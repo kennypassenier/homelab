@@ -4,6 +4,30 @@
 
 set -euo pipefail
 
+USE_DOCKER=""
+USE_PROMTAIL=""
+USE_WATCHTOWER=""
+
+function show_help() {
+    echo "Usage: $0 [OPTIONS] [STACK_NAME]"
+    echo "Options:"
+    echo "  -d    Force use Docker without prompting"
+    echo "  -w    Include centralized Watchtower (requires Docker)"
+    echo "  -p    Include centralized Promtail for Loki (requires Docker)"
+    echo "  -h    Show this help message"
+}
+
+while getopts "dwph" opt; do
+    case ${opt} in
+        d ) USE_DOCKER="y" ;;
+        w ) USE_WATCHTOWER="y" ;;
+        p ) USE_PROMTAIL="y" ;;
+        h ) show_help; exit 0 ;;
+        \? ) show_help; exit 1 ;;
+    esac
+done
+shift $((OPTIND -1))
+
 STACK_NAME="${1:-}"
 
 if [[ -z "$STACK_NAME" ]]; then
@@ -21,11 +45,24 @@ if [[ ! -d "apps" ]]; then
     exit 1
 fi
 
-read -r -p "Will this stack use Docker? (y/n) [y]: " USE_DOCKER
-USE_DOCKER=${USE_DOCKER:-y}
+if [[ -z "$USE_DOCKER" ]]; then
+    read -r -p "Will this stack use Docker? (y/n) [y]: " USE_DOCKER
+    USE_DOCKER=${USE_DOCKER:-y}
+fi
 
-read -r -p "Include Promtail for centralized logging to Loki? (y/n) [n]: " USE_PROMTAIL
-USE_PROMTAIL=${USE_PROMTAIL:-n}
+if [[ "$USE_DOCKER" =~ ^[Yy]$ ]]; then
+    if [[ -z "$USE_WATCHTOWER" ]]; then
+        read -r -p "Include Watchtower for automatic updates? (y/n) [y]: " USE_WATCHTOWER
+        USE_WATCHTOWER=${USE_WATCHTOWER:-y}
+    fi
+    if [[ -z "$USE_PROMTAIL" ]]; then
+        read -r -p "Include Promtail for centralized logging to Loki? (y/n) [n]: " USE_PROMTAIL
+        USE_PROMTAIL=${USE_PROMTAIL:-n}
+    fi
+else
+    USE_WATCHTOWER="n"
+    USE_PROMTAIL="n"
+fi
 
 echo "Creating infrastructure template for stack ${STACK_NAME}..."
 
@@ -76,8 +113,8 @@ EOF
     fi
 done
 
-# Generate central Watchtower for the stack if Docker is used
-if [[ "$USE_DOCKER" =~ ^[Yy]$ ]] && [ ${#APPS[@]} -gt 0 ]; then
+# Generate central Watchtower for the stack if requested and Docker is used
+if [[ "$USE_DOCKER" =~ ^[Yy]$ ]] && [[ "$USE_WATCHTOWER" =~ ^[Yy]$ ]] && [ ${#APPS[@]} -gt 0 ]; then
     WT_DIR="apps/${STACK_NAME}/watchtower"
     mkdir -p "${WT_DIR}"
     cat <<EOF > "${WT_DIR}/docker-compose.yml"

@@ -20,7 +20,7 @@ services:
       - .env
     volumes:
       # De container eist een fysiek .env bestand op deze locatie voor zijn interne scripts
-      - ./.env:/app/data/.env:ro
+      - ./.env:/app/data/.env
       - /appdata/paperless/ai-data:/app/data
     networks:
       - paperless_network

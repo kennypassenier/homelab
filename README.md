@@ -9,7 +9,7 @@ The goal of this setup is to manage all self-hosted applications centrally via t
 - **Security:** Secrets (`.env` files) are encrypted in the repository using Mozilla SOPS and Age. They are decrypted seamlessly on the local machine and inside the containers.
 - **Isolation:** Every application runs in its own unprivileged Proxmox LXC container.
 - **Efficiency:** Containers use Git Sparse Checkouts to only download the files they need (their specific app directory and shared scripts).
-- **Storage:** Fast-access app configurations (SSD) are stored locally in the container's Gitops directory (`./config`), while heavy media or backup data is bind-mounted from a centralized ZFS host drive (e.g. `/HDD2TB`).
+- **Storage:** Fast-access app configurations (SSD) are stored in an isolated host directory (`/opt/appdata/<STACK_NAME>`) and bind-mounted into the containers at `/appdata`. Heavy media or backup data is separated onto other drives (e.g. `/HDD2TB` or NAS drives).
 - **Networking:** IP assignments are handled centrally via OPNsense (Kea DHCP Reservations) using the container's MAC address.
 
 ---
@@ -61,18 +61,18 @@ Log into your Proxmox host via SSH and run the bootstrap script to provision the
 **Usage:**
 
 ```bash
-./scripts/host/proxmox-bootstrap-lxc.sh <VMID> <APP_NAME> <GITHUB_PAT> <AGE_PASSPHRASE> <GITHUB_USERNAME>
+./scripts/host/proxmox-bootstrap-lxc.sh <VMID> <STACK_NAME> <GITHUB_PAT> <AGE_PASSPHRASE> <GITHUB_USERNAME>
 ```
 
 **Example:**
 
 ```bash
-./scripts/host/proxmox-bootstrap-lxc.sh 101 pihole PLACEHOLDER_TOKEN PLACEHOLDER_PASSPHRASE PLACEHOLDER_GITHUB_USERNAME
+./scripts/host/proxmox-bootstrap-lxc.sh 101 media-stack PLACEHOLDER_TOKEN PLACEHOLDER_PASSPHRASE PLACEHOLDER_GITHUB_USERNAME
 ```
 
 **What this script does:**
 
-1. Mounts the ZFS host storage (`/HDD2TB/appdata/<APP_NAME>`) to the container (`/appdata`) for large data and backups.
+1. Mounts the fast local NVMe host storage (`/opt/appdata/<STACK_NAME>`) to the container (`/appdata`) for isolated application configs.
 2. Installs Docker, SOPS, and Age inside the LXC container.
 3. Performs a Git Sparse Checkout using your `PLACEHOLDER_TOKEN` to only fetch the necessary app directory.
 4. Decrypts the Age key using your `PLACEHOLDER_PASSPHRASE` and automatically decrypts your `.env` files.
@@ -149,7 +149,7 @@ Execute the backup script on the Proxmox host:
 **How the backup works:**
 
 1. **Container Pausing:** The script dynamically finds all Docker containers across all running LXCs that have the label `com.homelab.backup.pause=true` and pauses them to prevent database corruption.
-2. **Snapshot Creation:** Restic backs up the data directly to the repository (e.g., local NAS or cloud).
+2. **Snapshot Creation:** Restic backs up the host configuration directory (`/opt/appdata`) directly to the dedicated 2TB backup repository (`/HDD2TB/backups/restic`).
 3. **Safety Traps:** A bash `trap` guarantees that containers are ALWAYS unpaused, even if the backup fails or is manually aborted.
 4. **Retention Policy:** The script automatically prunes old backups (`--keep-daily 7 --keep-weekly 4 --keep-monthly 3`), ensuring your backup drive never fills up thanks to block-level deduplication.
 

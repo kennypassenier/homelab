@@ -53,8 +53,8 @@ services:
       - PGID=1000
       - TZ=Europe/Brussels
     volumes:
-      # Store config locally on the fast SSD, not on the 2TB backup/media drive
-      - ./config:/config
+      # Automatically refers to the fast NVMe host storage isolated per stack
+      - /appdata/${APP_NAME}/config:/config
     labels:
       # Enable automatic software updates via Watchtower
       - "com.centurylinklabs.watchtower.enable=true"

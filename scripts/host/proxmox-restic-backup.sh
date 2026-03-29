@@ -5,8 +5,8 @@
 set -euo pipefail
 
 RESTIC_PASSWORD="jouw_restic_wachtwoord"
-RESTIC_REPOSITORY="/pad/naar/nas/of/s3"
-APPDATA_DIR="/HDD2TB/appdata"
+RESTIC_REPOSITORY="/HDD2TB/backups/restic"
+APPDATA_DIR="/opt/appdata"
 export RESTIC_PASSWORD RESTIC_REPOSITORY
 
 echo "--- Starting Restic Backup Procedure ---"

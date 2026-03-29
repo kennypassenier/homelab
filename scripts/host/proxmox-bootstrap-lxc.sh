@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
 # Script Name: proxmox-bootstrap-lxc.sh
-# Description: Bootstraps an LXC container, configures storage, installs SOPS, and decrypts keys.
-# Usage:./proxmox-bootstrap-lxc.sh <VMID> <APP_NAME> <GITHUB_PAT> <AGE_PASSPHRASE> <GITHUB_USERNAME>
+# Description: Bootstraps an LXC container, configures fast local SSD storage, installs SOPS, and decrypts keys.
+# Usage:./proxmox-bootstrap-lxc.sh <VMID> <STACK_NAME> <GITHUB_PAT> <AGE_PASSPHRASE> <GITHUB_USERNAME>
 
 set -euo pipefail
 
 if [[ $# -ne 5 ]]; then
-    echo "Usage: $0 <VMID> <APP_NAME> <GITHUB_PAT> <AGE_PASSPHRASE> <GITHUB_USERNAME>"
+    echo "Usage: $0 <VMID> <STACK_NAME> <GITHUB_PAT> <AGE_PASSPHRASE> <GITHUB_USERNAME>"
     exit 1
 fi
 
 VMID="$1"
-APP_NAME="$2"
+STACK_NAME="$2"
 GITHUB_PAT="$3"
 AGE_PASSPHRASE="$4"
 GITHUB_USERNAME="$5"
 GITOPS_DIR="/opt/gitops"
 
-# Storage Automation: Centralized 2TB Drive
-HOST_STORAGE_PATH="/HDD2TB/appdata/${APP_NAME}"
+# Storage Automation: Fast Local NVMe Storage for App Configs/Databases
+HOST_STORAGE_PATH="/opt/appdata/${STACK_NAME}"
 LXC_MOUNT_POINT="/appdata"
 
-echo "Initiating bootstrap sequence for container ${VMID} targeting application ${APP_NAME}..."
+echo "Initiating bootstrap sequence for container ${VMID} targeting stack ${STACK_NAME}..."
 
 # Step 1: Ensure host directory exists and adjust permissions for unprivileged LXC
 mkdir -p "${HOST_STORAGE_PATH}"
@@ -51,7 +51,7 @@ pct exec "${VMID}" -- bash -c "cat > /root/sparse-setup.sh" << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 REPO_URL="https://github.com/kennypassenier/homelab.git"
-APP_DIR="apps/$1"
+STACK_DIR="apps/$1"
 AUTH_REPO_URL=$(echo "$REPO_URL" | sed "s|https://|https://$2@|g")
 
 mkdir -p /opt/gitops
@@ -70,13 +70,13 @@ git config --local filter.sops-env.required true
 
 # Setup sparse checkout
 git sparse-checkout init --cone
-git sparse-checkout set "$APP_DIR" "scripts/container" "secrets" ".sops.yaml"
+git sparse-checkout set "$STACK_DIR" "scripts/container" "secrets" ".sops.yaml"
 
 # Checkout main (Smudge filter automatically decrypts the.env files here)
 git checkout main
 EOF
 
-pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${APP_NAME} ${GITHUB_PAT} ${AGE_PASSPHRASE}"
+pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${STACK_NAME} ${GITHUB_PAT} ${AGE_PASSPHRASE}"
 
 # Step 6: Push GitHub Public Key for SSH access
 echo "Fetching GitHub SSH key for authentication..."
@@ -87,7 +87,7 @@ chmod 600 /root/.ssh/authorized_keys
 "
 
 # Step 7: Trigger the initial docker-compose up
-pct exec "${VMID}" -- bash -c "${GITOPS_DIR}/scripts/container/node-sync.sh ${APP_NAME}"
+pct exec "${VMID}" -- bash -c "${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME}"
 
 echo "Bootstrap completed. Fetch the MAC address for OPNsense:"
 pct config "${VMID}" | grep net0

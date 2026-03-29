@@ -13,17 +13,18 @@ services:
       - "993"
     devices:
       - /dev/dri:/dev/dri
+    shm_size: "4gb"
     env_file:
       - .env
     environment:
       - TZ=Europe/Brussels
       - JELLYFIN_LOG_DIR=/config/log
+      - JELLYFIN_TRANSCODE_DIR=/dev/shm
       - DOTNET_SYSTEM_NET_DISABLE_IPV6=1
     volumes:
       - /appdata/media/jellyfin/config:/config
       - /mnt/data/18TB:/data/18TB
       - /mnt/data/12TB:/data/12TB
-      - /dev/shm:/transcode
       # Mount the pre-check script into the container
       - ./check-streams.sh:/scripts/check-streams.sh:ro
     ports:

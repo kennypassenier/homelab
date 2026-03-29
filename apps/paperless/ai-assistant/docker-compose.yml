@@ -15,10 +15,7 @@ services:
       # Interne verbinding binnen het Docker netwerk
       - PAPERLESS_API_URL=http://paperless-webserver:8000/api
       - PAPERLESS_URL=http://paperless-webserver:8000
-      - HOST=0.0.0.0
-      - RAGZ_HOST=0.0.0.0
-      - FASTAPI_HOST=0.0.0.0
-      - BIND=0.0.0.0:8000
+    command: /bin/sh -c "uvicorn main:app --host 0.0.0.0 --port 8000 & npm start"
     env_file:
       - .env
     volumes:

@@ -18,11 +18,15 @@ services:
       - JELLYFIN_LOG_DIR=/config/log
       - JELLYFIN_CACHE_DIR=/transcode
       - DOTNET_SYSTEM_NET_DISABLE_IPV6=1
+      # Note: Set your actual API key here later (or via .env)
+      - JELLYFIN_API_KEY=PLACEHOLDER_API_KEY
     volumes:
       - /appdata/media/jellyfin/config:/config
       - /mnt/data/18TB:/data/18TB
       - /mnt/data/12TB:/data/12TB
       - /dev/shm:/transcode
+      # Mount the pre-check script into the container
+      - ./check-streams.sh:/scripts/check-streams.sh:ro
     ports:
       - "8096:8096"
     networks:
@@ -31,3 +35,5 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"
+      # Tell Watchtower to run this script before updating
+      - "com.centurylinklabs.watchtower.lifecycle.pre-check=/scripts/check-streams.sh"

@@ -11,6 +11,11 @@ services:
     user: "1000:1000"
     group_add:
       - "993"
+      - "44"
+      - "104"
+      - "105"
+      - "106"
+      - "107"
     devices:
       - /dev/dri:/dev/dri
     shm_size: "4gb"

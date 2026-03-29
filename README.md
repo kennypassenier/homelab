@@ -49,9 +49,22 @@ When you want to deploy a new stack of applications, you create a new LXC contai
 
 From the root of your local repository, run the stack generator script. This interactive script lets you create multiple apps within a single stack, optionally configures a centralized Watchtower for automatic updates, optionally includes a Promtail container for centralized logging, and prepares `.env` files.
 
+You can run it interactively:
+
 ```bash
 ./scripts/client/create-new-stack.sh
 ```
+
+Or you can use CLI flags to bypass prompts for faster execution:
+
+```bash
+./scripts/client/create-new-stack.sh -d -w -p <stack_name>
+```
+
+- `-d`: Force use Docker without prompting.
+- `-w`: Include centralized Watchtower (requires Docker).
+- `-p`: Include centralized Promtail for Loki (requires Docker).
+- `-h`: Show the help menu.
 
 After generation, configure your `docker-compose.yml` and `.env` files, then push them to Git. SOPS will automatically encrypt the `.env` files.
 

@@ -114,6 +114,19 @@ After running, you can connect simply by typing: `ssh <alias>` (e.g., `ssh media
 
 ---
 
+## Phase 4: Container Synchronization (GitOps)
+
+Inside each LXC container, the `node-sync.sh` script is used to keep the application state aligned with the Git repository. The initial bootstrap script automatically triggers this, but it can also be run manually or via a cron job to pull updates.
+
+**What this script does:**
+
+1. Pulls the latest changes from the `main` branch.
+2. Transparently decrypts `.env` files via the Git SOPS smudge filter.
+3. Recursively finds all `docker-compose.yml` or `compose.yaml` files for the specific app.
+4. Executes `docker compose up -d --remove-orphans` to apply declarative changes.
+
+---
+
 ## Directory Structure
 
 ```text

@@ -64,12 +64,9 @@ mkdir -p /opt/gitops
 cd /opt/gitops || exit 1
 git clone --no-checkout --filter=blob:none "$AUTH_REPO_URL" .
 
-# Fetch the encrypted Age key before full checkout
-git checkout HEAD -- secrets/age.key.enc
-
-# Decrypt the Age key to enable Git SOPS filter
+# Extract and decrypt the Age key directly from the git tree without touching the working directory
 mkdir -p /root/.config/sops/age
-openssl enc -d -aes-256-cbc -pbkdf2 -salt -in secrets/age.key.enc -out /root/.config/sops/age/keys.txt -pass pass:"$3"
+git show HEAD:secrets/age.key.enc | openssl enc -d -aes-256-cbc -pbkdf2 -salt -out /root/.config/sops/age/keys.txt -pass pass:"$3"
 chmod 600 /root/.config/sops/age/keys.txt
 
 # Setup transparent Git filters before checkout!
@@ -77,9 +74,9 @@ git config --local filter.sops-env.clean "sops --encrypt --input-type dotenv --o
 git config --local filter.sops-env.smudge "sops --decrypt --input-type dotenv --output-type dotenv /dev/stdin"
 git config --local filter.sops-env.required true
 
-# Setup sparse checkout (Temporarily disabled to resolve Git checkout deletion bugs)
-# git sparse-checkout init --cone
-# git sparse-checkout set "$STACK_DIR" "scripts" "secrets" ".sops.yaml"
+# Setup sparse checkout safely
+git sparse-checkout init --cone
+git sparse-checkout set "$STACK_DIR" "scripts" "secrets" ".sops.yaml"
 
 # Checkout main (Smudge filter automatically decrypts the.env files here)
 git checkout main

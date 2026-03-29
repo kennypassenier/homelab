@@ -30,3 +30,4 @@ Dit bestand bevat de essentiële context en regels voor LLM's (zoals Claude, Cha
   - `node-sync.sh` is robuuster gemaakt door een specifieke `cd` en door vooraf `docker compose pull -q` uit te voeren (om updates sneller te vangen en efficiënt te deployen zonder overbodige `--force-recreate` restarts).
   - Volledige ondersteuning en integratie van `pre-sync.sh` scripts (zoals gebruikt in de media stack voor de creatie van Docker netwerken buiten compose om).
   - Geavanceerde Watchtower lifecycle pre-checks toegevoegd (zoals `check-streams.sh` voor Jellyfin) die updates annuleren als er streams actief zijn om zo downtime tijdens gebruik te voorkomen.
+  - **Host Management:** Idempotente host-scripts toegevoegd (`host-sync.sh`, `setup-host-cron.sh`) om de Proxmox host periodiek te updaten via Git, plus een script (`proxmox-enable-gpu-passthrough.sh`) voor gecontroleerde, veilige hardware-acceleratie per LXC (zonder globale gaten te prikken).

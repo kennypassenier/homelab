@@ -75,10 +75,10 @@ Log into your Proxmox host via SSH and run the bootstrap script to provision the
 **Usage:**
 
 ```bash
-./scripts/host/proxmox-bootstrap-lxc.sh <VMID> <STACK_NAME> <GITHUB_USERNAME>
+./scripts/host/proxmox-bootstrap-lxc.sh [-t <GITHUB_PAT>] [-a <AGE_PASSPHRASE>] [-h] <VMID> <STACK_NAME> <GITHUB_USERNAME>
 ```
 
-_Note: To prevent secrets from leaking into your bash history, the script will interactively prompt you for your GitHub PAT and Age Passphrase._
+_Note: You can pass your credentials via flags (`-t` and `-a`) for automation, but to prevent secrets from leaking into your bash history, it's safer to omit them. The script will then interactively prompt you securely._
 
 **Example:**
 
@@ -119,10 +119,10 @@ First, ensure the script is executable (only needed once):
 chmod +x scripts/client/register-local-node.sh
 ```
 
-Then, run the interactive script:
+Then, run the script (interactively or via flags):
 
 ```bash
-./scripts/client/register-local-node.sh
+./scripts/client/register-local-node.sh [-a <alias>] [-i <ip>] [-h]
 ```
 
 **What this script does:**
@@ -212,6 +212,36 @@ If you no longer need a stack at all:
 1. Delete the stack directory from your Git repository and push.
 2. Manually stop and destroy the LXC container in the Proxmox Web GUI.
 3. Open the Proxmox host shell and delete the leftover data: `rm -rf /opt/appdata/<STACK_NAME>`.
+
+---
+
+## Phase 7: Proxmox Host Management
+
+While containers update automatically via GitOps, the Proxmox host itself also needs to keep its local utility scripts (`/scripts/host/*`) up to date. Furthermore, some hardware configurations (like GPU passthrough) must be handled at the host level rather than inside the unprivileged containers.
+
+### 1. Automated Host Script Synchronization
+
+To ensure the Proxmox host always runs the latest backup and deployment scripts from this repository, set up the automated host-sync cron job. This is an **idempotent** operation (safe to run multiple times).
+
+Run this once on the Proxmox host:
+
+```bash
+./scripts/host/setup-host-cron.sh
+```
+
+This configures `host-sync.sh` to run hourly, pulling the latest `main` branch into the host's repository safely.
+
+### 2. Enabling Hardware GPU Passthrough
+
+For media stacks (like Jellyfin) that require Intel/AMD hardware acceleration for video transcoding, the unprivileged LXC needs explicit permission to access `/dev/dri` on the host.
+
+Instead of opening up hardware access to _all_ containers (which is a security risk), use the targeted, **idempotent** passthrough script on the Proxmox host:
+
+```bash
+./scripts/host/proxmox-enable-gpu-passthrough.sh <VMID>
+```
+
+**Safety & Recovery:** This script safely appends the required `cgroup2` permissions and bind mounts to `/etc/pve/lxc/<VMID>.conf`. It checks if the rules already exist to prevent duplicates. If a container fails to start or crashes after applying this, recovery is as simple as running `nano /etc/pve/lxc/<VMID>.conf` on the host, deleting the appended `lxc.cgroup2` and `lxc.mount` lines, and restarting the LXC.
 
 ---
 

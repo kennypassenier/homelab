@@ -36,9 +36,10 @@ fi
 PUBLIC_KEY=$(grep "public key:" "$AGE_KEY_FILE" | awk '{print $4}')
 
 # Step 3: Create the.sops.yaml routing file
+# We use '.*' here to avoid SOPS stdin filename matching errors during git clean filters
 cat <<EOF >.sops.yaml
 creation_rules:
-  - path_regex: \.env$
+  - path_regex: .*
     key_groups:
     - age:
       - $PUBLIC_KEY

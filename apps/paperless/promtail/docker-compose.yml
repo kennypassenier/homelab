@@ -1,0 +1,17 @@
+networks:
+  paperless_network:
+    name: paperless_network
+    external: true
+
+services:
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail-paperless
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./config.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - paperless_network
+    restart: unless-stopped

@@ -1,0 +1,19 @@
+networks:
+  paperless_network:
+    name: paperless_network
+    external: true
+
+services:
+  db:
+    image: docker.io/library/postgres:16
+    container_name: paperless-db
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - /appdata/paperless/pgdata:/var/lib/postgresql/data
+    networks:
+      - paperless_network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"

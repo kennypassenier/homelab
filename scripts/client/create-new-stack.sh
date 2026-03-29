@@ -21,7 +21,12 @@ if [[ ! -d "apps" ]]; then
     exit 1
 fi
 
+read -r -p "Will this stack use Docker? (y/n) [y]: " USE_DOCKER
+USE_DOCKER=${USE_DOCKER:-y}
+
 echo "Creating infrastructure template for stack ${STACK_NAME}..."
+
+APPS=()
 
 while true; do
     echo ""
@@ -32,9 +37,11 @@ while true; do
 
     APP_DIR="apps/${STACK_NAME}/${APP_NAME}"
     mkdir -p "${APP_DIR}"
+    APPS+=("${APP_NAME}")
 
-    # Create a baseline docker-compose.yml with automated Watchtower and Restic labels
-    cat <<EOF > "${APP_DIR}/docker-compose.yml"
+    if [[ "$USE_DOCKER" =~ ^[Yy]$ ]]; then
+        # Create a baseline docker-compose.yml with automated Watchtower and Restic labels
+        cat <<EOF > "${APP_DIR}/docker-compose.yml"
 services:
   ${APP_NAME}:
     image: lscr.io/linuxserver/${APP_NAME}:latest
@@ -46,8 +53,8 @@ services:
       - PGID=1000
       - TZ=Europe/Brussels
     volumes:
-      # Automatically refers to the standardized bind mount inside the LXC
-      - /appdata/${APP_NAME}/config:/config
+      # Store config locally on the fast SSD, not on the 2TB backup/media drive
+      - ./config:/config
     labels:
       # Enable automatic software updates via Watchtower
       - "com.centurylinklabs.watchtower.enable=true"
@@ -56,22 +63,32 @@ services:
     ports:
       - "8080:80"
     restart: unless-stopped
+EOF
 
+        # Create a plaintext .env file.
+        echo "SECRET_EXAMPLE_TOKEN=vervang_dit_met_iets_geheims" > "${APP_DIR}/.env"
+        echo "Docker template generated successfully in ${APP_DIR}."
+    else
+        echo "Directory created successfully in ${APP_DIR}."
+    fi
+done
+
+# Generate central Watchtower for the stack if Docker is used
+if [[ "$USE_DOCKER" =~ ^[Yy]$ ]] && [ ${#APPS[@]} -gt 0 ]; then
+    WT_DIR="apps/${STACK_NAME}/watchtower"
+    mkdir -p "${WT_DIR}"
+    cat <<EOF > "${WT_DIR}/docker-compose.yml"
+services:
   watchtower:
     image: containrrr/watchtower
-    container_name: watchtower-${APP_NAME}
+    container_name: watchtower-${STACK_NAME}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --cleanup --label-enable
     restart: unless-stopped
 EOF
-
-    # Create a plaintext .env file.
-    # The Git 'clean' filter we installed earlier will automatically encrypt this upon 'git commit'.
-    echo "SECRET_EXAMPLE_TOKEN=vervang_dit_met_iets_geheims" > "${APP_DIR}/.env"
-
-    echo "Template generated successfully in ${APP_DIR}."
-done
+    echo "Central Watchtower configured in ${WT_DIR}."
+fi
 
 echo ""
 echo "Stack generation completed."

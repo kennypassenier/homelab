@@ -1,12 +1,30 @@
 #!/usr/bin/env bash
 # Script Name: proxmox-reset-stack.sh
 # Description: Safely resets a stack by wiping Docker state and host app data, but retains the LXC container.
-# Usage: ./proxmox-reset-stack.sh <VMID> <STACK_NAME>
+# Usage: ./proxmox-reset-stack.sh [OPTIONS] <VMID> <STACK_NAME>
 
 set -euo pipefail
 
+FORCE_YES=""
+
+function show_help() {
+    echo "Usage: $0 [OPTIONS] <VMID> <STACK_NAME>"
+    echo "Options:"
+    echo "  -y    Force reset without interactive confirmation"
+    echo "  -h    Show this help message"
+}
+
+while getopts "yh" opt; do
+    case ${opt} in
+        y ) FORCE_YES="yes" ;;
+        h ) show_help; exit 0 ;;
+        \? ) show_help; exit 1 ;;
+    esac
+done
+shift $((OPTIND -1))
+
 if [[ $# -ne 2 ]]; then
-    echo "Usage: $0 <VMID> <STACK_NAME>"
+    show_help
     exit 1
 fi
 
@@ -22,10 +40,12 @@ echo "⚠️  WARNING: This will permanently delete all application data and Doc
 echo "The LXC container itself (and its IP/configuration) will be kept intact."
 echo ""
 
-read -r -p "Are you sure you want to RESET? (Type 'yes' to confirm): " CONFIRM
-if [[ "$CONFIRM" != "yes" ]]; then
-    echo "Aborted."
-    exit 0
+if [[ "$FORCE_YES" != "yes" ]]; then
+    read -r -p "Are you sure you want to RESET? (Type 'yes' to confirm): " CONFIRM
+    if [[ "$CONFIRM" != "yes" ]]; then
+        echo "Aborted."
+        exit 0
+    fi
 fi
 
 echo "Stopping Docker containers in VM ${VMID}..."

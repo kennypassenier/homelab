@@ -157,18 +157,47 @@ Execute the backup script on the Proxmox host:
 
 ---
 
-## Phase 6: Stack Lifecycle Management (Reset / Destroy)
+## Phase 6: Stack & App Lifecycle Management
 
-If a stack becomes corrupted or you want to remove it entirely, use the clean-up utility on the Proxmox host to safely wipe the data without leaving ghost directories on your SSD.
+Managing your homelab is primarily declarative via Git. Here are the common lifecycle use-cases:
+
+### 1. Adding a New App to an Existing Stack
+
+1. Navigate to your local Git repository.
+2. Create a new directory for the app: `mkdir -p apps/<stack_name>/<app_name>`.
+3. Add your `docker-compose.yml` and `.env` files.
+4. Commit and push: `git add . && git commit -m "feat: add <app_name>" && git push`.
+5. Sync the container state by running `/opt/gitops/scripts/container/node-sync.sh <stack_name>` via SSH inside the LXC container.
+
+### 2. Updating Apps
+
+- **Automatic:** The centralized Watchtower container in each stack automatically pulls new images and restarts containers marked with the `com.centurylinklabs.watchtower.enable=true` label.
+- **Declarative:** Modify your `docker-compose.yml` (e.g., change an environment variable) and push to Git. Run `node-sync.sh` in the container to apply the new state.
+
+### 3. Removing an App
+
+1. Delete the app's folder from Git: `git rm -r apps/<stack_name>/<app_name>`.
+2. Commit and push.
+3. Run `node-sync.sh` in the LXC container. The `--remove-orphans` flag will automatically stop and remove the deleted app's container.
+4. _Note:_ The app's configuration data remains safely on the host's SSD at `/opt/appdata/<stack_name>/<app_name>` to prevent accidental data loss. You can delete this manually if desired.
+
+### 4. Resetting a Corrupted Stack
+
+If a stack is misbehaving and you want to start over without losing the LXC container, its static IP, or SSH keys, use the reset utility on the Proxmox host:
 
 ```bash
-./scripts/host/clean-stack.sh <VMID> <STACK_NAME>
+./scripts/host/proxmox-reset-stack.sh <VMID> <STACK_NAME>
 ```
 
-This interactive script offers two options:
+This script safely wipes all Docker containers, volumes, and local SSD app data (`/opt/appdata/<STACK_NAME>`). Afterwards, simply run `node-sync.sh` inside the LXC to cleanly rebuild the stack from your Git repository.
 
-1. **RESET:** Keeps the LXC container and static IP, but wipes all Docker containers, volumes, and app data. Perfect for starting fresh.
-2. **DESTROY:** Completely deletes the LXC container and permanently removes all associated host app data.
+### 5. Destroying a Stack Entirely
+
+If you no longer need a stack at all:
+
+1. Delete the stack directory from your Git repository and push.
+2. Manually stop and destroy the LXC container in the Proxmox Web GUI.
+3. Open the Proxmox host shell and delete the leftover data: `rm -rf /opt/appdata/<STACK_NAME>`.
 
 ---
 

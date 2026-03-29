@@ -77,9 +77,9 @@ git config --local filter.sops-env.clean "sops --encrypt --input-type dotenv --o
 git config --local filter.sops-env.smudge "sops --decrypt --input-type dotenv --output-type dotenv /dev/stdin"
 git config --local filter.sops-env.required true
 
-# Setup sparse checkout
-git sparse-checkout init --cone
-git sparse-checkout set "$STACK_DIR" "scripts" "secrets" ".sops.yaml"
+# Setup sparse checkout (Temporarily disabled to resolve Git checkout deletion bugs)
+# git sparse-checkout init --cone
+# git sparse-checkout set "$STACK_DIR" "scripts" "secrets" ".sops.yaml"
 
 # Checkout main (Smudge filter automatically decrypts the.env files here)
 git checkout main

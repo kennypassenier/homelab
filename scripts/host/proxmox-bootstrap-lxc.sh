@@ -62,7 +62,7 @@ AUTH_REPO_URL=$(echo "$REPO_URL" | sed "s|https://|https://$2@|g")
 
 mkdir -p /opt/gitops
 cd /opt/gitops || exit 1
-git clone --no-checkout --filter=blob:none "$AUTH_REPO_URL".
+git clone --no-checkout --filter=blob:none "$AUTH_REPO_URL" .
 
 # Decrypt the Age key to enable Git SOPS filter
 mkdir -p /root/.config/sops/age

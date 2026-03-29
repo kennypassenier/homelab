@@ -11,6 +11,7 @@ The goal of this setup is to manage all self-hosted applications centrally via t
 - **Efficiency:** Containers use Git Sparse Checkouts to only download the files they need (their specific app directory and shared scripts).
 - **Storage:** Fast-access app configurations (SSD) are stored in an isolated host directory (`/opt/appdata/<STACK_NAME>`) and bind-mounted into the containers at `/appdata`. Heavy media or backup data is separated onto other drives (e.g. `/HDD2TB` or NAS drives).
 - **Networking:** IP assignments are handled centrally via OPNsense (Kea DHCP Reservations) using the container's MAC address.
+- **Observability:** Centralized logging is supported via optional Promtail containers forwarding logs to a Loki/Grafana stack.
 
 ---
 
@@ -46,7 +47,7 @@ When you want to deploy a new stack of applications, you create a new LXC contai
 
 ### 1. Generate the Stack Template Locally
 
-From the root of your local repository, run the stack generator script. This interactive script lets you create multiple apps within a single stack, optionally configures a centralized Watchtower for automatic updates, and prepares `.env` files.
+From the root of your local repository, run the stack generator script. This interactive script lets you create multiple apps within a single stack, optionally configures a centralized Watchtower for automatic updates, optionally includes a Promtail container for centralized logging, and prepares `.env` files.
 
 ```bash
 ./scripts/client/create-new-stack.sh

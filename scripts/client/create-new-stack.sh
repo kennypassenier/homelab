@@ -24,6 +24,9 @@ fi
 read -r -p "Will this stack use Docker? (y/n) [y]: " USE_DOCKER
 USE_DOCKER=${USE_DOCKER:-y}
 
+read -r -p "Include Promtail for centralized logging to Loki? (y/n) [n]: " USE_PROMTAIL
+USE_PROMTAIL=${USE_PROMTAIL:-n}
+
 echo "Creating infrastructure template for stack ${STACK_NAME}..."
 
 APPS=()
@@ -88,6 +91,59 @@ services:
     restart: unless-stopped
 EOF
     echo "Central Watchtower configured in ${WT_DIR}."
+fi
+
+# Generate central Promtail for the stack if requested and Docker is used
+if [[ "$USE_DOCKER" =~ ^[Yy]$ ]] && [[ "$USE_PROMTAIL" =~ ^[Yy]$ ]]; then
+    PROM_DIR="apps/${STACK_NAME}/promtail"
+    mkdir -p "${PROM_DIR}"
+    cat <<EOF > "${PROM_DIR}/docker-compose.yml"
+services:
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail-${STACK_NAME}
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./config.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
+EOF
+
+    cat <<EOF > "${PROM_DIR}/config.yml"
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://LOKI_IP:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: system
+    static_configs:
+    - targets:
+        - localhost
+      labels:
+        job: varlogs
+        host: ${STACK_NAME}
+        __path__: /var/log/*log
+
+  - job_name: docker
+    pipeline_stages:
+      - docker: {}
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker
+          host: ${STACK_NAME}
+          __path__: /var/lib/docker/containers/*/*log
+EOF
+
+    echo "Central Promtail configured in ${PROM_DIR}. (Remember to update LOKI_IP in config.yml)"
 fi
 
 echo ""

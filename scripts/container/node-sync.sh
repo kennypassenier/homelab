@@ -12,6 +12,17 @@ cd "${GITOPS_DIR}" || exit 1
 # Pulling changes automatically invokes the SOPS smudge filter for.env files
 git pull origin main
 
+# Execute any pre-sync or setup scripts found in the application directories
+echo "Checking for pre-sync setup scripts..."
+find "apps/${APP_NAME}" -type f \( -name 'setup.sh' -o -name 'pre-sync.sh' \) -exec sh -c '
+    for script_file do
+        dir=$(dirname "${script_file}")
+        echo "Executing setup script in ${dir}..."
+        chmod +x "${script_file}"
+        (cd "${dir}" && bash "$(basename "${script_file}")")
+    done
+' sh {} +
+
 # Recursively locate all container manifest files and align the runtime state
 echo "Aligning runtime states with declarative manifests..."
 find "apps/${APP_NAME}" -type f \( -name 'docker-compose.yml' -o -name 'compose.yaml' \) -exec sh -c '

@@ -18,7 +18,7 @@ GITHUB_USERNAME="$5"
 GITOPS_DIR="/opt/gitops"
 
 # Storage Automation: Centralized 2TB Drive
-HOST_STORAGE_PATH="/mnt/storage/appdata/${APP_NAME}"
+HOST_STORAGE_PATH="/HDD2TB/appdata/${APP_NAME}"
 LXC_MOUNT_POINT="/appdata"
 
 echo "Initiating bootstrap sequence for container ${VMID} targeting application ${APP_NAME}..."

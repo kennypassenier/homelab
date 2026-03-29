@@ -64,6 +64,9 @@ mkdir -p /opt/gitops
 cd /opt/gitops || exit 1
 git clone --no-checkout --filter=blob:none "$AUTH_REPO_URL" .
 
+# Fetch the encrypted Age key before full checkout
+git checkout HEAD -- secrets/age.key.enc
+
 # Decrypt the Age key to enable Git SOPS filter
 mkdir -p /root/.config/sops/age
 openssl enc -d -aes-256-cbc -pbkdf2 -salt -in secrets/age.key.enc -out /root/.config/sops/age/keys.txt -pass pass:"$3"

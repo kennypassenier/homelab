@@ -26,8 +26,8 @@ Dit bestand bevat de essentiële context en regels voor LLM's (zoals Claude, Cha
   - `paperless`: Bevat Paperless-ngx, DB, Redis, Broker, Paperless-AI (Tagger UI + RAG backend), Promtail en Watchtower.
   - `media`: Bevat Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Promtail en Watchtower. Configuratie zit netjes in afzonderlijke apps gemount via `/appdata/media/...`.
 - **Recente wijzigingen:**
-  - Shell scripts (`proxmox-bootstrap-lxc.sh`, `register-local-node.sh`, `node-sync.sh`) zijn geüpgraded met CLI arguments (`getopts`) en `--help` functionaliteit voor betere automatisering.
+  - Shell scripts (`bootstrap-lxc.sh`, `register-local-node.sh`, `node-sync.sh`) zijn geüpgraded met CLI arguments (`getopts`) en `--help` functionaliteit voor betere automatisering. Alle host-scripts hanteren nu de overzichtelijke `[actie]-[object]` naamgevingsconventie.
   - `node-sync.sh` is robuuster gemaakt door een specifieke `cd` en door vooraf `docker compose pull -q` uit te voeren (om updates sneller te vangen en efficiënt te deployen zonder overbodige `--force-recreate` restarts).
   - Volledige ondersteuning en integratie van `pre-sync.sh` scripts (zoals gebruikt in de media stack voor de creatie van Docker netwerken buiten compose om).
   - Geavanceerde Watchtower lifecycle pre-checks toegevoegd (zoals `check-streams.sh` voor Jellyfin) die updates annuleren als er streams actief zijn om zo downtime tijdens gebruik te voorkomen.
-  - **Host Management:** Idempotente host-scripts toegevoegd (`host-sync.sh`, `setup-host-cron.sh`) om de Proxmox host periodiek te updaten via Git, plus een script (`proxmox-enable-gpu-passthrough.sh`) voor gecontroleerde, veilige hardware-acceleratie per LXC (zonder globale gaten te prikken).
+  - **Host Management:** Idempotente host-scripts toegevoegd (`sync-host.sh`, `setup-cron.sh`) om de Proxmox host periodiek te updaten via Git, plus een script (`enable-gpu.sh`) voor gecontroleerde, veilige hardware-acceleratie per LXC (zonder globale gaten te prikken). Ook host-scripts hebben nu handige vlaggen en een `-h` help-functie gekregen.

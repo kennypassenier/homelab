@@ -75,7 +75,7 @@ Log into your Proxmox host via SSH and run the bootstrap script to provision the
 **Usage:**
 
 ```bash
-./scripts/host/proxmox-bootstrap-lxc.sh [-t <GITHUB_PAT>] [-a <AGE_PASSPHRASE>] [-h] <VMID> <STACK_NAME> <GITHUB_USERNAME>
+./scripts/host/bootstrap-lxc.sh [-t <GITHUB_PAT>] [-a <AGE_PASSPHRASE>] [-h] <VMID> <STACK_NAME> <GITHUB_USERNAME>
 ```
 
 _Note: You can pass your credentials via flags (`-t` and `-a`) for automation, but to prevent secrets from leaking into your bash history, it's safer to omit them. The script will then interactively prompt you securely._
@@ -83,16 +83,16 @@ _Note: You can pass your credentials via flags (`-t` and `-a`) for automation, b
 **Example:**
 
 ```bash
-./scripts/host/proxmox-bootstrap-lxc.sh 101 media-stack PLACEHOLDER_GITHUB_USERNAME
+./scripts/host/bootstrap-lxc.sh 101 media-stack PLACEHOLDER_GITHUB_USERNAME
 ```
 
 **What this script does:**
 
 1. Mounts the fast local NVMe host storage (`/opt/appdata/<STACK_NAME>`) to the container (`/appdata`) for isolated application configs.
 2. Installs Docker, SOPS, Age, and `unattended-upgrades` (for automatic OS security patching) inside the LXC container.
-3. Performs a Git Sparse Checkout using your `PLACEHOLDER_TOKEN` to only fetch the necessary app directory.
-4. Decrypts the Age key using your `PLACEHOLDER_PASSPHRASE` and automatically decrypts your `.env` files.
-5. Pulls your public SSH keys from GitHub (`https://github.com/PLACEHOLDER_GITHUB_USERNAME.keys`) so you can access the container without a password.
+3. Performs a Git Sparse Checkout using your GitHub PAT to only fetch the necessary app directory.
+4. Decrypts the Age key using your passphrase and automatically decrypts your `.env` files.
+5. Pulls your public SSH keys from GitHub so you can access the container without a password.
 6. Outputs the MAC address of the new container for network configuration.
 
 ---
@@ -103,7 +103,7 @@ Because DHCP and routing are handled outside of Proxmox, we use OPNsense to assi
 
 ### 1. Reserve the IP in OPNsense
 
-1. Copy the MAC address outputted at the end of the `proxmox-bootstrap-lxc.sh` script.
+1. Copy the MAC address outputted at the end of the `bootstrap-lxc.sh` script.
 2. Go to your OPNsense router interface.
 3. Navigate to **Kea DHCP -> Reservations**.
 4. Add a new reservation mapping the MAC address to your desired static IP.
@@ -159,7 +159,7 @@ Backups are handled on the Proxmox host using Restic. The strategy is designed t
 Execute the backup script on the Proxmox host:
 
 ```bash
-./scripts/host/proxmox-restic-backup.sh
+./scripts/host/backup-stacks.sh
 ```
 
 **How the backup works:**
@@ -200,7 +200,7 @@ Managing your homelab is primarily declarative via Git. Here are the common life
 If a stack is misbehaving and you want to start over without losing the LXC container, its static IP, or SSH keys, use the reset utility on the Proxmox host:
 
 ```bash
-./scripts/host/proxmox-reset-stack.sh <VMID> <STACK_NAME>
+./scripts/host/reset-stack.sh <VMID> <STACK_NAME>
 ```
 
 This script safely wipes all Docker containers, volumes, and local SSD app data (`/opt/appdata/<STACK_NAME>`). Afterwards, simply run `node-sync.sh` inside the LXC to cleanly rebuild the stack from your Git repository.
@@ -226,10 +226,10 @@ To ensure the Proxmox host always runs the latest backup and deployment scripts 
 Run this once on the Proxmox host:
 
 ```bash
-./scripts/host/setup-host-cron.sh
+./scripts/host/setup-cron.sh [-d <REPO_DIR>]
 ```
 
-This configures `host-sync.sh` to run hourly, pulling the latest `main` branch into the host's repository safely.
+This configures `sync-host.sh` to run hourly, pulling the latest `main` branch into the host's repository safely.
 
 ### 2. Enabling Hardware GPU Passthrough
 
@@ -238,7 +238,7 @@ For media stacks (like Jellyfin) that require Intel/AMD hardware acceleration fo
 Instead of opening up hardware access to _all_ containers (which is a security risk), use the targeted, **idempotent** passthrough script on the Proxmox host:
 
 ```bash
-./scripts/host/proxmox-enable-gpu-passthrough.sh <VMID>
+./scripts/host/enable-gpu.sh [-h] <VMID>
 ```
 
 **Safety & Recovery:** This script safely appends the required `cgroup2` permissions and bind mounts to `/etc/pve/lxc/<VMID>.conf`. It checks if the rules already exist to prevent duplicates. If a container fails to start or crashes after applying this, recovery is as simple as running `nano /etc/pve/lxc/<VMID>.conf` on the host, deleting the appended `lxc.cgroup2` and `lxc.mount` lines, and restarting the LXC.

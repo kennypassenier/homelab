@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
-# Script Name: proxmox-enable-gpu-passthrough.sh
+# Script Name: enable-gpu.sh
 # Description: Enables Intel/AMD hardware GPU passthrough for an unprivileged LXC.
-# Usage: ./proxmox-enable-gpu-passthrough.sh <VMID>
+# Usage: ./enable-gpu.sh [-h] <VMID>
 
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-    echo "Usage: $0 <VMID>"
+show_help() {
+    echo "Usage: $0 [-h] <VMID>"
+    echo "  -h    Show this help message"
     echo "Example: $0 106"
-    exit 1
+    exit 0
+}
+
+while getopts "h" opt; do
+    case "$opt" in
+        h) show_help ;;
+        *) show_help ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [[ $# -ne 1 ]]; then
+    show_help
 fi
 
 VMID="$1"

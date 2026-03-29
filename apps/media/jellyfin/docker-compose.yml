@@ -1,0 +1,33 @@
+networks:
+  media_network:
+    name: media_network
+    external: true
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    # Hardware acceleration and custom user mappings temporarily disabled for stability
+    # user: "1000:1000"
+    # group_add:
+    #   - "993"
+    # devices:
+    #   - /dev/dri:/dev/dri
+    environment:
+      - TZ=Europe/Brussels
+      - JELLYFIN_LOG_DIR=/config/log
+      - JELLYFIN_CACHE_DIR=/transcode
+      - DOTNET_SYSTEM_NET_DISABLE_IPV6=1
+    volumes:
+      - /appdata/media/jellyfin/config:/config
+      - /mnt/data/18TB:/data/18TB
+      - /mnt/data/12TB:/data/12TB
+      - /dev/shm:/transcode
+    ports:
+      - "8096:8096"
+    networks:
+      - media_network
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"

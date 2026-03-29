@@ -92,7 +92,11 @@ curl -sL https://github.com/${GITHUB_USERNAME}.keys >> /root/.ssh/authorized_key
 chmod 600 /root/.ssh/authorized_keys
 "
 
-# Step 7: Trigger the initial docker-compose up
+# Step 7: Configure automated GitOps synchronization (Cronjob)
+echo "Setting up 5-minute GitOps reconciliation loop..."
+pct exec "${VMID}" -- bash -c "echo '*/5 * * * * root ${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME} > /var/log/node-sync.log 2>&1' > /etc/cron.d/gitops-sync"
+
+# Step 8: Trigger the initial docker-compose up
 pct exec "${VMID}" -- bash -c "${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME}"
 
 echo "Bootstrap completed. Fetch the MAC address for OPNsense:"

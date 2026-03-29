@@ -124,7 +124,7 @@ After running, you can connect simply by typing: `ssh <alias>` (e.g., `ssh media
 
 ## Phase 4: Container Synchronization (GitOps)
 
-Inside each LXC container, the `node-sync.sh` script is used to keep the application state aligned with the Git repository. The initial bootstrap script automatically triggers this, but it can also be run manually or via a cron job to pull updates.
+Inside each LXC container, the `node-sync.sh` script is used to keep the application state aligned with the Git repository. The bootstrap script automatically configures a **5-minute cronjob** to run this reconciliation loop, meaning your containers will automatically detect and apply Git changes. You can also run it manually for immediate results.
 
 **What this script does:**
 
@@ -167,12 +167,12 @@ Managing your homelab is primarily declarative via Git. Here are the common life
 2. Create a new directory for the app: `mkdir -p apps/<stack_name>/<app_name>`.
 3. Add your `docker-compose.yml` and `.env` files.
 4. Commit and push: `git add . && git commit -m "feat: add <app_name>" && git push`.
-5. Sync the container state by running `/opt/gitops/scripts/container/node-sync.sh <stack_name>` via SSH inside the LXC container.
+5. Wait up to 5 minutes for the automated GitOps cronjob to pull and deploy the app, or sync immediately by running `/opt/gitops/scripts/container/node-sync.sh <stack_name>` via SSH inside the LXC container.
 
 ### 2. Updating Apps
 
 - **Automatic:** The centralized Watchtower container in each stack automatically pulls new images and restarts containers marked with the `com.centurylinklabs.watchtower.enable=true` label.
-- **Declarative:** Modify your `docker-compose.yml` (e.g., change an environment variable) and push to Git. Run `node-sync.sh` in the container to apply the new state.
+- **Declarative:** Modify your `docker-compose.yml` (e.g., change an environment variable) and push to Git. The container's 5-minute GitOps cronjob will automatically apply the new state.
 
 ### 3. Removing an App
 

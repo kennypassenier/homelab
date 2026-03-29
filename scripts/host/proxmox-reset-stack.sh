@@ -36,6 +36,9 @@ if pct exec "${VMID}" -- command -v docker >/dev/null 2>&1; then
     pct exec "${VMID}" -- bash -c 'docker volume rm $(docker volume ls -q) 2>/dev/null || true'
 fi
 
+echo "Wiping internal LXC GitOps directory..."
+pct exec "${VMID}" -- rm -rf /opt/gitops
+
 echo "Wiping host application data at ${HOST_STORAGE_PATH}..."
 # Delete contents but keep the directory and mount intact
 # Using :? ensures it aborts if variable is empty, preventing accidental root wipe

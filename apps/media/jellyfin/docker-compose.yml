@@ -13,13 +13,13 @@ services:
     #   - "993"
     # devices:
     #   - /dev/dri:/dev/dri
+    env_file:
+      - .env
     environment:
       - TZ=Europe/Brussels
       - JELLYFIN_LOG_DIR=/config/log
       - JELLYFIN_CACHE_DIR=/transcode
       - DOTNET_SYSTEM_NET_DISABLE_IPV6=1
-      # Note: Set your actual API key here later (or via .env)
-      - JELLYFIN_API_KEY=PLACEHOLDER_API_KEY
     volumes:
       - /appdata/media/jellyfin/config:/config
       - /mnt/data/18TB:/data/18TB

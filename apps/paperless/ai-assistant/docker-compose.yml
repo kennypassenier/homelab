@@ -14,6 +14,8 @@ services:
     environment:
       # Interne verbinding binnen het Docker netwerk
       - PAPERLESS_API_URL=http://paperless-webserver:8000/api
+      - PAPERLESS_URL=http://paperless-webserver:8000
+      - HOST=0.0.0.0
     env_file:
       - .env
     volumes:

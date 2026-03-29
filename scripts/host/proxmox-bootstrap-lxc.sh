@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 # Script Name: proxmox-bootstrap-lxc.sh
 # Description: Bootstraps an LXC container, configures fast local SSD storage, installs SOPS, and decrypts keys.
-# Usage:./proxmox-bootstrap-lxc.sh <VMID> <STACK_NAME> <GITHUB_PAT> <AGE_PASSPHRASE> <GITHUB_USERNAME>
+# Usage:./proxmox-bootstrap-lxc.sh <VMID> <STACK_NAME> <GITHUB_USERNAME>
 
 set -euo pipefail
 
-if [[ $# -ne 5 ]]; then
-    echo "Usage: $0 <VMID> <STACK_NAME> <GITHUB_PAT> <AGE_PASSPHRASE> <GITHUB_USERNAME>"
+if [[ $# -ne 3 ]]; then
+    echo "Usage: $0 <VMID> <STACK_NAME> <GITHUB_USERNAME>"
     exit 1
 fi
 
 VMID="$1"
 STACK_NAME="$2"
-GITHUB_PAT="$3"
-AGE_PASSPHRASE="$4"
-GITHUB_USERNAME="$5"
+GITHUB_USERNAME="$3"
+
+# Securely prompt for sensitive credentials (avoids bash history leaks)
+read -s -p "Enter your GitHub Personal Access Token (GITHUB_PAT): " GITHUB_PAT
+echo ""
+read -s -p "Enter your Age key passphrase (AGE_PASSPHRASE): " AGE_PASSPHRASE
+echo ""
+
 GITOPS_DIR="/opt/gitops"
 
 # Storage Automation: Fast Local NVMe Storage for App Configs/Databases
@@ -34,10 +39,11 @@ pct set "${VMID}" -mp0 "${HOST_STORAGE_PATH},mp=${LXC_MOUNT_POINT}"
 pct start "${VMID}" || true
 sleep 5 # Wait for network initialization
 
-# Step 4: Install dependencies including Docker, Age, and SOPS
-echo "Installing utilities and encryption tooling..."
+# Step 4: Install dependencies including Docker, Age, SOPS, and unattended-upgrades
+echo "Installing utilities, security updates, and encryption tooling..."
 pct exec "${VMID}" -- bash -c "
-apt-get update && apt-get install -y curl git wget openssl jq
+apt-get update && apt-get install -y curl git wget openssl jq unattended-upgrades
+dpkg-reconfigure -f noninteractive unattended-upgrades
 curl -fsSL https://get.docker.com | sh
 wget -qO /usr/local/bin/sops https://github.com/getsops/sops/releases/download/v3.9.1/sops-v3.9.1.linux.amd64
 chmod +x /usr/local/bin/sops

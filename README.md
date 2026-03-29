@@ -9,7 +9,7 @@ The goal of this setup is to manage all self-hosted applications centrally via t
 - **Security:** Secrets (`.env` files) are encrypted in the repository using Mozilla SOPS and Age. They are decrypted seamlessly on the local machine and inside the containers.
 - **Isolation:** Every application runs in its own unprivileged Proxmox LXC container.
 - **Efficiency:** Containers use Git Sparse Checkouts to only download the files they need (their specific app directory and shared scripts).
-- **Storage:** Application data is stored centrally on the Proxmox host and bind-mounted into the LXC containers.
+- **Storage:** Fast-access app configurations (SSD) are stored locally in the container's Gitops directory (`./config`), while heavy media or backup data is bind-mounted from a centralized ZFS host drive (e.g. `/HDD2TB`).
 - **Networking:** IP assignments are handled centrally via OPNsense (Kea DHCP Reservations) using the container's MAC address.
 
 ---
@@ -40,13 +40,19 @@ git push -u origin main
 
 ---
 
-## Phase 2: Bootstrapping a New App (Proxmox Host)
+## Phase 2: Bootstrapping a New Stack (Proxmox Host)
 
-When you want to deploy a new application, you create a new LXC container in Proxmox and run the bootstrap script.
+When you want to deploy a new stack of applications, you create a new LXC container in Proxmox and run the bootstrap script.
 
-### 1. Create App Directory in Git
+### 1. Generate the Stack Template Locally
 
-Create a directory for your app (e.g., `apps/pihole`), add your `docker-compose.yml` and `.env` file, and push them to Git. SOPS will automatically encrypt the `.env` file.
+From the root of your local repository, run the stack generator script. This interactive script lets you create multiple apps within a single stack, optionally configures a centralized Watchtower for automatic updates, and prepares `.env` files.
+
+```bash
+./scripts/client/create-new-stack.sh
+```
+
+After generation, configure your `docker-compose.yml` and `.env` files, then push them to Git. SOPS will automatically encrypt the `.env` files.
 
 ### 2. Run the Bootstrap Script on Proxmox
 
@@ -66,7 +72,7 @@ Log into your Proxmox host via SSH and run the bootstrap script to provision the
 
 **What this script does:**
 
-1. Mounts host storage (`/mnt/storage/appdata/<APP_NAME>`) to the container (`/appdata`).
+1. Mounts the ZFS host storage (`/HDD2TB/appdata/<APP_NAME>`) to the container (`/appdata`) for large data and backups.
 2. Installs Docker, SOPS, and Age inside the LXC container.
 3. Performs a Git Sparse Checkout using your `PLACEHOLDER_TOKEN` to only fetch the necessary app directory.
 4. Decrypts the Age key using your `PLACEHOLDER_PASSPHRASE` and automatically decrypts your `.env` files.
@@ -122,8 +128,30 @@ Inside each LXC container, the `node-sync.sh` script is used to keep the applica
 
 1. Pulls the latest changes from the `main` branch.
 2. Transparently decrypts `.env` files via the Git SOPS smudge filter.
-3. Recursively finds all `docker-compose.yml` or `compose.yaml` files for the specific app.
-4. Executes `docker compose up -d --remove-orphans` to apply declarative changes.
+3. Finds and executes any `setup.sh` or `pre-sync.sh` scripts (useful for installing packages or setting permissions).
+4. Recursively finds all `docker-compose.yml` or `compose.yaml` files for the specific stack.
+5. Executes `docker compose up -d --remove-orphans` to apply declarative changes.
+
+---
+
+## Phase 5: Backup Strategy (Restic)
+
+Backups are handled on the Proxmox host using Restic. The strategy is designed to protect fast SSD configurations by safely pausing active databases and saving snapshots to the larger, slower HDD storage.
+
+### Running the Backup
+
+Execute the backup script on the Proxmox host:
+
+```bash
+./scripts/host/proxmox-restic-backup.sh
+```
+
+**How the backup works:**
+
+1. **Container Pausing:** The script dynamically finds all Docker containers across all running LXCs that have the label `com.homelab.backup.pause=true` and pauses them to prevent database corruption.
+2. **Snapshot Creation:** Restic backs up the data directly to the repository (e.g., local NAS or cloud).
+3. **Safety Traps:** A bash `trap` guarantees that containers are ALWAYS unpaused, even if the backup fails or is manually aborted.
+4. **Retention Policy:** The script automatically prunes old backups (`--keep-daily 7 --keep-weekly 4 --keep-monthly 3`), ensuring your backup drive never fills up thanks to block-level deduplication.
 
 ---
 
@@ -134,7 +162,8 @@ homelab/
 ├── .gitattributes          # Configures transparent SOPS encryption for Git
 ├── .sops.yaml              # Defines SOPS creation rules and Age public key
 ├── apps/                   # Contains individual application configurations (Docker Compose, .env)
-│   └── <app_name>/
+│   └── <stack_name>/
+│       └── <app_name>/
 ├── scripts/
 │   ├── client/             # Scripts executed on the local workstation (Pop!_OS)
 │   ├── host/               # Scripts executed on the Proxmox host

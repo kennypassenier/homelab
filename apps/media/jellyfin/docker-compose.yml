@@ -7,12 +7,12 @@ services:
   jellyfin:
     image: jellyfin/jellyfin:latest
     container_name: jellyfin
-    # Hardware acceleration and custom user mappings temporarily disabled for stability
-    # user: "1000:1000"
-    # group_add:
-    #   - "993"
-    # devices:
-    #   - /dev/dri:/dev/dri
+    # Enable Hardware acceleration and custom user mappings
+    user: "1000:1000"
+    group_add:
+      - "993"
+    devices:
+      - /dev/dri:/dev/dri
     env_file:
       - .env
     environment:

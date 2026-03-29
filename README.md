@@ -6,7 +6,7 @@ This repository contains the infrastructure as code (IaC) and GitOps configurati
 
 The goal of this setup is to manage all self-hosted applications centrally via this Git repository.
 
-- **Security:** Secrets (`.env` files) are encrypted in the repository using Mozilla SOPS and Age. They are decrypted seamlessly on the local machine and inside the containers.
+- **Security:** Secrets (`.env` files) are encrypted in the repository using Mozilla SOPS and Age. They are decrypted seamlessly on the local machine and inside the containers. _Note: Always keep your Age master private key safely backed up in a secure password manager (e.g., Bitwarden)._
 - **Isolation:** Every application runs in its own unprivileged Proxmox LXC container.
 - **Efficiency:** Containers use Git Sparse Checkouts to only download the files they need (their specific app directory and shared scripts).
 - **Storage:** Fast-access app configurations (SSD) are stored in an isolated host directory (`/opt/appdata/<STACK_NAME>`) and bind-mounted into the containers at `/appdata`. Heavy media or backup data is separated onto other drives (e.g. `/HDD2TB` or NAS drives).
@@ -61,19 +61,21 @@ Log into your Proxmox host via SSH and run the bootstrap script to provision the
 **Usage:**
 
 ```bash
-./scripts/host/proxmox-bootstrap-lxc.sh <VMID> <STACK_NAME> <GITHUB_PAT> <AGE_PASSPHRASE> <GITHUB_USERNAME>
+./scripts/host/proxmox-bootstrap-lxc.sh <VMID> <STACK_NAME> <GITHUB_USERNAME>
 ```
+
+_Note: To prevent secrets from leaking into your bash history, the script will interactively prompt you for your GitHub PAT and Age Passphrase._
 
 **Example:**
 
 ```bash
-./scripts/host/proxmox-bootstrap-lxc.sh 101 media-stack PLACEHOLDER_TOKEN PLACEHOLDER_PASSPHRASE PLACEHOLDER_GITHUB_USERNAME
+./scripts/host/proxmox-bootstrap-lxc.sh 101 media-stack PLACEHOLDER_GITHUB_USERNAME
 ```
 
 **What this script does:**
 
 1. Mounts the fast local NVMe host storage (`/opt/appdata/<STACK_NAME>`) to the container (`/appdata`) for isolated application configs.
-2. Installs Docker, SOPS, and Age inside the LXC container.
+2. Installs Docker, SOPS, Age, and `unattended-upgrades` (for automatic OS security patching) inside the LXC container.
 3. Performs a Git Sparse Checkout using your `PLACEHOLDER_TOKEN` to only fetch the necessary app directory.
 4. Decrypts the Age key using your `PLACEHOLDER_PASSPHRASE` and automatically decrypts your `.env` files.
 5. Pulls your public SSH keys from GitHub (`https://github.com/PLACEHOLDER_GITHUB_USERNAME.keys`) so you can access the container without a password.
@@ -152,6 +154,21 @@ Execute the backup script on the Proxmox host:
 2. **Snapshot Creation:** Restic backs up the host configuration directory (`/opt/appdata`) directly to the dedicated 2TB backup repository (`/HDD2TB/backups/restic`).
 3. **Safety Traps:** A bash `trap` guarantees that containers are ALWAYS unpaused, even if the backup fails or is manually aborted.
 4. **Retention Policy:** The script automatically prunes old backups (`--keep-daily 7 --keep-weekly 4 --keep-monthly 3`), ensuring your backup drive never fills up thanks to block-level deduplication.
+
+---
+
+## Phase 6: Stack Lifecycle Management (Reset / Destroy)
+
+If a stack becomes corrupted or you want to remove it entirely, use the clean-up utility on the Proxmox host to safely wipe the data without leaving ghost directories on your SSD.
+
+```bash
+./scripts/host/clean-stack.sh <VMID> <STACK_NAME>
+```
+
+This interactive script offers two options:
+
+1. **RESET:** Keeps the LXC container and static IP, but wipes all Docker containers, volumes, and app data. Perfect for starting fresh.
+2. **DESTROY:** Completely deletes the LXC container and permanently removes all associated host app data.
 
 ---
 

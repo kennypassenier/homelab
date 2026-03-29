@@ -1,24 +1,51 @@
 #!/usr/bin/env bash
 # Script Name: proxmox-bootstrap-lxc.sh
 # Description: Bootstraps an LXC container, configures fast local SSD storage, installs SOPS, and decrypts keys.
-# Usage:./proxmox-bootstrap-lxc.sh <VMID> <STACK_NAME> <GITHUB_USERNAME>
+# Usage: ./proxmox-bootstrap-lxc.sh [-t <github_pat>] [-a <age_passphrase>] [-h] <VMID> <STACK_NAME> <GITHUB_USERNAME>
 
 set -euo pipefail
 
+show_help() {
+    echo "Usage: $0 [-t <github_pat>] [-a <age_passphrase>] [-h] <VMID> <STACK_NAME> <GITHUB_USERNAME>"
+    echo ""
+    echo "Options:"
+    echo "  -t    GitHub Personal Access Token (if not provided, will prompt securely)"
+    echo "  -a    Age key passphrase (if not provided, will prompt securely)"
+    echo "  -h    Show this help message"
+    exit 0
+}
+
+GITHUB_PAT=""
+AGE_PASSPHRASE=""
+
+while getopts "t:a:h" opt; do
+    case "$opt" in
+        t) GITHUB_PAT="$OPTARG" ;;
+        a) AGE_PASSPHRASE="$OPTARG" ;;
+        h) show_help ;;
+        *) show_help ;;
+    esac
+done
+shift $((OPTIND-1))
+
 if [[ $# -ne 3 ]]; then
-    echo "Usage: $0 <VMID> <STACK_NAME> <GITHUB_USERNAME>"
-    exit 1
+    echo "Error: Missing required positional arguments."
+    show_help
 fi
 
 VMID="$1"
 STACK_NAME="$2"
 GITHUB_USERNAME="$3"
 
-# Securely prompt for sensitive credentials (avoids bash history leaks)
-read -s -p "Enter your GitHub Personal Access Token (GITHUB_PAT): " GITHUB_PAT
-echo ""
-read -s -p "Enter your Age key passphrase (AGE_PASSPHRASE): " AGE_PASSPHRASE
-echo ""
+if [ -z "$GITHUB_PAT" ]; then
+    read -s -p "Enter your GitHub Personal Access Token (GITHUB_PAT): " GITHUB_PAT
+    echo ""
+fi
+
+if [ -z "$AGE_PASSPHRASE" ]; then
+    read -s -p "Enter your Age key passphrase (AGE_PASSPHRASE): " AGE_PASSPHRASE
+    echo ""
+fi
 
 GITOPS_DIR="/opt/gitops"
 
@@ -53,7 +80,7 @@ mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
 
 # Step 5: Inject synchronization script and setup transparent Git encryption
 echo "Injecting synchronization script..."
-pct exec "${VMID}" -- bash -c "cat > /root/sparse-setup.sh" << 'EOF'
+pct exec "${VMID}" -- bash -c "cat > /root/sparse-setup.sh" << 'INNEREOF'
 #!/usr/bin/env bash
 set -euo pipefail
 REPO_URL="https://github.com/kennypassenier/homelab.git"
@@ -69,9 +96,9 @@ mkdir -p /root/.config/sops/age
 git show HEAD:secrets/age.key.enc | openssl enc -d -aes-256-cbc -pbkdf2 -salt -out /root/.config/sops/age/keys.txt -pass pass:"$3"
 chmod 600 /root/.config/sops/age/keys.txt
 
-# Setup transparent Git filters before checkout!
-git config --local filter.sops-env.clean "sops --encrypt --input-type dotenv --output-type dotenv /dev/stdin"
-git config --local filter.sops-env.smudge "sops --decrypt --input-type dotenv --output-type dotenv /dev/stdin"
+# Setup transparent Git filters before checkout! Use absolute path to guarantee SOPS is found in LXC
+git config --local filter.sops-env.clean "/usr/local/bin/sops --encrypt --input-type dotenv --output-type dotenv /dev/stdin"
+git config --local filter.sops-env.smudge "/usr/local/bin/sops --decrypt --input-type dotenv --output-type dotenv /dev/stdin"
 git config --local filter.sops-env.required true
 
 # Setup sparse checkout safely
@@ -80,7 +107,7 @@ git sparse-checkout set "$STACK_DIR" "scripts" "secrets" ".sops.yaml"
 
 # Checkout main (Smudge filter automatically decrypts the.env files here)
 git checkout main
-EOF
+INNEREOF
 
 pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${STACK_NAME} ${GITHUB_PAT} ${AGE_PASSPHRASE}"
 

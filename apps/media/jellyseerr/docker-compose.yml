@@ -1,0 +1,23 @@
+networks:
+  media_network:
+    name: media_network
+    external: true
+
+services:
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      - /appdata/media/jellyseerr/config:/app/config
+    ports:
+      - "7000:7000"
+    networks:
+      - media_network
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"

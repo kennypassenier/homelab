@@ -14,7 +14,7 @@ services:
     volumes:
       - /appdata/media/jellyseerr/config:/app/config
     ports:
-      - "7000:7000"
+      - "5055:5055"
     networks:
       - media_network
     restart: unless-stopped

@@ -24,7 +24,7 @@ Dit bestand bevat de essentiële context en regels voor LLM's (zoals Claude, Cha
 - **Uitgerolde Stacks:**
   - `monitoring`: Bevat Uptime Kuma, Grafana, Loki en Watchtower. Grafana is geconfigureerd om Loki automatisch als datasource te provisionen.
   - `paperless`: Bevat Paperless-ngx, DB, Redis, Broker, Paperless-AI (Tagger UI + RAG backend), Promtail en Watchtower.
-  - `media`: Bevat Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Promtail en Watchtower. Configuratie zit netjes in afzonderlijke apps gemount via `/appdata/media/...`.
+  - `media`: Bevat Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, Promtail en Watchtower. Configuratie zit netjes in afzonderlijke apps gemount via `/appdata/media/...`.
 - **Recente wijzigingen:**
   - Shell scripts (`bootstrap-lxc.sh`, `register-local-node.sh`, `node-sync.sh`) zijn geüpgraded met CLI arguments (`getopts`) en `--help` functionaliteit voor betere automatisering. Alle host-scripts hanteren nu de overzichtelijke `[actie]-[object]` naamgevingsconventie.
   - `node-sync.sh` is robuuster gemaakt door een specifieke `cd` en door vooraf `docker compose pull -q` uit te voeren (om updates sneller te vangen en efficiënt te deployen zonder overbodige `--force-recreate` restarts).

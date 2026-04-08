@@ -4,15 +4,15 @@ networks:
     external: true
 
 services:
-  jellyseerr:
-    image: fallenbagel/jellyseerr:latest
-    container_name: jellyseerr
+  seerr:
+    image: ghcr.io/seerr-team/seerr:latest
+    container_name: seerr
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=Europe/Brussels
     volumes:
-      - /appdata/media/jellyseerr/config:/app/config
+      - /appdata/media/seerr/config:/app/config
     ports:
       - "5055:5055"
     networks:

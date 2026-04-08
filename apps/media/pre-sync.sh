@@ -15,3 +15,22 @@ if ! docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1; then
 else
     echo "[pre-sync] Network '${NETWORK_NAME}' already exists. Skipping."
 fi
+
+# --- Jellyseerr to Seerr Migration ---
+# This block is idempotent. Once the directory is renamed, it will be skipped in future runs.
+if [ -d "/appdata/media/jellyseerr" ]; then
+    echo "[pre-sync] Found legacy Jellyseerr data. Migrating to Seerr..."
+
+    # Stop and remove the old container if it exists
+    if docker ps -a --format '{{.Names}}' | grep -q "^jellyseerr$"; then
+        echo "[pre-sync] Stopping and removing old jellyseerr container..."
+        docker stop jellyseerr || true
+        docker rm jellyseerr || true
+    fi
+
+    # Rename the data directory
+    echo "[pre-sync] Renaming data directory from jellyseerr to seerr..."
+    mv /appdata/media/jellyseerr /appdata/media/seerr
+
+    echo "[pre-sync] Migration to Seerr complete."
+fi

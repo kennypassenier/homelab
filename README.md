@@ -178,22 +178,25 @@ Managing your homelab is primarily declarative via Git. Here are the common life
 ### 1. Adding a New App to an Existing Stack
 
 1. Navigate to your local Git repository.
-2. Create a new directory for the app: `mkdir -p apps/<stack_name>/<app_name>`.
-3. Add your `docker-compose.yml` and `.env` files.
-4. Commit and push: `git add . && git commit -m "feat: add <app_name>" && git push`.
-5. Wait up to 5 minutes for the automated GitOps cronjob to pull and deploy the app, or sync immediately by running `/opt/gitops/scripts/container/node-sync.sh <stack_name>` via SSH inside the LXC container.
+2. Run the interactive generator script: `./scripts/client/create-new-app.sh`.
+3. The script will prompt you for the stack and app name, generate the template, and prepare the `.env` file.
+4. Configure your `docker-compose.yml` and `.env` files as needed.
+5. Commit and push: `git add . && git commit -m "feat: add <app_name>" && git push`.
+6. Wait up to 5 minutes for the automated GitOps cronjob to pull and deploy the app, or sync immediately by running `/opt/gitops/scripts/container/node-sync.sh <stack_name>` via SSH inside the LXC container.
 
 ### 2. Updating Apps
 
 - **Automatic:** The centralized Watchtower container in each stack automatically pulls new images and restarts containers marked with the `com.centurylinklabs.watchtower.enable=true` label.
 - **Declarative:** Modify your `docker-compose.yml` (e.g., change an environment variable) and push to Git. The container's 5-minute GitOps cronjob will automatically apply the new state.
 
-### 3. Removing an App
+### 3. Removing an App (Garbage Collection)
 
-1. Delete the app's folder from Git: `git rm -r apps/<stack_name>/<app_name>`.
-2. Commit and push.
-3. Run `node-sync.sh` in the LXC container. The `--remove-orphans` flag will automatically stop and remove the deleted app's container.
-4. _Note:_ The app's configuration data remains safely on the host's SSD at `/opt/appdata/<stack_name>/<app_name>` to prevent accidental data loss. You can delete this manually if desired.
+We use an automated Garbage Collection (GC) system. When an app is removed from Git, the 5-minute `node-sync.sh` cronjob will detect the orphaned data on the host, automatically stop the container, remove it, and cleanly delete the application's configuration data to prevent leftover artifacts.
+
+1. Navigate to your local Git repository.
+2. Run the removal script: `./scripts/client/remove-app.sh`.
+3. Select the stack and app. The script will automatically delete the files, commit, and push.
+4. Within 5 minutes, the GitOps cronjob will run its Garbage Collection routine on the LXC container, completely erasing the container and its `/opt/appdata/<stack_name>/<app_name>` directory.
 
 ### 4. Resetting a Corrupted Stack
 

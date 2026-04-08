@@ -45,6 +45,25 @@ if [[ -d "${STACK_DIR}" ]]; then
         docker compose up -d --remove-orphans
         cd - > /dev/null
     done
+
+    # Garbage Collection: Remove orphaned apps and their data
+    if [[ -d "/appdata/${STACK_NAME}" ]]; then
+        for app_data_dir in /appdata/${STACK_NAME}/*; do
+            if [[ -d "$app_data_dir" ]]; then
+                app_name=$(basename "$app_data_dir")
+                # If the app folder no longer exists in Git, it's an orphan
+                if [[ ! -d "${STACK_DIR}/${app_name}" ]]; then
+                    echo "Garbage Collection: App '${app_name}' no longer in Git. Removing..."
+                    # Attempt to stop and remove the container by app name
+                    docker stop "${app_name}" 2>/dev/null || true
+                    docker rm "${app_name}" 2>/dev/null || true
+                    # Safely delete the remaining app configuration data
+                    rm -rf "$app_data_dir"
+                    echo "Garbage Collection: Removed container and data for '${app_name}'."
+                fi
+            fi
+        done
+    fi
 else
     echo "Stack ${STACK_NAME} not found in Git."
 fi

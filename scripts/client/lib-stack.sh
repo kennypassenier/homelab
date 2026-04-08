@@ -97,6 +97,8 @@ services:
   watchtower:
     image: containrrr/watchtower:latest
     container_name: watchtower-${stack_name}
+    environment:
+      - DOCKER_API_VERSION=1.41
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --cleanup --label-enable

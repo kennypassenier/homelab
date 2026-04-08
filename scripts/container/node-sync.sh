@@ -48,3 +48,14 @@ if [[ -d "${STACK_DIR}" ]]; then
 else
     echo "Stack ${STACK_NAME} not found in Git."
 fi
+
+# One-time cleanup of legacy bootstrap artifacts
+if [[ -f "/root/sparse-setup.sh" ]]; then
+    echo "Cleaning up legacy bootstrap artifact: /root/sparse-setup.sh"
+    rm -f "/root/sparse-setup.sh"
+fi
+
+if [[ -d "/tmp/age" ]]; then
+    echo "Cleaning up legacy bootstrap artifact: /tmp/age"
+    rm -rf "/tmp/age"
+fi

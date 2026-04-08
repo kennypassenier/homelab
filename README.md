@@ -11,7 +11,7 @@ The goal of this setup is to manage all self-hosted applications centrally via t
 - **Efficiency:** Containers use Git Sparse Checkouts to only download the files they need (their specific app directory and shared scripts).
 - **Storage:** Fast-access app configurations (SSD) are stored in an isolated host directory (`/opt/appdata/<STACK_NAME>`) and bind-mounted into the containers at `/appdata`. Heavy media or backup data is separated onto other drives (e.g. `/HDD2TB` or NAS drives).
 - **Networking:** IP assignments are handled centrally via OPNsense (Kea DHCP Reservations) using the container's MAC address.
-- **Observability:** Centralized logging is supported via optional Promtail containers forwarding logs to a Loki/Grafana stack.
+- **Observability:** Centralized logging is supported via optional Promtail containers forwarding logs to a Loki/Grafana stack. Promtail configurations automatically expand environment variables, meaning the `LOKI_IP` is injected securely via `.env` files without manual config edits.
 
 ---
 
@@ -66,7 +66,7 @@ Or you can use CLI flags to bypass prompts for faster execution:
 - `-p`: Include centralized Promtail for Loki (requires Docker).
 - `-h`: Show the help menu.
 
-After generation, configure your `docker-compose.yml` and `.env` files, then push them to Git. SOPS will automatically encrypt the `.env` files.
+After generation, configure your `docker-compose.yml` and `.env` files (e.g., verifying the `LOKI_IP` in Promtail's `.env`), then push them to Git. SOPS will automatically encrypt the `.env` files.
 
 ### 2. Run the Bootstrap Script on Proxmox
 

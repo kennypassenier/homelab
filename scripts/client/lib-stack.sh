@@ -125,9 +125,13 @@ services:
       - /var/log:/var/log:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./config.yml:/etc/promtail/config.yml:ro
-    command: -config.file=/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml -config.expand-env=true
+    env_file:
+      - .env
     restart: unless-stopped
 EOF
+
+    echo "LOKI_IP=10.10.10.7" > "${prom_dir}/.env"
 
     cat <<EOF > "${prom_dir}/config.yml"
 server:
@@ -138,7 +142,7 @@ positions:
   filename: /tmp/positions.yaml
 
 clients:
-  - url: http://LOKI_IP:3100/loki/api/v1/push
+  - url: http://\${LOKI_IP}:3100/loki/api/v1/push
 
 scrape_configs:
   - job_name: system

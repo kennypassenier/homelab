@@ -26,6 +26,7 @@ Dit bestand bevat de essentiële context en regels voor LLM's (zoals Claude, Cha
   - `paperless`: Bevat Paperless-ngx, DB, Redis, Broker, Paperless-AI (Tagger UI + RAG backend), Promtail en Watchtower.
   - `media`: Bevat Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, Promtail en Watchtower. Configuratie zit netjes in afzonderlijke apps gemount via `/appdata/media/...`.
 - **Recente wijzigingen:**
+  - Promtail configuraties (voor logging naar Loki) gebruiken nu `-config.expand-env=true` samen met `.env` bestanden voor het dynamisch injecteren van variabelen (zoals `LOKI_IP`), zodat hardcoded IP's in `config.yml` verleden tijd zijn.
   - Client scripts toegevoegd voor lifecycle management: `create-new-app.sh` en `remove-app.sh` met een gedeelde bibliotheek `lib-stack.sh` voor DRY code en een interactieve genummerde CLI interface.
   - Shell scripts (`bootstrap-lxc.sh`, `register-local-node.sh`, `node-sync.sh`) zijn geüpgraded met CLI arguments (`getopts`) en `--help` functionaliteit voor betere automatisering. Alle host-scripts hanteren nu de overzichtelijke `[actie]-[object]` naamgevingsconventie.
   - `node-sync.sh` is robuuster gemaakt door een specifieke `cd` en door vooraf `docker compose pull -q` uit te voeren (om updates sneller te vangen en efficiënt te deployen zonder overbodige `--force-recreate` restarts).

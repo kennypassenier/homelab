@@ -34,3 +34,9 @@ if [ -d "/appdata/media/jellyseerr" ]; then
 
     echo "[pre-sync] Migration to Seerr complete."
 fi
+
+# Ensure proper permissions for Seerr (Fixes EACCES crash loop after migration)
+if [ -d "/appdata/media/seerr" ]; then
+    echo "[pre-sync] Ensuring correct ownership for Seerr data (1000:1000)..."
+    chown -R 1000:1000 /appdata/media/seerr
+fi

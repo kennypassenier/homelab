@@ -126,5 +126,9 @@ pct exec "${VMID}" -- bash -c "echo '*/5 * * * * root ${GITOPS_DIR}/scripts/cont
 # Step 8: Trigger the initial docker-compose up
 pct exec "${VMID}" -- bash -c "${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME}"
 
+# Step 9: Cleanup temporary bootstrap artifacts
+echo "Cleaning up temporary bootstrap artifacts..."
+pct exec "${VMID}" -- bash -c "rm -f /root/sparse-setup.sh && rm -rf /tmp/age"
+
 echo "Bootstrap completed. Fetch the MAC address for OPNsense:"
 pct config "${VMID}" | grep net0

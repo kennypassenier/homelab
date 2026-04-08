@@ -5,7 +5,7 @@ networks:
 
 services:
   watchtower:
-    image: containrrr/watchtower
+    image: containrrr/watchtower:latest
     container_name: watchtower-paperless
     environment:
       - DOCKER_API_VERSION=1.41
@@ -15,3 +15,5 @@ services:
     networks:
       - paperless_network
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"

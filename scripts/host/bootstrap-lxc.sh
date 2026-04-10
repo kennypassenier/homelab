@@ -1,48 +1,109 @@
 #!/usr/bin/env bash
-# Script Name: proxmox-bootstrap-lxc.sh
-# Description: Bootstraps an LXC container, configures fast local SSD storage, installs SOPS, and decrypts keys.
-# Usage: ./proxmox-bootstrap-lxc.sh [-t <github_pat>] [-a <age_passphrase>] [-h] <VMID> <STACK_NAME> <GITHUB_USERNAME>
+# Script Name: bootstrap-lxc.sh
+# Description: Bootstraps an LXC container interactively, configures fast local SSD storage, installs SOPS, and decrypts keys.
 
 set -euo pipefail
 
+# Safely load environment variables if present (e.g. GITHUB_USERNAME, GITHUB_PAT, AGE_PASSPHRASE)
+if [[ -f ".env" ]]; then
+    set -a
+    source .env
+    set +a
+elif [[ -f "scripts/host/.env" ]]; then
+    set -a
+    source "scripts/host/.env"
+    set +a
+fi
+
 show_help() {
-    echo "Usage: $0 [-t <github_pat>] [-a <age_passphrase>] [-h] <VMID> <STACK_NAME> <GITHUB_USERNAME>"
+    echo "Usage: $0 [-v <VMID>] [-s <STACK_NAME>] [-u <GITHUB_USERNAME>] [-t <GITHUB_PAT>] [-a <AGE_PASSPHRASE>] [-h]"
     echo ""
     echo "Options:"
-    echo "  -t    GitHub Personal Access Token (if not provided, will prompt securely)"
-    echo "  -a    Age key passphrase (if not provided, will prompt securely)"
+    echo "  -v    Proxmox VMID"
+    echo "  -s    Stack name"
+    echo "  -u    GitHub Username"
+    echo "  -t    GitHub Personal Access Token"
+    echo "  -a    Age key passphrase"
     echo "  -h    Show this help message"
+    echo ""
+    echo "If options are omitted, the script will run interactively and check for a .env file."
     exit 0
 }
 
-GITHUB_PAT=""
-AGE_PASSPHRASE=""
+# Initialize variables from Environment (or empty)
+VMID="${VMID:-}"
+STACK_NAME="${STACK_NAME:-}"
+GITHUB_USERNAME="${GITHUB_USERNAME:-}"
+GITHUB_PAT="${GITHUB_PAT:-}"
+AGE_PASSPHRASE="${AGE_PASSPHRASE:-}"
 
-while getopts "t:a:h" opt; do
+while getopts "v:s:u:t:a:h" opt; do
     case "$opt" in
+        v) VMID="$OPTARG" ;;
+        s) STACK_NAME="$OPTARG" ;;
+        u) GITHUB_USERNAME="$OPTARG" ;;
         t) GITHUB_PAT="$OPTARG" ;;
         a) AGE_PASSPHRASE="$OPTARG" ;;
         h) show_help ;;
         *) show_help ;;
     esac
 done
-shift $((OPTIND-1))
 
-if [[ $# -ne 3 ]]; then
-    echo "Error: Missing required positional arguments."
-    show_help
+echo "=== LXC Bootstrap Wizard ==="
+echo ""
+
+# 1. Prompt for VMID
+if [[ -z "$VMID" ]]; then
+    read -r -p "Enter the VMID for the new LXC container: " VMID
 fi
 
-VMID="$1"
-STACK_NAME="$2"
-GITHUB_USERNAME="$3"
+# 2. Prompt for Stack dynamically
+if [[ -z "$STACK_NAME" ]]; then
+    if [[ ! -d "apps" ]]; then
+        echo "Error: Run this script from the root of the repository."
+        exit 1
+    fi
 
-if [ -z "$GITHUB_PAT" ]; then
+    echo "Available stacks:"
+    stacks=()
+    for dir in apps/*/; do
+        if [[ -d "$dir" ]]; then
+            stacks+=("$(basename "$dir")")
+        fi
+    done
+
+    if [[ ${#stacks[@]} -eq 0 ]]; then
+        echo "Error: No stacks found in apps/ directory."
+        exit 1
+    fi
+
+    for i in "${!stacks[@]}"; do
+        echo "$((i+1)). ${stacks[$i]}"
+    done
+
+    while true; do
+        read -r -p "Select a stack to deploy (1-${#stacks[@]}): " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#stacks[@]}" ]; then
+            STACK_NAME="${stacks[$((choice-1))]}"
+            break
+        else
+            echo "Invalid selection. Please enter a number between 1 and ${#stacks[@]}."
+        fi
+    done
+fi
+
+# 3. Prompt for GitHub Username
+if [[ -z "$GITHUB_USERNAME" ]]; then
+    read -r -p "Enter your GitHub username (or set GITHUB_USERNAME in .env): " GITHUB_USERNAME
+fi
+
+# 4. Prompt for Secrets securely
+if [[ -z "$GITHUB_PAT" ]]; then
     read -s -p "Enter your GitHub Personal Access Token (GITHUB_PAT): " GITHUB_PAT
     echo ""
 fi
 
-if [ -z "$AGE_PASSPHRASE" ]; then
+if [[ -z "$AGE_PASSPHRASE" ]]; then
     read -s -p "Enter your Age key passphrase (AGE_PASSPHRASE): " AGE_PASSPHRASE
     echo ""
 fi
@@ -53,7 +114,8 @@ GITOPS_DIR="/opt/gitops"
 HOST_STORAGE_PATH="/opt/appdata/${STACK_NAME}"
 LXC_MOUNT_POINT="/appdata"
 
-echo "Initiating bootstrap sequence for container ${VMID} targeting stack ${STACK_NAME}..."
+echo ""
+echo "Initiating bootstrap sequence for container ${VMID} targeting stack '${STACK_NAME}'..."
 
 # Step 1: Ensure host directory exists and adjust permissions for unprivileged LXC
 mkdir -p "${HOST_STORAGE_PATH}"
@@ -105,7 +167,7 @@ git config --local filter.sops-env.required true
 git sparse-checkout init --cone
 git sparse-checkout set "$STACK_DIR" "scripts" "secrets" ".sops.yaml"
 
-# Checkout main (Smudge filter automatically decrypts the.env files here)
+# Checkout main (Smudge filter automatically decrypts the .env files here)
 git checkout main
 INNEREOF
 
@@ -130,5 +192,7 @@ pct exec "${VMID}" -- bash -c "${GITOPS_DIR}/scripts/container/node-sync.sh ${ST
 echo "Cleaning up temporary bootstrap artifacts..."
 pct exec "${VMID}" -- bash -c "rm -f /root/sparse-setup.sh && rm -rf /tmp/age"
 
-echo "Bootstrap completed. Fetch the MAC address for OPNsense:"
+echo ""
+echo "=== Bootstrap Completed ==="
+echo "Fetch the MAC address below to set a static IP in OPNsense:"
 pct config "${VMID}" | grep net0

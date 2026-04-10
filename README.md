@@ -78,22 +78,28 @@ After generation, configure your `docker-compose.yml` and `.env` files (e.g., ve
 
 Log into your Proxmox host via SSH and run the bootstrap script to provision the LXC container.
 
-**Usage:**
+The script features an interactive wizard that will guide you through the process and lets you dynamically select the stack you want to deploy from a numbered list.
+
+**Interactive Usage:**
 
 ```bash
-./scripts/host/bootstrap-lxc.sh [-t <GITHUB_PAT>] [-a <AGE_PASSPHRASE>] [-h] <VMID> <STACK_NAME> <GITHUB_USERNAME>
+./scripts/host/bootstrap-lxc.sh
 ```
 
-_Note: You can pass your credentials via flags (`-t` and `-a`) for automation, but to prevent secrets from leaking into your bash history, it's safer to omit them. The script will then interactively prompt you securely._
-
-**Example:**
+**Automated Usage (Optional):**
+To avoid typing your credentials and username every time, you can configure a `.env` file on your Proxmox host:
 
 ```bash
-# For a media stack
-./scripts/host/bootstrap-lxc.sh 101 media PLACEHOLDER_GITHUB_USERNAME
+cp scripts/host/.env.example scripts/host/.env
+nano scripts/host/.env # Fill in your GITHUB_USERNAME, GITHUB_PAT, and AGE_PASSPHRASE
+```
 
-# For the gateway stack (Nginx Proxy Manager, CrowdSec, GoAccess)
-./scripts/host/bootstrap-lxc.sh 102 gateway PLACEHOLDER_GITHUB_USERNAME
+Once configured, the script will automatically read these variables, leaving you to only pick the VMID and the stack!
+
+**CLI Flags (For full automation):**
+You can also bypass prompts entirely using flags (use `./scripts/host/bootstrap-lxc.sh -h` for all options):
+```bash
+./scripts/host/bootstrap-lxc.sh -v 101 -s media
 ```
 
 **What this script does:**

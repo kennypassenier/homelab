@@ -52,30 +52,39 @@ fi
 ui_step "Selected stack: ${STACK_NAME}"
 echo ""
 
-# Prompt for the app name to remove
-read -r -p "Enter the app name to completely remove from ${STACK_NAME}: " APP_NAME
+# Select an existing app using the library function
+APP_NAME=$(prompt_app_selection "$STACK_NAME")
 
 if [[ -z "$APP_NAME" ]]; then
-    ui_error "App name cannot be empty."
+    ui_error "No app selected or available."
     exit 1
 fi
 
 APP_DIR="apps/${STACK_NAME}/${APP_NAME}"
 
-if [[ ! -d "$APP_DIR" ]]; then
-    ui_error "App '${APP_NAME}' does not exist in Git (${APP_DIR})."
-    exit 1
+echo ""
+echo -e "${C_RED}================================================================${C_NC}"
+echo -e "${C_RED}WARNING: You are about to completely destroy the app '${APP_NAME}'!${C_NC}"
+echo -e "${C_RED}================================================================${C_NC}"
+ui_info "This will delete the Git configuration directory: ${APP_DIR}"
+ui_info "Once synced, the node-sync.sh script on the LXC container will automatically:"
+ui_info " 1. STOP the container"
+ui_info " 2. REMOVE the container"
+ui_info " 3. DELETE all its data from the host!"
+echo ""
+
+read -r -p "Are you sure you want to proceed? (y/N): " CONFIRM1
+if [[ ! "$CONFIRM1" =~ ^[Yy]$ ]]; then
+    ui_info "Aborted."
+    SUCCESS=1
+    exit 0
 fi
 
 echo ""
-ui_warning "WARNING: This will delete the Git configuration for '${APP_NAME}'."
-ui_info "Once synced, the node-sync.sh script on the LXC container will automatically"
-ui_info "STOP the container, REMOVE the container, and DELETE all its data from the host!"
-echo ""
-
-read -r -p "Are you absolutely sure you want to proceed? (y/N): " CONFIRM
-if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-    ui_info "Aborted."
+echo -e "${C_RED}Final confirmation required.${C_NC}"
+read -r -p "Are you ABSOLUTELY sure you want to delete '${APP_NAME}'? Type the app name to confirm: " CONFIRM2
+if [[ "$CONFIRM2" != "$APP_NAME" ]]; then
+    ui_info "App name did not match. Aborted."
     SUCCESS=1
     exit 0
 fi

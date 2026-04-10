@@ -43,6 +43,45 @@ prompt_stack_selection() {
     done
 }
 
+# Prompts the user to select an app from a specific stack
+# Argument $1: stack_name
+# Returns the selected app name
+prompt_app_selection() {
+    local stack_name="$1"
+    if [[ -z "$stack_name" ]]; then
+        echo "Error: prompt_app_selection requires a stack name." >&2
+        return 1
+    fi
+
+    local apps=()
+    for dir in "apps/${stack_name}"/*/; do
+        if [[ -d "$dir" ]]; then
+            apps+=("$(basename "$dir")")
+        fi
+    done
+
+    if [[ ${#apps[@]} -eq 0 ]]; then
+        echo "No existing apps found in apps/${stack_name}/." >&2
+        return 1
+    fi
+
+    echo "Available apps in ${stack_name}:" >&2
+    for i in "${!apps[@]}"; do
+        echo "$((i+1)). ${apps[$i]}" >&2
+    done
+
+    local choice
+    while true; do
+        read -r -p "Select an app (1-${#apps[@]}): " choice >&2
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#apps[@]}" ]; then
+            echo "${apps[$((choice-1))]}"
+            return 0
+        else
+            echo "Invalid selection. Please enter a number between 1 and ${#apps[@]}." >&2
+        fi
+    done
+}
+
 # Generates a new application template inside a stack
 generate_app() {
     local stack_name="$1"

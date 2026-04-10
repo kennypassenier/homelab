@@ -5,15 +5,19 @@ networks:
 
 services:
   nginx-proxy-manager:
-    image: jc21/nginx-proxy-manager:latest
+    image: lepresidente/nginx-proxy-manager-crowdsec:latest
     container_name: nginx-proxy-manager
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "80:80" # Public HTTP Port
       - "443:443" # Public HTTPS Port
       - "81:81" # Admin Web Port
     environment:
       - TZ=Europe/Brussels
+      - CROWDSEC_LAPI_URL=http://crowdsec:8080
+      - CROWDSEC_KEY=${CROWDSEC_BOUNCER_KEY:-supersecretbouncerkey}
     volumes:
       - /appdata/gateway/nginx-proxy-manager/data:/data
       - /appdata/gateway/nginx-proxy-manager/letsencrypt:/etc/letsencrypt

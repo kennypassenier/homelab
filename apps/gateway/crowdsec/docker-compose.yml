@@ -7,14 +7,19 @@ services:
   crowdsec:
     image: crowdsecurity/crowdsec:latest
     container_name: crowdsec
+    env_file:
+      - .env
     environment:
       - TZ=Europe/Brussels
       - COLLECTIONS=crowdsecurity/nginx-proxy-manager
+      - BOUNCER_KEY_npm=${CROWDSEC_BOUNCER_KEY:-supersecretbouncerkey}
     volumes:
       - /appdata/gateway/crowdsec/config:/etc/crowdsec
       - /appdata/gateway/crowdsec/data:/var/lib/crowdsec/data
       # Mount Nginx Proxy Manager logs for parsing
       - /appdata/gateway/nginx-proxy-manager/data/logs:/var/log/npm:ro
+      # Mount the local whitelist configuration
+      - ./whitelists.yaml:/etc/crowdsec/parsers/s02-enrich/homelab-whitelist.yaml:ro
     networks:
       - gateway_network
     restart: unless-stopped

@@ -132,21 +132,22 @@ Once the LXC container has a static IP, you can register it on your local Pop!\_
 First, ensure the script is executable (only needed once):
 
 ```bash
-chmod +x scripts/client/register-local-node.sh
+chmod +x scripts/client/add-ssh.sh
 ```
 
 Then, run the script (interactively or via flags):
 
 ```bash
-./scripts/client/register-local-node.sh [-a <alias>] [-i <ip>] [-h]
+./scripts/client/add-ssh.sh [-a <alias>] [-i <ip>] [-h]
 ```
 
 **What this script does:**
 
-1. Prompts you for a logical Host alias (e.g., `media-stack`).
+1. Prompts you for a logical Host alias (e.g., `media`).
 2. Prompts you for the static IP assigned by OPNsense.
-3. Safely appends a configuration block to your `~/.ssh/config`.
-4. Automatically accepts new SSH host keys (`StrictHostKeyChecking accept-new`) to prevent errors when recreating containers.
+3. Idempotently parses your `~/.ssh/config`. If the alias exists but differs, it securely updates and replaces the block. If it is already fully correct, it skips gracefully.
+4. Safely ensures a standardized configuration block is present.
+5. Automatically accepts new SSH host keys (`StrictHostKeyChecking accept-new`) to prevent errors when recreating containers.
 
 After running, you can connect simply by typing: `ssh <alias>` (e.g., `ssh media-stack`).
 

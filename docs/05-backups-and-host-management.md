@@ -59,13 +59,3 @@ If a container fails to start after applying this (e.g., due to different driver
 1. Open the config file: `nano /etc/pve/lxc/<VMID>.conf`
 2. Delete the appended `lxc.cgroup2` and `lxc.mount` lines at the bottom of the file.
 3. Restart the LXC.
-
----
-
-## Conclusion
-
-You have reached the end of the Homelab GitOps Wiki! 
-
-Your architecture is now fully documented: from securely encrypting secrets on your local machine (**Ground Zero**), to provisioning dynamic LXC containers (**Bootstrapping**), managing state automatically (**GitOps**), and safeguarding your persistent data (**Backups**). 
-
-Always remember to follow the guidelines in `PHILOSOPHY.md` when expanding your homelab. Happy hosting!

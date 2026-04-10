@@ -57,13 +57,3 @@ Click on the **Label filters** button or type a query directly:
     `{host="paperless"} |= "error"`
 
 Press **Run query** (or Shift+Enter) to stream the logs in real-time.
-
----
-
-## Conclusion
-
-You have now reached the end of the Homelab GitOps Wiki!
-
-You are fully equipped to manage, deploy, troubleshoot, and monitor your entire infrastructure using nothing but Git commits and the interactive manager scripts. Remember to keep your Age passphrase safe and always follow the principles outlined in `PHILOSOPHY.md`.
-
-Happy self-hosting!

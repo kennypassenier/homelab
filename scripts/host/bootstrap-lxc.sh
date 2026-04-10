@@ -23,6 +23,32 @@ else
     }
 fi
 
+# --- Rollback & Error Handling ---
+cleanup_on_error() {
+    local exit_code=$?
+    # Only trigger rollback on actual errors
+    if [[ $exit_code -ne 0 ]]; then
+        echo ""
+        ui_error "Bootstrap process failed unexpectedly! (Exit code: $exit_code)"
+        ui_warning "Initiating safety rollback procedures..."
+
+        # Stop the container safely to prevent undefined states
+        if [[ -n "${VMID:-}" ]]; then
+            ui_info "Stopping LXC container ${VMID}..."
+            pct stop "${VMID}" 2>/dev/null || true
+        fi
+
+        echo ""
+        ui_step "Troubleshooting tips:"
+        ui_info "1. Verify your GITHUB_PAT and AGE_PASSPHRASE are correct."
+        ui_info "2. Ensure the LXC container has active internet access (Gateway/DNS)."
+        ui_info "3. If the container or storage is corrupted, reset it and try again:"
+        ui_info "   ./scripts/host/reset-stack.sh ${VMID:-<VMID>} ${STACK_NAME:-<STACK_NAME>}"
+        echo ""
+    fi
+}
+trap cleanup_on_error EXIT
+
 # Safely load environment variables if present (e.g. GITHUB_USERNAME, GITHUB_PAT, AGE_PASSPHRASE)
 if [[ -f ".env" ]]; then
     chmod 600 .env

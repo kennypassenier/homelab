@@ -4,7 +4,37 @@
 
 set -euo pipefail
 
+# Source the shared UI library
+source "scripts/shared/lib-ui.sh"
+
 CONFIG_FILE="${HOME}/.ssh/config"
+TMP_CONFIG="${CONFIG_FILE}.tmp"
+SUCCESS=0
+
+# --- Rollback & Error Handling ---
+cleanup_on_error() {
+    local exit_code=$?
+    # Only trigger rollback on actual errors before completion
+    if [[ $exit_code -ne 0 && $SUCCESS -eq 0 ]]; then
+        echo ""
+        ui_error "SSH configuration failed unexpectedly! (Exit code: $exit_code)"
+
+        # Rollback: Clean up temporary config files if awk failed midway
+        if [[ -f "$TMP_CONFIG" ]]; then
+            ui_warning "Initiating safety rollback..."
+            ui_info "Removing temporary SSH configuration file to prevent corruption."
+            rm -f "$TMP_CONFIG"
+            ui_success "Rollback complete. ~/.ssh/config is untouched."
+        fi
+
+        echo ""
+        ui_step "Troubleshooting tips:"
+        ui_info "1. Ensure you have write permissions for ~/.ssh/config."
+        ui_info "2. Verify the integrity of your current ~/.ssh/config file."
+        echo ""
+    fi
+}
+trap cleanup_on_error EXIT
 
 # Ensure SSH config directory and file exist
 mkdir -p "${HOME}/.ssh"
@@ -42,7 +72,7 @@ if [[ -d "apps" ]]; then
 fi
 
 # 3. Interactive Menu
-echo "=== Local Workstation SSH Configurator ==="
+ui_info "=== Local Workstation SSH Configurator ==="
 echo "Select an SSH alias to configure:"
 echo ""
 
@@ -73,7 +103,7 @@ echo ""
 read -r -p "Select an option (1-$max_choice): " choice
 
 if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "$max_choice" ]; then
-    echo "Invalid selection."
+    ui_error "Invalid selection."
     exit 1
 fi
 
@@ -82,7 +112,8 @@ SSH_ALIAS=""
 SSH_IP=""
 
 if [[ "$action" == "EXIT" ]]; then
-    echo "Exited."
+    ui_info "Exited."
+    SUCCESS=1
     exit 0
 elif [[ "$action" == "MANUAL" ]]; then
     read -r -p "Enter the new logical Host alias (e.g., gateway): " SSH_ALIAS
@@ -97,7 +128,7 @@ elif [[ "$action" == CREATE:* ]]; then
 fi
 
 if [[ -z "$SSH_ALIAS" || -z "$SSH_IP" ]]; then
-    echo "Error: Alias and IP cannot be empty."
+    ui_error "Alias and IP cannot be empty."
     exit 1
 fi
 
@@ -126,23 +157,25 @@ if [[ "$CURRENT_IP" == "$SSH_IP" ]] && \
    [[ "$CURRENT_USER" == "root" ]] && \
    [[ "${CURRENT_PORT:-22}" == "22" ]] && \
    [[ "$CURRENT_SHKC" == "accept-new" ]]; then
-    echo "Alias '${SSH_ALIAS}' is already correctly configured for ${SSH_IP}. Skipping."
+    ui_success "Alias '${SSH_ALIAS}' is already correctly configured for ${SSH_IP}. Skipping."
+    SUCCESS=1
     exit 0
 fi
 
 if grep -iq "^Host[[:space:]]\+${SSH_ALIAS}$" "$CONFIG_FILE"; then
-    echo "Updating existing alias '${SSH_ALIAS}'..."
+    ui_step "Updating existing alias '${SSH_ALIAS}'..."
     awk -v target="$SSH_ALIAS" '
     tolower($1) == "host" || tolower($1) == "match" {
         if (tolower($1) == "host" && $2 == target) skip = 1
         else skip = 0
     }
     !skip { print }
-    ' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
-    cat "${CONFIG_FILE}.tmp" > "$CONFIG_FILE"
-    rm -f "${CONFIG_FILE}.tmp"
+    ' "$CONFIG_FILE" > "$TMP_CONFIG"
+
+    cat "$TMP_CONFIG" > "$CONFIG_FILE"
+    rm -f "$TMP_CONFIG"
 else
-    echo "Adding new alias '${SSH_ALIAS}'..."
+    ui_step "Adding new alias '${SSH_ALIAS}'..."
 fi
 
 cat <<EOF >> "${CONFIG_FILE}"
@@ -154,4 +187,8 @@ Host ${SSH_ALIAS}
     StrictHostKeyChecking accept-new
 EOF
 
-echo "Done! You can now securely connect via: ssh ${SSH_ALIAS}"
+# Mark execution as completely successful to prevent rollback
+SUCCESS=1
+
+echo ""
+ui_success "Done! You can now securely connect via: ssh ${SSH_ALIAS}"

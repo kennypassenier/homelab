@@ -4,23 +4,24 @@
 
 set -euo pipefail
 
-# Source the shared library
-source "$(dirname "$0")/lib-stack.sh"
+# Source the shared libraries
+source "$(dirname "$0")/lib/lib-stack.sh"
+source "scripts/shared/lib-ui.sh"
 
 # Ensure we are running from the root of the repo
 require_repo_root
 
-echo "=== Add a New App to an Existing Stack ==="
+ui_info "=== Add a New App to an Existing Stack ==="
 
 # Select an existing stack using the library function
 STACK_NAME=$(prompt_stack_selection)
 
 if [[ -z "$STACK_NAME" ]]; then
-    echo "Error: No stack selected or available."
+    ui_error "No stack selected or available."
     exit 1
 fi
 
-echo "Selected stack: ${STACK_NAME}"
+ui_step "Selected stack: ${STACK_NAME}"
 echo ""
 
 # Prompt for the new app name
@@ -29,12 +30,12 @@ while true; do
     if [[ -n "$APP_NAME" ]]; then
         # Check if the directory already exists
         if [[ -d "apps/${STACK_NAME}/${APP_NAME}" ]]; then
-            echo "Error: App '${APP_NAME}' already exists in stack '${STACK_NAME}'. Please choose a different name."
+            ui_error "App '${APP_NAME}' already exists in stack '${STACK_NAME}'. Please choose a different name."
         else
             break
         fi
     else
-        echo "Error: App name cannot be empty."
+        ui_error "App name cannot be empty."
     fi
 done
 
@@ -43,10 +44,12 @@ read -r -p "Will this app use Docker? (y/n) [y]: " USE_DOCKER
 USE_DOCKER=${USE_DOCKER:-y}
 
 # Generate the app using the shared function
-echo "Creating infrastructure template for app '${APP_NAME}' in stack '${STACK_NAME}'..."
+ui_step "Creating infrastructure template for app '${APP_NAME}' in stack '${STACK_NAME}'..."
+
+# Call the generator function
 generate_app "${STACK_NAME}" "${APP_NAME}" "${USE_DOCKER}"
 
 echo ""
-echo "App generation completed."
-echo "You can now edit the docker-compose.yml and .env files directly."
-echo "When you run 'git add', Git and SOPS will invisibly encrypt the .env files for you."
+ui_success "App generation completed."
+ui_info "You can now edit the docker-compose.yml and .env files directly."
+ui_info "When you run 'git add', Git and SOPS will invisibly encrypt the .env files for you."

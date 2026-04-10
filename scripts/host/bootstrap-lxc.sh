@@ -4,6 +4,25 @@
 
 set -euo pipefail
 
+# Source the shared UI library
+if [[ -f "scripts/shared/lib-ui.sh" ]]; then
+    source "scripts/shared/lib-ui.sh"
+else
+    # Fallback functions if the library is not found
+    ui_info() { echo "INFO: $1"; }
+    ui_success() { echo "SUCCESS: $1"; }
+    ui_warning() { echo "WARNING: $1"; }
+    ui_error() { echo "ERROR: $1"; }
+    ui_step() { echo "-> $1"; }
+    ui_run_pacman() {
+        local msg="$1"
+        shift
+        echo "Starting: $msg"
+        "$@" > /dev/null 2>&1
+        echo "Done: $msg"
+    }
+fi
+
 # Safely load environment variables if present (e.g. GITHUB_USERNAME, GITHUB_PAT, AGE_PASSPHRASE)
 if [[ -f ".env" ]]; then
     chmod 600 .env
@@ -51,7 +70,7 @@ while getopts "v:s:u:t:a:h" opt; do
     esac
 done
 
-echo "=== LXC Bootstrap Wizard ==="
+ui_info "=== LXC Bootstrap Wizard ==="
 echo ""
 
 # 1. Prompt for VMID
@@ -62,11 +81,11 @@ fi
 # 2. Prompt for Stack dynamically
 if [[ -z "$STACK_NAME" ]]; then
     if [[ ! -d "apps" ]]; then
-        echo "Error: Run this script from the root of the repository."
+        ui_error "Run this script from the root of the repository."
         exit 1
     fi
 
-    echo "Available stacks:"
+    ui_step "Available stacks:"
     stacks=()
     for dir in apps/*/; do
         if [[ -d "$dir" ]]; then
@@ -75,7 +94,7 @@ if [[ -z "$STACK_NAME" ]]; then
     done
 
     if [[ ${#stacks[@]} -eq 0 ]]; then
-        echo "Error: No stacks found in apps/ directory."
+        ui_error "No stacks found in apps/ directory."
         exit 1
     fi
 
@@ -89,7 +108,7 @@ if [[ -z "$STACK_NAME" ]]; then
             STACK_NAME="${stacks[$((choice-1))]}"
             break
         else
-            echo "Invalid selection. Please enter a number between 1 and ${#stacks[@]}."
+            ui_warning "Invalid selection. Please enter a number between 1 and ${#stacks[@]}."
         fi
     done
 fi
@@ -117,22 +136,23 @@ HOST_STORAGE_PATH="/opt/appdata/${STACK_NAME}"
 LXC_MOUNT_POINT="/appdata"
 
 echo ""
-echo "Initiating bootstrap sequence for container ${VMID} targeting stack '${STACK_NAME}'..."
+ui_step "Initiating bootstrap sequence for container ${VMID} targeting stack '${STACK_NAME}'..."
 
 # Step 1: Ensure host directory exists and adjust permissions for unprivileged LXC
-mkdir -p "${HOST_STORAGE_PATH}"
-chown -R 100000:100000 "${HOST_STORAGE_PATH}"
+ui_run_pacman "Configuring isolated host SSD storage..." \
+    bash -c "mkdir -p '${HOST_STORAGE_PATH}' && chown -R 100000:100000 '${HOST_STORAGE_PATH}'"
 
 # Step 2: Automatically bind mount the host directory to the LXC container
-pct set "${VMID}" -mp0 "${HOST_STORAGE_PATH},mp=${LXC_MOUNT_POINT}"
+ui_run_pacman "Bind mounting storage to LXC container..." \
+    pct set "${VMID}" -mp0 "${HOST_STORAGE_PATH},mp=${LXC_MOUNT_POINT}"
 
 # Step 3: Start the container
-pct start "${VMID}" || true
-sleep 5 # Wait for network initialization
+ui_run_pacman "Starting LXC container ${VMID}..." \
+    bash -c "pct start '${VMID}' || true; sleep 5"
 
 # Step 4: Install dependencies including Docker, Age, SOPS, and unattended-upgrades
-echo "Installing utilities, security updates, and encryption tooling..."
-pct exec "${VMID}" -- bash -c "
+ui_run_pacman "Installing dependencies (Docker, Age, SOPS, security updates)..." \
+    pct exec "${VMID}" -- bash -c "
 apt-get update && apt-get install -y curl git wget openssl jq unattended-upgrades
 dpkg-reconfigure -f noninteractive unattended-upgrades
 curl -fsSL https://get.docker.com | sh
@@ -143,8 +163,8 @@ mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
 "
 
 # Step 5: Inject synchronization script and setup transparent Git encryption
-echo "Injecting synchronization script..."
-pct exec "${VMID}" -- bash -c "cat > /root/sparse-setup.sh" << 'INNEREOF'
+ui_run_pacman "Injecting GitOps synchronization script..." \
+    pct exec "${VMID}" -- bash -c "cat > /root/sparse-setup.sh" << 'INNEREOF'
 #!/usr/bin/env bash
 set -euo pipefail
 REPO_URL="https://github.com/kennypassenier/homelab.git"
@@ -173,28 +193,30 @@ git sparse-checkout set "$STACK_DIR" "scripts" "secrets" ".sops.yaml"
 git checkout main
 INNEREOF
 
-pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${STACK_NAME} ${GITHUB_PAT} ${AGE_PASSPHRASE}"
+ui_run_pacman "Executing sparse checkout and decrypting secrets..." \
+    pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${STACK_NAME} ${GITHUB_PAT} ${AGE_PASSPHRASE}"
 
 # Step 6: Push GitHub Public Key for SSH access
-echo "Fetching GitHub SSH key for authentication..."
-pct exec "${VMID}" -- bash -c "
+ui_run_pacman "Fetching GitHub SSH key for authentication..." \
+    pct exec "${VMID}" -- bash -c "
 mkdir -p /root/.ssh && chmod 700 /root/.ssh
 curl -sL https://github.com/${GITHUB_USERNAME}.keys >> /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 "
 
 # Step 7: Configure automated GitOps synchronization (Cronjob)
-echo "Setting up 5-minute GitOps reconciliation loop..."
-pct exec "${VMID}" -- bash -c "echo '*/5 * * * * root ${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME} > /var/log/node-sync.log 2>&1' > /etc/cron.d/gitops-sync"
+ui_run_pacman "Configuring 5-minute GitOps reconciliation loop..." \
+    pct exec "${VMID}" -- bash -c "echo '*/5 * * * * root ${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME} > /var/log/node-sync.log 2>&1' > /etc/cron.d/gitops-sync"
 
 # Step 8: Trigger the initial docker-compose up
-pct exec "${VMID}" -- bash -c "${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME}"
+ui_run_pacman "Triggering initial application deployment..." \
+    pct exec "${VMID}" -- bash -c "${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME}"
 
 # Step 9: Cleanup temporary bootstrap artifacts
-echo "Cleaning up temporary bootstrap artifacts..."
-pct exec "${VMID}" -- bash -c "rm -f /root/sparse-setup.sh && rm -rf /tmp/age"
+ui_run_pacman "Cleaning up temporary bootstrap artifacts..." \
+    pct exec "${VMID}" -- bash -c "rm -f /root/sparse-setup.sh && rm -rf /tmp/age"
 
 echo ""
-echo "=== Bootstrap Completed ==="
-echo "Fetch the MAC address below to set a static IP in OPNsense:"
+ui_success "=== Bootstrap Completed ==="
+ui_info "Fetch the MAC address below to set a static IP in OPNsense:"
 pct config "${VMID}" | grep net0

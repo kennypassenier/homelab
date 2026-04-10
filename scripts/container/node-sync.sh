@@ -34,7 +34,10 @@ if [[ -d "${STACK_DIR}" ]]; then
     cd "${STACK_DIR}" || exit 1
 
     # Run pre-sync scripts if they exist
-    find . -name "pre-sync.sh" -type f -executable -exec {} \;
+    find . -name "pre-sync.sh" -type f | while read -r pre_sync_file; do
+        echo "Running pre-sync script: $pre_sync_file"
+        bash "$pre_sync_file"
+    done
 
     # Apply all docker-compose configurations
     find . -maxdepth 2 -type f \( -name "docker-compose.yml" -o -name "compose.yaml" \) | while read -r compose_file; do

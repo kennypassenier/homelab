@@ -1,0 +1,14 @@
+# Security: NEVER commit the host .env file!
+# Unlike the app .env files (which are encrypted by SOPS), this file contains your
+# plaintext GitHub PAT and Age Passphrase needed to bootstrap the system.
+scripts/host/.env
+
+# Logs
+*.log
+
+# OS / Editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo

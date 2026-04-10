@@ -6,10 +6,12 @@ set -euo pipefail
 
 # Safely load environment variables if present (e.g. GITHUB_USERNAME, GITHUB_PAT, AGE_PASSPHRASE)
 if [[ -f ".env" ]]; then
+    chmod 600 .env
     set -a
     source .env
     set +a
 elif [[ -f "scripts/host/.env" ]]; then
+    chmod 600 "scripts/host/.env"
     set -a
     source "scripts/host/.env"
     set +a

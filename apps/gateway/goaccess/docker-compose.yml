@@ -1,0 +1,28 @@
+networks:
+  gateway_network:
+    name: gateway_network
+    external: true
+
+services:
+  goaccess:
+    # Using a specialized image that automatically understands Nginx Proxy Manager's log format
+    image: xavierh/goaccess-for-nginxproxymanager:latest
+    container_name: goaccess
+    environment:
+      - TZ=Europe/Brussels
+      - SKIP_ARCHIVED_LOGS=False
+      - DEBUG=False
+      - BASIC_AUTH=False
+    volumes:
+      # Mount the NPM logs directory (read-only) so GoAccess can parse them in real-time
+      - /appdata/gateway/nginx-proxy-manager/data/logs:/opt/log:ro
+      # Optional persistence for custom configuration or persistent history
+      - /appdata/gateway/goaccess/data:/opt/custom
+    ports:
+      - "7880:7880" # Web UI for GoAccess Dashboard
+    networks:
+      - gateway_network
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"

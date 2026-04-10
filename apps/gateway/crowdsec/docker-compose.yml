@@ -1,0 +1,23 @@
+networks:
+  gateway_network:
+    name: gateway_network
+    external: true
+
+services:
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    environment:
+      - TZ=Europe/Brussels
+      - COLLECTIONS=crowdsecurity/nginx-proxy-manager
+    volumes:
+      - /appdata/gateway/crowdsec/config:/etc/crowdsec
+      - /appdata/gateway/crowdsec/data:/var/lib/crowdsec/data
+      # Mount Nginx Proxy Manager logs for parsing
+      - /appdata/gateway/nginx-proxy-manager/data/logs:/var/log/npm:ro
+    networks:
+      - gateway_network
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"

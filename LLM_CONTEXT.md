@@ -25,6 +25,7 @@ Dit bestand bevat de essentiële context en regels voor LLM's (zoals Claude, Cha
   - `monitoring`: Bevat Uptime Kuma, Grafana, Loki en Watchtower. Grafana is geconfigureerd om Loki automatisch als datasource te provisionen.
   - `paperless`: Bevat Paperless-ngx, DB, Redis, Broker, Paperless-AI (Tagger UI + RAG backend), Promtail en Watchtower.
   - `media`: Bevat Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, Promtail en Watchtower. Configuratie zit netjes in afzonderlijke apps gemount via `/appdata/media/...`.
+  - `gateway`: Bevat Nginx Proxy Manager, CrowdSec en GoAccess. Dient als de centrale reverse proxy en levert actieve security en web log analyse.
 - **Recente wijzigingen:**
   - Promtail configuraties (voor logging naar Loki) gebruiken nu `-config.expand-env=true` samen met `.env` bestanden voor het dynamisch injecteren van variabelen (zoals `LOKI_IP`), zodat hardcoded IP's in `config.yml` verleden tijd zijn.
   - Client scripts toegevoegd voor lifecycle management: `create-new-app.sh` en `remove-app.sh` met een gedeelde bibliotheek `lib-stack.sh` voor DRY code en een interactieve genummerde CLI interface.

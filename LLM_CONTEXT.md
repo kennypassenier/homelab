@@ -5,7 +5,7 @@ Dit bestand bevat de essentiële context en regels voor LLM's (zoals Claude, Cha
 ## 1. Project Architectuur & Technologieën
 
 - **Client/Werkstation:** Pop!\_OS. Alle lokale scripts en Git acties worden vanaf deze desktop uitgevoerd. Ga er standaard van uit dat de terminal hierop draait.
-- **Host:** Proxmox VE (draait onbevoorrechte LXC containers).
+- **Host:** Proxmox VE (draait onbevoorrechte LXC containers). Aanbevolen resources per standaard LXC (zoals de gateway): 2 Cores, 1GB RAM, 512MB Swap, 8GB Disk.
 - **Containers:** Docker & Docker Compose draaien _binnenin_ de LXC containers.
 - **GitOps Flow:** Elke applicatie/stack heeft een configuratie in `apps/<stack_name>/<app_name>`. Binnen de LXC draait elke 5 minuten het `node-sync.sh` script (via cron) om wijzigingen via Git Pull & Git Sparse Checkouts binnen te halen. Eventuele `pre-sync.sh` scripts in de stack map worden eerst uitgevoerd (bijv. voor het aanmaken van externe netwerken). Daarna voert het script `docker compose pull -q` en `docker compose up -d --remove-orphans` uit. Het script bevat nu ook **Garbage Collection (GC)**: als een app-map uit Git verdwijnt, stopt het de container en wist het automatisch de app-data op de host.
 - **Secret Management:** Transparante encryptie met **SOPS en Age**. `.env` bestanden worden lokaal automatisch geëncrypt via Git smudge/clean filters en gedeëncrypt in de containers.
@@ -25,7 +25,7 @@ Dit bestand bevat de essentiële context en regels voor LLM's (zoals Claude, Cha
   - `monitoring`: Bevat Uptime Kuma, Grafana, Loki en Watchtower. Grafana is geconfigureerd om Loki automatisch als datasource te provisionen.
   - `paperless`: Bevat Paperless-ngx, DB, Redis, Broker, Paperless-AI (Tagger UI + RAG backend), Promtail en Watchtower.
   - `media`: Bevat Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, Promtail en Watchtower. Configuratie zit netjes in afzonderlijke apps gemount via `/appdata/media/...`.
-  - `gateway`: Bevat Nginx Proxy Manager, CrowdSec en GoAccess. Dient als de centrale reverse proxy en levert actieve security en web log analyse.
+  - `gateway`: Bevat Nginx Proxy Manager (geconfigureerd met ingebouwde CrowdSec L7 Bouncer), CrowdSec (voorzien van LAN/Tailscale whitelists) en GoAccess. Dient als de centrale reverse proxy en levert actieve security (inclusief blokkades) en web log analyse.
 - **Recente wijzigingen:**
   - Promtail configuraties (voor logging naar Loki) gebruiken nu `-config.expand-env=true` samen met `.env` bestanden voor het dynamisch injecteren van variabelen (zoals `LOKI_IP`), zodat hardcoded IP's in `config.yml` verleden tijd zijn.
   - Client scripts toegevoegd voor lifecycle management: `create-new-app.sh` en `remove-app.sh` met een gedeelde bibliotheek `lib-stack.sh` voor DRY code en een interactieve genummerde CLI interface.

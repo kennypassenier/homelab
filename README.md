@@ -45,6 +45,12 @@ git push -u origin main
 
 When you want to deploy a new stack of applications, you create a new LXC container in Proxmox and run the bootstrap script.
 
+**Recommended LXC Specs (e.g., for the Gateway stack):**
+- **CPU:** 2 Cores
+- **RAM:** 1024 MB (1 GB)
+- **Swap:** 512 MB
+- **Disk:** 8 GB (App data is stored externally on the host bind-mount)
+
 ### 1. Generate the Stack Template Locally
 
 From the root of your local repository, run the stack generator script. This interactive script lets you create multiple apps within a single stack, optionally configures a centralized Watchtower for automatic updates, optionally includes a Promtail container for centralized logging, and prepares `.env` files.
@@ -83,7 +89,11 @@ _Note: You can pass your credentials via flags (`-t` and `-a`) for automation, b
 **Example:**
 
 ```bash
-./scripts/host/bootstrap-lxc.sh 101 media-stack PLACEHOLDER_GITHUB_USERNAME
+# For a media stack
+./scripts/host/bootstrap-lxc.sh 101 media PLACEHOLDER_GITHUB_USERNAME
+
+# For the gateway stack (Nginx Proxy Manager, CrowdSec, GoAccess)
+./scripts/host/bootstrap-lxc.sh 102 gateway PLACEHOLDER_GITHUB_USERNAME
 ```
 
 **What this script does:**

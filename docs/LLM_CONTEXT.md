@@ -7,7 +7,7 @@ This file contains the essential context and rules for LLMs (such as Claude, Cha
 - **Client/Workstation:** Linux desktop. All local scripts and Git actions are executed from this desktop. Assume by default that the terminal is running here.
 - **Host:** Proxmox VE (runs unprivileged LXC containers). Recommended resources per standard LXC (like the gateway): 2 Cores, 1GB RAM, 512MB Swap, 8GB Disk.
 - **Containers:** Docker & Docker Compose run _inside_ the LXC containers.
-- **GitOps Flow:** Each application/stack has a configuration in `apps/<stack_name>/<app_name>`. Inside the LXC, the `node-sync.sh` script runs every 5 minutes (via cron) to fetch changes via Git Pull & Git Sparse Checkouts. Any `pre-sync.sh` scripts in the stack folder are executed first (e.g., for creating external networks). Then the script executes `docker compose pull -q` and `docker compose up -d --remove-orphans`. The script now also includes **Garbage Collection (GC)**: if an app folder disappears from Git, it stops the container and automatically deletes the app data on the host.
+- **GitOps Flow:** Each application/stack has a configuration in `stacks/<stack_name>/<app_name>`. Inside the LXC, the `node-sync.sh` script runs every 5 minutes (via cron) to fetch changes via Git Pull & Git Sparse Checkouts. Any `pre-sync.sh` scripts in the stack folder are executed first (e.g., for creating external networks). Then the script executes `docker compose pull -q` and `docker compose up -d --remove-orphans`. The script now also includes **Garbage Collection (GC)**: if an app folder disappears from Git, it stops the container and automatically deletes the app data on the host.
 - **Secret Management:** Transparent encryption with **SOPS and Age**. `.env` files are automatically encrypted locally via Git smudge/clean filters and decrypted in the containers.
 - **Storage:** Fast configuration data (SSD) is located on the Proxmox host under `/opt/appdata/<STACK_NAME>` and is shared via an unprivileged bind-mount to the LXC at `/appdata`.
 - **Networking:** DHCP reservations (static IPs) are managed centrally in OPNsense based on the MAC address of the LXC container. Local DNS/SSH is handled via `~/.ssh/config` aliases.
@@ -25,7 +25,7 @@ This file contains the essential context and rules for LLMs (such as Claude, Cha
 - **Deployed Stacks:**
   - `monitoring`: Contains Uptime Kuma, Grafana, Loki, and Watchtower. Grafana is configured to automatically provision Loki as a datasource.
   - `paperless`: Contains Paperless-ngx, DB, Redis, Broker, Paperless-AI (Tagger UI + RAG backend), Promtail, and Watchtower.
-  - `media`: Contains Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, Promtail, and Watchtower. Configuration is neatly separated into individual apps mounted via `/appdata/media/...`.
+  - `media`: Contains Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, Promtail, and Watchtower. Configuration is neatly separated into individual stacks mounted via `/appdata/media/...`.
   - `gateway`: Contains Nginx Proxy Manager (configured with built-in CrowdSec L7 Bouncer), CrowdSec (equipped with LAN/Tailscale whitelists), and GoAccess. Serves as the central reverse proxy and provides active security (including blocks) and web log analysis.
 - **Recent Changes:**
   - Promtail configurations (for logging to Loki) now use `-config.expand-env=true` along with `.env` files for dynamically injecting variables (like `LOKI_IP`), making hardcoded IPs in `config.yml` a thing of the past.

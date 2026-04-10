@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Ensure we are running from the root of the repo
-if [[ ! -d "apps" || ! -d "scripts" ]]; then
+if [[ ! -d "stacks" || ! -d "scripts" ]]; then
     echo "Error: Run this script from the root of the repository."
     exit 1
 fi

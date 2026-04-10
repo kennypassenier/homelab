@@ -61,10 +61,10 @@ END {
     if (host != "") print host ":" ip
 }' "$CONFIG_FILE")
 
-# 2. Find available stacks in apps/ directory
+# 2. Find available stacks in stacks/ directory
 AVAILABLE_STACKS=()
-if [[ -d "apps" ]]; then
-    for dir in apps/*/; do
+if [[ -d "stacks" ]]; then
+    for dir in stacks/*/; do
         if [[ -d "$dir" ]]; then
             AVAILABLE_STACKS+=("$(basename "$dir")")
         fi

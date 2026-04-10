@@ -30,7 +30,7 @@ cleanup_on_error() {
 
         echo ""
         ui_step "Troubleshooting tips:"
-        ui_info "1. Check your write permissions in the 'apps/' directory."
+        ui_info "1. Check your write permissions in the 'stacks/' directory."
         ui_info "2. Ensure you are running this script from the root of the repository."
         ui_info "3. Verify your disk is not full."
         echo ""
@@ -78,11 +78,11 @@ if [[ -z "$STACK_NAME" ]]; then
     exit 1
 fi
 
-STACK_DIR="apps/${STACK_NAME}"
+STACK_DIR="stacks/${STACK_NAME}"
 
 # Prevent overwriting an existing stack
 if [[ -d "$STACK_DIR" ]]; then
-    ui_error "Stack '${STACK_NAME}' already exists. Use 'create-new-app.sh' to add apps to it."
+    ui_error "Stack '${STACK_NAME}' already exists. Use 'create-new-app.sh' to add stacks to it."
     exit 1
 fi
 

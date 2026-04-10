@@ -30,7 +30,7 @@ Scripts must be robust and have no unexpected or destructive consequences upon (
 - **Traps & Rollbacks:** For scripts that perform multiple critical steps or create temporary files (like the bootstrap scripts), a `trap` MUST be used. This trap ensures temporary files or partially applied changes are neatly cleaned up or rolled back if the script fails prematurely or is canceled (Ctrl+C).
 - **Graceful Exits:** Scripts must provide clear error messages and exit with a non-zero exit code if a critical requirement is missing or a command fails (use `set -e` where appropriate, or catch specific errors cleanly).
 - **Secret Management:** NEVER hardcode passwords, API keys, or sensitive paths in scripts. Use the existing SOPS/Age infrastructure or local, uncommitted `.env` files (which are protected with `.gitignore` and have the correct `chmod 600` permissions).
-- **Destructive Actions & Double Confirmation:** Any script that performs a destructive action (like deleting files, removing stacks/apps, or destroying data) MUST clearly state what is about to be deleted (using red text via `ui_warning` or `C_RED`) and require a double confirmation (e.g., "Are you sure?" followed by "Are you ABSOLUTELY sure?") to minimize typos and accidental data loss.
+- **Destructive Actions & Double Confirmation:** Any script that performs a destructive action (like deleting files, removing stacks/stacks, or destroying data) MUST clearly state what is about to be deleted (using red text via `ui_warning` or `C_RED`) and require a double confirmation (e.g., "Are you sure?" followed by "Are you ABSOLUTELY sure?") to minimize typos and accidental data loss.
 
 ## 4. Naming Conventions & Structure
 

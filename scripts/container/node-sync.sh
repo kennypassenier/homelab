@@ -23,7 +23,7 @@ fi
 
 STACK_NAME="$1"
 GITOPS_DIR="/opt/gitops"
-STACK_DIR="${GITOPS_DIR}/apps/${STACK_NAME}"
+STACK_DIR="${GITOPS_DIR}/stacks/${STACK_NAME}"
 
 cd "${GITOPS_DIR}" || exit 1
 git fetch origin main
@@ -49,7 +49,7 @@ if [[ -d "${STACK_DIR}" ]]; then
         cd - > /dev/null
     done
 
-    # Garbage Collection: Remove orphaned apps and their data
+    # Garbage Collection: Remove orphaned stacks and their data
     if [[ -d "/appdata/${STACK_NAME}" ]]; then
         for app_data_dir in /appdata/${STACK_NAME}/*; do
             if [[ -d "$app_data_dir" ]]; then

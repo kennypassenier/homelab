@@ -4,24 +4,24 @@
 
 # Ensure we are running from the root of the repo
 require_repo_root() {
-    if [[ ! -d "apps" || ! -d "scripts" ]]; then
+    if [[ ! -d "stacks" || ! -d "scripts" ]]; then
         echo "Error: Run this script from the root of the repository."
         exit 1
     fi
 }
 
-# Prompts the user to select an existing stack from the apps directory
+# Prompts the user to select an existing stack from the stacks directory
 # Returns the selected stack name
 prompt_stack_selection() {
     local stacks=()
-    for dir in apps/*/; do
+    for dir in stacks/*/; do
         if [[ -d "$dir" ]]; then
             stacks+=("$(basename "$dir")")
         fi
     done
 
     if [[ ${#stacks[@]} -eq 0 ]]; then
-        echo "No existing stacks found in apps/." >&2
+        echo "No existing stacks found in stacks/." >&2
         return 1
     fi
 
@@ -53,31 +53,31 @@ prompt_app_selection() {
         return 1
     fi
 
-    local apps=()
-    for dir in "apps/${stack_name}"/*/; do
+    local stacks=()
+    for dir in "stacks/${stack_name}"/*/; do
         if [[ -d "$dir" ]]; then
-            apps+=("$(basename "$dir")")
+            stacks+=("$(basename "$dir")")
         fi
     done
 
-    if [[ ${#apps[@]} -eq 0 ]]; then
-        echo "No existing apps found in apps/${stack_name}/." >&2
+    if [[ ${#stacks[@]} -eq 0 ]]; then
+        echo "No existing stacks found in stacks/${stack_name}/." >&2
         return 1
     fi
 
-    echo "Available apps in ${stack_name}:" >&2
-    for i in "${!apps[@]}"; do
-        echo "$((i+1)). ${apps[$i]}" >&2
+    echo "Available stacks in ${stack_name}:" >&2
+    for i in "${!stacks[@]}"; do
+        echo "$((i+1)). ${stacks[$i]}" >&2
     done
 
     local choice
     while true; do
-        read -r -p "Select an app (1-${#apps[@]}): " choice >&2
-        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#apps[@]}" ]; then
-            echo "${apps[$((choice-1))]}"
+        read -r -p "Select an app (1-${#stacks[@]}): " choice >&2
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#stacks[@]}" ]; then
+            echo "${stacks[$((choice-1))]}"
             return 0
         else
-            echo "Invalid selection. Please enter a number between 1 and ${#apps[@]}." >&2
+            echo "Invalid selection. Please enter a number between 1 and ${#stacks[@]}." >&2
         fi
     done
 }
@@ -88,7 +88,7 @@ generate_app() {
     local app_name="$2"
     local use_docker="${3:-y}"
 
-    local app_dir="apps/${stack_name}/${app_name}"
+    local app_dir="stacks/${stack_name}/${app_name}"
     mkdir -p "${app_dir}"
 
     if [[ "$use_docker" =~ ^[Yy]$ ]]; then
@@ -128,7 +128,7 @@ EOF
 # Generates a central Watchtower configuration for a stack
 generate_watchtower() {
     local stack_name="$1"
-    local wt_dir="apps/${stack_name}/watchtower"
+    local wt_dir="stacks/${stack_name}/watchtower"
 
     mkdir -p "${wt_dir}"
     cat <<EOF > "${wt_dir}/docker-compose.yml"
@@ -152,7 +152,7 @@ EOF
 # Generates a central Promtail configuration for a stack
 generate_promtail() {
     local stack_name="$1"
-    local prom_dir="apps/${stack_name}/promtail"
+    local prom_dir="stacks/${stack_name}/promtail"
 
     mkdir -p "${prom_dir}"
     cat <<EOF > "${prom_dir}/docker-compose.yml"

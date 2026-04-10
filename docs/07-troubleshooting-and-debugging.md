@@ -24,7 +24,7 @@ The `node-sync.sh` script runs every 5 minutes. If you push a change to Git and 
         git fetch --all
         git reset --hard origin/main
         ```
-    *   *Prevention:* Never manually edit files inside `/opt/gitops/apps/...` on the server. Always use your local workstation and push via Git.
+    *   *Prevention:* Never manually edit files inside `/opt/gitops/stacks/...` on the server. Always use your local workstation and push via Git.
 *   **Invalid Compose Syntax:** If you made a typo in your `docker-compose.yml`, `docker compose up` will throw a YAML parsing error and abort the deployment.
     *   **The Fix:** Fix the typo in your local Git repository on your workstation, commit, and push. Trigger the sync again.
 

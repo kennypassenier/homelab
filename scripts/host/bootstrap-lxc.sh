@@ -106,21 +106,21 @@ fi
 
 # 2. Prompt for Stack dynamically
 if [[ -z "$STACK_NAME" ]]; then
-    if [[ ! -d "apps" ]]; then
+    if [[ ! -d "stacks" ]]; then
         ui_error "Run this script from the root of the repository."
         exit 1
     fi
 
     ui_step "Available stacks:"
     stacks=()
-    for dir in apps/*/; do
+    for dir in stacks/*/; do
         if [[ -d "$dir" ]]; then
             stacks+=("$(basename "$dir")")
         fi
     done
 
     if [[ ${#stacks[@]} -eq 0 ]]; then
-        ui_error "No stacks found in apps/ directory."
+        ui_error "No stacks found in stacks/ directory."
         exit 1
     fi
 
@@ -194,7 +194,7 @@ ui_run_pacman "Injecting GitOps synchronization script..." \
 #!/usr/bin/env bash
 set -euo pipefail
 REPO_URL="https://github.com/kennypassenier/homelab.git"
-STACK_DIR="apps/$1"
+STACK_DIR="stacks/$1"
 AUTH_REPO_URL=$(echo "$REPO_URL" | sed "s|https://|https://$2@|g")
 
 mkdir -p /opt/gitops

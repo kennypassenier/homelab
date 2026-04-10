@@ -19,10 +19,10 @@ Before creating a container, you must define its configuration in Git.
 
 The interactive wizard will ask you for a stack name (e.g., `media`, `gateway`, `monitoring`). It will optionally configure a centralized Watchtower container (for automated updates) and a Promtail container (for forwarding logs to Loki). 
 
-Once generated, review the `docker-compose.yml` and `.env` files in `apps/<stack_name>/`. Customize them as needed, then push them to GitHub. Your `.env` files will automatically be encrypted by SOPS.
+Once generated, review the `docker-compose.yml` and `.env` files in `stacks/<stack_name>/`. Customize them as needed, then push them to GitHub. Your `.env` files will automatically be encrypted by SOPS.
 
 ```bash
-git add apps/<stack_name>
+git add stacks/<stack_name>
 git commit -m "feat: add <stack_name> stack"
 git push
 ```
@@ -58,7 +58,7 @@ The script is fully interactive. It will ask for the VMID of the container you j
 ### What the Bootstrap Script Does Automatically:
 1. **Storage Binding:** It mounts the fast NVMe host storage (`/opt/appdata/<STACK_NAME>`) directly into the container at `/appdata`.
 2. **Provisioning:** It installs Docker, Docker Compose, SOPS, Age, and `unattended-upgrades` inside the unprivileged LXC.
-3. **Sparse Checkout:** It uses your GitHub PAT to securely clone *only* the specific `apps/<STACK_NAME>` directory and the `scripts/` directory, saving disk space.
+3. **Sparse Checkout:** It uses your GitHub PAT to securely clone *only* the specific `stacks/<STACK_NAME>` directory and the `scripts/` directory, saving disk space.
 4. **Decryption:** It uses your Age passphrase to unlock the `secrets/age.key.enc` file, permanently enabling the container to decrypt its `.env` files.
 5. **SSH Access:** It pulls your public SSH keys from GitHub so you can access the container seamlessly.
 6. **MAC Address:** At the very end, it outputs the unique MAC address of the container. **Copy this address!**

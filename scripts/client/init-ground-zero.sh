@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-mkdir -p secrets scripts/client scripts/host scripts/container apps
+mkdir -p secrets scripts/client scripts/host scripts/container stacks
 echo "--- Initializing Homelab Ground Zero ---"
 
 # Step 1: Install dependencies (Age via apt, SOPS via GitHub)

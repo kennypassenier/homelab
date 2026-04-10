@@ -11,7 +11,7 @@ This document outlines how the GitOps synchronization works and how to manage th
 Inside each LXC container, a synchronization script (`scripts/container/node-sync.sh`) runs automatically via a **cronjob every 5 minutes**. This script is the engine of our GitOps architecture. You can also trigger it manually at any time by SSHing into the container and running `./container.sh`.
 
 ### What happens during a sync?
-1. **Git Pull:** The container pulls the latest changes from the `main` branch. Thanks to Git Sparse Checkouts, it only downloads its specific `apps/<stack_name>` directory and the shared scripts.
+1. **Git Pull:** The container pulls the latest changes from the `main` branch. Thanks to Git Sparse Checkouts, it only downloads its specific `stacks/<stack_name>` directory and the shared scripts.
 2. **Transparent Decryption:** The Git SOPS smudge filter automatically decrypts any updated `.env` files using the Age key provisioned during bootstrap.
 3. **Pre-Sync Hooks:** If the script finds a `pre-sync.sh` executable in the stack or app directories, it runs it. This is used for idempotent setup tasks, such as creating external Docker networks or fixing file permissions before containers start.
 4. **Garbage Collection (GC):** The script compares the application directories present in Git with the data directories on the host (`/opt/appdata/<stack_name>`). If an app has been removed from Git, the GC routine automatically stops the container, removes it, and completely deletes the orphaned configuration data on the host.
@@ -26,7 +26,7 @@ Inside each LXC container, a synchronization script (`scripts/container/node-syn
 4. Configure your `docker-compose.yml` and `.env` as needed.
 5. Commit and push the changes:
    ```bash
-   git add apps/<stack_name>/<app_name>
+   git add stacks/<stack_name>/<app_name>
    git commit -m "feat(<stack_name>): add <app_name>"
    git push
    ```

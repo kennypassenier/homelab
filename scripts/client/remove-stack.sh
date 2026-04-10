@@ -50,7 +50,7 @@ if [[ -z "$STACK_NAME" ]]; then
     exit 1
 fi
 
-STACK_DIR="apps/${STACK_NAME}"
+STACK_DIR="stacks/${STACK_NAME}"
 
 echo ""
 echo -e "${C_RED}================================================================${C_NC}"

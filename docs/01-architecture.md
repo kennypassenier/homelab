@@ -58,7 +58,7 @@ To keep the architecture simple and decoupled, networking is handled outside of 
 The heart of the automation is the `node-sync.sh` script, which runs inside every LXC container via a cronjob every **5 minutes**. 
 
 Here is the step-by-step flow of the reconciliation loop:
-1.  **Git Sparse Checkout:** The container only pulls the specific `apps/<STACK_NAME>` folder it needs, ignoring the rest of the repository to save space and time.
+1.  **Git Sparse Checkout:** The container only pulls the specific `stacks/<STACK_NAME>` folder it needs, ignoring the rest of the repository to save space and time.
 2.  **Pull Latest State:** `git pull origin main` retrieves the latest declarative state.
 3.  **Decrypt Secrets:** SOPS automatically decrypts any updated `.env` files.
 4.  **Pre-Sync Hooks:** If a `pre-sync.sh` script exists in the stack folder (e.g., for setting up external Docker networks or migrating data folders), it is executed. These scripts are designed to be idempotent.

@@ -60,7 +60,7 @@ if [[ -z "$APP_NAME" ]]; then
     exit 1
 fi
 
-APP_DIR="apps/${STACK_NAME}/${APP_NAME}"
+APP_DIR="stacks/${STACK_NAME}/${APP_NAME}"
 
 echo ""
 echo -e "${C_RED}================================================================${C_NC}"

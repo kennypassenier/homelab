@@ -6,7 +6,7 @@ Welcome to the Homelab GitOps repository. This project contains the infrastructu
 
 For ease of use, all operations have been bundled into three central interactive manager scripts located in the root of this repository. Instead of remembering individual script paths, simply run the manager for your current environment:
 
-- **`./client.sh`**: Run this on your local workstation (e.g., Linux desktop) to create/remove stacks and apps, add SSH aliases, or initialize encryption.
+- **`./client.sh`**: Run this on your local workstation (e.g., Linux desktop) to create/remove stacks and stacks, add SSH aliases, or initialize encryption.
 - **`./host.sh`**: Run this on the Proxmox server to bootstrap new LXC containers, manage backups, enable GPU passthrough, or sync the host configuration.
 - **`./container.sh`**: Run this inside an LXC container (usually in `/opt/gitops`) to manually trigger the GitOps sync.
 
@@ -29,7 +29,7 @@ To keep the root of this repository clean and maintainable, all detailed documen
 
 ```text
 homelab/
-├── apps/                   # Individual application configurations (Docker Compose, .env)
+├── stacks/                   # Individual application configurations (Docker Compose, .env)
 ├── docs/                   # Detailed documentation and guidelines (Wiki)
 ├── scripts/                # Individual script modules (client, host, container, shared)
 ├── secrets/                # Encrypted Age private key

@@ -29,7 +29,7 @@ while true; do
     read -r -p "Enter the new app name: " APP_NAME
     if [[ -n "$APP_NAME" ]]; then
         # Check if the directory already exists
-        if [[ -d "apps/${STACK_NAME}/${APP_NAME}" ]]; then
+        if [[ -d "stacks/${STACK_NAME}/${APP_NAME}" ]]; then
             ui_error "App '${APP_NAME}' already exists in stack '${STACK_NAME}'. Please choose a different name."
         else
             break

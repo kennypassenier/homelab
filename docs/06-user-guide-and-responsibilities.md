@@ -26,7 +26,7 @@ You are responsible for generating templates and orchestrating high-level change
 *   **`./container.sh` (Inside LXC):** Use this if you are impatient and want to manually trigger the GitOps sync instead of waiting for the 5-minute cronjob.
 
 ### B. Defining the State (Code & Secrets)
-*   **Editing `docker-compose.yml`:** You must define the Docker images, ports, volumes, and labels for your apps.
+*   **Editing `docker-compose.yml`:** You must define the Docker images, ports, volumes, and labels for your stacks.
 *   **Managing `.env` files:** You write your secrets into `.env` files locally. You are responsible for ensuring that you have initialized Ground Zero so that Git automatically encrypts these files via SOPS/Age before pushing.
 *   **Safeguarding Keys:** You are solely responsible for securely storing your Age master passphrase in a password manager (e.g., Bitwarden). If you lose this, you lose access to all encrypted secrets.
 

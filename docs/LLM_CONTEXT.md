@@ -4,7 +4,7 @@ This file contains the essential context and rules for LLMs (such as Claude, Cha
 
 ## 1. Project Architecture & Technologies
 
-- **Client/Workstation:** Pop!\_OS. All local scripts and Git actions are executed from this desktop. Assume by default that the terminal is running here.
+- **Client/Workstation:** Linux desktop. All local scripts and Git actions are executed from this desktop. Assume by default that the terminal is running here.
 - **Host:** Proxmox VE (runs unprivileged LXC containers). Recommended resources per standard LXC (like the gateway): 2 Cores, 1GB RAM, 512MB Swap, 8GB Disk.
 - **Containers:** Docker & Docker Compose run _inside_ the LXC containers.
 - **GitOps Flow:** Each application/stack has a configuration in `apps/<stack_name>/<app_name>`. Inside the LXC, the `node-sync.sh` script runs every 5 minutes (via cron) to fetch changes via Git Pull & Git Sparse Checkouts. Any `pre-sync.sh` scripts in the stack folder are executed first (e.g., for creating external networks). Then the script executes `docker compose pull -q` and `docker compose up -d --remove-orphans`. The script now also includes **Garbage Collection (GC)**: if an app folder disappears from Git, it stops the container and automatically deletes the app data on the host.
@@ -17,7 +17,7 @@ This file contains the essential context and rules for LLMs (such as Claude, Cha
 
 1. **ALWAYS ASK PERMISSION:** NEVER execute terminal commands or file edits unprompted. Always explain your plan first, show the code/commands, and wait for an explicit "go" from the user.
 2. **Keep documentation up-to-date:** Whenever we adjust the architecture, scripts, or CLI flags, the `README.md` MUST be updated in the same iteration.
-3. **Context Check:** Remember that we are not on the Proxmox server or in a container unless we are explicitly logged in via a command (like `ssh`). Scripts in `/scripts/client/` are for Pop!\_OS, `/scripts/host/` for Proxmox, and `/scripts/container/` for inside the LXC. For user interaction, there are now central manager scripts in the root: `client.sh`, `host.sh`, and `container.sh`.
+3. **Context Check:** Remember that we are not on the Proxmox server or in a container unless we are explicitly logged in via a command (like `ssh`). Scripts in `/scripts/client/` are for Linux desktop, `/scripts/host/` for Proxmox, and `/scripts/container/` for inside the LXC. For user interaction, there are now central manager scripts in the root: `client.sh`, `host.sh`, and `container.sh`.
 4. **Philosophy & Best Practices:** ALWAYS read and follow the guidelines in `docs/PHILOSOPHY.md` for code style, DRY principles (use of shared libraries), UI/UX (colors and spinners via `lib-ui.sh`), idempotency, and error handling when creating or modifying scripts.
 
 ## 3. Current Status

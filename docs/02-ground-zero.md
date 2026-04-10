@@ -1,6 +1,6 @@
 # Phase 1: Ground Zero (Local Setup)
 
-Before you can deploy any applications to your Proxmox server, you must establish a secure foundation on your local workstation (e.g., Pop!_OS). In this GitOps architecture, all configuration is public by default, except for sensitive data (like passwords, API keys, and database credentials). 
+Before you can deploy any applications to your Proxmox server, you must establish a secure foundation on your local workstation (e.g., Linux desktop). In this GitOps architecture, all configuration is public by default, except for sensitive data (like passwords, API keys, and database credentials). 
 
 "Ground Zero" is the process of initializing transparent repository encryption using **Mozilla SOPS** and **Age**.
 

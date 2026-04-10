@@ -10,7 +10,7 @@ This phase covers how to dynamically create new applications locally, spin up is
 
 Before creating a container, you must define its configuration in Git. 
 
-1. On your local machine (e.g., Pop!_OS), open a terminal in the repository root.
+1. On your local machine (e.g., Linux desktop), open a terminal in the repository root.
 2. Run the client manager:
    ```bash
    ./client.sh

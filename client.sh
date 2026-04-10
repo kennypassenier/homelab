@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Script Name: client.sh
 # Description: Central management menu for all client-side homelab operations.
-# Executed on the local workstation (e.g., Pop!_OS).
+# Executed on the local workstation (e.g., Linux desktop).
 
 set -euo pipefail
 

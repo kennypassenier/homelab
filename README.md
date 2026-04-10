@@ -6,7 +6,7 @@ Welcome to the Homelab GitOps repository. This project contains the infrastructu
 
 For ease of use, all operations have been bundled into three central interactive manager scripts located in the root of this repository. Instead of remembering individual script paths, simply run the manager for your current environment:
 
-- **`./client.sh`**: Run this on your local workstation (e.g., Pop!_OS) to create/remove stacks and apps, add SSH aliases, or initialize encryption.
+- **`./client.sh`**: Run this on your local workstation (e.g., Linux desktop) to create/remove stacks and apps, add SSH aliases, or initialize encryption.
 - **`./host.sh`**: Run this on the Proxmox server to bootstrap new LXC containers, manage backups, enable GPU passthrough, or sync the host configuration.
 - **`./container.sh`**: Run this inside an LXC container (usually in `/opt/gitops`) to manually trigger the GitOps sync.
 
@@ -20,6 +20,8 @@ To keep the root of this repository clean and maintainable, all detailed documen
 - **[Part 4: GitOps & Lifecycle](docs/04-gitops-and-lifecycle.md)**: The 5-minute sync loop, app updates, and GC.
 - **[Part 5: Backups & Host](docs/05-backups-and-host-management.md)**: Restic backups, GPU passthrough, and host sync.
 - **[Part 6: User Guide & Responsibilities](docs/06-user-guide-and-responsibilities.md)**: Clear mapping of manual user actions vs. automated system processes.
+- **[Part 7: Troubleshooting & Debugging](docs/07-troubleshooting-and-debugging.md)**: Common sync errors, SOPS failures, and permission fixes.
+- **[Part 8: Centralized Monitoring](docs/08-centralized-monitoring.md)**: Viewing container logs via Loki, Promtail, and Grafana.
 - **[Philosophy & Guidelines](docs/PHILOSOPHY.md)**: Our core design principles, coding standards, and best practices (DRY, shared UI libraries, idempotency, safety, etc.). **Must read** before contributing.
 - **[LLM Context](docs/LLM_CONTEXT.md)**: Essential context and rules for LLMs (like Claude, ChatGPT, Gemini) assisting with this project.
 

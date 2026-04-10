@@ -36,7 +36,7 @@ Scripts must be robust and have no unexpected or destructive consequences upon (
 
 - **Action-Object Structure:** Use the `[action]-[object].sh` convention for scripts (e.g., `create-new-app.sh`, `sync-host.sh`, `remove-app.sh`).
 - **Location:** Place scripts in the correct folder based on where they should be executed:
-  - `scripts/client/` for local management from the workstation (Pop!_OS).
+  - `scripts/client/` for local management from the workstation (e.g., Linux desktop).
   - `scripts/host/` for management and configuration directly on the Proxmox server.
   - `scripts/container/` for scripts running inside the LXC (and thus in a Docker context).
   - `scripts/shared/` for code used across different environments.

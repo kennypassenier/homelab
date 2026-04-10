@@ -50,7 +50,7 @@ You cannot commit plaintext passwords, API keys, or database credentials to a Gi
 To keep the architecture simple and decoupled, networking is handled outside of Proxmox.
 
 *   **OPNsense (DHCP):** We rely on an OPNsense router for network management. When a new LXC is bootstrapped, it generates a unique MAC address. We assign a static IP to this MAC address via OPNsense Kea DHCP Reservations.
-*   **Local SSH Aliases:** To easily access the containers from the client workstation (Pop!_OS), we manage `~/.ssh/config` via the `client.sh` manager. This allows typing `ssh media` instead of remembering IP addresses.
+*   **Local SSH Aliases:** To easily access the containers from the client workstation (e.g., Linux desktop), we manage `~/.ssh/config` via the `client.sh` manager. This allows typing `ssh media` instead of remembering IP addresses.
 *   **Reverse Proxy:** The `gateway` stack runs Nginx Proxy Manager and CrowdSec, handling all incoming web traffic, SSL termination, and L7 security (blocking malicious IPs).
 
 ## 6. The GitOps Reconciliation Loop

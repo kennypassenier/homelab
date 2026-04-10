@@ -9,7 +9,7 @@ This document serves as the definitive guide to your daily workflow, clearly map
 ## 1. The Core Principle: Git is the Interface
 
 As a user, **you should almost never SSH into a container or host to change a configuration.** 
-Your primary interface for interacting with the homelab is your local Git repository on your workstation (e.g., Pop!_OS). 
+Your primary interface for interacting with the homelab is your local Git repository on your workstation (e.g., Linux desktop). 
 
 If you want to change a port, update a secret, or add a new service, you make the change in the local repository, commit it, and push it to the remote branch. The system will automatically reconcile the server's state to match Git.
 

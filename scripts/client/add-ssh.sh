@@ -12,13 +12,11 @@ touch "${CONFIG_FILE}"
 chmod 600 "${CONFIG_FILE}"
 
 # 1. Parse existing hosts and IPs from ~/.ssh/config
-EXISTING_HOSTS=()
-EXISTING_IPS=()
+declare -A EXISTING_HOSTS_IP
 
 while IFS=':' read -r host ip; do
     if [[ "$host" != "*" && -n "$host" ]]; then
-        EXISTING_HOSTS+=("$host")
-        EXISTING_IPS+=("$ip")
+        EXISTING_HOSTS_IP["$host"]="$ip"
     fi
 done < <(awk '
 tolower($1) == "host" {
@@ -33,57 +31,37 @@ END {
     if (host != "") print host ":" ip
 }' "$CONFIG_FILE")
 
-# 2. Find suggestions based on apps/ directory
-SUGGESTIONS=()
+# 2. Find available stacks in apps/ directory
+AVAILABLE_STACKS=()
 if [[ -d "apps" ]]; then
     for dir in apps/*/; do
         if [[ -d "$dir" ]]; then
-            stack=$(basename "$dir")
-            found=0
-            for e_host in "${EXISTING_HOSTS[@]:-}"; do
-                if [[ "$e_host" == "$stack" ]]; then
-                    found=1
-                    break
-                fi
-            done
-            if [[ $found -eq 0 ]]; then
-                SUGGESTIONS+=("$stack")
-            fi
+            AVAILABLE_STACKS+=("$(basename "$dir")")
         fi
     done
 fi
 
 # 3. Interactive Menu
 echo "=== Local Workstation SSH Configurator ==="
-echo "Existing SSH Aliases in ~/.ssh/config:"
+echo "Select an SSH alias to configure:"
+echo ""
 
 index=1
 declare -a MENU_ACTIONS
 
-if [[ ${#EXISTING_HOSTS[@]} -eq 0 ]]; then
-    echo "  (No aliases found)"
-else
-    for i in "${!EXISTING_HOSTS[@]}"; do
-        host="${EXISTING_HOSTS[$i]}"
-        ip="${EXISTING_IPS[$i]}"
-        echo "  $index) Update existing: $host ($ip)"
-        MENU_ACTIONS[$index]="UPDATE:$host:$ip"
-        ((index++))
-    done
-fi
+for stack in "${AVAILABLE_STACKS[@]}"; do
+    if [[ -n "${EXISTING_HOSTS_IP[$stack]:-}" ]]; then
+        current_ip="${EXISTING_HOSTS_IP[$stack]}"
+        echo "  $index) Update: $stack (Current IP: $current_ip)"
+        MENU_ACTIONS[$index]="UPDATE:$stack:$current_ip"
+    else
+        echo "  $index) Create: $stack"
+        MENU_ACTIONS[$index]="CREATE:$stack"
+    fi
+    ((index++))
+done
 
-echo ""
-if [[ ${#SUGGESTIONS[@]} -gt 0 ]]; then
-    echo "Suggested homelab stacks to add:"
-    for stack in "${SUGGESTIONS[@]}"; do
-        echo "  $index) Add suggestion: $stack"
-        MENU_ACTIONS[$index]="SUGGEST:$stack"
-        ((index++))
-    done
-    echo ""
-fi
-
-echo "  $index) Manually add a new custom alias"
+echo "  $index) Manually add a custom alias"
 MENU_ACTIONS[$index]="MANUAL"
 ((index++))
 
@@ -113,9 +91,9 @@ elif [[ "$action" == UPDATE:* ]]; then
     IFS=':' read -r _ SSH_ALIAS current_ip <<< "$action"
     read -r -p "Enter the new static IPv4 address for '$SSH_ALIAS' [current: $current_ip]: " new_ip
     SSH_IP="${new_ip:-$current_ip}"
-elif [[ "$action" == SUGGEST:* ]]; then
+elif [[ "$action" == CREATE:* ]]; then
     IFS=':' read -r _ SSH_ALIAS <<< "$action"
-    read -r -p "Enter the static IPv4 address for suggested stack '$SSH_ALIAS': " SSH_IP
+    read -r -p "Enter the static IPv4 address for stack '$SSH_ALIAS': " SSH_IP
 fi
 
 if [[ -z "$SSH_ALIAS" || -z "$SSH_IP" ]]; then
@@ -167,7 +145,6 @@ else
     echo "Adding new alias '${SSH_ALIAS}'..."
 fi
 
-# Append the standardized block at the end of the file
 cat <<EOF >> "${CONFIG_FILE}"
 
 Host ${SSH_ALIAS}

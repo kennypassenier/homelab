@@ -182,8 +182,8 @@ ui_run_pacman "Starting LXC container ${VMID}..." \
     bash -c "pct start '${VMID}' || true; sleep 5"
 
 # Step 4: Install dependencies including Docker, Age, SOPS, and unattended-upgrades
-ui_run_pacman "Installing dependencies (Docker, Age, SOPS, security updates)..." \
-    pct exec "${VMID}" -- bash -c "
+ui_step "Installing dependencies (Docker, Age, SOPS, security updates)..."
+pct exec "${VMID}" -- bash -c "
 apt-get update && apt-get install -y curl git wget openssl jq unattended-upgrades
 dpkg-reconfigure -f noninteractive unattended-upgrades
 curl -fsSL https://get.docker.com | sh
@@ -192,10 +192,11 @@ chmod +x /usr/local/bin/sops
 wget -qO- https://github.com/FiloSottile/age/releases/download/v1.1.1/age-v1.1.1-linux-amd64.tar.gz | tar -xzf - -C /tmp/
 mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
 "
+ui_success "Dependencies installed."
 
 # Step 5: Inject synchronization script and setup transparent Git encryption
-ui_run_pacman "Injecting GitOps synchronization script..." \
-    pct exec "${VMID}" -- bash -c "cat > /root/sparse-setup.sh" << 'INNEREOF'
+ui_step "Injecting GitOps synchronization script..."
+pct exec "${VMID}" -- bash -c "cat > /root/sparse-setup.sh" << 'INNEREOF'
 #!/usr/bin/env bash
 set -euo pipefail
 REPO_URL="https://github.com/kennypassenier/homelab.git"
@@ -234,23 +235,25 @@ INNEREOF
 
 # Pass secrets as environment variables rather than positional arguments.
 # Positional args appear in 'ps aux' for the duration of the call; env vars do not.
-ui_run_pacman "Executing sparse checkout and decrypting secrets..." \
-    pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && BOOTSTRAP_PAT='${GITHUB_PAT}' BOOTSTRAP_PASSPHRASE='${AGE_PASSPHRASE}' /root/sparse-setup.sh ${STACK_NAME}"
+ui_step "Executing sparse checkout and decrypting secrets..."
+pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && BOOTSTRAP_PAT='${GITHUB_PAT}' BOOTSTRAP_PASSPHRASE='${AGE_PASSPHRASE}' /root/sparse-setup.sh ${STACK_NAME}"
+ui_success "Sparse checkout complete."
 
 # Step 6: Push GitHub Public Key for SSH access
-ui_run_pacman "Fetching GitHub SSH key for authentication..." \
-    pct exec "${VMID}" -- bash -c "
+ui_step "Fetching GitHub SSH key for authentication..."
+pct exec "${VMID}" -- bash -c "
 mkdir -p /root/.ssh && chmod 700 /root/.ssh
 curl -sL https://github.com/${GITHUB_USERNAME}.keys >> /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 "
+ui_success "SSH key configured."
 
 # Step 7: Configure automated GitOps synchronization (Cronjob + logrotate)
 # Using >> (append) so successive sync runs accumulate in the log rather than each run
 # wiping the previous output. Logrotate keeps 7 days of compressed history and then
 # truncates the live file, so the log never grows unbounded.
-ui_run_pacman "Configuring 5-minute GitOps reconciliation loop..." \
-    pct exec "${VMID}" -- bash -c "
+ui_step "Configuring 5-minute GitOps reconciliation loop..."
+pct exec "${VMID}" -- bash -c "
         echo '*/5 * * * * root ${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME} >> /var/log/node-sync.log 2>&1' > /etc/cron.d/gitops-sync
         cat > /etc/logrotate.d/node-sync <<'LOGROTATE'
 /var/log/node-sync.log {
@@ -262,6 +265,7 @@ ui_run_pacman "Configuring 5-minute GitOps reconciliation loop..." \
 }
 LOGROTATE
     "
+ui_success "Cronjob configured."
 
 # Step 8: Trigger the initial docker-compose up
 # This step is a convenience — the 5-minute cronjob will handle it if this fails.
@@ -276,8 +280,9 @@ else
 fi
 
 # Step 9: Cleanup temporary bootstrap artifacts
-ui_run_pacman "Cleaning up temporary bootstrap artifacts..." \
-    pct exec "${VMID}" -- bash -c "rm -f /root/sparse-setup.sh && rm -rf /tmp/age"
+ui_step "Cleaning up temporary bootstrap artifacts..."
+pct exec "${VMID}" -- bash -c "rm -f /root/sparse-setup.sh && rm -rf /tmp/age"
+ui_success "Cleanup done."
 
 echo ""
 ui_success "=== Bootstrap Completed ==="

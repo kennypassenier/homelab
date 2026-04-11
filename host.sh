@@ -15,10 +15,7 @@ source "scripts/shared/lib-ui.sh"
 
 show_menu() {
     clear
-    echo -e "${C_CYAN}================================================================${C_NC}"
-    echo -e "${C_CYAN}                     Homelab Host Manager                       ${C_NC}"
-    echo -e "${C_CYAN}================================================================${C_NC}"
-    echo ""
+    ui_header "Homelab Host Manager"
     echo -e "  ${C_GREEN}1.${C_NC} Bootstrap a new LXC container"
     echo -e "  ${C_GREEN}2.${C_NC} Backup Stacks (Restic)"
     echo -e "  ${C_GREEN}3.${C_NC} Enable GPU Passthrough for an LXC"
@@ -31,7 +28,7 @@ show_menu() {
 
 while true; do
     show_menu
-    read -r -p "Select an option (0-6): " choice
+    read -r -p "${UI_INDENT}Select an option (0-6): " choice
 
     case $choice in
         1)
@@ -70,5 +67,5 @@ while true; do
     esac
 
     echo ""
-    read -r -p "Press Enter to return to the menu..."
+    read -r -p "${UI_INDENT}Press Enter to return to the menu..."
 done

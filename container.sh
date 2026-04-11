@@ -15,10 +15,7 @@ source "scripts/shared/lib-ui.sh"
 
 show_menu() {
     clear
-    echo -e "${C_CYAN}================================================================${C_NC}"
-    echo -e "${C_CYAN}                   Homelab Container Manager                    ${C_NC}"
-    echo -e "${C_CYAN}================================================================${C_NC}"
-    echo ""
+    ui_header "Homelab Container Manager"
     echo -e "  ${C_GREEN}1.${C_NC} Trigger Node Sync (Pull from Git & Deploy)"
     echo -e "  ${C_YELLOW}0.${C_NC} Exit"
     echo ""
@@ -26,13 +23,13 @@ show_menu() {
 
 while true; do
     show_menu
-    read -r -p "Select an option (0-1): " choice
+    read -r -p "${UI_INDENT}Select an option (0-1): " choice
 
     case $choice in
         1)
             echo ""
             # node-sync.sh usually requires a stack name as an argument
-            read -r -p "Enter the stack name to sync: " STACK_NAME
+            read -r -p "${UI_INDENT}Enter the stack name to sync: " STACK_NAME
             if [[ -n "$STACK_NAME" ]]; then
                 ./scripts/container/node-sync.sh "$STACK_NAME"
             else
@@ -51,5 +48,5 @@ while true; do
     esac
 
     echo ""
-    read -r -p "Press Enter to return to the menu..."
+    read -r -p "${UI_INDENT}Press Enter to return to the menu..."
 done

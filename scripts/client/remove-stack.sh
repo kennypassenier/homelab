@@ -40,41 +40,46 @@ cleanup_on_error() {
 }
 trap cleanup_on_error EXIT
 
-ui_info "=== Remove an Entire Stack ==="
+ui_section "Remove an Entire Stack"
 
 # Select an existing stack using the foolproof interactive library function
-STACK_NAME=$(prompt_stack_selection)
-
-if [[ -z "$STACK_NAME" ]]; then
-    ui_error "No stack selected or available."
-    exit 1
-fi
+# prompt_stack_selection returns 2 if the user chose Cancel
+STACK_NAME=$(prompt_stack_selection) || { ui_info "Cancelled."; SUCCESS=1; exit 0; }
 
 STACK_DIR="stacks/${STACK_NAME}"
 
+# Count the apps in this stack so the user knows the blast radius
+APP_COUNT=$(find "$STACK_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)
+
+# --- Confirmation Summary ---
 echo ""
-echo -e "${C_RED}================================================================${C_NC}"
-echo -e "${C_RED}WARNING: You are about to completely destroy the ENTIRE STACK '${STACK_NAME}'!${C_NC}"
-echo -e "${C_RED}================================================================${C_NC}"
-ui_info "This will delete the Git configuration directory: ${STACK_DIR}"
-ui_info "Once synced, the node-sync.sh script on the LXC container will automatically:"
-ui_info " 1. STOP all containers in the stack"
-ui_info " 2. REMOVE all containers in the stack"
-ui_info " 3. DELETE all their data from the host!"
+ui_divider "$C_RED"
+echo -e "${UI_INDENT}${C_RED}!! DESTRUCTIVE ACTION — THIS CANNOT BE UNDONE !!${C_NC}"
+ui_divider "$C_RED"
+echo ""
+echo -e "  ${C_CYAN}Stack:${C_NC}            ${STACK_NAME}"
+echo -e "  ${C_CYAN}Config directory:${C_NC} ${STACK_DIR}"
+echo -e "  ${C_CYAN}Apps in stack:${C_NC}    ${APP_COUNT}"
+echo ""
+echo -e "  ${C_YELLOW}What will happen after the next Git sync (~5 min):${C_NC}"
+echo -e "    1. All ${APP_COUNT} container(s) in '${STACK_NAME}' will be ${C_RED}STOPPED${C_NC}"
+echo -e "    2. All ${APP_COUNT} container(s) in '${STACK_NAME}' will be ${C_RED}REMOVED${C_NC}"
+echo -e "    3. All host data at ${C_RED}/opt/appdata/${STACK_NAME}${C_NC} will be ${C_RED}DELETED${C_NC}"
 echo ""
 
 # First Confirmation: simple y/n
-read -r -p "Are you sure you want to proceed? (y/N): " CONFIRM1
-if [[ ! "$CONFIRM1" =~ ^[Yy]$ ]]; then
+if ! ui_confirm "Are you sure you want to proceed?"; then
     ui_info "Aborted."
     SUCCESS=1
     exit 0
 fi
 
 echo ""
-echo -e "${C_RED}Final confirmation required.${C_NC}"
-# Second Confirmation: explicitly type the stack name
-read -r -p "Are you ABSOLUTELY sure you want to delete '${STACK_NAME}'? Type the stack name to confirm: " CONFIRM2
+echo -e "${UI_INDENT}${C_RED}Final confirmation required.${C_NC}"
+# Second Confirmation: explicitly type the stack name to prevent accidental deletion
+CONFIRM2=$(ui_input_required "Type the stack name to confirm deletion" "${STACK_NAME}") || { ui_info "Aborted."; SUCCESS=1; exit 0; }
+# Trim accidental leading/trailing whitespace before comparing
+CONFIRM2="$(ui_trim "$CONFIRM2")"
 if [[ "$CONFIRM2" != "$STACK_NAME" ]]; then
     ui_info "Stack name did not match. Aborted."
     SUCCESS=1

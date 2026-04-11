@@ -1,0 +1,21 @@
+services:
+  qsdf:
+    image: lscr.io/linuxserver/qsdf:latest
+    container_name: qsdf
+    env_file:
+      - .env
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      # Automatically refers to the fast NVMe host storage isolated per stack
+      - /appdata/test/qsdf/config:/config
+    labels:
+      # Enable automatic software updates via Watchtower
+      - "com.centurylinklabs.watchtower.enable=true"
+      # Pause container during Restic backups to prevent database corruption
+      - "com.homelab.backup.pause=true"
+    ports:
+      - "8080:80"
+    restart: unless-stopped

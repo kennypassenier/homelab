@@ -37,6 +37,7 @@ cleanup_on_error() {
     fi
 }
 trap cleanup_on_error EXIT
+trap 'echo ""; ui_info "Cancelled."; exit 0' INT
 
 USE_DOCKER=""
 USE_PROMTAIL=""
@@ -67,10 +68,10 @@ STACK_NAME="${1:-}"
 # Ensure we are running from the root of the repo
 require_repo_root
 
-ui_info "=== Create a New Stack ==="
+ui_section "Create a New Stack"
 
 if [[ -z "$STACK_NAME" ]]; then
-    read -r -p "Enter the name of the new stack (LXC container): " STACK_NAME
+    STACK_NAME=$(ui_input_required "Name of the new stack (LXC container)" "my-stack  •  Esc to cancel") || { ui_info "Cancelled."; exit 0; }
 fi
 
 if [[ -z "$STACK_NAME" ]]; then
@@ -86,23 +87,37 @@ if [[ -d "$STACK_DIR" ]]; then
     exit 1
 fi
 
-if [[ -z "$USE_DOCKER" ]]; then
-    read -r -p "Will this stack use Docker? (y/n) [y]: " USE_DOCKER
-    USE_DOCKER=${USE_DOCKER:-y}
-fi
+if [[ -z "$USE_DOCKER" && -z "$USE_WATCHTOWER" && -z "$USE_PROMTAIL" ]]; then
+    USE_DOCKER="n"; USE_WATCHTOWER="n"; USE_PROMTAIL="n"
 
-if [[ "$USE_DOCKER" =~ ^[Yy]$ ]]; then
-    if [[ -z "$USE_WATCHTOWER" ]]; then
-        read -r -p "Include Watchtower for automatic updates? (y/n) [y]: " USE_WATCHTOWER
-        USE_WATCHTOWER=${USE_WATCHTOWER:-y}
-    fi
-    if [[ -z "$USE_PROMTAIL" ]]; then
-        read -r -p "Include Promtail for centralized logging to Loki? (y/n) [n]: " USE_PROMTAIL
-        USE_PROMTAIL=${USE_PROMTAIL:-n}
+    # Step 1: Docker
+    ui_confirm "Include Docker Compose?" "true" && USE_DOCKER="y" || USE_DOCKER="n"
+
+    # Step 2: Watchtower + Promtail — only if Docker is enabled
+    if [[ "$USE_DOCKER" == "y" ]]; then
+        declare -a _selected
+        mapfile -t _selected < <(ui_multiselect \
+            --header "Select additional Docker components:" \
+            --selected "Watchtower — automatic image updates,Promtail — log shipping to Loki" \
+            "Watchtower — automatic image updates" \
+            "Promtail — log shipping to Loki") || { ui_info "Cancelled."; exit 0; }
+        for _item in "${_selected[@]:-}"; do
+            [[ "$_item" == "Watchtower"* ]] && USE_WATCHTOWER="y"
+            [[ "$_item" == "Promtail"* ]]   && USE_PROMTAIL="y"
+        done
+        unset _selected _item
     fi
 else
-    USE_WATCHTOWER="n"
-    USE_PROMTAIL="n"
+    # Partial CLI flags supplied — fill in any missing ones interactively
+    if [[ -z "$USE_DOCKER" ]]; then
+        ui_confirm "Will this stack use Docker?" "true" && USE_DOCKER="y" || USE_DOCKER="n"
+    fi
+    if [[ "$USE_DOCKER" =~ ^[Yy]$ ]]; then
+        [[ -z "$USE_WATCHTOWER" ]] && { ui_confirm "Include Watchtower for automatic updates?" "true" && USE_WATCHTOWER="y" || USE_WATCHTOWER="n"; }
+        [[ -z "$USE_PROMTAIL" ]]   && { ui_confirm "Include Promtail for centralized logging to Loki?" && USE_PROMTAIL="y" || USE_PROMTAIL="n"; }
+    else
+        USE_WATCHTOWER="n"; USE_PROMTAIL="n"
+    fi
 fi
 
 echo ""
@@ -114,7 +129,8 @@ APPS=()
 
 while true; do
     echo ""
-    read -r -p "Enter app name for this stack (leave empty to finish): " APP_NAME
+    APP_NAME=$(ui_input "App name (leave empty to finish)" "") || break
+    APP_NAME=$(ui_trim "$APP_NAME")
     if [[ -z "$APP_NAME" ]]; then
         break
     fi

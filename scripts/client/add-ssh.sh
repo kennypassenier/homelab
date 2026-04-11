@@ -72,59 +72,50 @@ if [[ -d "stacks" ]]; then
 fi
 
 # 3. Interactive Menu
-ui_info "=== Local Workstation SSH Configurator ==="
-echo "Select an SSH alias to configure:"
-echo ""
+ui_section "Local Workstation SSH Configurator"
 
-index=1
-declare -a MENU_ACTIONS
+# Build display items and a reverse map from label -> stack name
+declare -a MENU_ITEMS
+declare -A ITEM_STACK
 
 for stack in "${AVAILABLE_STACKS[@]}"; do
     if [[ -n "${EXISTING_HOSTS_IP[$stack]:-}" ]]; then
         current_ip="${EXISTING_HOSTS_IP[$stack]}"
-        echo "  $index) Update: $stack (Current IP: $current_ip)"
-        MENU_ACTIONS[$index]="UPDATE:$stack:$current_ip"
+        label="Update: ${stack}  (IP: ${current_ip})"
     else
-        echo "  $index) Create: $stack"
-        MENU_ACTIONS[$index]="CREATE:$stack"
+        label="Create: ${stack}"
     fi
-    ((index++))
+    MENU_ITEMS+=("$label")
+    ITEM_STACK["$label"]="$stack"
 done
 
-echo "  $index) Manually add a custom alias"
-MENU_ACTIONS[$index]="MANUAL"
-((index++))
+MENU_ITEMS+=("Manually add a custom alias")
+MENU_ITEMS+=("Exit")
 
-echo "  $index) Exit"
-MENU_ACTIONS[$index]="EXIT"
-max_choice=$((index - 1))
+CHOICE=$(ui_choose --header "Select an SSH alias to configure:" "${MENU_ITEMS[@]}") || {
+    ui_info "Cancelled."
+    SUCCESS=1
+    exit 0
+}
 
-echo ""
-read -r -p "Select an option (1-$max_choice): " choice
-
-if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "$max_choice" ]; then
-    ui_error "Invalid selection."
-    exit 1
-fi
-
-action="${MENU_ACTIONS[$choice]}"
 SSH_ALIAS=""
 SSH_IP=""
 
-if [[ "$action" == "EXIT" ]]; then
+if [[ "$CHOICE" == "Exit" ]]; then
     ui_info "Exited."
     SUCCESS=1
     exit 0
-elif [[ "$action" == "MANUAL" ]]; then
-    read -r -p "Enter the new logical Host alias (e.g., gateway): " SSH_ALIAS
-    read -r -p "Enter the static IPv4 address (e.g., 10.10.10.6): " SSH_IP
-elif [[ "$action" == UPDATE:* ]]; then
-    IFS=':' read -r _ SSH_ALIAS current_ip <<< "$action"
-    read -r -p "Enter the new static IPv4 address for '$SSH_ALIAS' [current: $current_ip]: " new_ip
-    SSH_IP="${new_ip:-$current_ip}"
-elif [[ "$action" == CREATE:* ]]; then
-    IFS=':' read -r _ SSH_ALIAS <<< "$action"
-    read -r -p "Enter the static IPv4 address for stack '$SSH_ALIAS': " SSH_IP
+elif [[ "$CHOICE" == "Manually add a custom alias" ]]; then
+    SSH_ALIAS=$(ui_input_required "New logical Host alias" "gateway") || { ui_info "Cancelled."; SUCCESS=1; exit 0; }
+    SSH_IP=$(ui_input_required "Static IPv4 address" "10.10.10.x") || { ui_info "Cancelled."; SUCCESS=1; exit 0; }
+elif [[ "$CHOICE" == Update:* ]]; then
+    stack="${ITEM_STACK[$CHOICE]}"
+    current_ip="${EXISTING_HOSTS_IP[$stack]}"
+    SSH_ALIAS="$stack"
+    SSH_IP=$(ui_input_required "New IPv4 for '${SSH_ALIAS}'" "10.10.10.x" "$current_ip") || { ui_info "Cancelled."; SUCCESS=1; exit 0; }
+elif [[ "$CHOICE" == Create:* ]]; then
+    SSH_ALIAS="${ITEM_STACK[$CHOICE]}"
+    SSH_IP=$(ui_input_required "Static IPv4 for '${SSH_ALIAS}'" "10.10.10.x") || { ui_info "Cancelled."; SUCCESS=1; exit 0; }
 fi
 
 if [[ -z "$SSH_ALIAS" || -z "$SSH_IP" ]]; then

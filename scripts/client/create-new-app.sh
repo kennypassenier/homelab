@@ -11,10 +11,11 @@ source "scripts/shared/lib-ui.sh"
 # Ensure we are running from the root of the repo
 require_repo_root
 
-ui_info "=== Add a New App to an Existing Stack ==="
+ui_section "Add a New App to an Existing Stack"
 
 # Select an existing stack using the library function
-STACK_NAME=$(prompt_stack_selection)
+# prompt_stack_selection returns 2 if the user chose Cancel
+STACK_NAME=$(prompt_stack_selection) || { ui_info "Cancelled."; exit 0; }
 
 if [[ -z "$STACK_NAME" ]]; then
     ui_error "No stack selected or available."
@@ -26,7 +27,7 @@ echo ""
 
 # Prompt for the new app name
 while true; do
-    read -r -p "Enter the new app name: " APP_NAME
+    APP_NAME=$(ui_input_required "Enter the new app name" "my-app  •  Esc to cancel") || { ui_info "Cancelled."; exit 0; }
     if [[ -n "$APP_NAME" ]]; then
         # Check if the directory already exists
         if [[ -d "stacks/${STACK_NAME}/${APP_NAME}" ]]; then
@@ -40,8 +41,11 @@ while true; do
 done
 
 # Prompt for Docker usage
-read -r -p "Will this app use Docker? (y/n) [y]: " USE_DOCKER
-USE_DOCKER=${USE_DOCKER:-y}
+if ui_confirm "Will this app use Docker?" "true"; then
+    USE_DOCKER="y"
+else
+    USE_DOCKER="n"
+fi
 
 # Generate the app using the shared function
 ui_step "Creating infrastructure template for app '${APP_NAME}' in stack '${STACK_NAME}'..."

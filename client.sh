@@ -13,62 +13,59 @@ fi
 
 source "scripts/shared/lib-ui.sh"
 
-show_menu() {
-    clear
-    echo -e "${C_CYAN}================================================================${C_NC}"
-    echo -e "${C_CYAN}                   Homelab Client Manager                       ${C_NC}"
-    echo -e "${C_CYAN}================================================================${C_NC}"
-    echo ""
-    echo -e "  ${C_GREEN}1.${C_NC} Create a new Stack"
-    echo -e "  ${C_GREEN}2.${C_NC} Create a new App inside a Stack"
-    echo -e "  ${C_GREEN}3.${C_NC} Remove an App"
-    echo -e "  ${C_GREEN}4.${C_NC} Remove an entire Stack"
-    echo -e "  ${C_GREEN}5.${C_NC} Register SSH alias for a new LXC container"
-    echo -e "  ${C_GREEN}6.${C_NC} Initialize Ground Zero (SOPS Encryption Setup)"
-    echo -e "  ${C_YELLOW}0.${C_NC} Exit"
-    echo ""
-}
-
 while true; do
-    show_menu
-    read -r -p "Select an option (0-6): " choice
+    clear
+    ui_header "Homelab Client Manager"
 
-    case $choice in
-        1)
-            echo ""
-            ./scripts/client/create-new-stack.sh
-            ;;
-        2)
-            echo ""
-            ./scripts/client/create-new-app.sh
-            ;;
-        3)
-            echo ""
-            ./scripts/client/remove-app.sh
-            ;;
-        4)
-            echo ""
-            ./scripts/client/remove-stack.sh
-            ;;
-        5)
-            echo ""
-            ./scripts/client/add-ssh.sh
-            ;;
-        6)
-            echo ""
-            ./scripts/client/init-ground-zero.sh
-            ;;
-        0)
-            echo ""
+    CHOICE=$(ui_choose --header "Select an operation:" \
+        "Create a new Stack" \
+        "Create a new App inside a Stack" \
+        "Remove an App" \
+        "Remove an entire Stack" \
+        "Register SSH alias for a new LXC" \
+        "SOPS/Age: First-Time Key Setup (run once!)" \
+        "SOPS/Age: Restore on New Machine" \
+        "Exit") || CHOICE="Exit"
+
+    clear
+
+    case "$CHOICE" in
+        "Create a new Stack")
+            ./scripts/client/create-new-stack.sh ;;
+        "Create a new App inside a Stack")
+            ./scripts/client/create-new-app.sh ;;
+        "Remove an App")
+            ./scripts/client/remove-app.sh ;;
+        "Remove an entire Stack")
+            ./scripts/client/remove-stack.sh ;;
+        "Register SSH alias for a new LXC")
+            ./scripts/client/add-ssh.sh ;;
+        "SOPS/Age: First-Time Key Setup (run once!)")
+            if [[ -f "secrets/age.key.enc" ]]; then
+                ui_warning "secrets/age.key.enc already exists — this setup has already been run."
+                ui_warning "Running this again will OVERWRITE your existing encryption key."
+                ui_warning "All existing encrypted .env files will become PERMANENTLY unreadable."
+                echo ""
+                if ! ui_confirm "Are you absolutely sure you want to generate a NEW key?" "false"; then
+                    ui_info "Aborted."
+                else
+                    if ! ui_confirm "FINAL WARNING: this is irreversible. Continue?" "false"; then
+                        ui_info "Aborted."
+                    else
+                        ./scripts/client/init-ground-zero.sh
+                    fi
+                fi
+            else
+                ./scripts/client/init-ground-zero.sh
+            fi ;;
+        "SOPS/Age: Restore on New Machine")
+            ./scripts/client/restore-client.sh ;;
+        "Exit")
             ui_info "Exiting Client Manager."
             exit 0
-            ;;
-        *)
-            ui_error "Invalid selection. Please enter a number between 0 and 6."
-            sleep 2
             ;;
     esac
 
     echo ""
-    read -r -p "Press Enter to return to the menu..."
+    read -r -p "${UI_INDENT}Press Enter to return to the menu..."
 done

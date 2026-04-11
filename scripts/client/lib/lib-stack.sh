@@ -2,6 +2,11 @@
 # Script Name: lib-stack.sh
 # Description: Shared library for stack and app generation.
 
+# Source the shared UI library so color variables are always available,
+# even when this library is sourced before lib-ui.sh in the calling script.
+_LIB_STACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${_LIB_STACK_DIR}/../../shared/lib-ui.sh"
+
 # Ensure we are running from the root of the repo
 require_repo_root() {
     if [[ ! -d "stacks" || ! -d "scripts" ]]; then
@@ -25,22 +30,12 @@ prompt_stack_selection() {
         return 1
     fi
 
-    echo "Available stacks:" >&2
-    for i in "${!stacks[@]}"; do
-        echo "$((i+1)). ${stacks[$i]}" >&2
-    done
-
-    local choice
-    while true; do
-        read -r -p "Select a stack (1-${#stacks[@]}): " choice >&2
-        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#stacks[@]}" ]; then
-            # Output the selected stack name to stdout
-            echo "${stacks[$((choice-1))]}"
-            return 0
-        else
-            echo "Invalid selection. Please enter a number between 1 and ${#stacks[@]}." >&2
-        fi
-    done
+    # ui_choose handles gum (interactive picker) and fallback (numbered list).
+    # "Cancel" as the last item is colored yellow in fallback mode.
+    local result
+    result=$(ui_choose --header "Select a stack:" "${stacks[@]}" "Cancel") || return 2
+    [[ "$result" == "Cancel" ]] && return 2
+    echo "$result"
 }
 
 # Prompts the user to select an app from a specific stack
@@ -65,21 +60,12 @@ prompt_app_selection() {
         return 1
     fi
 
-    echo "Available stacks in ${stack_name}:" >&2
-    for i in "${!stacks[@]}"; do
-        echo "$((i+1)). ${stacks[$i]}" >&2
-    done
-
-    local choice
-    while true; do
-        read -r -p "Select an app (1-${#stacks[@]}): " choice >&2
-        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#stacks[@]}" ]; then
-            echo "${stacks[$((choice-1))]}"
-            return 0
-        else
-            echo "Invalid selection. Please enter a number between 1 and ${#stacks[@]}." >&2
-        fi
-    done
+    # ui_choose handles gum (interactive picker) and fallback (numbered list).
+    # "Cancel" as the last item is colored yellow in fallback mode.
+    local result
+    result=$(ui_choose --header "Select an app in '${stack_name}':" "${stacks[@]}" "Cancel") || return 2
+    [[ "$result" == "Cancel" ]] && return 2
+    echo "$result"
 }
 
 # Generates a new application template inside a stack

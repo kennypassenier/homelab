@@ -3,6 +3,7 @@
 # plaintext GitHub PAT and Age Passphrase needed to bootstrap the system.
 scripts/host/.env
 
+
 # Logs
 *.log
 

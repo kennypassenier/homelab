@@ -1,0 +1,17 @@
+services:
+  cloudflared:
+    image: lscr.io/linuxserver/cloudflared:latest
+    container_name: cloudflared
+    env_file:
+      - .env
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      # Automatically refers to the fast NVMe host storage isolated per stack
+      - /appdata/cloudflared/cloudflared/config:/config
+    labels:
+      # Enable automatic software updates via Watchtower
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped

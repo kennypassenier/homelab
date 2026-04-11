@@ -205,9 +205,10 @@ pct exec "${VMID}" -- bash -c "cat > /root/sparse-setup.sh" << 'INNEREOF'
 set -euo pipefail
 REPO_URL="https://github.com/kennypassenier/homelab.git"
 STACK_DIR="stacks/$1"
-# Credentials are passed as environment variables (BOOTSTRAP_PAT, BOOTSTRAP_PASSPHRASE)
-# rather than positional arguments to prevent exposure in 'ps aux'.
-AUTH_REPO_URL=$(echo "$REPO_URL" | sed "s|https://|https://${BOOTSTRAP_PAT}@|g")
+# GIT_TERMINAL_PROMPT=0 ensures git fails immediately instead of hanging on a prompt
+# if the PAT is missing or invalid.
+export GIT_TERMINAL_PROMPT=0
+AUTH_REPO_URL=$(echo "$REPO_URL" | sed "s|https://|https://$2@|g")
 
 # Wipe any leftover gitops directory from a previous failed bootstrap attempt
 # so that 'git clone' always starts with a clean slate.
@@ -216,15 +217,9 @@ mkdir -p /opt/gitops
 cd /opt/gitops || exit 1
 git clone --no-checkout --filter=blob:none "$AUTH_REPO_URL" .
 
-# Immediately strip the PAT from the stored remote URL. Git writes the clone URL
-# verbatim into .git/config; leaving the token there means any future 'git remote -v'
-# or config read exposes it permanently. The clean URL works for all subsequent pulls
-# because SOPS/credential flow takes over after bootstrap.
-git remote set-url origin "$REPO_URL"
-
 # Extract and decrypt the Age key directly from the git tree without touching the working directory
 mkdir -p /root/.config/sops/age
-git show HEAD:secrets/age.key.enc | openssl enc -d -aes-256-cbc -pbkdf2 -salt -out /root/.config/sops/age/keys.txt -pass pass:"${BOOTSTRAP_PASSPHRASE}"
+git show HEAD:secrets/age.key.enc | openssl enc -d -aes-256-cbc -pbkdf2 -salt -out /root/.config/sops/age/keys.txt -pass pass:"$3"
 chmod 600 /root/.config/sops/age/keys.txt
 
 # Setup transparent Git filters before checkout! Use absolute path to guarantee SOPS is found in LXC
@@ -240,10 +235,8 @@ git sparse-checkout set "$STACK_DIR" "scripts" "secrets" ".sops.yaml"
 git checkout main
 INNEREOF
 
-# Pass secrets as environment variables rather than positional arguments.
-# Positional args appear in 'ps aux' for the duration of the call; env vars do not.
 ui_step "Executing sparse checkout and decrypting secrets..."
-pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && BOOTSTRAP_PAT='${GITHUB_PAT}' BOOTSTRAP_PASSPHRASE='${AGE_PASSPHRASE}' /root/sparse-setup.sh ${STACK_NAME}"
+pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${STACK_NAME} ${GITHUB_PAT} ${AGE_PASSPHRASE}"
 ui_success "Sparse checkout complete."
 
 # Step 6: Push GitHub Public Key for SSH access

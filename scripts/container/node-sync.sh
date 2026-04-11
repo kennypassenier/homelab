@@ -49,6 +49,10 @@ flock -n 200 || { log_sync info "Another sync is already running. Skipping this 
 cd "${GITOPS_DIR}" || exit 1
 git fetch origin main
 git checkout main
+# The SOPS smudge filter decrypts .env files on checkout, leaving them as "local changes"
+# in git's eyes. Reset tracked files to their committed (encrypted) state before pulling
+# so the merge never conflicts on SOPS-managed files.
+git checkout -- .
 git pull origin main
 
 if [[ -d "${STACK_DIR}" ]]; then

@@ -46,9 +46,11 @@ creation_rules:
 EOF
 
 # Step 4: Symmetrically encrypt the private key for the Git repository
-read -s -p "Enter a strong passphrase to protect your Age key (AGE_PASSPHRASE): " AGE_PASS
+read -s -p "Enter a strong passphrase to protect your Age key (AGE_PASSPHRASE): " AGE_PASSPHRASE
 echo
-openssl enc -aes-256-cbc -pbkdf2 -salt -in "$AGE_KEY_FILE" -out secrets/age.key.enc -pass pass:"$AGE_PASS"
+# Pass the passphrase via file descriptor 3 instead of -pass pass:"..." to prevent it
+# from being visible in 'ps aux' for the duration of the openssl process.
+openssl enc -aes-256-cbc -pbkdf2 -salt -in "$AGE_KEY_FILE" -out secrets/age.key.enc -pass fd:3 3<<<"${AGE_PASSPHRASE}"
 
 # Step 5: Configure Git smudge and clean filters for seamless workflow
 git config --local filter.sops-env.clean "sops --encrypt --input-type dotenv --output-type dotenv /dev/stdin"

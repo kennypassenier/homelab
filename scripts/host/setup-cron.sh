@@ -50,3 +50,17 @@ else
     echo "Cron job successfully added."
     echo "Logs will be written to ${LOG_FILE}."
 fi
+
+# Configure logrotate for the host sync log so it never grows unbounded.
+# Idempotent: writing the same config file again is harmless.
+LOGROTATE_FILE="/etc/logrotate.d/host-sync"
+cat > "${LOGROTATE_FILE}" <<EOF
+${LOG_FILE} {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+}
+EOF
+echo "Logrotate configured at ${LOGROTATE_FILE} (daily, 7 days retention)."

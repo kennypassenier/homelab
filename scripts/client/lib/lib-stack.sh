@@ -118,7 +118,7 @@ services:
 EOF
 
         # Create a plaintext .env file.
-        echo "SECRET_EXAMPLE_TOKEN=vervang_dit_met_iets_geheims" > "${app_dir}/.env"
+        echo "SECRET_EXAMPLE_TOKEN=replace_with_your_actual_secret" > "${app_dir}/.env"
         echo "Docker template generated successfully in ${app_dir}."
     else
         echo "Directory created successfully in ${app_dir}."

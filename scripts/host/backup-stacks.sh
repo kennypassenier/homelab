@@ -4,8 +4,27 @@
 
 set -euo pipefail
 
-RESTIC_PASSWORD="jouw_restic_wachtwoord"
-RESTIC_REPOSITORY="/HDD2TB/backups/restic"
+# Load credentials from the host .env file. Secrets must never be hardcoded in scripts.
+# The .env file should be at /root/homelab/scripts/host/.env (chmod 600, not committed to Git).
+ENV_FILE="$(dirname "$0")/.env"
+if [[ -f "$ENV_FILE" ]]; then
+    chmod 600 "$ENV_FILE"
+    set -a
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+    set +a
+fi
+
+# Fail loudly if required secrets are missing rather than running with wrong/empty values.
+if [[ -z "${RESTIC_PASSWORD:-}" ]]; then
+    echo "ERROR: RESTIC_PASSWORD is not set. Add it to scripts/host/.env on the Proxmox host."
+    exit 1
+fi
+if [[ -z "${RESTIC_REPOSITORY:-}" ]]; then
+    echo "ERROR: RESTIC_REPOSITORY is not set. Add it to scripts/host/.env on the Proxmox host."
+    exit 1
+fi
+
 APPDATA_DIR="/opt/appdata"
 export RESTIC_PASSWORD RESTIC_REPOSITORY
 

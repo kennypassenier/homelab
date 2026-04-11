@@ -22,7 +22,7 @@ To keep the root of this repository clean and maintainable, all detailed documen
 - **[Part 6: User Guide & Responsibilities](docs/06-user-guide-and-responsibilities.md)**: Clear mapping of manual user actions vs. automated system processes.
 - **[Part 7: Troubleshooting & Debugging](docs/07-troubleshooting-and-debugging.md)**: Common sync errors, SOPS failures, and permission fixes.
 - **[Part 8: Centralized Monitoring](docs/08-centralized-monitoring.md)**: Viewing container logs via Loki, Promtail, and Grafana.
-- **[Philosophy & Guidelines](docs/PHILOSOPHY.md)**: Our core design principles, coding standards, and best practices (DRY, shared UI libraries, idempotency, safety, etc.). **Must read** before contributing.
+- **[Contributing Guidelines](docs/CONTRIBUTING.md)**: Core design principles, coding standards, and best practices (DRY, shared UI libraries, idempotency, safety, etc.). **Must read** before contributing.
 - **[LLM Context](docs/LLM_CONTEXT.md)**: Essential context and rules for LLMs (like Claude, ChatGPT, Gemini) assisting with this project.
 
 ## 📂 Repository Structure

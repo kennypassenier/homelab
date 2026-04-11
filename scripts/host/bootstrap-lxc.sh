@@ -63,15 +63,16 @@ elif [[ -f "scripts/host/.env" ]]; then
 fi
 
 show_help() {
-    echo "Usage: $0 [-v <VMID>] [-s <STACK_NAME>] [-u <GITHUB_USERNAME>] [-t <GITHUB_PAT>] [-a <AGE_PASSPHRASE>] [-h]"
+    echo "Usage: $0 [-v <VMID>] [-s <STACK_NAME>] [-u <GITHUB_USERNAME>] [-h]"
     echo ""
     echo "Options:"
     echo "  -v    Proxmox VMID"
     echo "  -s    Stack name"
     echo "  -u    GitHub Username"
-    echo "  -t    GitHub Personal Access Token"
-    echo "  -a    Age key passphrase"
     echo "  -h    Show this help message"
+    echo ""
+    echo "Secrets (GITHUB_PAT, AGE_PASSPHRASE) must NOT be passed as CLI flags — they would"
+    echo "be visible to all users via 'ps aux'. Provide them via a .env file or interactively."
     echo ""
     echo "If options are omitted, the script will run interactively and check for a .env file."
     exit 0
@@ -84,13 +85,14 @@ GITHUB_USERNAME="${GITHUB_USERNAME:-}"
 GITHUB_PAT="${GITHUB_PAT:-}"
 AGE_PASSPHRASE="${AGE_PASSPHRASE:-}"
 
-while getopts "v:s:u:t:a:h" opt; do
+# NOTE: GITHUB_PAT and AGE_PASSPHRASE are intentionally NOT accepted as CLI flags.
+# Passing secrets via command-line arguments exposes them in 'ps aux', making them
+# visible to any user on the host. Use a .env file or the interactive prompts instead.
+while getopts "v:s:u:h" opt; do
     case "$opt" in
         v) VMID="$OPTARG" ;;
         s) STACK_NAME="$OPTARG" ;;
         u) GITHUB_USERNAME="$OPTARG" ;;
-        t) GITHUB_PAT="$OPTARG" ;;
-        a) AGE_PASSPHRASE="$OPTARG" ;;
         h) show_help ;;
         *) show_help ;;
     esac
@@ -144,10 +146,13 @@ if [[ -z "$GITHUB_USERNAME" ]]; then
     read -r -p "Enter your GitHub username (or set GITHUB_USERNAME in .env): " GITHUB_USERNAME
 fi
 
-# 4. Prompt for Secrets securely
+# 4. Validate secrets — these must come from .env, not interactive prompts.
+# GITHUB_PAT as a CLI arg or prompt would expose it in 'ps aux'; .env is the
+# only acceptable source on a shared Proxmox host.
 if [[ -z "$GITHUB_PAT" ]]; then
-    read -s -p "Enter your GitHub Personal Access Token (GITHUB_PAT): " GITHUB_PAT
-    echo ""
+    ui_error "GITHUB_PAT is not set. Add it to scripts/host/.env on the Proxmox host."
+    ui_info "Example: echo 'GITHUB_PAT=ghp_...' >> scripts/host/.env && chmod 600 scripts/host/.env"
+    exit 1
 fi
 
 if [[ -z "$AGE_PASSPHRASE" ]]; then
@@ -195,15 +200,23 @@ ui_run_pacman "Injecting GitOps synchronization script..." \
 set -euo pipefail
 REPO_URL="https://github.com/kennypassenier/homelab.git"
 STACK_DIR="stacks/$1"
-AUTH_REPO_URL=$(echo "$REPO_URL" | sed "s|https://|https://$2@|g")
+# Credentials are passed as environment variables (BOOTSTRAP_PAT, BOOTSTRAP_PASSPHRASE)
+# rather than positional arguments to prevent exposure in 'ps aux'.
+AUTH_REPO_URL=$(echo "$REPO_URL" | sed "s|https://|https://${BOOTSTRAP_PAT}@|g")
 
 mkdir -p /opt/gitops
 cd /opt/gitops || exit 1
 git clone --no-checkout --filter=blob:none "$AUTH_REPO_URL" .
 
+# Immediately strip the PAT from the stored remote URL. Git writes the clone URL
+# verbatim into .git/config; leaving the token there means any future 'git remote -v'
+# or config read exposes it permanently. The clean URL works for all subsequent pulls
+# because SOPS/credential flow takes over after bootstrap.
+git remote set-url origin "$REPO_URL"
+
 # Extract and decrypt the Age key directly from the git tree without touching the working directory
 mkdir -p /root/.config/sops/age
-git show HEAD:secrets/age.key.enc | openssl enc -d -aes-256-cbc -pbkdf2 -salt -out /root/.config/sops/age/keys.txt -pass pass:"$3"
+git show HEAD:secrets/age.key.enc | openssl enc -d -aes-256-cbc -pbkdf2 -salt -out /root/.config/sops/age/keys.txt -pass pass:"${BOOTSTRAP_PASSPHRASE}"
 chmod 600 /root/.config/sops/age/keys.txt
 
 # Setup transparent Git filters before checkout! Use absolute path to guarantee SOPS is found in LXC
@@ -219,8 +232,10 @@ git sparse-checkout set "$STACK_DIR" "scripts" "secrets" ".sops.yaml"
 git checkout main
 INNEREOF
 
+# Pass secrets as environment variables rather than positional arguments.
+# Positional args appear in 'ps aux' for the duration of the call; env vars do not.
 ui_run_pacman "Executing sparse checkout and decrypting secrets..." \
-    pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${STACK_NAME} ${GITHUB_PAT} ${AGE_PASSPHRASE}"
+    pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && BOOTSTRAP_PAT='${GITHUB_PAT}' BOOTSTRAP_PASSPHRASE='${AGE_PASSPHRASE}' /root/sparse-setup.sh ${STACK_NAME}"
 
 # Step 6: Push GitHub Public Key for SSH access
 ui_run_pacman "Fetching GitHub SSH key for authentication..." \
@@ -230,9 +245,23 @@ curl -sL https://github.com/${GITHUB_USERNAME}.keys >> /root/.ssh/authorized_key
 chmod 600 /root/.ssh/authorized_keys
 "
 
-# Step 7: Configure automated GitOps synchronization (Cronjob)
+# Step 7: Configure automated GitOps synchronization (Cronjob + logrotate)
+# Using >> (append) so successive sync runs accumulate in the log rather than each run
+# wiping the previous output. Logrotate keeps 7 days of compressed history and then
+# truncates the live file, so the log never grows unbounded.
 ui_run_pacman "Configuring 5-minute GitOps reconciliation loop..." \
-    pct exec "${VMID}" -- bash -c "echo '*/5 * * * * root ${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME} > /var/log/node-sync.log 2>&1' > /etc/cron.d/gitops-sync"
+    pct exec "${VMID}" -- bash -c "
+        echo '*/5 * * * * root ${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME} >> /var/log/node-sync.log 2>&1' > /etc/cron.d/gitops-sync
+        cat > /etc/logrotate.d/node-sync <<'LOGROTATE'
+/var/log/node-sync.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+}
+LOGROTATE
+    "
 
 # Step 8: Trigger the initial docker-compose up
 ui_run_pacman "Triggering initial application deployment..." \

@@ -19,6 +19,7 @@ This file contains the essential context and rules for LLMs (such as Claude, Cha
 2. **Keep documentation up-to-date:** Whenever we adjust the architecture, scripts, or CLI flags, the `README.md` MUST be updated in the same iteration.
 3. **Context Check:** Remember that we are not on the Proxmox server or in a container unless we are explicitly logged in via a command (like `ssh`). Scripts in `/scripts/client/` are for Linux desktop, `/scripts/host/` for Proxmox, and `/scripts/container/` for inside the LXC. For user interaction, there are now central manager scripts in the root: `client.sh`, `host.sh`, and `container.sh`.
 4. **Contributing Guidelines & Best Practices:** ALWAYS read and follow the guidelines in `docs/CONTRIBUTING.md` for code style, DRY principles (use of shared libraries), UI/UX (colors and spinners via `lib-ui.sh`), idempotency, and error handling when creating or modifying scripts.
+5. **GitOps first — always:** NEVER suggest fixing problems by running commands directly inside a container or on the Proxmox host. The correct answer is always: fix the source in Git, push, and let `node-sync.sh` apply the change. For recovery scenarios (e.g. broken sync state), point to the scripts in `scripts/host/` via `host.sh` — never ad-hoc `pct exec` or direct SSH workarounds.
 
 ## 3. Current Status
 

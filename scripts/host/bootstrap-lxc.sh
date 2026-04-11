@@ -264,8 +264,16 @@ LOGROTATE
     "
 
 # Step 8: Trigger the initial docker-compose up
-ui_run_pacman "Triggering initial application deployment..." \
-    pct exec "${VMID}" -- bash -c "${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME}"
+# This step is a convenience — the 5-minute cronjob will handle it if this fails.
+# We therefore don't abort the entire bootstrap on failure; instead we surface the
+# real error output so it can be debugged without rolling back a successful install.
+ui_step "Triggering initial application deployment..."
+if ! pct exec "${VMID}" -- bash -c "${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME}"; then
+    ui_warning "Initial sync run failed (exit code $?). The cronjob will retry in 5 minutes."
+    ui_info "To debug, run: pct exec ${VMID} -- bash -c '${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME}'"
+else
+    ui_success "Initial application deployment complete."
+fi
 
 # Step 9: Cleanup temporary bootstrap artifacts
 ui_run_pacman "Cleaning up temporary bootstrap artifacts..." \

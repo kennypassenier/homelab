@@ -24,6 +24,7 @@ Always read `docs/LLM_CONTEXT.md` and `docs/CONTRIBUTING.md` for full context.
 1. **Always ask before acting.** Never execute terminal commands or file edits unprompted. Explain the plan, show the code, and wait for explicit approval.
 2. **Keep documentation in sync.** Any change to scripts, architecture, or CLI flags must update `docs/README.md` (and `docs/LLM_CONTEXT.md` if relevant) in the same iteration.
 3. **Context awareness.** Assume the terminal is on the Linux client desktop unless an explicit `ssh` login was made. Do not run host or container commands in a client context.
+4. **GitOps first — always.** Never suggest fixing issues by running commands directly inside a container or on the host. The correct fix is always: adjust the source in Git, push, and let `node-sync.sh` apply it. For recovery scenarios (broken sync state, locked repo), point to `host.sh` on the Proxmox host — never raw `pct exec` or direct SSH workarounds unless there is absolutely no GitOps alternative.
 
 ---
 

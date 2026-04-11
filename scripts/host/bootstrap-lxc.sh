@@ -170,16 +170,20 @@ echo ""
 ui_step "Initiating bootstrap sequence for container ${VMID} targeting stack '${STACK_NAME}'..."
 
 # Step 1: Ensure host directory exists and adjust permissions for unprivileged LXC
-ui_run_pacman "Configuring isolated host SSD storage..." \
-    bash -c "mkdir -p '${HOST_STORAGE_PATH}' && chown -R 100000:100000 '${HOST_STORAGE_PATH}'"
+ui_step "Configuring isolated host SSD storage..."
+bash -c "mkdir -p '${HOST_STORAGE_PATH}' && chown -R 100000:100000 '${HOST_STORAGE_PATH}'"
+ui_success "Storage configured."
 
 # Step 2: Automatically bind mount the host directory to the LXC container
-ui_run_pacman "Bind mounting storage to LXC container..." \
-    pct set "${VMID}" -mp0 "${HOST_STORAGE_PATH},mp=${LXC_MOUNT_POINT}"
+ui_step "Bind mounting storage to LXC container..."
+pct set "${VMID}" -mp0 "${HOST_STORAGE_PATH},mp=${LXC_MOUNT_POINT}"
+ui_success "Storage mounted."
 
 # Step 3: Start the container
-ui_run_pacman "Starting LXC container ${VMID}..." \
-    bash -c "pct start '${VMID}' || true; sleep 5"
+ui_step "Starting LXC container ${VMID}..."
+pct start "${VMID}" || true
+sleep 5
+ui_success "Container started."
 
 # Step 4: Install dependencies including Docker, Age, SOPS, and unattended-upgrades
 ui_step "Installing dependencies (Docker, Age, SOPS, security updates)..."

@@ -209,6 +209,9 @@ STACK_DIR="stacks/$1"
 # rather than positional arguments to prevent exposure in 'ps aux'.
 AUTH_REPO_URL=$(echo "$REPO_URL" | sed "s|https://|https://${BOOTSTRAP_PAT}@|g")
 
+# Wipe any leftover gitops directory from a previous failed bootstrap attempt
+# so that 'git clone' always starts with a clean slate.
+rm -rf /opt/gitops
 mkdir -p /opt/gitops
 cd /opt/gitops || exit 1
 git clone --no-checkout --filter=blob:none "$AUTH_REPO_URL" .

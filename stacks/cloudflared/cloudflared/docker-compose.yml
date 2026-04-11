@@ -1,7 +1,8 @@
 services:
   cloudflared:
-    image: lscr.io/linuxserver/cloudflared:latest
+    image: cloudflare/cloudflared:latest
     container_name: cloudflared
+    command: tunnel --no-autoupdate run
     env_file:
       - .env
     environment:

@@ -21,6 +21,8 @@ Promtail is the agent that actually collects the logs. Instead of running centra
 *   It mounts the host's `/var/log` (for system logs) and `/var/lib/docker/containers` (for Docker logs).
 *   It tails these files in real-time and ships them securely over the network to the central Loki server.
 
+Each Promtail instance also scrapes `/var/log/node-sync.log` via a dedicated `node_sync` job. This log contains structured **logfmt** output from `node-sync.sh` (e.g. `ts=... level=warn stack=media app=jellyfin msg="..."`). Promtail parses this format and promotes `level`, `stack`, and `app` as Loki labels, making GitOps sync events fully queryable in Grafana.
+
 ---
 
 ## 2. Automated Configuration (GitOps & Secrets)
@@ -55,5 +57,9 @@ Click on the **Label filters** button or type a query directly:
     `{host="gateway", job="docker"}`
 *   To search for the word "error" in the `paperless` stack:
     `{host="paperless"} |= "error"`
+*   To see all GitOps sync warnings across all stacks:
+    `{job="node_sync", level="warn"}`
+*   To see sync events for a specific app:
+    `{job="node_sync", stack="media", app="jellyfin"}`
 
 Press **Run query** (or Shift+Enter) to stream the logs in real-time.

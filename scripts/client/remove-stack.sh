@@ -87,7 +87,7 @@ if [[ "$CONFIRM2" != "$STACK_NAME" ]]; then
 fi
 
 ui_step "Removing ${STACK_DIR} from Git..."
-git rm -r "${STACK_DIR}" > /dev/null
+git rm -rf "${STACK_DIR}" > /dev/null
 
 ui_step "Committing and pushing changes..."
 git commit -m "feat(core): remove stack ${STACK_NAME} and trigger garbage collection" > /dev/null

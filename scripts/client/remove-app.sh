@@ -88,7 +88,7 @@ if [[ "$CONFIRM2" != "$APP_NAME" ]]; then
 fi
 
 ui_step "Removing ${APP_DIR} from Git..."
-git rm -r "${APP_DIR}" > /dev/null
+git rm -rf "${APP_DIR}" > /dev/null
 
 ui_step "Committing and pushing changes..."
 git commit -m "feat(${STACK_NAME}): remove ${APP_NAME} and trigger garbage collection" > /dev/null

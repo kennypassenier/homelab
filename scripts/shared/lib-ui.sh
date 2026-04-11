@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Script Name: lib-ui.sh
-# Description: Shared UI library providing colors, icons, and pacman spinners for bash scripts.
+# Description: Shared UI library — colors, logging, interactive prompts (with Gum TUI), and spinners.
+#              Auto-detects Gum (charmbracelet/gum) and falls back to POSIX equivalents
+#              in non-interactive environments (cron, CI, piped output).
+
+# Guard against being sourced multiple times in the same shell session.
+# Prevents duplicate output (e.g. the gum install hint) when a parent script sources
+# this library and then calls a child script that sources it again.
+[[ -n "${_LIB_UI_LOADED:-}" ]] && return 0
+_LIB_UI_LOADED="true"
 
 # Determine if we are running in an interactive terminal to support colors safely
 if [ -t 1 ]; then
@@ -27,6 +35,24 @@ UI_INDENT="  "
 # fall back automatically to the plain POSIX implementations below.
 if command -v gum &>/dev/null && [ -t 1 ]; then
     GUM_AVAILABLE="true"
+elif [ -t 1 ]; then
+    # Interactive terminal but gum is not installed — suggest how to install it.
+    # The hint is suppressed in non-interactive environments (cron, container sync, CI).
+    GUM_AVAILABLE="false"
+    _gum_hint=""
+    if command -v pacman &>/dev/null; then
+        _gum_hint="sudo pacman -S gum"
+    elif command -v brew &>/dev/null; then
+        _gum_hint="brew install gum"
+    elif command -v dnf &>/dev/null; then
+        _gum_hint="sudo dnf install gum  # requires Charm rpm repo"
+    elif command -v apt-get &>/dev/null; then
+        _gum_hint="see https://github.com/charmbracelet/gum#installation (apt requires Charm repo)"
+    else
+        _gum_hint="see https://github.com/charmbracelet/gum#installation"
+    fi
+    echo -e "  \033[1;34mℹ️  INFO:\033[0m Install \033[1mgum\033[0m for a richer TUI experience: \033[1;36m${_gum_hint}\033[0m"
+    unset _gum_hint
 else
     GUM_AVAILABLE="false"
 fi
@@ -261,10 +287,20 @@ ui_header() {
     local color="${2:-$C_CYAN}"
     echo ""
     if [[ "$GUM_AVAILABLE" == "true" ]]; then
+        # Map ANSI color variables to ANSI-256 foreground numbers for gum.
+        # Defaults to bright cyan (14) when an unrecognised color is passed.
+        local gum_color="14"
+        case "$color" in
+            "$C_RED")    gum_color="9"  ;;
+            "$C_GREEN")  gum_color="10" ;;
+            "$C_YELLOW") gum_color="11" ;;
+            "$C_BLUE")   gum_color="12" ;;
+            "$C_CYAN")   gum_color="14" ;;
+        esac
         local width
         width=$(( $(tput cols 2>/dev/null || echo 80) - 4 ))
         gum style \
-            --foreground "14" --border-foreground "14" \
+            --foreground "$gum_color" --border-foreground "$gum_color" \
             --border rounded --align center \
             --width "$width" --padding "0 2" \
             "$title"
@@ -291,25 +327,28 @@ ui_section() {
 }
 
 # --- Logging Functions ---
+# All logging functions write to stderr (>&2) so they never pollute stdout.
+# This is critical for functions that return data via stdout (ui_choose, ui_input, etc.)
+# — any internal ui_error/ui_warning calls must not end up captured in $() substitutions.
 
 ui_info() {
-    echo -e "${UI_INDENT}${C_BLUE}ℹ️  INFO:${C_NC} $1"
+    echo -e "${UI_INDENT}${C_BLUE}ℹ️  INFO:${C_NC} $1" >&2
 }
 
 ui_success() {
-    echo -e "${UI_INDENT}${C_GREEN}✅ SUCCESS:${C_NC} $1"
+    echo -e "${UI_INDENT}${C_GREEN}✅ SUCCESS:${C_NC} $1" >&2
 }
 
 ui_warning() {
-    echo -e "${UI_INDENT}${C_YELLOW}⚠️  WARNING:${C_NC} $1"
+    echo -e "${UI_INDENT}${C_YELLOW}⚠️  WARNING:${C_NC} $1" >&2
 }
 
 ui_error() {
-    echo -e "${UI_INDENT}${C_RED}❌ ERROR:${C_NC} $1"
+    echo -e "${UI_INDENT}${C_RED}❌ ERROR:${C_NC} $1" >&2
 }
 
 ui_step() {
-    echo -e "${UI_INDENT}${C_CYAN}➡️  ${C_NC}$1"
+    echo -e "${UI_INDENT}${C_CYAN}➡️  ${C_NC}$1" >&2
 }
 
 # --- Pacman Spinner ---

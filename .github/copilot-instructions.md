@@ -34,11 +34,17 @@ Always read `docs/LLM_CONTEXT.md` and `docs/CONTRIBUTING.md` for full context.
 - Source shared libraries at the top of scripts instead of duplicating logic.
 
 ### UX & Output
-- Use `lib-ui.sh` functions for all output — no raw `echo` with hardcoded ANSI codes.
+- Use `lib-ui.sh` functions for all output — no raw `echo` with hardcoded ANSI codes, and no direct `gum` calls outside of `lib-ui.sh`.
 - Green = success, Red = errors, Yellow = warnings, Cyan/Blue = info.
-- Wrap long-running commands with the pacman spinner (`ui_run_pacman`).
-- Use numbered interactive menus for user input instead of free-text prompts.
-- Scripts must handle non-TTY environments (cron, CI) gracefully — `lib-ui.sh` must auto-disable colors and spinners.
+- **Gum integration:** `lib-ui.sh` auto-detects if [Gum](https://github.com/charmbracelet/gum) is installed and if stdout is a TTY. When both are true, rich TUI components are used. Otherwise, everything falls back to plain POSIX equivalents automatically — no script changes needed.
+- **Interactive prompts — always use the wrappers (never raw `read` or `gum` directly):**
+  - `ui_choose` — single-item selection menu
+  - `ui_multiselect` — multi-item checkbox picker
+  - `ui_input` / `ui_input_required` — styled text input
+  - `ui_confirm` — Yes/No confirmation
+- **Spinners:** Prefer `ui_spin` over `ui_run_pacman` for all new code. Both fall back to the pacman animation when Gum is unavailable.
+- **Headers/layout:** Use `ui_header` for full-width page headers and `ui_section` for in-page section headings.
+- Scripts must handle non-TTY environments (cron, CI) gracefully — `lib-ui.sh` auto-disables Gum, colors, and spinners.
 
 ### Safety & Idempotency
 - Scripts must be safe to run multiple times — check before modifying (e.g., `~/.ssh/config` entries, existing directories).

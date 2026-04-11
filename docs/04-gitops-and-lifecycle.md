@@ -17,6 +17,8 @@ Inside each LXC container, a synchronization script (`scripts/container/node-syn
 4. **Garbage Collection (GC):** The script compares the application directories present in Git with the data directories on the host (`/opt/appdata/<stack_name>`). If an app has been removed from Git, the GC routine automatically stops the container, removes it, and completely deletes the orphaned configuration data on the host.
 5. **Deployment:** Finally, it recursively finds all `docker-compose.yml` files, runs `docker compose pull -q` to fetch updated images (if tags changed), and executes `docker compose up -d --remove-orphans` to apply the declarative state.
 
+All output from `node-sync.sh` is written to `/var/log/node-sync.log` using structured **logfmt** (`ts=... level=... stack=... app=... msg="..."`). Promtail automatically ships these logs to Loki and promotes `level`, `stack`, and `app` as filterable labels — see [Part 8: Centralized Monitoring](08-centralized-monitoring.md).
+
 ## 2. Adding and Updating Applications
 
 ### Adding a New App to an Existing Stack

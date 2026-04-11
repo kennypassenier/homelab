@@ -189,6 +189,29 @@ scrape_configs:
           job: docker
           host: ${stack_name}
           __path__: /var/lib/docker/containers/*/*log
+
+  - job_name: node_sync
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: node_sync
+          host: ${stack_name}
+          __path__: /var/log/node-sync.log
+    pipeline_stages:
+      - logfmt:
+          mapping:
+            ts:
+            level:
+            stack:
+            app:
+      - labels:
+          level:
+          stack:
+          app:
+      - timestamp:
+          source: ts
+          format: RFC3339
 EOF
 
     echo "Central Promtail configured in ${prom_dir}. (Remember to update LOKI_IP in config.yml)"

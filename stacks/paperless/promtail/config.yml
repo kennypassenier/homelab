@@ -28,3 +28,26 @@ scrape_configs:
           job: docker
           host: paperless
           __path__: /var/lib/docker/containers/*/*log
+
+  - job_name: node_sync
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: node_sync
+          host: paperless
+          __path__: /var/log/node-sync.log
+    pipeline_stages:
+      - logfmt:
+          mapping:
+            ts:
+            level:
+            stack:
+            app:
+      - labels:
+          level:
+          stack:
+          app:
+      - timestamp:
+          source: ts
+          format: RFC3339

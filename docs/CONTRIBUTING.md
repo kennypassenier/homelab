@@ -20,15 +20,26 @@ We strive to avoid duplicate code. Scripts should be as modular as possible.
 
 Command-line tools must be user-friendly, clear, and visually consistent.
 
-- **Use `lib-ui.sh` for all output.** Never use raw `echo` or `printf` with hardcoded ANSI codes in scripts.
+- **Use `lib-ui.sh` for all output.** Never use raw `echo`, `printf` with hardcoded ANSI codes, or direct `gum` calls in scripts.
+- **Gum integration:** `lib-ui.sh` automatically detects whether [Gum](https://github.com/charmbracelet/gum) is installed and whether stdout is a TTY. When both are true, rich TUI components are used (styled menus, animated spinners, bordered headers). When either is false (cron, CI, SSH pipe), everything falls back to plain POSIX equivalents automatically — no script changes required.
 - **Color conventions:**
   - Green → success
   - Red → errors
   - Yellow → warnings
   - Cyan/Blue → informational messages
-- **Spinners & progress:** Wrap long-running commands with `ui_run_pacman` (the pacman spinner from `lib-ui.sh`) so users get feedback during slow operations.
-- **Interactive menus:** Prefer numbered lists for user input over free-text prompts. This prevents typos and makes scripts foolproof for manual use.
-- **Non-TTY safety:** Scripts must behave correctly in environments without a terminal (cron, CI). The UI library auto-disables colors and spinners when stdout is not a TTY, keeping log output clean.
+- **Interactive prompts — always use the wrappers:**
+
+  | Function | Purpose |
+  |---|---|
+  | `ui_choose` | Single-item selection menu (`gum choose` / numbered list fallback) |
+  | `ui_multiselect` | Multi-item checkbox picker (`gum choose --no-limit` / numbered list fallback) |
+  | `ui_input` | Single-line text input (`gum input` / `read` fallback) |
+  | `ui_input_required` | Like `ui_input`, but loops until a non-empty value is provided |
+  | `ui_confirm` | Yes/No confirmation (`gum confirm` / y/N fallback) |
+
+- **Spinners & progress:** Wrap long-running commands with `ui_spin` (`gum spin` / pacman fallback). Use `ui_run_pacman` only in legacy code — prefer `ui_spin` for all new code.
+- **Headers & sections:** Use `ui_header` for full-width page headers (`gum style` box / divider fallback) and `ui_section` for in-page section headings with underlines.
+- **Non-TTY safety:** Scripts must behave correctly in environments without a terminal (cron, CI). The UI library auto-disables Gum, colors, and spinners when stdout is not a TTY, keeping log output clean.
 
 ---
 

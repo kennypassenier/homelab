@@ -1,0 +1,27 @@
+networks:
+  gateway_network:
+    name: gateway_network
+    external: true
+
+services:
+  cs-firewall-bouncer:
+    image: crowdsecurity/cs-firewall-bouncer:latest
+    container_name: cs-firewall-bouncer
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "envsubst < /tmp/config.yaml.tpl > /etc/crowdsec/cs-firewall-bouncer.yaml && cs-firewall-bouncer -c /etc/crowdsec/cs-firewall-bouncer.yaml"
+    volumes:
+      - ./config.yaml:/tmp/config.yaml.tpl:ro
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      - gateway_network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"

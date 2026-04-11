@@ -1,0 +1,20 @@
+mode: nftables
+pid_dir: /var/run/
+update_frequency: 10s
+daemonize: false
+log_mode: stdout
+log_level: info
+api_url: http://crowdsec:8080
+api_key: ${CROWDSEC_BOUNCER_KEY}
+
+nftables:
+  ipv4:
+    enabled: true
+    set-only: false
+    table: crowdsec
+    chain: crowdsec-chain
+  ipv6:
+    enabled: true
+    set-only: false
+    table: crowdsec6
+    chain: crowdsec6-chain

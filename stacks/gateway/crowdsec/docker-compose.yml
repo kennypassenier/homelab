@@ -12,7 +12,7 @@ services:
     environment:
       - TZ=Europe/Brussels
       - COLLECTIONS=crowdsecurity/nginx-proxy-manager
-      - BOUNCER_KEY_npm=${CROWDSEC_BOUNCER_KEY:-supersecretbouncerkey}
+      - BOUNCER_KEY_firewall=${CROWDSEC_BOUNCER_KEY:-supersecretbouncerkey}
     volumes:
       - /appdata/gateway/crowdsec/config:/etc/crowdsec
       - /appdata/gateway/crowdsec/data:/var/lib/crowdsec/data

@@ -1,0 +1,59 @@
+services:
+  # Gluetun VPN container — enige internetgateway voor qBittorrent (kill switch).
+  # Alle poorten voor qbittorrent worden hier gedeclareerd omdat qbittorrent
+  # network_mode: service:gluetun gebruikt — het heeft zelf geen eigen network stack.
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - .env
+    environment:
+      - VPN_SERVICE_PROVIDER=surfshark
+      - VPN_TYPE=wireguard
+      - WIREGUARD_ADDRESSES=10.14.0.2/32
+      - SERVER_HOSTNAMES=ch-zur.prod.surfshark.com
+    ports:
+      # qBittorrent Web UI — geopend op gluetun omdat qbittorrent geen eigen netwerk heeft
+      - "8080:8080"
+    # Gluetun heeft een ingebouwde healthcheck binary die wacht tot de VPN tunnel
+    # actief is. qBittorrent start pas als deze check slaagt (service_healthy).
+    # Dit garandeert dat er nooit een verbinding is buiten de VPN om.
+    healthcheck:
+      test: /gluetun/healthcheck
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    # Verplicht in hetzelfde compose-bestand als gluetun: Docker vereist dat beide
+    # services tot hetzelfde compose-project behoren voor network_mode: service:<name>.
+    # Dit is de kill switch: als gluetun stopt, verliest qbittorrent alle connectiviteit.
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        # Wacht niet alleen op container start, maar op een gezonde VPN-verbinding
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+      - WEBUI_PORT=8080
+    volumes:
+      - /appdata/downloader/qbittorrent/config:/config
+      - /mnt/downloads:/downloads
+    labels:
+      # Enable automatic software updates via Watchtower
+      - "com.centurylinklabs.watchtower.enable=true"
+      # Pause container during Restic backups to prevent database corruption
+      - "com.homelab.backup.pause=true"
+    restart: unless-stopped

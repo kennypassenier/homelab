@@ -42,11 +42,13 @@ while true; do
             ;;
         3)
             echo ""
-            ./scripts/host/enable-gpu.sh
+            read -r -p "${UI_INDENT}Enter the VMID of the LXC: " vmid
+            ./scripts/host/enable-gpu.sh "$vmid"
             ;;
         4)
             echo ""
-            ./scripts/host/enable-tun.sh
+            read -r -p "${UI_INDENT}Enter the VMID of the LXC: " vmid
+            ./scripts/host/enable-tun.sh "$vmid"
             ;;
         5)
             echo ""

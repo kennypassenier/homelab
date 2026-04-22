@@ -22,8 +22,8 @@ As the administrator of this homelab, your manual interactions are limited to th
 ### A. Infrastructure Configuration (Using the Managers)
 You are responsible for generating templates and orchestrating high-level changes using the central manager scripts:
 *   **`./client.sh` (Local Workstation):** Use this to initialize Ground Zero encryption, generate new Stack/App templates, safely remove Apps/Stacks (with double confirmation), and register new SSH aliases.
-*   **`./host.sh` (Proxmox Server):** Use this to bootstrap brand new LXC containers, force a manual Restic backup, enable GPU passthrough, or reset a corrupted stack.
-*   **`./container.sh` (Inside LXC):** Use this if you are impatient and want to manually trigger the GitOps sync instead of waiting for the 5-minute cronjob.
+*   **`./host.sh` (Proxmox Server):** Use this to bootstrap brand new LXC containers, force a manual Restic backup, enable GPU passthrough, enable TUN passthrough (for VPN stacks like `downloader` — auto-detects whether it's needed from the stack's compose files), or reset a corrupted stack.
+*   **`./container.sh` (Inside LXC):** Use this if you are impatient and want to manually trigger the GitOps sync instead of waiting for the 5-minute cronjob. The stack name is auto-detected from the cron job — no input needed.
 
 ### B. Defining the State (Code & Secrets)
 *   **Editing `docker-compose.yml`:** You must define the Docker images, ports, volumes, and labels for your stacks.

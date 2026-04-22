@@ -57,6 +57,8 @@ services:
     volumes:
       - /appdata/downloader/qbittorrent/config:/config
       - /mnt/downloads:/downloads
+      # VueTorrent alternative Web UI — kept up-to-date by pre-sync.sh via git pull
+      - /appdata/downloader/vuetorrent:/vuetorrent:ro
     labels:
       # Enable automatic software updates via Watchtower
       - "com.centurylinklabs.watchtower.enable=true"

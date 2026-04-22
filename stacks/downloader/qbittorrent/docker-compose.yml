@@ -16,14 +16,17 @@ services:
       - VPN_TYPE=wireguard
       - WIREGUARD_ADDRESSES=10.14.0.2/32
       - SERVER_HOSTNAMES=ch-zur.prod.surfshark.com
+      # Use IP addresses for health checks to avoid DNS dependency during startup.
+      # The default targets (cloudflare.com, github.com) require gluetun's own DNS
+      # to be fully ready, creating a race condition that marks the container unhealthy.
+      - HEALTH_TARGET_ADDRESSES=1.1.1.1:443,8.8.8.8:443
     ports:
       # qBittorrent Web UI — geopend op gluetun omdat qbittorrent geen eigen netwerk heeft
       - "8080:8080"
-    # Gluetun heeft een ingebouwde healthcheck binary die wacht tot de VPN tunnel
-    # actief is. qBittorrent start pas als deze check slaagt (service_healthy).
-    # Dit garandeert dat er nooit een verbinding is buiten de VPN om.
+    # Gluetun exposes an internal health server on port 9999 that confirms
+    # the VPN tunnel is active. qBittorrent waits for this before starting.
     healthcheck:
-      test: /gluetun/healthcheck
+      test: ["CMD", "wget", "-q", "--tries=1", "--spider", "http://127.0.0.1:9999"]
       interval: 10s
       timeout: 5s
       retries: 5

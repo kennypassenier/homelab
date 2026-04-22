@@ -54,11 +54,13 @@ services:
       - PGID=1000
       - TZ=Europe/Brussels
       - WEBUI_PORT=8080
+      # LSIO mod that installs VueTorrent as the alternative Web UI on every container start.
+      # Watchtower keeps the mod image up-to-date automatically — no manual steps needed.
+      # After first deploy: Settings → Web UI → Use alternative Web UI → /vuetorrent
+      - DOCKER_MODS=ghcr.io/vuetorrent/vuetorrent-lsio-mod:latest
     volumes:
       - /appdata/downloader/qbittorrent/config:/config
       - /mnt/downloads:/downloads
-      # VueTorrent alternative Web UI — kept up-to-date by pre-sync.sh via git pull
-      - /appdata/downloader/vuetorrent:/vuetorrent:ro
     labels:
       # Enable automatic software updates via Watchtower
       - "com.centurylinklabs.watchtower.enable=true"

@@ -28,12 +28,14 @@ while true; do
     case $choice in
         1)
             echo ""
-            # node-sync.sh usually requires a stack name as an argument
-            read -r -p "${UI_INDENT}Enter the stack name to sync: " STACK_NAME
+            # Auto-detect the stack name from the GitOps cron job — the same stack
+            # this container was bootstrapped for is always in /etc/cron.d/gitops-sync.
+            STACK_NAME=$(grep -o 'node-sync.sh [^ ]*' /etc/cron.d/gitops-sync 2>/dev/null | awk '{print $2}' || true)
             if [[ -n "$STACK_NAME" ]]; then
+                ui_info "Auto-detected stack: ${STACK_NAME}"
                 ./scripts/container/node-sync.sh "$STACK_NAME"
             else
-                ui_error "Stack name cannot be empty."
+                ui_error "Could not auto-detect stack name from /etc/cron.d/gitops-sync."
             fi
             ;;
         0)

@@ -25,8 +25,11 @@ services:
       - "8080:8080"
     # Gluetun exposes an internal health server on port 9999 that confirms
     # the VPN tunnel is active. qBittorrent waits for this before starting.
+    # Use CMD-SHELL with wget -O /dev/null (GET request) — gluetun's health server
+    # only supports GET, not HEAD. wget --spider sends HEAD and gets a 405 back,
+    # causing the healthcheck to always fail even when the VPN is working.
     healthcheck:
-      test: [ "CMD", "wget", "-q", "--tries=1", "--spider", "http://127.0.0.1:9999" ]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:9999"]
       interval: 10s
       timeout: 5s
       retries: 5

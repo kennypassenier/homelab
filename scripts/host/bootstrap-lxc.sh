@@ -179,6 +179,34 @@ ui_step "Bind mounting storage to LXC container..."
 pct set "${VMID}" -mp0 "${HOST_STORAGE_PATH},mp=${LXC_MOUNT_POINT}"
 ui_success "Storage mounted."
 
+# Step 2b: Auto-detect if any compose file in this stack requires /dev/net/tun (e.g. gluetun).
+# If so, configure TUN passthrough on the LXC *before* the container starts — the config
+# only takes effect at boot time, so this must happen here rather than in a pre-sync hook.
+CONF_FILE="/etc/pve/lxc/${VMID}.conf"
+if grep -rl "/dev/net/tun" "stacks/${STACK_NAME}/" 2>/dev/null | grep -q .; then
+    if grep -q "lxc.cgroup2.devices.allow: c 10:200" "${CONF_FILE}" 2>/dev/null; then
+        ui_info "TUN passthrough already configured — skipping."
+    else
+        ui_step "Detected /dev/net/tun usage in stack '${STACK_NAME}' — enabling TUN passthrough..."
+        if [[ ! -e "/dev/net/tun" ]]; then
+            ui_error "/dev/net/tun does not exist on this host. Enable it with: modprobe tun"
+            exit 1
+        fi
+        cat <<EOF >> "${CONF_FILE}"
+
+# --- Added by bootstrap-lxc.sh (auto-detected TUN requirement) ---
+# Allow the container's cgroup to access the TUN character device (major 10, minor 200).
+# Required for VPN clients (e.g. gluetun) running inside Docker.
+lxc.cgroup2.devices.allow: c 10:200 rwm
+
+# Bind mount the host's TUN device node into the container so Docker can see it.
+lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+# ----------------------------------------------------------------
+EOF
+        ui_success "TUN passthrough configured."
+    fi
+fi
+
 # Step 3: Start the container
 ui_step "Starting LXC container ${VMID}..."
 pct start "${VMID}" || true

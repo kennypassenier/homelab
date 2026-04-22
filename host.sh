@@ -19,16 +19,17 @@ show_menu() {
     echo -e "  ${C_GREEN}1.${C_NC} Bootstrap a new LXC container"
     echo -e "  ${C_GREEN}2.${C_NC} Backup Stacks (Restic)"
     echo -e "  ${C_GREEN}3.${C_NC} Enable GPU Passthrough for an LXC"
-    echo -e "  ${C_GREEN}4.${C_NC} Reset a corrupted Stack"
-    echo -e "  ${C_GREEN}5.${C_NC} Sync Host scripts from Git"
-    echo -e "  ${C_GREEN}6.${C_NC} Setup Host Cronjob for automated sync"
+    echo -e "  ${C_GREEN}4.${C_NC} Enable TUN Passthrough for an LXC (VPN)"
+    echo -e "  ${C_GREEN}5.${C_NC} Reset a corrupted Stack"
+    echo -e "  ${C_GREEN}6.${C_NC} Sync Host scripts from Git"
+    echo -e "  ${C_GREEN}7.${C_NC} Setup Host Cronjob for automated sync"
     echo -e "  ${C_YELLOW}0.${C_NC} Exit"
     echo ""
 }
 
 while true; do
     show_menu
-    read -r -p "${UI_INDENT}Select an option (0-6): " choice
+    read -r -p "${UI_INDENT}Select an option (0-7): " choice
 
     case $choice in
         1)
@@ -45,13 +46,17 @@ while true; do
             ;;
         4)
             echo ""
-            ./scripts/host/reset-stack.sh
+            ./scripts/host/enable-tun.sh
             ;;
         5)
             echo ""
-            ./scripts/host/sync-host.sh
+            ./scripts/host/reset-stack.sh
             ;;
         6)
+            echo ""
+            ./scripts/host/sync-host.sh
+            ;;
+        7)
             echo ""
             ./scripts/host/setup-cron.sh
             ;;
@@ -61,7 +66,7 @@ while true; do
             exit 0
             ;;
         *)
-            ui_error "Invalid selection. Please enter a number between 0 and 6."
+            ui_error "Invalid selection. Please enter a number between 0 and 7."
             sleep 2
             ;;
     esac

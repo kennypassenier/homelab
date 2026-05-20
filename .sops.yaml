@@ -1,5 +1,5 @@
 creation_rules:
   - path_regex: .*
     key_groups:
-      - age:
-          - age1m0v2jfh3fmm8s2meumwqye7a0htc43q8u2tjwg3g6vux2g687qusefyws0
+    - age:
+      - age1m0v2jfh3fmm8s2meumwqye7a0htc43q8u2tjwg3g6vux2g687qusefyws0

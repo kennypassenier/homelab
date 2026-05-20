@@ -1,0 +1,9 @@
+# Downloader stack LXC bind mounts (GitOps managed)
+# Add/edit as needed for reproducibility
+mounts:
+  - host: /HDD18TB/subvol-103-disk-0/downloads
+    container: /mnt/downloads
+    comment: "Main downloads folder (ZFS, shared with media and fileserver)"
+  - host: /opt/appdata/downloader
+    container: /appdata
+    comment: "Appdata (config, persistent state)"

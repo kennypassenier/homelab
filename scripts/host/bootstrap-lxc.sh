@@ -171,7 +171,11 @@ bash -c "mkdir -p '${HOST_STORAGE_PATH}' && chown -R 100000:100000 '${HOST_STORA
 ui_success "Storage configured."
 
 
-# Step 2: Automatically bind mount the host directory to the LXC container
+
+# Step 2: Ensure container is stopped before bind mounting storage
+ui_step "Stopping LXC container ${VMID} (if running) before mounting..."
+pct stop "${VMID}" 2>/dev/null || true
+
 ui_step "Bind mounting storage to LXC container..."
 pct set "${VMID}" -mp0 "${HOST_STORAGE_PATH},mp=${LXC_MOUNT_POINT}"
 ui_success "Storage mounted."

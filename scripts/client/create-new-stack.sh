@@ -143,6 +143,22 @@ while true; do
     generate_app "${STACK_NAME}" "${APP_NAME}" "${USE_DOCKER}"
     APPS+=("${APP_NAME}")
     ui_success "App '${APP_NAME}' template generated."
+
+    # --- Infisical .env export automation for each app ---
+    PRE_SYNC="${STACK_DIR}/pre-sync.sh"
+    EXPORT_LINE=""
+    if [[ "${APP_NAME}" == "watchtower" ]]; then
+        EXPORT_LINE="" # Do not add for watchtower
+    elif [[ "${APP_NAME}" == "promtail" ]]; then
+        EXPORT_LINE="infisical export --env=prod --path=shared/promtail/.env > /appdata/${STACK_NAME}/promtail/.env"
+    else
+        EXPORT_LINE="infisical export --env=prod --path=${STACK_NAME}/${APP_NAME}/.env > /appdata/${STACK_NAME}/${APP_NAME}/.env"
+    fi
+    if [[ -n "$EXPORT_LINE" ]]; then
+        if ! grep -Fxq "$EXPORT_LINE" "$PRE_SYNC" 2>/dev/null; then
+            echo "$EXPORT_LINE" >> "$PRE_SYNC"
+        fi
+    fi
 done
 
 # Generate central Watchtower for the stack if requested and Docker is used

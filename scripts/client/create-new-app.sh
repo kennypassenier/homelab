@@ -53,7 +53,30 @@ ui_step "Creating infrastructure template for app '${APP_NAME}' in stack '${STAC
 # Call the generator function
 generate_app "${STACK_NAME}" "${APP_NAME}" "${USE_DOCKER}"
 
+# --- Infisical .env export automation ---
+PRE_SYNC="stacks/${STACK_NAME}/pre-sync.sh"
+EXPORT_LINE=""
+
+# Determine the correct infisical export command
+if [[ "${APP_NAME}" == "watchtower" ]]; then
+    EXPORT_LINE="" # Do not add for watchtower
+elif [[ "${APP_NAME}" == "promtail" ]]; then
+    EXPORT_LINE="infisical export --env=prod --path=shared/promtail/.env > /appdata/${STACK_NAME}/promtail/.env"
+else
+    EXPORT_LINE="infisical export --env=prod --path=${STACK_NAME}/${APP_NAME}/.env > /appdata/${STACK_NAME}/${APP_NAME}/.env"
+fi
+
+# Append to pre-sync.sh if not already present and line is not empty
+if [[ -n "$EXPORT_LINE" ]]; then
+    if ! grep -Fxq "$EXPORT_LINE" "$PRE_SYNC" 2>/dev/null; then
+        echo "$EXPORT_LINE" >> "$PRE_SYNC"
+        ui_success "Added Infisical export for ${APP_NAME} to pre-sync.sh."
+    else
+        ui_info "Infisical export for ${APP_NAME} already present in pre-sync.sh."
+    fi
+fi
+
 echo ""
 ui_success "App generation completed."
 ui_info "You can now edit the docker-compose.yml and .env files directly."
-ui_info "When you run 'git add', Git and SOPS will invisibly encrypt the .env files for you."
+ui_info "Infisical .env export for this app is now automated in pre-sync.sh."

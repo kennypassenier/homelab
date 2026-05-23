@@ -1,7 +1,13 @@
 
 
+
 #!/usr/bin/env bash
-export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
+# Source INFISICAL_ variables if present
+if [ -f /root/.env ]; then
+    set -a
+    source /root/.env
+    set +a
+fi
 set -euo pipefail
 # Pre-sync hook for the vikunja stack.
 # Runs inside the LXC as root before docker compose is applied.

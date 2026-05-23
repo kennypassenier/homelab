@@ -1,15 +1,5 @@
-# Inject Infisical Machine Identity credentials as environment variables into the LXC container
-if [[ -f "scripts/host/.env" ]]; then
-    CLIENT_ID=$(grep '^INFISICAL_CLIENT_ID=' scripts/host/.env | cut -d= -f2-)
-    CLIENT_SECRET=$(grep '^INFISICAL_CLIENT_SECRET=' scripts/host/.env | cut -d= -f2-)
-    if [[ -n "$CLIENT_ID" && -n "$CLIENT_SECRET" ]]; then
-        ui_step "Injecting INFISICAL_CLIENT_ID and INFISICAL_CLIENT_SECRET into LXC container environment..."
-        pct set "$VMID" -ef INFISICAL_CLIENT_ID="$CLIENT_ID" -ef INFISICAL_CLIENT_SECRET="$CLIENT_SECRET"
-        ui_success "INFISICAL_CLIENT_ID and INFISICAL_CLIENT_SECRET injected as environment variables."
-    else
-        ui_warning "INFISICAL_CLIENT_ID or INFISICAL_CLIENT_SECRET not found in scripts/host/.env; skipping environment injection."
-    fi
-fi
+
+# (Legacy LXC environment injection removed; now handled via /root/.env and /etc/environment in the container)
 #!/usr/bin/env bash
 # Script Name: bootstrap-lxc.sh
 # Description: Bootstraps an LXC container interactively, configures fast local SSD storage, and sets up the environment.
@@ -249,11 +239,24 @@ for attempt in $(seq 1 $max_retries); do
         sleep $retry_delay
     fi
 done
+
 if [[ $success -eq 1 ]]; then
     ui_success "/appdata and all app subdirectories ensured."
 else
     ui_error "/appdata mount did not become available in the container after $((max_retries * retry_delay)) seconds."
     exit 1
+fi
+
+# Step 3b: Copy only INFISICAL_ variables from host .env into the container's /root/.env and /etc/environment
+ui_step "Copying INFISICAL_ variables from host .env into container..."
+if grep '^INFISICAL_' scripts/host/.env > /dev/null 2>&1; then
+    grep '^INFISICAL_' scripts/host/.env > /tmp/infisical.env
+    pct push "${VMID}" "/tmp/infisical.env" "/root/.env"
+    pct exec "${VMID}" -- bash -c "grep '^INFISICAL_' /root/.env >> /etc/environment"
+    rm -f /tmp/infisical.env
+    ui_success "INFISICAL_ variables copied to /root/.env and /etc/environment in container."
+else
+    ui_warning "No INFISICAL_ variables found in scripts/host/.env; skipping copy."
 fi
 
 ui_step "Installing dependencies (Docker, Infisical CLI, security updates)..."

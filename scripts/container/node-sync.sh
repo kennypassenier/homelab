@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Script Name: node-sync.sh
 # Usage: ./node-sync.sh [-h] <STACK_NAME>
+
 set -euo pipefail
+
+# Source INFISICAL_ variables if present
+if [ -f /root/.env ]; then
+    set -a
+    source /root/.env
+    set +a
+fi
 
 show_help() {
     echo "Usage: $0 [-h] <STACK_NAME>"

@@ -231,7 +231,8 @@ apt-get update && apt-get install -y infisical
 ui_success "Dependencies installed."
 
 ui_step "Injecting GitOps synchronization script..."
-# No SOPS/Age or encrypted secrets logic remains. Only GitOps sync logic is injected as needed.
+# Copy minimal sparse-setup.sh (no SOPS/Age, no $3) into the container
+pct push "${VMID}" "scripts/host/sparse-setup.sh" "/root/sparse-setup.sh"
 
 ui_step "Executing sparse checkout..."
 pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${STACK_NAME} ${GITHUB_PAT}"

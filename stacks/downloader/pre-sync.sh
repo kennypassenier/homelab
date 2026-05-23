@@ -23,7 +23,7 @@ export INFISICAL_TOKEN=$(infisical login --method=universal-auth \
   --client-secret="$INFISICAL_CLIENT_SECRET" \
   --plain --silent)
 
-# Generate .env for qbittorrent (correct path)
-infisical export --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" --env=prod --path=downloader/qbittorrent > /appdata/downloader/qbittorrent/.env
-# Generate .env for promtail from shared/promtail (correct path)
-infisical export --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" --env=prod --path=shared/promtail > /appdata/downloader/promtail/.env
+# Generate .env for qbittorrent (export to stack dir for compose)
+infisical export --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" --env=prod --path=downloader/qbittorrent > /opt/gitops/stacks/downloader/qbittorrent/.env
+# Generate .env for promtail from shared/promtail (export to stack dir for compose)
+infisical export --token="$INFISICAL_TOKEN" --projectId="$INFISICAL_PROJECT_ID" --env=prod --path=shared/promtail > /opt/gitops/stacks/downloader/promtail/.env

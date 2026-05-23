@@ -16,6 +16,10 @@ if [[ -d "$VIKUNJA_DATA" ]]; then
     chown -R 1000:1000 "$VIKUNJA_DATA"
 fi
 
+# Ensure required directories exist
+mkdir -p /appdata/vikunja/vikunja/config
+mkdir -p /appdata/vikunja/promtail
+
 # Generate .env for vikunja
 infisical export --env=prod --path=vikunja/vikunja/.env > /appdata/vikunja/vikunja/.env
 # Generate .env for promtail from shared/promtail

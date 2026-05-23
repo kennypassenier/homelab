@@ -16,6 +16,12 @@ else
     echo "[pre-sync] Network '${NETWORK_NAME}' already exists. Skipping."
 fi
 
+# Ensure required directories exist
+mkdir -p /appdata/gateway/crowdsec
+mkdir -p /appdata/gateway/goaccess
+mkdir -p /appdata/gateway/nginx-proxy-manager
+mkdir -p /appdata/gateway/promtail
+
 # Generate .env for crowdsec
 infisical export --env=prod --path=gateway/crowdsec/.env > /appdata/gateway/crowdsec/.env
 # Generate .env for goaccess

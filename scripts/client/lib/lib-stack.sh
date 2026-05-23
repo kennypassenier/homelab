@@ -138,49 +138,53 @@ EOF
 # Generates a central Promtail configuration for a stack
 generate_promtail() {
     local stack_name="$1"
-    local prom_dir="stacks/${stack_name}/promtail"
+    local app_dir="stacks/${stack_name}/${app_name}"
+    mkdir -p "${app_dir}"
 
-    mkdir -p "${prom_dir}"
-    cat <<EOF > "${prom_dir}/docker-compose.yml"
+    # --- Ensure pre-sync.sh will always create /appdata/<stack>/<app> dirs ---
+    local pre_sync="stacks/${stack_name}/pre-sync.sh"
+    local app_data_dir="/appdata/${stack_name}/${app_name}"
+    if ! grep -q "mkdir -p ${app_data_dir}" "$pre_sync" 2>/dev/null; then
+        # Insert mkdir -p before any infisical export or .env generation for this app
+        if grep -q "infisical export --env=prod --path=${stack_name}/${app_name}/.env" "$pre_sync" 2>/dev/null; then
+            sed -i "/infisical export --env=prod --path=${stack_name}\/${app_name}\/\.env/i mkdir -p ${app_data_dir}" "$pre_sync" 2>/dev/null
+        else
+            echo "mkdir -p ${app_data_dir}" >> "$pre_sync"
+        fi
+    fi
+
+    if [[ "$use_docker" =~ ^[Yy]$ ]]; then
+        # Create a baseline docker-compose.yml with automated Watchtower and Restic labels
+        cat <<EOF > "${app_dir}/docker-compose.yml"
 services:
-  promtail:
-    image: grafana/promtail:latest
-    container_name: promtail-${stack_name}
-    volumes:
-      - /var/log:/var/log:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - ./config.yml:/etc/promtail/config.yml:ro
-    command: -config.file=/etc/promtail/config.yml -config.expand-env=true
+  ${app_name}:
+    image: lscr.io/linuxserver/${app_name}:latest
+    container_name: ${app_name}
     env_file:
       - .env
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      # Automatically refers to the fast NVMe host storage isolated per stack
+      - /appdata/${stack_name}/${app_name}/config:/config
+    labels:
+      # Enable automatic software updates via Watchtower
+      - "com.centurylinklabs.watchtower.enable=true"
+      # Pause container during Restic backups to prevent database corruption
+      - "com.homelab.backup.pause=true"
+    ports:
+      - "8080:80"
     restart: unless-stopped
 EOF
 
-    echo "LOKI_IP=10.10.10.7" > "${prom_dir}/.env"
-
-    cat <<EOF > "${prom_dir}/config.yml"
-server:
-  http_listen_port: 9080
-  grpc_listen_port: 0
-
-positions:
-  filename: /tmp/positions.yaml
-
-clients:
-  - url: http://\${LOKI_IP}:3100/loki/api/v1/push
-
-scrape_configs:
-  - job_name: system
-    static_configs:
-    - targets:
-        - localhost
-      labels:
-        job: varlogs
-        host: ${stack_name}
-        __path__: /var/log/*log
-
-  - job_name: docker
-    pipeline_stages:
+        # Create a plaintext .env file.
+        echo "SECRET_EXAMPLE_TOKEN=replace_with_your_actual_secret" > "${app_dir}/.env"
+        echo "Docker template generated successfully in ${app_dir}."
+    else
+        echo "Directory created successfully in ${app_dir}."
+    fi
       - docker: {}
     static_configs:
       - targets:

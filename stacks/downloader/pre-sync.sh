@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Ensure required directories exist
+mkdir -p /appdata/downloader/qbittorrent/config
+mkdir -p /appdata/downloader/promtail
+
 # Only seed config if it doesn't exist
 CONF="/appdata/downloader/qbittorrent/config/qBittorrent/qBittorrent.conf"
 TEMPLATE="/appdata/downloader/qbittorrent.conf.template"

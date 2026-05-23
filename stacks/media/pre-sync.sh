@@ -42,6 +42,9 @@ if [ -d "/appdata/media/seerr" ]; then
 # Generate .env for jellyfin
 infisical export --env=prod --path=media/jellyfin/.env > /appdata/media/jellyfin/.env
 
+# Ensure required directories exist
+mkdir -p /appdata/media/promtail
+
 # Generate .env for promtail from shared/promtail
 infisical export --env=prod --path=shared/promtail/.env > /appdata/media/promtail/.env
     chown -R 1000:1000 /appdata/media/seerr

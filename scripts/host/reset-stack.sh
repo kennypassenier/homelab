@@ -46,7 +46,6 @@ if [[ "$FORCE_YES" != "yes" ]]; then
     fi
 fi
 
-echo "Wiping host application data at ${HOST_STORAGE_PATH}..."
 
 echo "Stopping Docker containers in VM ${VMID}..."
 # Stop all docker containers, remove them, and prune volumes safely

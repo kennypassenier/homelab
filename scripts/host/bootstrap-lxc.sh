@@ -180,10 +180,24 @@ ui_step "Configuring isolated host SSD storage..."
 bash -c "mkdir -p '${HOST_STORAGE_PATH}' && chown -R 100000:100000 '${HOST_STORAGE_PATH}'"
 ui_success "Storage configured."
 
+
 # Step 2: Automatically bind mount the host directory to the LXC container
 ui_step "Bind mounting storage to LXC container..."
 pct set "${VMID}" -mp0 "${HOST_STORAGE_PATH},mp=${LXC_MOUNT_POINT}"
 ui_success "Storage mounted."
+
+
+# Step 2a: Ensure /appdata and all /appdata/<stack>/<app> directories exist inside the container before any automation runs
+ui_step "Ensuring /appdata and all app subdirectories exist inside the container..."
+pct exec "${VMID}" -- mkdir -p /appdata
+for app_dir in stacks/${STACK_NAME}/*/; do
+    app_name=$(basename "$app_dir")
+    # Skip non-directories (e.g. pre-sync.sh, stack-mounts.yml)
+    if [[ -d "$app_dir" ]]; then
+        pct exec "${VMID}" -- mkdir -p "/appdata/${STACK_NAME}/${app_name}"
+    fi
+done
+ui_success "/appdata and all app subdirectories ensured."
 
 # Step 2b: Auto-detect if any compose file in this stack requires /dev/net/tun (e.g. gluetun).
 # If so, configure TUN passthrough on the LXC *before* the container starts — the config

@@ -1,8 +1,6 @@
-export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
-#!/usr/bin/env bash
-# Script Name: pre-sync.sh
-# Description: Pre-sync hook for the media stack. Automatically executed by node-sync.sh.
 
+#!/usr/bin/env bash
+export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
 set -euo pipefail
 
 NETWORK_NAME="media_network"
@@ -39,14 +37,11 @@ fi
 # Ensure proper permissions for Seerr (Fixes EACCES crash loop after migration)
 if [ -d "/appdata/media/seerr" ]; then
     echo "[pre-sync] Ensuring correct ownership for Seerr data (1000:1000)..."
+    chown -R 1000:1000 /appdata/media/seerr
+fi
 
 # Generate .env for jellyfin
 infisical export --env=prod --path=media/jellyfin/.env > /appdata/media/jellyfin/.env
 
-# Ensure required directories exist
-mkdir -p /appdata/media/promtail
-
 # Generate .env for promtail from shared/promtail
 infisical export --env=prod --path=shared/promtail/.env > /appdata/media/promtail/.env
-    chown -R 1000:1000 /appdata/media/seerr
-fi

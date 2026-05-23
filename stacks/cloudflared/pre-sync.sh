@@ -1,10 +1,8 @@
-export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
-#!/usr/bin/env bash
-set -euo pipefail
 
-# Ensure required directories exist
-mkdir -p /appdata/cloudflared/cloudflared
-mkdir -p /appdata/cloudflared/promtail
+
+#!/usr/bin/env bash
+export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
+set -euo pipefail
 
 # Generate .env for cloudflared
 infisical export --env=prod --path=cloudflared/cloudflared/.env > /appdata/cloudflared/cloudflared/.env

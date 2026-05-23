@@ -1,5 +1,8 @@
-export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
+
+
 #!/usr/bin/env bash
+export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
+set -euo pipefail
 # Pre-sync hook for the vikunja stack.
 # Runs inside the LXC as root before docker compose is applied.
 #
@@ -9,17 +12,11 @@ export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
 # owned by root (uid=0 in the LXC), so we must fix ownership here to prevent
 # "permission denied" errors on the mounted files volume.
 
-set -euo pipefail
-
 VIKUNJA_DATA="/appdata/vikunja/vikunja/config"
 
 if [[ -d "$VIKUNJA_DATA" ]]; then
     chown -R 1000:1000 "$VIKUNJA_DATA"
 fi
-
-# Ensure required directories exist
-mkdir -p /appdata/vikunja/vikunja/config
-mkdir -p /appdata/vikunja/promtail
 
 # Generate .env for vikunja
 infisical export --env=prod --path=vikunja/vikunja/.env > /appdata/vikunja/vikunja/.env

@@ -1,8 +1,7 @@
-export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
-#!/usr/bin/env bash
-# Script Name: pre-sync.sh
-# Description: Pre-sync hook for the gateway stack. Automatically executed by node-sync.sh.
 
+
+#!/usr/bin/env bash
+export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
 set -euo pipefail
 
 NETWORK_NAME="gateway_network"
@@ -16,12 +15,6 @@ if ! docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1; then
 else
     echo "[pre-sync] Network '${NETWORK_NAME}' already exists. Skipping."
 fi
-
-# Ensure required directories exist
-mkdir -p /appdata/gateway/crowdsec
-mkdir -p /appdata/gateway/goaccess
-mkdir -p /appdata/gateway/nginx-proxy-manager
-mkdir -p /appdata/gateway/promtail
 
 # Generate .env for crowdsec
 infisical export --env=prod --path=gateway/crowdsec/.env > /appdata/gateway/crowdsec/.env

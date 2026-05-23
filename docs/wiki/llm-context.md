@@ -45,11 +45,7 @@ Log format: `ts=<RFC3339> level=<info|error> stack=<name> app=<name> msg=<text>`
 
 ## Secret Management
 
-- **Tool**: SOPS + Age encryption
-- **Git filter**: `scripts/client/init-ground-zero.sh` installs `smudge` (decrypt on checkout) and `clean` (encrypt on add) Git filters. `.env` files are transparently encrypted/decrypted.
-- **Key location**: `~/.config/sops/age/keys.txt` on the client. Encrypted backup: `secrets/age.key.enc` in the repo.
-- **LXC setup**: `bootstrap-lxc.sh` installs SOPS + Age in the LXC and copies the Age key from the host.
-- **Rule**: Never hardcode credentials. All secrets go in SOPS-encrypted `.env` files.
+- **Secret Management:** Secrets are managed via local uncommitted `.env` files. SOPS/Age is no longer used.
 
 ---
 

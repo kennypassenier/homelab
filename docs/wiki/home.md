@@ -38,8 +38,7 @@ Run on the Linux desktop from the repo root.
 | [remove-app.sh](script-remove-app.md) | Remove an app (triggers GitOps GC) |
 | [remove-stack.sh](script-remove-stack.md) | Remove an entire stack |
 | [add-ssh.sh](script-add-ssh.md) | Add an SSH alias to `~/.ssh/config` |
-| [init-ground-zero.sh](script-init-ground-zero.md) | First-time client setup |
-| [restore-client.sh](script-restore-client.md) | Re-configure a client from scratch |
+
 
 ---
 

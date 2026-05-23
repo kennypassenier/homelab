@@ -12,7 +12,7 @@ if [[ -f "scripts/host/.env" ]]; then
 fi
 #!/usr/bin/env bash
 # Script Name: bootstrap-lxc.sh
-# Description: Bootstraps an LXC container interactively, configures fast local SSD storage, installs SOPS, and decrypts keys.
+# Description: Bootstraps an LXC container interactively, configures fast local SSD storage, and sets up the environment.
 
 set -euo pipefail
 
@@ -52,7 +52,7 @@ cleanup_on_error() {
 
         echo ""
         ui_step "Troubleshooting tips:"
-        ui_info "1. Verify your GITHUB_PAT and AGE_PASSPHRASE are correct."
+        ui_info "1. Verify your GITHUB_PAT is correct."
         ui_info "2. Ensure the LXC container has active internet access (Gateway/DNS)."
         ui_info "3. If the container or storage is corrupted, reset it and try again:"
         ui_info "   ./scripts/host/reset-stack.sh ${VMID:-<VMID>} ${STACK_NAME:-<STACK_NAME>}"
@@ -61,7 +61,7 @@ cleanup_on_error() {
 }
 trap cleanup_on_error EXIT
 
-# Safely load environment variables if present (e.g. GITHUB_USERNAME, GITHUB_PAT, AGE_PASSPHRASE)
+# Safely load environment variables if present (e.g. GITHUB_USERNAME, GITHUB_PAT)
 if [[ -f ".env" ]]; then
     chmod 600 .env
     set -a
@@ -83,8 +83,8 @@ show_help() {
     echo "  -u    GitHub Username"
     echo "  -h    Show this help message"
     echo ""
-    echo "Secrets (GITHUB_PAT, AGE_PASSPHRASE) must NOT be passed as CLI flags — they would"
-    echo "be visible to all users via 'ps aux'. Provide them via a .env file or interactively."
+    echo "Secrets (GITHUB_PAT) must NOT be passed as CLI flags — they would"
+    echo "be visible to all users via 'ps aux'. Provide them via a .env file."
     echo ""
     echo "If options are omitted, the script will run interactively and check for a .env file."
     exit 0
@@ -95,11 +95,10 @@ VMID="${VMID:-}"
 STACK_NAME="${STACK_NAME:-}"
 GITHUB_USERNAME="${GITHUB_USERNAME:-}"
 GITHUB_PAT="${GITHUB_PAT:-}"
-AGE_PASSPHRASE="${AGE_PASSPHRASE:-}"
-
-# NOTE: GITHUB_PAT and AGE_PASSPHRASE are intentionally NOT accepted as CLI flags.
+ 
+# NOTE: GITHUB_PAT is intentionally NOT accepted as a CLI flag.
 # Passing secrets via command-line arguments exposes them in 'ps aux', making them
-# visible to any user on the host. Use a .env file or the interactive prompts instead.
+# visible to any user on the host. Use a .env file instead.
 while getopts "v:s:u:h" opt; do
     case "$opt" in
         v) VMID="$OPTARG" ;;
@@ -167,11 +166,6 @@ if [[ -z "$GITHUB_PAT" ]]; then
     exit 1
 fi
 
-if [[ -z "$AGE_PASSPHRASE" ]]; then
-    read -s -p "Enter your Age key passphrase (AGE_PASSPHRASE): " AGE_PASSPHRASE
-    echo ""
-fi
-
 GITOPS_DIR="/opt/gitops"
 
 # Storage Automation: Fast Local NVMe Storage for App Configs/Databases
@@ -225,58 +219,19 @@ pct start "${VMID}" || true
 sleep 5
 ui_success "Container started."
 
-# Step 4: Install dependencies including Docker, Age, SOPS, Infisical CLI, and unattended-upgrades
-ui_step "Installing dependencies (Docker, Age, SOPS, Infisical CLI, security updates)..."
+ui_step "Installing dependencies (Docker, Infisical CLI, security updates)..."
 pct exec "${VMID}" -- bash -c "
 apt-get update && apt-get install -y curl git wget openssl jq unattended-upgrades
 dpkg-reconfigure -f noninteractive unattended-upgrades
 curl -fsSL https://get.docker.com | sh
-wget -qO /usr/local/bin/sops https://github.com/getsops/sops/releases/download/v3.9.1/sops-v3.9.1.linux.amd64
-chmod +x /usr/local/bin/sops
-wget -qO- https://github.com/FiloSottile/age/releases/download/v1.1.1/age-v1.1.1-linux-amd64.tar.gz | tar -xzf - -C /tmp/
-mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
 # Install Infisical CLI (Debian/Ubuntu)
 curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash
 apt-get update && apt-get install -y infisical
 "
 ui_success "Dependencies installed."
 
-# Step 5: Inject synchronization script and setup transparent Git encryption
 ui_step "Injecting GitOps synchronization script..."
-pct exec "${VMID}" -- bash -c "cat > /root/sparse-setup.sh" << 'INNEREOF'
-#!/usr/bin/env bash
-set -euo pipefail
-REPO_URL="https://github.com/kennypassenier/homelab.git"
-STACK_DIR="stacks/$1"
-# GIT_TERMINAL_PROMPT=0 ensures git fails immediately instead of hanging on a prompt
-# if the PAT is missing or invalid.
-export GIT_TERMINAL_PROMPT=0
-AUTH_REPO_URL=$(echo "$REPO_URL" | sed "s|https://|https://$2@|g")
-
-# Wipe any leftover gitops directory from a previous failed bootstrap attempt
-# so that 'git clone' always starts with a clean slate.
-rm -rf /opt/gitops
-mkdir -p /opt/gitops
-cd /opt/gitops || exit 1
-git clone --no-checkout --filter=blob:none "$AUTH_REPO_URL" .
-
-# Extract and decrypt the Age key directly from the git tree without touching the working directory
-mkdir -p /root/.config/sops/age
-git show HEAD:secrets/age.key.enc | openssl enc -d -aes-256-cbc -pbkdf2 -salt -out /root/.config/sops/age/keys.txt -pass pass:"$3"
-chmod 600 /root/.config/sops/age/keys.txt
-
-# Setup transparent Git filters before checkout! Use absolute path to guarantee SOPS is found in LXC
-git config --local filter.sops-env.clean "/usr/local/bin/sops --encrypt --input-type dotenv --output-type dotenv /dev/stdin"
-git config --local filter.sops-env.smudge "/usr/local/bin/sops --decrypt --input-type dotenv --output-type dotenv /dev/stdin"
-git config --local filter.sops-env.required true
-
-# Setup sparse checkout safely
-git sparse-checkout init --cone
-git sparse-checkout set "$STACK_DIR" "scripts" "secrets" ".sops.yaml"
-
-# Checkout main (Smudge filter automatically decrypts the .env files here)
-git checkout main
-INNEREOF
+# No SOPS/Age or encrypted secrets logic remains. Only GitOps sync logic is injected as needed.
 
 ui_step "Executing sparse checkout and decrypting secrets..."
 pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${STACK_NAME} ${GITHUB_PAT} ${AGE_PASSPHRASE}"

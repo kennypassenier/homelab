@@ -36,14 +36,10 @@ Data persistence is critical. Docker volumes inside an LXC can be difficult to b
 *   **Why?** This allows the Proxmox host to centrally back up all application configurations (via Restic) without needing to SSH into every individual container. It also means if an LXC is destroyed, the actual configuration data remains safely on the host.
 *   **Bulk Storage:** Heavy media or backup data is kept on separate NAS drives or secondary HDDs (e.g., `/HDD2TB`) and is mounted into the specific LXCs that need it (like the `media` stack).
 
-## 4. Secret Management: SOPS + Age
 
-You cannot commit plaintext passwords, API keys, or database credentials to a Git repository. To solve this, we use **Mozilla SOPS** combined with **Age**.
+## 4. Secret Management
 
-*   **Transparent Encryption:** Developers use a local setup (`client.sh -> Initialize Ground Zero`) which installs Git filters (smudge/clean). 
-*   **How it works:** When you commit a `.env` file, Git automatically intercepts it and encrypts the contents using your public Age key. The file is stored in GitHub as ciphertext.
-*   **Decryption:** When the LXC container pulls the repository, the GitOps script uses the private Age key (provided during bootstrap) to seamlessly decrypt the `.env` file back to plaintext before Docker Compose runs.
-*   **Why Age?** Age is a simple, modern, and secure encryption tool. It is much lighter and easier to manage in a homelab than heavy enterprise solutions like HashiCorp Vault.
+You cannot commit plaintext passwords, API keys, or database credentials to a Git repository. Secrets are managed via local uncommitted `.env` files (`chmod 600`, listed in `.gitignore`). Do not hardcode secrets in version control. No encryption, decryption, or filter logic is used—just keep `.env` files out of Git.
 
 ## 5. Networking & Routing
 
@@ -60,7 +56,7 @@ The heart of the automation is the `node-sync.sh` script, which runs inside ever
 Here is the step-by-step flow of the reconciliation loop:
 1.  **Git Sparse Checkout:** The container only pulls the specific `stacks/<STACK_NAME>` folder it needs, ignoring the rest of the repository to save space and time.
 2.  **Pull Latest State:** `git pull origin main` retrieves the latest declarative state.
-3.  **Decrypt Secrets:** SOPS automatically decrypts any updated `.env` files.
+3.  **Secrets:** Each container reads its local `.env` file (if present) for secrets. No decryption or filter logic is used.
 4.  **Pre-Sync Hooks:** If a `pre-sync.sh` script exists in the stack folder (e.g., for setting up external Docker networks or migrating data folders), it is executed. These scripts are designed to be idempotent.
 5.  **Garbage Collection (GC):** The script checks the host data in `/opt/appdata/<STACK_NAME>`. If it finds a folder for an app that no longer exists in Git, it dynamically stops the container and permanently deletes the host data. This ensures no orphaned data is left behind.
 6.  **Apply State:** Finally, it runs `docker compose pull -q` (to fetch new image updates) followed by `docker compose up -d --remove-orphans`.

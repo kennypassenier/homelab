@@ -12,7 +12,7 @@ Inside each LXC container, a synchronization script (`scripts/container/node-syn
 
 ### What happens during a sync?
 1. **Git Pull:** The container pulls the latest changes from the `main` branch. Thanks to Git Sparse Checkouts, it only downloads its specific `stacks/<stack_name>` directory and the shared scripts.
-2. **Transparent Decryption:** The Git SOPS smudge filter automatically decrypts any updated `.env` files using the Age key provisioned during bootstrap.
+
 3. **Pre-Sync Hooks:** If the script finds a `pre-sync.sh` executable in the stack or app directories, it runs it. This is used for idempotent setup tasks, such as creating external Docker networks or fixing file permissions before containers start.
 4. **Garbage Collection (GC):** The script compares the application directories present in Git with the data directories on the host (`/opt/appdata/<stack_name>`). If an app has been removed from Git, the GC routine automatically stops the container, removes it, and completely deletes the orphaned configuration data on the host.
 5. **Deployment:** Finally, it recursively finds all `docker-compose.yml` files, runs `docker compose pull -q` to fetch updated images (if tags changed), and executes `docker compose up -d --remove-orphans` to apply the declarative state.
@@ -32,7 +32,7 @@ All output from `node-sync.sh` is written to `/var/log/node-sync.log` using stru
    git commit -m "feat(<stack_name>): add <app_name>"
    git push
    ```
-6. Within 5 minutes, the container will detect the new folder, decrypt the `.env`, and spin up the new Docker container automatically.
+6. Within 5 minutes, the container will detect the new folder, read the `.env` (if present), and spin up the new Docker container automatically.
 
 ### Updating Applications
 *   **Configuration Updates (Declarative):** If you need to change a port, volume, or environment variable, simply edit the file locally, commit, and push. The 5-minute cronjob will apply the change.

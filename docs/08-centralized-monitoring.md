@@ -31,7 +31,7 @@ Setting up a Promtail agent in a new stack is completely automated by our GitOps
 
 1.  **Generation:** When you run `./client.sh` and select **`1. Create a new Stack`**, the wizard will ask if you want to include a central Promtail container.
 2.  **Environment Expansion:** Promtail configurations (`config.yml`) usually require hardcoding the IP address of the Loki server. To avoid committing static IP addresses to Git, we launch Promtail with the `-config.expand-env=true` flag.
-3.  **Encrypted Injection:** The Loki IP is stored in the stack's `.env` file as `LOKI_IP=10.10.10.x`. This file is encrypted via SOPS. When the `node-sync.sh` script deploys the stack on the server, it decrypts the `.env` file, and Docker Compose injects the `LOKI_IP` dynamically into the Promtail configuration.
+3.  **Environment Injection:** The Loki IP is stored in the stack's `.env` file as `LOKI_IP=10.10.10.x`. When the `node-sync.sh` script deploys the stack on the server, Docker Compose injects the `LOKI_IP` dynamically into the Promtail configuration.
 
 ---
 

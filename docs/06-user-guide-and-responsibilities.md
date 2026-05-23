@@ -21,14 +21,14 @@ As the administrator of this homelab, your manual interactions are limited to th
 
 ### A. Infrastructure Configuration (Using the Managers)
 You are responsible for generating templates and orchestrating high-level changes using the central manager scripts:
-*   **`./client.sh` (Local Workstation):** Use this to initialize Ground Zero encryption, generate new Stack/App templates, safely remove Apps/Stacks (with double confirmation), and register new SSH aliases.
+*   **`./client.sh` (Local Workstation):** Use this to generate new Stack/App templates, safely remove Apps/Stacks (with double confirmation), and register new SSH aliases.
 *   **`./host.sh` (Proxmox Server):** Use this to bootstrap brand new LXC containers, force a manual Restic backup, enable GPU passthrough, enable TUN passthrough (for VPN stacks like `downloader` — auto-detects whether it's needed from the stack's compose files), or reset a corrupted stack.
 *   **`./container.sh` (Inside LXC):** Use this if you are impatient and want to manually trigger the GitOps sync instead of waiting for the 5-minute cronjob. The stack name is auto-detected from the cron job — no input needed.
 
 ### B. Defining the State (Code & Secrets)
 *   **Editing `docker-compose.yml`:** You must define the Docker images, ports, volumes, and labels for your stacks.
-*   **Managing `.env` files:** You write your secrets into `.env` files locally. You are responsible for ensuring that you have initialized Ground Zero so that Git automatically encrypts these files via SOPS/Age before pushing.
-*   **Safeguarding Keys:** You are solely responsible for securely storing your Age master passphrase in a password manager (e.g., Bitwarden). If you lose this, you lose access to all encrypted secrets.
+*   **Managing `.env` files:** You write your secrets into `.env` files locally. Do not commit them to version control. No encryption or decryption is used—just keep `.env` files out of Git.
+
 
 ### C. External Infrastructure (GUI Tasks)
 The GitOps loop cannot control external hardware or hypervisor-level networking. You must manually:
@@ -44,7 +44,7 @@ Once you have pushed your changes to the `main` branch, the homelab's automation
 ### A. The 5-Minute Reconciliation Loop
 Every 5 minutes, a cronjob inside every LXC container wakes up and performs the following sequence without any human input:
 1.  **Pulls** the latest Git commits using Sparse Checkout (only downloading what it needs).
-2.  **Decrypts** any changed `.env` files automatically in memory using the Age key.
+2.  **Reads** any changed `.env` files for secrets (if present). No decryption or key is used.
 3.  **Executes** any `pre-sync.sh` scripts idempotently (e.g., creating Docker networks).
 4.  **Deploys** the updated `docker-compose.yml` state (`docker compose up -d --remove-orphans`).
 
@@ -77,13 +77,13 @@ Here is exactly how you handle common tasks, illustrating the split between your
 1.  **User:** Run `./client.sh` -> *Create a new App inside a Stack*.
 2.  **User:** Edit the generated `docker-compose.yml` and `.env` to suit your needs.
 3.  **User:** `git add .`, `git commit -m "feat: add app"`, and `git push`.
-4.  **System:** Waits 0-5 minutes. Pulls the code, decrypts the `.env`, and starts the container.
+4.  **System:** Waits 0-5 minutes. Pulls the code, reads the `.env` (if present), and starts the container.
 
 ### Scenario 2: Changing an Environment Variable
 1.  **User:** Open the `.env` file locally (it is automatically decrypted for you by the Git clean filter).
 2.  **User:** Change the value.
-3.  **User:** `git add .`, `git commit`, `git push`. (Git encrypts it via the smudge filter).
-4.  **System:** Pulls the new encrypted file, decrypts it on the node, notices the config change, and recreates the specific Docker container.
+3.  **User:** `git add .`, `git commit`, `git push`.
+4.  **System:** Pulls the new `.env` file, notices the config change, and recreates the specific Docker container.
 
 ### Scenario 3: Deleting an App
 1.  **User:** Run `./client.sh` -> *Remove an App*.
@@ -105,5 +105,4 @@ While day-to-day operations are automated, you are responsible for the following
 
 - [ ] **Proxmox Host Updates:** Periodically log into the Proxmox Web GUI or SSH into the host to run `apt update && apt upgrade` to keep the hypervisor secure.
 - [ ] **OPNsense Updates:** Keep your router firmware updated.
-- [ ] **Age Key Backup:** Verify at least twice a year that you still know and have access to your Age master passphrase.
 - [ ] **Host Script Sync:** Ensure `./host.sh` -> *Setup Host Cronjob* was run at least once so the host automatically updates its utility scripts from Git.

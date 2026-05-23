@@ -1,6 +1,6 @@
 # Homelab GitOps Architecture
 
-Welcome to the Homelab GitOps repository. This project contains the infrastructure as code (IaC) and configuration for managing a homelab environment using Proxmox, LXC containers, Docker, and transparent Git encryption (SOPS + Age).
+Welcome to the Homelab GitOps repository. This project contains the infrastructure as code (IaC) and configuration for managing a homelab environment using Proxmox, LXC containers, and Docker.
 
 ## 🚀 Quick Start: Central Managers
 
@@ -15,12 +15,12 @@ For ease of use, all operations have been bundled into three central interactive
 To keep the root of this repository clean and maintainable, all detailed documentation has been moved to the `docs/` directory. Please refer to the following files for in-depth information:
 
 - **[Part 1: Architecture](docs/01-architecture.md)**: High-level overview of GitOps, LXC, Storage, Secrets, and the sync loop.
-- **[Part 2: Ground Zero](docs/02-ground-zero.md)**: Initializing SOPS and Age encryption on your local workstation.
+- **[Part 2: Ground Zero](docs/02-ground-zero.md)**: (Deprecated) Initializing secrets management on your local workstation.
 - **[Part 3: Bootstrapping & Networking](docs/03-bootstrapping-and-networking.md)**: Creating LXCs, static IPs, and SSH config.
 - **[Part 4: GitOps & Lifecycle](docs/04-gitops-and-lifecycle.md)**: The 5-minute sync loop, app updates, and GC.
 - **[Part 5: Backups & Host](docs/05-backups-and-host-management.md)**: Restic backups, GPU passthrough, and host sync.
 - **[Part 6: User Guide & Responsibilities](docs/06-user-guide-and-responsibilities.md)**: Clear mapping of manual user actions vs. automated system processes.
-- **[Part 7: Troubleshooting & Debugging](docs/07-troubleshooting-and-debugging.md)**: Common sync errors, SOPS failures, and permission fixes.
+- **[Part 7: Troubleshooting & Debugging](docs/07-troubleshooting-and-debugging.md)**: Common sync errors and permission fixes.
 - **[Part 8: Centralized Monitoring](docs/08-centralized-monitoring.md)**: Viewing container logs via Loki, Promtail, and Grafana.
 - **[Contributing Guidelines](docs/CONTRIBUTING.md)**: Core design principles, coding standards, and best practices (DRY, shared UI libraries, idempotency, safety, etc.). **Must read** before contributing.
 - **[LLM Context](docs/LLM_CONTEXT.md)**: Essential context and rules for LLMs (like Claude, ChatGPT, Gemini) assisting with this project.
@@ -32,7 +32,7 @@ homelab/
 ├── stacks/                   # Individual application configurations (Docker Compose, .env)
 ├── docs/                   # Detailed documentation and guidelines (Wiki)
 ├── scripts/                # Individual script modules (client, host, container, shared)
-├── secrets/                # Encrypted Age private key
+├── secrets/                # (Legacy) Encrypted secrets (no longer used)
 ├── client.sh               # Central manager for local workstation actions
 ├── host.sh                 # Central manager for Proxmox host actions
 └── container.sh            # Central manager for container actions

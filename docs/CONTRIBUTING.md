@@ -50,7 +50,7 @@ Scripts must be robust and produce no unexpected side effects when run repeatedl
 - **Idempotency:** Running a script multiple times must always produce the same end state. Check before modifying — e.g., verify an `~/.ssh/config` entry or directory doesn't already exist before creating it.
 - **Traps & rollbacks:** For scripts that perform multi-step critical operations or create temporary files, always add a `trap` to clean up or roll back on failure or `Ctrl+C`.
 - **Graceful exits:** Exit with a non-zero code on any critical failure. Use `set -e` where appropriate, or explicitly catch and handle errors with clear messages.
-- **Secret management:** Never hardcode passwords, API keys, tokens, or sensitive paths. Use the SOPS/Age infrastructure or local uncommitted `.env` files (`chmod 600`, listed in `.gitignore`).
+- **Secret management:** Never hardcode passwords, API keys, tokens, or sensitive paths. Use local uncommitted `.env` files (`chmod 600`, listed in `.gitignore`).
 - **Destructive actions require double confirmation:** Any script that deletes files, removes stacks/apps, or destroys data must:
   1. Clearly describe what will be deleted — in **red** via `ui_warning` or `C_RED`.
   2. Ask "Are you sure?" and then "Are you **ABSOLUTELY** sure?" before proceeding.

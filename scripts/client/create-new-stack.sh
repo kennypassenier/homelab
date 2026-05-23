@@ -179,4 +179,4 @@ SUCCESS=1
 echo ""
 ui_success "Stack generation completed successfully!"
 ui_info "You can now edit the docker-compose.yml and .env files directly."
-ui_info "When you run 'git add', Git and SOPS will invisibly encrypt the .env files for you."
+

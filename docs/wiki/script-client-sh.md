@@ -23,8 +23,7 @@ Must be run from the repository root (the script checks for `stacks/` and `scrip
 | Remove an App | [remove-app.sh](script-remove-app.md) | Delete an app from Git (triggers GC on next sync) |
 | Remove an entire Stack | [remove-stack.sh](script-remove-stack.md) | Delete a full stack from Git (triggers GC on next sync) |
 | Register SSH alias for a new LXC | [add-ssh.sh](script-add-ssh.md) | Add or update `~/.ssh/config` alias for an LXC |
-| SOPS/Age: First-Time Key Setup | [init-ground-zero.sh](script-init-ground-zero.md) | One-time encryption bootstrap (guarded against re-runs) |
-| SOPS/Age: Restore on New Machine | [restore-client.sh](script-restore-client.md) | Restore Age key and Git filters on a new desktop |
+
 | Exit | — | Exits the menu loop |
 
 ## Key Setup Guard

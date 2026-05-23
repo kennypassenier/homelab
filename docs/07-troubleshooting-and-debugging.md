@@ -28,18 +28,7 @@ The `node-sync.sh` script runs every 5 minutes. If you push a change to Git and 
 *   **Invalid Compose Syntax:** If you made a typo in your `docker-compose.yml`, `docker compose up` will throw a YAML parsing error and abort the deployment.
     *   **The Fix:** Fix the typo in your local Git repository on your workstation, commit, and push. Trigger the sync again.
 
-## 2. SOPS & Age Decryption Failures
 
-If your containers start but immediately crash because they cannot connect to databases or APIs, they might be missing their decrypted `.env` files.
-
-### Symptoms
-*   The `.env` file inside the container's app directory contains encrypted SOPS metadata instead of plaintext variables.
-*   The `node-sync.sh` output shows: `Failed to decrypt file`.
-
-### The Fix
-1. **Check the Key:** Ensure the private Age key exists in the container at `/opt/gitops/secrets/age.key` and is in plaintext (starts with `AGE-SECRET-KEY-`).
-2. **Bootstrap Failure:** If the key is missing or still encrypted, the bootstrap process likely failed to decrypt `secrets/age.key.enc` due to a wrong passphrase.
-3. **Manual Recovery:** You can manually decrypt the key on the Proxmox host and inject it, or simply use the host manager (`./host.sh` -> **`4. Reset a corrupted Stack`**) and rebuild the LXC, ensuring you type the correct Age passphrase this time.
 
 ## 3. Container CrashLoopBackOff & Permissions
 

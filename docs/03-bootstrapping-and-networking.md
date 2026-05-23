@@ -60,7 +60,7 @@ The script is fully interactive. It will ask for the VMID of the container you j
 1. **Storage Binding:** It mounts the fast NVMe host storage (`/opt/appdata/<STACK_NAME>`) directly into the container at `/appdata`.
 2. **Provisioning:** It installs Docker, Docker Compose, and `unattended-upgrades` inside the unprivileged LXC.
 3. **Sparse Checkout:** It uses your GitHub PAT to securely clone *only* the specific `stacks/<STACK_NAME>` directory and the `scripts/` directory, saving disk space.
-4. **Decryption:** It uses your Age passphrase to unlock the `secrets/age.key.enc` file, permanently enabling the container to decrypt its `.env` files.
+
 5. **SSH Access:** It pulls your public SSH keys from GitHub so you can access the container seamlessly.
 6. **MAC Address:** At the very end, it outputs the unique MAC address of the container. 
 

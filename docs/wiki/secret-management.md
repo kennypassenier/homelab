@@ -1,13 +1,6 @@
 # Secret Management
 
 Secrets (API keys, passwords, tokens) are stored in local uncommitted `.env` files alongside the `docker-compose.yml` they belong to. Do not commit `.env` files to version control. SOPS/Age is no longer used. All previous scripts for SOPS/Age setup or restore have been removed.
-4. Encrypt the private key with a passphrase → `secrets/age.key.enc`
-5. Configure the Git smudge/clean filters
-
-Commit `.sops.yaml`, `.gitattributes`, and `secrets/age.key.enc` to Git. **Never commit** `~/.config/sops/age/keys.txt`.
-
-
-
 ## Working with `.env` Files
 
 ```bash
@@ -40,7 +33,7 @@ The `.*` regex matches all files (not just `.env`) to avoid stdin filename match
 
 - **Never pass `AGE_PASSPHRASE` or `GITHUB_PAT` as CLI arguments** — they would be visible in `ps aux`. Always use a `.env` file on the host or interactive prompts.
 - `.env` files in `scripts/host/` are not committed and should be `chmod 600` on the Proxmox host.
-- The encrypted `secrets/age.key.enc` is useless without the passphrase — it is safe to commit.
+
 
 ## See also
 

@@ -28,7 +28,7 @@ Must be run from the repository root (the script checks for `stacks/` and `scrip
 
 ## Key Setup Guard
 
-Before launching `init-ground-zero.sh`, `client.sh` checks whether `secrets/age.key.enc` already exists. If it does, it shows two confirmation prompts with red warnings explaining that re-running would overwrite the key and make all existing encrypted `.env` files permanently unreadable.
+
 
 ## See also
 

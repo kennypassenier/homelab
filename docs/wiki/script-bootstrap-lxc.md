@@ -43,7 +43,7 @@ The script uses `pct exec <VMID>` to run commands inside the LXC:
 3. **Install SOPS** — downloads the v3.9.1 binary
 4. **Clone the repository** — sparse checkout of only `stacks/<STACK_NAME>/` and `scripts/` to keep the LXC footprint small, stored at `/opt/gitops`
 5. **Configure Git filters** — same smudge/clean filter as on the client
-6. **Restore Age key** — decrypts `secrets/age.key.enc` using `AGE_PASSPHRASE` via `openssl`
+
 7. **Run initial node-sync** — triggers the first deployment
 8. **Install cron job** — writes `/etc/cron.d/gitops-sync` with a `*/5 * * * *` schedule
 9. **TUN auto-detection** — scans the stack's compose files for `/dev/net/tun`; if found, calls [enable-tun.sh](script-enable-tun.md) automatically

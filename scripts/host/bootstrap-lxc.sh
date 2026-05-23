@@ -233,8 +233,8 @@ ui_success "Dependencies installed."
 ui_step "Injecting GitOps synchronization script..."
 # No SOPS/Age or encrypted secrets logic remains. Only GitOps sync logic is injected as needed.
 
-ui_step "Executing sparse checkout and decrypting secrets..."
-pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${STACK_NAME} ${GITHUB_PAT} ${AGE_PASSPHRASE}"
+ui_step "Executing sparse checkout..."
+pct exec "${VMID}" -- bash -c "chmod +x /root/sparse-setup.sh && /root/sparse-setup.sh ${STACK_NAME} ${GITHUB_PAT}"
 ui_success "Sparse checkout complete."
 
 # Step 6: Push GitHub Public Key for SSH access

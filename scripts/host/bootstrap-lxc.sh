@@ -4,6 +4,26 @@
 # Script Name: bootstrap-lxc.sh
 # Description: Bootstraps an LXC container interactively, configures fast local SSD storage, and sets up the environment.
 
+# shellcheck disable=SC1091,SC2086,SC2155
+# bootstrap-lxc.sh — Proxmox LXC GitOps Bootstrapper
+#
+# This script bootstraps an LXC container for a GitOps-managed stack.
+#
+# Features:
+#   - Ensures host and container storage is set up and mounted
+#   - Injects only INFISICAL_ secrets into the container (never GITHUB_PAT)
+#   - Installs Docker, Infisical CLI, and security updates
+#   - Robustly creates all /appdata/<stack>/<app> directories
+#   - Handles TUN passthrough if needed
+#   - Idempotent and safe for repeated runs
+#   - Provides clear, color-coded output and error handling
+#
+# Usage: Run as root on the Proxmox host from the repo root.
+#
+# Inputs: VMID, STACK_NAME, GITHUB_USERNAME, GITHUB_PAT (via .env or prompt)
+#
+# Guarantees: After completion, the LXC is ready for GitOps sync and secrets are available for Infisical CLI.
+
 set -euo pipefail
 
 # Source the shared UI library
@@ -253,11 +273,18 @@ fi
 
 # Step 3b: Copy only INFISICAL_ variables from host .env into the container's /root/.env and /etc/environment
 ui_step "Copying INFISICAL_ variables from host .env into container..."
-if grep '^INFISICAL_' scripts/host/.env > /dev/null 2>&1; then
-    grep '^INFISICAL_' scripts/host/.env > /tmp/infisical.env
-    pct push "${VMID}" "/tmp/infisical.env" "/root/.env"
-    pct exec "${VMID}" -- bash -c "grep '^INFISICAL_' /root/.env >> /etc/environment"
-    rm -f /tmp/infisical.env
+infisical_tmp_env=$(mktemp)
+trap 'rm -f "$infisical_tmp_env"' EXIT
+if grep '^INFISICAL_' "scripts/host/.env" > /dev/null 2>&1; then
+    grep '^INFISICAL_' "scripts/host/.env" > "$infisical_tmp_env"
+    if ! pct push "${VMID}" "$infisical_tmp_env" "/root/.env"; then
+        ui_error "Failed to push INFISICAL_ env file to container."
+        exit 1
+    fi
+    if ! pct exec "${VMID}" -- bash -c "grep '^INFISICAL_' /root/.env >> /etc/environment"; then
+        ui_error "Failed to append INFISICAL_ variables to /etc/environment in container."
+        exit 1
+    fi
     ui_success "INFISICAL_ variables copied to /root/.env and /etc/environment in container."
 else
     ui_warning "No INFISICAL_ variables found in scripts/host/.env; skipping copy."
@@ -297,7 +324,7 @@ ui_success "SSH key configured."
 # truncates the live file, so the log never grows unbounded.
 ui_step "Configuring 5-minute GitOps reconciliation loop..."
 pct exec "${VMID}" -- bash -c "
-        echo '*/5 * * * * root ${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME} >> /var/log/node-sync.log 2>&1' > /etc/cron.d/gitops-sync
+    echo '*/5 * * * * root ${GITOPS_DIR}/scripts/container/node-sync.sh ${STACK_NAME} >> /var/log/node-sync.log 2>&1' > /etc/cron.d/gitops-sync
         cat > /etc/logrotate.d/node-sync <<'LOGROTATE'
 /var/log/node-sync.log {
     daily
@@ -306,6 +333,24 @@ pct exec "${VMID}" -- bash -c "
     missingok
     notifempty
 }
+LOGROTATE
+"
+ui_success "Cronjob configured."
+
+# Final summary
+echo ""
+ui_info "=== Bootstrap Summary ==="
+ui_info "Container VMID: ${VMID}"
+ui_info "Stack: ${STACK_NAME}"
+ui_info "Host storage: ${HOST_STORAGE_PATH}"
+ui_info "LXC mount: ${LXC_MOUNT_POINT}"
+if pct exec "${VMID}" -- test -d /appdata; then
+    ui_success "/appdata is present in the container."
+else
+    ui_warning "/appdata is NOT present in the container! Check mount configuration."
+fi
+ui_info "INFISICAL_ variables present in /root/.env: $(pct exec "${VMID}" -- bash -c 'grep -c ^INFISICAL_ /root/.env 2>/dev/null || echo 0')"
+echo "========================="
 LOGROTATE
     "
 ui_success "Cronjob configured."

@@ -1,3 +1,4 @@
+export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
 #!/usr/bin/env bash
 # Maak het gedeelde netwerk aan als het nog niet bestaat
 docker network create paperless_network 2>/dev/null || true

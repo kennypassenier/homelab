@@ -1,3 +1,4 @@
+export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
 #!/usr/bin/env bash
 # Script Name: pre-sync.sh
 # Description: Pre-sync hook for the media stack. Automatically executed by node-sync.sh.

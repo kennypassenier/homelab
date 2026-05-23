@@ -1,3 +1,4 @@
+export $(cat /proc/1/environ | tr '\0' '\n' | grep '^INFISICAL_' | xargs)
 #!/usr/bin/env bash
 set -euo pipefail
 

@@ -52,7 +52,8 @@ while true; do
             ;;
         5)
             echo ""
-            ./scripts/host/reset-stack.sh
+            read -r -p "${UI_INDENT}Enter the VMID of the LXC to reset: " vmid
+            ./scripts/host/reset-stack.sh -y "$vmid"
             ;;
         6)
             echo ""

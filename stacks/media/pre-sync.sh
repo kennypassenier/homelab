@@ -38,5 +38,11 @@ fi
 # Ensure proper permissions for Seerr (Fixes EACCES crash loop after migration)
 if [ -d "/appdata/media/seerr" ]; then
     echo "[pre-sync] Ensuring correct ownership for Seerr data (1000:1000)..."
+
+# Generate .env for jellyfin
+infisical export --env=prod --path=media/jellyfin/.env > /appdata/media/jellyfin/.env
+
+# Generate .env for promtail from shared/promtail
+infisical export --env=prod --path=shared/promtail/.env > /appdata/media/promtail/.env
     chown -R 1000:1000 /appdata/media/seerr
 fi

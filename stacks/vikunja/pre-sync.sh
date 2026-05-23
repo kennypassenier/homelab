@@ -15,3 +15,8 @@ VIKUNJA_DATA="/appdata/vikunja/vikunja/config"
 if [[ -d "$VIKUNJA_DATA" ]]; then
     chown -R 1000:1000 "$VIKUNJA_DATA"
 fi
+
+# Generate .env for vikunja
+infisical export --env=prod --path=vikunja/vikunja/.env > /appdata/vikunja/vikunja/.env
+# Generate .env for promtail from shared/promtail
+infisical export --env=prod --path=shared/promtail/.env > /appdata/vikunja/promtail/.env

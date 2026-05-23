@@ -1,3 +1,15 @@
+# Inject Infisical Machine Identity credentials as environment variables into the LXC container
+if [[ -f "scripts/host/.env" ]]; then
+    CLIENT_ID=$(grep '^INFISICAL_CLIENT_ID=' scripts/host/.env | cut -d= -f2-)
+    CLIENT_SECRET=$(grep '^INFISICAL_CLIENT_SECRET=' scripts/host/.env | cut -d= -f2-)
+    if [[ -n "$CLIENT_ID" && -n "$CLIENT_SECRET" ]]; then
+        ui_step "Injecting INFISICAL_CLIENT_ID and INFISICAL_CLIENT_SECRET into LXC container environment..."
+        pct set "$VMID" -ef INFISICAL_CLIENT_ID="$CLIENT_ID" -ef INFISICAL_CLIENT_SECRET="$CLIENT_SECRET"
+        ui_success "INFISICAL_CLIENT_ID and INFISICAL_CLIENT_SECRET injected as environment variables."
+    else
+        ui_warning "INFISICAL_CLIENT_ID or INFISICAL_CLIENT_SECRET not found in scripts/host/.env; skipping environment injection."
+    fi
+fi
 #!/usr/bin/env bash
 # Script Name: bootstrap-lxc.sh
 # Description: Bootstraps an LXC container interactively, configures fast local SSD storage, installs SOPS, and decrypts keys.
@@ -213,8 +225,8 @@ pct start "${VMID}" || true
 sleep 5
 ui_success "Container started."
 
-# Step 4: Install dependencies including Docker, Age, SOPS, and unattended-upgrades
-ui_step "Installing dependencies (Docker, Age, SOPS, security updates)..."
+# Step 4: Install dependencies including Docker, Age, SOPS, Infisical CLI, and unattended-upgrades
+ui_step "Installing dependencies (Docker, Age, SOPS, Infisical CLI, security updates)..."
 pct exec "${VMID}" -- bash -c "
 apt-get update && apt-get install -y curl git wget openssl jq unattended-upgrades
 dpkg-reconfigure -f noninteractive unattended-upgrades
@@ -223,6 +235,9 @@ wget -qO /usr/local/bin/sops https://github.com/getsops/sops/releases/download/v
 chmod +x /usr/local/bin/sops
 wget -qO- https://github.com/FiloSottile/age/releases/download/v1.1.1/age-v1.1.1-linux-amd64.tar.gz | tar -xzf - -C /tmp/
 mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
+# Install Infisical CLI (Debian/Ubuntu)
+curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash
+apt-get update && apt-get install -y infisical
 "
 ui_success "Dependencies installed."
 

@@ -187,17 +187,10 @@ pct set "${VMID}" -mp0 "${HOST_STORAGE_PATH},mp=${LXC_MOUNT_POINT}"
 ui_success "Storage mounted."
 
 
-# Step 2a: Ensure /appdata and all /appdata/<stack>/<app> directories exist inside the container before any automation runs
-ui_step "Ensuring /appdata and all app subdirectories exist inside the container..."
-pct exec "${VMID}" -- mkdir -p /appdata
-for app_dir in stacks/${STACK_NAME}/*/; do
-    app_name=$(basename "$app_dir")
-    # Skip non-directories (e.g. pre-sync.sh, stack-mounts.yml)
-    if [[ -d "$app_dir" ]]; then
-        pct exec "${VMID}" -- mkdir -p "/appdata/${STACK_NAME}/${app_name}"
-    fi
-done
-ui_success "/appdata and all app subdirectories ensured."
+
+# Step 2a: Ensure /appdata and all /appdata/<stack>/<app> directories exist inside the container after it is started
+# This must be done after pct start, as the mount is only available then
+
 
 # Step 2b: Auto-detect if any compose file in this stack requires /dev/net/tun (e.g. gluetun).
 # If so, configure TUN passthrough on the LXC *before* the container starts — the config
@@ -227,11 +220,41 @@ EOF
     fi
 fi
 
+
 # Step 3: Start the container
 ui_step "Starting LXC container ${VMID}..."
 pct start "${VMID}" || true
 sleep 5
 ui_success "Container started."
+
+# Step 3a: Ensure /appdata and all app subdirectories exist inside the container (robust, with retries)
+ui_step "Ensuring /appdata and all app subdirectories exist inside the container..."
+max_retries=10
+retry_delay=2
+success=0
+for attempt in $(seq 1 $max_retries); do
+    if pct exec "${VMID}" -- test -d /appdata; then
+        pct exec "${VMID}" -- mkdir -p /appdata
+        for app_dir in stacks/${STACK_NAME}/*/; do
+            app_name=$(basename "$app_dir")
+            # Skip non-directories (e.g. pre-sync.sh, stack-mounts.yml)
+            if [[ -d "$app_dir" ]]; then
+                pct exec "${VMID}" -- mkdir -p "/appdata/${STACK_NAME}/${app_name}"
+            fi
+        done
+        success=1
+        break
+    else
+        ui_warning "/appdata not available in container yet (attempt $attempt/$max_retries), retrying in ${retry_delay}s..."
+        sleep $retry_delay
+    fi
+done
+if [[ $success -eq 1 ]]; then
+    ui_success "/appdata and all app subdirectories ensured."
+else
+    ui_error "/appdata mount did not become available in the container after $((max_retries * retry_delay)) seconds."
+    exit 1
+fi
 
 ui_step "Installing dependencies (Docker, Infisical CLI, security updates)..."
 pct exec "${VMID}" -- bash -c "

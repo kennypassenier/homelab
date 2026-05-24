@@ -1,0 +1,121 @@
+# Homelab Features — Expanded & Explained
+
+## 1. Centralized Log Aggregation (Promtail + Loki)
+- **What:** All container logs are collected and shipped to a central Loki server using Promtail.
+- **How:** Each stack includes a Promtail container configured to tail logs from all apps in that stack. Logs are structured (logfmt) for easy searching and filtering in Grafana.
+- **Where:** Used in every stack (downloader, media, monitoring, paperless, etc.).
+- **Why:** Enables unified log search, troubleshooting, and alerting across the entire homelab.
+
+## 2. Automated Container Updates (Watchtower)
+- **What:** Containers are automatically updated to the latest image versions.
+- **How:** Watchtower runs as a service in each stack, monitoring for new image versions and restarting containers as needed.
+- **Where:** All stacks.
+- **Why:** Ensures security patches and new features are applied without manual intervention.
+
+## 3. GitOps-Driven Configuration & Deployment
+- **What:** All stack and app configurations are managed in Git and automatically applied to running containers.
+- **How:** node-sync.sh runs every 5 minutes in each LXC, pulling the latest changes from Git, running pre-sync scripts, and applying docker-compose changes.
+- **Where:** All stacks, via node-sync.sh and pre-sync.sh.
+- **Why:** Guarantees reproducibility, easy rollback, and auditability of all changes.
+
+## 4. .env-Based Secrets Management
+- **What:** All secrets (API keys, passwords, tokens) are stored in .env files, not in code or Git.
+- **How:** .env files are injected into containers at runtime and sourced by scripts.
+- **Where:** All stacks and apps.
+- **Why:** Keeps secrets out of version control and allows for easy rotation.
+
+## 5. Pre-Sync Script Automation
+- **What:** Each stack can have a pre-sync.sh script that runs before docker-compose up.
+- **How:** Used for tasks like exporting secrets, seeding config files, or preparing directories.
+- **Where:** downloader/pre-sync.sh (exports Infisical secrets, seeds qBittorrent config), media/pre-sync.sh, etc.
+- **Why:** Automates one-off or per-deploy setup steps, ensuring containers always start with the right config.
+
+## 6. Healthchecks and Dependency Management
+- **What:** Containers can depend on the health of other containers before starting.
+- **How:** For example, qBittorrent uses network_mode: service:gluetun and only starts when Gluetun’s VPN tunnel is healthy (checked via wget to 127.0.0.1:9999).
+- **Where:** downloader stack (qBittorrent + Gluetun).
+- **Why:** Prevents leaks (e.g., no torrenting without VPN) and ensures correct startup order.
+
+## 7. TUN Device Passthrough for VPN Containers
+- **What:** VPN containers (like Gluetun) require access to the TUN device for WireGuard/OpenVPN.
+- **How:** bootstrap-lxc.sh and host.sh scripts auto-detect if a stack needs TUN and configure the LXC accordingly.
+- **Where:** downloader stack, any stack using VPNs.
+- **Why:** Ensures VPN containers work out-of-the-box without manual LXC tweaks.
+
+## 8. Garbage Collection of Orphaned App Data
+- **What:** If an app is removed from Git, its containers are stopped and its data is deleted automatically.
+- **How:** node-sync.sh detects missing app folders and triggers cleanup.
+- **Where:** All stacks.
+- **Why:** Prevents orphaned data from filling up disks and keeps the system tidy.
+
+## 9. Centralized Management Scripts (client.sh, host.sh, container.sh)
+- **What:** Interactive CLI menus for all major management tasks (create, remove, reset, sync, enable TUN, etc.).
+- **How:** Scripts in the repo root provide a unified interface for both host and container operations.
+- **Where:** Used on both the Proxmox host and inside LXCs.
+- **Why:** Simplifies management and reduces the risk of manual errors.
+
+## 10. Structured Logging for Sync Operations
+- **What:** node-sync.sh emits logs in logfmt format, with fields for timestamp, level, stack, app, and message.
+- **How:** Promtail parses these logs and sends them to Loki with appropriate labels.
+- **Where:** All stacks.
+- **Why:** Enables powerful filtering and alerting in Grafana.
+
+## 11. Auto-Provisioning of Grafana Datasources
+- **What:** Grafana is configured to automatically add Loki as a datasource on startup.
+- **How:** Provisioning files in /appdata/monitoring/grafana.
+- **Where:** monitoring stack.
+- **Why:** Ensures logs are always available in Grafana without manual setup.
+
+## 12. Remote Path Mappings for Media Automation
+- **What:** Sonarr, Radarr, and other media managers use remote path mappings to translate download client paths to their own filesystem.
+- **How:** Configured in the Arr suite’s Web UI.
+- **Where:** media stack.
+- **Why:** Allows seamless import of downloads, even if the download client and media manager see different paths.
+
+## 13. Centralized Reverse Proxy (Nginx Proxy Manager)
+- **What:** All web UIs are routed through a single, user-friendly reverse proxy.
+- **How:** Nginx Proxy Manager container, with CrowdSec integration for security.
+- **Where:** gateway stack.
+- **Why:** Simplifies access, enables SSL, and provides a single point for access control and monitoring.
+
+## 14. Security Integrations (CrowdSec)
+- **What:** CrowdSec protects the reverse proxy and other services from abuse and attacks.
+- **How:** Integrated with Nginx Proxy Manager.
+- **Where:** gateway stack.
+- **Why:** Adds an active security layer to your homelab.
+
+## 15. Automated Healthchecks and Service Restarts
+- **What:** Containers are monitored for health, and unhealthy containers are restarted automatically.
+- **How:** Docker Compose healthcheck directives and Watchtower.
+- **Where:** All stacks, especially downloader (Gluetun healthcheck).
+- **Why:** Ensures high availability and self-healing.
+
+## 16. Bind-Mounted Persistent Storage
+- **What:** All important data is stored on the host (or fileserver) and bind-mounted into containers.
+- **How:** /appdata/<stack>/<app> and /mnt/downloads are mounted into containers.
+- **Where:** All stacks.
+- **Why:** Ensures data survives container or LXC recreation and is easy to back up.
+
+## 17. Automated Backups (Restic)
+- **What:** The host runs Restic to back up all /appdata folders, pausing containers as needed to prevent data corruption.
+- **How:** Host-side backup scripts with container labels for pause/resume.
+- **Where:** Proxmox host.
+- **Why:** Provides reliable, consistent backups of all critical data.
+
+## 18. Gum TUI Integration for Scripts
+- **What:** Management scripts use Gum for rich, interactive terminal UIs when available.
+- **How:** lib-ui.sh auto-detects Gum and switches to TUI mode.
+- **Where:** All management scripts.
+- **Why:** Improves usability and reduces errors in interactive sessions.
+
+## 19. Automatic TUN Passthrough Detection
+- **What:** Scripts detect if a stack needs TUN and configure the LXC automatically.
+- **How:** bootstrap-lxc.sh and host.sh.
+- **Where:** Any stack using VPNs.
+- **Why:** Removes manual steps and ensures VPN containers always work.
+
+## 20. Cron-Driven GitOps Sync
+- **What:** node-sync.sh is run every 5 minutes via cron in each LXC.
+- **How:** Configured by bootstrap-lxc.sh.
+- **Where:** All stacks.
+- **Why:** Ensures all changes in Git are applied quickly and automatically.

@@ -7,6 +7,15 @@
 All persistent container data is stored on the Proxmox host — not inside the LXC filesystem. This means data survives LXC resets, and backups only need to target one location on the host. The LXC has access to its data through an unprivileged bind mount.
 
 ## Directory Structure
+## Automatic Directory Creation for Bind-Mounts
+
+All benodigde bind-mount directories voor persistentie worden automatisch aangemaakt op de Proxmox host vóórdat containers starten. Dit voorkomt dat containers zonder bind-mounts opstarten (en data verliezen) en garandeert dat alle data altijd op de juiste plek op de host staat.
+
+- Bij elke (her)deploy of nieuwe stack/app creatie parsen de `pre-sync.sh` scripts en de `create-new-stack.sh`/`create-new-app.sh` scripts de `docker-compose.yml` en maken automatisch alle benodigde directories aan in `/opt/appdata/<stack>/<app>`.
+- Dit gebeurt volledig GitOps-gedreven: de directorystructuur op de host volgt altijd de declaratieve state in Git.
+- Hierdoor is recovery/migratie eenvoudiger en is het risico op dataverlies door ontbrekende bind-mounts geminimaliseerd.
+
+Zie ook: [pre-sync.sh](script-bootstrap-lxc.md), [create-new-stack.sh](script-create-new-stack.md), [create-new-app.sh](script-create-new-app.md).
 
 ```
 Proxmox Host (NVMe SSD)

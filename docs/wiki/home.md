@@ -10,10 +10,10 @@
 |---|---|
 | [Architecture Overview](architecture-overview.md) | Three-tier diagram: client → host → containers |
 | [GitOps Flow](gitops-flow.md) | How `node-sync.sh` syncs the repo to running containers |
-| [Secret Management](secret-management.md) | SOPS + Age encryption for `.env` files |
-| [Storage Layout](storage-layout.md) | Proxmox host paths and bind mounts into LXCs |
+| [Secret Management](secret-management.md) | SOPS + Age encryption & dynamic secrets provisioning (Infisical) |
+| [Storage Layout](storage-layout.md) | Proxmox host paths, bind mounts & automatische directory-creatie |
 | [Networking](networking.md) | Static IPs, SSH aliases, per-stack Docker networks |
-| [Backups](backups.md) | Restic backup process with container pause/resume |
+| [Backups](backups.md) | Restic backup, automatische OS security updates |
 
 ---
 

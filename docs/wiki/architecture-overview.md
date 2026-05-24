@@ -67,6 +67,15 @@ Changes to infrastructure are always made through Git — never by running comma
 | Networking | Static IPs via DHCP, SSH aliases | [networking.md](networking.md) |
 | Backups | Restic with container pause/resume | [backups.md](backups.md) |
 
+## Automated OS Security Updates (unattended-upgrades)
+
+Alle Debian/Ubuntu-gebaseerde containers ontvangen automatische security updates voor het besturingssysteem. Tijdens het bootstrappen van een nieuwe LXC installeert en configureert het script `bootstrap-lxc.sh` unattended-upgrades, zodat kritieke beveiligingspatches zonder handmatige tussenkomst worden toegepast.
+
+- Dit verkleint het aanvalsoppervlak en houdt het systeem veilig met minimale inspanning.
+- De status van unattended-upgrades is te controleren in de container via `systemctl status unattended-upgrades`.
+
+Zie ook: [script-bootstrap-lxc.md](script-bootstrap-lxc.md).
+
 ## See also
 
 - [GitOps Flow](gitops-flow.md)

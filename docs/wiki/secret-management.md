@@ -42,3 +42,12 @@ The `.*` regex matches all files (not just `.env`) to avoid stdin filename match
 - [script-bootstrap-lxc.md](script-bootstrap-lxc.md)
 - [GitOps Flow](gitops-flow.md)
 - [Architecture Overview](architecture-overview.md)
+
+## Dynamic Secrets Provisioning (Infisical)
+
+Secrets en gevoelige configuratie worden automatisch geëxporteerd vanuit Infisical naar .env-bestanden per stack/app. Dit gebeurt via de pre-sync.sh scripts vóórdat containers starten, zodat alle apps hun secrets als environment variables krijgen.
+
+- De Infisical CLI wordt aangeroepen door pre-sync.sh om secrets veilig te exporteren naar de juiste .env-bestanden.
+- Hierdoor blijven secrets buiten Git, is rotatie en beheer eenvoudig, en hebben containers altijd up-to-date secrets bij elke (her)deploy.
+
+Zie ook: [pre-sync.sh](script-bootstrap-lxc.md).

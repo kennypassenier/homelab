@@ -161,8 +161,27 @@
 - **Where:** Any stack using VPNs.
 - **Why:** Removes manual steps and ensures VPN containers always work.
 
+
 ## 20. Cron-Driven GitOps Sync
 - **What:** node-sync.sh is run every 5 minutes via cron in each LXC.
 - **How:** Configured by bootstrap-lxc.sh.
 - **Where:** All stacks.
 - **Why:** Ensures all changes in Git are applied quickly and automatically.
+
+## 21. Automated OS Security Updates (unattended-upgrades)
+- **What:** All Debian/Ubuntu-based containers receive automatic security updates for the OS.
+- **How:** The bootstrap-lxc.sh script installs and configures unattended-upgrades in every LXC, ensuring critical security patches are applied without manual intervention.
+- **Where:** All LXCs (hosted containers).
+- **Why:** Reduces attack surface and keeps the base system secure with minimal effort.
+
+## 22. Automatic Directory Creation for Bind-Mounts
+- **What:** All required bind-mount directories for persistent data/config are auto-created on de Proxmox host vóór containers starten.
+- **How:** pre-sync.sh en de create-new-stack/app scripts parsen docker-compose.yml en maken automatisch alle benodigde directories aan in /opt/appdata/<stack>/<app>.
+- **Where:** Alle stacks en apps, bij elke (her)deploy of nieuwe stack/app creatie.
+- **Why:** Voorkomt dat containers zonder bind-mounts starten (en data verliezen), maakt recovery/migratie eenvoudiger, en garandeert dat data altijd op de juiste plek op de host staat.
+
+## 23. Dynamic Secrets Provisioning (Infisical)
+- **What:** Secrets en gevoelige config worden automatisch geëxporteerd vanuit Infisical naar .env-bestanden per stack/app.
+- **How:** pre-sync.sh scripts roepen Infisical CLI aan om secrets te exporteren vóór containers starten, zodat alle apps hun secrets als environment variables krijgen.
+- **Where:** Alle stacks/apps die secrets nodig hebben.
+- **Why:** Houdt secrets veilig buiten Git, maakt rotatie en beheer eenvoudig, en zorgt dat containers altijd up-to-date secrets hebben.

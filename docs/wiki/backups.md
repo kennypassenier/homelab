@@ -6,6 +6,8 @@
 
 Backups are centralised on the Proxmox host using [Restic](https://restic.net/). Because all container data is stored on the host at `/opt/appdata` (see [storage-layout.md](storage-layout.md)), a single Restic run covers every stack. Containers that hold databases or critical state are paused during the backup to avoid file corruption.
 
+Naast back-ups is er een extra beschermingslaag: automatische OS security updates (unattended-upgrades) worden in elke LXC geconfigureerd tijdens het bootstrappen. Hierdoor worden kritieke beveiligingspatches automatisch toegepast, wat het risico op kwetsbaarheden minimaliseert. Zie [architecture-overview.md](architecture-overview.md#automated-os-security-updates-unattended-upgrades).
+
 ## How It Works
 
 The backup is run by [backup-stacks.sh](script-backup-stacks.md) (`scripts/host/backup-stacks.sh`).

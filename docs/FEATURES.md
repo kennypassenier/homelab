@@ -6,11 +6,58 @@
 - **Where:** Used in every stack (downloader, media, monitoring, paperless, etc.).
 - **Why:** Enables unified log search, troubleshooting, and alerting across the entire homelab.
 
+
 ## 2. Automated Container Updates (Watchtower)
-- **What:** Containers are automatically updated to the latest image versions.
-- **How:** Watchtower runs as a service in each stack, monitoring for new image versions and restarting containers as needed.
-- **Where:** All stacks.
-- **Why:** Ensures security patches and new features are applied without manual intervention.
+- **What:** Containers are automatically updated to the latest image versions, but only if explicitly enabled.
+- **How:** Watchtower runs as a service in each stack, monitoring for new image versions and restarting containers as needed. Only containers with the label `com.centurylinklabs.watchtower.enable=true` are updated. This allows you to exclude critical apps (like Jellyfin during streaming, or database-backed services) from auto-updates to prevent downtime or data loss. Watchtower is also labeled to update itself in every stack.
+- **Advanced:** Watchtower supports lifecycle hooks (pre/post-update commands) to check for active streams or database locks before updating (not always used, but supported by the system). 
+- **Where:** All stacks, with selective enablement per app in docker-compose.yml.
+- **Why:** Ensures security patches and new features are applied without manual intervention, while protecting critical workloads from unwanted restarts.
+## 2a. Watchtower Tag-Based Update Control
+- **What:** Fine-grained control over which containers are updated automatically.
+- **How:** By omitting or setting `com.centurylinklabs.watchtower.enable=false` on a service, it is excluded from Watchtower updates. This is used for apps like Jellyfin (to avoid updates during streaming) and for database containers.
+- **Where:** All stacks, especially media and database-backed apps.
+- **Why:** Prevents downtime or data corruption during critical operations.
+## 2b. Watchtower Lifecycle Hooks (Supported)
+- **What:** Ability to run scripts before/after updating a container (e.g., check for active streams, block updates if busy).
+- **How:** By setting Watchtower lifecycle labels (e.g., `com.centurylinklabs.watchtower.lifecycle.pre-update-command`).
+- **Where:** Supported in all stacks, can be enabled as needed.
+- **Why:** Adds safety for stateful or user-facing services.
+## 6a. Custom Healthchecks and Dependency Order
+- **What:** Ensures containers only start when dependencies are healthy (e.g., VPN up before torrenting).
+- **How:** Uses Docker Compose healthchecks and `depends_on` with `condition: service_healthy`.
+- **Where:** downloader/qbittorrent (waits for Gluetun VPN), other stacks as needed.
+- **Why:** Prevents leaks and ensures correct startup order.
+## 6b. Custom Network Modes
+- **What:** Some services share a network stack for security (e.g., VPN chaining).
+- **How:** `network_mode: service:<name>` in docker-compose.yml.
+- **Where:** downloader/qbittorrent uses Gluetun's network stack.
+- **Why:** Ensures all traffic is routed through VPN.
+## 6c. Entrypoint/Command Overrides
+- **What:** Some containers override the default entrypoint or command for custom startup logic (e.g., Promtail, Cloudflared, Paperless AI Assistant).
+- **How:** Set in docker-compose.yml via `entrypoint:` or `command:`.
+- **Where:** Various stacks.
+- **Why:** Enables advanced configuration and integration.
+## 6d. User/Group/Capabilities
+- **What:** Some containers run as root (`user: "0:0"`) or with extra capabilities (`cap_add`, `devices`) for hardware or network access.
+- **How:** Set in docker-compose.yml.
+- **Where:** monitoring/grafana, downloader/qbittorrent, etc.
+- **Why:** Required for certain hardware or privileged operations.
+## 7a. GPU Passthrough for Hardware Acceleration
+- **What:** Hardware acceleration for containers (e.g., Jellyfin transcoding) is enabled via safe LXC GPU passthrough.
+- **How:** The `enable-gpu.sh` script configures the LXC for Intel/AMD GPU passthrough by appending the correct cgroup and mount entries to the LXC config. Bind mounts `/dev/dri/card0` and `/dev/dri/renderD128` are used for device access.
+- **Where:** Any stack/app needing hardware video acceleration (media stack, Jellyfin, etc.).
+- **Why:** Enables efficient video transcoding and hardware-accelerated workloads.
+## 7b. Bind Mounts for Hardware Devices
+- **What:** Host GPU devices are bind-mounted into containers for direct access.
+- **How:** LXC config and docker-compose volumes.
+- **Where:** Media stack, or any app needing GPU access.
+- **Why:** Required for hardware acceleration.
+## 9a. .env-Driven Secrets and Dynamic Config
+- **What:** All secrets and dynamic config are injected at runtime via `.env` files, never hardcoded.
+- **How:** All scripts and compose files source `.env` files for secrets and config.
+- **Where:** All stacks and apps.
+- **Why:** Ensures security, flexibility, and easy rotation of secrets.
 
 ## 3. GitOps-Driven Configuration & Deployment
 - **What:** All stack and app configurations are managed in Git and automatically applied to running containers.

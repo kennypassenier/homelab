@@ -1,3 +1,13 @@
+# --- Auto-create all /appdata bind-mount directories from docker-compose.yml (for new app) ---
+COMPOSE_FILE="stacks/${STACK_NAME}/${APP_NAME}/docker-compose.yml"
+if [ -f "$COMPOSE_FILE" ]; then
+    grep '^[[:space:]]*-[[:space:]]*/appdata' "$COMPOSE_FILE" | cut -d: -f1 | sed 's/^[[:space:]]*-[[:space:]]*//' | while read DIR; do
+        if [ ! -d "$DIR" ]; then
+            mkdir -p "$DIR"
+            ui_info "[create-new-app] Aangemaakt: $DIR"
+        fi
+    done
+fi
 #!/usr/bin/env bash
 # Script Name: create-new-app.sh
 # Description: Generates a new application template within an existing stack using shared library functions.

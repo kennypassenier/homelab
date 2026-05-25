@@ -1,3 +1,57 @@
+# LLM Context — GitOps Proxmox Homelab (2026, Rust Architecture)
+
+This file provides the essential context and rules for LLMs (Claude, ChatGPT, Gemini, etc.) assisting with this project. **Always read this file first at the start of a new session.**
+## 1. Architecture Overview (Authoritative Source)
+
+The homelab is now managed by a 3-tier Rust architecture:
+- **CLIENT:** Desktop TUI (Ratatui) for scaffolding, management, and GitOps triggers. Handles all stack/app creation, directory scaffolding, SSH alias management, and advanced docker-compose.yml generation (Traefik, Watchtower, healthchecks, permissions, VPN, restart policies). No shell scripts are used for management.
+- **HOST:** Proxmox host daemon (Ratatui) for LXC provisioning, persistent storage management, atomic hardware passthrough (GPU/TUN), and backup orchestration. All host logic is implemented in Rust; legacy scripts are fully deprecated.
+- **LXC:** Rust daemon (Ratatui) running inside each LXC container, responsible for GitOps sync, secrets management (Ephemeral Secrets Container), atomic mount validation, container orchestration, and telemetry. All sync, secrets, and validation logic is handled here. No bash scripts remain.
+**All legacy scripts and tools are fully deprecated:** client.sh, host.sh, container.sh, node-sync.sh, pre-sync.sh, enable-gpu.sh, enable-tun.sh, backup-stacks.sh, reset-stack.sh, Infisical, Nginx Proxy Manager, Gum, SOPS/Age.
+
+**Reverse proxy and security:** Traefik (with CrowdSec Bouncer middleware) is the only supported reverse proxy. Nginx Proxy Manager is not used anywhere.
+**Secrets:** Managed by a short-lived Ephemeral Secrets Container, not by scripts or Infisical. No secrets are ever committed to Git or managed by shell scripts.
+
+**TUI/UX:** All terminal UIs use Ratatui. Gum is not used anywhere.
+**Storage:** All persistent data is managed by the HOST daemon and bind-mounted from /opt/appdata/<STACK> on the Proxmox host. CLIENT scaffolding ensures all directories exist before deployment.
+
+**Backups:** Orchestrated by the HOST daemon using Restic, with API-driven pause/resume for safe backups.
+**Networking:** Static IPs via DHCP reservations (OPNsense), SSH via ~/.ssh/config aliases. VPN kill-switch enforced via network_mode: service:gluetun in compose files.
+
+**Observability:** Promtail ships all logs to Loki; Grafana dashboards are auto-provisioned and require no manual edits.
+**All features and requirements are now mapped and tracked in:**
+  - docs/architecture.md (global rules, architecture, and infrastructure)
+  - docs/client-features.md (CLIENT TUI requirements)
+  - docs/host-features.md (HOST daemon requirements)
+  - docs/lxc-features.md (LXC daemon requirements)
+
+**FEATURES.md is deprecated.**
+## 2. Strict LLM Instructions (Rules)
+
+1. **ALWAYS ASK PERMISSION:** NEVER execute terminal commands or file edits unprompted. Always explain your plan first, show the code/commands, and wait for an explicit "go" from the user.
+2. **Keep documentation up-to-date:** Whenever architecture, code, or CLI flags change, update docs/README.md and relevant tier docs in the same iteration.
+3. **Context Check:** Assume the terminal is on the Linux desktop unless explicitly logged into the host or a container. Never run host or container commands in a client context.
+4. **Contributing Guidelines:** Always follow docs/CONTRIBUTING.md for code style, DRY, UI/UX, idempotency, and error handling.
+5. **GitOps first — always:** Never suggest direct fixes inside containers or on the host. All changes must be made in Git and applied via the GitOps flow.
+
+## 3. Tier Responsibilities (Summary)
+- **CLIENT:**
+  - Scaffolds stacks/apps, generates all docker-compose.yml with advanced features (Traefik, Watchtower, healthchecks, permissions, VPN, restart policies)
+  - Manages SSH aliases and directory structure
+  - Triggers GitOps sync via HTTP Push API to LXC
+  - Provides a premium Ratatui TUI for all workflows
+
+- **HOST:**
+  - Proxmox LXC provisioning, hardware passthrough (GPU/TUN), persistent storage management
+  - Orchestrates backups (Restic) with API-driven pause/resume
+  - All logic in Rust, no shell scripts
+
+- **LXC:**
+  - Handles all GitOps sync, secrets management (Ephemeral Secrets Container), atomic mount validation, container orchestration, and telemetry
+  - Provides a Ratatui TUI for in-container management
+  - No bash scripts or legacy tools
+
+**For full requirements and implementation details, always consult architecture.md and the three x-features.md files.**
 # LLM Context - GitOps Proxmox Homelab
 
 This file contains the essential context and rules for LLMs (such as Claude, ChatGPT, Gemini) that assist in building and maintaining this project. **Always read this file first at the start of a new session.**

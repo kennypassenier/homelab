@@ -15,12 +15,10 @@ pub fn generate_mac_address() -> String {
     mac.join(":")
 }
 
-/// Data for the docker-compose template.
+/// Data for the app service in docker-compose.
 #[derive(Template)]
 #[template(
     source = r#"
-version: '3.8'
-services:
   {{ app_name }}:
     image: your-image:latest
     container_name: {{ app_name }}
@@ -32,19 +30,62 @@ services:
     networks:
       default:
         mac_address: {{ mac_address }}
+"#,
+    ext = "yml"
+)]
+pub struct AppServiceTemplate<'a> {
+    pub app_name: &'a str,
+    pub mac_address: &'a str,
+    pub domain_name: &'a str,
+}
+
+/// Data for the stack-level docker-compose template (includes app, Watchtower, Promtail)
+#[derive(Template)]
+#[template(
+    source = r#"
+version: '3.8'
+services:
+{{ app_service }}
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    environment:
+      - DOCKER_API_VERSION=1.41
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --cleanup --label-enable
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    command: -config.file=/etc/promtail/config.yml -config.expand-env=true
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 networks:
   default:
     driver: bridge
 "#,
     ext = "yml"
 )]
-pub struct AppTemplate<'a> {
-    pub app_name: &'a str,
-    pub mac_address: &'a str,
-    pub domain_name: &'a str,
+pub struct StackTemplate<'a> {
+    pub app_service: String,
 }
 
-/// Renders the docker-compose template to a String.
-pub fn scaffold_app(template: &AppTemplate) -> Result<String, askama::Error> {
-    template.render()
+/// Render only the app service YAML (for single-app compose or sub-apps)
+pub fn scaffold_app(app: &AppServiceTemplate) -> Result<String, askama::Error> {
+    app.render()
+}
+
+/// Render a full stack docker-compose.yml with app, Watchtower, and Promtail
+pub fn scaffold_stack(app: &AppServiceTemplate) -> Result<String, askama::Error> {
+    let app_service = scaffold_app(app)?;
+    let stack = StackTemplate { app_service };
+    stack.render()
 }

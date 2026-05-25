@@ -74,3 +74,9 @@ Task 5: Update the event loop. If ActiveModal is open, route all keyboard inputs
 
 **Copilot Prompt 2 (AI Context File):**
 `Write a markdown file named docs/LLM_CONTEXT_CLIENT.md targeted at future AI Agents. Explicitly state the "Core Principles": NEVER runs on Proxmox, Git=God (no SSH execution for deployments), and the Blast Radius validation. List the core Rust crates used and detail the architectural flow of the HTTP Push API and SSE telemetry mechanism.`
+## Stap 1.8: Legacy client.sh Feature Parity
+**Copilot Prompt:**
+`We need to ensure full feature parity with our old bash-based 'client.sh'. 
+Task 1: Extend the Scaffolding module to specifically handle the "Create new Stack" and "Create new App" workflows. It must dynamically generate docker-compose.yml templates that automatically include our standard Watchtower and Promtail boilerplate (as described in our GitOps specs).
+Task 2: Ensure the HostManagement tab includes the logic for the old 'add-ssh.sh' script. Create a function that parses the local ~/.ssh/config and idempotently adds or updates an SSH alias with a new LXC container's IP address, without corrupting existing entries.
+Task 3: Ensure the Blast Radius module covers both 'Remove App' and 'Remove Stack', triggering the correct Git deletion and commit sequence before pushing.`

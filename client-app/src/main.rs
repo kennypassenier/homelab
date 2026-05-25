@@ -19,6 +19,7 @@ use ratatui::{
 };
 use std::io;
 use tokio::runtime::Runtime;
+use tokio::signal;
 mod gitops;
 mod scaffold;
 mod theme;
@@ -93,57 +94,76 @@ async fn async_main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     let mut app = App::new();
 
-    loop {
-        terminal.draw(|f| {
-            let size = f.size();
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3), // Top bar
-                    Constraint::Min(0),    // Main content
-                ])
-                .split(size);
+    // Create a signal handler for SIGINT (Ctrl+C) and pin it for tokio::select!
+    let mut sigint = signal::ctrl_c();
+    tokio::pin!(sigint);
 
-            // Top Bar: Tabs
-            let tab_titles: Vec<_> = Tab::all().iter().map(|t| t.title()).collect();
-            let tabs = Tabs::new(tab_titles)
-                .select(app.active_tab)
-                .block(
-                    Block::default()
+    loop {
+        // Use tokio::select! to handle both key events and SIGINT
+        tokio::select! {
+            _ = &mut sigint => {
+                // SIGINT received
+                break;
+            }
+            res = async {
+                terminal.draw(|f| {
+                    let size = f.size();
+                    let chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Length(3), // Top bar
+                            Constraint::Min(0),    // Main content
+                        ])
+                        .split(size);
+
+                    // Top Bar: Tabs
+                    let tab_titles: Vec<_> = Tab::all().iter().map(|t| t.title()).collect();
+                    let tabs = Tabs::new(tab_titles)
+                        .select(app.active_tab)
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .border_type(BorderType::Rounded)
+                                .title("Homelab Client")
+                                .style(app.theme.border_style()),
+                        )
+                        .highlight_style(app.theme.tab_style(true))
+                        .style(app.theme.tab_style(false));
+                    f.render_widget(tabs, chunks[0]);
+
+                    // Main Content
+                    let main_block = Block::default()
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
-                        .title("Homelab Client")
-                        .style(app.theme.border_style()),
-                )
-                .highlight_style(app.theme.tab_style(true))
-                .style(app.theme.tab_style(false));
-            f.render_widget(tabs, chunks[0]);
+                        .title(app.active_tab().title())
+                        .style(app.theme.border_style());
+                    let content = Paragraph::new(app.active_tab().title())
+                        .block(main_block)
+                        .style(Style::default().fg(app.theme.text));
+                    f.render_widget(content, chunks[1]);
+                })?;
 
-            // Main Content
-            let main_block = Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(app.active_tab().title())
-                .style(app.theme.border_style());
-            let content = Paragraph::new(app.active_tab().title())
-                .block(main_block)
-                .style(Style::default().fg(app.theme.text));
-            f.render_widget(content, chunks[1]);
-        })?;
-
-        // Handle key events
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let event::Event::Key(key) = event::read()? {
-                use crossterm::event::{KeyCode, KeyEventKind};
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') => break,
-                        KeyCode::Left => app.prev_tab(),
-                        KeyCode::Right => app.next_tab(),
-                        _ => {}
+                // Handle key events
+                if event::poll(std::time::Duration::from_millis(100))? {
+                    if let event::Event::Key(key) = event::read()? {
+                        use crossterm::event::{KeyCode, KeyEventKind};
+                        if key.kind == KeyEventKind::Press {
+                            match key.code {
+                                KeyCode::Char('q') => return Err(std::io::Error::new(std::io::ErrorKind::Other, "quit")),
+                                KeyCode::Left => app.prev_tab(),
+                                KeyCode::Right => app.next_tab(),
+                                _ => {}
+                            }
+                        }
                     }
                 }
-            }
+                Ok(()) as std::io::Result<()> // Explicit type
+            } => {
+                // If the async block returns an error, break the loop (e.g., on 'q')
+                if res.is_err() {
+                    break;
+                }
+            },
         }
     }
     disable_raw_mode()?;

@@ -1,7 +1,7 @@
 //! Scaffolding logic and docker-compose template rendering for Homelab Client.
 use askama::Template;
-use rand::{Rng, thread_rng};
 use rand::prelude::SliceRandom;
+use rand::{Rng, thread_rng};
 
 /// Generates a random Locally Administered MAC address (first octet ends in 2, 6, A, or E).
 pub fn generate_mac_address() -> String {

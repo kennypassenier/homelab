@@ -74,7 +74,7 @@ networks:
 "#,
     ext = "yml"
 )]
-pub struct StackTemplate<'a> {
+pub struct StackTemplate {
     pub app_service: String,
 }
 

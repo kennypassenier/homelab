@@ -20,10 +20,15 @@ use ratatui::{
 use std::io;
 use tokio::runtime::Runtime;
 use tokio::signal;
+mod blast_radius;
 mod gitops;
 mod scaffold;
 mod theme;
+use crate::blast_radius::{ActiveModal, draw_warning_modal};
 use crate::theme::Theme;
+use std::fs;
+use tui_input::Input;
+use tui_input::backend::crossterm::EventHandler;
 
 /// Enum representing the available tabs in the UI.
 #[derive(Copy, Clone, Debug)]
@@ -50,6 +55,9 @@ impl Tab {
 struct App {
     active_tab: usize,
     theme: Theme,
+    modal: ActiveModal,
+    // For demo: selected app/stack name (would be dynamic in real app)
+    selected_name: String,
 }
 
 impl App {
@@ -57,6 +65,8 @@ impl App {
         Self {
             active_tab: 0,
             theme: Theme::cyberpunk(),
+            modal: ActiveModal::None,
+            selected_name: "demo-app".to_string(),
         }
     }
     fn next_tab(&mut self) {
@@ -99,23 +109,18 @@ async fn async_main() -> Result<()> {
     tokio::pin!(sigint);
 
     loop {
-        // Use tokio::select! to handle both key events and SIGINT
         tokio::select! {
-            _ = &mut sigint => {
-                // SIGINT received
-                break;
-            }
+            _ = &mut sigint => { break; }
             res = async {
                 terminal.draw(|f| {
                     let size = f.size();
                     let chunks = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([
-                            Constraint::Length(3), // Top bar
-                            Constraint::Min(0),    // Main content
+                            Constraint::Length(3),
+                            Constraint::Min(0),
                         ])
                         .split(size);
-
                     // Top Bar: Tabs
                     let tab_titles: Vec<_> = Tab::all().iter().map(|t| t.title()).collect();
                     let tabs = Tabs::new(tab_titles)
@@ -130,39 +135,68 @@ async fn async_main() -> Result<()> {
                         .highlight_style(app.theme.tab_style(true))
                         .style(app.theme.tab_style(false));
                     f.render_widget(tabs, chunks[0]);
-
-                    // Main Content
-                    let main_block = Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
-                        .title(app.active_tab().title())
-                        .style(app.theme.border_style());
-                    let content = Paragraph::new(app.active_tab().title())
-                        .block(main_block)
-                        .style(Style::default().fg(app.theme.text));
-                    f.render_widget(content, chunks[1]);
+                    // Main Content or Modal
+                    match &app.modal {
+                        ActiveModal::DeleteConfirmation { app_name, input } => {
+                            draw_warning_modal(f, size, app_name, input);
+                        }
+                        ActiveModal::None => {
+                            let main_block = Block::default()
+                                .borders(Borders::ALL)
+                                .border_type(BorderType::Rounded)
+                                .title(app.active_tab().title())
+                                .style(app.theme.border_style());
+                            let content = Paragraph::new(app.active_tab().title())
+                                .block(main_block)
+                                .style(Style::default().fg(app.theme.text));
+                            f.render_widget(content, chunks[1]);
+                        }
+                    }
                 })?;
-
                 // Handle key events
                 if event::poll(std::time::Duration::from_millis(100))? {
                     if let event::Event::Key(key) = event::read()? {
                         use crossterm::event::{KeyCode, KeyEventKind};
                         if key.kind == KeyEventKind::Press {
-                            match key.code {
-                                KeyCode::Char('q') => return Err(std::io::Error::new(std::io::ErrorKind::Other, "quit")),
-                                KeyCode::Left => app.prev_tab(),
-                                KeyCode::Right => app.next_tab(),
-                                _ => {}
+                            match &mut app.modal {
+                                ActiveModal::DeleteConfirmation { app_name, input } => {
+                                    use crossterm::event::KeyCode;
+                                    if key.code == KeyCode::Esc {
+                                        app.modal = ActiveModal::None;
+                                    } else if key.code == KeyCode::Enter {
+                                        if input.value() == app_name {
+                                            // Delete folder, commit, push
+                                            let path = format!("stacks/{}", app_name);
+                                            let _ = fs::remove_dir_all(&path); // ignore error for demo
+                                            let _ = gitops::commit_and_push(".", &format!("Delete {}", app_name));
+                                            app.modal = ActiveModal::None;
+                                        }
+                                    } else {
+                                        input.handle_event(&event::Event::Key(key));
+                                    }
+                                }
+                                ActiveModal::None => {
+                                    match key.code {
+                                        KeyCode::Char('q') => return Err(std::io::Error::new(std::io::ErrorKind::Other, "quit")),
+                                        KeyCode::Left => app.prev_tab(),
+                                        KeyCode::Right => app.next_tab(),
+                                        KeyCode::Char('d') => {
+                                            // Open modal for demo app/stack
+                                            app.modal = ActiveModal::DeleteConfirmation {
+                                                app_name: app.selected_name.clone(),
+                                                input: Input::default(),
+                                            };
+                                        }
+                                        _ => {}
+                                    }
+                                }
                             }
                         }
                     }
                 }
-                Ok(()) as std::io::Result<()> // Explicit type
+                Ok(()) as std::io::Result<()>
             } => {
-                // If the async block returns an error, break the loop (e.g., on 'q')
-                if res.is_err() {
-                    break;
-                }
+                if res.is_err() { break; }
             },
         }
     }

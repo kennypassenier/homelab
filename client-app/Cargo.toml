@@ -1,0 +1,22 @@
+[package]
+name = "client-app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = "0.26"
+crossterm = "0.27"
+tokio = { version = "1.38", features = ["full"] }
+anyhow = "1.0"
+color-eyre = "0.6"
+askama = "0.12"
+rand = "0.8"
+git2 = "0.18"
+serde_yaml = "0.9"
+reqwest = { version = "0.12", features = ["stream"] }
+reqwest-eventsource = "0.5"
+tui-input = "0.8"
+
+[[bin]]
+name = "CLIENT"
+path = "src/main.rs"

@@ -1,52 +1,68 @@
 {
-  "id": null,
-  "title": "Homelab Logs (Universal)",
-  "tags": ["logs", "homelab"],
-  "timezone": "browser",
-  "schemaVersion": 37,
-  "version": 1,
-  "refresh": "10s",
-  "panels": [
-    {
-      "type": "logs",
-      "title": "Logs",
-      "gridPos": {"h": 20, "w": 24, "x": 0, "y": 0},
-      "options": {
-        "showLabels": true,
-        "showTime": true,
-        "wrapLogMessage": true,
-        "dedupStrategy": "none"
-      },
-      "targets": [
+    "id": null,
+    "title": "Homelab Logs (Universal)",
+    "tags": [
+        "logs",
+        "homelab"
+    ],
+    "timezone": "browser",
+    "schemaVersion": 37,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
         {
-          "expr": "{stack=~\"$stack\", app=~\"$app\"}",
-          "refId": "A"
+            "type": "logs",
+            "title": "Logs",
+            "gridPos": {
+                "h": 20,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "options": {
+                "showLabels": true,
+                "showTime": true,
+                "wrapLogMessage": true,
+                "dedupStrategy": "none"
+            },
+            "targets": [
+                {
+                    "expr": "{stack=~\"$stack\", app=~\"$app\"}",
+                    "refId": "A"
+                }
+            ]
         }
-      ]
+    ],
+    "templating": {
+        "list": [
+            {
+                "name": "stack",
+                "type": "query",
+                "datasource": "Loki",
+                "query": "label_values(stack)",
+                "refresh": 1,
+                "includeAll": true,
+                "multi": false,
+                "current": {
+                    "selected": false,
+                    "text": "All",
+                    "value": ""
+                }
+            },
+            {
+                "name": "app",
+                "type": "query",
+                "datasource": "Loki",
+                "query": "label_values(app)",
+                "refresh": 1,
+                "includeAll": true,
+                "multi": false,
+                "current": {
+                    "selected": false,
+                    "text": "All",
+                    "value": ""
+                }
+            }
+        ]
     }
-  ],
-  "templating": {
-    "list": [
-      {
-        "name": "stack",
-        "type": "query",
-        "datasource": "Loki",
-        "query": "label_values(stack)",
-        "refresh": 1,
-        "includeAll": true,
-        "multi": false,
-        "current": {"selected": false, "text": "All", "value": ""}
-      },
-      {
-        "name": "app",
-        "type": "query",
-        "datasource": "Loki",
-        "query": "label_values(app)",
-        "refresh": 1,
-        "includeAll": true,
-        "multi": false,
-        "current": {"selected": false, "text": "All", "value": ""}
-      }
-    ]
-  }
 }

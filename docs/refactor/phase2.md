@@ -9,6 +9,15 @@ Task 2: Add crates: ratatui, crossterm, tokio, axum, bollard, git2, anyhow, colo
 Task 3: Write a main.rs that sets up a Ratatui terminal backend using crossterm, WITH a color-eyre panic hook that calls disable_raw_mode().
 Task 4: Implement a basic TUI loop that shows a Dashboard tab with dummy stats and a log viewer pane.`
 
+## Stap 2.1b: Premium UI/UX & Styling Requirements
+**Copilot Prompt:**
+`CRITICAL UI/UX INSTRUCTIONS: Just like the Client application, the Ratatui interface for this LXC Daemon MUST be hyper-modern, highly polished, and visually stunning. 
+Task 1: Implement a centralized styling module with vibrant but professional colors (e.g., Cyan/Magenta accents, dark grey backgrounds).
+Task 2: All Layout blocks must use rounded borders (BorderType::Rounded) with appropriate padding. 
+Task 3: Implement visual feedback: active tabs must be highlighted, background sync states must use animated spinners in the UI, and error logs must stand out in high-contrast Red.
+Task 4: Modals must render as floating, centered pop-ups with a shadow effect.`
+
+
 ## Stap 2.2: File-Locking & De HTTP Push-API
 **Copilot Prompt:**
 `We need to implement a concurrency lock and an HTTP API server using axum.
@@ -49,6 +58,14 @@ Task 2: Write deploy_stack(compose_path: &str) that reads GitOps YAML.
 Task 3: Use bollard to pull images, stop existing containers, and start new ones.
 Task 4: CRITICAL: Implement rollback logic. If the start command fails or a container crashes within 10 seconds, automatically attempt to restart the previously running image IDs and return an Error.
 Task 5: Send events to the SSE stream.`
+
+## Stap 2.6b: Pre-Deploy Hooks & Webhook Alerting
+**Copilot Prompt:**
+`We need to implement Pre-Deploy hooks and Webhook alerting for rollbacks.
+Task 1: Before triggering the bollard deployment, check if a file named 'hooks/setup.sh' exists in the target stack directory. If it exists, execute it using tokio::process::Command. This replaces the old bash 'pre-sync.sh' logic for creating external Docker networks.
+Task 2: If the execution of the hook fails, abort the deployment and return an Error.
+Task 3: Implement an alerting mechanism. If a deployment fails and triggers the rollback logic from Step 2.6, use 'reqwest' to send an HTTP POST request to a Webhook URL (e.g., Discord or Ntfy) loaded from the system environment variables. Inform the user about the exact stack that failed and triggered a rollback.`
+
 
 ## Stap 2.7: Garbage Collection (Git = God)
 **Copilot Prompt:**

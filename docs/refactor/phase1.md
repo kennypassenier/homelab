@@ -10,6 +10,15 @@ Task 3: Write a main.rs that sets up a basic Ratatui terminal backend using cros
 CRITICAL: You MUST implement a robust panic hook (using color-eyre or standard panic handlers) that guarantees disable_raw_mode() is called and the terminal state is fully restored if the application crashes or exits unexpectedly. 
 Task 4: Implement a basic run-loop that draws a blank screen with the text "Homelab Client - Press 'q' to exit" and handles the 'q' keypress to gracefully exit. Keep it in a single file for now.`
 
+## Stap 1.1b: Premium UI/UX & Styling Requirements
+**Copilot Prompt:**
+`CRITICAL UI/UX INSTRUCTIONS: This is not a basic terminal app. The Ratatui interface MUST be hyper-modern, highly polished, and visually stunning ("fancy"). 
+Task 1: Implement a centralized styling module (e.g., a theme or color palette struct) using vibrant but professional colors (e.g., Cyan/Magenta accents, dark grey backgrounds).
+Task 2: All Layout blocks must use rounded borders (`BorderType::Rounded`) with appropriate padding and margins. 
+Task 3: Implement visual feedback for all user actions: active tabs must be distinctly highlighted, loading states must use animated spinners (e.g., using the `throbber-widgets-tui` or a custom tick-based animation), and error messages must use stark, high-contrast Red styling.
+Task 4: Modals (like the Blast Radius warning) must render as floating, centered pop-ups with a shadow effect (using a darkened background layer beneath them) to create a 3D depth effect in the terminal.
+
+
 ## Stap 1.2: State Machine & Navigatie
 **Copilot Prompt:**
 `Extend our Ratatui application with a State Machine for navigation.

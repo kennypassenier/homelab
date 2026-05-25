@@ -9,6 +9,15 @@ Task 2: Add crates: ratatui, crossterm, tokio, reqwest, serde, serde_json, toml,
 Task 3: Write main.rs setting up a Ratatui TUI with a color-eyre panic hook for disable_raw_mode().
 Task 4: Implement a TUI loop with Tabs: Dashboard, Backups, Settings.`
 
+## Stap 3.1b: Premium UI/UX & Styling Requirements
+**Copilot Prompt:**
+`CRITICAL UI/UX INSTRUCTIONS: The Ratatui interface for this Proxmox Host Daemon MUST match the premium, hyper-modern aesthetic of the rest of the ecosystem.
+Task 1: Implement a centralized styling module using a consistent color palette (e.g., Cyan/Magenta accents, dark grey backgrounds).
+Task 2: Use rounded borders (BorderType::Rounded) for all Layout blocks. 
+Task 3: Ensure dynamic visual feedback: the Dashboard and Backup tabs must highlight when active, Restic backup progress should use animated spinners, and Proxmox API errors must be displayed in high-contrast Red.
+Task 4: Confirmation modals (like rebooting an LXC) must render as floating, centered pop-ups with a shadow effect.`
+
+
 ## Stap 3.2: LXC Provisioning (Proxmox API) & Post-Provisioning Hook
 **Copilot Prompt:**
 `We need to implement LXC provisioning via Proxmox REST API with a Post-Provisioning Hook.

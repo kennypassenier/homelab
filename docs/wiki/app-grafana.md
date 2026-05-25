@@ -18,7 +18,15 @@ Grafana's provisioning directory is mounted directly from the Git repository ins
 /opt/gitops/stacks/monitoring/grafana/provisioning → /etc/grafana/provisioning
 ```
 
+
 This means changes to datasource or dashboard provisioning configs in Git are applied on the next `docker compose up` restart without manual intervention.
+
+## Universal Log Dashboard (Zero Maintenance)
+
+- **What:** Grafana is provisioned with a universal log dashboard (`homelab-logs.json`) that auto-discovers all stacks and apps from Loki log labels.
+- **How:** The dashboard uses template variables for `stack` and `app`, so any new stack/app with Promtail logs appears automatically in the dropdowns—no manual edits needed.
+- **Where:** [stacks/monitoring/grafana/provisioning/dashboards/homelab-logs.json](../../stacks/monitoring/grafana/provisioning/dashboards/homelab-logs.json)
+- **Why:** Ensures all logs are instantly visible and searchable in Grafana, with zero dashboard maintenance. Just add a stack/app with Promtail and its logs appear.
 
 ### Loki Datasource
 

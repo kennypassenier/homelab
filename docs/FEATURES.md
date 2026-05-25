@@ -1,10 +1,11 @@
 # Homelab Features — Expanded & Explained
 
-## 1. Centralized Log Aggregation (Promtail + Loki)
-- **What:** All container logs are collected and shipped to a central Loki server using Promtail.
-- **How:** Each stack includes a Promtail container configured to tail logs from all apps in that stack. Logs are structured (logfmt) for easy searching and filtering in Grafana.
-- **Where:** Used in every stack (downloader, media, monitoring, paperless, etc.).
-- **Why:** Enables unified log search, troubleshooting, and alerting across the entire homelab.
+
+## 1. Centralized Log Aggregation (Promtail + Loki + Universal Grafana Dashboard)
+- **What:** All container logs are collected and shipped to a central Loki server using Promtail. Grafana provides a universal, auto-updating dashboard for all logs.
+- **How:** Each stack includes a Promtail container configured to tail logs from all apps in that stack. Logs are labeled with `stack` and `app` and sent to Loki. A single provisioned Grafana dashboard (see `stacks/monitoring/grafana/provisioning/dashboards/homelab-logs.json`) provides instant access to all logs, with dropdowns to filter by stack and app. New stacks/apps appear automatically—no manual dashboard edits needed.
+- **Where:** Used in every stack (downloader, media, monitoring, paperless, etc.). Logs are viewed in Grafana’s web UI.
+- **Why:** Enables unified log search, troubleshooting, and alerting across the entire homelab, with zero manual dashboard maintenance.
 
 
 ## 2. Automated Container Updates (Watchtower)

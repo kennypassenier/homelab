@@ -16,12 +16,15 @@ pub enum ActiveModal {
         input: Input,
     },
     AppCreationWizard(AppCreationWizardState),
+    SshAddWizard(SshAddWizardState),
     None,
 }
 
 /// State for the multi-step app creation wizard
 pub struct AppCreationWizardState {
     pub stack_name: String,
+    pub app_name: Option<String>,
+    pub docker_image: Option<String>,
     pub step: AppCreationStep,
     pub multiselect_cursor: usize, // for DefaultsMultiselect step
 }
@@ -32,13 +35,17 @@ pub enum AppCreationStep {
         error: Option<String>,
     },
     DockerPrompt {
-        selected: bool,
+        input: Input,
+        error: Option<String>,
     },
     DefaultsMultiselect {
         options: Vec<DefaultServiceOption>,
         selected: Vec<bool>,
     },
-    // Review, Done to be added
+    Review {
+        summary: String,
+    },
+    Done,
 }
 
 pub struct DefaultServiceOption {
@@ -85,9 +92,9 @@ pub fn draw_app_creation_wizard(
                 .style(Style::default().fg(Color::Cyan));
             f.render_widget(para, popup_area);
         }
-        AppCreationStep::DockerPrompt { selected } => {
+        AppCreationStep::DockerPrompt { input, error } => {
             let block = Block::default()
-                .title("Docker Prompt")
+                .title("Docker Image")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(
@@ -96,13 +103,53 @@ pub fn draw_app_creation_wizard(
                         .add_modifier(Modifier::BOLD),
                 );
             let mut text = format!(
-                "Docker image to use:\n> {}\n\n[Enter to continue, ESC to cancel]",
+                "Enter Docker image for app:\n> {}\n\n[Enter to continue, ESC to cancel]",
                 input.value()
             );
+            if let Some(err) = error {
+                text.push_str(&format!("\n\n[Error: {}]", err));
+            }
             let para = Paragraph::new(text)
                 .block(block)
                 .alignment(Alignment::Left)
                 .style(Style::default().fg(Color::Cyan));
+            f.render_widget(para, popup_area);
+        }
+        AppCreationStep::Review { summary } => {
+            let block = Block::default()
+                .title("Review & Confirm")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let text = format!(
+                "Review your new app:\n\n{}\n\n[Enter to create, ESC to cancel]",
+                summary
+            );
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Green));
+            f.render_widget(para, popup_area);
+        }
+        AppCreationStep::Done => {
+            let block = Block::default()
+                .title("App Created!")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let text = "App created and docker-compose.yml written!\n\n[ESC to close]";
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Green));
             f.render_widget(para, popup_area);
         }
         AppCreationStep::DefaultsMultiselect { options, selected } => {
@@ -191,5 +238,109 @@ pub fn draw_delete_app_modal(
         .block(block)
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::Red));
+    f.render_widget(para, popup_area);
+}
+
+// ── SSH Add Wizard ───────────────────────────────────────────────────────────
+
+/// Multi-step state for the SSH alias creation wizard in the Host Management tab.
+pub struct SshAddWizardState {
+    pub step: SshAddStep,
+}
+
+/// Steps in the SSH add wizard.
+pub enum SshAddStep {
+    /// User types the Host alias (e.g. "lxc-media").
+    Alias {
+        input: Input,
+        error: Option<String>,
+    },
+    /// User types the IP address or hostname.
+    Ip {
+        alias: String,
+        input: Input,
+        error: Option<String>,
+    },
+    /// User types the SSH username (default: root).
+    User {
+        alias: String,
+        ip: String,
+        input: Input,
+    },
+    /// The upsert completed — show confirmation.
+    Done { alias: String },
+}
+
+/// Draws the SSH add wizard as a centred popup overlay.
+pub fn draw_ssh_add_wizard(
+    f: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    state: &SshAddWizardState,
+) {
+    let popup_area = Rect {
+        x: area.width / 4,
+        y: area.height / 3,
+        width: area.width / 2,
+        height: 9,
+    };
+    f.render_widget(Clear, popup_area);
+
+    let (title, body) = match &state.step {
+        SshAddStep::Alias { input, error } => {
+            let err_line = error
+                .as_deref()
+                .map(|e| format!("\n{}", e))
+                .unwrap_or_default();
+            (
+                " Add SSH Alias (1/3): Host alias ",
+                format!(
+                    "Enter the SSH alias (e.g. lxc-media):\n> {}{}\n\n[Enter] next  [Esc] cancel",
+                    input.value(),
+                    err_line,
+                ),
+            )
+        }
+        SshAddStep::Ip { alias, input, error } => {
+            let err_line = error
+                .as_deref()
+                .map(|e| format!("\n{}", e))
+                .unwrap_or_default();
+            (
+                " Add SSH Alias (2/3): IP address ",
+                format!(
+                    "Alias: {}\nEnter the IP address:\n> {}{}\n\n[Enter] next  [Esc] cancel",
+                    alias,
+                    input.value(),
+                    err_line,
+                ),
+            )
+        }
+        SshAddStep::User { alias, ip, input } => (
+            " Add SSH Alias (3/3): Username ",
+            format!(
+                "Alias: {}  IP: {}\nEnter username (default: root):\n> {}\n\n[Enter] save  [Esc] cancel",
+                alias,
+                ip,
+                input.value(),
+            ),
+        ),
+        SshAddStep::Done { alias } => (
+            " SSH Alias Saved ",
+            format!(
+                "Alias '{}' written to ~/.ssh/config.\nConnect with: ssh {}\n\n[Enter/Esc] close",
+                alias, alias,
+            ),
+        ),
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Cyan));
+    let para = Paragraph::new(body)
+        .block(block)
+        .alignment(Alignment::Left)
+        .style(Style::default().fg(Color::White));
     f.render_widget(para, popup_area);
 }

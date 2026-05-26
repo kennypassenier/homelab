@@ -405,11 +405,13 @@ async fn async_main() -> Result<()> {
                                                 }
                                                 KeyCode::Enter => {
                                                     // Proceed to multiselect step
+                                                    // If this is a Docker stack, include Traefik as a default option
                                                     let options = vec![
                                                         crate::blast_radius::DefaultServiceOption { label: "Watchtower", description: "Auto-update" },
                                                         crate::blast_radius::DefaultServiceOption { label: "Promtail", description: "Log shipping" },
+                                                        crate::blast_radius::DefaultServiceOption { label: "Traefik", description: "Reverse proxy (Docker stacks only)" },
                                                     ];
-                                                    let selected = vec![true, true];
+                                                    let selected = vec![true, true, true];
                                                     state.step = AppCreationStep::DefaultsMultiselect { options, selected };
                                                     state.multiselect_cursor = 0;
                                                 }

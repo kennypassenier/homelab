@@ -99,7 +99,7 @@ See `refactor/phase1.md` and `refactor/refactor-features.md` for full requiremen
 ## Scaffolding Tab
 - **Dynamic App & Stack Creation:** Interface to scaffold new stacks and apps, generating docker-compose.yml with Traefik, Watchtower, and Promtail boilerplate.
 - **Advanced Configurations:** Support for custom healthchecks, permissions (user/group/capabilities), and VPN network namespaces (e.g., network_mode: service:gluetun).
-- **MAC Address Generator:** Generate safe, random Locally Administered MAC addresses for new LXCs.
+- **MAC Address Generator:** Generate safe, random Locally Administered MAC addresses for new LXCs. The generated MAC is written to the LXC provisioning YAML ("lxc-compose.yml"), ensuring each container has a static, collision-free MAC address for DHCP/static IP assignment.
 - **Pre-Flight Linting & GitOps:** YAML validation (serde_yaml), auto-stage, commit, and push to main branch.
 - **Blast Radius Protection:** Deletion triggers a red floating modal with 3D drop-shadow, requiring exact name confirmation and Git commit for removal.
 

@@ -1,6 +1,3 @@
-
-
-
 # Tier 1: CLIENT (Desktop TUI)
 
 The CLIENT is a local desktop application that acts as the primary control center, fully replacing the old `client.sh` and all legacy management scripts. All interactive management, scaffolding, and deployment logic is now implemented in Rust using a premium Ratatui TUI. **client.sh is deprecated and must not be used.**
@@ -81,3 +78,22 @@ The CLIENT is a local desktop application that acts as the primary control cente
 15. GitOps garbage collection
 
 See `refactor/phase1.md` and `refactor/refactor-features.md` for full requirements.
+
+# Tab Requirements (Detailed)
+
+## Dashboard Tab
+- **Live SSE Telemetry:** Real-time stream of deployment logs from the LXC daemon via Server-Sent Events (SSE).
+- **Manual Deployment Triggers:** Interface to trigger the HTTP Push API for immediate deployment (secured with Bearer token).
+- **Visual Feedback:** Animated spinners for loading states and dynamic Cyan/Magenta color palette.
+
+## Scaffolding Tab
+- **Dynamic App & Stack Creation:** Interface to scaffold new stacks and apps, generating docker-compose.yml with Traefik, Watchtower, and Promtail boilerplate.
+- **Advanced Configurations:** Support for custom healthchecks, permissions (user/group/capabilities), and VPN network namespaces (e.g., network_mode: service:gluetun).
+- **MAC Address Generator:** Generate safe, random Locally Administered MAC addresses for new LXCs.
+- **Pre-Flight Linting & GitOps:** YAML validation (serde_yaml), auto-stage, commit, and push to main branch.
+- **Blast Radius Protection:** Deletion triggers a red floating modal with 3D drop-shadow, requiring exact name confirmation and Git commit for removal.
+
+## Host Management Tab
+- **Idempotent SSH Management:** Manage local access to Proxmox containers by parsing and updating ~/.ssh/config safely and in-place, without duplicates or corruption.
+
+---

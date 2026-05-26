@@ -7,6 +7,7 @@ use tui_input::Input;
 /// Enum for active modal state.
 pub enum ActiveModal {
     DeleteConfirmation { app_name: String, input: Input },
+    DeleteAppConfirmation { stack_name: String, app_name: String, input: Input },
     None,
 }
 
@@ -16,7 +17,7 @@ pub fn draw_warning_modal(f: &mut ratatui::Frame, area: Rect, app_name: &str, in
         x: area.width / 4,
         y: area.height / 3,
         width: area.width / 2,
-        height: 7,
+        height: 8,
     };
     f.render_widget(Clear, popup_area); // darken background
     let block = Block::default()
@@ -25,7 +26,34 @@ pub fn draw_warning_modal(f: &mut ratatui::Frame, area: Rect, app_name: &str, in
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD));
     let text = format!(
-        "DANGER: Type the exact name of the app to delete it.\n\nApp: {}\n> {}",
+        "DANGER: Type the exact name of the app to delete it.\n\nApp: {}\n> {}\n\n[ESC to cancel]",
+        app_name,
+        input.value()
+    );
+    let para = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::Red));
+    f.render_widget(para, popup_area);
+}
+
+/// Draws a warning modal for deleting an app (shows stack and app)
+pub fn draw_delete_app_modal(f: &mut ratatui::Frame, area: Rect, stack_name: &str, app_name: &str, input: &Input) {
+    let popup_area = Rect {
+        x: area.width / 4,
+        y: area.height / 3,
+        width: area.width / 2,
+        height: 9,
+    };
+    f.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .title("DANGER")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD));
+    let text = format!(
+        "DANGER: Type the exact app name to delete it.\n\nStack: {}\nApp: {}\n> {}\n\n[ESC to cancel]",
+        stack_name,
         app_name,
         input.value()
     );

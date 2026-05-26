@@ -1,8 +1,8 @@
 //! GitOps and YAML linting logic for Homelab Client.
 use anyhow::Result;
-use git2::{Repository, IndexAddOption, PushOptions, Cred, RemoteCallbacks};
-use std::path::Path;
+use git2::{Cred, IndexAddOption, PushOptions, RemoteCallbacks, Repository};
 use serde_yaml;
+use std::path::Path;
 
 /// Pre-flight check: parse the given YAML file and return an error if invalid.
 pub fn pre_flight_check(file_path: &str) -> Result<()> {

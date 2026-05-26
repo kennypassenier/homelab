@@ -27,6 +27,8 @@ pub fn generate_mac_address() -> String {
       - "traefik.http.routers.{{ app_name }}.rule=Host(\"{{ domain_name }}\")"
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"
+    volumes:
+      - ../{{ app_name }}-config:/config
     networks:
       default:
         mac_address: {{ mac_address }}

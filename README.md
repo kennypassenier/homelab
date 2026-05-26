@@ -25,15 +25,45 @@ To keep the root of this repository clean and maintainable, all detailed documen
 - **[Contributing Guidelines](docs/CONTRIBUTING.md)**: Core design principles, coding standards, and best practices (DRY, shared UI libraries, idempotency, safety, etc.). **Must read** before contributing.
 - **[LLM Context](docs/LLM_CONTEXT.md)**: Essential context and rules for LLMs (like Claude, ChatGPT, Gemini) assisting with this project.
 
-## 📂 Repository Structure
+## 📂 Repository Structure & Storage Layout
 
 ```text
 homelab/
-├── stacks/                   # Individual application configurations (Docker Compose, .env)
-├── docs/                   # Detailed documentation and guidelines (Wiki)
-├── scripts/                # Individual script modules (client, host, container, shared)
-├── secrets/                # (Legacy) Encrypted secrets (no longer used)
-├── client.sh               # Central manager for local workstation actions
-├── host.sh                 # Central manager for Proxmox host actions
-└── container.sh            # Central manager for container actions
+├── stacks/                   # GitOps-managed: docker-compose.yml, scripts, etc. (per app)
+│   ├── media/
+│   │   ├── jellyfin/         # GitOps: docker-compose.yml, scripts, etc.
+│   │   └── ...
+│   └── ...
+├── docs/                     # Detailed documentation and guidelines (Wiki)
+├── scripts/                  # Individual script modules (client, host, container, shared)
+├── secrets/                  # (Legacy) Encrypted secrets (no longer used)
+├── client.sh                 # Central manager for local workstation actions
+├── host.sh                   # Central manager for Proxmox host actions
+└── container.sh              # Central manager for container actions
 ```
+
+### New Storage & Config Layout (Inside Container)
+
+For each app, the directory structure inside the container is:
+
+```text
+/$stackname/
+	$appname/           # GitOps-managed: docker-compose.yml, scripts, etc.
+	$appname-config/    # Persistent config/data (bind mount from Proxmox host)
+```
+
+**Example:**
+
+```text
+/media/
+	jellyfin/           # GitOps: docker-compose.yml, scripts, etc.
+	jellyfin-config/    # Persistent config/data
+	sonarr/
+	sonarr-config/
+	...
+```
+
+**Rationale:**
+- All persistent config/data is now in `$stackname/$appname-config` (bind mount from host)
+- All GitOps-managed files (compose, scripts) are in `$stackname/$appname`
+- This makes navigation and management much more logical and user-friendly

@@ -6,8 +6,15 @@ use tui_input::Input;
 
 /// Enum for active modal state.
 pub enum ActiveModal {
-    DeleteConfirmation { app_name: String, input: Input },
-    DeleteAppConfirmation { stack_name: String, app_name: String, input: Input },
+    DeleteConfirmation {
+        app_name: String,
+        input: Input,
+    },
+    DeleteAppConfirmation {
+        stack_name: String,
+        app_name: String,
+        input: Input,
+    },
     AppCreationWizard(AppCreationWizardState),
     None,
 }
@@ -20,9 +27,17 @@ pub struct AppCreationWizardState {
 }
 
 pub enum AppCreationStep {
-    Name { input: Input, error: Option<String> },
-    DockerPrompt { selected: bool },
-    DefaultsMultiselect { options: Vec<DefaultServiceOption>, selected: Vec<bool> },
+    Name {
+        input: Input,
+        error: Option<String>,
+    },
+    DockerPrompt {
+        selected: bool,
+    },
+    DefaultsMultiselect {
+        options: Vec<DefaultServiceOption>,
+        selected: Vec<bool>,
+    },
     // Review, Done to be added
 }
 
@@ -32,8 +47,12 @@ pub struct DefaultServiceOption {
 }
 
 /// Draws the app creation wizard modal (step-based)
-pub fn draw_app_creation_wizard(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppCreationWizardState) {
-    use ratatui::{widgets::*, style::*};
+pub fn draw_app_creation_wizard(
+    f: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    state: &AppCreationWizardState,
+) {
+    use ratatui::{style::*, widgets::*};
     let popup_area = ratatui::layout::Rect {
         x: area.width / 4,
         y: area.height / 3,
@@ -47,8 +66,16 @@ pub fn draw_app_creation_wizard(f: &mut ratatui::Frame, area: ratatui::layout::R
                 .title("Create New App")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
-            let mut text = format!("Enter new app name for stack '{}':\n> {}\n\n[Enter to continue, ESC to cancel]", state.stack_name, input.value());
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let mut text = format!(
+                "Enter new app name for stack '{}':\n> {}\n\n[Enter to continue, ESC to cancel]",
+                state.stack_name,
+                input.value()
+            );
             if let Some(err) = error {
                 text.push_str(&format!("\n\n[Error: {}]", err));
             }
@@ -63,8 +90,15 @@ pub fn draw_app_creation_wizard(f: &mut ratatui::Frame, area: ratatui::layout::R
                 .title("Docker Prompt")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
-            let mut text = format!("Docker image to use:\n> {}\n\n[Enter to continue, ESC to cancel]", input.value());
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let mut text = format!(
+                "Docker image to use:\n> {}\n\n[Enter to continue, ESC to cancel]",
+                input.value()
+            );
             let para = Paragraph::new(text)
                 .block(block)
                 .alignment(Alignment::Left)
@@ -76,11 +110,19 @@ pub fn draw_app_creation_wizard(f: &mut ratatui::Frame, area: ratatui::layout::R
                 .title("Default Services")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
             let mut text = String::from("Select default containers to add:\n\n");
             for (i, opt) in options.iter().enumerate() {
-                let mark = if selected[i] {"[x]"} else {"[ ]"};
-                let cursor = if i == state.multiselect_cursor {"⮞"} else {"  "};
+                let mark = if selected[i] { "[x]" } else { "[ ]" };
+                let cursor = if i == state.multiselect_cursor {
+                    "⮞"
+                } else {
+                    "  "
+                };
                 text.push_str(&format!("  {} {} {}\n", cursor, mark, opt.label));
             }
             text.push_str("\n[↑/↓ to move, Space to toggle, Enter to confirm, ESC to cancel]");
@@ -120,7 +162,13 @@ pub fn draw_warning_modal(f: &mut ratatui::Frame, area: Rect, app_name: &str, in
 }
 
 /// Draws a warning modal for deleting an app (shows stack and app)
-pub fn draw_delete_app_modal(f: &mut ratatui::Frame, area: Rect, stack_name: &str, app_name: &str, input: &Input) {
+pub fn draw_delete_app_modal(
+    f: &mut ratatui::Frame,
+    area: Rect,
+    stack_name: &str,
+    app_name: &str,
+    input: &Input,
+) {
     let popup_area = Rect {
         x: area.width / 4,
         y: area.height / 3,

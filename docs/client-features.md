@@ -17,7 +17,12 @@ The CLIENT is a local desktop application that acts as the primary control cente
 - [x] **Idempotent SSH Management:** Replaces `add-ssh.sh` ([8]). Securely parses the local `~/.ssh/config` file and adds or updates SSH aliases for new LXCs without duplicating entries or corrupting the file ([9]).
 
 
+
 ### Advanced Scaffolding Requirements
+- [ ] **New Directory Layout:**
+	- For each app, scaffolding must create both `$stackname/$appname` (GitOps: compose, scripts) and `$stackname/$appname-config` (persistent config/data, bind mount from host).
+	- All generated `docker-compose.yml` files must use `- ../$appname-config:/config` for the config volume.
+	- No references to `/opt/appdata` or `/appdata` remain in templates or docs.
 - [ ] **Traefik Labels:** docker-compose.yml generation must support dynamic Traefik routing labels for all web services, fully replacing Nginx Proxy Manager.
 - [ ] **Watchtower Hooks:** Support for Watchtower lifecycle labels (e.g., `com.centurylinklabs.watchtower.lifecycle.pre-check`) to prevent updates during active usage (e.g., active Jellyfin streams).
 - [ ] **Custom Healthchecks & Dependencies:** Support for `depends_on` with `condition: service_healthy` to enforce correct startup order (e.g., VPN/qBittorrent).

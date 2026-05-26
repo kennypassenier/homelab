@@ -251,10 +251,7 @@ pub struct SshAddWizardState {
 /// Steps in the SSH add wizard.
 pub enum SshAddStep {
     /// User types the Host alias (e.g. "lxc-media").
-    Alias {
-        input: Input,
-        error: Option<String>,
-    },
+    Alias { input: Input, error: Option<String> },
     /// User types the IP address or hostname.
     Ip {
         alias: String,
@@ -300,7 +297,11 @@ pub fn draw_ssh_add_wizard(
                 ),
             )
         }
-        SshAddStep::Ip { alias, input, error } => {
+        SshAddStep::Ip {
+            alias,
+            input,
+            error,
+        } => {
             let err_line = error
                 .as_deref()
                 .map(|e| format!("\n{}", e))

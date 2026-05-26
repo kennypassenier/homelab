@@ -5,8 +5,7 @@
 
 use color_eyre::eyre::Result;
 use crossterm::{
-    event,
-    execute,
+    event, execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};

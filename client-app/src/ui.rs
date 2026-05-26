@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Cell, List, ListItem, Paragraph, Row, Table, Tabs},
 };
 
-use crate::app::{App, Tab};
+use crate::app::{App, LogLevelFilter, Tab, LOG_SOURCES};
 use crate::blast_radius::{
     ActiveModal, draw_app_creation_wizard, draw_delete_app_modal, draw_ssh_add_wizard, draw_warning_modal,
 };
@@ -437,7 +437,7 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
-    // ── Outer layout: legend header (3) + log list (fill) + status footer (1) ──
+    // ── Outer layout: header row (3) + log list (fill) + status footer (1) ──
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -447,40 +447,111 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         ])
         .split(area);
 
-    // ── Source colour legend ─────────────────────────────────────────────────
-    let legend_spans = vec![
-        Span::styled("  lxc-cloudflared ", Style::default().fg(Color::Blue)),
-        Span::styled("lxc-downloader ",    Style::default().fg(Color::Magenta)),
-        Span::styled("lxc-gateway ",       Style::default().fg(Color::Yellow)),
-        Span::styled("lxc-media ",         Style::default().fg(Color::Cyan)),
-        Span::styled("lxc-monitoring ",    Style::default().fg(Color::Green)),
-        Span::styled("lxc-paperless ",     Style::default().fg(Color::LightCyan)),
-        Span::styled("lxc-vikunja ",       Style::default().fg(Color::LightMagenta)),
-        Span::styled("HOST ",              Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        Span::styled("CLIENT",             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-    ];
-    f.render_widget(
-        Paragraph::new(Line::from(legend_spans)).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(" Sources ")
-                .style(app.theme.border_style()),
-        ),
-        chunks[0],
-    );
+    // ── Header: Sources (scrollable) | Level filter ──────────────────────────
+    // The level block has a fixed width; sources get everything else.
+    let header_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(30)])
+        .split(chunks[0]);
+
+    // -- Sources block (horizontal scroll) -----------------------------------
+    {
+        let inner_w = header_cols[0].width.saturating_sub(4) as usize; // borders + 2 pad
+        let has_left = app.log_source_scroll > 0;
+
+        let mut spans: Vec<Span> = Vec::new();
+        let mut used = 0usize;
+
+        if has_left {
+            spans.push(Span::styled("\u{25c0} ", Style::default().fg(Color::Yellow)));
+            used += 2;
+        }
+
+        let mut last_end = app.log_source_scroll;
+        for (name, color) in &LOG_SOURCES[app.log_source_scroll..] {
+            // "+2": reserve space for " ▶" right-indicator if there are more after
+            let label = format!("{} ", name);
+            let reserve = if last_end + 1 < LOG_SOURCES.len() { 2 } else { 0 };
+            if used + label.len() + reserve > inner_w {
+                break;
+            }
+            spans.push(Span::styled(label.clone(), Style::default().fg(*color)));
+            used += label.len();
+            last_end += 1;
+        }
+
+        if last_end < LOG_SOURCES.len() {
+            spans.push(Span::styled(" \u{25b6}", Style::default().fg(Color::Yellow)));
+        }
+
+        f.render_widget(
+            Paragraph::new(Line::from(spans)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(" Sources  [</> scroll] ")
+                    .style(app.theme.border_style()),
+            ),
+            header_cols[0],
+        );
+    }
+
+    // -- Level filter block ---------------------------------------------------
+    {
+        let active = app.log_level_filter;
+        let mut spans: Vec<Span> = Vec::new();
+        for filter in [
+            LogLevelFilter::All,
+            LogLevelFilter::Info,
+            LogLevelFilter::Warn,
+            LogLevelFilter::Error,
+        ] {
+            let label = format!(" {} ", filter.label());
+            let style = if filter == active {
+                let color = match filter {
+                    LogLevelFilter::All   => Color::Cyan,
+                    LogLevelFilter::Info  => Color::Green,
+                    LogLevelFilter::Warn  => Color::Yellow,
+                    LogLevelFilter::Error => Color::Red,
+                };
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(color)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            spans.push(Span::styled(label, style));
+        }
+
+        f.render_widget(
+            Paragraph::new(Line::from(spans)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(" Level [f] ")
+                    .style(app.theme.border_style()),
+            ),
+            header_cols[1],
+        );
+    }
 
     // ── Scrollable log list ──────────────────────────────────────────────────
-    // Available inner height inside the bordered block.
     let inner_height = chunks[1].height.saturating_sub(2) as usize;
-    let total = app.logs.len();
     let scroll = app.log_scroll;
 
-    // `end` is the first line below the viewport; `start` is the first visible.
+    // Apply level filter.
+    let filtered: Vec<_> = app
+        .logs
+        .iter()
+        .filter(|l| app.log_level_filter.matches(&l.level))
+        .collect();
+
+    let total = filtered.len();
     let end = total.saturating_sub(scroll);
     let start = end.saturating_sub(inner_height);
 
-    let items: Vec<ListItem> = app.logs[start..end]
+    let items: Vec<ListItem> = filtered[start..end]
         .iter()
         .map(|line| {
             let src_color = log_source_color(&line.source);
@@ -504,7 +575,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     let title = if scroll == 0 {
         " Logs [live] "
     } else {
-        " Logs [paused — End to resume] "
+        " Logs [paused \u{2014} End to resume] "
     };
     f.render_widget(
         List::new(items).block(
@@ -522,11 +593,22 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         chunks[1],
     );
 
-    // ── Footer: scroll indicator ─────────────────────────────────────────────
-    let status = if scroll == 0 {
-        format!(" {} lines  |  up/down to scroll", total)
+    // ── Footer: counts and hints ─────────────────────────────────────────────
+    let all_total = app.logs.len();
+    let status = if app.log_level_filter == LogLevelFilter::All {
+        if scroll == 0 {
+            format!(" {} lines  |  \u{2191}/\u{2193} scroll  |  </> source", all_total)
+        } else {
+            format!(
+                " -{} from latest  |  End = resume  |  {}/{} lines",
+                scroll, end, total
+            )
+        }
     } else {
-        format!(" -{} from latest  |  End = resume live  |  {}/{} lines", scroll, end, total)
+        format!(
+            " {} / {} lines  [filter: {}]  |  [f] cycle filter",
+            total, all_total, app.log_level_filter.label()
+        )
     };
     f.render_widget(
         Paragraph::new(status).style(Style::default().fg(Color::DarkGray)),
@@ -536,18 +618,13 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 
 /// Maps a log source name to a display colour.
 fn log_source_color(source: &str) -> Color {
-    match source {
-        "lxc-cloudflared" => Color::Blue,
-        "lxc-downloader"  => Color::Magenta,
-        "lxc-gateway"     => Color::Yellow,
-        "lxc-media"       => Color::Cyan,
-        "lxc-monitoring"  => Color::Green,
-        "lxc-paperless"   => Color::LightCyan,
-        "lxc-vikunja"     => Color::LightMagenta,
-        "HOST"            => Color::White,
-        "CLIENT"          => Color::Cyan,
-        _                 => Color::Gray,
+    // Walk LOG_SOURCES so this stays in sync with the legend automatically.
+    for (name, color) in LOG_SOURCES {
+        if *name == source {
+            return *color;
+        }
     }
+    Color::Gray
 }
 
 /// Maps a log level string to a display style.
@@ -558,3 +635,4 @@ fn log_level_style(level: &str) -> Style {
         _       => Style::default().fg(Color::DarkGray),
     }
 }
+

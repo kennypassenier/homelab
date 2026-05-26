@@ -34,6 +34,61 @@ impl Tab {
     }
 }
 
+/// Each log source displayed in the Logs tab legend, with its display colour.
+/// Add new stacks here as the homelab grows.
+pub const LOG_SOURCES: &[(&str, ratatui::style::Color)] = &[
+    ("lxc-cloudflared", ratatui::style::Color::Blue),
+    ("lxc-downloader",  ratatui::style::Color::Magenta),
+    ("lxc-gateway",     ratatui::style::Color::Yellow),
+    ("lxc-media",       ratatui::style::Color::Cyan),
+    ("lxc-monitoring",  ratatui::style::Color::Green),
+    ("lxc-paperless",   ratatui::style::Color::LightCyan),
+    ("lxc-vikunja",     ratatui::style::Color::LightMagenta),
+    ("HOST",            ratatui::style::Color::White),
+    ("CLIENT",          ratatui::style::Color::Cyan),
+];
+
+/// Which log levels are visible in the Logs tab.
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum LogLevelFilter {
+    All,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevelFilter {
+    /// Cycle to the next filter in order: All → Info → Warn → Error → All.
+    pub fn next(self) -> Self {
+        match self {
+            Self::All   => Self::Info,
+            Self::Info  => Self::Warn,
+            Self::Warn  => Self::Error,
+            Self::Error => Self::All,
+        }
+    }
+
+    /// Label shown in the level filter block.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All   => "ALL",
+            Self::Info  => "INFO",
+            Self::Warn  => "WARN",
+            Self::Error => "ERROR",
+        }
+    }
+
+    /// Returns true if a line with the given level string passes this filter.
+    pub fn matches(self, level: &str) -> bool {
+        match self {
+            Self::All   => true,
+            Self::Info  => level == "INFO",
+            Self::Warn  => level == "WARN",
+            Self::Error => level == "ERROR",
+        }
+    }
+}
+
 /// A single telemetry line stored in the Logs tab ring buffer.
 pub struct LogLine {
     pub time: String,
@@ -131,6 +186,10 @@ pub struct App {
     pub logs: Vec<LogLine>,
     /// Lines from the bottom to scroll back by (0 = live / pinned to newest).
     pub log_scroll: usize,
+    /// Horizontal scroll offset for the Sources legend (index of first visible source).
+    pub log_source_scroll: usize,
+    /// Which log levels are visible (default: All).
+    pub log_level_filter: LogLevelFilter,
     /// Index into MOCK_SEQUENCE, advances on every tick.
     log_tick: usize,
 }
@@ -151,6 +210,8 @@ impl App {
             stack_scroll: 0,
             logs: Vec::new(),
             log_scroll: 0,
+            log_source_scroll: 0,
+            log_level_filter: LogLevelFilter::All,
             log_tick: 0,
         };
         // Pre-fill with a page of mock entries so the Logs tab is not blank on startup.

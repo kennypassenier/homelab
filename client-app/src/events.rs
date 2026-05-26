@@ -7,7 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
-use crate::app::{App, Tab};
+use crate::app::{App, LogLevelFilter, Tab};
 use crate::blast_radius::{
     ActiveModal, AppCreationStep, AppCreationWizardState, DefaultServiceOption,
     SshAddStep, SshAddWizardState,
@@ -307,7 +307,22 @@ fn handle_logs_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
             app.log_scroll = app.log_scroll.saturating_sub(1);
         }
         KeyCode::End => {
-            // Jump back to live view.
+            app.log_scroll = 0;
+        }
+        // Source legend horizontal scroll.
+        KeyCode::Left => {
+            app.log_source_scroll = app.log_source_scroll.saturating_sub(1);
+        }
+        KeyCode::Right => {
+            use crate::app::LOG_SOURCES;
+            if app.log_source_scroll + 1 < LOG_SOURCES.len() {
+                app.log_source_scroll += 1;
+            }
+        }
+        // Cycle log-level filter.
+        KeyCode::Char('f') => {
+            app.log_level_filter = app.log_level_filter.next();
+            // Reset scroll so we don't overshoot the filtered view.
             app.log_scroll = 0;
         }
         KeyCode::Tab => app.tab_right(),

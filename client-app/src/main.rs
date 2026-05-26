@@ -25,7 +25,7 @@ mod gitops;
 mod scaffold;
 mod theme;
 mod app_list;
-use crate::blast_radius::{ActiveModal, draw_warning_modal, draw_delete_app_modal};
+use crate::blast_radius::{ActiveModal, draw_warning_modal, draw_delete_app_modal, draw_app_creation_wizard, AppCreationWizardState, AppCreationStep};
 use crate::theme::Theme;
 use std::fs;
 use std::path::Path;
@@ -207,6 +207,9 @@ async fn async_main() -> Result<()> {
                         ActiveModal::DeleteAppConfirmation { stack_name, app_name, input } => {
                             draw_delete_app_modal(f, size, stack_name, app_name, input);
                         }
+                        ActiveModal::AppCreationWizard(state) => {
+                            draw_app_creation_wizard(f, size, state);
+                        }
                         ActiveModal::None => {
                             match app.active_tab() {
                                 Tab::Scaffolding => {
@@ -372,6 +375,71 @@ async fn async_main() -> Result<()> {
                                         input.handle_event(&event::Event::Key(key));
                                     }
                                 }
+                                ActiveModal::AppCreationWizard(state) => {
+                                    use crossterm::event::KeyCode;
+                                    match &mut state.step {
+                                        AppCreationStep::Name { input, error } => {
+                                            if key.code == KeyCode::Esc {
+                                                app.modal = ActiveModal::None;
+                                            } else if key.code == KeyCode::Enter {
+                                                let name = input.value().trim();
+                                                if name.is_empty() {
+                                                    *error = Some("App name cannot be empty".to_string());
+                                                } else if std::path::Path::new(&format!("stacks/{}/{}", state.stack_name, name)).exists() {
+                                                    *error = Some("App already exists in this stack".to_string());
+                                                } else {
+                                                    // Proceed to Docker prompt step
+                                                    state.step = AppCreationStep::DockerPrompt { selected: true };
+                                                }
+                                            } else {
+                                                input.handle_event(&event::Event::Key(key));
+                                            }
+                                        }
+                                        AppCreationStep::DockerPrompt { selected } => {
+                                            match key.code {
+                                                KeyCode::Esc => {
+                                                    app.modal = crate::blast_radius::ActiveModal::None;
+                                                }
+                                                KeyCode::Left | KeyCode::Right => {
+                                                    *selected = !*selected;
+                                                }
+                                                KeyCode::Enter => {
+                                                    // Proceed to multiselect step
+                                                    let options = vec![
+                                                        crate::blast_radius::DefaultServiceOption { label: "Watchtower", description: "Auto-update" },
+                                                        crate::blast_radius::DefaultServiceOption { label: "Promtail", description: "Log shipping" },
+                                                    ];
+                                                    let selected = vec![true, true];
+                                                    state.step = AppCreationStep::DefaultsMultiselect { options, selected };
+                                                    state.multiselect_cursor = 0;
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                        AppCreationStep::DefaultsMultiselect { options, selected } => {
+                                            let len = options.len();
+                                            let cursor = &mut state.multiselect_cursor;
+                                            match key.code {
+                                                KeyCode::Esc => {
+                                                    app.modal = crate::blast_radius::ActiveModal::None;
+                                                }
+                                                KeyCode::Up => {
+                                                    if *cursor > 0 { *cursor -= 1; }
+                                                }
+                                                KeyCode::Down => {
+                                                    if *cursor + 1 < len { *cursor += 1; }
+                                                }
+                                                KeyCode::Char(' ') => {
+                                                    selected[*cursor] = !selected[*cursor];
+                                                }
+                                                KeyCode::Enter => {
+                                                    // Proceed to next step (review/finish, to be implemented)
+                                                    app.modal = crate::blast_radius::ActiveModal::None;
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                }
                                 ActiveModal::None => {
                                     match app.active_tab() {
                                         Tab::Scaffolding => {
@@ -481,7 +549,17 @@ async fn async_main() -> Result<()> {
                                                             1 => { // actions
                                                                 let dropdown = &mut app.stack_dropdowns[app.selected_stack];
                                                                 match dropdown.selected_option {
-                                                                    0 => {/* Add App: TODO */},
+                                                                    0 => {
+                                                                        // Start app creation wizard for this stack
+                                                                        let stack_name = app.stacks[app.selected_stack].clone();
+                                                                        app.modal = crate::blast_radius::ActiveModal::AppCreationWizard(AppCreationWizardState {
+                                                                            stack_name,
+                                                                            step: AppCreationStep::Name {
+                                                                                input: Input::default(),
+                                                                                error: None,
+                                                                            },
+                                                                        });
+                                                                    },
                                                                     1 => {
                                                                         let name = app.stacks[app.selected_stack].clone();
                                                                         app.modal = ActiveModal::DeleteConfirmation {

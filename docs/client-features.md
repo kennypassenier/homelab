@@ -16,6 +16,7 @@ The CLIENT is a local desktop application that acts as the primary control cente
 - [x] **MAC Address Generator:** To prevent DHCP conflicts ([7]), the client generates safe, random Locally Administered MAC addresses for new LXCs.
 - [x] **Idempotent SSH Management:** Replaces `add-ssh.sh` ([8]). Securely parses the local `~/.ssh/config` file and adds or updates SSH aliases for new LXCs without duplicating entries or corrupting the file ([9]).
 
+
 ### Advanced Scaffolding Requirements
 - [ ] **Traefik Labels:** docker-compose.yml generation must support dynamic Traefik routing labels for all web services, fully replacing Nginx Proxy Manager.
 - [ ] **Watchtower Hooks:** Support for Watchtower lifecycle labels (e.g., `com.centurylinklabs.watchtower.lifecycle.pre-check`) to prevent updates during active usage (e.g., active Jellyfin streams).
@@ -23,11 +24,15 @@ The CLIENT is a local desktop application that acts as the primary control cente
 - [ ] **Permissions:** Support for setting `user`, `group`, and `cap_add` (capabilities) for hardware and network access in generated templates.
 - [ ] **VPN Network Namespaces:** Support for injecting `network_mode: service:<vpn>` for VPN kill-switch routing in generated templates.
 - [ ] **Automated Restarts:** Ensure standard Docker Compose healthchecks and Watchtower restart policies are included in all generated templates.
+- [ ] **App Creation: Multiselect Defaults:** After Docker usage is confirmed, show a popup multiselect for default containers (e.g., Watchtower, Promtail), with Watchtower and Promtail pre-selected. If selected, auto-generate their service in the stack if not present.
+- [ ] **Stack Actions: Conditional Add:** In stack actions, show "Add Watchtower" and "Add Promtail" only if they do not already exist in the stack.
+- [ ] **All Prompts as Popups:** All prompts, confirmations, and error messages are implemented as popup modals using Ratatui conventions (not Bash style).
+
 
 ## 3. Security, Validation & GitOps
 - [x] **Pre-Flight Linting:** Parses and validates all YAML configurations using `serde_yaml` locally before allowing a `git push`.
-- [x] **Automated Git Lifecycle:** Automatically stages, commits (with auto-generated commit messages), and pushes newly scaffolded stacks/apps to the `main` branch.
-- [ ] **Blast Radius Protection:** Replaces `remove-app.sh` and `remove-stack.sh` ([10], [11]). When deleting an app or stack, a stark red floating modal with a 3D drop-shadow appears ([12]). The user must type the exact name of the app/stack to confirm ([13], [14]). Once confirmed, the client deletes the folder from Git, commits, and pushes to trigger automatic Garbage Collection.
+- [ ] **Manual GitOps Sync:** No automatic push after destructive actions. A "Sync" or "Save" action is available in the UI to stage, commit, and push all pending changes when the user chooses.
+- [ ] **Blast Radius Protection:** Replaces `remove-app.sh` and `remove-stack.sh` ([10], [11]). When deleting an app or stack, a stark red floating modal with a 3D drop-shadow appears ([12]). The user must type the exact name of the app/stack to confirm ([13], [14]). Once confirmed, the client deletes the folder from Git, but does not push until the user triggers sync.
 
 ## 4. API & Telemetry
 - [x] **HTTP Push API:** Instead of waiting for a 5-minute cron job ([15]), the CLIENT sends an HTTP POST request (secured with a Bearer token) directly to the LXC daemon to trigger an immediate deployment.

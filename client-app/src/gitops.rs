@@ -31,7 +31,8 @@ pub fn commit_and_push(repo_path: &str, commit_message: &str) -> Result<()> {
     )?;
     let mut cb = RemoteCallbacks::new();
     cb.credentials(|_url, username_from_url, _allowed_types| {
-        Cred::ssh_key_from_agent(username_from_url.unwrap())
+        let username = username_from_url.unwrap_or("git");
+        Cred::ssh_key_from_agent(username)
     });
     let mut push_opts = PushOptions::new();
     push_opts.remote_callbacks(cb);

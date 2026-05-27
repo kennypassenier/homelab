@@ -57,6 +57,8 @@ async fn async_main() -> Result<()> {
 
     // Drives mock log messages (and will drive live SSE ticks once connected).
     let mut log_tick = tokio::time::interval(Duration::from_millis(400));
+    // Drives all visual animations: pulse, ticker, sparklines. Target ~30 FPS.
+    let mut anim_tick = tokio::time::interval(Duration::from_millis(33));
 
     loop {
         // Always draw before polling — keeps the UI responsive
@@ -71,6 +73,10 @@ async fn async_main() -> Result<()> {
 
             _ = log_tick.tick() => {
                 app.tick_logs();
+            }
+
+            _ = anim_tick.tick() => {
+                app.tick_anim();
             }
 
             res = async {

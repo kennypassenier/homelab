@@ -1,9 +1,12 @@
 //! Application state — Tab enum, App struct, and all state-management helpers.
 
 use std::{
+    collections::VecDeque,
     fs,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 
 use crate::blast_radius::ActiveModal;
 use crate::theme::Theme;
@@ -20,7 +23,12 @@ pub enum Tab {
 impl Tab {
     /// Returns every tab in display order.
     pub fn all() -> &'static [Tab] {
-        &[Tab::Dashboard, Tab::Scaffolding, Tab::HostManagement, Tab::Logs]
+        &[
+            Tab::Dashboard,
+            Tab::Scaffolding,
+            Tab::HostManagement,
+            Tab::Logs,
+        ]
     }
 
     /// Human-readable tab label used in the tab bar.
@@ -38,14 +46,14 @@ impl Tab {
 /// Add new stacks here as the homelab grows.
 pub const LOG_SOURCES: &[(&str, ratatui::style::Color)] = &[
     ("lxc-cloudflared", ratatui::style::Color::Blue),
-    ("lxc-downloader",  ratatui::style::Color::Magenta),
-    ("lxc-gateway",     ratatui::style::Color::Yellow),
-    ("lxc-media",       ratatui::style::Color::Cyan),
-    ("lxc-monitoring",  ratatui::style::Color::Green),
-    ("lxc-paperless",   ratatui::style::Color::LightCyan),
-    ("lxc-vikunja",     ratatui::style::Color::LightMagenta),
-    ("HOST",            ratatui::style::Color::White),
-    ("CLIENT",          ratatui::style::Color::Cyan),
+    ("lxc-downloader", ratatui::style::Color::Magenta),
+    ("lxc-gateway", ratatui::style::Color::Yellow),
+    ("lxc-media", ratatui::style::Color::Cyan),
+    ("lxc-monitoring", ratatui::style::Color::Green),
+    ("lxc-paperless", ratatui::style::Color::LightCyan),
+    ("lxc-vikunja", ratatui::style::Color::LightMagenta),
+    ("HOST", ratatui::style::Color::White),
+    ("CLIENT", ratatui::style::Color::Cyan),
 ];
 
 /// Which log levels are visible in the Logs tab.
@@ -61,9 +69,9 @@ impl LogLevelFilter {
     /// Cycle to the next filter in order: All → Info → Warn → Error → All.
     pub fn next(self) -> Self {
         match self {
-            Self::All   => Self::Info,
-            Self::Info  => Self::Warn,
-            Self::Warn  => Self::Error,
+            Self::All => Self::Info,
+            Self::Info => Self::Warn,
+            Self::Warn => Self::Error,
             Self::Error => Self::All,
         }
     }
@@ -71,9 +79,9 @@ impl LogLevelFilter {
     /// Label shown in the level filter block.
     pub fn label(self) -> &'static str {
         match self {
-            Self::All   => "ALL",
-            Self::Info  => "INFO",
-            Self::Warn  => "WARN",
+            Self::All => "ALL",
+            Self::Info => "INFO",
+            Self::Warn => "WARN",
             Self::Error => "ERROR",
         }
     }
@@ -81,9 +89,9 @@ impl LogLevelFilter {
     /// Returns true if a line with the given level string passes this filter.
     pub fn matches(self, level: &str) -> bool {
         match self {
-            Self::All   => true,
-            Self::Info  => level == "INFO",
-            Self::Warn  => level == "WARN",
+            Self::All => true,
+            Self::Info => level == "INFO",
+            Self::Warn => level == "WARN",
             Self::Error => level == "ERROR",
         }
     }
@@ -100,48 +108,152 @@ pub struct LogLine {
 /// Cyclic mock telemetry entries used until a live SSE stream is connected.
 /// Each tuple is (source, level, message).
 const MOCK_SEQUENCE: &[(&str, &str, &str)] = &[
-    ("lxc-cloudflared", "INFO",  "[node-sync] Checking for upstream changes..."),
-    ("lxc-cloudflared", "INFO",  "[git] Already up to date"),
-    ("lxc-cloudflared", "INFO",  "[docker] cloudflared: Image up to date"),
-    ("lxc-downloader",  "INFO",  "[node-sync] Checking for upstream changes..."),
-    ("lxc-downloader",  "INFO",  "[git] Already up to date"),
-    ("lxc-downloader",  "INFO",  "[docker] qbittorrent: Image up to date"),
-    ("lxc-downloader",  "INFO",  "[promtail] Shipping 17 log lines to Loki"),
-    ("lxc-gateway",     "INFO",  "[node-sync] Checking for upstream changes..."),
-    ("lxc-gateway",     "INFO",  "[git] Already up to date"),
-    ("lxc-gateway",     "INFO",  "[docker] crowdsec: Image up to date"),
-    ("lxc-gateway",     "WARN",  "[crowdsec] Decision added: ban 203.0.113.42 (SSH bruteforce, 48 attempts)"),
-    ("lxc-gateway",     "INFO",  "[docker] nginx-proxy-manager: Image up to date"),
-    ("lxc-gateway",     "INFO",  "[promtail] Shipping 31 log lines to Loki"),
-    ("lxc-media",       "INFO",  "[node-sync] Checking for upstream changes..."),
-    ("lxc-media",       "INFO",  "[git] Fast-forward: 1 new commit"),
-    ("lxc-media",       "INFO",  "[pre-sync] Running pre-sync.sh..."),
-    ("lxc-media",       "INFO",  "[docker] bazarr: Pulling newer image"),
-    ("lxc-media",       "INFO",  "[docker] bazarr: Container recreated"),
-    ("lxc-media",       "INFO",  "[docker] bazarr: Started"),
-    ("lxc-media",       "INFO",  "[docker] jellyfin: Image up to date"),
-    ("lxc-media",       "INFO",  "[promtail] Shipping 52 log lines to Loki"),
-    ("lxc-monitoring",  "INFO",  "[node-sync] Checking for upstream changes..."),
-    ("lxc-monitoring",  "INFO",  "[git] Already up to date"),
-    ("lxc-monitoring",  "INFO",  "[loki] Received 100 lines from 4 sources"),
-    ("lxc-monitoring",  "INFO",  "[grafana] Dashboard scraped: uptime-kuma"),
-    ("lxc-monitoring",  "INFO",  "[promtail] Shipping 8 log lines to Loki"),
-    ("lxc-paperless",   "INFO",  "[node-sync] Checking for upstream changes..."),
-    ("lxc-paperless",   "INFO",  "[git] Already up to date"),
-    ("lxc-vikunja",     "INFO",  "[node-sync] Checking for upstream changes..."),
-    ("lxc-vikunja",     "INFO",  "[git] Already up to date"),
-    ("HOST",            "INFO",  "sync-host.sh: Syncing bind-mounts to lxc-media"),
-    ("HOST",            "INFO",  "sync-host.sh: Sync complete"),
-    ("lxc-media",       "INFO",  "[watchtower] Checking all images for updates..."),
-    ("lxc-media",       "INFO",  "[watchtower] All containers up to date"),
-    ("lxc-downloader",  "INFO",  "[qbittorrent] Torrent completed: ubuntu-24.04.iso (4.6 GB)"),
-    ("lxc-gateway",     "ERROR", "[nginx-proxy-manager] Upstream unreachable: lxc-vikunja:3456 (timeout)"),
-    ("lxc-gateway",     "WARN",  "[crowdsec] 5 new IPs banned this cycle"),
-    ("CLIENT",          "INFO",  "Git push triggered: feat(media): add bazarr"),
-    ("lxc-media",       "INFO",  "[node-sync] Fast-forward: 1 new commit"),
-    ("lxc-media",       "INFO",  "[pre-sync] Running pre-sync.sh..."),
-    ("lxc-media",       "INFO",  "[docker] bazarr: Pulling image"),
-    ("lxc-media",       "INFO",  "[docker] bazarr: Container created and started"),
+    (
+        "lxc-cloudflared",
+        "INFO",
+        "[node-sync] Checking for upstream changes...",
+    ),
+    ("lxc-cloudflared", "INFO", "[git] Already up to date"),
+    (
+        "lxc-cloudflared",
+        "INFO",
+        "[docker] cloudflared: Image up to date",
+    ),
+    (
+        "lxc-downloader",
+        "INFO",
+        "[node-sync] Checking for upstream changes...",
+    ),
+    ("lxc-downloader", "INFO", "[git] Already up to date"),
+    (
+        "lxc-downloader",
+        "INFO",
+        "[docker] qbittorrent: Image up to date",
+    ),
+    (
+        "lxc-downloader",
+        "INFO",
+        "[promtail] Shipping 17 log lines to Loki",
+    ),
+    (
+        "lxc-gateway",
+        "INFO",
+        "[node-sync] Checking for upstream changes...",
+    ),
+    ("lxc-gateway", "INFO", "[git] Already up to date"),
+    ("lxc-gateway", "INFO", "[docker] crowdsec: Image up to date"),
+    (
+        "lxc-gateway",
+        "WARN",
+        "[crowdsec] Decision added: ban 203.0.113.42 (SSH bruteforce, 48 attempts)",
+    ),
+    (
+        "lxc-gateway",
+        "INFO",
+        "[docker] nginx-proxy-manager: Image up to date",
+    ),
+    (
+        "lxc-gateway",
+        "INFO",
+        "[promtail] Shipping 31 log lines to Loki",
+    ),
+    (
+        "lxc-media",
+        "INFO",
+        "[node-sync] Checking for upstream changes...",
+    ),
+    ("lxc-media", "INFO", "[git] Fast-forward: 1 new commit"),
+    ("lxc-media", "INFO", "[pre-sync] Running pre-sync.sh..."),
+    ("lxc-media", "INFO", "[docker] bazarr: Pulling newer image"),
+    ("lxc-media", "INFO", "[docker] bazarr: Container recreated"),
+    ("lxc-media", "INFO", "[docker] bazarr: Started"),
+    ("lxc-media", "INFO", "[docker] jellyfin: Image up to date"),
+    (
+        "lxc-media",
+        "INFO",
+        "[promtail] Shipping 52 log lines to Loki",
+    ),
+    (
+        "lxc-monitoring",
+        "INFO",
+        "[node-sync] Checking for upstream changes...",
+    ),
+    ("lxc-monitoring", "INFO", "[git] Already up to date"),
+    (
+        "lxc-monitoring",
+        "INFO",
+        "[loki] Received 100 lines from 4 sources",
+    ),
+    (
+        "lxc-monitoring",
+        "INFO",
+        "[grafana] Dashboard scraped: uptime-kuma",
+    ),
+    (
+        "lxc-monitoring",
+        "INFO",
+        "[promtail] Shipping 8 log lines to Loki",
+    ),
+    (
+        "lxc-paperless",
+        "INFO",
+        "[node-sync] Checking for upstream changes...",
+    ),
+    ("lxc-paperless", "INFO", "[git] Already up to date"),
+    (
+        "lxc-vikunja",
+        "INFO",
+        "[node-sync] Checking for upstream changes...",
+    ),
+    ("lxc-vikunja", "INFO", "[git] Already up to date"),
+    (
+        "HOST",
+        "INFO",
+        "sync-host.sh: Syncing bind-mounts to lxc-media",
+    ),
+    ("HOST", "INFO", "sync-host.sh: Sync complete"),
+    (
+        "lxc-media",
+        "INFO",
+        "[watchtower] Checking all images for updates...",
+    ),
+    (
+        "lxc-media",
+        "INFO",
+        "[watchtower] All containers up to date",
+    ),
+    (
+        "lxc-downloader",
+        "INFO",
+        "[qbittorrent] Torrent completed: ubuntu-24.04.iso (4.6 GB)",
+    ),
+    (
+        "lxc-gateway",
+        "ERROR",
+        "[nginx-proxy-manager] Upstream unreachable: lxc-vikunja:3456 (timeout)",
+    ),
+    (
+        "lxc-gateway",
+        "WARN",
+        "[crowdsec] 5 new IPs banned this cycle",
+    ),
+    (
+        "CLIENT",
+        "INFO",
+        "Git push triggered: feat(media): add bazarr",
+    ),
+    (
+        "lxc-media",
+        "INFO",
+        "[node-sync] Fast-forward: 1 new commit",
+    ),
+    ("lxc-media", "INFO", "[pre-sync] Running pre-sync.sh..."),
+    ("lxc-media", "INFO", "[docker] bazarr: Pulling image"),
+    (
+        "lxc-media",
+        "INFO",
+        "[docker] bazarr: Container created and started",
+    ),
 ];
 
 /// Returns the current wall-clock time as HH:MM:SS.
@@ -192,6 +304,22 @@ pub struct App {
     pub log_level_filter: LogLevelFilter,
     /// Index into MOCK_SEQUENCE, advances on every tick.
     log_tick: usize,
+
+    // ── Animation state (driven by anim_tick at 33 ms) ─────────────────────
+    /// Sinusoidal phase (0..2π) for pulse/breathing effects on selected items.
+    pub pulse_phase: f32,
+    /// Byte offset into `ticker_content` for the scrolling bottom status bar.
+    pub ticker_offset: usize,
+    /// Pre-built looping ASCII ticker string shown at the bottom of the screen.
+    pub ticker_content: String,
+    /// CPU load sparkline ring buffers — one `VecDeque` per stack, same order as `stacks`.
+    pub lxc_cpu: Vec<VecDeque<u64>>,
+    /// RAM usage sparkline ring buffers — one `VecDeque` per stack.
+    pub lxc_ram: Vec<VecDeque<u64>>,
+    /// Currently highlighted LXC row index in the Host Management tab.
+    pub host_selected: usize,
+    /// RNG seeded once at startup — only for animations, never for security.
+    rng: SmallRng,
 }
 
 impl App {
@@ -199,6 +327,37 @@ impl App {
     pub fn new() -> Self {
         let stacks = App::load_stacks();
         let stack_dropdowns = Self::build_dropdowns(&stacks);
+        let ticker_content = Self::build_ticker_content();
+        let mut rng = SmallRng::from_entropy();
+
+        // Pre-fill 30 random-walk samples per stack so sparklines look populated
+        // on the very first render.
+        let lxc_cpu: Vec<VecDeque<u64>> = stacks
+            .iter()
+            .map(|_| {
+                let mut d = VecDeque::new();
+                let mut v: i64 = rng.gen_range(10..70);
+                for _ in 0..30 {
+                    v = (v + rng.gen_range(-5..=5)).clamp(2, 98);
+                    d.push_back(v as u64);
+                }
+                d
+            })
+            .collect();
+
+        let lxc_ram: Vec<VecDeque<u64>> = stacks
+            .iter()
+            .map(|_| {
+                let mut d = VecDeque::new();
+                let mut v: i64 = rng.gen_range(20..80);
+                for _ in 0..30 {
+                    v = (v + rng.gen_range(-3..=3)).clamp(10, 95);
+                    d.push_back(v as u64);
+                }
+                d
+            })
+            .collect();
+
         let mut app = Self {
             active_tab: 0,
             theme: Theme::cyberpunk(),
@@ -213,6 +372,13 @@ impl App {
             log_source_scroll: 0,
             log_level_filter: LogLevelFilter::All,
             log_tick: 0,
+            pulse_phase: 0.0,
+            ticker_offset: 0,
+            ticker_content,
+            lxc_cpu,
+            lxc_ram,
+            host_selected: 0,
+            rng,
         };
         // Pre-fill with a page of mock entries so the Logs tab is not blank on startup.
         for _ in 0..20 {
@@ -286,6 +452,66 @@ impl App {
     }
 
     // ── private helpers ─────────────────────────────────────────────────────
+
+    /// Advances all animation state by one tick (called at ~30 FPS).
+    pub fn tick_anim(&mut self) {
+        use std::f32::consts::TAU;
+
+        // Sinusoidal pulse phase for breathing highlights.
+        self.pulse_phase = (self.pulse_phase + 0.08) % TAU;
+
+        // Scroll the bottom ticker one char per tick.
+        let ticker_len = self.ticker_content.chars().count();
+        if ticker_len > 0 {
+            self.ticker_offset = (self.ticker_offset + 1) % ticker_len;
+        }
+
+        // Grow sparkline deques if new stacks were added since last tick.
+        while self.lxc_cpu.len() < self.stacks.len() {
+            let mut d = VecDeque::new();
+            d.push_back(self.rng.gen_range(10u64..70));
+            self.lxc_cpu.push(d);
+        }
+        while self.lxc_ram.len() < self.stacks.len() {
+            let mut d = VecDeque::new();
+            d.push_back(self.rng.gen_range(20u64..80));
+            self.lxc_ram.push(d);
+        }
+
+        // Random walk per LXC CPU load.
+        for cpu in &mut self.lxc_cpu {
+            let last = cpu.back().copied().unwrap_or(30) as i64;
+            let next = (last + self.rng.gen_range(-5..=5)).clamp(2, 98) as u64;
+            cpu.push_back(next);
+            if cpu.len() > 60 {
+                cpu.pop_front();
+            }
+        }
+
+        // Random walk per LXC RAM usage.
+        for ram in &mut self.lxc_ram {
+            let last = ram.back().copied().unwrap_or(40) as i64;
+            let next = (last + self.rng.gen_range(-3..=3)).clamp(10, 95) as u64;
+            ram.push_back(next);
+            if ram.len() > 60 {
+                ram.pop_front();
+            }
+        }
+    }
+
+    fn build_ticker_content() -> String {
+        // A looping telemetry string. Intentionally long so it doesn't visibly repeat
+        // within a normal session.
+        String::from(
+            "  \u{25cf} 0xFF4A2F :: ETH0 TX=1.2MB/s RX=430KB/s \
+             :: pve-01 [ONLINE] :: GITOPS [ACTIVE] :: node-sync [RUN] \
+             :: docker [UP] :: crowdsec [ARMED] :: uptime:47d12h \
+             :: CRC_OK :: MESH_STABLE :: SOPS_OK :: AGE_KEY [VALID] \
+             :: 0xDE:AD:BE:EF:00:01 :: lat=0.4ms :: loki [OK] \
+             :: grafana [OK] :: 6 LXC [ONLINE] :: PUSH_READY \
+             :: SHA256:aB3x... :: 192.168.1.0/24 [STABLE] ::  ",
+        )
+    }
 
     fn build_dropdowns(stacks: &[String]) -> Vec<StackDropdown> {
         stacks

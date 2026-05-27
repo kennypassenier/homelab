@@ -9,8 +9,8 @@ use tui_input::backend::crossterm::EventHandler;
 
 use crate::app::{App, LogLevelFilter, Tab};
 use crate::blast_radius::{
-    ActiveModal, AppCreationStep, AppCreationWizardState, DefaultServiceOption,
-    SshAddStep, SshAddWizardState,
+    ActiveModal, AppCreationStep, AppCreationWizardState, DefaultServiceOption, SshAddStep,
+    SshAddWizardState,
 };
 
 /// What the event loop should do after processing a key.
@@ -96,15 +96,13 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
             }
         }
 
-        ActiveModal::SshAddWizard(state) => {
-            match handle_ssh_wizard(state, key) {
-                WizardOutcome::Continue => {}
-                WizardOutcome::Close => {
-                    app.modal = ActiveModal::None;
-                }
-                WizardOutcome::Reload => {}
+        ActiveModal::SshAddWizard(state) => match handle_ssh_wizard(state, key) {
+            WizardOutcome::Continue => {}
+            WizardOutcome::Close => {
+                app.modal = ActiveModal::None;
             }
-        }
+            WizardOutcome::Reload => {}
+        },
 
         ActiveModal::None => {
             return handle_navigation(app, key);
@@ -287,6 +285,16 @@ fn handle_host_management_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
                     error: None,
                 },
             });
+            EventOutcome::Continue
+        }
+        KeyCode::Up => {
+            app.host_selected = app.host_selected.saturating_sub(1);
+            EventOutcome::Continue
+        }
+        KeyCode::Down => {
+            if app.host_selected + 1 < app.stacks.len() {
+                app.host_selected += 1;
+            }
             EventOutcome::Continue
         }
         _ => handle_generic_nav(app, key),
@@ -567,7 +575,11 @@ fn handle_ssh_wizard(state: &mut SshAddWizardState, key: KeyEvent) -> WizardOutc
             }
         }
 
-        SshAddStep::Ip { alias, input, error } => {
+        SshAddStep::Ip {
+            alias,
+            input,
+            error,
+        } => {
             if key.code == KeyCode::Esc {
                 return WizardOutcome::Close;
             } else if key.code == KeyCode::Enter {

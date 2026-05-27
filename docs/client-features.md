@@ -1,6 +1,8 @@
 # Tier 1: CLIENT (Desktop TUI)
 
-The CLIENT is a local desktop application that acts as the primary control center, fully replacing the old `client.sh` and all legacy management scripts. All interactive management, scaffolding, and deployment logic is now implemented in Rust using a premium Ratatui TUI. **client.sh is deprecated and must not be used.**
+The CLIENT is a local desktop application that acts as the **sole orchestration hub** for all system flows, fully replacing the old `client.sh` and all legacy management scripts. All interactive management, scaffolding, and deployment logic is now implemented in Rust using a premium Ratatui TUI. **client.sh is deprecated and must not be used.**
+
+**Communication model:** The CLIENT is the only actor that calls both the HOST daemon and individual LXC daemons. HOST and LXC never communicate with each other. When a flow requires sequential HOST → LXC steps (e.g., provision an LXC, then trigger its first sync), the CLIENT calls HOST, waits for the completion event on the SSE stream, and only then calls the LXC. Endpoint addresses are derived from the `lxc-compose.yml` files in Git (for LXC IPs via DHCP reservation) and the fixed HOST IP configured at CLIENT startup.
 
 ## 1. Premium UI/UX (Ratatui)
 - [x] **Hyper-Modern Interface:** The terminal application is built using `ratatui` and must look visually stunning. 
@@ -39,9 +41,12 @@ The CLIENT is a local desktop application that acts as the primary control cente
 - [ ] **Manual GitOps Sync:** No automatic push after destructive actions. A "Sync" or "Save" action is available in the UI to stage, commit, and push all pending changes when the user chooses.
 - [ ] **Blast Radius Protection:** Replaces `remove-app.sh` and `remove-stack.sh` ([10], [11]). When deleting an app or stack, a stark red floating modal with a 3D drop-shadow appears ([12]). The user must type the exact name of the app/stack to confirm ([13], [14]). Once confirmed, the client deletes the folder from Git, but does not push until the user triggers sync.
 
-## 4. API & Telemetry
-- [x] **HTTP Push API:** Instead of waiting for a 5-minute cron job ([15]), the CLIENT sends an HTTP POST request (secured with a Bearer token) directly to the LXC daemon to trigger an immediate deployment. Press `s` on the Scaffolding tab to trigger a sync for the selected stack. LXC IP is resolved from `~/.ssh/config` (entry `lxc-<stack>`) with `LXC_API_IP` env var fallback.
-- [ ] **Live SSE Telemetry:** Establishes a Server-Sent Events (SSE) connection to the LXC daemon. Deployment logs are streamed live to the bottom of the desktop UI.
+## 4. API, Orchestration & Telemetry
+- [x] **HTTP Push API (CLIENT → HOST):** Sends API calls to `https://<host_ip>:8443/api/*` (Bearer token auth) for all provisioning, hardware, backup, and storage operations.
+- [x] **HTTP Push API (CLIENT → LXC):** Sends API calls to `http://<lxc_ip>:8080/api/*` (Bearer token auth) for sync triggers, backup pause/resume, OS patching, and health checks. LXC IP is resolved from the `hwaddr` field in the stack's `lxc-compose.yml` (matched to OPNsense DHCP reservation) or from `~/.ssh/config`.
+- [ ] **Sequential Orchestration:** When a flow requires HOST then LXC steps, the CLIENT subscribes to the HOST SSE stream (`GET /api/events/stream`), waits for the confirming event, then issues the LXC call. No LXC call is ever fired before its required HOST precondition completes.
+- [ ] **Live SSE Telemetry:** Subscribes to `GET /api/logs/stream` on each active LXC daemon. Deployment logs stream live to the per-stack deployment modal.
+- [ ] **Endpoint Discovery:** All LXC endpoints are derived from `lxc-compose.yml` files committed in Git. The HOST endpoint is a single fixed IP configured at CLIENT startup (`HOST_API_URL` env var or `~/.config/homelab/config.toml`).
 
 ## 5. Updates & Maintenance
 - [x] The CLIENT application is built and tested locally via `cargo test` and `cargo build`. GitHub Actions strictly runs unit tests (e.g., testing MAC generators and idempotent parsers) when the `client-app/` directory is updated.
@@ -91,10 +96,13 @@ See `refactor/phase1.md` and `refactor/refactor-features.md` for full requiremen
 
 # Tab Requirements (Detailed)
 
-## Dashboard Tab
-- **Live SSE Telemetry:** Real-time stream of deployment logs from the LXC daemon via Server-Sent Events (SSE).
-- **Manual Deployment Triggers:** Interface to trigger the HTTP Push API for immediate deployment (secured with Bearer token).
-- **Visual Feedback:** Animated spinners for loading states and dynamic Cyan/Magenta color palette.
+## Stacks Tab
+- **Stack List:** All stacks in the Git repo listed with live health badges (`✓`, `⚠ N warn`, `✗ N err`) derived from the LXC daemon SSE stream.
+- **Stack Actions:** Activate, Deactivate, Deploy, Update, Add App, Delete Stack — all via keyboard shortcuts or context menu.
+- **Per-Stack Deployment Modal:** When any long-running stack operation is triggered (sync, provision, update, patch), a modal/popup opens that shows **only the log events for that stack**. Logs are streamed live from the HOST SSE stream and/or the relevant LXC SSE stream. The modal closes or can be dismissed after completion; the operation never blocks the rest of the TUI.
+  - Modal layout: stack name in header, current phase label, progress bar, scrollable logfmt log pane (color-coded by `level`), elapsed time, `[ESC] minimize` / `[r] retry on failure`.
+  - Log lines from `level=error` appear in red; `level=warn` in yellow; `level=info` in default foreground.
+  - The CLIENT subscribes to HOST SSE first (provision/bootstrap phases), then switches to LXC SSE (sync/post-deploy phases) as orchestration progresses.
 
 ## Scaffolding Tab
 - **Dynamic App & Stack Creation:** Interface to scaffold new stacks and apps, generating docker-compose.yml with Traefik, Watchtower, and Promtail boilerplate.
@@ -103,7 +111,19 @@ See `refactor/phase1.md` and `refactor/refactor-features.md` for full requiremen
 - **Pre-Flight Linting & GitOps:** YAML validation (serde_yaml), auto-stage, commit, and push to main branch.
 - **Blast Radius Protection:** Deletion triggers a red floating modal with 3D drop-shadow, requiring exact name confirmation and Git commit for removal.
 
-## Host Management Tab
-- **Idempotent SSH Management:** Manage local access to Proxmox containers by parsing and updating ~/.ssh/config safely and in-place, without duplicates or corruption.
+## Host Tab
+- **Idempotent SSH Management:** Manage local access to Proxmox containers by parsing and updating `~/.ssh/config` safely and in-place, without duplicates or corruption.
+- **LXC Provisioning:** Trigger `POST /api/lxc/provision` for any SCAFFOLDED stack. Opens the per-stack deployment modal for live bootstrap progress.
+- **Hardware Passthrough:** GPU and TUN passthrough configuration sent to HOST via API; result shown in modal.
+- **OS Patching:** Trigger `POST /api/os/patch` on HOST (Proxmox VE packages); progress streamed in modal. Never auto-reboots host.
 
----
+## Backups Tab
+- **Manual Backup:** Press `b` to trigger a full Restic backup of all stacks. The CLIENT first calls `POST /api/backup/pause` on each active LXC, then calls `POST /api/backup/run` on HOST, then calls `POST /api/backup/resume` on each LXC after completion (or on error). Progress streamed in modal.
+- **Backup Schedule:** View and edit the automated Restic backup schedule (cron expression, retention policy). Sent to HOST via `POST /api/backup/schedule`.
+- **Snapshot Picker:** List available Restic snapshots per stack (from `GET /api/backup/snapshots`). Select a snapshot to restore a single stack via `individual-backup-restore.md` flow.
+- **Disaster Recovery Wizard:** Full restore flow (`full-backup-restore.md`): pre-flight checks → provision all stacks → restore all appdata → trigger initial sync on all LXCs.
+
+## Logs Tab
+- **Aggregated Log View:** Scrollable, filterable view of all recent logfmt events received via SSE from HOST and all active LXC daemons.
+- **Filter by tier, stack, app, level:** `component=lxc`, `stack=media`, `level=error`, etc.
+- **Persistent Log Buffer:** Last 500 lines per stack retained in memory; written to `~/.local/share/homelab/logs/<stack>/<date>.log`.

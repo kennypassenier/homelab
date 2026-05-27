@@ -3,10 +3,14 @@
 
 # Tier 3: LXC (GitOps Engine in Docker)
 
-The LXC daemon is a Rust application packaged as a Docker container, running alongside your apps inside every Proxmox container. **node-sync.sh and container.sh are fully deprecated and must not be used.** All sync, management, and deployment logic is now implemented in Rust, with the daemon running an Axum web server for HTTP Push APIs and a fallback cron loop for eventual consistency.
+The LXC daemon is a Rust application packaged as a Docker container, running alongside your apps inside every Proxmox container. **node-sync.sh and container.sh are fully deprecated and must not be used.** All sync, management, and deployment logic is now implemented in Rust, with the daemon running an Axum web server for HTTP Push APIs and a fallback 30-minute tokio interval loop for eventual consistency.
 
-- [x] **Hyper-Modern Interface:** Ratatui TUI with 5 tabs (Dashboard, GitOps, Containers, Secrets, Logs), running over SSH. Gum is not used.
-- [x] **Styling & Feedback:** Centralized `theme.rs`. Cyan/Magenta double+rounded borders, active tab highlighted Cyan+BOLD, ● UP green / ○ DN red status indicators, sync state shown in tab bar title, error logs in high-contrast Red.
+**Communication model:** The LXC daemon only responds to requests from the CLIENT. It does **not** call the HOST daemon directly. When an LXC operation depends on a prior HOST step (e.g., appdata directories being created before first sync), the CLIENT orchestrates the sequence: it waits for the HOST to confirm completion, then issues the follow-up call to the LXC.
+
+## 1. Plain Output (No Ratatui)
+- [ ] **Rudimentary Logging Only:** The LXC daemon emits plain `stdout`/`stderr` log lines in logfmt format. There is no Ratatui TUI. All interactive management and visual feedback lives exclusively in the CLIENT.
+- [ ] **Structured Logfmt:** Every event follows `ts=<ISO8601> level=<info|warn|error> component=lxc stack=<name> app=<name> msg="..."`. Log lines are the sole output surface.
+- [x] **SSE Stream:** All log events are broadcast via `GET /api/logs/stream` (SSE) so the CLIENT can render them live in the per-stack deployment modal.
 
 - [x] **Sparse Checkouts:** Autonomously fetches only the configuration for its specific stack using Git Sparse-Checkout, discarding any manual local changes ([7]). Initialised on first boot via `GITOPS_REPO_URL` env var; falls back gracefully if already cloned.
 - [x] **Axum API & File-Locks:** Axum web server on `:8080` handling `POST /api/sync`, `POST /api/backup/pause`, `POST /api/backup/resume`, and `GET /api/logs/stream` (SSE). Runs concurrently with TUI via tokio. `/tmp/gitops.lock` prevents concurrent syncs.

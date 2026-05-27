@@ -4,28 +4,13 @@ This file provides the essential context and rules for LLMs (Claude, ChatGPT, Ge
 ## 1. Architecture Overview (Authoritative Source)
 
 The homelab is now managed by a 3-tier Rust architecture:
-- **CLIENT:** Desktop TUI (Ratatui) for scaffolding, management, and GitOps triggers. Handles all stack/app creation, directory scaffolding, SSH alias management, and advanced docker-compose.yml generation (Traefik, Watchtower, healthchecks, permissions, VPN, restart policies). No shell scripts are used for management.
-- **HOST:** Proxmox host daemon (Ratatui) for LXC provisioning, persistent storage management, atomic hardware passthrough (GPU/TUN), and backup orchestration. All host logic is implemented in Rust; legacy scripts are fully deprecated.
-- **LXC:** Rust daemon (Ratatui) running inside each LXC container, responsible for GitOps sync, secrets management (Ephemeral Secrets Container), atomic mount validation, container orchestration, and telemetry. All sync, secrets, and validation logic is handled here. No bash scripts remain.
+- **CLIENT:** Desktop TUI (Ratatui) — the **sole interactive interface and orchestration hub** for the entire system. Handles all stack/app scaffolding, SSH alias management, docker-compose.yml generation (Traefik, Watchtower, healthchecks, VPN, restart policies), and all API calls to HOST and LXC. CLIENT is the only component with a Ratatui TUI.
+- **HOST:** Proxmox host daemon — **headless, no TUI**. Emits plain logfmt to stdout/stderr and SSE. Responds only to CLIENT requests. Responsible for: LXC provisioning (`pct create/set/start/stop/destroy`), hardware passthrough (GPU/TUN), NVMe appdata directory management, and Restic backup execution.
+- **LXC:** Rust daemon (Docker container) running inside each LXC — **headless, no TUI**. Emits plain logfmt to stdout/stderr and SSE. Responds only to CLIENT requests. Responsible for: GitOps sync, ephemeral secrets injection, Docker orchestration (Bollard), pre-deploy hooks (`setup.sh`), mount validation, OS patching, and telemetry.
+
+**Communication model:** CLIENT calls HOST and CLIENT calls LXC. HOST and LXC never communicate with each other. When a flow requires HOST work before LXC work, CLIENT orchestrates the sequence: it waits for HOST confirmation on the SSE stream, then issues the LXC call. LXC endpoint IPs are derived from each stack's `lxc-compose.yml`. HOST endpoint is a single fixed IP configured in CLIENT.
+
 **All legacy scripts and tools are fully deprecated:** client.sh, host.sh, container.sh, node-sync.sh, pre-sync.sh, enable-gpu.sh, enable-tun.sh, backup-stacks.sh, reset-stack.sh, Infisical, Nginx Proxy Manager, Gum, SOPS/Age.
-
-**Reverse proxy and security:** Traefik (with CrowdSec Bouncer middleware) is the only supported reverse proxy. Nginx Proxy Manager is not used anywhere.
-**Secrets:** Managed by a short-lived Ephemeral Secrets Container, not by scripts or Infisical. No secrets are ever committed to Git or managed by shell scripts.
-
-**TUI/UX:** All terminal UIs use Ratatui. Gum is not used anywhere.
-**Storage:** All persistent config/data is now stored in `$stackname/$appname-config` (bind-mounted from the Proxmox host). All GitOps-managed files (compose, scripts, etc.) are in `$stackname/$appname`. CLIENT scaffolding ensures both directories exist before deployment.
-
-**Backups:** Orchestrated by the HOST daemon using Restic, with API-driven pause/resume for safe backups.
-**Networking:** Static IPs via DHCP reservations (OPNsense), SSH via ~/.ssh/config aliases. VPN kill-switch enforced via network_mode: service:gluetun in compose files.
-
-**Observability:** Promtail ships all logs to Loki; Grafana dashboards are auto-provisioned and require no manual edits.
-**All features and requirements are now mapped and tracked in:**
-  - docs/architecture.md (global rules, architecture, and infrastructure)
-  - docs/client-features.md (CLIENT TUI requirements)
-  - docs/host-features.md (HOST daemon requirements)
-  - docs/lxc-features.md (LXC daemon requirements)
-
-**FEATURES.md is deprecated.**
 ## 2. Strict LLM Instructions (Rules)
 
 1. **ALWAYS ASK PERMISSION:** NEVER execute terminal commands or file edits unprompted. Always explain your plan first, show the code/commands, and wait for an explicit "go" from the user.
@@ -35,21 +20,24 @@ The homelab is now managed by a 3-tier Rust architecture:
 5. **GitOps first — always:** Never suggest direct fixes inside containers or on the host. All changes must be made in Git and applied via the GitOps flow.
 
 ## 3. Tier Responsibilities (Summary)
-- **CLIENT:**
-  - Scaffolds stacks/apps, generates all docker-compose.yml with advanced features (Traefik, Watchtower, healthchecks, permissions, VPN, restart policies)
+- **CLIENT (Ratatui TUI — sole interactive interface):**
+  - Scaffolds stacks/apps, generates all docker-compose.yml and lxc-compose.yml
   - Manages SSH aliases and directory structure
-  - Triggers GitOps sync via HTTP Push API to LXC
-  - Provides a premium Ratatui TUI for all workflows
+  - Orchestrates all multi-step flows (provision → sync, backup → pause → restore → resume)
+  - Calls HOST API and LXC API; never lets HOST and LXC talk directly
+  - Per-stack deployment modal with live SSE log stream
+  - Resolves LXC IPs from lxc-compose.yml; HOST IP is a single fixed config value
 
-- **HOST:**
-  - Proxmox LXC provisioning, hardware passthrough (GPU/TUN), persistent storage management
-  - Orchestrates backups (Restic) with API-driven pause/resume
-  - All logic in Rust, no shell scripts
+- **HOST (headless — plain logfmt output only):**
+  - Proxmox LXC provisioning, hardware passthrough (GPU/TUN), NVMe appdata management
+  - Restic backup execution (triggered and orchestrated by CLIENT)
+  - Emits all events via logfmt stdout and SSE stream
+  - No TUI, no direct LXC calls
 
-- **LXC:**
-  - Handles all GitOps sync, secrets management (Ephemeral Secrets Container), atomic mount validation, container orchestration, and telemetry
-  - Provides a Ratatui TUI for in-container management
-  - No bash scripts or legacy tools
+- **LXC (headless — plain logfmt output only):**
+  - GitOps sync, ephemeral secrets, Docker orchestration, pre-deploy hooks, mount validation, OS patching
+  - Emits all events via logfmt stdout and SSE stream
+  - No TUI, no direct HOST calls
 
 **For full requirements and implementation details, always consult architecture.md and the three x-features.md files.**
 # LLM Context - GitOps Proxmox Homelab

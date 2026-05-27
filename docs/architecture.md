@@ -75,5 +75,14 @@ This document defines the authoritative architecture, network, and storage rules
     *   The **LXC Daemon** is built as a Docker image, pushed to GHCR, and automatically updated across all containers via Watchtower.
     *   The **HOST Daemon** compiles natively via GitHub Actions, publishes to GitHub Releases, and pulls its own updates automatically.
 
-## 8. Terminal UI/UX (TUI Conflict Resolved)
-- **Gum is Fully Removed:** All terminal interfaces globally use Ratatui for a consistent, premium TUI/UX. Gum is not used anywhere in the system. All interactive management, dashboards, and modals are implemented in Rust using Ratatui, with a unified color palette and animated spinners.
+## 8. Terminal UI/UX (TUI Model)
+- **CLIENT is the Sole TUI:** All interactive management, dashboards, deployment modals, and confirmation dialogs are implemented in the CLIENT using Ratatui. The CLIENT is the only component with a Ratatui interface.
+- **HOST and LXC are Headless:** The HOST daemon and LXC daemon emit plain logfmt lines to `stdout`/`stderr` only. They have no Ratatui TUI. All visual feedback for HOST and LXC operations is rendered by the CLIENT via SSE stream consumption.
+- **Gum is Fully Removed:** No interactive shell TUI tooling anywhere in the system.
+
+## 9. Communication Model (Authoritative)
+- **CLIENT is the sole orchestrator.** No direct communication exists between HOST and LXC daemons. Every call flows through the CLIENT.
+- **CLIENT → HOST:** `POST/GET https://<host_ip>:8443/api/*` with Bearer token. HOST emits completion/error events on `GET /api/events/stream` (SSE).
+- **CLIENT → LXC:** `POST/GET http://<lxc_ip>:8080/api/*` with Bearer token. LXC emits log events on `GET /api/logs/stream` (SSE).
+- **Sequential orchestration:** When a flow requires HOST work before LXC work (e.g., provision then first sync), the CLIENT subscribes to the HOST SSE stream, waits for the confirming event, then issues the LXC call. No LXC call is issued before its HOST precondition event is received.
+- **Endpoint discovery:** LXC IPs come from the `hwaddr` in each stack's `lxc-compose.yml` (matched to OPNsense DHCP reservation). The HOST IP is a single fixed address configured in the CLIENT (`HOST_API_URL`).

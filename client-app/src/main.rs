@@ -13,6 +13,7 @@ use std::io;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::signal;
+use tokio::sync::mpsc;
 
 mod app;
 mod app_list;
@@ -21,6 +22,7 @@ mod events;
 mod gitops;
 mod scaffold;
 mod ssh_config;
+mod telemetry;
 mod theme;
 mod ui;
 
@@ -52,6 +54,9 @@ async fn async_main() -> Result<()> {
 
     let mut app = App::new();
 
+    // Channel for background tasks (sync HTTP calls) to report results back to the TUI.
+    let (sync_tx, mut sync_rx) = mpsc::unbounded_channel::<(String, bool, String)>();
+
     let sigint = signal::ctrl_c();
     tokio::pin!(sigint);
 
@@ -61,6 +66,57 @@ async fn async_main() -> Result<()> {
     let mut anim_tick = tokio::time::interval(Duration::from_millis(33));
 
     loop {
+        // Drain any sync results that arrived from background tasks
+        while let Ok((stack, ok, msg)) = sync_rx.try_recv() {
+            let level = if ok { "INFO" } else { "ERROR" };
+            app.push_log("CLIENT", level, &msg);
+            app.sync_status = if ok {
+                format!("Sync OK — '{}'", stack)
+            } else {
+                format!("Sync failed — {} : {}", stack, msg)
+            };
+        }
+
+        // If a sync was queued by the 's' key, spawn the HTTP request now
+        if app.sync_pending {
+            app.sync_pending = false;
+            let stack = app.sync_stack.clone();
+            let tx = sync_tx.clone();
+
+            // Resolve LXC IP: look up `lxc-<stack>` in ~/.ssh/config, then fall
+            // back to the LXC_API_IP env var, then 127.0.0.1.
+            let lxc_host = format!("lxc-{}", stack);
+            let ip = ssh_config::parse_ssh_config()
+                .into_iter()
+                .find(|e| e.host == lxc_host)
+                .map(|e| e.hostname)
+                .unwrap_or_else(|| {
+                    std::env::var("LXC_API_IP").unwrap_or_else(|_| "127.0.0.1".to_string())
+                });
+            let url = format!("http://{}:8080/api/sync", ip);
+            let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+            app.push_log("CLIENT", "INFO", &format!("→ POST {} (stack={})", url, stack));
+
+            tokio::spawn(async move {
+                let client = reqwest::Client::new();
+                let mut req = client.post(&url);
+                if !token.is_empty() {
+                    req = req.bearer_auth(&token);
+                }
+                match req.send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        let _ = tx.send((stack, true, "Sync accepted by LXC daemon".to_string()));
+                    }
+                    Ok(resp) => {
+                        let _ = tx.send((stack, false, format!("HTTP {}", resp.status())));
+                    }
+                    Err(e) => {
+                        let _ = tx.send((stack, false, e.to_string()));
+                    }
+                }
+            });
+        }
+
         // Always draw before polling — keeps the UI responsive
         terminal.draw(|f| ui::draw_ui(f, &app))?;
 

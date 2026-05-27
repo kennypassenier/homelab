@@ -40,7 +40,7 @@ The CLIENT is a local desktop application that acts as the primary control cente
 - [ ] **Blast Radius Protection:** Replaces `remove-app.sh` and `remove-stack.sh` ([10], [11]). When deleting an app or stack, a stark red floating modal with a 3D drop-shadow appears ([12]). The user must type the exact name of the app/stack to confirm ([13], [14]). Once confirmed, the client deletes the folder from Git, but does not push until the user triggers sync.
 
 ## 4. API & Telemetry
-- [x] **HTTP Push API:** Instead of waiting for a 5-minute cron job ([15]), the CLIENT sends an HTTP POST request (secured with a Bearer token) directly to the LXC daemon to trigger an immediate deployment.
+- [x] **HTTP Push API:** Instead of waiting for a 5-minute cron job ([15]), the CLIENT sends an HTTP POST request (secured with a Bearer token) directly to the LXC daemon to trigger an immediate deployment. Press `s` on the Scaffolding tab to trigger a sync for the selected stack. LXC IP is resolved from `~/.ssh/config` (entry `lxc-<stack>`) with `LXC_API_IP` env var fallback.
 - [ ] **Live SSE Telemetry:** Establishes a Server-Sent Events (SSE) connection to the LXC daemon. Deployment logs are streamed live to the bottom of the desktop UI.
 
 ## 5. Updates & Maintenance

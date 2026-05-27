@@ -1,40 +1,71 @@
-//! HTTP Push API and SSE Telemetry logic for Homelab Client.
+//! HTTP Push API and SSE Telemetry logic for Homelab CLIENT.
+//!
+//! `trigger_deployment` is the main entry point called from the event loop when the
+//! user presses 's' on the Scaffolding tab. It:
+//!   1. POSTs to the LXC daemon's /api/sync endpoint to queue a GitOps sync.
+//!   2. Connects to /api/logs/stream (SSE) and streams log lines into `log_buffer`.
 use std::sync::{Arc, Mutex};
 use anyhow::Result;
+use futures::StreamExt;
 use reqwest::Client;
-use reqwest_eventsource::{EventSource, Event};
-use tokio_stream::StreamExt;
 
-/// Shared log buffer for SSE events.
+/// Shared log buffer — background SSE task appends lines here.
 pub type LogBuffer = Arc<Mutex<Vec<String>>>;
 
-/// Triggers a deployment via HTTP POST and starts SSE log streaming.
-pub async fn trigger_deployment(api_url: &str, token: &str, log_buffer: LogBuffer) -> Result<()> {
+/// Sends a sync trigger POST to `post_url`, then subscribes to the SSE log stream
+/// at `sse_url`, pushing received lines into `log_buffer` until the stream closes.
+///
+/// The function is cheap to spawn in a background `tokio::spawn` task.
+pub async fn trigger_deployment(post_url: &str, sse_url: &str, token: &str, log_buffer: LogBuffer) -> Result<()> {
     let client = Client::new();
-    // Send HTTP POST with Bearer token
-    let res = client.post(api_url)
-        .bearer_auth(token)
-        .send()
-        .await?;
-    if !res.status().is_success() {
-        return Err(anyhow::anyhow!("POST failed: {}", res.status()));
+
+    // ── Step 1: Trigger sync ───────────────────────────────────────────────
+    let mut req = client.post(post_url);
+    if !token.is_empty() {
+        req = req.bearer_auth(token);
     }
-    // Start SSE connection
-    let mut es = EventSource::new(client.get(api_url)).unwrap();
-    while let Some(event) = es.next().await {
-        match event {
-            Ok(Event::Open) => {},
-            Ok(Event::Message(msg)) => {
-                let mut logs = log_buffer.lock().unwrap();
-                logs.push(msg.data);
-                if logs.len() > 100 { logs.remove(0); }
-            },
-            Ok(Event::Retry) => {},
+    let res = req.send().await?;
+    if !res.status().is_success() {
+        return Err(anyhow::anyhow!("POST {} returned {}", post_url, res.status()));
+    }
+
+    // ── Step 2: Stream SSE log lines ──────────────────────────────────────
+    // The LXC daemon sends newline-delimited SSE text:
+    //   data: <logfmt line>\n\n
+    // We parse it manually to avoid reqwest-eventsource version coupling.
+    let sse_res = client.get(sse_url).send().await?;
+    let mut byte_stream = sse_res.bytes_stream();
+    let mut buf = String::new();
+
+    while let Some(chunk_result) = byte_stream.next().await {
+        let bytes = match chunk_result {
+            Ok(b) => b,
             Err(e) => {
                 let mut logs = log_buffer.lock().unwrap();
-                logs.push(format!("SSE error: {}", e));
+                logs.push(format!("[SSE error] {}", e));
+                break;
+            }
+        };
+        if let Ok(text) = std::str::from_utf8(&bytes) {
+            buf.push_str(text);
+        }
+
+        // SSE events are separated by a blank line (\n\n)
+        while let Some(sep) = buf.find("\n\n") {
+            let raw_event = buf[..sep].to_string();
+            buf.drain(..sep + 2);
+
+            for line in raw_event.lines() {
+                if let Some(data) = line.strip_prefix("data: ") {
+                    let mut logs = log_buffer.lock().unwrap();
+                    logs.push(data.to_string());
+                    if logs.len() > 500 {
+                        logs.remove(0);
+                    }
+                }
             }
         }
     }
+
     Ok(())
 }

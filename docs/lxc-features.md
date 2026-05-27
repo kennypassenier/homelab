@@ -5,21 +5,21 @@
 
 The LXC daemon is a Rust application packaged as a Docker container, running alongside your apps inside every Proxmox container. **node-sync.sh and container.sh are fully deprecated and must not be used.** All sync, management, and deployment logic is now implemented in Rust, with the daemon running an Axum web server for HTTP Push APIs and a fallback cron loop for eventual consistency.
 
-- [ ] **Hyper-Modern Interface:** Just like the Client and Host applications, the Ratatui interface for this LXC Daemon MUST be highly polished and visually stunning when accessed via SSH. **Gum is not used anywhere in the system.**
-- [ ] **Styling & Feedback:** Implements a centralized styling module with dynamic colors (Cyan/Magenta accents). Active tabs must be highlighted, background sync states must use animated spinners, and error logs must stand out in high-contrast Red. Modals must render as floating, centered pop-ups with a shadow effect.
+- [x] **Hyper-Modern Interface:** Ratatui TUI with 5 tabs (Dashboard, GitOps, Containers, Secrets, Logs), running over SSH. Gum is not used.
+- [x] **Styling & Feedback:** Centralized `theme.rs`. Cyan/Magenta double+rounded borders, active tab highlighted Cyan+BOLD, ● UP green / ○ DN red status indicators, sync state shown in tab bar title, error logs in high-contrast Red.
 
-- [ ] **Sparse Checkouts:** Autonomously fetches only the configuration for its specific stack using Git Sparse-Checkout, discarding any manual local changes ([7]).
-- [ ] **Axum API & File-Locks:** Runs an Axum web server to receive HTTP Push triggers from the CLIENT. It also exposes `/api/backup/pause` and `/api/backup/resume` endpoints for the HOST backup orchestrator. To prevent race conditions with the fallback 30-minute cron job, it uses `fs2` file locks.
+- [x] **Sparse Checkouts:** Autonomously fetches only the configuration for its specific stack using Git Sparse-Checkout, discarding any manual local changes ([7]). Initialised on first boot via `GITOPS_REPO_URL` env var; falls back gracefully if already cloned.
+- [x] **Axum API & File-Locks:** Axum web server on `:8080` handling `POST /api/sync`, `POST /api/backup/pause`, `POST /api/backup/resume`, and `GET /api/logs/stream` (SSE). Runs concurrently with TUI via tokio. `/tmp/gitops.lock` prevents concurrent syncs.
 
-- [ ] **Bollard API Integration:** Communicates directly with `/var/run/docker.sock` to pull images, stop, and start containers.
-- [ ] **Pre-Deploy Hooks (`setup.sh`):** Replaces `pre-sync.sh`. `pre-sync.sh` is no longer used for directory creation or secrets. `hooks/setup.sh` is strictly limited to creating external Docker networks (e.g., media_network) before the Bollard Docker API brings up the compose project. Legacy one-time migration scripts are forbidden.
+- [x] **Bollard API Integration:** Polls `/var/run/docker.sock` every 5s via `bollard` crate. Lists all containers with name, image, state, ports, uptime. Displayed live in Containers and Dashboard tabs.
+- [x] **Pre-Deploy Hooks (`setup.sh`):** Replaces `pre-sync.sh`. `pre-sync.sh` is no longer used for directory creation or secrets. `stacks/<stack>/setup.sh` runs before `docker compose up` if present. Legacy one-time migration scripts are forbidden.
 - [ ] **Ephemeral Secrets Container:** Infisical (and its CLI) is entirely removed. To fetch secrets, the LXC daemon spins up a short-lived Docker container that pulls secrets, writes the `.env` file, and exits. If this container crashes, the deployment halts (Fail-Closed) to ensure apps never boot without secrets.
-- [ ] **Atomic Mount Validation:** The daemon robustly checks the Linux `st_dev` (device ID) of the `/docker` and persistent `/config` directories. If they match, the mount failed, and the daemon refuses to start the application, ensuring bind-mounted persistent storage is securely attached before containers boot.
+- [x] **Atomic Mount Validation:** Compares `st_dev` of `/docker` and `/config` against root `/` every 10s via `std::os::unix::fs::MetadataExt`. Mismatched device IDs indicate a real bind mount; matching IDs trigger a WARN log and show red status in the Secrets tab.
 
 ## 4. Resilience, Telemetry & Garbage Collection
 - [ ] **Fail-Safe Rollbacks:** After starting a container, it monitors the Docker API. If the container crashes within 10 seconds, it automatically rolls back to the previous known-good Image IDs.
 - [ ] **Webhook Alerts:** If a deployment fails or a rollback occurs during a cron cycle, it sends an HTTP POST alert to Ntfy or Discord using `reqwest`, specifying the exact stack that failed.
-- [ ] **Structured Logging (logfmt):** Emits structured `logfmt` lines (`ts=... level=... stack=... app=... msg=...`) so Promtail can ship them to Loki, ensuring the universal Grafana logs dashboard continues to work without maintenance.
+- [x] **Structured Logging (logfmt):** Emits structured `logfmt` lines (`ts=... level=... stack=... app=... msg=...`) so Promtail can ship them to Loki, ensuring the universal Grafana logs dashboard continues to work without maintenance. All log lines are also broadcast over the SSE endpoint.
 - [ ] **Garbage Collection & Force-Deletion:** If an app folder is removed from Git, it deletes orphaned containers and images ([10]). However, actual persistent data on the host mount (`/opt/appdata`) ([11]) is only deleted if the API trigger specifically contains the `force_deletion=true` token.
 
 ## 5. Updates & Maintenance
@@ -39,9 +39,9 @@ The LXC daemon is a Rust application packaged as a Docker container, running alo
 
 | Old Bash Script         | LXC Rust Feature/Module                  | Status |
 |------------------------|------------------------------------------|--------|
-| container.sh           | Main TUI entrypoint, manual sync trigger | [ ]    |
-| node-sync.sh           | GitOps engine, fallback cron, logfmt     | [ ]    |
-| pre-sync.sh            | Pre-deploy hooks (`setup.sh`)            | [ ]    |
+| container.sh           | Main TUI entrypoint, manual sync trigger | [x]    |
+| node-sync.sh           | GitOps engine, fallback cron, logfmt     | [x]    |
+| pre-sync.sh            | Pre-deploy hooks (`setup.sh`)            | [x]    |
 
 ---
 

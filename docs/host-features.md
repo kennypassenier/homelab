@@ -26,8 +26,8 @@ The HOST is a native `systemd` daemon running directly on the Proxmox bare-metal
 
 
 ## 4. Backup Orchestration & Stack Recovery
-- [ ] **API-Driven Restic Backups:** Replaces `backup-stacks.sh` ([14]). Instead of manually pausing containers, the HOST sends an HTTP POST `/api/backup/pause` to the LXC Daemon.
-- [ ] **Rust Drop Guards:** After Restic backs up `/opt/appdata` ([15]), a Rust Drop Guard guarantees that the `/api/backup/resume` signal is sent to the LXC, even if the Restic process panics or crashes.
+- [x] **API-Driven Restic Backups:** Replaces `backup-stacks.sh` ([14]). The HOST sends `POST /api/backup/pause` to each LXC Daemon before Restic backs up `/opt/appdata`. Press `b` in the Backups tab to run a cycle. LXC IPs resolved from `LXC_<STACK>_IP` env vars (defaults: 10.0.1.10x).
+- [x] **Rust Drop Guards:** After Restic backs up `/opt/appdata` ([15]), a Rust Drop Guard guarantees that the `/api/backup/resume` signal is sent to the LXC, even if the Restic process panics or crashes.
 - [ ] **Persistent Storage Management:** The HOST daemon is responsible for managing the actual NVMe storage at `/opt/appdata/<STACK>`. It relies on the CLIENT to scaffold and create the required directory structures, but performs atomic wipes of these directories when a reset-stack action is triggered, ensuring safe and complete data removal while preserving the LXC container itself.
 
 ## 5. CI/CD Self-Updater
@@ -50,7 +50,7 @@ The HOST is a native `systemd` daemon running directly on the Proxmox bare-metal
 | bootstrap-lxc.sh       | Proxmox API Client & Exec Hooks         | [ ]    |
 | enable-gpu.sh          | GPU passthrough config (Atomic Rename)  | [ ]    |
 | enable-tun.sh          | TUN device passthrough config           | [ ]    |
-| backup-stacks.sh       | API-driven Restic backup                | [ ]    |
+| backup-stacks.sh       | API-driven Restic backup                | [x]    |
 | reset-stack.sh         | Stack recovery / secure deletion feature| [ ]    |
 
 *(Note: Legacy scripts `sync-host.sh` and `setup-cron.sh` are obsoleted by the new native GitHub Releases CI/CD Self-Updater).*

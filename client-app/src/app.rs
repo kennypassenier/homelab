@@ -320,6 +320,12 @@ pub struct App {
     pub host_selected: usize,
     /// RNG seeded once at startup — only for animations, never for security.
     rng: SmallRng,
+    /// When `true`, the main loop will look up the LXC IP and POST /api/sync.
+    pub sync_pending: bool,
+    /// The stack name to sync (set alongside `sync_pending = true`).
+    pub sync_stack: String,
+    /// Human-readable status line shown at the bottom of the Scaffolding tab.
+    pub sync_status: String,
 }
 
 impl App {
@@ -379,6 +385,9 @@ impl App {
             lxc_ram,
             host_selected: 0,
             rng,
+            sync_pending: false,
+            sync_stack: String::new(),
+            sync_status: "Idle".to_string(),
         };
         // Pre-fill with a page of mock entries so the Logs tab is not blank on startup.
         for _ in 0..20 {
@@ -410,6 +419,19 @@ impl App {
         self.stack_dropdowns = Self::build_dropdowns(&self.stacks);
         if self.selected_stack >= self.stacks.len() && !self.stacks.is_empty() {
             self.selected_stack = self.stacks.len() - 1;
+        }
+    }
+
+    /// Pushes a real log entry into the ring buffer (used by background tasks).
+    pub fn push_log(&mut self, source: &str, level: &str, message: &str) {
+        self.logs.push(LogLine {
+            time: current_time_str(),
+            source: source.to_string(),
+            level: level.to_string(),
+            message: message.to_string(),
+        });
+        if self.logs.len() > 500 {
+            self.logs.remove(0);
         }
     }
 

@@ -463,6 +463,17 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
 
         KeyCode::Char('q') => return EventOutcome::Quit,
 
+        // Trigger a GitOps sync on the LXC that manages the selected stack.
+        // The main loop picks up `sync_pending` and sends the HTTP request.
+        KeyCode::Char('s') => {
+            if let Some(stack_name) = app.stacks.get(app.selected_stack) {
+                app.sync_stack = stack_name.clone();
+                app.sync_pending = true;
+                app.sync_status = format!("Queued sync for '{}'…", stack_name);
+            }
+            return EventOutcome::Continue;
+        }
+
         _ => {}
     }
 

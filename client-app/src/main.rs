@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
 
 use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 
 mod app;
 mod app_list;
@@ -24,8 +25,10 @@ mod backup_schedule;
 mod blast_radius;
 mod events;
 mod gitops;
+mod latch;
 mod opnsense;
 mod scaffold;
+mod shell;
 mod ssh_config;
 mod stack_features;
 mod theme;
@@ -33,6 +36,7 @@ mod transactions;
 mod ui;
 
 use app::App;
+use blast_radius::{ActiveModal, OperationEntry, OperationProgressState};
 
 enum SyncEvent {
     Accepted {
@@ -44,6 +48,39 @@ enum SyncEvent {
     },
     Finished {
         stack: String,
+        ok: bool,
+        msg: String,
+    },
+}
+
+#[derive(Serialize)]
+struct RestoreRequestPayload {
+    scope: String,
+    stack_names: Vec<String>,
+    backup_id: String,
+    verify_only: bool,
+    skip_post_hooks: bool,
+}
+
+#[derive(Deserialize)]
+struct RestoreEventPayload {
+    stack_name: String,
+    phase: String,
+    message: String,
+    is_error: bool,
+}
+
+#[derive(Deserialize)]
+struct RestoreStatusPayload {
+    events: Vec<RestoreEventPayload>,
+    success: bool,
+    error_message: Option<String>,
+}
+
+enum RestoreDispatchEvent {
+    Finished {
+        stack: String,
+        payload: Option<RestoreStatusPayload>,
         ok: bool,
         msg: String,
     },
@@ -77,6 +114,7 @@ async fn async_main() -> Result<()> {
 
     // Channel for background tasks (sync HTTP calls) to report results back to the TUI.
     let (sync_tx, mut sync_rx) = mpsc::unbounded_channel::<SyncEvent>();
+    let (restore_tx, mut restore_rx) = mpsc::unbounded_channel::<RestoreDispatchEvent>();
 
     let sigint = signal::ctrl_c();
     tokio::pin!(sigint);
@@ -151,11 +189,76 @@ async fn async_main() -> Result<()> {
             }
         }
 
+        while let Ok(event) = restore_rx.try_recv() {
+            match event {
+                RestoreDispatchEvent::Finished {
+                    stack,
+                    payload,
+                    ok,
+                    msg,
+                } => {
+                    let level = if ok { "INFO" } else { "ERROR" };
+                    app.push_client_logfmt(
+                        level,
+                        Some(&stack),
+                        Some("restore_result"),
+                        &msg,
+                        if ok { None } else { Some(&msg) },
+                    );
+
+                    if let Some(body) = payload {
+                        let entries: Vec<OperationEntry> = if body.events.is_empty() {
+                            vec![OperationEntry {
+                                name: stack.clone(),
+                                status: if ok { "✓" } else { "✗" }.to_string(),
+                                detail: msg.clone(),
+                            }]
+                        } else {
+                            body.events
+                                .into_iter()
+                                .map(|event| OperationEntry {
+                                    name: event.stack_name,
+                                    status: if event.is_error { "✗" } else { "✓" }.to_string(),
+                                    detail: format!("{}: {}", event.phase, event.message),
+                                })
+                                .collect()
+                        };
+
+                        app.modal = ActiveModal::OperationProgress(OperationProgressState {
+                            title: format!("Restore Result - {}", stack),
+                            phase: if body.success {
+                                "Completed".to_string()
+                            } else {
+                                "Failed".to_string()
+                            },
+                            summary: body
+                                .error_message
+                                .unwrap_or_else(|| msg.clone()),
+                            entries,
+                        });
+                    }
+
+                    app.backup_status = if ok {
+                        format!("restore completed for '{}'", stack)
+                    } else {
+                        format!("restore failed for '{}': {}", stack, msg)
+                    };
+                }
+            }
+        }
+
         // Promote queued batch sync work into the single-sync execution slot.
         if !app.sync_pending {
             if let Some(next_stack) = app.sync_queue.pop_front() {
                 app.sync_stack = next_stack;
                 app.sync_pending = true;
+            }
+        }
+
+        if !app.restore_pending {
+            if let Some(next_stack) = app.restore_queue.pop_front() {
+                app.restore_stack = next_stack;
+                app.restore_pending = true;
             }
         }
 
@@ -167,14 +270,7 @@ async fn async_main() -> Result<()> {
 
             // Resolve LXC IP: look up `lxc-<stack>` in ~/.ssh/config, then fall
             // back to the LXC_API_IP env var, then 127.0.0.1.
-            let lxc_host = format!("lxc-{}", stack);
-            let ip = ssh_config::parse_ssh_config()
-                .into_iter()
-                .find(|e| e.host == lxc_host)
-                .map(|e| e.hostname)
-                .unwrap_or_else(|| {
-                    std::env::var("LXC_API_IP").unwrap_or_else(|_| "127.0.0.1".to_string())
-                });
+            let ip = resolve_stack_api_ip(&stack);
             let url = format!("http://{}:8080/api/sync", ip);
             let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
             app.push_client_logfmt(
@@ -252,6 +348,96 @@ async fn async_main() -> Result<()> {
             });
         }
 
+        if app.restore_pending {
+            app.restore_pending = false;
+            let stack = app.restore_stack.clone();
+            let backup_id = app.restore_backup_id.clone();
+            let tx = restore_tx.clone();
+
+            let ip = resolve_stack_api_ip(&stack);
+
+            let url = format!("http://{}:8080/api/restore", ip);
+            let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+            app.push_client_logfmt(
+                "INFO",
+                Some(&stack),
+                Some("restore_dispatch"),
+                &format!("POST {} backup_id={}", url, backup_id),
+                None,
+            );
+
+            tokio::spawn(async move {
+                let payload = RestoreRequestPayload {
+                    scope: "Stack".to_string(),
+                    stack_names: vec![stack.clone()],
+                    backup_id,
+                    verify_only: false,
+                    skip_post_hooks: false,
+                };
+
+                let client = reqwest::Client::new();
+                let mut req = client.post(&url).json(&payload);
+                if !token.is_empty() {
+                    req = req.bearer_auth(&token);
+                }
+
+                match req.send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        match resp.json::<RestoreStatusPayload>().await {
+                            Ok(body) => {
+                                let msg = if body.success {
+                                    "Restore completed".to_string()
+                                } else {
+                                    body.error_message
+                                        .clone()
+                                        .unwrap_or_else(|| "Restore failed".to_string())
+                                };
+                                let _ = tx.send(RestoreDispatchEvent::Finished {
+                                    stack,
+                                    payload: Some(body),
+                                    ok: true,
+                                    msg,
+                                });
+                            }
+                            Err(e) => {
+                                let _ = tx.send(RestoreDispatchEvent::Finished {
+                                    stack,
+                                    payload: None,
+                                    ok: false,
+                                    msg: format!("Restore response parse failed: {}", e),
+                                });
+                            }
+                        }
+                    }
+                    Ok(resp) => {
+                        let status = resp.status();
+                        let body = resp
+                            .json::<RestoreStatusPayload>()
+                            .await
+                            .ok();
+                        let msg = body
+                            .as_ref()
+                            .and_then(|b| b.error_message.clone())
+                            .unwrap_or_else(|| format!("HTTP {}", status));
+                        let _ = tx.send(RestoreDispatchEvent::Finished {
+                            stack,
+                            payload: body,
+                            ok: false,
+                            msg,
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(RestoreDispatchEvent::Finished {
+                            stack,
+                            payload: None,
+                            ok: false,
+                            msg: e.to_string(),
+                        });
+                    }
+                }
+            });
+        }
+
         // Always draw before polling — keeps the UI responsive
         terminal.draw(|f| ui::draw_ui(f, &app))?;
 
@@ -313,4 +499,22 @@ fn parse_live_log_line(line: &str) -> (String, String) {
         .map(|value| value.trim_matches('"').replace('"', ""))
         .unwrap_or_else(|| line.to_string());
     (level, message)
+}
+
+fn resolve_stack_api_ip(stack: &str) -> String {
+    let mut aliases = vec![crate::scaffold::legacy_lxc_alias(stack)];
+
+    if let Ok(config) = crate::scaffold::read_stack_config(stack) {
+        aliases.push(config.hostname);
+        aliases.push(crate::scaffold::canonical_lxc_name(config.vmid, stack));
+    }
+
+    let entries = ssh_config::parse_ssh_config();
+    for alias in aliases {
+        if let Some(entry) = entries.iter().find(|e| e.host == alias) {
+            return entry.hostname.clone();
+        }
+    }
+
+    std::env::var("LXC_API_IP").unwrap_or_else(|_| "127.0.0.1".to_string())
 }

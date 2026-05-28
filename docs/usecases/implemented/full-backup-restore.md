@@ -16,8 +16,8 @@ Trigger:
 Behavior:
 
 - Opens operation progress modal
-- Builds per-stack DR plan entries
-- Displays phase and summary for provision + restore + sync orchestration path
+- Queues per-stack restore dispatch through LXC `POST /api/restore`
+- Displays backend phase events and final state in operation progress modal
 
 ---
 

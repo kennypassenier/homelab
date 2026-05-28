@@ -1055,15 +1055,23 @@ fn handle_backups_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
                 .unwrap_or_else(|| "unknown".to_string());
             app.modal = ActiveModal::OperationProgress(OperationProgressState {
                 title: format!("Individual Restore - {}", stack),
-                phase: "Snapshot selection + restore dispatch".to_string(),
-                summary: "Restore request prepared for selected stack.".to_string(),
+                phase: "Restore dispatch".to_string(),
+                summary: format!(
+                    "Dispatching restore for '{}' with backup_id='{}'.",
+                    stack, app.restore_backup_id
+                ),
                 entries: vec![OperationEntry {
                     name: stack.clone(),
                     status: "⟳".to_string(),
-                    detail: "awaiting snapshot picker integration".to_string(),
+                    detail: "queued for /api/restore".to_string(),
                 }],
             });
-            app.backup_status = format!("individual restore prepared for '{}'", stack);
+            app.restore_stack = stack.clone();
+            app.restore_pending = true;
+            app.backup_status = format!(
+                "individual restore queued for '{}' using backup '{}'",
+                stack, app.restore_backup_id
+            );
         }
         KeyCode::Char('r') => {
             let entries: Vec<OperationEntry> = app
@@ -1072,16 +1080,24 @@ fn handle_backups_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
                 .map(|s| OperationEntry {
                     name: s.clone(),
                     status: "⟳".to_string(),
-                    detail: "provision + restore + sync plan".to_string(),
+                    detail: "queued for /api/restore".to_string(),
                 })
                 .collect();
             app.modal = ActiveModal::OperationProgress(OperationProgressState {
                 title: "Full Backup Restore".to_string(),
-                phase: "Disaster recovery pre-flight".to_string(),
-                summary: format!("Prepared DR plan for {} stack(s).", entries.len()),
+                phase: "Restore dispatch".to_string(),
+                summary: format!(
+                    "Queueing restore dispatch for {} stack(s) with backup_id='{}'.",
+                    entries.len(), app.restore_backup_id
+                ),
                 entries,
             });
-            app.backup_status = "disaster recovery plan prepared".to_string();
+            app.restore_queue = app.stacks.iter().cloned().collect();
+            app.backup_status = format!(
+                "full restore queued for {} stack(s) using backup '{}'",
+                app.restore_queue.len(),
+                app.restore_backup_id
+            );
         }
         KeyCode::Char('p') => {
             let entries: Vec<OperationEntry> = app

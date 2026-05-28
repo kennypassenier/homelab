@@ -280,10 +280,14 @@ fn managed_description(config: &crate::scaffold::StackConfig) -> String {
 }
 
 fn known_stack_hostnames(known_stacks: &[String]) -> HashSet<String> {
-    known_stacks
-        .iter()
-        .map(|stack| format!("lxc-{}", stack))
-        .collect()
+    known_stacks.iter().fold(HashSet::new(), |mut acc, stack| {
+        acc.insert(crate::scaffold::legacy_lxc_alias(stack));
+        if let Ok(config) = crate::scaffold::read_stack_config(stack) {
+            acc.insert(crate::scaffold::canonical_lxc_name(config.vmid, stack));
+            acc.insert(config.hostname);
+        }
+        acc
+    })
 }
 
 fn is_managed_for_stack(

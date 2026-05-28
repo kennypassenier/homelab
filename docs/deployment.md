@@ -81,6 +81,22 @@ Create these files from the examples in the repo:
 
 Use them as service `EnvironmentFile=` inputs or shell exports for local testing.
 
+### Optional Central Bundle (recommended when secrets grow)
+
+If you prefer one central source of truth, use:
+
+- `config/env.bundle.example` -> copy to `config/env.bundle`
+- run `./scripts/shared/sync-env-bundle.sh --bundle config/env.bundle`
+
+This generates tier-specific files automatically:
+
+- `client-app/.env`
+- `host-daemon/.env`
+- `lxc-daemon/.env`
+- `scripts/host/.env`
+
+This keeps deployment ergonomic while preserving per-service runtime boundaries.
+
 ### CLIENT variables
 
 CLIENT currently cares about:
@@ -101,6 +117,8 @@ HOST currently cares about:
 - `HOST_UPDATE_ASSET`
 - optional `HOST_UPDATE_TOKEN`
 - optional `LXC_<STACK>_IP` values used during backup orchestration
+- optional `RESTIC_REPO_BASE` for HOST daemon per-stack restic target base
+- optional `RCLONE_CONFIG_FILE` for rclone-backed restic repositories (Google Drive, etc.)
 
 ### LXC variables
 
@@ -144,16 +162,39 @@ Use this order.
 - Ensure `/opt/appdata` and backup storage roots exist.
 
 4. Prepare each LXC.
-- Install Docker / Docker Compose / git.
-- Install/start the LXC daemon.
-- Create env file from `lxc-daemon/.env.example`.
-- Set `STACK_NAME` per container.
-- Set `GITOPS_REPO_URL` to this repo.
+ 
+ 
+ 
+5. *(Optional)* Sync credentials to LXC via Latch Clone.
+- On CLIENT, run `./scripts/client/setup-latch.sh` to set up latch CLI + keyring.
+- Configure credentials in your keyring (see `docs/latch-clone-setup.md`).
+- Use CLIENT TUI "Secrets" menu to sync to LXC containers securely.
+- Latch Clone supports end-to-end encrypted credential migration without temp files.
+
+6. Deploy stacks via GitOps.
 - If private, also set `GITOPS_REPO_TOKEN`.
 
 5. Prepare secrets.
 - Verify every stack `pre-sync.sh` can authenticate to the secret backend.
 - Verify destination directories under `/appdata/<stack>/<app>/` exist or are created by your stack workflow.
+
+### Restic + Google Drive (rclone backend)
+
+Current status:
+
+- Restic backup workflow is implemented.
+- Google Drive is supported through restic's `rclone:` backend when rclone is installed/configured.
+
+Host setup checklist:
+
+1. Install `restic` and `rclone` on the Proxmox host.
+2. Configure rclone remote (example remote name: `gdrive`).
+3. Set host backup env values:
+	- `RESTIC_REPOSITORY=rclone:gdrive:homelab-restic` (script path)
+	- `RESTIC_REPO_BASE=rclone:gdrive:homelab` (HOST daemon per-stack path)
+	- `RESTIC_PASSWORD=<strong password>`
+	- optional `RCLONE_CONFIG_FILE=/root/.config/rclone/rclone.conf`
+4. Run `scripts/host/backup-stacks.sh`; repository init is automatic when missing.
 
 6. Publish artifacts.
 - Create a `host-daemon-vX.Y.Z` tag to publish a HOST release asset.
@@ -191,7 +232,4 @@ After deployment, verify:
 
 These features are still tracked as pending use-cases before full end-to-end feature completion:
 
-- host storage operations
-- host hardware operations
-- backup policy enforcement service
-- restore execution backend
+- none currently tracked in `docs/usecases/pending/`

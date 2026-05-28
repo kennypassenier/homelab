@@ -7,7 +7,7 @@ This document defines the stack-level lxc-compose contract used by CLIENT, HOST,
 - version: integer schema version.
 - stack_name: stack directory name under stacks/.
 - vmid: Proxmox VMID (0 means not provisioned yet).
-- hostname: LXC hostname.
+- hostname: LXC hostname (preferred canonical format `vmid-app-<stack>`; legacy `lxc-<stack>` still tolerated).
 - hwaddr: MAC address used for DHCP reservation.
 - deploy.enabled: activation gate for deploy command.
 - network.bridge: Proxmox bridge name used by the stack.
@@ -24,6 +24,7 @@ This document defines the stack-level lxc-compose contract used by CLIENT, HOST,
 - hardware.gpu.enabled: boolean host passthrough hint.
 - hardware.gpu.profile: GPU profile identifier (for example intel_igpu).
 - hardware.gpu.target_app: app folder name that should receive GPU compose wiring.
+- host_management.managed: when false, HOST reconciliation skips this container for boot/resource applies.
 
 ## Activation Contract
 

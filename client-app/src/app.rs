@@ -338,6 +338,14 @@ pub struct App {
     pub backup_schedule: BackupSchedule,
     /// Status line in Backups tab.
     pub backup_status: String,
+    /// When true, main loop dispatches a restore API request.
+    pub restore_pending: bool,
+    /// Stack currently targeted for restore dispatch.
+    pub restore_stack: String,
+    /// Queue for batch restore operations.
+    pub restore_queue: VecDeque<String>,
+    /// Backup snapshot id sent to restore backend.
+    pub restore_backup_id: String,
 }
 
 impl App {
@@ -404,6 +412,11 @@ impl App {
             sync_status: "Idle".to_string(),
             backup_schedule: BackupSchedule::load_or_default(),
             backup_status: "Backup policy loaded".to_string(),
+            restore_pending: false,
+            restore_stack: String::new(),
+            restore_queue: VecDeque::new(),
+            restore_backup_id: std::env::var("BACKUP_ID_DEFAULT")
+                .unwrap_or_else(|_| "latest".to_string()),
         };
         // Pre-fill with a page of mock entries so the Logs tab is not blank on startup.
         for _ in 0..20 {

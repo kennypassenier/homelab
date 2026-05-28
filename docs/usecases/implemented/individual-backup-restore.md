@@ -17,7 +17,9 @@ Behavior:
 
 - Targets currently selected stack
 - Opens operation progress modal with restore phase context
-- Updates backup status line for restore preparation
+- Dispatches real restore request to LXC `POST /api/restore` for the selected stack
+- Updates operation progress modal with backend phase events and final success/failure state
+- Updates backup status line with backend result
 
 ---
 

@@ -26,6 +26,8 @@ Last updated: 2026-05-28
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.
 - App rows now expose a real config editor for Git-managed app metadata, starting with Docker image updates.
 - New stack defaults explicitly set `deploy.enabled=false` to keep manual activation as the safe default.
+- Latch clone orchestration module can perform offer/create/apply credential sync through local + LXC command execution.
+- LXC naming standardization supports canonical `vmid-app-<stack>` hostnames while preserving legacy alias compatibility.
 
 ## Notes
 

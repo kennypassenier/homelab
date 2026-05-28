@@ -1,7 +1,7 @@
 # Use Case: Backup Scheduling
 
-**Tier:** CLIENT (policy editing) + HOST/LXC continuous services
-**Status:** Implemented (CLIENT policy layer)
+**Tier:** CLIENT + HOST + LXC continuous services
+**Status:** Implemented
 
 ---
 
@@ -31,7 +31,12 @@ Implemented in CLIENT:
   - ~/.config/homelab/backup-schedule.json
 - Hotkeys for editing and saving policy.
 
-No cron expression is used.
+Implemented in HOST:
+
+- Continuous policy enforcer loop that polls persisted policy.
+- Interval-driven scheduled backup cycles (service-based, no cron logic).
+- Restic retention enforcement from policy (`forget --keep-daily/weekly/monthly --prune`).
+- Concurrency guard to avoid overlapping manual and scheduled backup cycles.
 
 ---
 
@@ -43,7 +48,7 @@ Implemented via client-app/src/backup_schedule.rs:
 - load_or_default()
 - save()
 
-This module is reusable for future HOST API integration.
+This module is now consumed by HOST enforcement through compatible policy fields.
 
 ---
 
@@ -59,3 +64,8 @@ In Backups tab:
 - n: toggle notify_on_success
 - f: toggle notify_on_failure
 - s: save policy
+
+## 5. Enforcement Notes
+
+- Schedule notifications are currently policy fields only; delivery backends are planned under `docs/usecases/planned/notification-routing.md`.
+- Scheduled cycle progress appears in HOST backup status output.

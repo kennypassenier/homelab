@@ -25,8 +25,29 @@ if [[ -z "${RESTIC_REPOSITORY:-}" ]]; then
     exit 1
 fi
 
+if [[ "${RESTIC_REPOSITORY}" == rclone:* ]]; then
+    if ! command -v rclone >/dev/null 2>&1; then
+        echo "ERROR: RESTIC_REPOSITORY uses rclone backend but 'rclone' is not installed."
+        exit 1
+    fi
+
+    if [[ -n "${RCLONE_CONFIG_FILE:-}" && ! -f "${RCLONE_CONFIG_FILE}" ]]; then
+        echo "ERROR: RCLONE_CONFIG_FILE is set but file does not exist: ${RCLONE_CONFIG_FILE}"
+        exit 1
+    fi
+fi
+
 APPDATA_DIR="/opt/appdata"
 export RESTIC_PASSWORD RESTIC_REPOSITORY
+
+ensure_restic_repo() {
+    if restic snapshots >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "--- Restic repository not initialized. Running 'restic init' ---"
+    restic init
+}
 
 echo "--- Starting Restic Backup Procedure ---"
 LXC_IDS=$(pct list | awk 'NR>1 && $2=="running" {print $1}')
@@ -55,6 +76,8 @@ for VMID in $LXC_IDS; do
         done
     fi
 done
+
+ensure_restic_repo
 
 restic backup "${APPDATA_DIR}" --cleanup-cache
 

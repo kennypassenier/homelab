@@ -6,7 +6,6 @@ Current pending feature set:
 
 - host storage operations
 - host hardware operations
-- backup policy enforcement service
 - restore execution backend
 
 Detailed backlog files live under `docs/usecases/pending/`.

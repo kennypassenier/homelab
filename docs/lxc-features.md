@@ -19,6 +19,7 @@ Last updated: 2026-05-28
 - compose pull/up execution per stack app folder.
 - lock-file based sync exclusion.
 - websocket telemetry endpoint for CLIENT modal/log views.
+- restore execution backend endpoint (`POST /api/restore`) with phased status events.
 
 ## Image Delivery
 

@@ -592,7 +592,9 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
             let is_running = i % 5 != 3;
             let id = 101 + i;
             let ip = format!("192.168.1.{}", id);
-            let container = format!("lxc-{}", name);
+            let container = crate::scaffold::read_stack_config(name)
+                .map(|cfg| cfg.hostname)
+                .unwrap_or_else(|_| crate::scaffold::legacy_lxc_alias(name));
 
             let (status_text, status_color) = if is_running {
                 ("\u{25cf} RUN", Color::Green)

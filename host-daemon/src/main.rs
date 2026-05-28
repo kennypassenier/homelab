@@ -9,10 +9,14 @@ use ratatui::{
     prelude::*,
     widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
 };
+use std::path::Path;
 
 mod app;
 mod backup;
+mod hardware;
+mod policy;
 mod self_update;
+mod storage;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     crossterm::terminal::enable_raw_mode()?;
@@ -26,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Channel for the backup thread to send status lines back to the TUI
     let (backup_tx, backup_rx) = std::sync::mpsc::channel::<String>();
+    backup::start_policy_enforcer(backup_tx.clone());
 
     loop {
         // Poll backup status from background thread
@@ -84,17 +89,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         stack, ip
                                     ));
                                 }
-                                let results = backup::run_backup_cycle_owned(stacks);
-                                for r in &results {
-                                    let status = if r.backup_ok { "OK" } else { "FAIL" };
-                                    let _ = tx.send(format!(
-                                        "[{}] pause={} backup={} resume={} — {}",
-                                        r.stack,
-                                        if r.paused { "ok" } else { "err" },
-                                        status,
-                                        if r.resumed { "ok" } else { "err" },
-                                        r.message
-                                    ));
+                                match backup::run_backup_cycle_owned_guarded(stacks) {
+                                    Some(results) => {
+                                        for r in &results {
+                                            let status = if r.backup_ok { "OK" } else { "FAIL" };
+                                            let _ = tx.send(format!(
+                                                "[{}] pause={} backup={} resume={} — {}",
+                                                r.stack,
+                                                if r.paused { "ok" } else { "err" },
+                                                status,
+                                                if r.resumed { "ok" } else { "err" },
+                                                r.message
+                                            ));
+                                        }
+                                    }
+                                    None => {
+                                        let _ = tx.send(
+                                            "Backup skipped: another cycle is currently running"
+                                                .to_string(),
+                                        );
+                                    }
                                 }
                                 let _ = tx.send("DONE".to_string());
                             });
@@ -106,6 +120,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 Err(err) => app
                                     .backup_status
                                     .push(format!("HOST update failed: {}", err)),
+                            }
+                        }
+                        KeyCode::Char('o') => {
+                            let gitops_root = std::env::var("GITOPS_REPO")
+                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            for line in
+                                policy::reconcile_boot_policies(Path::new(&gitops_root), false)
+                            {
+                                app.backup_status.push(line);
+                            }
+                        }
+                        KeyCode::Char('O') => {
+                            let gitops_root = std::env::var("GITOPS_REPO")
+                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            for line in
+                                policy::reconcile_boot_policies(Path::new(&gitops_root), true)
+                            {
+                                app.backup_status.push(line);
+                            }
+                        }
+                        KeyCode::Char('h') => {
+                            let gitops_root = std::env::var("GITOPS_REPO")
+                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            for line in
+                                policy::reconcile_hot_resources(Path::new(&gitops_root), false)
+                            {
+                                app.backup_status.push(line);
+                            }
+                        }
+                        KeyCode::Char('H') => {
+                            let gitops_root = std::env::var("GITOPS_REPO")
+                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            for line in
+                                policy::reconcile_hot_resources(Path::new(&gitops_root), true)
+                            {
+                                app.backup_status.push(line);
                             }
                         }
                         _ => {}
@@ -138,9 +188,10 @@ fn draw_main(f: &mut ratatui::Frame, app: &app::App) {
         _ => unreachable!(),
     }
 
-    let footer =
-        Paragraph::new(" HOST v0.1 | TABS: ↑↓/1-5 | [b] backup | [U] self-update | q=quit")
-            .style(Style::default().fg(Color::DarkGray));
+    let footer = Paragraph::new(
+        " HOST v0.1 | TABS: ↑↓/1-5 | [b] backup | [o/O] boot preview/apply | [h/H] resources preview/apply | [U] self-update | q=quit",
+    )
+    .style(Style::default().fg(Color::DarkGray));
     let fx = area.x + area.width - 2;
     let fy = area.y + area.height - 1;
     let footer_area = Rect::new(fx, fy, 2, 1);
@@ -280,18 +331,52 @@ fn draw_backups(f: &mut ratatui::Frame, app: &app::App, area: Rect) {
 }
 
 fn draw_storage(f: &mut ratatui::Frame, _app: &app::App, area: Rect) {
-    let content = [
-        "Storage responsibilities:",
-        "- Host appdata root: /opt/appdata/<stack>",
-        "- Backup repository root: /backups/<stack>",
-        "- LXC consumes host data through bind mounts declared in lxc-compose.yml",
-        "",
-        "Current expectations:",
-        "- Restic reads from /opt/appdata during HOST backup orchestration",
-        "- Stack mount metadata remains GitOps-controlled",
-        "- Deleted stack folders should be garbage-collected by the sync path",
-    ]
-    .join("\n");
+    let appdata_root = std::env::var("APPDATA_BASE").unwrap_or_else(|_| "/opt/appdata".to_string());
+    let mut lines = vec![
+        format!("Storage root: {}", appdata_root),
+        "Bind mount preflight + stack storage health:".to_string(),
+    ];
+
+    match storage::get_storage_summary(Path::new(&appdata_root)) {
+        Ok(statuses) => {
+            let healthy = statuses
+                .iter()
+                .filter(|s| matches!(s.health, storage::StorageHealth::Healthy))
+                .count();
+            let warning = statuses
+                .iter()
+                .filter(|s| matches!(s.health, storage::StorageHealth::Warning))
+                .count();
+            let critical = statuses
+                .iter()
+                .filter(|s| matches!(s.health, storage::StorageHealth::Critical))
+                .count();
+
+            lines.push(format!(
+                "Stacks inspected: {} (healthy={}, warning={}, critical={})",
+                statuses.len(),
+                healthy,
+                warning,
+                critical
+            ));
+
+            for status in statuses.iter().take(10) {
+                lines.push(format!(
+                    "- {:<14} {} ({})",
+                    status.stack_name, status.health, status.message
+                ));
+            }
+
+            if statuses.len() > 10 {
+                lines.push(format!("... and {} more stack(s)", statuses.len() - 10));
+            }
+        }
+        Err(e) => {
+            lines.push(format!("Storage inspection failed: {}", e));
+        }
+    }
+
+    let content = lines.join("\n");
 
     f.render_widget(
         Paragraph::new(content).block(
@@ -305,18 +390,40 @@ fn draw_storage(f: &mut ratatui::Frame, _app: &app::App, area: Rect) {
 }
 
 fn draw_hardware(f: &mut ratatui::Frame, _app: &app::App, area: Rect) {
-    let content = [
-        "Hardware responsibilities:",
-        "- GPU passthrough remains host-owned",
-        "- TUN/device access remains host-owned",
-        "- CLIENT writes orchestration hints into stack lxc-compose.yml",
-        "",
-        "Current execution model:",
-        "- Use HOST scripts/services to apply Proxmox-side config",
-        "- Do not mutate running containers directly outside GitOps recovery flows",
-        "- Self-update is release-driven via [U] on this daemon",
-    ]
-    .join("\n");
+    let gitops_root = std::env::var("GITOPS_REPO").unwrap_or_else(|_| "/opt/gitops".to_string());
+    let gpu = hardware::check_gpu_readiness();
+    let tun = hardware::check_tun_readiness();
+
+    let mut lines = vec![
+        format!("GPU readiness: {} ({})", gpu.readiness, gpu.message),
+        format!("TUN readiness: {} ({})", tun.readiness, tun.message),
+        "Per-stack intent reconciliation:".to_string(),
+    ];
+
+    match hardware::discover_stack_hardware_intents(Path::new(&gitops_root)) {
+        Ok(intents) if intents.is_empty() => {
+            lines.push("No hardware intents found in lxc-compose.yml files".to_string());
+        }
+        Ok(intents) => {
+            for intent in intents.iter().take(12) {
+                let result = hardware::reconcile_hardware(intent);
+                let mark = if result.success { "OK" } else { "FAIL" };
+                lines.push(format!(
+                    "- {:<14} {:<3} {}",
+                    result.stack_name, mark, result.message
+                ));
+            }
+
+            if intents.len() > 12 {
+                lines.push(format!("... and {} more intent(s)", intents.len() - 12));
+            }
+        }
+        Err(e) => {
+            lines.push(format!("Intent discovery failed: {}", e));
+        }
+    }
+
+    let content = lines.join("\n");
 
     f.render_widget(
         Paragraph::new(content).block(

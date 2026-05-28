@@ -18,6 +18,7 @@ mod app;
 mod docker;
 mod gitops;
 mod mounts;
+mod restore;
 
 use app::AppState;
 

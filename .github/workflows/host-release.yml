@@ -10,28 +10,13 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  notify:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-gnu
-
-      - name: Build HOST daemon
-        working-directory: host-daemon
-        run: cargo build --release --target x86_64-unknown-linux-gnu
-
-      - name: Package binary
+      - name: Tag pushed
         run: |
-          cp host-daemon/target/x86_64-unknown-linux-gnu/release/HOST HOST-linux-x86_64-unknown-linux-gnu
-          chmod +x HOST-linux-x86_64-unknown-linux-gnu
+          echo "Host daemon release tag detected: ${{ github.ref_name }}"
+          echo ""
+          echo "Release artifacts are now built and published via Makefile."
+          echo "See docs/ for release instructions."
 
-      - name: Publish release asset
-        uses: softprops/action-gh-release@v2
-        with:
-          files: HOST-linux-x86_64-unknown-linux-gnu

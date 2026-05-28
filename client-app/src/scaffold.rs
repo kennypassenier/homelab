@@ -22,6 +22,18 @@ pub struct StackConfig {
     pub disk_gb: u32,
 }
 
+const DEFAULT_LXC_ROLE: &str = "app";
+
+/// Canonical LXC name in the standard scheme: vmid-role-stack.
+pub fn canonical_lxc_name(vmid: u32, stack_name: &str) -> String {
+    format!("{}-{}-{}", vmid, DEFAULT_LXC_ROLE, stack_name)
+}
+
+/// Legacy alias kept for migration compatibility.
+pub fn legacy_lxc_alias(stack_name: &str) -> String {
+    format!("lxc-{}", stack_name)
+}
+
 /// Generates a deterministic locally-administered MAC address for a stack.
 pub fn deterministic_mac_address(stack_name: &str) -> String {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -73,9 +85,9 @@ pub fn ensure_lxc_compose(stack_name: &str) -> io::Result<()> {
     }
 
     let default_doc = format!(
-        "version: 1\nstack_name: \"{}\"\nvmid: 0\nhostname: \"lxc-{}\"\nhwaddr: \"{}\"\n\ndeploy:\n  enabled: false\n  activated_at: null\n\nnetwork:\n  bridge: \"vmbr0\"\n  ip_mode: \"dhcp-reserved\"\n  reserved_ipv4: null\n\nboot:\n  autostart: true\n  order: 90\n\nresources:\n  cores: 2\n  memory_mb: 2048\n  disk_gb: 32\n",
+        "version: 1\nstack_name: \"{}\"\nvmid: 0\nhostname: \"{}\"\nhwaddr: \"{}\"\n\ndeploy:\n  enabled: false\n  activated_at: null\n\nnetwork:\n  bridge: \"vmbr0\"\n  ip_mode: \"dhcp-reserved\"\n  reserved_ipv4: null\n\nboot:\n  autostart: true\n  order: 90\n\nresources:\n  cores: 2\n  memory_mb: 2048\n  disk_gb: 32\n",
         stack_name,
-        stack_name,
+        canonical_lxc_name(0, stack_name),
         deterministic_mac_address(stack_name)
     );
     fs::write(path, default_doc)
@@ -89,8 +101,8 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid lxc-compose root"))?;
 
     let vmid = mapping_u32(root, "vmid").unwrap_or(0);
-    let hostname =
-        mapping_string(root, "hostname").unwrap_or_else(|| format!("lxc-{}", stack_name));
+    let hostname = mapping_string(root, "hostname")
+        .unwrap_or_else(|| canonical_lxc_name(vmid, stack_name));
     let hwaddr =
         mapping_string(root, "hwaddr").unwrap_or_else(|| deterministic_mac_address(stack_name));
     let deploy_enabled = root

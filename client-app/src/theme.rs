@@ -5,6 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 pub struct Theme {
     pub accent_cyan: Color,
     pub accent_magenta: Color,
+    #[allow(dead_code)]
     pub background: Color,
     pub border: Color,
     pub text: Color,
@@ -54,16 +55,19 @@ impl Theme {
     }
 
     /// Dimmed / powered-down text.
+    #[allow(dead_code)]
     pub fn dim_style(&self) -> Style {
         Style::default().fg(Color::Rgb(55, 60, 75))
     }
 
     /// Success / online state — neon green.
+    #[allow(dead_code)]
     pub fn success_style(&self) -> Style {
         Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
     }
 
     /// Warning style — red bold.
+    #[allow(dead_code)]
     pub fn warning_style(&self) -> Style {
         Style::default()
             .fg(self.warning)
@@ -75,7 +79,7 @@ impl Theme {
     /// `phase` comes from `App::pulse_phase` which advances 0.08 rad/tick at 30 FPS.
     /// Returns a style that oscillates between a dim teal and a bright cyan background.
     pub fn pulse_style(phase: f32) -> Style {
-        let t = (phase.sin() * 0.5 + 0.5_f32); // 0.0 → 1.0
+        let t = phase.sin() * 0.5 + 0.5_f32; // 0.0 -> 1.0
         let g = (t * 170.0) as u8;
         let b = (t * 210.0) as u8;
         Style::default()

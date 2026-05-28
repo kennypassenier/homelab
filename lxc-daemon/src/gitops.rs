@@ -128,7 +128,7 @@ async fn check_git_status(state: Arc<Mutex<AppState>>) {
         repo_url: remote_url,
         branch,
         commit,
-        sparse: format!("stacks/{}/*", stack_name),
+        sparse: format!("stacks/{}/**", stack_name),
         is_synced,
         last_sync: now,
         next_sync: "in 30m".to_string(),
@@ -177,6 +177,24 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         let s = state.lock().unwrap();
         s.stack_name.clone()
     };
+
+    // Enforce strict stack-scoped sparse checkout on every run to avoid drift.
+    let sparse_scope = format!("stacks/{}", stack_name);
+    let sparse_result = tokio::task::spawn_blocking(move || {
+        run_git(GITOPS_REPO, &["sparse-checkout", "set", &sparse_scope])
+    })
+    .await
+    .unwrap_or_else(|_| Err("spawn failed".to_string()));
+
+    if let Err(e) = sparse_result {
+        finish_sync(
+            state,
+            false,
+            format!("sparse scope update failed: {}", e.replace('\n', " ")),
+        )
+        .await;
+        return;
+    }
 
     // ── Step 1: git fetch ──────────────────────────────────────────────────
     let fetch_result =

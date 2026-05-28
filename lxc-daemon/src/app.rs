@@ -1,10 +1,11 @@
-use std::collections::VecDeque;
 use chrono::{DateTime, Local};
+use std::collections::VecDeque;
 use tokio::sync::broadcast;
 
 #[derive(Debug, Clone)]
 pub enum LogLevel {
     Info,
+    #[allow(dead_code)]
     Debug,
     Warn,
     Error,
@@ -14,11 +15,11 @@ pub enum LogLevel {
 impl std::fmt::Display for LogLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LogLevel::Info  => write!(f, "info"),
+            LogLevel::Info => write!(f, "info"),
             LogLevel::Debug => write!(f, "debug"),
-            LogLevel::Warn  => write!(f, "warn"),
+            LogLevel::Warn => write!(f, "warn"),
             LogLevel::Error => write!(f, "error"),
-            LogLevel::Ok    => write!(f, "ok"),
+            LogLevel::Ok => write!(f, "ok"),
         }
     }
 }
@@ -32,6 +33,7 @@ pub struct LogEntry {
 
 #[derive(Debug, Clone, Default)]
 pub struct ContainerInfo {
+    #[allow(dead_code)]
     pub id: String,
     pub name: String,
     pub image: String,
@@ -84,7 +86,7 @@ pub struct AppState {
     pub is_syncing: bool,
     pub sync_requested: bool,
     pub backup_paused: bool,
-    /// Broadcast channel sender — SSE subscribers receive every new log message.
+    /// Broadcast channel sender — WebSocket clients receive every new log message.
     pub log_tx: broadcast::Sender<String>,
 }
 
@@ -138,7 +140,9 @@ impl AppState {
         let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
         let logfmt = format!(
             "ts={} level={} stack={} msg=\"{}\"",
-            ts, level, self.stack_name,
+            ts,
+            level,
+            self.stack_name,
             msg.replace('"', "'")
         );
         println!("{}", logfmt);
@@ -152,7 +156,7 @@ impl AppState {
         if self.logs.len() > 500 {
             self.logs.pop_front();
         }
-        // Broadcast to any connected SSE clients (ignore if no subscribers)
+        // Broadcast to any connected WebSocket clients (ignore if no subscribers)
         let _ = self.log_tx.send(logfmt);
     }
 }

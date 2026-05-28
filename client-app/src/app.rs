@@ -8,6 +8,7 @@ use std::{
 
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 
+use crate::backup_schedule::BackupSchedule;
 use crate::blast_radius::ActiveModal;
 use crate::theme::Theme;
 
@@ -16,6 +17,7 @@ use crate::theme::Theme;
 pub enum Tab {
     Dashboard,
     Scaffolding,
+    Backups,
     HostManagement,
     Logs,
 }
@@ -26,6 +28,7 @@ impl Tab {
         &[
             Tab::Dashboard,
             Tab::Scaffolding,
+            Tab::Backups,
             Tab::HostManagement,
             Tab::Logs,
         ]
@@ -36,6 +39,7 @@ impl Tab {
         match self {
             Tab::Dashboard => "Dashboard",
             Tab::Scaffolding => "Scaffolding",
+            Tab::Backups => "Backups",
             Tab::HostManagement => "Host Management",
             Tab::Logs => "Logs",
         }
@@ -105,7 +109,7 @@ pub struct LogLine {
     pub message: String,
 }
 
-/// Cyclic mock telemetry entries used until a live SSE stream is connected.
+/// Cyclic mock telemetry entries used until a live WebSocket stream is connected.
 /// Each tuple is (source, level, message).
 const MOCK_SEQUENCE: &[(&str, &str, &str)] = &[
     (
@@ -324,8 +328,14 @@ pub struct App {
     pub sync_pending: bool,
     /// The stack name to sync (set alongside `sync_pending = true`).
     pub sync_stack: String,
+    /// FIFO queue for batch stack sync actions (deploy/update all active stacks).
+    pub sync_queue: VecDeque<String>,
     /// Human-readable status line shown at the bottom of the Scaffolding tab.
     pub sync_status: String,
+    /// Backup schedule policy edited in Backups tab.
+    pub backup_schedule: BackupSchedule,
+    /// Status line in Backups tab.
+    pub backup_status: String,
 }
 
 impl App {
@@ -387,7 +397,10 @@ impl App {
             rng,
             sync_pending: false,
             sync_stack: String::new(),
+            sync_queue: VecDeque::new(),
             sync_status: "Idle".to_string(),
+            backup_schedule: BackupSchedule::load_or_default(),
+            backup_status: "Backup policy loaded".to_string(),
         };
         // Pre-fill with a page of mock entries so the Logs tab is not blank on startup.
         for _ in 0..20 {
@@ -433,6 +446,44 @@ impl App {
         if self.logs.len() > 500 {
             self.logs.remove(0);
         }
+    }
+
+    /// Builds a canonical logfmt message used across client-side events.
+    pub fn logfmt(
+        component: &str,
+        level: &str,
+        stack: Option<&str>,
+        phase: Option<&str>,
+        msg: &str,
+        error: Option<&str>,
+    ) -> String {
+        let mut parts = Vec::new();
+        parts.push(format!("component={}", component));
+        parts.push(format!("level={}", level.to_lowercase()));
+        if let Some(stack) = stack {
+            parts.push(format!("stack={}", stack));
+        }
+        if let Some(phase) = phase {
+            parts.push(format!("phase={}", phase));
+        }
+        parts.push(format!("msg=\"{}\"", msg.replace('"', "'")));
+        if let Some(err) = error {
+            parts.push(format!("error=\"{}\"", err.replace('"', "'")));
+        }
+        parts.join(" ")
+    }
+
+    /// Emits a structured CLIENT log line to the in-memory log buffer.
+    pub fn push_client_logfmt(
+        &mut self,
+        level: &str,
+        stack: Option<&str>,
+        phase: Option<&str>,
+        msg: &str,
+        error: Option<&str>,
+    ) {
+        let line = Self::logfmt("client", level, stack, phase, msg, error);
+        self.push_log("CLIENT", &level.to_uppercase(), &line);
     }
 
     /// Advances to the next tab (wraps around).

@@ -1,0 +1,21 @@
+version: 1
+stack_name: "media"
+vmid: 104
+hostname: "lxc-media"
+hwaddr: "02:42:ac:11:34:7a"
+
+deploy:
+  enabled: false
+  activated_at: null
+
+network:
+  bridge: "vmbr0"
+  ip_mode: "dhcp-reserved"
+
+resources:
+  cores: 2
+  memory_mb: 2048
+  swap_mb: 512
+  disk_gb: 32
+
+notes: "Set deploy.enabled=true when the stack is activated in CLIENT."

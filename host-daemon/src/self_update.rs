@@ -1,0 +1,138 @@
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+
+use reqwest::blocking::Client;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct ReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleaseInfo {
+    tag_name: String,
+    assets: Vec<ReleaseAsset>,
+}
+
+pub fn check_and_apply_update() -> Result<String, String> {
+    let repo = std::env::var("HOST_UPDATE_REPO").unwrap_or_else(|_| "kennypassenier/homelab".to_string());
+    let expected_asset = std::env::var("HOST_UPDATE_ASSET")
+        .unwrap_or_else(|_| "HOST-linux-x86_64-unknown-linux-gnu".to_string());
+
+    let release = fetch_latest_release(&repo)?;
+    let latest = normalize_version(&release.tag_name);
+    let current = normalize_version(env!("CARGO_PKG_VERSION"));
+
+    if version_cmp(&latest, &current) <= 0 {
+        return Ok(format!(
+            "No HOST update available (current={} latest={})",
+            current, latest
+        ));
+    }
+
+    let asset = release
+        .assets
+        .iter()
+        .find(|a| a.name == expected_asset)
+        .ok_or_else(|| format!("Release {} missing asset {}", release.tag_name, expected_asset))?;
+
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let tmp = tmp_path_for(&exe);
+
+    download_asset(&asset.browser_download_url, &tmp)?;
+    make_executable(&tmp)?;
+
+    fs::rename(&tmp, &exe).map_err(|e| format!("Atomic replace failed: {}", e))?;
+
+    let restart_msg = match try_restart_service() {
+        Ok(()) => "service restart requested".to_string(),
+        Err(e) => format!("binary replaced; manual restart may be required ({})", e),
+    };
+
+    Ok(format!(
+        "HOST updated {} -> {} ({})",
+        current, latest, restart_msg
+    ))
+}
+
+fn fetch_latest_release(repo: &str) -> Result<ReleaseInfo, String> {
+    let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    Client::new()
+        .get(url)
+        .header("User-Agent", "homelab-host-daemon")
+        .send()
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json::<ReleaseInfo>()
+        .map_err(|e| e.to_string())
+}
+
+fn download_asset(url: &str, path: &PathBuf) -> Result<(), String> {
+    let bytes = Client::new()
+        .get(url)
+        .header("User-Agent", "homelab-host-daemon")
+        .send()
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .bytes()
+        .map_err(|e| e.to_string())?;
+
+    fs::write(path, &bytes).map_err(|e| e.to_string())
+}
+
+fn make_executable(path: &PathBuf) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(path)
+            .map_err(|e| e.to_string())?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn try_restart_service() -> Result<(), String> {
+    let status = Command::new("systemctl")
+        .args(["restart", "host-daemon.service"])
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("systemctl restart host-daemon.service failed".to_string())
+    }
+}
+
+fn tmp_path_for(exe: &std::path::Path) -> PathBuf {
+    let mut p = exe.to_path_buf();
+    p.set_extension("new");
+    p
+}
+
+fn normalize_version(v: &str) -> String {
+    v.trim_start_matches('v')
+        .trim_start_matches("host-daemon-")
+        .to_string()
+}
+
+fn version_cmp(a: &str, b: &str) -> i32 {
+    let pa = parse_triplet(a);
+    let pb = parse_triplet(b);
+    pa.cmp(&pb) as i32
+}
+
+fn parse_triplet(v: &str) -> (u64, u64, u64) {
+    let mut it = v.split('.').map(|x| x.parse::<u64>().unwrap_or(0));
+    (
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+    )
+}

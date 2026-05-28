@@ -17,13 +17,16 @@ use tokio::sync::mpsc;
 
 mod app;
 mod app_list;
+mod backup_schedule;
 mod blast_radius;
 mod events;
 mod gitops;
 mod scaffold;
 mod ssh_config;
+mod stack_features;
 mod telemetry;
 mod theme;
+mod transactions;
 mod ui;
 
 use app::App;
@@ -60,7 +63,7 @@ async fn async_main() -> Result<()> {
     let sigint = signal::ctrl_c();
     tokio::pin!(sigint);
 
-    // Drives mock log messages (and will drive live SSE ticks once connected).
+    // Drives mock log messages (and will drive live WebSocket ticks once connected).
     let mut log_tick = tokio::time::interval(Duration::from_millis(400));
     // Drives all visual animations: pulse, ticker, sparklines. Target ~30 FPS.
     let mut anim_tick = tokio::time::interval(Duration::from_millis(33));
@@ -69,15 +72,56 @@ async fn async_main() -> Result<()> {
         // Drain any sync results that arrived from background tasks
         while let Ok((stack, ok, msg)) = sync_rx.try_recv() {
             let level = if ok { "INFO" } else { "ERROR" };
-            app.push_log("CLIENT", level, &msg);
+            app.push_client_logfmt(
+                level,
+                Some(&stack),
+                Some("sync_result"),
+                &msg,
+                if ok { None } else { Some(&msg) },
+            );
             app.sync_status = if ok {
                 format!("Sync OK — '{}'", stack)
             } else {
                 format!("Sync failed — {} : {}", stack, msg)
             };
+
+            if ok {
+                let summary = crate::stack_features::post_deploy_summary(&stack);
+                if summary.missing_compose.is_empty() {
+                    app.push_client_logfmt(
+                        "INFO",
+                        Some(&stack),
+                        Some("post_deploy"),
+                        &format!(
+                            "post-deploy validation complete apps_healthy={}",
+                            summary.app_count
+                        ),
+                        None,
+                    );
+                } else {
+                    app.push_client_logfmt(
+                        "WARN",
+                        Some(&stack),
+                        Some("post_deploy"),
+                        &format!(
+                            "post-deploy validation warnings apps_missing_compose={}",
+                            summary.missing_compose.join(",")
+                        ),
+                        None,
+                    );
+                }
+            }
         }
 
-        // If a sync was queued by the 's' key, spawn the HTTP request now
+        // Promote queued batch sync work into the single-sync execution slot.
+        if !app.sync_pending {
+            if let Some(next_stack) = app.sync_queue.pop_front() {
+                app.sync_stack = next_stack;
+                app.sync_pending = true;
+            }
+        }
+
+        // If a sync was queued by key actions, spawn the HTTP request now.
         if app.sync_pending {
             app.sync_pending = false;
             let stack = app.sync_stack.clone();
@@ -95,7 +139,13 @@ async fn async_main() -> Result<()> {
                 });
             let url = format!("http://{}:8080/api/sync", ip);
             let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
-            app.push_log("CLIENT", "INFO", &format!("→ POST {} (stack={})", url, stack));
+            app.push_client_logfmt(
+                "INFO",
+                Some(&stack),
+                Some("sync_dispatch"),
+                &format!("POST {}", url),
+                None,
+            );
 
             tokio::spawn(async move {
                 let client = reqwest::Client::new();

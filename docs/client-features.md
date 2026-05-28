@@ -1,129 +1,27 @@
-# Tier 1: CLIENT (Desktop TUI)
+# CLIENT Features (Current)
 
-The CLIENT is a local desktop application that acts as the **sole orchestration hub** for all system flows, fully replacing the old `client.sh` and all legacy management scripts. All interactive management, scaffolding, and deployment logic is now implemented in Rust using a premium Ratatui TUI. **client.sh is deprecated and must not be used.**
+Last updated: 2026-05-28
 
-**Communication model:** The CLIENT is the only actor that calls both the HOST daemon and individual LXC daemons. HOST and LXC never communicate with each other. When a flow requires sequential HOST → LXC steps (e.g., provision an LXC, then trigger its first sync), the CLIENT calls HOST, waits for the completion event on the SSE stream, and only then calls the LXC. Endpoint addresses are derived from the `lxc-compose.yml` files in Git (for LXC IPs via DHCP reservation) and the fixed HOST IP configured at CLIENT startup.
+## Scope
 
-## 1. Premium UI/UX (Ratatui)
-- [x] **Hyper-Modern Interface:** The terminal application is built using `ratatui` and must look visually stunning. 
-- [x] **Styling & Feedback:** Uses a centralized styling module with dynamic colors (Cyan/Magenta accents, dark grey backgrounds), rounded borders (`BorderType::Rounded`), and animated spinners for loading states (e.g., waiting for API triggers or Git pushes).
+- Ratatui TUI for all interactive flows.
+- Stack/app scaffolding, activation/deactivation, deploy/update queueing.
+- Backup/restore/patch orchestration surfaces.
+- Structured client logfmt-style event emission for critical operations.
 
+## Implemented Highlights
 
-## 2. Feature Parity & Advanced Scaffolding
-- [x] **Dynamic Scaffolding:** Replaces `create-new-stack.sh` and `create-new-app.sh` ([3], [4]). The Rust CLIENT's Scaffolding module is now strictly responsible for automatically creating all required bind-mount directories on the Proxmox host via API/SSH before a stack is deployed. **pre-sync.sh no longer handles directory creation.**
-- [x] **Standard Boilerplate:** Generated templates automatically include:
-	- Traefik labels for dynamic routing (replacing Nginx Proxy Manager)
-	- Promtail configurations for log shipping ([5])
-	- Watchtower auto-update labels (`com.centurylinklabs.watchtower.enable=true`) ([6])
-- [x] **MAC Address Generator:** To prevent DHCP conflicts ([7]), the client generates safe, random Locally Administered MAC addresses for new LXCs.
-- [x] **Idempotent SSH Management:** Replaces `add-ssh.sh` ([8]). Securely parses the local `~/.ssh/config` file and adds or updates SSH aliases for new LXCs without duplicating entries or corrupting the file ([9]).
+- Add/delete stack and add/delete app flows.
+- Core app management.
+- Deploy selected and batch deploy/update of active stacks.
+- Fail-closed pre-sync and filesystem-layout validation gates.
+- Transaction ledger for add_stack and delete_stack phases.
+- Reusable operation progress modal used by backup/restore/patch actions.
+- GPU compose wiring toggles per selected app (g/G) and host hint writes to lxc-compose.
+- Stack creation wizard now captures provisioning defaults (CPU 1-8, memory in 512 MiB steps, root disk GiB) and writes them into stack `lxc-compose.yml`.
+- New stack defaults explicitly set `deploy.enabled=false` to keep manual activation as the safe default.
 
+## Notes
 
-
-### Advanced Scaffolding Requirements
-- [ ] **New Directory Layout:**
-	- For each app, scaffolding must create both `$stackname/$appname` (GitOps: compose, scripts) and `$stackname/$appname-config` (persistent config/data, bind mount from host).
-	- All generated `docker-compose.yml` files must use `- ../$appname-config:/config` for the config volume.
-	- No references to `/opt/appdata` or `/appdata` remain in templates or docs.
-- [ ] **Traefik Labels:** docker-compose.yml generation must support dynamic Traefik routing labels for all web services, fully replacing Nginx Proxy Manager.
-- [ ] **Watchtower Hooks:** Support for Watchtower lifecycle labels (e.g., `com.centurylinklabs.watchtower.lifecycle.pre-check`) to prevent updates during active usage (e.g., active Jellyfin streams).
-- [ ] **Custom Healthchecks & Dependencies:** Support for `depends_on` with `condition: service_healthy` to enforce correct startup order (e.g., VPN/qBittorrent).
-- [ ] **Permissions:** Support for setting `user`, `group`, and `cap_add` (capabilities) for hardware and network access in generated templates.
-- [ ] **VPN Network Namespaces:** Support for injecting `network_mode: service:<vpn>` for VPN kill-switch routing in generated templates.
-- [ ] **Automated Restarts:** Ensure standard Docker Compose healthchecks and Watchtower restart policies are included in all generated templates.
-- [ ] **App Creation: Multiselect Defaults:** After Docker usage is confirmed, show a popup multiselect for default containers (e.g., Watchtower, Promtail), with Watchtower and Promtail pre-selected. If selected, auto-generate their service in the stack if not present.
-- [ ] **Stack Actions: Conditional Add:** In stack actions, show "Add Watchtower" and "Add Promtail" only if they do not already exist in the stack.
-- [ ] **All Prompts as Popups:** All prompts, confirmations, and error messages are implemented as popup modals using Ratatui conventions (not Bash style).
-
-
-## 3. Security, Validation & GitOps
-- [x] **Pre-Flight Linting:** Parses and validates all YAML configurations using `serde_yaml` locally before allowing a `git push`.
-- [ ] **Manual GitOps Sync:** No automatic push after destructive actions. A "Sync" or "Save" action is available in the UI to stage, commit, and push all pending changes when the user chooses.
-- [ ] **Blast Radius Protection:** Replaces `remove-app.sh` and `remove-stack.sh` ([10], [11]). When deleting an app or stack, a stark red floating modal with a 3D drop-shadow appears ([12]). The user must type the exact name of the app/stack to confirm ([13], [14]). Once confirmed, the client deletes the folder from Git, but does not push until the user triggers sync.
-
-## 4. API, Orchestration & Telemetry
-- [x] **HTTP Push API (CLIENT → HOST):** Sends API calls to `https://<host_ip>:8443/api/*` (Bearer token auth) for all provisioning, hardware, backup, and storage operations.
-- [x] **HTTP Push API (CLIENT → LXC):** Sends API calls to `http://<lxc_ip>:8080/api/*` (Bearer token auth) for sync triggers, backup pause/resume, OS patching, and health checks. LXC IP is resolved from the `hwaddr` field in the stack's `lxc-compose.yml` (matched to OPNsense DHCP reservation) or from `~/.ssh/config`.
-- [ ] **Sequential Orchestration:** When a flow requires HOST then LXC steps, the CLIENT subscribes to the HOST SSE stream (`GET /api/events/stream`), waits for the confirming event, then issues the LXC call. No LXC call is ever fired before its required HOST precondition completes.
-- [ ] **Live SSE Telemetry:** Subscribes to `GET /api/logs/stream` on each active LXC daemon. Deployment logs stream live to the per-stack deployment modal.
-- [ ] **Endpoint Discovery:** All LXC endpoints are derived from `lxc-compose.yml` files committed in Git. The HOST endpoint is a single fixed IP configured at CLIENT startup (`HOST_API_URL` env var or `~/.config/homelab/config.toml`).
-
-## 5. Updates & Maintenance
-- [x] The CLIENT application is built and tested locally via `cargo test` and `cargo build`. GitHub Actions strictly runs unit tests (e.g., testing MAC generators and idempotent parsers) when the `client-app/` directory is updated.
-
----
-
-**Legend:**
-- [x] = Complete
-- [ ] = Not yet implemented or not fully integrated in TUI
-
----
-
-
-## Implementation Details & Mapping
-
-| Legacy Script/Feature   | CLIENT Rust Feature/Module                | Status |
-|------------------------|-------------------------------------------|--------|
-| client.sh              | Main TUI, tab navigation, all workflows   | [x]    |
-| pre-sync.sh (dir create)| Directory creation now handled by Rust CLIENT Scaffolding | [x]    |
-| create-new-stack.sh    | Scaffolding: stack creation, templates    | [x]    |
-| create-new-app.sh      | Scaffolding: app creation, templates      | [x]    |
-| remove-app.sh          | Blast Radius modal, app deletion          | [ ]    |
-| remove-stack.sh        | Blast Radius modal, stack deletion        | [ ]    |
-| add-ssh.sh             | SSH config management (POSIX only)        | [x]    |
-
----
-
-## References
-
-1. 5-min GitOps cron job: node-sync.sh
-2. client.sh (legacy entrypoint)
-3. scripts/client/
-4. scripts/client/create-new-stack.sh
-5. scripts/client/create-new-app.sh
-6. Promtail: log shipping
-7. Watchtower: auto-update
-8. MAC address conflicts
-9. scripts/client/add-ssh.sh
-10. SSH config idempotency
-11. scripts/client/remove-app.sh
-12. scripts/client/remove-stack.sh
-13. Red modal confirmation
-14. Exact name confirmation
-15. GitOps garbage collection
-
-See `refactor/phase1.md` and `refactor/refactor-features.md` for full requirements.
-
-# Tab Requirements (Detailed)
-
-## Stacks Tab
-- **Stack List:** All stacks in the Git repo listed with live health badges (`✓`, `⚠ N warn`, `✗ N err`) derived from the LXC daemon SSE stream.
-- **Stack Actions:** Activate, Deactivate, Deploy, Update, Add App, Delete Stack — all via keyboard shortcuts or context menu.
-- **Per-Stack Deployment Modal:** When any long-running stack operation is triggered (sync, provision, update, patch), a modal/popup opens that shows **only the log events for that stack**. Logs are streamed live from the HOST SSE stream and/or the relevant LXC SSE stream. The modal closes or can be dismissed after completion; the operation never blocks the rest of the TUI.
-  - Modal layout: stack name in header, current phase label, progress bar, scrollable logfmt log pane (color-coded by `level`), elapsed time, `[ESC] minimize` / `[r] retry on failure`.
-  - Log lines from `level=error` appear in red; `level=warn` in yellow; `level=info` in default foreground.
-  - The CLIENT subscribes to HOST SSE first (provision/bootstrap phases), then switches to LXC SSE (sync/post-deploy phases) as orchestration progresses.
-
-## Scaffolding Tab
-- **Dynamic App & Stack Creation:** Interface to scaffold new stacks and apps, generating docker-compose.yml with Traefik, Watchtower, and Promtail boilerplate.
-- **Advanced Configurations:** Support for custom healthchecks, permissions (user/group/capabilities), and VPN network namespaces (e.g., network_mode: service:gluetun).
-- **MAC Address Generator:** Generate safe, random Locally Administered MAC addresses for new LXCs. The generated MAC is written to the LXC provisioning YAML ("lxc-compose.yml"), ensuring each container has a static, collision-free MAC address for DHCP/static IP assignment.
-- **Pre-Flight Linting & GitOps:** YAML validation (serde_yaml), auto-stage, commit, and push to main branch.
-- **Blast Radius Protection:** Deletion triggers a red floating modal with 3D drop-shadow, requiring exact name confirmation and Git commit for removal.
-
-## Host Tab
-- **Idempotent SSH Management:** Manage local access to Proxmox containers by parsing and updating `~/.ssh/config` safely and in-place, without duplicates or corruption.
-- **LXC Provisioning:** Trigger `POST /api/lxc/provision` for any SCAFFOLDED stack. Opens the per-stack deployment modal for live bootstrap progress.
-- **Hardware Passthrough:** GPU and TUN passthrough configuration sent to HOST via API; result shown in modal.
-- **OS Patching:** Trigger `POST /api/os/patch` on HOST (Proxmox VE packages); progress streamed in modal. Never auto-reboots host.
-
-## Backups Tab
-- **Manual Backup:** Press `b` to trigger a full Restic backup of all stacks. The CLIENT first calls `POST /api/backup/pause` on each active LXC, then calls `POST /api/backup/run` on HOST, then calls `POST /api/backup/resume` on each LXC after completion (or on error). Progress streamed in modal.
-- **Backup Schedule:** View and edit the automated Restic backup schedule (cron expression, retention policy). Sent to HOST via `POST /api/backup/schedule`.
-- **Snapshot Picker:** List available Restic snapshots per stack (from `GET /api/backup/snapshots`). Select a snapshot to restore a single stack via `individual-backup-restore.md` flow.
-- **Disaster Recovery Wizard:** Full restore flow (`full-backup-restore.md`): pre-flight checks → provision all stacks → restore all appdata → trigger initial sync on all LXCs.
-
-## Logs Tab
-- **Aggregated Log View:** Scrollable, filterable view of all recent logfmt events received via SSE from HOST and all active LXC daemons.
-- **Filter by tier, stack, app, level:** `component=lxc`, `stack=media`, `level=error`, etc.
-- **Persistent Log Buffer:** Last 500 lines per stack retained in memory; written to `~/.local/share/homelab/logs/<stack>/<date>.log`.
+- CLIENT remains GitOps-first and commits generated changes through the existing Git helper path.
+- HOST-only operations (for example real GPU passthrough on Proxmox) are represented as CLIENT orchestration intent, not direct local host mutation.

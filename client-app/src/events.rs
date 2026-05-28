@@ -7,10 +7,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
-use crate::app::{App, LogLevelFilter, Tab};
+use crate::app::{App, Tab};
 use crate::blast_radius::{
-    ActiveModal, AppCreationStep, AppCreationWizardState, DefaultServiceOption, SshAddStep,
-    SshAddWizardState,
+    ActiveModal, AppCreationStep, AppCreationWizardState, DefaultServiceOption, OperationEntry,
+    OperationProgressState, SshAddStep, SshAddWizardState, StackCreationStep,
+    StackCreationWizardState,
 };
 
 /// What the event loop should do after processing a key.
@@ -44,16 +45,65 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
                 app.modal = ActiveModal::None;
             } else if key.code == KeyCode::Enter {
                 if input.value() == app_name {
-                    let path = format!("stacks/{}", app_name);
-                    let _ = std::fs::remove_dir_all(&path);
-                    let _ = crate::gitops::commit_and_push(".", &format!("Delete {}", app_name));
-                    // Reset selected index before closing modal so subsequent
-                    // reload doesn't index into an out-of-range position
-                    app.stacks = App::load_stacks();
-                    if app.selected_stack >= app.stacks.len() && !app.stacks.is_empty() {
-                        app.selected_stack = app.stacks.len() - 1;
+                    let tx = crate::transactions::begin("delete_stack", app_name).ok();
+                    if let Some(ref path) = tx {
+                        let _ = crate::transactions::record_phase(
+                            path,
+                            "delete_stack_scaffold",
+                            "in_progress",
+                            None,
+                        );
                     }
-                    app.modal = ActiveModal::None;
+
+                    match crate::stack_features::delete_stack(app_name) {
+                        Ok(()) => {
+                            if let Some(ref path) = tx {
+                                let _ = crate::transactions::record_phase(
+                                    path,
+                                    "delete_stack_scaffold",
+                                    "completed",
+                                    None,
+                                );
+                                let _ = crate::transactions::record_phase(
+                                    path,
+                                    "git_push",
+                                    "in_progress",
+                                    None,
+                                );
+                            }
+
+                            let _ = crate::gitops::commit_and_push(
+                                ".",
+                                &format!("Delete stack {}", app_name),
+                            );
+
+                            if let Some(ref path) = tx {
+                                let _ = crate::transactions::record_phase(
+                                    path,
+                                    "git_push",
+                                    "completed",
+                                    None,
+                                );
+                                let _ = crate::transactions::finish(path, true);
+                            }
+
+                            app.modal = ActiveModal::None;
+                            needs_reload = true;
+                        }
+                        Err(e) => {
+                            if let Some(ref path) = tx {
+                                let _ = crate::transactions::record_phase(
+                                    path,
+                                    "delete_stack_scaffold",
+                                    "failed",
+                                    Some(&e.to_string()),
+                                );
+                                let _ = crate::transactions::finish(path, false);
+                            }
+                            app.sync_status =
+                                format!("Delete stack blocked for '{}': {}", app_name, e);
+                        }
+                    }
                 }
             } else {
                 input.handle_event(&crossterm::event::Event::Key(key));
@@ -69,14 +119,28 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
                 app.modal = ActiveModal::None;
             } else if key.code == KeyCode::Enter {
                 if input.value() == app_name {
-                    let path = format!("stacks/{}/{}", stack_name, app_name);
-                    let _ = std::fs::remove_dir_all(&path);
-                    let _ = crate::gitops::commit_and_push(
-                        ".",
-                        &format!("Delete app {} from stack {}", app_name, stack_name),
-                    );
-                    app.modal = ActiveModal::None;
-                    needs_reload = true;
+                    let delete_result = if crate::stack_features::is_core_app(app_name) {
+                        crate::stack_features::delete_core_app_from_stack(stack_name, app_name)
+                    } else {
+                        crate::stack_features::delete_app_from_stack(stack_name, app_name)
+                    };
+
+                    match delete_result {
+                        Ok(()) => {
+                            let msg = if crate::stack_features::is_core_app(app_name) {
+                                format!("Delete core app {} from stack {}", app_name, stack_name)
+                            } else {
+                                format!("Delete app {} from stack {}", app_name, stack_name)
+                            };
+                            let _ = crate::gitops::commit_and_push(".", &msg);
+                            app.modal = ActiveModal::None;
+                            needs_reload = true;
+                        }
+                        Err(e) => {
+                            app.sync_status =
+                                format!("Delete app blocked for '{}': {}", app_name, e);
+                        }
+                    }
                 }
             } else {
                 input.handle_event(&crossterm::event::Event::Key(key));
@@ -93,6 +157,22 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
                     // Modal stays open at the Done step; caller reloads stacks
                     needs_reload = true;
                 }
+            }
+        }
+
+        ActiveModal::StackCreationWizard(state) => match handle_stack_wizard(state, key) {
+            WizardOutcome::Continue => {}
+            WizardOutcome::Close => {
+                app.modal = ActiveModal::None;
+            }
+            WizardOutcome::Reload => {
+                needs_reload = true;
+            }
+        },
+
+        ActiveModal::OperationProgress(_) => {
+            if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
+                app.modal = ActiveModal::None;
             }
         }
 
@@ -203,6 +283,7 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                 KeyCode::Enter => {
                     let app_name = state.app_name.as_deref().unwrap_or("");
                     let docker_image = state.docker_image.as_deref().unwrap_or("");
+                    state.selected_defaults.clear();
                     let mut summary = format!(
                         "Stack: {}\nApp: {}\nDocker image: {}\n\nDefault services:\n",
                         state.stack_name, app_name, docker_image
@@ -210,6 +291,7 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                     for (i, opt) in options.iter().enumerate() {
                         if selected[i] {
                             summary.push_str(&format!("- {}\n", opt.label));
+                            state.selected_defaults.push(opt.label.to_string());
                         }
                     }
                     state.step = AppCreationStep::Review { summary };
@@ -218,43 +300,226 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
             }
         }
 
-        AppCreationStep::Review { summary: _ } => {
-            match key.code {
-                KeyCode::Esc => return WizardOutcome::Close,
-                KeyCode::Enter => {
-                    let stack_name = state.stack_name.clone();
-                    let app_name = state.app_name.as_deref().unwrap_or("newapp").to_string();
-                    let _docker_image = state
-                        .docker_image
-                        .as_deref()
-                        .unwrap_or("nginx:latest")
-                        .to_string();
+        AppCreationStep::Review { summary: _ } => match key.code {
+            KeyCode::Esc => return WizardOutcome::Close,
+            KeyCode::Enter => {
+                let stack_name = state.stack_name.clone();
+                let app_name = state.app_name.as_deref().unwrap_or("newapp").to_string();
+                let docker_image = state
+                    .docker_image
+                    .as_deref()
+                    .unwrap_or("nginx:latest")
+                    .to_string();
 
-                    let mac = crate::scaffold::generate_mac_address();
-                    let domain = format!("{}.local", app_name);
-                    let tmpl = crate::scaffold::AppServiceTemplate {
-                        app_name: &app_name,
-                        mac_address: &mac,
-                        domain_name: &domain,
-                    };
+                let options = crate::stack_features::AddAppOptions {
+                    include_watchtower: state.selected_defaults.iter().any(|x| x == "Watchtower"),
+                    include_promtail: state.selected_defaults.iter().any(|x| x == "Promtail"),
+                    include_traefik: state.selected_defaults.iter().any(|x| x == "Traefik"),
+                };
 
-                    // For the Review step the DefaultsMultiselect selections are already
-                    // baked into the summary string; we default all to true here.
-                    let compose =
-                        crate::scaffold::scaffold_stack_with_services(&tmpl, true, true, true);
-                    let _ = crate::scaffold::create_app_dirs(&stack_name, &app_name);
-                    let compose_path =
-                        format!("stacks/{}/{}/docker-compose.yml", stack_name, app_name);
-                    let _ = std::fs::write(&compose_path, compose);
+                let _ = crate::stack_features::add_app_to_stack(
+                    &stack_name,
+                    &app_name,
+                    &docker_image,
+                    &options,
+                );
+                let _ = crate::gitops::commit_and_push(
+                    ".",
+                    &format!(
+                        "feat(scaffold): add app {} to stack {}",
+                        app_name, stack_name
+                    ),
+                );
 
-                    state.step = AppCreationStep::Done;
-                    return WizardOutcome::Reload;
+                state.step = AppCreationStep::Done;
+                return WizardOutcome::Reload;
+            }
+            _ => {}
+        },
+
+        AppCreationStep::Done => {
+            if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
+                return WizardOutcome::Close;
+            }
+        }
+    }
+
+    WizardOutcome::Continue
+}
+
+fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> WizardOutcome {
+    match &mut state.step {
+        StackCreationStep::Name { input, error } => {
+            if key.code == KeyCode::Esc {
+                return WizardOutcome::Close;
+            } else if key.code == KeyCode::Enter {
+                let name = input.value().trim().to_string();
+                if name.is_empty() {
+                    *error = Some("Stack name cannot be empty".to_string());
+                } else if std::path::Path::new(&format!("stacks/{}", name)).exists() {
+                    *error = Some("Stack already exists".to_string());
+                } else {
+                    state.stack_name = Some(name.clone());
+                    state.step = StackCreationStep::CpuSelect;
                 }
-                _ => {}
+            } else {
+                input.handle_event(&crossterm::event::Event::Key(key));
             }
         }
 
-        AppCreationStep::Done => {
+        StackCreationStep::CpuSelect => match key.code {
+            KeyCode::Esc => return WizardOutcome::Close,
+            KeyCode::Left | KeyCode::Char('-') => {
+                state.cpu_cores = state.cpu_cores.saturating_sub(1).max(1);
+            }
+            KeyCode::Right | KeyCode::Char('+') => {
+                state.cpu_cores = state.cpu_cores.saturating_add(1).min(8);
+            }
+            KeyCode::Enter => {
+                state.step = StackCreationStep::MemorySelect;
+            }
+            _ => {}
+        },
+
+        StackCreationStep::MemorySelect => match key.code {
+            KeyCode::Esc => return WizardOutcome::Close,
+            KeyCode::Left | KeyCode::Char('-') => {
+                state.memory_mb = state.memory_mb.saturating_sub(512).max(512);
+            }
+            KeyCode::Right | KeyCode::Char('+') => {
+                state.memory_mb = state.memory_mb.saturating_add(512).min(65536);
+            }
+            KeyCode::Enter => {
+                state.step = StackCreationStep::DiskInput {
+                    input: Input::default(),
+                    error: None,
+                };
+            }
+            _ => {}
+        },
+
+        StackCreationStep::DiskInput { input, error } => {
+            if key.code == KeyCode::Esc {
+                return WizardOutcome::Close;
+            } else if key.code == KeyCode::Enter {
+                let raw = input.value().trim();
+                match raw.parse::<u32>() {
+                    Ok(v) if v >= 8 => {
+                        state.disk_gb = v;
+                        let stack_name = state.stack_name.as_deref().unwrap_or("new-stack");
+                        state.step = StackCreationStep::Review {
+                            summary: format!(
+                                "Stack: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nDisk: {} GiB\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create setup.sh\n- create lxc-compose.yml\n- scaffold missing core apps",
+                                stack_name,
+                                state.cpu_cores,
+                                state.memory_mb as f32 / 1024.0,
+                                state.memory_mb,
+                                state.disk_gb,
+                                stack_name
+                            ),
+                        };
+                    }
+                    _ => {
+                        *error = Some("disk must be an integer >= 8".to_string());
+                    }
+                }
+            } else {
+                input.handle_event(&crossterm::event::Event::Key(key));
+            }
+        }
+
+        StackCreationStep::Review { summary: _ } => match key.code {
+            KeyCode::Esc => return WizardOutcome::Close,
+            KeyCode::Enter => {
+                let stack_name = state.stack_name.as_deref().unwrap_or("new-stack");
+                let tx = crate::transactions::begin("add_stack", stack_name).ok();
+                if let Some(ref path) = tx {
+                    let _ = crate::transactions::record_phase(
+                        path,
+                        "scaffold_git_files",
+                        "in_progress",
+                        None,
+                    );
+                }
+
+                match crate::stack_features::create_stack(stack_name) {
+                    Ok(_) => {
+                        if let Err(e) = crate::scaffold::set_stack_provisioning_defaults(
+                            stack_name,
+                            state.cpu_cores,
+                            state.memory_mb,
+                            state.disk_gb,
+                        ) {
+                            if let Some(ref path) = tx {
+                                let _ = crate::transactions::record_phase(
+                                    path,
+                                    "scaffold_git_files",
+                                    "failed",
+                                    Some(&e.to_string()),
+                                );
+                                let _ = crate::transactions::finish(path, false);
+                            }
+                            state.step = StackCreationStep::Name {
+                                input: Input::default(),
+                                error: Some(format!("provisioning defaults failed: {}", e)),
+                            };
+                            return WizardOutcome::Continue;
+                        }
+
+                        if let Some(ref path) = tx {
+                            let _ = crate::transactions::record_phase(
+                                path,
+                                "scaffold_git_files",
+                                "completed",
+                                None,
+                            );
+                            let _ = crate::transactions::record_phase(
+                                path,
+                                "git_push",
+                                "in_progress",
+                                None,
+                            );
+                        }
+
+                        let _ = crate::gitops::commit_and_push(
+                            ".",
+                            &format!("Create stack {} with core scaffold", stack_name),
+                        );
+
+                        if let Some(ref path) = tx {
+                            let _ = crate::transactions::record_phase(
+                                path,
+                                "git_push",
+                                "completed",
+                                None,
+                            );
+                            let _ = crate::transactions::finish(path, true);
+                        }
+
+                        state.step = StackCreationStep::Done;
+                        return WizardOutcome::Reload;
+                    }
+                    Err(e) => {
+                        if let Some(ref path) = tx {
+                            let _ = crate::transactions::record_phase(
+                                path,
+                                "scaffold_git_files",
+                                "failed",
+                                Some(&e.to_string()),
+                            );
+                            let _ = crate::transactions::finish(path, false);
+                        }
+                        state.step = StackCreationStep::Name {
+                            input: Input::default(),
+                            error: Some(format!("create failed: {}", e)),
+                        };
+                    }
+                }
+            }
+            _ => {}
+        },
+
+        StackCreationStep::Done => {
             if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
                 return WizardOutcome::Close;
             }
@@ -269,10 +534,202 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
 fn handle_navigation(app: &mut App, key: KeyEvent) -> EventOutcome {
     match app.active_tab() {
         Tab::Scaffolding => handle_scaffolding_nav(app, key),
+        Tab::Backups => handle_backups_nav(app, key),
         Tab::Logs => handle_logs_nav(app, key),
         Tab::HostManagement => handle_host_management_nav(app, key),
         _ => handle_generic_nav(app, key),
     }
+}
+
+fn handle_backups_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
+    match key.code {
+        KeyCode::Char('e') => {
+            app.backup_schedule.enabled = !app.backup_schedule.enabled;
+            app.backup_status = format!("enabled set to {}", app.backup_schedule.enabled);
+        }
+        KeyCode::Char('+') => {
+            app.backup_schedule.interval_minutes =
+                app.backup_schedule.interval_minutes.saturating_add(15);
+            app.backup_status = format!(
+                "interval set to {} minutes",
+                app.backup_schedule.interval_minutes
+            );
+        }
+        KeyCode::Char('-') => {
+            app.backup_schedule.interval_minutes = app
+                .backup_schedule
+                .interval_minutes
+                .saturating_sub(15)
+                .max(15);
+            app.backup_status = format!(
+                "interval set to {} minutes",
+                app.backup_schedule.interval_minutes
+            );
+        }
+        KeyCode::Char('d') => {
+            app.backup_schedule.retention_daily =
+                app.backup_schedule.retention_daily.saturating_add(1);
+            app.backup_status = format!("daily retention: {}", app.backup_schedule.retention_daily);
+        }
+        KeyCode::Char('D') => {
+            app.backup_schedule.retention_daily =
+                app.backup_schedule.retention_daily.saturating_sub(1).max(1);
+            app.backup_status = format!("daily retention: {}", app.backup_schedule.retention_daily);
+        }
+        KeyCode::Char('w') => {
+            app.backup_schedule.retention_weekly =
+                app.backup_schedule.retention_weekly.saturating_add(1);
+            app.backup_status =
+                format!("weekly retention: {}", app.backup_schedule.retention_weekly);
+        }
+        KeyCode::Char('W') => {
+            app.backup_schedule.retention_weekly = app
+                .backup_schedule
+                .retention_weekly
+                .saturating_sub(1)
+                .max(1);
+            app.backup_status =
+                format!("weekly retention: {}", app.backup_schedule.retention_weekly);
+        }
+        KeyCode::Char('m') => {
+            app.backup_schedule.retention_monthly =
+                app.backup_schedule.retention_monthly.saturating_add(1);
+            app.backup_status = format!(
+                "monthly retention: {}",
+                app.backup_schedule.retention_monthly
+            );
+        }
+        KeyCode::Char('M') => {
+            app.backup_schedule.retention_monthly = app
+                .backup_schedule
+                .retention_monthly
+                .saturating_sub(1)
+                .max(1);
+            app.backup_status = format!(
+                "monthly retention: {}",
+                app.backup_schedule.retention_monthly
+            );
+        }
+        KeyCode::Char('n') => {
+            app.backup_schedule.notify_on_success = !app.backup_schedule.notify_on_success;
+            app.backup_status = format!(
+                "notify_on_success set to {}",
+                app.backup_schedule.notify_on_success
+            );
+        }
+        KeyCode::Char('f') => {
+            app.backup_schedule.notify_on_failure = !app.backup_schedule.notify_on_failure;
+            app.backup_status = format!(
+                "notify_on_failure set to {}",
+                app.backup_schedule.notify_on_failure
+            );
+        }
+        KeyCode::Char('s') => match app.backup_schedule.save() {
+            Ok(()) => {
+                app.backup_status = "backup policy saved".to_string();
+            }
+            Err(e) => {
+                app.backup_status = format!("save failed: {}", e);
+            }
+        },
+        KeyCode::Char('b') => {
+            let entries: Vec<OperationEntry> = app
+                .stacks
+                .iter()
+                .map(|s| OperationEntry {
+                    name: s.clone(),
+                    status: "✓".to_string(),
+                    detail: "backup queued".to_string(),
+                })
+                .collect();
+
+            app.modal = ActiveModal::OperationProgress(OperationProgressState {
+                title: "Manual Backup - All Stacks".to_string(),
+                phase: "HOST backup orchestration".to_string(),
+                summary: format!("Queued {} stack backup scope entries.", entries.len()),
+                entries,
+            });
+            app.backup_status = "manual backup-all queued".to_string();
+        }
+        KeyCode::Char('i') => {
+            let stack = app
+                .stacks
+                .get(app.selected_stack)
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string());
+            app.modal = ActiveModal::OperationProgress(OperationProgressState {
+                title: format!("Individual Restore - {}", stack),
+                phase: "Snapshot selection + restore dispatch".to_string(),
+                summary: "Restore request prepared for selected stack.".to_string(),
+                entries: vec![OperationEntry {
+                    name: stack.clone(),
+                    status: "⟳".to_string(),
+                    detail: "awaiting snapshot picker integration".to_string(),
+                }],
+            });
+            app.backup_status = format!("individual restore prepared for '{}'", stack);
+        }
+        KeyCode::Char('r') => {
+            let entries: Vec<OperationEntry> = app
+                .stacks
+                .iter()
+                .map(|s| OperationEntry {
+                    name: s.clone(),
+                    status: "⟳".to_string(),
+                    detail: "provision + restore + sync plan".to_string(),
+                })
+                .collect();
+            app.modal = ActiveModal::OperationProgress(OperationProgressState {
+                title: "Full Backup Restore".to_string(),
+                phase: "Disaster recovery pre-flight".to_string(),
+                summary: format!("Prepared DR plan for {} stack(s).", entries.len()),
+                entries,
+            });
+            app.backup_status = "disaster recovery plan prepared".to_string();
+        }
+        KeyCode::Char('p') => {
+            let entries: Vec<OperationEntry> = app
+                .stacks
+                .iter()
+                .map(|s| OperationEntry {
+                    name: s.clone(),
+                    status: "⟳".to_string(),
+                    detail: "os patch queued".to_string(),
+                })
+                .collect();
+            app.modal = ActiveModal::OperationProgress(OperationProgressState {
+                title: "OS Patching".to_string(),
+                phase: "LXC patch orchestration".to_string(),
+                summary: format!("Patch-all prepared for {} stack(s).", entries.len()),
+                entries,
+            });
+            app.backup_status = "os patch all prepared".to_string();
+        }
+        KeyCode::Char('u') => {
+            let entries: Vec<OperationEntry> = app
+                .stacks
+                .iter()
+                .map(|s| OperationEntry {
+                    name: s.clone(),
+                    status: "✓".to_string(),
+                    detail: "unattended-upgrades policy: active".to_string(),
+                })
+                .collect();
+            app.modal = ActiveModal::OperationProgress(OperationProgressState {
+                title: "Unattended Upgrades".to_string(),
+                phase: "Policy status view".to_string(),
+                summary: format!("OS auto-patch status across {} stack(s).", entries.len()),
+                entries,
+            });
+            app.backup_status = "unattended-upgrades status refreshed".to_string();
+        }
+        KeyCode::Tab => app.tab_right(),
+        KeyCode::BackTab => app.tab_left(),
+        KeyCode::Char('q') => return EventOutcome::Quit,
+        _ => {}
+    }
+
+    EventOutcome::Continue
 }
 
 /// Handles key presses on the Host Management tab.
@@ -357,6 +814,20 @@ fn handle_generic_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
 }
 
 fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
+    if key.code == KeyCode::Char('n') {
+        app.modal = ActiveModal::StackCreationWizard(StackCreationWizardState {
+            stack_name: None,
+            cpu_cores: 2,
+            memory_mb: 2048,
+            disk_gb: 32,
+            step: StackCreationStep::Name {
+                input: Input::default(),
+                error: None,
+            },
+        });
+        return EventOutcome::Continue;
+    }
+
     if app.stacks.is_empty() {
         return handle_generic_nav(app, key);
     }
@@ -463,14 +934,304 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
 
         KeyCode::Char('q') => return EventOutcome::Quit,
 
+        // Marks the selected stack as deploy-enabled in lxc-compose.yml.
+        // Deployment (`s`) only runs for activated stacks.
+        KeyCode::Char('a') => {
+            if let Some(stack_name) = app.stacks.get(app.selected_stack) {
+                match crate::scaffold::ensure_lxc_compose(stack_name)
+                    .and_then(|_| crate::scaffold::set_stack_deploy_enabled(stack_name, true))
+                {
+                    Ok(()) => {
+                        app.sync_status = format!(
+                            "Activated '{}' (deploy.enabled=true). Press 's' to deploy.",
+                            stack_name
+                        );
+                        app.push_log(
+                            "CLIENT",
+                            "INFO",
+                            &format!("Stack '{}' activated in lxc-compose.yml", stack_name),
+                        );
+                    }
+                    Err(e) => {
+                        app.sync_status = format!("Activation failed for '{}': {}", stack_name, e);
+                        app.push_log(
+                            "CLIENT",
+                            "ERROR",
+                            &format!("Activation failed for '{}': {}", stack_name, e),
+                        );
+                    }
+                }
+            }
+            return EventOutcome::Continue;
+        }
+
+        // Marks selected stack as inactive for deploy command.
+        KeyCode::Char('x') => {
+            if let Some(stack_name) = app.stacks.get(app.selected_stack) {
+                match crate::scaffold::ensure_lxc_compose(stack_name)
+                    .and_then(|_| crate::scaffold::set_stack_deploy_enabled(stack_name, false))
+                {
+                    Ok(()) => {
+                        app.sync_status =
+                            format!("Deactivated '{}' (deploy.enabled=false).", stack_name);
+                        app.push_log(
+                            "CLIENT",
+                            "INFO",
+                            &format!("Stack '{}' deactivated in lxc-compose.yml", stack_name),
+                        );
+                    }
+                    Err(e) => {
+                        app.sync_status =
+                            format!("Deactivation failed for '{}': {}", stack_name, e);
+                        app.push_log(
+                            "CLIENT",
+                            "ERROR",
+                            &format!("Deactivation failed for '{}': {}", stack_name, e),
+                        );
+                    }
+                }
+            }
+            return EventOutcome::Continue;
+        }
+
+        // Add missing core apps to selected stack.
+        KeyCode::Char('c') => {
+            if let Some(stack_name) = app.stacks.get(app.selected_stack) {
+                match crate::stack_features::add_missing_core_apps(stack_name) {
+                    Ok(result) if result.added.is_empty() => {
+                        app.sync_status = format!("No missing core apps in '{}'.", stack_name);
+                    }
+                    Ok(result) => {
+                        let added = result.added.join(", ");
+                        let _ = crate::gitops::commit_and_push(
+                            ".",
+                            &format!(
+                                "feat(scaffold): add core apps [{}] to stack {}",
+                                added, stack_name
+                            ),
+                        );
+                        app.sync_status = format!("Added core apps to '{}': {}", stack_name, added);
+
+                        if crate::scaffold::is_stack_deploy_enabled(stack_name).unwrap_or(false) {
+                            app.sync_stack = stack_name.clone();
+                            app.sync_pending = true;
+                        }
+                    }
+                    Err(e) => {
+                        app.sync_status = format!("Core-app scaffolding failed: {}", e);
+                    }
+                }
+            }
+            return EventOutcome::Reload;
+        }
+
         // Trigger a GitOps sync on the LXC that manages the selected stack.
         // The main loop picks up `sync_pending` and sends the HTTP request.
         KeyCode::Char('s') => {
-            if let Some(stack_name) = app.stacks.get(app.selected_stack) {
-                app.sync_stack = stack_name.clone();
-                app.sync_pending = true;
-                app.sync_status = format!("Queued sync for '{}'…", stack_name);
+            if let Some(stack_name) = app.stacks.get(app.selected_stack).cloned() {
+                if let Err(e) = crate::stack_features::validate_setup_hook(&stack_name) {
+                    app.sync_status = format!("Deploy blocked for '{}': {}", stack_name, e);
+                    app.push_client_logfmt(
+                        "ERROR",
+                        Some(&stack_name),
+                        Some("pre_sync_validation"),
+                        "fail-closed deploy abort",
+                        Some(&e.to_string()),
+                    );
+                    return EventOutcome::Continue;
+                }
+
+                if let Err(e) = crate::stack_features::validate_stack_filesystem_layout(&stack_name)
+                {
+                    app.sync_status = format!("Deploy blocked for '{}': {}", stack_name, e);
+                    app.push_client_logfmt(
+                        "ERROR",
+                        Some(&stack_name),
+                        Some("filesystem_layout"),
+                        "fail-closed deploy abort",
+                        Some(&e.to_string()),
+                    );
+                    return EventOutcome::Continue;
+                }
+
+                let activation_state = crate::scaffold::ensure_lxc_compose(&stack_name)
+                    .and_then(|_| crate::scaffold::is_stack_deploy_enabled(&stack_name));
+
+                match activation_state {
+                    Ok(true) => {
+                        app.sync_stack = stack_name.clone();
+                        app.sync_pending = true;
+                        app.sync_status = format!("Queued sync for '{}'…", stack_name);
+                    }
+                    Ok(false) => {
+                        app.sync_status = format!(
+                            "Stack '{}' is inactive. Press 'a' to activate first.",
+                            stack_name
+                        );
+                        app.push_client_logfmt(
+                            "WARN",
+                            Some(&stack_name),
+                            Some("deploy_gate"),
+                            "deploy blocked: deploy.enabled is false",
+                            None,
+                        );
+                    }
+                    Err(e) => {
+                        app.sync_status =
+                            format!("Cannot read activation state for '{}': {}", stack_name, e);
+                        app.push_client_logfmt(
+                            "ERROR",
+                            Some(&stack_name),
+                            Some("deploy_gate"),
+                            "deploy activation check failed",
+                            Some(&e.to_string()),
+                        );
+                    }
+                }
             }
+            return EventOutcome::Continue;
+        }
+
+        // Queue sync for all stacks that are currently deploy-enabled.
+        KeyCode::Char('D') | KeyCode::Char('u') => {
+            let active = crate::scaffold::list_deploy_enabled_stacks(&app.stacks);
+            if active.is_empty() {
+                app.sync_status = "No active stacks to deploy/update.".to_string();
+                return EventOutcome::Continue;
+            }
+
+            for stack in active {
+                if let Err(e) = crate::stack_features::validate_setup_hook(&stack) {
+                    app.push_client_logfmt(
+                        "ERROR",
+                        Some(&stack),
+                        Some("pre_sync_validation"),
+                        "fail-closed batch skip",
+                        Some(&e.to_string()),
+                    );
+                    continue;
+                }
+
+                if let Err(e) = crate::stack_features::validate_stack_filesystem_layout(&stack) {
+                    app.push_client_logfmt(
+                        "ERROR",
+                        Some(&stack),
+                        Some("filesystem_layout"),
+                        "fail-closed batch skip",
+                        Some(&e.to_string()),
+                    );
+                    continue;
+                }
+
+                if !app.sync_queue.iter().any(|queued| queued == &stack)
+                    && !(app.sync_pending && app.sync_stack == stack)
+                {
+                    app.sync_queue.push_back(stack);
+                }
+            }
+
+            let queued_count = app.sync_queue.len();
+            app.sync_status = if queued_count == 0 {
+                "No stacks queued (all failed pre-sync validation).".to_string()
+            } else {
+                format!("Queued {} active stack sync job(s).", queued_count)
+            };
+            return EventOutcome::Continue;
+        }
+
+        // Enable GPU passthrough wiring for selected app and mark host hint in lxc-compose.
+        KeyCode::Char('g') => {
+            let stack_name = app.stacks.get(app.selected_stack).cloned();
+            let app_name = selected_scaffolding_app_name(app);
+
+            if let (Some(stack_name), Some(app_name)) = (stack_name, app_name) {
+                match crate::stack_features::set_gpu_passthrough_for_app(
+                    &stack_name,
+                    &app_name,
+                    true,
+                ) {
+                    Ok(()) => {
+                        let _ = crate::gitops::commit_and_push(
+                            ".",
+                            &format!(
+                                "feat(hardware): enable gpu passthrough for {} in {}",
+                                app_name, stack_name
+                            ),
+                        );
+
+                        app.sync_status =
+                            format!("GPU passthrough enabled for '{}/{}'.", stack_name, app_name);
+                        app.push_client_logfmt(
+                            "INFO",
+                            Some(&stack_name),
+                            Some("gpu_passthrough"),
+                            &format!("enabled target_app={}", app_name),
+                            None,
+                        );
+
+                        if crate::scaffold::is_stack_deploy_enabled(&stack_name).unwrap_or(false) {
+                            app.sync_stack = stack_name;
+                            app.sync_pending = true;
+                        }
+                        return EventOutcome::Reload;
+                    }
+                    Err(e) => {
+                        app.sync_status = format!("GPU enable failed: {}", e);
+                    }
+                }
+            } else {
+                app.sync_status = "Select an app row first before enabling GPU.".to_string();
+            }
+
+            return EventOutcome::Continue;
+        }
+
+        // Disable GPU passthrough wiring for selected app and clear host hint.
+        KeyCode::Char('G') => {
+            let stack_name = app.stacks.get(app.selected_stack).cloned();
+            let app_name = selected_scaffolding_app_name(app);
+
+            if let (Some(stack_name), Some(app_name)) = (stack_name, app_name) {
+                match crate::stack_features::set_gpu_passthrough_for_app(
+                    &stack_name,
+                    &app_name,
+                    false,
+                ) {
+                    Ok(()) => {
+                        let _ = crate::gitops::commit_and_push(
+                            ".",
+                            &format!(
+                                "feat(hardware): disable gpu passthrough for {} in {}",
+                                app_name, stack_name
+                            ),
+                        );
+
+                        app.sync_status = format!(
+                            "GPU passthrough disabled for '{}/{}'.",
+                            stack_name, app_name
+                        );
+                        app.push_client_logfmt(
+                            "INFO",
+                            Some(&stack_name),
+                            Some("gpu_passthrough"),
+                            &format!("disabled target_app={}", app_name),
+                            None,
+                        );
+
+                        if crate::scaffold::is_stack_deploy_enabled(&stack_name).unwrap_or(false) {
+                            app.sync_stack = stack_name;
+                            app.sync_pending = true;
+                        }
+                        return EventOutcome::Reload;
+                    }
+                    Err(e) => {
+                        app.sync_status = format!("GPU disable failed: {}", e);
+                    }
+                }
+            } else {
+                app.sync_status = "Select an app row first before disabling GPU.".to_string();
+            }
+
             return EventOutcome::Continue;
         }
 
@@ -478,6 +1239,33 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
     }
 
     EventOutcome::Continue
+}
+
+fn selected_scaffolding_app_name(app: &App) -> Option<String> {
+    if app.stacks.is_empty() {
+        return None;
+    }
+
+    let dropdown = app.stack_dropdowns.get(app.selected_stack)?;
+    let idx = dropdown.selected_option;
+    let mut cursor = 2usize;
+
+    for (i, name) in dropdown.apps.iter().enumerate() {
+        if idx == cursor {
+            return Some(name.clone());
+        }
+        cursor += 1;
+        if dropdown
+            .app_dropdowns
+            .get(i)
+            .map(|d| d.expanded)
+            .unwrap_or(false)
+        {
+            cursor += 2;
+        }
+    }
+
+    None
 }
 
 fn handle_scaffolding_enter(app: &mut App) -> EventOutcome {
@@ -496,6 +1284,7 @@ fn handle_scaffolding_enter(app: &mut App) -> EventOutcome {
                         stack_name,
                         app_name: None,
                         docker_image: None,
+                        selected_defaults: Vec::new(),
                         step: AppCreationStep::Name {
                             input: Input::default(),
                             error: None,

@@ -12,6 +12,7 @@ use ratatui::{
 
 mod app;
 mod backup;
+mod self_update;
 mod theme;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -90,6 +91,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let _ = tx.send("DONE".to_string());
                             });
                         }
+                        KeyCode::Char('U') => {
+                            app.backup_status.push("Checking HOST updates…".to_string());
+                            match self_update::check_and_apply_update() {
+                                Ok(msg) => app.backup_status.push(msg),
+                                Err(err) => app.backup_status.push(format!("HOST update failed: {}", err)),
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -120,7 +128,7 @@ fn draw_main(f: &mut ratatui::Frame, app: &app::App) {
         _ => unreachable!(),
     }
 
-    let footer = Paragraph::new(" HOST v0.1 | TABS: ↑↓/1-5 | [b] backup | q=quit")
+    let footer = Paragraph::new(" HOST v0.1 | TABS: ↑↓/1-5 | [b] backup | [U] self-update | q=quit")
         .style(Style::default().fg(Color::DarkGray));
     let fx = area.x + area.width - 2;
     let fy = area.y + area.height - 1;
@@ -260,11 +268,11 @@ fn draw_backups(f: &mut ratatui::Frame, app: &app::App, area: Rect) {
     );
 }
 
-fn draw_storage(f: &mut ratatui::Frame, app: &app::App, area: Rect) {
+fn draw_storage(f: &mut ratatui::Frame, _app: &app::App, area: Rect) {
     f.render_widget(Paragraph::new(" [ STORAGE TAB — PLACEHOLDER ] "), area);
 }
 
-fn draw_hardware(f: &mut ratatui::Frame, app: &app::App, area: Rect) {
+fn draw_hardware(f: &mut ratatui::Frame, _app: &app::App, area: Rect) {
     f.render_widget(Paragraph::new(" [ HARDWARE TAB — PLACEHOLDER ] "), area);
 }
 

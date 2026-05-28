@@ -16,6 +16,8 @@ pub enum ActiveModal {
         input: Input,
     },
     AppCreationWizard(AppCreationWizardState),
+    StackCreationWizard(StackCreationWizardState),
+    OperationProgress(OperationProgressState),
     SshAddWizard(SshAddWizardState),
     None,
 }
@@ -25,6 +27,7 @@ pub struct AppCreationWizardState {
     pub stack_name: String,
     pub app_name: Option<String>,
     pub docker_image: Option<String>,
+    pub selected_defaults: Vec<String>,
     pub step: AppCreationStep,
     pub multiselect_cursor: usize, // for DefaultsMultiselect step
 }
@@ -51,6 +54,44 @@ pub enum AppCreationStep {
 pub struct DefaultServiceOption {
     pub label: &'static str,
     pub description: &'static str,
+}
+
+pub struct StackCreationWizardState {
+    pub stack_name: Option<String>,
+    pub cpu_cores: u8,
+    pub memory_mb: u32,
+    pub disk_gb: u32,
+    pub step: StackCreationStep,
+}
+
+pub enum StackCreationStep {
+    Name {
+        input: Input,
+        error: Option<String>,
+    },
+    CpuSelect,
+    MemorySelect,
+    DiskInput {
+        input: Input,
+        error: Option<String>,
+    },
+    Review {
+        summary: String,
+    },
+    Done,
+}
+
+pub struct OperationProgressState {
+    pub title: String,
+    pub phase: String,
+    pub entries: Vec<OperationEntry>,
+    pub summary: String,
+}
+
+pub struct OperationEntry {
+    pub name: String,
+    pub status: String,
+    pub detail: String,
 }
 
 /// Draws the app creation wizard modal (step-based)
@@ -170,7 +211,10 @@ pub fn draw_app_creation_wizard(
                 } else {
                     "  "
                 };
-                text.push_str(&format!("  {} {} {}\n", cursor, mark, opt.label));
+                text.push_str(&format!(
+                    "  {} {} {}  - {}\n",
+                    cursor, mark, opt.label, opt.description
+                ));
             }
             text.push_str("\n[↑/↓ to move, Space to toggle, Enter to confirm, ESC to cancel]");
             let para = Paragraph::new(text)
@@ -180,6 +224,226 @@ pub fn draw_app_creation_wizard(
             f.render_widget(para, popup_area);
         }
     }
+}
+
+pub fn draw_stack_creation_wizard(
+    f: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    state: &StackCreationWizardState,
+) {
+    use ratatui::{style::*, widgets::*};
+    let popup_area = ratatui::layout::Rect {
+        x: area.width / 4,
+        y: area.height / 3,
+        width: area.width / 2,
+        height: 10,
+    };
+    f.render_widget(Clear, popup_area);
+
+    match &state.step {
+        StackCreationStep::Name { input, error } => {
+            let block = Block::default()
+                .title("Create New Stack")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let mut text = format!(
+                "Enter new stack name:\n> {}\n\n[Enter to continue, ESC to cancel]",
+                input.value()
+            );
+            if let Some(err) = error {
+                text.push_str(&format!("\n\n[Error: {}]", err));
+            }
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Cyan));
+            f.render_widget(para, popup_area);
+        }
+        StackCreationStep::CpuSelect => {
+            let block = Block::default()
+                .title("CPU Cores")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let text = format!(
+                "Select CPU cores (1-8):\n\n  cores: {}\n\n[←/→ or +/- adjust, Enter continue, ESC cancel]",
+                state.cpu_cores
+            );
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Cyan));
+            f.render_widget(para, popup_area);
+        }
+        StackCreationStep::MemorySelect => {
+            let block = Block::default()
+                .title("Memory")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let gib = state.memory_mb as f32 / 1024.0;
+            let text = format!(
+                "Select memory (512 MiB steps):\n\n  memory: {:.1} GiB ({} MiB)\n\n[←/→ or +/- adjust, Enter continue, ESC cancel]",
+                gib,
+                state.memory_mb
+            );
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Cyan));
+            f.render_widget(para, popup_area);
+        }
+        StackCreationStep::DiskInput { input, error } => {
+            let block = Block::default()
+                .title("Disk Size")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let mut text = format!(
+                "Enter root disk size (GiB integer):\n> {}\n\n[Enter continue, ESC cancel]",
+                input.value()
+            );
+            if let Some(err) = error {
+                text.push_str(&format!("\n\n[Error: {}]", err));
+            }
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Cyan));
+            f.render_widget(para, popup_area);
+        }
+        StackCreationStep::Review { summary } => {
+            let block = Block::default()
+                .title("Review & Confirm")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let text = format!(
+                "Review your new stack:\n\n{}\n\n[Enter to create, ESC to cancel]",
+                summary
+            );
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Green));
+            f.render_widget(para, popup_area);
+        }
+        StackCreationStep::Done => {
+            let block = Block::default()
+                .title("Stack Created")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let text = "Stack scaffold created with core apps.\n\n[Enter or ESC to close]";
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Green));
+            f.render_widget(para, popup_area);
+        }
+    }
+}
+
+pub fn draw_operation_progress(
+    f: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    state: &OperationProgressState,
+) {
+    use ratatui::{style::*, widgets::*};
+    use ratatui::text::Line;
+
+    let popup_area = ratatui::layout::Rect {
+        x: area.width / 8,
+        y: area.height / 6,
+        width: area.width * 3 / 4,
+        height: area.height * 2 / 3,
+    };
+    f.render_widget(Clear, popup_area);
+
+    let body_height = popup_area.height.saturating_sub(5);
+    let rows = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Length(2),
+            ratatui::layout::Constraint::Length(body_height),
+            ratatui::layout::Constraint::Length(3),
+        ])
+        .split(popup_area);
+
+    f.render_widget(
+        Paragraph::new(format!("Phase: {}", state.phase)).block(
+            Block::default()
+                .title(format!(" {} ", state.title))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        ),
+        rows[0],
+    );
+
+    let entries = if state.entries.is_empty() {
+        vec![Line::from("  (no items)")]
+    } else {
+        state
+            .entries
+            .iter()
+            .map(|entry| {
+                Line::from(format!(
+                    "  {}  {:<20}  {}",
+                    entry.status, entry.name, entry.detail
+                ))
+            })
+            .collect()
+    };
+
+    f.render_widget(
+        Paragraph::new(entries).block(
+            Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        ),
+        rows[1],
+    );
+
+    f.render_widget(
+        Paragraph::new(format!(
+            "{}\n[Enter/Esc] close",
+            state.summary
+        ))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Green)),
+        )
+        .style(Style::default().fg(Color::Rgb(170, 190, 190))),
+        rows[2],
+    );
 }
 
 /// Draws a warning modal with a red border and input field.

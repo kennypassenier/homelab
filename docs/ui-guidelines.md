@@ -481,7 +481,7 @@ pub lxc_ram: HashMap<String, VecDeque<u64>>,
 ```
 
 Mock data is pushed on each `anim_tick` with a gentle random walk. Real data
-comes from the future SSE daemon.
+comes from the future WebSocket daemon.
 
 **Rendering:** Inline in the LXC table row using a split: data columns (80%)
 + sparkline column (20%).

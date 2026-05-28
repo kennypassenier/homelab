@@ -9,6 +9,7 @@ const RESTIC_REPO_BASE: &str = "/backups";
 const APPDATA_BASE: &str = "/opt/appdata";
 
 /// Result of a single stack's backup run.
+#[allow(dead_code)]
 pub struct BackupResult {
     pub stack: String,
     pub lxc_ip: String,

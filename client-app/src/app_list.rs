@@ -1,6 +1,5 @@
 // Utility to list apps (subfolders with docker-compose.yml) for a given stack
 use std::fs;
-use std::path::Path;
 
 pub fn list_apps_for_stack(stack_name: &str) -> Vec<String> {
     let mut apps = Vec::new();

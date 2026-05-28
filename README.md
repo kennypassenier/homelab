@@ -2,6 +2,11 @@
 
 Welcome to the Homelab GitOps repository. This project contains the infrastructure as code (IaC) and configuration for managing a homelab environment using Proxmox, LXC containers, and Docker.
 
+## Release Automation
+
+- HOST daemon updates are release-driven (GitHub Releases) rather than push-triggered.
+- LXC daemon image is built and published to GHCR via change-aware GitHub Actions.
+
 ## 🚀 Quick Start: Central Managers
 
 For ease of use, all operations have been bundled into three central interactive manager scripts located in the root of this repository. Instead of remembering individual script paths, simply run the manager for your current environment:

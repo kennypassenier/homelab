@@ -49,11 +49,11 @@ pub fn parse_ssh_config() -> Vec<SshEntry> {
     let mut cur_user = String::from("root");
     let mut cur_port: u16 = 22;
 
-    let mut flush = |entries: &mut Vec<SshEntry>,
-                     host: Option<String>,
-                     hostname: &str,
-                     user: &str,
-                     port: u16| {
+    let flush = |entries: &mut Vec<SshEntry>,
+                 host: Option<String>,
+                 hostname: &str,
+                 user: &str,
+                 port: u16| {
         if let Some(h) = host {
             if !hostname.is_empty() && h != "*" {
                 entries.push(SshEntry {

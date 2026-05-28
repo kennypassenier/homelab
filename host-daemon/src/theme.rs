@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use ratatui::style::{Color, Modifier, Style};
 
 // Theme struct - will be initialized later in main()

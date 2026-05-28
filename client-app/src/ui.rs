@@ -8,16 +8,13 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, BorderType, Borders, Cell, List, ListItem,
-        Paragraph, Row, Table, Tabs,
-    },
+    widgets::{Block, BorderType, Borders, Cell, List, ListItem, Paragraph, Row, Table, Tabs},
 };
 
 use crate::app::{App, LOG_SOURCES, LogLevelFilter, Tab};
 use crate::blast_radius::{
-    ActiveModal, draw_app_creation_wizard, draw_delete_app_modal, draw_ssh_add_wizard,
-    draw_warning_modal,
+    ActiveModal, draw_app_creation_wizard, draw_delete_app_modal, draw_operation_progress,
+    draw_ssh_add_wizard, draw_stack_creation_wizard, draw_warning_modal,
 };
 
 /// Renders the complete UI for the current frame.
@@ -77,12 +74,19 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
         ActiveModal::AppCreationWizard(state) => {
             draw_app_creation_wizard(f, size, state);
         }
+        ActiveModal::StackCreationWizard(state) => {
+            draw_stack_creation_wizard(f, size, state);
+        }
+        ActiveModal::OperationProgress(state) => {
+            draw_operation_progress(f, size, state);
+        }
         ActiveModal::SshAddWizard(state) => {
             draw_ssh_add_wizard(f, size, state);
         }
         ActiveModal::None => match app.active_tab() {
             Tab::Scaffolding => draw_scaffolding(f, root[1], app),
             Tab::Dashboard => draw_dashboard(f, root[1], app),
+            Tab::Backups => draw_backups(f, root[1], app),
             Tab::HostManagement => draw_host_management(f, root[1], app),
             Tab::Logs => draw_logs(f, root[1], app),
         },
@@ -95,6 +99,15 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
 // ── Tab renderers ────────────────────────────────────────────────────────────
 
 fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -102,7 +115,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
             Constraint::Length(24), // actions
             Constraint::Min(0),     // apps
         ])
-        .split(area);
+        .split(rows[0]);
 
     // ── Stacks column ──────────────────────────────────────────────────────
     let visible = app.stacks.len().min(20);
@@ -118,8 +131,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
         .map(|(i, name)| {
             let selected = i == app.selected_stack && app.column_focus == 0;
             let style = if selected {
-                crate::theme::Theme::pulse_style(app.pulse_phase)
-                    .add_modifier(Modifier::BOLD)
+                crate::theme::Theme::pulse_style(app.pulse_phase).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(app.theme.text)
             };
@@ -133,7 +145,11 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .title(" [ STACKS ] ")
-                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                .title_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
                 .style(if app.column_focus == 0 {
                     app.theme.active_border_style()
                 } else {
@@ -145,6 +161,11 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
 
     // Nothing else to render if there are no stacks yet
     if app.stacks.is_empty() {
+        f.render_widget(
+            Paragraph::new("  no stacks yet  |  press [n] to create stack")
+                .style(Style::default().fg(Color::DarkGray)),
+            rows[1],
+        );
         return;
     }
 
@@ -163,8 +184,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
                 _ => Style::default().fg(app.theme.accent_cyan),
             };
             let style = if selected {
-                base.add_modifier(Modifier::BOLD)
-                    .bg(Color::Rgb(0, 80, 90))
+                base.add_modifier(Modifier::BOLD).bg(Color::Rgb(0, 80, 90))
             } else {
                 base
             };
@@ -178,7 +198,11 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .title(" [ ACTIONS ] ")
-                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                .title_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
                 .style(if app.column_focus == 1 {
                     app.theme.active_border_style()
                 } else {
@@ -201,8 +225,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
             "\u{25b6} "
         };
         let style = if selected {
-            crate::theme::Theme::pulse_style(app.pulse_phase)
-                .add_modifier(Modifier::BOLD)
+            crate::theme::Theme::pulse_style(app.pulse_phase).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(app.theme.text)
         };
@@ -232,7 +255,11 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .title(" [ APPS ] ")
-                .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                .title_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
                 .style(if app.column_focus == 2 {
                     app.theme.active_border_style()
                 } else {
@@ -240,6 +267,20 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
                 }),
         ),
         cols[2],
+    );
+
+    f.render_widget(
+        Paragraph::new(
+            "  [n] new stack   [a] activate   [x] deactivate   [c] add core apps   [g/G] gpu on/off app   [s] deploy selected   [D/u] deploy/update all active",
+        )
+        .style(Style::default().fg(Color::DarkGray)),
+        rows[1],
+    );
+
+    f.render_widget(
+        Paragraph::new(format!("  status: {}", app.sync_status))
+            .style(Style::default().fg(Color::Rgb(140, 160, 170))),
+        rows[2],
     );
 }
 
@@ -274,7 +315,11 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(" [ STACKS_TOTAL ] ")
-                    .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                    .title_style(
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )
                     .style(app.theme.border_style()),
             ),
         stat_cols[0],
@@ -291,7 +336,11 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(" [ CONTAINERS_TOTAL ] ")
-                    .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                    .title_style(
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )
                     .style(app.theme.border_style()),
             ),
         stat_cols[1],
@@ -304,7 +353,11 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(" [ GIT_STATUS ] ")
-                    .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                    .title_style(
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )
                     .style(app.theme.border_style()),
             ),
         stat_cols[2],
@@ -364,11 +417,75 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(" [ STACK_OVERVIEW ] ")
-                    .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                    .title_style(
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )
                     .style(app.theme.border_style()),
             )
             .highlight_style(Style::default()),
         rows[1],
+    );
+}
+
+fn draw_backups(f: &mut Frame, area: Rect, app: &App) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
+    let schedule = &app.backup_schedule;
+    let body = format!(
+        "Backup Engine Policy (continuous service scheduler)\n\n\
+Enabled:            {}\n\
+Interval (minutes): {}\n\
+Retention daily:    {}\n\
+Retention weekly:   {}\n\
+Retention monthly:  {}\n\
+Notify success:     {}\n\
+Notify failure:     {}\n",
+        schedule.enabled,
+        schedule.interval_minutes,
+        schedule.retention_daily,
+        schedule.retention_weekly,
+        schedule.retention_monthly,
+        schedule.notify_on_success,
+        schedule.notify_on_failure
+    );
+
+    f.render_widget(
+        Paragraph::new(body).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" [ BACKUP POLICY ] ")
+                .title_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .style(app.theme.border_style()),
+        ),
+        rows[0],
+    );
+
+    f.render_widget(
+        Paragraph::new(
+            "  [e] enabled  [+/-] interval  [d/D][w/W][m/M] retention  [n/f] notify  [s] save  [b] backup all  [i] restore stack  [r] full restore  [p] patch all  [u] unattended check",
+        )
+        .style(Style::default().fg(Color::DarkGray)),
+        rows[1],
+    );
+
+    f.render_widget(
+        Paragraph::new(format!("  status: {}", app.backup_status))
+            .style(Style::default().fg(Color::Rgb(140, 160, 170))),
+        rows[2],
     );
 }
 
@@ -396,22 +513,21 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
-        Span::styled(
-            "NODE: pve-01",
-            Style::default().fg(Color::White),
-        ),
+        Span::styled("NODE: pve-01", Style::default().fg(Color::White)),
         Span::raw("  \u{b7}  "),
-        Span::styled("192.168.1.10", Style::default().fg(Color::Rgb(100, 150, 200))),
+        Span::styled(
+            "192.168.1.10",
+            Style::default().fg(Color::Rgb(100, 150, 200)),
+        ),
         Span::raw("  \u{b7}  "),
         Span::styled(
             format!("{}/{} ONLINE", online_count, node_count),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  \u{b7}  "),
-        Span::styled(
-            "uptime: 47d 12h",
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled("uptime: 47d 12h", Style::default().fg(Color::DarkGray)),
         Span::raw("  \u{b7}  "),
         Span::styled(
             "\u{26a0} LXC: MOCK DATA",
@@ -586,12 +702,14 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
             .iter()
             .map(|e| {
                 Row::new(vec![
-                    Cell::from(e.host.as_str())
-                        .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Cell::from(e.host.as_str()).style(
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Cell::from(e.hostname.as_str())
                         .style(Style::default().fg(Color::Rgb(100, 150, 200))),
-                    Cell::from(e.user.as_str())
-                        .style(Style::default().fg(Color::DarkGray)),
+                    Cell::from(e.user.as_str()).style(Style::default().fg(Color::DarkGray)),
                 ])
             })
             .collect()
@@ -606,7 +724,11 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(
         Table::new(
             ssh_rows,
-            [Constraint::Min(14), Constraint::Length(16), Constraint::Length(8)],
+            [
+                Constraint::Min(14),
+                Constraint::Length(16),
+                Constraint::Length(8),
+            ],
         )
         .header(ssh_header)
         .block(
@@ -665,8 +787,10 @@ fn load_color(pct: u64) -> Color {
 ///
 /// Maps 0–100 → ' ' `▁▂▃▄▅▆▇█` (9 levels).
 fn mini_spark(data: &std::collections::VecDeque<u64>, width: usize) -> String {
-    const BLOCKS: [char; 9] = [' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}',
-                                '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}'];
+    const BLOCKS: [char; 9] = [
+        ' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
+        '\u{2588}',
+    ];
     let start = data.len().saturating_sub(width);
     data.iter()
         .skip(start)

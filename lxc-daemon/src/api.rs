@@ -1,17 +1,17 @@
+use crate::app::{AppState, LogLevel};
 use axum::{
-    Router,
-    extract::State,
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
     http::{HeaderMap, StatusCode},
-    response::sse::{Event, KeepAlive, Sse},
+    response::IntoResponse,
     routing::{get, post},
-    Json,
+    Json, Router,
 };
-use futures::stream;
 use serde::Serialize;
-use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
-use crate::app::{AppState, LogLevel};
 
 #[derive(Serialize)]
 struct ApiResponse {
@@ -22,14 +22,17 @@ struct ApiResponse {
 pub async fn run_server(state: Arc<Mutex<AppState>>) {
     {
         let mut s = state.lock().unwrap();
-        s.add_log(LogLevel::Info, "Axum HTTP server listening on 0.0.0.0:8080".to_string());
+        s.add_log(
+            LogLevel::Info,
+            "Axum HTTP server listening on 0.0.0.0:8080".to_string(),
+        );
     }
 
     let app = Router::new()
-        .route("/api/sync",           post(handle_sync))
-        .route("/api/backup/pause",   post(handle_backup_pause))
-        .route("/api/backup/resume",  post(handle_backup_resume))
-        .route("/api/logs/stream",    get(handle_sse))
+        .route("/api/sync", post(handle_sync))
+        .route("/api/backup/pause", post(handle_backup_pause))
+        .route("/api/backup/resume", post(handle_backup_resume))
+        .route("/api/logs/ws", get(handle_ws))
         .with_state(state);
 
     let listener = match tokio::net::TcpListener::bind("0.0.0.0:8080").await {
@@ -45,27 +48,44 @@ pub async fn run_server(state: Arc<Mutex<AppState>>) {
     });
 }
 
-// ── SSE log stream ─────────────────────────────────────────────────────────
+// ── WebSocket log stream ───────────────────────────────────────────────────
 
-async fn handle_sse(
+async fn handle_ws(
+    ws: WebSocketUpgrade,
     State(state): State<Arc<Mutex<AppState>>>,
-) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
-    // Subscribe BEFORE dropping the lock so we don't miss the first messages
-    let rx: broadcast::Receiver<String> = state.lock().unwrap().log_tx.subscribe();
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_ws_client(socket, state))
+}
 
-    let stream = stream::unfold(rx, |mut rx| async move {
-        loop {
-            match rx.recv().await {
-                Ok(msg) => return Some((Ok(Event::default().data(msg)), rx)),
-                // Missed some messages due to slow consumer — skip and continue
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                // Sender dropped (daemon shutting down)
-                Err(broadcast::error::RecvError::Closed) => return None,
+async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
+    // Subscribe before dropping the lock so we don't miss the first messages.
+    let mut rx: broadcast::Receiver<String> = { state.lock().unwrap().log_tx.subscribe() };
+    drop(state);
+
+    loop {
+        tokio::select! {
+            result = rx.recv() => {
+                match result {
+                    Ok(msg) => {
+                        if socket.send(Message::Text(msg)).await.is_err() {
+                            break; // client disconnected
+                        }
+                    }
+                    // Missed messages due to slow consumer — skip and continue.
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    // Sender dropped (daemon shutting down).
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(_)) => break,
+                    _ => {} // ignore ping/pong/binary from client
+                }
             }
         }
-    });
-
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    }
 }
 
 // ── Sync trigger ───────────────────────────────────────────────────────────
@@ -76,7 +96,10 @@ async fn handle_sync(
 ) -> (StatusCode, Json<ApiResponse>) {
     let mut s = state.lock().unwrap();
     s.sync_requested = true;
-    s.add_log(LogLevel::Info, "Sync triggered via HTTP Push API".to_string());
+    s.add_log(
+        LogLevel::Info,
+        "Sync triggered via HTTP Push API".to_string(),
+    );
     (
         StatusCode::ACCEPTED,
         Json(ApiResponse {

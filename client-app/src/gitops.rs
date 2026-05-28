@@ -2,9 +2,9 @@
 use anyhow::Result;
 use git2::{Cred, IndexAddOption, PushOptions, RemoteCallbacks, Repository};
 use serde_yaml;
-use std::path::Path;
 
 /// Pre-flight check: parse the given YAML file and return an error if invalid.
+#[allow(dead_code)]
 pub fn pre_flight_check(file_path: &str) -> Result<()> {
     let content = std::fs::read_to_string(file_path)?;
     serde_yaml::from_str::<serde_yaml::Value>(&content)?;

@@ -13,6 +13,8 @@ This document defines the stack-level lxc-compose contract used by CLIENT, HOST,
 - network.bridge: Proxmox bridge name used by the stack.
 - network.ip_mode: current network intent (for example `dhcp-reserved` or `manual`).
 - network.reserved_ipv4: desired DHCP reservation address when `ip_mode=dhcp-reserved`.
+- boot.autostart: whether the LXC should auto-start on host boot (default true).
+- boot.order: startup order hint; higher values start later (default 90).
 - resources.cores: CPU core allocation hint.
 - resources.memory_mb: memory allocation hint in MiB.
 - resources.disk_gb: root disk allocation hint in GiB.

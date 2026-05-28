@@ -29,6 +29,7 @@ Last updated: 2026-05-28
 
 - Implemented use cases are stored under docs/usecases/implemented/.
 - Remaining gaps are tracked under docs/usecases/pending/.
+- Future ideas and roadmap candidates are tracked under docs/usecases/planned/.
 - Legacy refactor phase documents were retired.
 
 ## Delivery Model Updates

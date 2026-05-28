@@ -681,7 +681,7 @@ fn handle_stack_config_editor(
                                     ""
                                 } else {
                                     "s"
-                            11 => {
+                                }
                             ));
                         }
                         Err(e) => {
@@ -689,7 +689,7 @@ fn handle_stack_config_editor(
                         }
                     }
                 }
-                9 => {
+                11 => {
                     let activated_at = if state.deploy_enabled {
                         state
                             .activated_at
@@ -1710,8 +1710,8 @@ fn handle_scaffolding_enter(app: &mut App) -> EventOutcome {
                             bridge: config.bridge,
                             ip_mode: config.ip_mode,
                             reserved_ipv4: config.reserved_ipv4,
-                                autostart: config.autostart,
-                                startup_order: config.startup_order,
+                            autostart: config.autostart,
+                            startup_order: config.startup_order,
                             cpu_cores: config.cpu_cores,
                             memory_mb: config.memory_mb,
                             disk_gb: config.disk_gb,

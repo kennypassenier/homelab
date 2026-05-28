@@ -13,6 +13,10 @@ network:
   ip_mode: "dhcp-reserved"
   reserved_ipv4: "10.10.10.104"
 
+boot:
+  autostart: true
+  order: 90
+
 resources:
   cores: 2
   memory_mb: 2048

@@ -20,7 +20,9 @@ Last updated: 2026-05-28
 - Reusable operation progress modal used by backup/restore/patch actions.
 - GPU compose wiring toggles per selected app (g/G) and host hint writes to lxc-compose.
 - Stack creation wizard now captures provisioning defaults (CPU 1-8, memory in 512 MiB steps, root disk GiB) and writes them into stack `lxc-compose.yml`.
+- Stack creation wizard now captures boot policy defaults (autostart + boot order) and writes them into stack `lxc-compose.yml`.
 - Stack config editor allows stack-level editing of deploy state, resources, hostname, MAC address, IP mode, and reserved IPv4 from the Scaffolding tab.
+- Stack config editor allows stack-level editing of autostart and boot order policy.
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.
 - App rows now expose a real config editor for Git-managed app metadata, starting with Docker image updates.
 - New stack defaults explicitly set `deploy.enabled=false` to keep manual activation as the safe default.

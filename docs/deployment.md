@@ -87,7 +87,7 @@ CLIENT currently cares about:
 
 - `LXC_API_TOKEN`
 - `LXC_API_IP`
-- `OPNSENSE_BASE_URL`
+- `OPNSENSE_BASE_URL` (for example `https://10.10.5.1`)
 - `OPNSENSE_API_KEY`
 - `OPNSENSE_API_SECRET`
 - optional `OPNSENSE_TLS_INSECURE=true` for lab-only self-signed HTTPS
@@ -181,6 +181,7 @@ After deployment, verify:
 - HOST self-update can read releases
 - LXC sparse checkout contains only `stacks/<stack_name>/`
 - stack `lxc-compose.yml` files contain expected `deploy`, `network`, and `resources` blocks
+- stack `lxc-compose.yml` files contain expected `deploy`, `network`, `boot`, and `resources` blocks
 - OPNsense reservations are present for any stack using `dhcp-reserved` plus `network.reserved_ipv4`
 - per-app `.env` files exist under `/appdata/...`
 - Docker containers start successfully inside each LXC

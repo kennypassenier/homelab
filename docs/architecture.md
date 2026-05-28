@@ -31,6 +31,7 @@ Last updated: 2026-05-28
 
 - Implemented references are in docs/usecases/implemented/.
 - Remaining feature gaps are tracked explicitly in docs/usecases/pending/.
+- Longer-horizon ideas are tracked in docs/usecases/planned/.
 
 ## Release and Delivery Model
 

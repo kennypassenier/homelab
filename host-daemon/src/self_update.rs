@@ -18,7 +18,8 @@ struct ReleaseInfo {
 }
 
 pub fn check_and_apply_update() -> Result<String, String> {
-    let repo = std::env::var("HOST_UPDATE_REPO").unwrap_or_else(|_| "kennypassenier/homelab".to_string());
+    let repo =
+        std::env::var("HOST_UPDATE_REPO").unwrap_or_else(|_| "kennypassenier/homelab".to_string());
     let expected_asset = std::env::var("HOST_UPDATE_ASSET")
         .unwrap_or_else(|_| "HOST-linux-x86_64-unknown-linux-gnu".to_string());
 
@@ -37,7 +38,12 @@ pub fn check_and_apply_update() -> Result<String, String> {
         .assets
         .iter()
         .find(|a| a.name == expected_asset)
-        .ok_or_else(|| format!("Release {} missing asset {}", release.tag_name, expected_asset))?;
+        .ok_or_else(|| {
+            format!(
+                "Release {} missing asset {}",
+                release.tag_name, expected_asset
+            )
+        })?;
 
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let tmp = tmp_path_for(&exe);
@@ -60,9 +66,7 @@ pub fn check_and_apply_update() -> Result<String, String> {
 
 fn fetch_latest_release(repo: &str) -> Result<ReleaseInfo, String> {
     let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
-    Client::new()
-        .get(url)
-        .header("User-Agent", "homelab-host-daemon")
+    github_get(&url)
         .send()
         .map_err(|e| e.to_string())?
         .error_for_status()
@@ -72,9 +76,7 @@ fn fetch_latest_release(repo: &str) -> Result<ReleaseInfo, String> {
 }
 
 fn download_asset(url: &str, path: &PathBuf) -> Result<(), String> {
-    let bytes = Client::new()
-        .get(url)
-        .header("User-Agent", "homelab-host-daemon")
+    let bytes = github_get(url)
         .send()
         .map_err(|e| e.to_string())?
         .error_for_status()
@@ -89,13 +91,22 @@ fn make_executable(path: &PathBuf) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(path)
-            .map_err(|e| e.to_string())?
-            .permissions();
+        let mut perms = fs::metadata(path).map_err(|e| e.to_string())?.permissions();
         perms.set_mode(0o755);
         fs::set_permissions(path, perms).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn github_get(url: &str) -> reqwest::blocking::RequestBuilder {
+    let client = Client::new();
+    let req = client.get(url).header("User-Agent", "homelab-host-daemon");
+    let token = std::env::var("HOST_UPDATE_TOKEN").unwrap_or_default();
+    if token.is_empty() {
+        req
+    } else {
+        req.bearer_auth(token)
+    }
 }
 
 fn try_restart_service() -> Result<(), String> {

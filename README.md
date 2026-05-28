@@ -6,6 +6,7 @@ Welcome to the Homelab GitOps repository. This project contains the infrastructu
 
 - HOST daemon updates are release-driven (GitHub Releases) rather than push-triggered.
 - LXC daemon image is built and published to GHCR via change-aware GitHub Actions.
+- Deployment order, required tokens, and env templates are documented in `docs/deployment.md`.
 
 ## 🚀 Quick Start: Central Managers
 

@@ -1,7 +1,7 @@
+use crate::app::{AppState, GitStatus, LogLevel};
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use crate::app::{AppState, GitStatus, LogLevel};
 
 /// The homelab monorepo is sparse-checked-out here inside every LXC.
 const GITOPS_REPO: &str = "/opt/gitops";
@@ -45,7 +45,8 @@ async fn ensure_sparse_checkout(state: Arc<Mutex<AppState>>) {
         s.add_log(
             LogLevel::Warn,
             "GITOPS_REPO_URL not set — skipping sparse checkout init. \
-             Set GITOPS_REPO_URL to the homelab git repo URL.".to_string(),
+             Set GITOPS_REPO_URL to the homelab git repo URL."
+                .to_string(),
         );
         return;
     }
@@ -63,11 +64,18 @@ async fn ensure_sparse_checkout(state: Arc<Mutex<AppState>>) {
     }
 
     let stack_clone = stack_name.clone();
+    let auth_repo_url = authenticated_repo_url(&repo_url);
     let result = tokio::task::spawn_blocking(move || -> Result<(), String> {
         let _ = std::fs::create_dir_all(GITOPS_REPO);
 
         let clone = Command::new("git")
-            .args(["clone", "--filter=blob:none", "--no-checkout", &repo_url, GITOPS_REPO])
+            .args([
+                "clone",
+                "--filter=blob:none",
+                "--no-checkout",
+                &auth_repo_url,
+                GITOPS_REPO,
+            ])
             .output()
             .map_err(|e| e.to_string())?;
         if !clone.status.success() {
@@ -75,7 +83,10 @@ async fn ensure_sparse_checkout(state: Arc<Mutex<AppState>>) {
         }
 
         run_git(GITOPS_REPO, &["sparse-checkout", "init", "--cone"])?;
-        run_git(GITOPS_REPO, &["sparse-checkout", "set", &format!("stacks/{}", stack_clone)])?;
+        run_git(
+            GITOPS_REPO,
+            &["sparse-checkout", "set", &format!("stacks/{}", stack_clone)],
+        )?;
         run_git(GITOPS_REPO, &["checkout", "main"])?;
         Ok(())
     })
@@ -85,7 +96,10 @@ async fn ensure_sparse_checkout(state: Arc<Mutex<AppState>>) {
     let mut s = state.lock().unwrap();
     match result {
         Ok(_) => s.add_log(LogLevel::Ok, "Sparse checkout initialised".to_string()),
-        Err(e) => s.add_log(LogLevel::Error, format!("Sparse checkout init failed: {}", e)),
+        Err(e) => s.add_log(
+            LogLevel::Error,
+            format!("Sparse checkout init failed: {}", e),
+        ),
     }
 }
 
@@ -99,8 +113,8 @@ async fn check_git_status(state: Arc<Mutex<AppState>>) {
     let (branch, commit, remote_url, is_synced) = tokio::task::spawn_blocking(move || {
         let branch = run_git(GITOPS_REPO, &["rev-parse", "--abbrev-ref", "HEAD"])
             .unwrap_or_else(|_| "unknown".to_string());
-        let commit = run_git(GITOPS_REPO, &["log", "--oneline", "-1"])
-            .unwrap_or_else(|_| "—".to_string());
+        let commit =
+            run_git(GITOPS_REPO, &["log", "--oneline", "-1"]).unwrap_or_else(|_| "—".to_string());
         let commit_short = commit.split_whitespace().next().unwrap_or("—").to_string();
         let remote_url = run_git(GITOPS_REPO, &["config", "--get", "remote.origin.url"])
             .unwrap_or_else(|_| "—".to_string());
@@ -113,12 +127,14 @@ async fn check_git_status(state: Arc<Mutex<AppState>>) {
         )
     })
     .await
-    .unwrap_or_else(|_| (
-        "unknown".to_string(),
-        "—".to_string(),
-        "—".to_string(),
-        false,
-    ));
+    .unwrap_or_else(|_| {
+        (
+            "unknown".to_string(),
+            "—".to_string(),
+            "—".to_string(),
+            false,
+        )
+    });
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let lock_free = !Path::new(LOCK_FILE).exists();
@@ -149,8 +165,17 @@ fn run_git(repo_path: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+fn authenticated_repo_url(repo_url: &str) -> String {
+    let token = std::env::var("GITOPS_REPO_TOKEN").unwrap_or_default();
+    if token.is_empty() || !repo_url.starts_with("https://") {
+        return repo_url.to_string();
+    }
+
+    repo_url.replacen("https://", &format!("https://{}@", token), 1)
+}
+
 fn check_is_synced(repo_path: &str) -> bool {
-    let local  = run_git(repo_path, &["rev-parse", "HEAD"]).unwrap_or_default();
+    let local = run_git(repo_path, &["rev-parse", "HEAD"]).unwrap_or_default();
     let remote = run_git(repo_path, &["rev-parse", "@{u}"]).unwrap_or_default();
     !local.is_empty() && local.trim() == remote.trim()
 }
@@ -161,7 +186,10 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
     if Path::new(LOCK_FILE).exists() {
         let mut s = state.lock().unwrap();
         s.sync_requested = false;
-        s.add_log(LogLevel::Warn, "Sync skipped — lock file exists".to_string());
+        s.add_log(
+            LogLevel::Warn,
+            "Sync skipped — lock file exists".to_string(),
+        );
         return;
     }
     let _ = std::fs::write(LOCK_FILE, "");
@@ -197,25 +225,33 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
     }
 
     // ── Step 1: git fetch ──────────────────────────────────────────────────
-    let fetch_result =
-        tokio::task::spawn_blocking(|| run_git(GITOPS_REPO, &["fetch", "origin"]))
-            .await
-            .unwrap_or_else(|_| Err("spawn failed".to_string()));
+    let fetch_result = tokio::task::spawn_blocking(|| run_git(GITOPS_REPO, &["fetch", "origin"]))
+        .await
+        .unwrap_or_else(|_| Err("spawn failed".to_string()));
 
     if let Err(e) = fetch_result {
-        finish_sync(state, false, format!("git fetch failed: {}", e.replace('\n', " "))).await;
+        finish_sync(
+            state,
+            false,
+            format!("git fetch failed: {}", e.replace('\n', " ")),
+        )
+        .await;
         return;
     }
 
     // ── Step 2: git reset --hard origin/main ─────────────────────────────
-    let reset_result = tokio::task::spawn_blocking(|| {
-        run_git(GITOPS_REPO, &["reset", "--hard", "origin/main"])
-    })
-    .await
-    .unwrap_or_else(|_| Err("spawn failed".to_string()));
+    let reset_result =
+        tokio::task::spawn_blocking(|| run_git(GITOPS_REPO, &["reset", "--hard", "origin/main"]))
+            .await
+            .unwrap_or_else(|_| Err("spawn failed".to_string()));
 
     if let Err(e) = reset_result {
-        finish_sync(state, false, format!("git reset failed: {}", e.replace('\n', " "))).await;
+        finish_sync(
+            state,
+            false,
+            format!("git reset failed: {}", e.replace('\n', " ")),
+        )
+        .await;
         return;
     }
     {
@@ -235,8 +271,11 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
                 .output()
                 .map_err(|e| e.to_string())
                 .and_then(|o| {
-                    if o.status.success() { Ok(()) }
-                    else { Err(String::from_utf8_lossy(&o.stderr).to_string()) }
+                    if o.status.success() {
+                        Ok(())
+                    } else {
+                        Err(String::from_utf8_lossy(&o.stderr).to_string())
+                    }
                 })
         })
         .await
@@ -244,7 +283,10 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
 
         let mut s = state.lock().unwrap();
         match hook_result {
-            Ok(_) => s.add_log(LogLevel::Ok, format!("ts=now stack={} app=setup.sh msg=\"hook ok\"", sn)),
+            Ok(_) => s.add_log(
+                LogLevel::Ok,
+                format!("ts=now stack={} app=setup.sh msg=\"hook ok\"", sn),
+            ),
             Err(e) => s.add_log(LogLevel::Warn, format!("setup.sh failed: {}", e)),
         }
     }
@@ -273,8 +315,11 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
                 .output()
                 .map_err(|e| e.to_string())
                 .and_then(|o| {
-                    if o.status.success() { Ok(()) }
-                    else { Err(String::from_utf8_lossy(&o.stderr).to_string()) }
+                    if o.status.success() {
+                        Ok(())
+                    } else {
+                        Err(String::from_utf8_lossy(&o.stderr).to_string())
+                    }
                 })
         })
         .await
@@ -283,11 +328,22 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         {
             let mut s = state.lock().unwrap();
             match &pull {
-                Ok(_) => s.add_log(LogLevel::Info,
-                    format!("ts=now stack={} app={} msg=\"images pulled\"", stack_name, app_name)),
-                Err(e) => s.add_log(LogLevel::Warn,
-                    format!("ts=now stack={} app={} msg=\"pull warning: {}\"", stack_name, app_name,
-                        e.lines().next().unwrap_or(""))),
+                Ok(_) => s.add_log(
+                    LogLevel::Info,
+                    format!(
+                        "ts=now stack={} app={} msg=\"images pulled\"",
+                        stack_name, app_name
+                    ),
+                ),
+                Err(e) => s.add_log(
+                    LogLevel::Warn,
+                    format!(
+                        "ts=now stack={} app={} msg=\"pull warning: {}\"",
+                        stack_name,
+                        app_name,
+                        e.lines().next().unwrap_or("")
+                    ),
+                ),
             }
         }
 
@@ -300,8 +356,11 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
                 .output()
                 .map_err(|e| e.to_string())
                 .and_then(|o| {
-                    if o.status.success() { Ok(()) }
-                    else { Err(String::from_utf8_lossy(&o.stderr).to_string()) }
+                    if o.status.success() {
+                        Ok(())
+                    } else {
+                        Err(String::from_utf8_lossy(&o.stderr).to_string())
+                    }
                 })
         })
         .await
@@ -309,11 +368,22 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
 
         let mut s = state.lock().unwrap();
         match up {
-            Ok(_) => s.add_log(LogLevel::Ok,
-                format!("ts=now stack={} app={} msg=\"containers up\"", stack_name, app_name)),
-            Err(e) => s.add_log(LogLevel::Error,
-                format!("ts=now stack={} app={} msg=\"compose up failed: {}\"", stack_name, app_name,
-                    e.lines().next().unwrap_or(""))),
+            Ok(_) => s.add_log(
+                LogLevel::Ok,
+                format!(
+                    "ts=now stack={} app={} msg=\"containers up\"",
+                    stack_name, app_name
+                ),
+            ),
+            Err(e) => s.add_log(
+                LogLevel::Error,
+                format!(
+                    "ts=now stack={} app={} msg=\"compose up failed: {}\"",
+                    stack_name,
+                    app_name,
+                    e.lines().next().unwrap_or("")
+                ),
+            ),
         }
     }
 

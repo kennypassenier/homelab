@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -7,95 +5,44 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_yaml::{Mapping, Value};
 
-/// Holds the core template variables required to scaffold a new application
-pub struct AppServiceTemplate<'a> {
-    pub app_name: &'a str,
-    pub mac_address: &'a str,
-    pub domain_name: &'a str,
+pub struct StackConfig {
+    pub stack_name: String,
+    pub vmid: u32,
+    pub hostname: String,
+    pub hwaddr: String,
+    pub deploy_enabled: bool,
+    pub activated_at: Option<String>,
+    pub bridge: String,
+    pub ip_mode: String,
+    pub reserved_ipv4: Option<String>,
+    pub autostart: bool,
+    pub startup_order: u32,
+    pub cpu_cores: u8,
+    pub memory_mb: u32,
+    pub disk_gb: u32,
 }
 
-/// Creates the necessary directory structure for a new application within a stack
-pub fn create_app_dirs(stack_dir: &str, app_name: &str) -> io::Result<()> {
-    let path = format!("stacks/{}/{}", stack_dir, app_name);
-    let dir_path = Path::new(&path);
-
-    if !dir_path.exists() {
-        fs::create_dir_all(dir_path)?;
+/// Generates a deterministic locally-administered MAC address for a stack.
+pub fn deterministic_mac_address(stack_name: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in stack_name.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
     }
 
-    Ok(())
-}
+    let bytes = [
+        0x02,
+        ((hash >> 32) & 0xff) as u8,
+        ((hash >> 24) & 0xff) as u8,
+        ((hash >> 16) & 0xff) as u8,
+        ((hash >> 8) & 0xff) as u8,
+        (hash & 0xff) as u8,
+    ];
 
-/// Generates a randomized MAC address for isolated container networking
-pub fn generate_mac_address() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
     format!(
-        "02:42:ac:11:{:02x}:{:02x}",
-        rng.gen_range(0..255),
-        rng.gen_range(0..255)
+        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]
     )
-}
-
-/// Returns the standard Watchtower docker-compose snippet
-pub fn watchtower_service_yaml() -> &'static str {
-    r#"
-    watchtower:
-        image: containrrr/watchtower
-        volumes:
-            - /var/run/docker.sock:/var/run/docker.sock
-        command: --interval 86400
-        restart: unless-stopped
-"#
-}
-
-/// Returns the standard Promtail docker-compose snippet
-pub fn promtail_service_yaml() -> &'static str {
-    r#"
-    promtail:
-        image: grafana/promtail:latest
-        volumes:
-            - /var/log:/var/log
-        restart: unless-stopped
-"#
-}
-
-/// Returns the standard Traefik labels and network configuration snippet
-pub fn traefik_service_yaml() -> &'static str {
-    r#"
-        labels:
-            - "traefik.enable=true"
-            - "traefik.http.routers.app.rule=Host(`${DOMAIN_NAME}`)"
-            - "traefik.http.services.app.loadbalancer.server.port=80"
-"#
-}
-// removed invalid YAML/config lines
-
-/// Generate a full stack docker-compose.yml with selected default services
-pub fn scaffold_stack_with_services(
-    app: &AppServiceTemplate,
-    include_watchtower: bool,
-    include_promtail: bool,
-    include_traefik: bool,
-) -> String {
-    let mut services = String::new();
-    // Main app service
-    services.push_str(&format!(
-        "  {}:\n    image: nginx:latest\n    mac_address: {}\n",
-        app.app_name, app.mac_address
-    ));
-    // Add selected defaults
-    if include_watchtower {
-        services.push_str(watchtower_service_yaml());
-    }
-    if include_promtail {
-        services.push_str(promtail_service_yaml());
-    }
-    if include_traefik {
-        services.push_str(traefik_service_yaml());
-    }
-    // Compose file header and networks
-    services
 }
 
 /// Returns the path to the stack-level lxc-compose.yml file.
@@ -125,14 +72,218 @@ pub fn ensure_lxc_compose(stack_name: &str) -> io::Result<()> {
         return Ok(());
     }
 
-    // Keep VMID as 0 by default so provisioning can set a real value later.
     let default_doc = format!(
-        "version: 1\nstack_name: \"{}\"\nvmid: 0\nhostname: \"lxc-{}\"\nhwaddr: \"{}\"\ndeploy:\n  enabled: false\n  activated_at: null\n",
+        "version: 1\nstack_name: \"{}\"\nvmid: 0\nhostname: \"lxc-{}\"\nhwaddr: \"{}\"\n\ndeploy:\n  enabled: false\n  activated_at: null\n\nnetwork:\n  bridge: \"vmbr0\"\n  ip_mode: \"dhcp-reserved\"\n  reserved_ipv4: null\n\nboot:\n  autostart: true\n  order: 90\n\nresources:\n  cores: 2\n  memory_mb: 2048\n  disk_gb: 32\n",
         stack_name,
         stack_name,
-        generate_mac_address()
+        deterministic_mac_address(stack_name)
     );
     fs::write(path, default_doc)
+}
+
+pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
+    ensure_lxc_compose(stack_name)?;
+    let doc = load_lxc_compose(stack_name)?;
+    let root = doc
+        .as_mapping()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid lxc-compose root"))?;
+
+    let vmid = mapping_u32(root, "vmid").unwrap_or(0);
+    let hostname =
+        mapping_string(root, "hostname").unwrap_or_else(|| format!("lxc-{}", stack_name));
+    let hwaddr =
+        mapping_string(root, "hwaddr").unwrap_or_else(|| deterministic_mac_address(stack_name));
+    let deploy_enabled = root
+        .get(Value::String("deploy".to_string()))
+        .and_then(Value::as_mapping)
+        .and_then(|m| m.get(Value::String("enabled".to_string())))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let activated_at = root
+        .get(Value::String("deploy".to_string()))
+        .and_then(Value::as_mapping)
+        .and_then(|m| m.get(Value::String("activated_at".to_string())))
+        .and_then(Value::as_str)
+        .map(|v| v.to_string());
+
+    let network = root
+        .get(Value::String("network".to_string()))
+        .and_then(Value::as_mapping);
+    let bridge = network
+        .and_then(|m| m.get(Value::String("bridge".to_string())))
+        .and_then(Value::as_str)
+        .unwrap_or("vmbr0")
+        .to_string();
+    let ip_mode = network
+        .and_then(|m| m.get(Value::String("ip_mode".to_string())))
+        .and_then(Value::as_str)
+        .unwrap_or("dhcp-reserved")
+        .to_string();
+    let reserved_ipv4 = network
+        .and_then(|m| m.get(Value::String("reserved_ipv4".to_string())))
+        .and_then(Value::as_str)
+        .map(|v| v.to_string());
+
+    let boot = root
+        .get(Value::String("boot".to_string()))
+        .and_then(Value::as_mapping);
+    let autostart = boot
+        .and_then(|m| m.get(Value::String("autostart".to_string())))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let startup_order = boot
+        .and_then(|m| m.get(Value::String("order".to_string())))
+        .and_then(Value::as_u64)
+        .unwrap_or(90) as u32;
+
+    let resources = root
+        .get(Value::String("resources".to_string()))
+        .and_then(Value::as_mapping);
+    let cpu_cores = resources
+        .and_then(|m| m.get(Value::String("cores".to_string())))
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            root.get(Value::String("cores".to_string()))
+                .and_then(Value::as_u64)
+        })
+        .unwrap_or(2) as u8;
+    let memory_mb = resources
+        .and_then(|m| m.get(Value::String("memory_mb".to_string())))
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            root.get(Value::String("memory_mb".to_string()))
+                .and_then(Value::as_u64)
+        })
+        .unwrap_or(2048) as u32;
+    let disk_gb = resources
+        .and_then(|m| m.get(Value::String("disk_gb".to_string())))
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            root.get(Value::String("rootfs_size_gb".to_string()))
+                .and_then(Value::as_u64)
+        })
+        .unwrap_or(32) as u32;
+
+    Ok(StackConfig {
+        stack_name: stack_name.to_string(),
+        vmid,
+        hostname,
+        hwaddr,
+        deploy_enabled,
+        activated_at,
+        bridge,
+        ip_mode,
+        reserved_ipv4,
+        autostart,
+        startup_order,
+        cpu_cores,
+        memory_mb,
+        disk_gb,
+    })
+}
+
+pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
+    let mut doc = load_lxc_compose(&config.stack_name).unwrap_or(Value::Mapping(Mapping::new()));
+    if !doc.is_mapping() {
+        doc = Value::Mapping(Mapping::new());
+    }
+
+    let root = doc
+        .as_mapping_mut()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid lxc-compose root"))?;
+
+    root.insert(
+        Value::String("version".to_string()),
+        Value::Number(1.into()),
+    );
+    root.insert(
+        Value::String("stack_name".to_string()),
+        Value::String(config.stack_name.clone()),
+    );
+    root.insert(
+        Value::String("vmid".to_string()),
+        Value::Number((config.vmid as u64).into()),
+    );
+    root.insert(
+        Value::String("hostname".to_string()),
+        Value::String(config.hostname.clone()),
+    );
+    root.insert(
+        Value::String("hwaddr".to_string()),
+        Value::String(config.hwaddr.clone()),
+    );
+
+    let mut deploy = Mapping::new();
+    deploy.insert(
+        Value::String("enabled".to_string()),
+        Value::Bool(config.deploy_enabled),
+    );
+    deploy.insert(
+        Value::String("activated_at".to_string()),
+        config
+            .activated_at
+            .as_ref()
+            .map(|v| Value::String(v.clone()))
+            .unwrap_or(Value::Null),
+    );
+    root.insert(Value::String("deploy".to_string()), Value::Mapping(deploy));
+
+    let mut network = Mapping::new();
+    network.insert(
+        Value::String("bridge".to_string()),
+        Value::String(config.bridge.clone()),
+    );
+    network.insert(
+        Value::String("ip_mode".to_string()),
+        Value::String(config.ip_mode.clone()),
+    );
+    network.insert(
+        Value::String("reserved_ipv4".to_string()),
+        config
+            .reserved_ipv4
+            .as_ref()
+            .map(|v| Value::String(v.clone()))
+            .unwrap_or(Value::Null),
+    );
+    root.insert(
+        Value::String("network".to_string()),
+        Value::Mapping(network),
+    );
+
+    let mut boot = Mapping::new();
+    boot.insert(
+        Value::String("autostart".to_string()),
+        Value::Bool(config.autostart),
+    );
+    boot.insert(
+        Value::String("order".to_string()),
+        Value::Number((config.startup_order as u64).into()),
+    );
+    root.insert(Value::String("boot".to_string()), Value::Mapping(boot));
+
+    let mut resources = Mapping::new();
+    resources.insert(
+        Value::String("cores".to_string()),
+        Value::Number((config.cpu_cores as u64).into()),
+    );
+    resources.insert(
+        Value::String("memory_mb".to_string()),
+        Value::Number((config.memory_mb as u64).into()),
+    );
+    resources.insert(
+        Value::String("disk_gb".to_string()),
+        Value::Number((config.disk_gb as u64).into()),
+    );
+    root.insert(
+        Value::String("resources".to_string()),
+        Value::Mapping(resources),
+    );
+
+    root.remove(Value::String("cores".to_string()));
+    root.remove(Value::String("memory_mb".to_string()));
+    root.remove(Value::String("rootfs_size_gb".to_string()));
+
+    save_lxc_compose(&config.stack_name, &doc)
 }
 
 /// Reads stack deploy.enabled from lxc-compose.yml.
@@ -302,40 +453,28 @@ pub fn set_stack_provisioning_defaults(
     cpu_cores: u8,
     memory_mb: u32,
     disk_gb: u32,
+    autostart: bool,
+    startup_order: u32,
 ) -> io::Result<()> {
-    let mut doc = load_lxc_compose(stack_name)?;
-    if !doc.is_mapping() {
-        doc = Value::Mapping(Mapping::new());
-    }
+    let mut config = read_stack_config(stack_name)?;
+    config.cpu_cores = cpu_cores;
+    config.memory_mb = memory_mb;
+    config.disk_gb = disk_gb;
+    config.autostart = autostart;
+    config.startup_order = startup_order;
+    config.deploy_enabled = false;
+    config.activated_at = None;
+    save_stack_config(&config)
+}
 
-    let root = doc
-        .as_mapping_mut()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid lxc-compose root"))?;
+fn mapping_string(root: &Mapping, key: &str) -> Option<String> {
+    root.get(Value::String(key.to_string()))
+        .and_then(Value::as_str)
+        .map(|v| v.to_string())
+}
 
-    root.insert(
-        Value::String("cores".to_string()),
-        Value::Number((cpu_cores as u64).into()),
-    );
-    root.insert(
-        Value::String("memory_mb".to_string()),
-        Value::Number((memory_mb as u64).into()),
-    );
-    root.insert(
-        Value::String("rootfs_size_gb".to_string()),
-        Value::Number((disk_gb as u64).into()),
-    );
-
-    // Explicitly maintain manual activation policy.
-    let deploy_key = Value::String("deploy".to_string());
-    if !root.contains_key(&deploy_key) {
-        root.insert(deploy_key.clone(), Value::Mapping(Mapping::new()));
-    }
-    let deploy = root
-        .get_mut(&deploy_key)
-        .and_then(Value::as_mapping_mut)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid deploy block"))?;
-    deploy.insert(Value::String("enabled".to_string()), Value::Bool(false));
-    deploy.insert(Value::String("activated_at".to_string()), Value::Null);
-
-    save_lxc_compose(stack_name, &doc)
+fn mapping_u32(root: &Mapping, key: &str) -> Option<u32> {
+    root.get(Value::String(key.to_string()))
+        .and_then(Value::as_u64)
+        .map(|v| v as u32)
 }

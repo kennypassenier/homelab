@@ -14,6 +14,9 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::signal;
 use tokio::sync::mpsc;
+use tokio_tungstenite::connect_async;
+
+use futures::StreamExt;
 
 mod app;
 mod app_list;
@@ -21,15 +24,30 @@ mod backup_schedule;
 mod blast_radius;
 mod events;
 mod gitops;
+mod opnsense;
 mod scaffold;
 mod ssh_config;
 mod stack_features;
-mod telemetry;
 mod theme;
 mod transactions;
 mod ui;
 
 use app::App;
+
+enum SyncEvent {
+    Accepted {
+        stack: String,
+    },
+    LiveLog {
+        stack: String,
+        line: String,
+    },
+    Finished {
+        stack: String,
+        ok: bool,
+        msg: String,
+    },
+}
 
 /// Bootstraps the Tokio runtime and hands off to the async event loop.
 fn main() -> Result<()> {
@@ -58,7 +76,7 @@ async fn async_main() -> Result<()> {
     let mut app = App::new();
 
     // Channel for background tasks (sync HTTP calls) to report results back to the TUI.
-    let (sync_tx, mut sync_rx) = mpsc::unbounded_channel::<(String, bool, String)>();
+    let (sync_tx, mut sync_rx) = mpsc::unbounded_channel::<SyncEvent>();
 
     let sigint = signal::ctrl_c();
     tokio::pin!(sigint);
@@ -70,45 +88,65 @@ async fn async_main() -> Result<()> {
 
     loop {
         // Drain any sync results that arrived from background tasks
-        while let Ok((stack, ok, msg)) = sync_rx.try_recv() {
-            let level = if ok { "INFO" } else { "ERROR" };
-            app.push_client_logfmt(
-                level,
-                Some(&stack),
-                Some("sync_result"),
-                &msg,
-                if ok { None } else { Some(&msg) },
-            );
-            app.sync_status = if ok {
-                format!("Sync OK — '{}'", stack)
-            } else {
-                format!("Sync failed — {} : {}", stack, msg)
-            };
-
-            if ok {
-                let summary = crate::stack_features::post_deploy_summary(&stack);
-                if summary.missing_compose.is_empty() {
+        while let Ok(event) = sync_rx.try_recv() {
+            match event {
+                SyncEvent::Accepted { stack } => {
                     app.push_client_logfmt(
                         "INFO",
                         Some(&stack),
-                        Some("post_deploy"),
-                        &format!(
-                            "post-deploy validation complete apps_healthy={}",
-                            summary.app_count
-                        ),
+                        Some("sync_result"),
+                        "Sync accepted by LXC daemon",
                         None,
                     );
-                } else {
+                    app.sync_status = format!("Sync accepted — '{}'", stack);
+                }
+                SyncEvent::LiveLog { stack, line } => {
+                    app.mark_live_logs_seen();
+                    let source = format!("lxc-{}", stack);
+                    let (level, message) = parse_live_log_line(&line);
+                    app.push_log(&source, &level, &message);
+                }
+                SyncEvent::Finished { stack, ok, msg } => {
+                    let level = if ok { "INFO" } else { "ERROR" };
                     app.push_client_logfmt(
-                        "WARN",
+                        level,
                         Some(&stack),
-                        Some("post_deploy"),
-                        &format!(
-                            "post-deploy validation warnings apps_missing_compose={}",
-                            summary.missing_compose.join(",")
-                        ),
-                        None,
+                        Some("sync_result"),
+                        &msg,
+                        if ok { None } else { Some(&msg) },
                     );
+                    app.sync_status = if ok {
+                        format!("Sync OK — '{}'", stack)
+                    } else {
+                        format!("Sync failed — {} : {}", stack, msg)
+                    };
+
+                    if ok {
+                        let summary = crate::stack_features::post_deploy_summary(&stack);
+                        if summary.missing_compose.is_empty() {
+                            app.push_client_logfmt(
+                                "INFO",
+                                Some(&stack),
+                                Some("post_deploy"),
+                                &format!(
+                                    "post-deploy validation complete apps_healthy={}",
+                                    summary.app_count
+                                ),
+                                None,
+                            );
+                        } else {
+                            app.push_client_logfmt(
+                                "WARN",
+                                Some(&stack),
+                                Some("post_deploy"),
+                                &format!(
+                                    "post-deploy validation warnings apps_missing_compose={}",
+                                    summary.missing_compose.join(",")
+                                ),
+                                None,
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -155,13 +193,60 @@ async fn async_main() -> Result<()> {
                 }
                 match req.send().await {
                     Ok(resp) if resp.status().is_success() => {
-                        let _ = tx.send((stack, true, "Sync accepted by LXC daemon".to_string()));
+                        let _ = tx.send(SyncEvent::Accepted {
+                            stack: stack.clone(),
+                        });
+
+                        let ws_url = format!("ws://{}:8080/api/logs/ws", ip);
+                        if let Ok((mut socket, _)) = connect_async(&ws_url).await {
+                            let mut streamed_any = false;
+                            loop {
+                                match tokio::time::timeout(Duration::from_secs(2), socket.next())
+                                    .await
+                                {
+                                    Ok(Some(Ok(message))) => {
+                                        if let Ok(text) = message.into_text() {
+                                            streamed_any = true;
+                                            let _ = tx.send(SyncEvent::LiveLog {
+                                                stack: stack.clone(),
+                                                line: text,
+                                            });
+                                        }
+                                    }
+                                    Ok(Some(Err(err))) => {
+                                        let _ = tx.send(SyncEvent::Finished {
+                                            stack,
+                                            ok: false,
+                                            msg: format!("Live log stream failed: {}", err),
+                                        });
+                                        return;
+                                    }
+                                    Ok(None) => break,
+                                    Err(_) if streamed_any => break,
+                                    Err(_) => break,
+                                }
+                            }
+                        }
+
+                        let _ = tx.send(SyncEvent::Finished {
+                            stack,
+                            ok: true,
+                            msg: "Sync completed; live logs streamed to CLIENT".to_string(),
+                        });
                     }
                     Ok(resp) => {
-                        let _ = tx.send((stack, false, format!("HTTP {}", resp.status())));
+                        let _ = tx.send(SyncEvent::Finished {
+                            stack,
+                            ok: false,
+                            msg: format!("HTTP {}", resp.status()),
+                        });
                     }
                     Err(e) => {
-                        let _ = tx.send((stack, false, e.to_string()));
+                        let _ = tx.send(SyncEvent::Finished {
+                            stack,
+                            ok: false,
+                            msg: e.to_string(),
+                        });
                     }
                 }
             });
@@ -214,4 +299,18 @@ async fn async_main() -> Result<()> {
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen)?;
     Ok(())
+}
+
+fn parse_live_log_line(line: &str) -> (String, String) {
+    let level = line
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("level="))
+        .map(|value| value.trim_matches('"').to_uppercase())
+        .unwrap_or_else(|| "INFO".to_string());
+    let message = line
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("msg="))
+        .map(|value| value.trim_matches('"').replace('"', ""))
+        .unwrap_or_else(|| line.to_string());
+    (level, message)
 }

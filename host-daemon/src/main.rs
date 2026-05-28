@@ -13,7 +13,6 @@ use ratatui::{
 mod app;
 mod backup;
 mod self_update;
-mod theme;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     crossterm::terminal::enable_raw_mode()?;
@@ -35,7 +34,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if app.backup_status.len() > 200 {
                 app.backup_status.remove(0);
             }
-            if app.backup_status.last().map(|l| l.starts_with("DONE")).unwrap_or(false) {
+            if app
+                .backup_status
+                .last()
+                .map(|l| l.starts_with("DONE"))
+                .unwrap_or(false)
+            {
                 app.backup_running = false;
             }
         }
@@ -67,14 +71,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .into_iter()
                                 .filter(|n| n.status == "RUN")
                                 .map(|n| {
-                                    let stack = n.name.strip_prefix("lxc-").unwrap_or(&n.name).to_string();
+                                    let stack =
+                                        n.name.strip_prefix("lxc-").unwrap_or(&n.name).to_string();
                                     (stack, n.ip)
                                 })
                                 .collect();
                             let tx = backup_tx.clone();
                             std::thread::spawn(move || {
                                 for (stack, ip) in &stacks {
-                                    let _ = tx.send(format!("[{}] Pausing containers via {}:8080…", stack, ip));
+                                    let _ = tx.send(format!(
+                                        "[{}] Pausing containers via {}:8080…",
+                                        stack, ip
+                                    ));
                                 }
                                 let results = backup::run_backup_cycle_owned(stacks);
                                 for r in &results {
@@ -95,7 +103,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             app.backup_status.push("Checking HOST updates…".to_string());
                             match self_update::check_and_apply_update() {
                                 Ok(msg) => app.backup_status.push(msg),
-                                Err(err) => app.backup_status.push(format!("HOST update failed: {}", err)),
+                                Err(err) => app
+                                    .backup_status
+                                    .push(format!("HOST update failed: {}", err)),
                             }
                         }
                         _ => {}
@@ -128,8 +138,9 @@ fn draw_main(f: &mut ratatui::Frame, app: &app::App) {
         _ => unreachable!(),
     }
 
-    let footer = Paragraph::new(" HOST v0.1 | TABS: ↑↓/1-5 | [b] backup | [U] self-update | q=quit")
-        .style(Style::default().fg(Color::DarkGray));
+    let footer =
+        Paragraph::new(" HOST v0.1 | TABS: ↑↓/1-5 | [b] backup | [U] self-update | q=quit")
+            .style(Style::default().fg(Color::DarkGray));
     let fx = area.x + area.width - 2;
     let fy = area.y + area.height - 1;
     let footer_area = Rect::new(fx, fy, 2, 1);
@@ -269,11 +280,53 @@ fn draw_backups(f: &mut ratatui::Frame, app: &app::App, area: Rect) {
 }
 
 fn draw_storage(f: &mut ratatui::Frame, _app: &app::App, area: Rect) {
-    f.render_widget(Paragraph::new(" [ STORAGE TAB — PLACEHOLDER ] "), area);
+    let content = [
+        "Storage responsibilities:",
+        "- Host appdata root: /opt/appdata/<stack>",
+        "- Backup repository root: /backups/<stack>",
+        "- LXC consumes host data through bind mounts declared in lxc-compose.yml",
+        "",
+        "Current expectations:",
+        "- Restic reads from /opt/appdata during HOST backup orchestration",
+        "- Stack mount metadata remains GitOps-controlled",
+        "- Deleted stack folders should be garbage-collected by the sync path",
+    ]
+    .join("\n");
+
+    f.render_widget(
+        Paragraph::new(content).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" STORAGE "),
+        ),
+        area,
+    );
 }
 
 fn draw_hardware(f: &mut ratatui::Frame, _app: &app::App, area: Rect) {
-    f.render_widget(Paragraph::new(" [ HARDWARE TAB — PLACEHOLDER ] "), area);
+    let content = [
+        "Hardware responsibilities:",
+        "- GPU passthrough remains host-owned",
+        "- TUN/device access remains host-owned",
+        "- CLIENT writes orchestration hints into stack lxc-compose.yml",
+        "",
+        "Current execution model:",
+        "- Use HOST scripts/services to apply Proxmox-side config",
+        "- Do not mutate running containers directly outside GitOps recovery flows",
+        "- Self-update is release-driven via [U] on this daemon",
+    ]
+    .join("\n");
+
+    f.render_widget(
+        Paragraph::new(content).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" HARDWARE "),
+        ),
+        area,
+    );
 }
 
 fn draw_lxc_mesh_table(f: &mut ratatui::Frame, app: &app::App, area: Rect) {

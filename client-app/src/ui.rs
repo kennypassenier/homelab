@@ -13,8 +13,9 @@ use ratatui::{
 
 use crate::app::{App, LOG_SOURCES, LogLevelFilter, Tab};
 use crate::blast_radius::{
-    ActiveModal, draw_app_creation_wizard, draw_delete_app_modal, draw_operation_progress,
-    draw_ssh_add_wizard, draw_stack_creation_wizard, draw_warning_modal,
+    ActiveModal, draw_app_config_editor, draw_app_creation_wizard, draw_delete_app_modal,
+    draw_operation_progress, draw_ssh_add_wizard, draw_stack_config_editor,
+    draw_stack_creation_wizard, draw_warning_modal,
 };
 
 /// Renders the complete UI for the current frame.
@@ -74,8 +75,14 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
         ActiveModal::AppCreationWizard(state) => {
             draw_app_creation_wizard(f, size, state);
         }
+        ActiveModal::AppConfigEditor(state) => {
+            draw_app_config_editor(f, size, state);
+        }
         ActiveModal::StackCreationWizard(state) => {
             draw_stack_creation_wizard(f, size, state);
+        }
+        ActiveModal::StackConfigEditor(state) => {
+            draw_stack_config_editor(f, size, state);
         }
         ActiveModal::OperationProgress(state) => {
             draw_operation_progress(f, size, state);

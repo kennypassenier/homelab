@@ -9,9 +9,10 @@ use tui_input::backend::crossterm::EventHandler;
 
 use crate::app::{App, Tab};
 use crate::blast_radius::{
-    ActiveModal, AppCreationStep, AppCreationWizardState, DefaultServiceOption, OperationEntry,
-    OperationProgressState, SshAddStep, SshAddWizardState, StackCreationStep,
-    StackCreationWizardState,
+    ActiveModal, AppConfigEditorState, AppConfigEditorStep, AppCreationStep,
+    AppCreationWizardState, DefaultServiceOption, OperationEntry, OperationProgressState,
+    SshAddStep, SshAddWizardState, StackConfigEditorState, StackConfigEditorStep,
+    StackCreationStep, StackCreationWizardState,
 };
 
 /// What the event loop should do after processing a key.
@@ -31,6 +32,8 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
     if key.kind != KeyEventKind::Press {
         return EventOutcome::Continue;
     }
+
+    let known_stacks = app.stacks.clone();
 
     // ── Active modal takes full input priority ───────────────────────────────
     //
@@ -160,6 +163,16 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
             }
         }
 
+        ActiveModal::AppConfigEditor(state) => match handle_app_config_editor(state, key) {
+            WizardOutcome::Continue => {}
+            WizardOutcome::Close => {
+                app.modal = ActiveModal::None;
+            }
+            WizardOutcome::Reload => {
+                needs_reload = true;
+            }
+        },
+
         ActiveModal::StackCreationWizard(state) => match handle_stack_wizard(state, key) {
             WizardOutcome::Continue => {}
             WizardOutcome::Close => {
@@ -169,6 +182,16 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
                 needs_reload = true;
             }
         },
+
+        ActiveModal::StackConfigEditor(state) => {
+            match handle_stack_config_editor(state, key, &known_stacks) {
+                WizardOutcome::Continue => {}
+                WizardOutcome::Close => {
+                    app.modal = ActiveModal::None;
+                }
+                WizardOutcome::Reload => {}
+            }
+        }
 
         ActiveModal::OperationProgress(_) => {
             if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
@@ -406,18 +429,7 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
                 match raw.parse::<u32>() {
                     Ok(v) if v >= 8 => {
                         state.disk_gb = v;
-                        let stack_name = state.stack_name.as_deref().unwrap_or("new-stack");
-                        state.step = StackCreationStep::Review {
-                            summary: format!(
-                                "Stack: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nDisk: {} GiB\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create setup.sh\n- create lxc-compose.yml\n- scaffold missing core apps",
-                                stack_name,
-                                state.cpu_cores,
-                                state.memory_mb as f32 / 1024.0,
-                                state.memory_mb,
-                                state.disk_gb,
-                                stack_name
-                            ),
-                        };
+                        state.step = StackCreationStep::AutoStartSelect;
                     }
                     _ => {
                         *error = Some("disk must be an integer >= 8".to_string());
@@ -427,6 +439,44 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
                 input.handle_event(&crossterm::event::Event::Key(key));
             }
         }
+
+        StackCreationStep::AutoStartSelect => match key.code {
+            KeyCode::Esc => return WizardOutcome::Close,
+            KeyCode::Left | KeyCode::Right | KeyCode::Char('-') | KeyCode::Char('+') => {
+                state.autostart = !state.autostart;
+            }
+            KeyCode::Enter => {
+                state.step = StackCreationStep::BootOrderSelect;
+            }
+            _ => {}
+        },
+
+        StackCreationStep::BootOrderSelect => match key.code {
+            KeyCode::Esc => return WizardOutcome::Close,
+            KeyCode::Left | KeyCode::Char('-') => {
+                state.startup_order = state.startup_order.saturating_sub(5).max(5);
+            }
+            KeyCode::Right | KeyCode::Char('+') => {
+                state.startup_order = state.startup_order.saturating_add(5).min(500);
+            }
+            KeyCode::Enter => {
+                let stack_name = state.stack_name.as_deref().unwrap_or("new-stack");
+                state.step = StackCreationStep::Review {
+                    summary: format!(
+                        "Stack: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nDisk: {} GiB\nAutostart: {}\nBoot order: {}\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create setup.sh\n- create lxc-compose.yml\n- scaffold missing core apps",
+                        stack_name,
+                        state.cpu_cores,
+                        state.memory_mb as f32 / 1024.0,
+                        state.memory_mb,
+                        state.disk_gb,
+                        state.autostart,
+                        state.startup_order,
+                        stack_name
+                    ),
+                };
+            }
+            _ => {}
+        },
 
         StackCreationStep::Review { summary: _ } => match key.code {
             KeyCode::Esc => return WizardOutcome::Close,
@@ -449,6 +499,8 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
                             state.cpu_cores,
                             state.memory_mb,
                             state.disk_gb,
+                            state.autostart,
+                            state.startup_order,
                         ) {
                             if let Some(ref path) = tx {
                                 let _ = crate::transactions::record_phase(
@@ -527,6 +579,350 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
     }
 
     WizardOutcome::Continue
+}
+
+fn handle_stack_config_editor(
+    state: &mut StackConfigEditorState,
+    key: KeyEvent,
+    known_stacks: &[String],
+) -> WizardOutcome {
+    match &mut state.step {
+        StackConfigEditorStep::Overview => match key.code {
+            KeyCode::Esc => return WizardOutcome::Close,
+            KeyCode::Up => {
+                state.selected_field = state.selected_field.saturating_sub(1);
+                state.error = None;
+            }
+            KeyCode::Down => {
+                state.selected_field = (state.selected_field + 1).min(11);
+                state.error = None;
+            }
+            KeyCode::Left | KeyCode::Char('-') => {
+                state.error = None;
+                match state.selected_field {
+                    0 => {
+                        state.deploy_enabled = false;
+                        state.activated_at = None;
+                    }
+                    1 => state.cpu_cores = state.cpu_cores.saturating_sub(1).max(1),
+                    2 => state.memory_mb = state.memory_mb.saturating_sub(512).max(512),
+                    3 => state.disk_gb = state.disk_gb.saturating_sub(1).max(8),
+                    6 => state.ip_mode = previous_ip_mode(&state.ip_mode),
+                    8 => state.autostart = false,
+                    9 => state.startup_order = state.startup_order.saturating_sub(5).max(5),
+                    _ => {}
+                }
+            }
+            KeyCode::Right | KeyCode::Char('+') => {
+                state.error = None;
+                match state.selected_field {
+                    0 => state.deploy_enabled = true,
+                    1 => state.cpu_cores = state.cpu_cores.saturating_add(1).min(8),
+                    2 => state.memory_mb = state.memory_mb.saturating_add(512).min(65536),
+                    3 => state.disk_gb = state.disk_gb.saturating_add(1).min(2048),
+                    6 => state.ip_mode = next_ip_mode(&state.ip_mode),
+                    8 => state.autostart = true,
+                    9 => state.startup_order = state.startup_order.saturating_add(5).min(500),
+                    _ => {}
+                }
+            }
+            KeyCode::Enter => match state.selected_field {
+                4 => {
+                    let mut input = Input::default();
+                    input = input.with_value(state.hostname.clone());
+                    state.step = StackConfigEditorStep::EditHostname { input };
+                }
+                5 => {
+                    let mut input = Input::default();
+                    input = input.with_value(state.hwaddr.clone());
+                    state.step = StackConfigEditorStep::EditHwaddr { input };
+                }
+                7 => {
+                    let mut input = Input::default();
+                    input = input.with_value(state.reserved_ipv4.clone().unwrap_or_default());
+                    state.step = StackConfigEditorStep::EditReservedIpv4 { input };
+                }
+                8 => {
+                    state.autostart = !state.autostart;
+                }
+                9 => {
+                    state.startup_order = state.startup_order.saturating_add(5).min(500);
+                }
+                10 => {
+                    let config = crate::scaffold::StackConfig {
+                        stack_name: state.stack_name.clone(),
+                        vmid: state.vmid,
+                        hostname: state.hostname.clone(),
+                        hwaddr: state.hwaddr.clone(),
+                        deploy_enabled: state.deploy_enabled,
+                        activated_at: state.activated_at.clone(),
+                        bridge: state.bridge.clone(),
+                        ip_mode: state.ip_mode.clone(),
+                        reserved_ipv4: state.reserved_ipv4.clone(),
+                        autostart: state.autostart,
+                        startup_order: state.startup_order,
+                        cpu_cores: state.cpu_cores,
+                        memory_mb: state.memory_mb,
+                        disk_gb: state.disk_gb,
+                    };
+
+                    match crate::opnsense::ensure_stack_reservation(&config, known_stacks) {
+                        Ok(outcome) => {
+                            state.error = Some(format!(
+                                "DHCP reservation {} for {} (deleted {} old stack-owned conflict{}).",
+                                if outcome.updated {
+                                    "updated"
+                                } else {
+                                    "created"
+                                },
+                                outcome.reserved_ipv4,
+                                outcome.deleted_conflicts,
+                                if outcome.deleted_conflicts == 1 {
+                                    ""
+                                } else {
+                                    "s"
+                            11 => {
+                            ));
+                        }
+                        Err(e) => {
+                            state.error = Some(format!("DHCP sync failed: {}", e));
+                        }
+                    }
+                }
+                9 => {
+                    let activated_at = if state.deploy_enabled {
+                        state
+                            .activated_at
+                            .clone()
+                            .or_else(|| Some(current_epoch_string()))
+                    } else {
+                        None
+                    };
+
+                    let config = crate::scaffold::StackConfig {
+                        stack_name: state.stack_name.clone(),
+                        vmid: state.vmid,
+                        hostname: state.hostname.clone(),
+                        hwaddr: state.hwaddr.clone(),
+                        deploy_enabled: state.deploy_enabled,
+                        activated_at,
+                        bridge: state.bridge.clone(),
+                        ip_mode: state.ip_mode.clone(),
+                        reserved_ipv4: state.reserved_ipv4.clone(),
+                        autostart: state.autostart,
+                        startup_order: state.startup_order,
+                        cpu_cores: state.cpu_cores,
+                        memory_mb: state.memory_mb,
+                        disk_gb: state.disk_gb,
+                    };
+
+                    match crate::scaffold::save_stack_config(&config) {
+                        Ok(()) => {
+                            let _ = crate::gitops::commit_and_push(
+                                ".",
+                                &format!("Update stack config for {}", state.stack_name),
+                            );
+                            state.activated_at = config.activated_at.clone();
+                            state.error = None;
+                            state.step = StackConfigEditorStep::Done {
+                                summary: format!(
+                                    "Saved lxc-compose settings for '{}'.\nDeploy enabled: {}\nResources: {} cores / {:.1} GiB / {} GiB\nHostname: {}\nIP mode: {}\nReserved IPv4: {}\nAutostart: {}\nBoot order: {}",
+                                    state.stack_name,
+                                    state.deploy_enabled,
+                                    state.cpu_cores,
+                                    state.memory_mb as f32 / 1024.0,
+                                    state.disk_gb,
+                                    state.hostname,
+                                    state.ip_mode,
+                                    state.reserved_ipv4.as_deref().unwrap_or("(unset)"),
+                                    state.autostart,
+                                    state.startup_order,
+                                ),
+                            };
+                        }
+                        Err(e) => {
+                            state.error = Some(format!("save failed: {}", e));
+                        }
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        },
+        StackConfigEditorStep::EditHostname { input } => {
+            if key.code == KeyCode::Esc {
+                state.error = None;
+                state.step = StackConfigEditorStep::Overview;
+            } else if key.code == KeyCode::Enter {
+                let hostname = input.value().trim();
+                if hostname.is_empty() || hostname.contains(' ') {
+                    state.error =
+                        Some("hostname must be non-empty and contain no spaces".to_string());
+                } else {
+                    state.hostname = hostname.to_string();
+                    state.error = None;
+                    state.step = StackConfigEditorStep::Overview;
+                }
+            } else {
+                input.handle_event(&crossterm::event::Event::Key(key));
+            }
+        }
+        StackConfigEditorStep::EditHwaddr { input } => {
+            if key.code == KeyCode::Esc {
+                state.error = None;
+                state.step = StackConfigEditorStep::Overview;
+            } else if key.code == KeyCode::Enter {
+                let hwaddr = input.value().trim().to_lowercase();
+                if is_valid_mac_address(&hwaddr) {
+                    state.hwaddr = hwaddr;
+                    state.error = None;
+                    state.step = StackConfigEditorStep::Overview;
+                } else {
+                    state.error = Some("hwaddr must be six hex pairs separated by ':'".to_string());
+                }
+            } else {
+                input.handle_event(&crossterm::event::Event::Key(key));
+            }
+        }
+        StackConfigEditorStep::EditReservedIpv4 { input } => {
+            if key.code == KeyCode::Esc {
+                state.error = None;
+                state.step = StackConfigEditorStep::Overview;
+            } else if key.code == KeyCode::Enter {
+                let value = input.value().trim();
+                if value.is_empty() {
+                    state.reserved_ipv4 = None;
+                    state.error = None;
+                    state.step = StackConfigEditorStep::Overview;
+                } else if is_valid_ipv4(value) {
+                    state.reserved_ipv4 = Some(value.to_string());
+                    state.error = None;
+                    state.step = StackConfigEditorStep::Overview;
+                } else {
+                    state.error = Some("reserved IPv4 must be a valid IPv4 address".to_string());
+                }
+            } else {
+                input.handle_event(&crossterm::event::Event::Key(key));
+            }
+        }
+        StackConfigEditorStep::Done { .. } => {
+            if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
+                return WizardOutcome::Close;
+            }
+        }
+    }
+
+    WizardOutcome::Continue
+}
+
+fn handle_app_config_editor(state: &mut AppConfigEditorState, key: KeyEvent) -> WizardOutcome {
+    match &mut state.step {
+        AppConfigEditorStep::Overview => match key.code {
+            KeyCode::Esc => return WizardOutcome::Close,
+            KeyCode::Up => {
+                state.selected_field = state.selected_field.saturating_sub(1);
+                state.error = None;
+            }
+            KeyCode::Down => {
+                state.selected_field = (state.selected_field + 1).min(1);
+                state.error = None;
+            }
+            KeyCode::Enter => match state.selected_field {
+                0 => {
+                    let mut input = Input::default();
+                    input = input.with_value(state.docker_image.clone());
+                    state.step = AppConfigEditorStep::EditDockerImage { input };
+                }
+                1 => {
+                    if state.docker_image.trim().is_empty() {
+                        state.error = Some("docker image must be non-empty".to_string());
+                    } else {
+                        match crate::stack_features::set_app_docker_image(
+                            &state.stack_name,
+                            &state.app_name,
+                            state.docker_image.trim(),
+                        ) {
+                            Ok(()) => {
+                                let _ = crate::gitops::commit_and_push(
+                                    ".",
+                                    &format!(
+                                        "Update docker image for {}/{}",
+                                        state.stack_name, state.app_name
+                                    ),
+                                );
+                                state.step = AppConfigEditorStep::Done {
+                                    summary: format!(
+                                        "Saved compose config for '{}/{}'.\nDocker image: {}",
+                                        state.stack_name, state.app_name, state.docker_image
+                                    ),
+                                };
+                            }
+                            Err(e) => {
+                                state.error = Some(format!("save failed: {}", e));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        },
+        AppConfigEditorStep::EditDockerImage { input } => {
+            if key.code == KeyCode::Esc {
+                state.error = None;
+                state.step = AppConfigEditorStep::Overview;
+            } else if key.code == KeyCode::Enter {
+                let image = input.value().trim();
+                if image.is_empty() {
+                    state.error = Some("docker image must be non-empty".to_string());
+                } else {
+                    state.docker_image = image.to_string();
+                    state.error = None;
+                    state.step = AppConfigEditorStep::Overview;
+                }
+            } else {
+                input.handle_event(&crossterm::event::Event::Key(key));
+            }
+        }
+        AppConfigEditorStep::Done { .. } => {
+            if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
+                return WizardOutcome::Close;
+            }
+        }
+    }
+
+    WizardOutcome::Continue
+}
+
+fn current_epoch_string() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string()
+}
+
+fn next_ip_mode(current: &str) -> String {
+    match current {
+        "manual" => "dhcp-reserved".to_string(),
+        _ => "manual".to_string(),
+    }
+}
+
+fn previous_ip_mode(current: &str) -> String {
+    next_ip_mode(current)
+}
+
+fn is_valid_mac_address(value: &str) -> bool {
+    let parts: Vec<&str> = value.split(':').collect();
+    parts.len() == 6
+        && parts
+            .iter()
+            .all(|part| part.len() == 2 && part.chars().all(|ch| ch.is_ascii_hexdigit()))
+}
+
+fn is_valid_ipv4(value: &str) -> bool {
+    value.parse::<std::net::Ipv4Addr>().is_ok()
 }
 
 // ── Normal navigation (no modal open) ────────────────────────────────────────
@@ -820,6 +1216,8 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
             cpu_cores: 2,
             memory_mb: 2048,
             disk_gb: 32,
+            autostart: true,
+            startup_order: 90,
             step: StackCreationStep::Name {
                 input: Input::default(),
                 error: None,
@@ -1299,10 +1697,37 @@ fn handle_scaffolding_enter(app: &mut App) -> EventOutcome {
                         input: Input::default(),
                     };
                 }
-                2 => {
-                    // Stack-level config management (pre-sync.sh, lxc-compose.yml, etc.)
-                    // TODO: open stack config editor modal
-                }
+                2 => match crate::scaffold::read_stack_config(&stack_name) {
+                    Ok(config) => {
+                        let pre_sync_exists =
+                            std::path::Path::new(&format!("stacks/{}/setup.sh", stack_name))
+                                .exists();
+                        app.modal = ActiveModal::StackConfigEditor(StackConfigEditorState {
+                            stack_name: config.stack_name,
+                            vmid: config.vmid,
+                            hostname: config.hostname,
+                            hwaddr: config.hwaddr,
+                            bridge: config.bridge,
+                            ip_mode: config.ip_mode,
+                            reserved_ipv4: config.reserved_ipv4,
+                                autostart: config.autostart,
+                                startup_order: config.startup_order,
+                            cpu_cores: config.cpu_cores,
+                            memory_mb: config.memory_mb,
+                            disk_gb: config.disk_gb,
+                            deploy_enabled: config.deploy_enabled,
+                            activated_at: config.activated_at,
+                            pre_sync_exists,
+                            selected_field: 0,
+                            error: None,
+                            step: StackConfigEditorStep::Overview,
+                        });
+                    }
+                    Err(e) => {
+                        app.sync_status =
+                            format!("Cannot open stack config for '{}': {}", stack_name, e);
+                    }
+                },
                 _ => {}
             }
         }
@@ -1326,7 +1751,25 @@ fn handle_scaffolding_enter(app: &mut App) -> EventOutcome {
                 cursor += 1;
                 if ad.expanded {
                     if idx == cursor {
-                        // "Edit Config" sub-item — not implemented yet
+                        match crate::stack_features::read_app_docker_image(&stack_name, &d.apps[i])
+                        {
+                            Ok(docker_image) => {
+                                app.modal = ActiveModal::AppConfigEditor(AppConfigEditorState {
+                                    stack_name: stack_name.clone(),
+                                    app_name: d.apps[i].clone(),
+                                    docker_image,
+                                    selected_field: 0,
+                                    error: None,
+                                    step: AppConfigEditorStep::Overview,
+                                });
+                            }
+                            Err(e) => {
+                                app.sync_status = format!(
+                                    "Cannot open app config for '{}/{}': {}",
+                                    stack_name, d.apps[i], e
+                                );
+                            }
+                        }
                         return EventOutcome::Continue;
                     }
                     cursor += 1;

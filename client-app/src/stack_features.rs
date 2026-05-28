@@ -289,6 +289,75 @@ pub fn add_app_to_stack(
     Ok(())
 }
 
+pub fn read_app_docker_image(stack_name: &str, app_name: &str) -> io::Result<String> {
+    let compose_path = format!("stacks/{}/{}/docker-compose.yml", stack_name, app_name);
+    let raw = fs::read_to_string(&compose_path)?;
+    let doc: Value = serde_yaml::from_str(&raw)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    let root = doc
+        .as_mapping()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid compose root"))?;
+    let services = root
+        .get(Value::String("services".to_string()))
+        .and_then(Value::as_mapping)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing services block"))?;
+
+    let service_key = if services.contains_key(Value::String(app_name.to_string())) {
+        Value::String(app_name.to_string())
+    } else {
+        services
+            .keys()
+            .find_map(|key| key.as_str().map(|value| Value::String(value.to_string())))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no service found"))?
+    };
+
+    services
+        .get(&service_key)
+        .and_then(Value::as_mapping)
+        .and_then(|service| service.get(Value::String("image".to_string())))
+        .and_then(Value::as_str)
+        .map(|value| value.to_string())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing image field"))
+}
+
+pub fn set_app_docker_image(stack_name: &str, app_name: &str, docker_image: &str) -> io::Result<()> {
+    let compose_path = format!("stacks/{}/{}/docker-compose.yml", stack_name, app_name);
+    let raw = fs::read_to_string(&compose_path)?;
+    let mut doc: Value = serde_yaml::from_str(&raw)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    let root = doc
+        .as_mapping_mut()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid compose root"))?;
+    let services = root
+        .get_mut(Value::String("services".to_string()))
+        .and_then(Value::as_mapping_mut)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing services block"))?;
+
+    let service_key = if services.contains_key(Value::String(app_name.to_string())) {
+        Value::String(app_name.to_string())
+    } else {
+        services
+            .keys()
+            .find_map(|key| key.as_str().map(|value| Value::String(value.to_string())))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no service found"))?
+    };
+
+    let service = services
+        .get_mut(&service_key)
+        .and_then(Value::as_mapping_mut)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid service block"))?;
+    service.insert(
+        Value::String("image".to_string()),
+        Value::String(docker_image.to_string()),
+    );
+
+    let serialized = serde_yaml::to_string(&doc)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    fs::write(compose_path, serialized)
+}
+
 pub fn delete_app_from_stack(stack_name: &str, app_name: &str) -> io::Result<()> {
     if is_core_app(app_name) {
         return Err(io::Error::new(

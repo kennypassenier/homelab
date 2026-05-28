@@ -7,6 +7,7 @@ Last updated: 2026-05-28
 - CLIENT is the only interactive UI and orchestrator.
 - HOST and LXC are headless daemons.
 - CLIENT calls HOST and CLIENT calls LXC.
+- CLIENT may also call external control-plane APIs for Git-managed infrastructure intent, such as OPNsense DHCP reservation automation.
 - HOST and LXC do not call each other directly.
 
 ## GitOps and Deployment Scope
@@ -28,10 +29,11 @@ Last updated: 2026-05-28
 
 ## Use Case Status
 
-- All use cases in docs/usecases are implemented.
 - Implemented references are in docs/usecases/implemented/.
+- Remaining feature gaps are tracked explicitly in docs/usecases/pending/.
 
 ## Release and Delivery Model
 
 - HOST binary updates are release-version driven (GitHub Releases), not direct push-triggered runtime updates.
 - LXC daemon image publication to GHCR is CI-based and path-gated to daemon/workflow changes.
+- LXC deploy telemetry is streamed back to CLIENT over the daemon WebSocket API during sync operations.

@@ -27,7 +27,8 @@ Last updated: 2026-05-28
 
 ## Documentation State
 
-- Use cases are complete and stored under docs/usecases/implemented/.
+- Implemented use cases are stored under docs/usecases/implemented/.
+- Remaining gaps are tracked under docs/usecases/pending/.
 - Legacy refactor phase documents were retired.
 
 ## Delivery Model Updates
@@ -35,3 +36,6 @@ Last updated: 2026-05-28
 - HOST self-update is release-based (version/tag check), not push-based.
 - LXC daemon image delivery is automated via GHCR workflow with path-based change gating.
 - CLIENT stack wizard sets CPU/RAM/Disk defaults in `lxc-compose.yml` and keeps deploy disabled until explicit activation.
+- CLIENT streams live deploy logs from the LXC daemon during sync actions.
+- CLIENT app rows include a Git-managed config editor for Docker image updates.
+- CLIENT can sync stack-owned DHCP reservations to OPNsense from `lxc-compose.yml` network intent.

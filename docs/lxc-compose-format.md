@@ -10,6 +10,12 @@ This document defines the stack-level lxc-compose contract used by CLIENT, HOST,
 - hostname: LXC hostname.
 - hwaddr: MAC address used for DHCP reservation.
 - deploy.enabled: activation gate for deploy command.
+- network.bridge: Proxmox bridge name used by the stack.
+- network.ip_mode: current network intent (for example `dhcp-reserved` or `manual`).
+- network.reserved_ipv4: desired DHCP reservation address when `ip_mode=dhcp-reserved`.
+- resources.cores: CPU core allocation hint.
+- resources.memory_mb: memory allocation hint in MiB.
+- resources.disk_gb: root disk allocation hint in GiB.
 
 ## Optional Keys
 
@@ -32,6 +38,9 @@ See docs/examples/lxc-compose.example.yml.
 - Keep this file stack-scoped and idempotent.
 - Add new fields in backward-compatible manner.
 - Do not remove deploy.enabled, because it is now the activation source of truth.
+- CLIENT stack editing now normalizes resource values into the `resources` block.
+- Deterministic MAC addresses are derived from stack identity unless explicitly overridden.
+- Legacy top-level resource keys are tolerated on read and normalized on save.
 
 ## Sparse Checkout Scope
 

@@ -11,11 +11,11 @@ deploy:
 network:
   bridge: "vmbr0"
   ip_mode: "dhcp-reserved"
+  reserved_ipv4: "10.10.10.104"
 
 resources:
   cores: 2
   memory_mb: 2048
-  swap_mb: 512
   disk_gb: 32
 
 notes: "Set deploy.enabled=true when the stack is activated in CLIENT."

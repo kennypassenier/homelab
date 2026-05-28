@@ -16,7 +16,9 @@ pub enum ActiveModal {
         input: Input,
     },
     AppCreationWizard(AppCreationWizardState),
+    AppConfigEditor(AppConfigEditorState),
     StackCreationWizard(StackCreationWizardState),
+    StackConfigEditor(StackConfigEditorState),
     OperationProgress(OperationProgressState),
     SshAddWizard(SshAddWizardState),
     None,
@@ -61,24 +63,64 @@ pub struct StackCreationWizardState {
     pub cpu_cores: u8,
     pub memory_mb: u32,
     pub disk_gb: u32,
+    pub autostart: bool,
+    pub startup_order: u32,
     pub step: StackCreationStep,
 }
 
 pub enum StackCreationStep {
-    Name {
-        input: Input,
-        error: Option<String>,
-    },
+    Name { input: Input, error: Option<String> },
     CpuSelect,
     MemorySelect,
-    DiskInput {
-        input: Input,
-        error: Option<String>,
-    },
-    Review {
-        summary: String,
-    },
+    DiskInput { input: Input, error: Option<String> },
+    AutoStartSelect,
+    BootOrderSelect,
+    Review { summary: String },
     Done,
+}
+
+pub struct StackConfigEditorState {
+    pub stack_name: String,
+    pub vmid: u32,
+    pub hostname: String,
+    pub hwaddr: String,
+    pub bridge: String,
+    pub ip_mode: String,
+    pub reserved_ipv4: Option<String>,
+    pub autostart: bool,
+    pub startup_order: u32,
+    pub cpu_cores: u8,
+    pub memory_mb: u32,
+    pub disk_gb: u32,
+    pub deploy_enabled: bool,
+    pub activated_at: Option<String>,
+    pub pre_sync_exists: bool,
+    pub selected_field: usize,
+    pub error: Option<String>,
+    pub step: StackConfigEditorStep,
+}
+
+pub enum StackConfigEditorStep {
+    Overview,
+    EditHostname { input: Input },
+    EditHwaddr { input: Input },
+    EditReservedIpv4 { input: Input },
+    Done { summary: String },
+}
+
+pub struct AppConfigEditorState {
+    pub stack_name: String,
+    pub app_name: String,
+    pub docker_image: String,
+    pub selected_field: usize,
+    pub error: Option<String>,
+    pub step: AppConfigEditorStep,
+}
+
+pub enum AppConfigEditorStep {
+    Overview,
+    EditDockerImage { input: Input },
+    Done { summary: String },
 }
 
 pub struct OperationProgressState {
@@ -297,8 +339,7 @@ pub fn draw_stack_creation_wizard(
             let gib = state.memory_mb as f32 / 1024.0;
             let text = format!(
                 "Select memory (512 MiB steps):\n\n  memory: {:.1} GiB ({} MiB)\n\n[←/→ or +/- adjust, Enter continue, ESC cancel]",
-                gib,
-                state.memory_mb
+                gib, state.memory_mb
             );
             let para = Paragraph::new(text)
                 .block(block)
@@ -323,6 +364,46 @@ pub fn draw_stack_creation_wizard(
             if let Some(err) = error {
                 text.push_str(&format!("\n\n[Error: {}]", err));
             }
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Cyan));
+            f.render_widget(para, popup_area);
+        }
+        StackCreationStep::AutoStartSelect => {
+            let block = Block::default()
+                .title("Auto Start")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let text = format!(
+                "Start this LXC automatically on host boot:\n\n  autostart: {}\n\n[←/→ or +/- toggle, Enter continue, ESC cancel]",
+                state.autostart
+            );
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Cyan));
+            f.render_widget(para, popup_area);
+        }
+        StackCreationStep::BootOrderSelect => {
+            let block = Block::default()
+                .title("Boot Order")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let text = format!(
+                "Set boot order priority (higher means later / lower priority):\n\n  boot order: {}\n\nDefault 90 keeps stacks behind critical infra.\n\n[←/→ or +/- adjust, Enter continue, ESC cancel]",
+                state.startup_order
+            );
             let para = Paragraph::new(text)
                 .block(block)
                 .alignment(Alignment::Left)
@@ -369,13 +450,264 @@ pub fn draw_stack_creation_wizard(
     }
 }
 
+pub fn draw_stack_config_editor(
+    f: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    state: &StackConfigEditorState,
+) {
+    use ratatui::{style::*, widgets::*};
+
+    let popup_area = ratatui::layout::Rect {
+        x: area.width / 6,
+        y: area.height / 6,
+        width: area.width * 2 / 3,
+        height: area.height * 2 / 3,
+    };
+    f.render_widget(Clear, popup_area);
+
+    match &state.step {
+        StackConfigEditorStep::Overview => {
+            let block = Block::default()
+                .title(format!("Stack Config :: {}", state.stack_name))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+
+            let fields = [
+                format!("Deploy enabled: {}", state.deploy_enabled),
+                format!("CPU cores: {}", state.cpu_cores),
+                format!(
+                    "Memory: {:.1} GiB ({} MiB)",
+                    state.memory_mb as f32 / 1024.0,
+                    state.memory_mb
+                ),
+                format!("Disk: {} GiB", state.disk_gb),
+                format!("Hostname: {}", state.hostname),
+                format!("MAC address: {}", state.hwaddr),
+                format!("IP mode: {}", state.ip_mode),
+                format!(
+                    "Reserved IPv4: {}",
+                    state.reserved_ipv4.as_deref().unwrap_or("(unset)")
+                ),
+                format!("Autostart: {}", state.autostart),
+                format!("Boot order: {}", state.startup_order),
+                "Sync DHCP reservation".to_string(),
+                "Save and commit".to_string(),
+            ];
+
+            let mut text = format!(
+                "VMID: {}\nBridge: {}\nPre-sync hook: {}\nActivated at: {}\n\n",
+                state.vmid,
+                state.bridge,
+                if state.pre_sync_exists {
+                    "present"
+                } else {
+                    "missing"
+                },
+                state.activated_at.as_deref().unwrap_or("null")
+            );
+
+            for (index, field) in fields.iter().enumerate() {
+                let cursor = if index == state.selected_field {
+                    ">"
+                } else {
+                    " "
+                };
+                text.push_str(&format!("{} {}\n", cursor, field));
+            }
+
+            text.push_str("\n[↑/↓] select  [←/→ +/-] adjust  [Enter] edit/action  [Esc] close");
+            if let Some(err) = &state.error {
+                text.push_str(&format!("\n\nError: {}", err));
+            }
+
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::White));
+            f.render_widget(para, popup_area);
+        }
+        StackConfigEditorStep::EditHostname { input } => {
+            let para = Paragraph::new(format!(
+                "Enter hostname for stack '{}':\n> {}\n\n[Enter save, Esc cancel]{}",
+                state.stack_name,
+                input.value(),
+                state
+                    .error
+                    .as_deref()
+                    .map(|e| format!("\n\nError: {}", e))
+                    .unwrap_or_default()
+            ))
+            .block(
+                Block::default()
+                    .title("Edit Hostname")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            )
+            .alignment(Alignment::Left)
+            .style(Style::default().fg(Color::White));
+            f.render_widget(para, popup_area);
+        }
+        StackConfigEditorStep::EditHwaddr { input } => {
+            let para = Paragraph::new(format!(
+                "Enter MAC address for stack '{}':\n> {}\n\n[Enter save, Esc cancel]{}",
+                state.stack_name,
+                input.value(),
+                state
+                    .error
+                    .as_deref()
+                    .map(|e| format!("\n\nError: {}", e))
+                    .unwrap_or_default()
+            ))
+            .block(
+                Block::default()
+                    .title("Edit MAC Address")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            )
+            .alignment(Alignment::Left)
+            .style(Style::default().fg(Color::White));
+            f.render_widget(para, popup_area);
+        }
+        StackConfigEditorStep::EditReservedIpv4 { input } => {
+            let para = Paragraph::new(format!(
+                "Enter reserved IPv4 for stack '{}':\n> {}\n\nLeave blank to clear it.\n\n[Enter save, Esc cancel]{}",
+                state.stack_name,
+                input.value(),
+                state
+                    .error
+                    .as_deref()
+                    .map(|e| format!("\n\nError: {}", e))
+                    .unwrap_or_default()
+            ))
+            .block(
+                Block::default()
+                    .title("Edit Reserved IPv4")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            )
+            .alignment(Alignment::Left)
+            .style(Style::default().fg(Color::White));
+            f.render_widget(para, popup_area);
+        }
+        StackConfigEditorStep::Done { summary } => {
+            let para = Paragraph::new(format!("{}\n\n[Enter/Esc] close", summary))
+                .block(
+                    Block::default()
+                        .title("Stack Config Saved")
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(Color::Green)),
+                )
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Green));
+            f.render_widget(para, popup_area);
+        }
+    }
+}
+
+pub fn draw_app_config_editor(
+    f: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    state: &AppConfigEditorState,
+) {
+    use ratatui::{style::*, widgets::*};
+
+    let popup_area = ratatui::layout::Rect {
+        x: area.width / 5,
+        y: area.height / 4,
+        width: area.width * 3 / 5,
+        height: area.height / 2,
+    };
+    f.render_widget(Clear, popup_area);
+
+    match &state.step {
+        AppConfigEditorStep::Overview => {
+            let fields = [
+                format!("Docker image: {}", state.docker_image),
+                "Save and commit".to_string(),
+            ];
+            let mut text = format!("Stack: {}\nApp: {}\n\n", state.stack_name, state.app_name);
+            for (index, field) in fields.iter().enumerate() {
+                let cursor = if index == state.selected_field {
+                    ">"
+                } else {
+                    " "
+                };
+                text.push_str(&format!("{} {}\n", cursor, field));
+            }
+            text.push_str("\n[↑/↓] select  [Enter] edit/save  [Esc] close");
+            if let Some(err) = &state.error {
+                text.push_str(&format!("\n\nError: {}", err));
+            }
+
+            let para = Paragraph::new(text)
+                .block(
+                    Block::default()
+                        .title(format!(
+                            "App Config :: {}/{}",
+                            state.stack_name, state.app_name
+                        ))
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(Color::Cyan)),
+                )
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::White));
+            f.render_widget(para, popup_area);
+        }
+        AppConfigEditorStep::EditDockerImage { input } => {
+            let para = Paragraph::new(format!(
+                "Enter Docker image for app '{}':\n> {}\n\n[Enter save, Esc cancel]{}",
+                state.app_name,
+                input.value(),
+                state
+                    .error
+                    .as_deref()
+                    .map(|e| format!("\n\nError: {}", e))
+                    .unwrap_or_default()
+            ))
+            .block(
+                Block::default()
+                    .title("Edit Docker Image")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            )
+            .alignment(Alignment::Left)
+            .style(Style::default().fg(Color::White));
+            f.render_widget(para, popup_area);
+        }
+        AppConfigEditorStep::Done { summary } => {
+            let para = Paragraph::new(format!("{}\n\n[Enter/Esc] close", summary))
+                .block(
+                    Block::default()
+                        .title("App Config Saved")
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(Color::Green)),
+                )
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Green));
+            f.render_widget(para, popup_area);
+        }
+    }
+}
+
 pub fn draw_operation_progress(
     f: &mut ratatui::Frame,
     area: ratatui::layout::Rect,
     state: &OperationProgressState,
 ) {
-    use ratatui::{style::*, widgets::*};
     use ratatui::text::Line;
+    use ratatui::{style::*, widgets::*};
 
     let popup_area = ratatui::layout::Rect {
         x: area.width / 8,
@@ -401,7 +733,11 @@ pub fn draw_operation_progress(
                 .title(format!(" {} ", state.title))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
         ),
         rows[0],
     );
@@ -431,17 +767,14 @@ pub fn draw_operation_progress(
     );
 
     f.render_widget(
-        Paragraph::new(format!(
-            "{}\n[Enter/Esc] close",
-            state.summary
-        ))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Green)),
-        )
-        .style(Style::default().fg(Color::Rgb(170, 190, 190))),
+        Paragraph::new(format!("{}\n[Enter/Esc] close", state.summary))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Green)),
+            )
+            .style(Style::default().fg(Color::Rgb(170, 190, 190))),
         rows[2],
     );
 }

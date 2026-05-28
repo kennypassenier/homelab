@@ -308,6 +308,8 @@ pub struct App {
     pub log_level_filter: LogLevelFilter,
     /// Index into MOCK_SEQUENCE, advances on every tick.
     log_tick: usize,
+    /// Disable synthetic log playback once real LXC telemetry arrives.
+    pub live_logs_seen: bool,
 
     // ── Animation state (driven by anim_tick at 33 ms) ─────────────────────
     /// Sinusoidal phase (0..2π) for pulse/breathing effects on selected items.
@@ -388,6 +390,7 @@ impl App {
             log_source_scroll: 0,
             log_level_filter: LogLevelFilter::All,
             log_tick: 0,
+            live_logs_seen: false,
             pulse_phase: 0.0,
             ticker_offset: 0,
             ticker_content,
@@ -511,6 +514,9 @@ impl App {
     /// Auto-scrolling is only applied when the user has not manually scrolled up
     /// (i.e. `log_scroll == 0`).
     pub fn tick_logs(&mut self) {
+        if self.live_logs_seen {
+            return;
+        }
         let (source, level, message) = MOCK_SEQUENCE[self.log_tick % MOCK_SEQUENCE.len()];
         self.logs.push(LogLine {
             time: current_time_str(),
@@ -522,6 +528,10 @@ impl App {
             self.logs.remove(0);
         }
         self.log_tick += 1;
+    }
+
+    pub fn mark_live_logs_seen(&mut self) {
+        self.live_logs_seen = true;
     }
 
     // ── private helpers ─────────────────────────────────────────────────────

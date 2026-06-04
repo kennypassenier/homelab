@@ -39,6 +39,7 @@ pub struct StackIntent {
     pub unprivileged: bool,
     pub features: Vec<String>,
     pub tun_device: Option<bool>,
+    pub gpu_passthrough: Option<bool>,
     pub managed: bool,
 }
 
@@ -198,6 +199,12 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
         _ => None,
     };
 
+    let gpu_passthrough = match &yaml["hardware"]["gpu"]["enabled"] {
+        serde_yaml::Value::Bool(b) => Some(*b),
+        serde_yaml::Value::Null => None,
+        _ => None,
+    };
+
     let managed = yaml["host_management"]["managed"].as_bool().unwrap_or(true);
 
     Ok(StackIntent {
@@ -220,6 +227,7 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
         unprivileged,
         features,
         tun_device,
+        gpu_passthrough,
         managed,
     })
 }

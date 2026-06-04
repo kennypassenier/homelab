@@ -30,6 +30,11 @@ pub fn bootstrap_lxc(vmid: u32, intent: &StackIntent) -> Result<BootstrapResult,
         setup_tun_device(vmid)?;
     }
 
+    // Hardware (GPU passthrough)
+    if intent.gpu_passthrough.unwrap_or(false) {
+        setup_gpu_passthrough(vmid)?;
+    }
+
     // Start container
     pct_start(vmid)?;
     wait_for_container_ready(vmid, Duration::from_secs(30))?;
@@ -206,6 +211,46 @@ lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
         .map_err(|e| format!("Failed to write TUN config: {}", e))?;
 
     println!("TUN device passthrough configured for LXC {}", vmid);
+    Ok(())
+}
+
+/// Enable Intel/AMD GPU passthrough for media/transcoding containers
+fn setup_gpu_passthrough(vmid: u32) -> Result<(), String> {
+    let conf_file = format!("/etc/pve/lxc/{}.conf", vmid);
+    let conf_content = std::fs::read_to_string(&conf_file)
+        .map_err(|e| format!("Failed to read LXC config: {}", e))?;
+
+    // Idempotency: skip if DRM cgroup entry already present
+    if conf_content.contains("lxc.cgroup2.devices.allow: c 226:") {
+        println!("GPU passthrough already configured for LXC {}", vmid);
+        return Ok(());
+    }
+
+    // Verify DRM devices exist on host
+    if !Path::new("/dev/dri/card0").exists() {
+        return Err(
+            "/dev/dri/card0 not found on host — no GPU available for passthrough".to_string(),
+        );
+    }
+
+    let gpu_config = r#"
+# --- GPU Passthrough (auto-configured) ---
+# 226 is the DRM major device number
+lxc.cgroup2.devices.allow: c 226:0 rwm
+lxc.cgroup2.devices.allow: c 226:128 rwm
+lxc.mount.entry: /dev/dri/card0 dev/dri/card0 none bind,optional,create=file
+lxc.mount.entry: /dev/dri/renderD128 dev/dri/renderD128 none bind,optional,create=file
+"#;
+
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(&conf_file)
+        .map_err(|e| format!("Failed to open LXC config for writing: {}", e))?;
+
+    file.write_all(gpu_config.as_bytes())
+        .map_err(|e| format!("Failed to write GPU config: {}", e))?;
+
+    println!("GPU passthrough configured for LXC {}", vmid);
     Ok(())
 }
 

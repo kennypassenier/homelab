@@ -34,6 +34,8 @@ lxc:
 
 hardware:
   tun_device: null  # null=auto-detect, true=force, false=disable
+  gpu:
+    enabled: false  # true=enable Intel/AMD DRM passthrough (cgroup2 + bind-mount)
 
 host_management:
   managed: true

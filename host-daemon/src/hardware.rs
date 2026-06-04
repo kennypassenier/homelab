@@ -143,7 +143,8 @@ pub fn check_gpu_readiness() -> HardwareStatus {
             readiness: HardwareReadiness::RequiresSetup,
             available_devices: vec![],
             iommu_groups: None,
-            message: "IOMMU not enabled in Proxmox; run enable-gpu.sh to configure".to_string(),
+            message: "IOMMU not enabled in Proxmox; enable intel_iommu=on or amd_iommu=on in GRUB"
+                .to_string(),
         };
     }
 
@@ -200,7 +201,7 @@ pub fn check_tun_readiness() -> HardwareStatus {
         message: if available {
             "TUN/TAP passthrough ready".to_string()
         } else {
-            "TUN device not available; run enable-tun.sh to configure".to_string()
+            "TUN device not available; run: modprobe tun".to_string()
         },
     }
 }

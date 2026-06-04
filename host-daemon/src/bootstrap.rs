@@ -462,7 +462,7 @@ fn install_lxc_daemon(vmid: u32) -> Result<(), String> {
     if let Ok(lxc_daemon_image) = std::env::var("LXC_DAEMON_IMAGE") {
         let image = format!("{}:latest", lxc_daemon_image);
         println!("Attempting to pull LXC daemon image: {}", image);
-        
+
         let docker_pull = format!(
             r#"
 if docker pull {} &>/dev/null; then
@@ -477,7 +477,7 @@ fi
 "#,
             image, image
         );
-        
+
         if pct_exec(vmid, &docker_pull).is_ok() {
             println!("LXC daemon installed from docker image");
             return Ok(());

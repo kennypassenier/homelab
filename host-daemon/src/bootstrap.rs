@@ -458,51 +458,82 @@ echo "SSH access configured for GitHub user: ${{GITHUB_USER}}"
 fn install_lxc_daemon(vmid: u32) -> Result<(), String> {
     println!("Installing LXC daemon in LXC {}...", vmid);
 
-    // For now, we'll use a simple approach: copy from HOST if it exists,
-    // or download from GitHub releases
-    let host_daemon_path = "/opt/homelab/lxc-daemon/target/release/LXC";
-
-    if Path::new(host_daemon_path).exists() {
-        // Copy from HOST build
-        let output = Command::new("pct")
-            .args([
-                "push",
-                &vmid.to_string(),
-                host_daemon_path,
-                "/usr/local/bin/lxc-daemon",
-            ])
-            .output()
-            .map_err(|e| format!("Failed to push LXC daemon: {}", e))?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Failed to push LXC daemon: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        pct_exec(vmid, "chmod +x /usr/local/bin/lxc-daemon")?;
-    } else {
-        // Download from GitHub releases or build placeholder
-        println!(
-            "Warning: LXC daemon binary not found at {}",
-            host_daemon_path
-        );
-        println!("Creating placeholder - you should build and deploy the actual daemon");
-
-        pct_exec(
-            vmid,
+    // Strategy 1: Try to pull the LXC daemon Docker image (preferred)
+    if let Ok(lxc_daemon_image) = std::env::var("LXC_DAEMON_IMAGE") {
+        let image = format!("{}:latest", lxc_daemon_image);
+        println!("Attempting to pull LXC daemon image: {}", image);
+        
+        let docker_pull = format!(
             r#"
-            mkdir -p /usr/local/bin
-            echo '#!/bin/bash' > /usr/local/bin/lxc-daemon
-            echo 'echo "LXC daemon placeholder - replace with actual binary"' >> /usr/local/bin/lxc-daemon
-            echo 'sleep infinity' >> /usr/local/bin/lxc-daemon
-            chmod +x /usr/local/bin/lxc-daemon
-        "#,
-        )?;
+if docker pull {} &>/dev/null; then
+    docker run --rm {} tar xOf /usr/local/bin/LXC > /tmp/lxc-daemon
+    mv /tmp/lxc-daemon /usr/local/bin/lxc-daemon
+    chmod +x /usr/local/bin/lxc-daemon
+    echo "LXC daemon extracted from docker image successfully"
+else
+    echo "Failed to pull docker image"
+    exit 1
+fi
+"#,
+            image, image
+        );
+        
+        if pct_exec(vmid, &docker_pull).is_ok() {
+            println!("LXC daemon installed from docker image");
+            return Ok(());
+        }
+        println!("Docker image pull failed, falling back to binary method");
     }
 
-    println!("LXC daemon installed in LXC {}", vmid);
+    // Strategy 2: Copy binary from HOST build artifacts
+    let binary_paths = vec![
+        "/opt/homelab/lxc-daemon/target/release/LXC",
+        "apps/LXC-linux-x86_64-unknown-linux-gnu",
+        "lxc-daemon/target/release/LXC",
+    ];
+
+    for binary_path in binary_paths {
+        if Path::new(binary_path).exists() {
+            println!("Found LXC daemon binary at: {}", binary_path);
+            let output = Command::new("pct")
+                .args([
+                    "push",
+                    &vmid.to_string(),
+                    binary_path,
+                    "/usr/local/bin/lxc-daemon",
+                ])
+                .output()
+                .map_err(|e| format!("Failed to push LXC daemon: {}", e))?;
+
+            if !output.status.success() {
+                return Err(format!(
+                    "Failed to push LXC daemon: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+
+            pct_exec(vmid, "chmod +x /usr/local/bin/lxc-daemon")?;
+            println!("LXC daemon installed from binary");
+            return Ok(());
+        }
+    }
+
+    // Strategy 3: Fallback to placeholder (should not reach in production)
+    println!("Warning: LXC daemon binary not found in standard locations");
+    println!("Creating placeholder - build and deploy the actual daemon from `make release-lxc`");
+
+    pct_exec(
+        vmid,
+        r#"
+        mkdir -p /usr/local/bin
+        echo '#!/bin/bash' > /usr/local/bin/lxc-daemon
+        echo 'echo "LXC daemon placeholder - replace with actual binary or docker image"' >> /usr/local/bin/lxc-daemon
+        echo 'sleep infinity' >> /usr/local/bin/lxc-daemon
+        chmod +x /usr/local/bin/lxc-daemon
+    "#,
+    )?;
+
+    println!("LXC daemon installed (placeholder - update required)");
     Ok(())
 }
 

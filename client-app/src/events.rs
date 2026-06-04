@@ -264,10 +264,6 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                     state.docker_image = Some(image);
                     let options = vec![
                         DefaultServiceOption {
-                            label: "Watchtower",
-                            description: "Auto-update",
-                        },
-                        DefaultServiceOption {
                             label: "Promtail",
                             description: "Log shipping",
                         },
@@ -276,7 +272,7 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                             description: "Reverse proxy (Docker stacks only)",
                         },
                     ];
-                    let selected = vec![true, true, true];
+                    let selected = vec![true, true];
                     state.step = AppCreationStep::DefaultsMultiselect { options, selected };
                     state.multiselect_cursor = 0;
                 }
@@ -335,7 +331,6 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                     .to_string();
 
                 let options = crate::stack_features::AddAppOptions {
-                    include_watchtower: state.selected_defaults.iter().any(|x| x == "Watchtower"),
                     include_promtail: state.selected_defaults.iter().any(|x| x == "Promtail"),
                     include_traefik: state.selected_defaults.iter().any(|x| x == "Traefik"),
                 };

@@ -20,8 +20,8 @@ HOST_VERSION := $(shell grep '^version' $(HOST_SRC)/Cargo.toml | head -1 | cut -
 LXC_VERSION := $(shell grep '^version' $(LXC_SRC)/Cargo.toml | head -1 | cut -d'"' -f2)
 
 .PHONY: help build build-client build-client-windows build-host build-lxc clean
-.PHONY: docker release-host release-lxc version-check version-bump-host version-bump-lxc
-.PHONY: show-versions
+.PHONY: docker release-host release-client release-lxc version-check version-bump-host
+.PHONY: version-bump-client version-bump-lxc show-versions docker-build-only docker-push
 
 help:
 	@echo "Homelab Build & Release Targets"
@@ -40,6 +40,7 @@ help:
 	@echo ""
 	@echo "Release Targets:"
 	@echo "  make release-host           - Build HOST, auto-bump patch, create GitHub release"
+	@echo "  make release-client         - Build CLIENT (Linux+Windows), auto-bump patch, create GitHub release"
 	@echo "  make release-lxc            - Build LXC, auto-bump patch, create GitHub release & push image"
 	@echo ""
 	@echo "Utility Targets:"
@@ -91,9 +92,9 @@ version-bump-host:
 	@echo "Auto-bumping HOST version (patch increment)..."
 	@./scripts/shared/bump-patch-version.sh $(HOST_SRC)/Cargo.toml HOST
 
-version-bump-lxc:
-	@echo "Auto-bumping LXC version (patch increment)..."
-	@./scripts/shared/bump-patch-version.sh $(LXC_SRC)/Cargo.toml LXC
+version-bump-client:
+	@echo "Auto-bumping CLIENT version (patch increment)..."
+	@./scripts/shared/bump-patch-version.sh $(CLIENT_SRC)/Cargo.toml CLIENT
 
 # Docker targets for LXC daemon image
 docker: docker-build-only docker-push
@@ -121,7 +122,7 @@ docker-push:
 
 # Release targets
 # These auto-bump patch version, build, create git tag, and push to GitHub
-release-host: build-host
+release-host: version-bump-host build-host
 	@echo "Creating HOST daemon release v$(HOST_VERSION)..."
 	@if ! command -v gh &> /dev/null; then \
 		echo "✗ gh (GitHub CLI) not found; cannot create release"; \
@@ -130,7 +131,9 @@ release-host: build-host
 	@mkdir -p $(APPS_DIR)
 	@cp $(HOST_SRC)/target/release/$(HOST_NAME) $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
 	@chmod +x $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
+	@git add $(HOST_SRC)/Cargo.toml && git commit -m "Bump host-daemon version to v$(HOST_VERSION)"
 	@git tag "host-daemon-v$(HOST_VERSION)" -m "Release host-daemon v$(HOST_VERSION)"
+	@git push origin main
 	@git push origin "host-daemon-v$(HOST_VERSION)"
 	@gh release create "host-daemon-v$(HOST_VERSION)" \
 		$(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu \
@@ -138,20 +141,45 @@ release-host: build-host
 		--generate-notes
 	@echo "✓ HOST release created successfully"
 
-release-lxc: docker build-lxc
+release-client: version-bump-client build-client build-client-windows
+	@echo "Creating CLIENT release v$(CLIENT_VERSION)..."
+	@if ! command -v gh &> /dev/null; then \
+		echo "✗ gh (GitHub CLI) not found; cannot create release"; \
+		exit 1; \
+	fi
+	@mkdir -p $(APPS_DIR)
+	@cp $(CLIENT_SRC)/target/release/$(CLIENT_NAME) $(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu
+	@chmod +x $(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu
+	@cp $(CLIENT_SRC)/target/x86_64-pc-windows-gnu/release/$(CLIENT_NAME).exe $(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe
+	@chmod +x $(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe
+	@git add $(CLIENT_SRC)/Cargo.toml && git commit -m "Bump client version to v$(CLIENT_VERSION)"
+	@git tag "client-v$(CLIENT_VERSION)" -m "Release client v$(CLIENT_VERSION)"
+	@git push origin main
+	@git push origin "client-v$(CLIENT_VERSION)"
+	@gh release create "client-v$(CLIENT_VERSION)" \
+		$(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu \
+		$(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe \
+		--title "CLIENT v$(CLIENT_VERSION)" \
+		--generate-notes
+	@echo "✓ CLIENT release created successfully"
+
+release-lxc: version-bump-lxc docker-build-only docker-push build-lxc
 	@echo "Creating LXC daemon release v$(LXC_VERSION)..."
 	@if ! command -v gh &> /dev/null; then \
 		echo "✗ gh (GitHub CLI) not found; cannot create release"; \
 		exit 1; \
 	fi
 	@mkdir -p $(APPS_DIR)
-	@cp $(LXC_SRC)/target/release/$(LXC_NAME) $(APPS_DIR)/LXC-linux-x86_64
-	@chmod +x $(APPS_DIR)/LXC-linux-x86_64
+	@cp $(LXC_SRC)/target/release/$(LXC_NAME) $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu
+	@chmod +x $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu
+	@git add $(LXC_SRC)/Cargo.toml && git commit -m "Bump lxc-daemon version to v$(LXC_VERSION)"
 	@git tag "lxc-daemon-v$(LXC_VERSION)" -m "Release lxc-daemon v$(LXC_VERSION)"
+	@git push origin main
 	@git push origin "lxc-daemon-v$(LXC_VERSION)"
 	@gh release create "lxc-daemon-v$(LXC_VERSION)" \
-		$(APPS_DIR)/LXC-linux-x86_64 \
+		$(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu \
 		--title "lxc-daemon v$(LXC_VERSION)" \
+		--notes "Docker image: $(GHCR_LXC_IMAGE):v$(LXC_VERSION)" \
 		--generate-notes
 	@echo "✓ LXC release created and image pushed successfully"
 
@@ -160,4 +188,8 @@ clean:
 	cargo clean --manifest-path $(HOST_SRC)/Cargo.toml
 	cargo clean --manifest-path $(LXC_SRC)/Cargo.toml
 	@rm -f $(APPS_DIR)/$(CLIENT_NAME) $(APPS_DIR)/$(HOST_NAME) $(APPS_DIR)/$(LXC_NAME)
-	@rm -f $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu $(APPS_DIR)/LXC-linux-x86_64
+	@rm -f $(APPS_DIR)/$(CLIENT_NAME).exe
+	@rm -f $(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu
+	@rm -f $(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe
+	@rm -f $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
+	@rm -f $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu

@@ -10,6 +10,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
 };
 use std::path::Path;
+use std::sync::mpsc;
 
 mod app;
 mod backup;
@@ -31,14 +32,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = app::App::new();
     let mut last_time = std::time::Instant::now();
 
-    // Channel for the backup thread to send status lines back to the TUI
-    let (backup_tx, backup_rx) = std::sync::mpsc::channel::<String>();
-    backup::start_policy_enforcer(backup_tx.clone());
-    failsafe::start_failsafe_enforcer(backup_tx.clone());
+    // Shared status channel for backup, update, and failsafe workers.
+    let (status_tx, status_rx) = mpsc::channel::<String>();
+    backup::start_policy_enforcer(status_tx.clone());
+    failsafe::start_failsafe_enforcer(status_tx.clone());
+    start_update_checker(status_tx.clone());
 
     loop {
         // Poll backup status from background thread
-        while let Ok(line) = backup_rx.try_recv() {
+        while let Ok(line) = status_rx.try_recv() {
             app.backup_status.push(line);
             if app.backup_status.len() > 200 {
                 app.backup_status.remove(0);
@@ -85,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     (stack, n.ip)
                                 })
                                 .collect();
-                            let tx = backup_tx.clone();
+                            let tx = status_tx.clone();
                             std::thread::spawn(move || {
                                 for (stack, ip) in &stacks {
                                     let _ = tx.send(format!(
@@ -215,6 +217,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal.backend_mut().execute(LeaveAlternateScreen)?;
     crossterm::terminal::disable_raw_mode()?;
     Ok(())
+}
+
+fn start_update_checker(status_tx: mpsc::Sender<String>) {
+    std::thread::spawn(move || {
+        let mut last_check = std::time::Instant::now();
+
+        loop {
+            let interval_secs = std::env::var("HOST_UPDATE_INTERVAL_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(1800)
+                .max(60);
+
+            if last_check.elapsed().as_secs() >= interval_secs {
+                let _ = status_tx.send(format!(
+                    "[host-update] checking GitHub releases (interval={}s)",
+                    interval_secs
+                ));
+
+                match self_update::check_and_apply_update() {
+                    Ok(msg) => {
+                        let _ = status_tx.send(format!("[host-update] {}", msg));
+                    }
+                    Err(err) => {
+                        let _ = status_tx.send(format!("[host-update] failed: {}", err));
+                    }
+                }
+
+                last_check = std::time::Instant::now();
+            }
+
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        }
+    });
 }
 
 fn draw_main(f: &mut ratatui::Frame, app: &app::App) {

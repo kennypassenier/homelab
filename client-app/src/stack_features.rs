@@ -10,7 +10,6 @@ const CORE_APPS: [&str; 3] = ["promtail", "watchtower", "traefik"];
 const GPU_NODES_INTEL: [&str; 2] = ["/dev/dri/renderD128", "/dev/dri/card0"];
 
 pub struct AddAppOptions {
-    pub include_watchtower: bool,
     pub include_promtail: bool,
     pub include_traefik: bool,
 }
@@ -528,16 +527,6 @@ fn app_compose_yaml(
         out.push_str("      - \"traefik.http.services.app.loadbalancer.server.port=80\"\n");
     }
 
-    if options.include_watchtower {
-        out.push_str("\n  watchtower:\n");
-        out.push_str("    image: containrrr/watchtower:latest\n");
-        out.push_str("    restart: unless-stopped\n");
-        out.push_str("    volumes:\n");
-        out.push_str("      - /var/run/docker.sock:/var/run/docker.sock\n");
-        out.push_str("    environment:\n");
-        out.push_str("      WATCHTOWER_LABEL_ENABLE: \"true\"\n");
-    }
-
     if options.include_promtail {
         out.push_str("\n  promtail:\n");
         out.push_str("    image: grafana/promtail:latest\n");
@@ -592,6 +581,7 @@ fn scaffold_promtail(stack_name: &str) -> io::Result<()> {
 fn scaffold_watchtower(stack_name: &str) -> io::Result<()> {
     let app_dir = format!("stacks/{}/watchtower", stack_name);
     fs::create_dir_all(&app_dir)?;
+    // Watchtower is not user-selectable anymore; every new stack gets it.
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(

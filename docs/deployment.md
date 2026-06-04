@@ -108,6 +108,8 @@ CLIENT currently cares about:
 - `OPNSENSE_API_SECRET`
 - optional `OPNSENSE_TLS_INSECURE=true` for lab-only self-signed HTTPS
 - optional per-stack overrides like `LXC_MEDIA_IP`
+- optional `HOST_HEARTBEAT_SSH_ALIAS` for HOST heartbeat pulse target (default `HOST`)
+- optional `HOST_HEARTBEAT_FILE` remote heartbeat file path (default `/tmp/homelab-client-heartbeat.ts`)
 
 ### HOST variables
 
@@ -119,6 +121,9 @@ HOST currently cares about:
 - optional `LXC_<STACK>_IP` values used during backup orchestration
 - optional `RESTIC_REPO_BASE` for HOST daemon per-stack restic target base
 - optional `RCLONE_CONFIG_FILE` for rclone-backed restic repositories (Google Drive, etc.)
+- optional `FAILSAFE_SYNC_INTERVAL_SECS` for inverse heartbeat failsafe window cadence
+- optional `HEARTBEAT_TTL_SECS` freshness threshold for heartbeat suppression
+- optional `HOST_HEARTBEAT_FILE` heartbeat timestamp file path on host
 
 ### LXC variables
 
@@ -230,6 +235,4 @@ After deployment, verify:
 
 ## 8. Known Remaining Gaps
 
-These features are still tracked as pending use-cases before full end-to-end feature completion:
-
-- none currently tracked in `docs/usecases/pending/`
+Check `docs/usecases/pending/` for the current active backlog.

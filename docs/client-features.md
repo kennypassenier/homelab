@@ -9,6 +9,7 @@ Last updated: 2026-05-28
 - Backup/restore/patch orchestration surfaces.
 - Structured client logfmt-style event emission for critical operations.
 - Live deploy telemetry streamed from LXC daemon WebSocket logs during sync actions.
+- Session heartbeat pulses to LXC daemons while CLIENT is running, used to suppress unnecessary failsafe sync windows.
 
 ## Implemented Highlights
 

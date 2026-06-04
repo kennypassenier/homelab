@@ -20,9 +20,17 @@ pub struct StackConfig {
     pub cpu_cores: u8,
     pub memory_mb: u32,
     pub disk_gb: u32,
+    // New fields for GitOps provisioning
+    pub host_storage_path: String,
+    pub mount_point: String,
+    pub lxc_template: String,
+    pub unprivileged: bool,
+    pub features: Vec<String>,
+    pub tun_device: Option<bool>, // None = auto-detect, Some(true) = force, Some(false) = disable
 }
 
 const DEFAULT_LXC_ROLE: &str = "app";
+const DEFAULT_LXC_TEMPLATE: &str = "debian-12-standard 12.12-1 amd64";
 
 /// Canonical LXC name in the standard scheme: vmid-role-stack.
 pub fn canonical_lxc_name(vmid: u32, stack_name: &str) -> String {
@@ -85,10 +93,51 @@ pub fn ensure_lxc_compose(stack_name: &str) -> io::Result<()> {
     }
 
     let default_doc = format!(
-        "version: 1\nstack_name: \"{}\"\nvmid: 0\nhostname: \"{}\"\nhwaddr: \"{}\"\n\ndeploy:\n  enabled: false\n  activated_at: null\n\nnetwork:\n  bridge: \"vmbr0\"\n  ip_mode: \"dhcp-reserved\"\n  reserved_ipv4: null\n\nboot:\n  autostart: true\n  order: 90\n\nresources:\n  cores: 2\n  memory_mb: 2048\n  disk_gb: 32\n",
+        r#"version: 1
+stack_name: "{}"
+vmid: 0
+hostname: "{}"
+hwaddr: "{}"
+
+deploy:
+  enabled: false
+  activated_at: null
+
+network:
+  bridge: "vmbr0"
+  ip_mode: "dhcp-reserved"
+  reserved_ipv4: null
+
+boot:
+  autostart: true
+  order: 90
+
+resources:
+  cores: 2
+  memory_mb: 2048
+  disk_gb: 32
+
+storage:
+  host_path: "/opt/appdata/{}"
+  mount_point: "/appdata"
+
+lxc:
+  template: "{}"
+  unprivileged: true
+  features:
+    - "nesting=1"
+
+hardware:
+  tun_device: null
+
+host_management:
+  managed: true
+"#,
         stack_name,
         canonical_lxc_name(0, stack_name),
-        deterministic_mac_address(stack_name)
+        deterministic_mac_address(stack_name),
+        stack_name,
+        DEFAULT_LXC_TEMPLATE
     );
     fs::write(path, default_doc)
 }
@@ -101,8 +150,8 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid lxc-compose root"))?;
 
     let vmid = mapping_u32(root, "vmid").unwrap_or(0);
-    let hostname = mapping_string(root, "hostname")
-        .unwrap_or_else(|| canonical_lxc_name(vmid, stack_name));
+    let hostname =
+        mapping_string(root, "hostname").unwrap_or_else(|| canonical_lxc_name(vmid, stack_name));
     let hwaddr =
         mapping_string(root, "hwaddr").unwrap_or_else(|| deterministic_mac_address(stack_name));
     let deploy_enabled = root
@@ -176,6 +225,57 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         })
         .unwrap_or(32) as u32;
 
+    // New fields for GitOps provisioning
+    let storage = root
+        .get(Value::String("storage".to_string()))
+        .and_then(Value::as_mapping);
+    let host_storage_path = storage
+        .and_then(|m| m.get(Value::String("host_path".to_string())))
+        .and_then(Value::as_str)
+        .unwrap_or(&format!("/opt/appdata/{}", stack_name))
+        .to_string();
+    let mount_point = storage
+        .and_then(|m| m.get(Value::String("mount_point".to_string())))
+        .and_then(Value::as_str)
+        .unwrap_or("/appdata")
+        .to_string();
+
+    let lxc_config = root
+        .get(Value::String("lxc".to_string()))
+        .and_then(Value::as_mapping);
+    let lxc_template = lxc_config
+        .and_then(|m| m.get(Value::String("template".to_string())))
+        .and_then(Value::as_str)
+        .unwrap_or(DEFAULT_LXC_TEMPLATE)
+        .to_string();
+    let unprivileged = lxc_config
+        .and_then(|m| m.get(Value::String("unprivileged".to_string())))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let features = lxc_config
+        .and_then(|m| m.get(Value::String("features".to_string())))
+        .and_then(Value::as_sequence)
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_else(|| vec!["nesting=1".to_string()]);
+
+    let hardware = root
+        .get(Value::String("hardware".to_string()))
+        .and_then(Value::as_mapping);
+    let tun_device = hardware
+        .and_then(|m| m.get(Value::String("tun_device".to_string())))
+        .and_then(|v| {
+            if v.is_null() {
+                Some(None) // Explicitly null = auto-detect
+            } else {
+                v.as_bool().map(Some) // true/false = force/disable
+            }
+        })
+        .unwrap_or(None); // Missing = auto-detect
+
     Ok(StackConfig {
         stack_name: stack_name.to_string(),
         vmid,
@@ -191,6 +291,12 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         cpu_cores,
         memory_mb,
         disk_gb,
+        host_storage_path,
+        mount_point,
+        lxc_template,
+        unprivileged,
+        features,
+        tun_device,
     })
 }
 
@@ -290,6 +396,64 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
         Value::String("resources".to_string()),
         Value::Mapping(resources),
     );
+
+    // New fields for GitOps provisioning
+    let mut storage = Mapping::new();
+    storage.insert(
+        Value::String("host_path".to_string()),
+        Value::String(config.host_storage_path.clone()),
+    );
+    storage.insert(
+        Value::String("mount_point".to_string()),
+        Value::String(config.mount_point.clone()),
+    );
+    root.insert(
+        Value::String("storage".to_string()),
+        Value::Mapping(storage),
+    );
+
+    let mut lxc_config = Mapping::new();
+    lxc_config.insert(
+        Value::String("template".to_string()),
+        Value::String(config.lxc_template.clone()),
+    );
+    lxc_config.insert(
+        Value::String("unprivileged".to_string()),
+        Value::Bool(config.unprivileged),
+    );
+    let features_seq: Vec<Value> = config
+        .features
+        .iter()
+        .map(|f| Value::String(f.clone()))
+        .collect();
+    lxc_config.insert(
+        Value::String("features".to_string()),
+        Value::Sequence(features_seq),
+    );
+    root.insert(Value::String("lxc".to_string()), Value::Mapping(lxc_config));
+
+    let mut hardware = Mapping::new();
+    hardware.insert(
+        Value::String("tun_device".to_string()),
+        config
+            .tun_device
+            .map(|v| Value::Bool(v))
+            .unwrap_or(Value::Null),
+    );
+    root.insert(
+        Value::String("hardware".to_string()),
+        Value::Mapping(hardware),
+    );
+
+    // Ensure host_management.managed exists (default true)
+    if !root.contains_key(&Value::String("host_management".to_string())) {
+        let mut host_mgmt = Mapping::new();
+        host_mgmt.insert(Value::String("managed".to_string()), Value::Bool(true));
+        root.insert(
+            Value::String("host_management".to_string()),
+            Value::Mapping(host_mgmt),
+        );
+    }
 
     root.remove(Value::String("cores".to_string()));
     root.remove(Value::String("memory_mb".to_string()));
@@ -476,6 +640,19 @@ pub fn set_stack_provisioning_defaults(
     config.startup_order = startup_order;
     config.deploy_enabled = false;
     config.activated_at = None;
+    // Ensure new fields have defaults if not already set
+    if config.host_storage_path.is_empty() {
+        config.host_storage_path = format!("/opt/appdata/{}", stack_name);
+    }
+    if config.mount_point.is_empty() {
+        config.mount_point = "/appdata".to_string();
+    }
+    if config.lxc_template.is_empty() {
+        config.lxc_template = DEFAULT_LXC_TEMPLATE.to_string();
+    }
+    if config.features.is_empty() {
+        config.features = vec!["nesting=1".to_string()];
+    }
     save_stack_config(&config)
 }
 

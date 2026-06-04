@@ -10,6 +10,8 @@ const GITOPS_REPO: &str = "/opt/gitops";
 const LOCK_FILE: &str = "/tmp/gitops.lock";
 
 pub async fn run_checker(state: Arc<Mutex<AppState>>) {
+    let mut last_failsafe_window = std::time::Instant::now();
+
     {
         let mut s = state.lock().unwrap();
         s.add_log(LogLevel::Info, "GitOps checker started".to_string());
@@ -19,12 +21,78 @@ pub async fn run_checker(state: Arc<Mutex<AppState>>) {
     ensure_sparse_checkout(state.clone()).await;
 
     loop {
-        check_git_status(state.clone()).await;
+        let failsafe_interval_secs: u64 = std::env::var("FAILSAFE_SYNC_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(1800) // Changed from 3600 to 1800 (30 minutes)
+            .max(60);
 
-        let requested = {
+        let heartbeat_ttl_secs: i64 = std::env::var("HEARTBEAT_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(180)
+            .max(30);
+
+        let (heartbeat_fresh, heartbeat_age_secs) = {
+            let s = state.lock().unwrap();
+            let now = chrono::Utc::now().timestamp();
+            let age = s
+                .client_heartbeat_ts
+                .map(|ts| (now - ts).max(0))
+                .unwrap_or(i64::MAX);
+            (age <= heartbeat_ttl_secs, age)
+        };
+
+        let elapsed = last_failsafe_window.elapsed().as_secs();
+        let remaining = failsafe_interval_secs.saturating_sub(elapsed);
+        let next_sync = if heartbeat_fresh {
+            format!(
+                "failsafe in ~{}m (suppressed; heartbeat {}s ago)",
+                (remaining + 59) / 60,
+                heartbeat_age_secs
+            )
+        } else {
+            format!("failsafe in ~{}m", (remaining + 59) / 60)
+        };
+
+        check_git_status(state.clone(), next_sync).await;
+
+        let mut requested = {
             let s = state.lock().unwrap();
             s.sync_requested
         };
+
+        let failsafe_due = elapsed >= failsafe_interval_secs;
+        if failsafe_due {
+            if heartbeat_fresh {
+                let mut s = state.lock().unwrap();
+                s.add_log(
+                    LogLevel::Info,
+                    format!(
+                        "Failsafe sync window skipped: CLIENT heartbeat is fresh ({}s <= {}s)",
+                        heartbeat_age_secs, heartbeat_ttl_secs
+                    ),
+                );
+            } else {
+                {
+                    let mut s = state.lock().unwrap();
+                    s.add_log(
+                        LogLevel::Warn,
+                        format!(
+                            "Failsafe sync triggered: no CLIENT heartbeat (age={}s ttl={}s)",
+                            heartbeat_age_secs, heartbeat_ttl_secs
+                        ),
+                    );
+                    s.sync_requested = true;
+                }
+            }
+            last_failsafe_window = std::time::Instant::now();
+            requested = {
+                let s = state.lock().unwrap();
+                s.sync_requested
+            };
+        }
+
         if requested {
             perform_sync(state.clone()).await;
         }
@@ -104,7 +172,7 @@ async fn ensure_sparse_checkout(state: Arc<Mutex<AppState>>) {
 }
 
 /// Reads git metadata and updates AppState::git (runs every 30 s).
-async fn check_git_status(state: Arc<Mutex<AppState>>) {
+async fn check_git_status(state: Arc<Mutex<AppState>>, next_sync: String) {
     let stack_name = {
         let s = state.lock().unwrap();
         s.stack_name.clone()
@@ -147,7 +215,7 @@ async fn check_git_status(state: Arc<Mutex<AppState>>) {
         sparse: format!("stacks/{}/**", stack_name),
         is_synced,
         last_sync: now,
-        next_sync: "in 30m".to_string(),
+        next_sync,
         lock_free,
     };
 }
@@ -259,14 +327,14 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         s.add_log(LogLevel::Ok, "git reset complete".to_string());
     }
 
-    // ── Step 3: pre-deploy hook (setup.sh) if present ────────────────────
-    let setup_path = format!("{}/stacks/{}/setup.sh", GITOPS_REPO, stack_name);
-    if Path::new(&setup_path).exists() {
+    // ── Step 3: pre-sync hooks (pre-sync.sh) if present ────────────────────
+    let pre_sync_path = format!("{}/stacks/{}/pre-sync.sh", GITOPS_REPO, stack_name);
+    if Path::new(&pre_sync_path).exists() {
         let stack_dir = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
         let sn = stack_name.clone();
         let hook_result = tokio::task::spawn_blocking(move || {
             Command::new("bash")
-                .arg(&setup_path)
+                .arg(&pre_sync_path)
                 .current_dir(&stack_dir)
                 .output()
                 .map_err(|e| e.to_string())
@@ -285,9 +353,18 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         match hook_result {
             Ok(_) => s.add_log(
                 LogLevel::Ok,
-                format!("ts=now stack={} app=setup.sh msg=\"hook ok\"", sn),
+                format!(
+                    "ts=now level=info stack={} hook=pre-sync.sh msg=\"hook executed\"",
+                    sn
+                ),
             ),
-            Err(e) => s.add_log(LogLevel::Warn, format!("setup.sh failed: {}", e)),
+            Err(e) => s.add_log(
+                LogLevel::Warn,
+                format!(
+                    "ts=now level=warn stack={} hook=pre-sync.sh msg=\"hook failed: {}\"",
+                    sn, e
+                ),
+            ),
         }
     }
 
@@ -338,7 +415,7 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
                 Err(e) => s.add_log(
                     LogLevel::Warn,
                     format!(
-                        "ts=now stack={} app={} msg=\"pull warning: {}\"",
+                        "ts=now level=warn stack={} app={} msg=\"pull warning: {}\"",
                         stack_name,
                         app_name,
                         e.lines().next().unwrap_or("")
@@ -371,14 +448,14 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
             Ok(_) => s.add_log(
                 LogLevel::Ok,
                 format!(
-                    "ts=now stack={} app={} msg=\"containers up\"",
+                    "ts=now level=info stack={} app={} msg=\"containers up\"",
                     stack_name, app_name
                 ),
             ),
             Err(e) => s.add_log(
                 LogLevel::Error,
                 format!(
-                    "ts=now stack={} app={} msg=\"compose up failed: {}\"",
+                    "ts=now level=error stack={} app={} msg=\"compose up failed: {}\"",
                     stack_name,
                     app_name,
                     e.lines().next().unwrap_or("")
@@ -386,6 +463,9 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
             ),
         }
     }
+
+    // ── Step 5: Garbage collection - remove orphaned apps ──────────────────
+    garbage_collect_orphans(state.clone(), &stack_name).await;
 
     finish_sync(state, true, "Sync complete".to_string()).await;
 }
@@ -417,4 +497,122 @@ fn list_app_dirs(stack_dir: &str) -> Vec<String> {
         .collect();
     dirs.sort(); // deterministic order
     dirs
+}
+
+/// Remove orphaned apps that exist in /appdata but no longer exist in Git
+async fn garbage_collect_orphans(state: Arc<Mutex<AppState>>, stack_name: &str) {
+    let appdata_path = Path::new("/appdata");
+    if !appdata_path.exists() {
+        return;
+    }
+
+    let git_stack_path = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
+    let git_apps: std::collections::HashSet<String> = list_app_dirs(&git_stack_path)
+        .into_iter()
+        .filter_map(|p| {
+            Path::new(&p)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+        })
+        .collect();
+
+    let Ok(entries) = std::fs::read_dir(appdata_path) else {
+        return;
+    };
+
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let app_name = match path.file_name() {
+            Some(name) => name.to_string_lossy().to_string(),
+            None => continue,
+        };
+
+        // Skip if app still exists in Git
+        if git_apps.contains(&app_name) {
+            continue;
+        }
+
+        // App is orphaned - remove it
+        {
+            let mut s = state.lock().unwrap();
+            s.add_log(
+                LogLevel::Warn,
+                format!(
+                    "ts=now level=warn stack={} app={} msg=\"orphaned app detected (no longer in git)\"",
+                    stack_name, app_name
+                ),
+            );
+        }
+
+        // Try to stop containers in this app directory
+        let app_path = path.clone();
+        let app_name_clone = app_name.clone();
+        let _stop_result = tokio::task::spawn_blocking(move || {
+            // Try docker compose down first
+            let compose_path = app_path.join("docker-compose.yml");
+            if compose_path.exists() {
+                let down = Command::new("docker")
+                    .args(["compose", "down", "--remove-orphans"])
+                    .current_dir(&app_path)
+                    .output();
+                if down.is_ok() && down.unwrap().status.success() {
+                    return Ok(());
+                }
+            }
+
+            // Fallback: try stopping by container name pattern
+            let _ = Command::new("docker")
+                .args([
+                    "ps",
+                    "-a",
+                    "--filter",
+                    &format!("name={}", app_name_clone),
+                    "--format",
+                    "{{.ID}}",
+                ])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    let ids = String::from_utf8_lossy(&o.stdout);
+                    for id in ids.lines() {
+                        let _ = Command::new("docker").args(["stop", id]).output();
+                        let _ = Command::new("docker").args(["rm", id]).output();
+                    }
+                    Some(())
+                });
+
+            Ok::<(), String>(())
+        })
+        .await;
+
+        // Remove appdata directory
+        let path_clone = path.clone();
+        let remove_result = tokio::task::spawn_blocking(move || {
+            std::fs::remove_dir_all(&path_clone).map_err(|e| e.to_string())
+        })
+        .await
+        .unwrap_or_else(|_| Err("spawn failed".to_string()));
+
+        let mut s = state.lock().unwrap();
+        match remove_result {
+            Ok(_) => s.add_log(
+                LogLevel::Ok,
+                format!(
+                    "ts=now level=info stack={} app={} msg=\"orphaned app removed (containers stopped, data deleted)\"",
+                    stack_name, app_name
+                ),
+            ),
+            Err(e) => s.add_log(
+                LogLevel::Error,
+                format!(
+                    "ts=now level=error stack={} app={} msg=\"failed to remove orphaned app: {}\"",
+                    stack_name, app_name, e
+                ),
+            ),
+        }
+    }
 }

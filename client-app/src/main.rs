@@ -9,6 +9,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use std::collections::HashSet;
 use std::io;
 use std::time::Duration;
 use tokio::runtime::Runtime;
@@ -123,6 +124,8 @@ async fn async_main() -> Result<()> {
     let mut log_tick = tokio::time::interval(Duration::from_millis(400));
     // Drives all visual animations: pulse, ticker, sparklines. Target ~30 FPS.
     let mut anim_tick = tokio::time::interval(Duration::from_millis(33));
+    // While CLIENT is active, periodically pulse heartbeats so LXC can suppress failsafe pulls.
+    let mut heartbeat_tick = tokio::time::interval(Duration::from_secs(30));
 
     loop {
         // Drain any sync results that arrived from background tasks
@@ -231,9 +234,7 @@ async fn async_main() -> Result<()> {
                             } else {
                                 "Failed".to_string()
                             },
-                            summary: body
-                                .error_message
-                                .unwrap_or_else(|| msg.clone()),
+                            summary: body.error_message.unwrap_or_else(|| msg.clone()),
                             entries,
                         });
                     }
@@ -411,10 +412,7 @@ async fn async_main() -> Result<()> {
                     }
                     Ok(resp) => {
                         let status = resp.status();
-                        let body = resp
-                            .json::<RestoreStatusPayload>()
-                            .await
-                            .ok();
+                        let body = resp.json::<RestoreStatusPayload>().await.ok();
                         let msg = body
                             .as_ref()
                             .and_then(|b| b.error_message.clone())
@@ -454,6 +452,15 @@ async fn async_main() -> Result<()> {
 
             _ = anim_tick.tick() => {
                 app.tick_anim();
+            }
+
+            _ = heartbeat_tick.tick() => {
+                let stacks = app.stacks.clone();
+                let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+                tokio::spawn(async move {
+                    send_heartbeats(stacks, token).await;
+                    send_host_heartbeat().await;
+                });
             }
 
             res = async {
@@ -517,4 +524,49 @@ fn resolve_stack_api_ip(stack: &str) -> String {
     }
 
     std::env::var("LXC_API_IP").unwrap_or_else(|_| "127.0.0.1".to_string())
+}
+
+async fn send_heartbeats(stacks: Vec<String>, token: String) {
+    let mut targets = HashSet::new();
+    for stack in stacks {
+        let ip = resolve_stack_api_ip(&stack);
+        if !ip.trim().is_empty() {
+            targets.insert(ip);
+        }
+    }
+
+    if targets.is_empty() {
+        return;
+    }
+
+    let client = reqwest::Client::new();
+    for ip in targets {
+        let url = format!("http://{}:8080/api/heartbeat", ip);
+        let mut req = client.post(url);
+        if !token.is_empty() {
+            req = req.bearer_auth(&token);
+        }
+        let _ = req.send().await;
+    }
+}
+
+async fn send_host_heartbeat() {
+    let alias = std::env::var("HOST_HEARTBEAT_SSH_ALIAS").unwrap_or_else(|_| "HOST".to_string());
+    if alias.trim().is_empty() {
+        return;
+    }
+
+    let heartbeat_file = std::env::var("HOST_HEARTBEAT_FILE")
+        .unwrap_or_else(|_| "/tmp/homelab-client-heartbeat.ts".to_string());
+
+    let cmd = format!("date +%s > {}", heartbeat_file);
+
+    let _ = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::process::Command::new("ssh")
+            .arg(alias)
+            .arg(cmd)
+            .output(),
+    )
+    .await;
 }

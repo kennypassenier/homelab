@@ -33,6 +33,13 @@ Last updated: 2026-05-28
 - Update checks target GitHub Releases latest tag and compare against local binary version.
 - On update availability, HOST downloads the release asset, atomically replaces the local executable, and requests a service restart.
 
+## Heartbeat-Gated Failsafe Recovery
+
+- HOST runs periodic failsafe windows (default hourly).
+- CLIENT sends heartbeat pulses while the TUI is active.
+- If heartbeat is fresh at a failsafe window, HOST skips emergency update checks.
+- If heartbeat is stale/missing, HOST performs emergency release self-update check.
+
 ## GPU Clarification
 
 - GPU passthrough cannot be offloaded to LXC runtime.

@@ -664,6 +664,12 @@ fn handle_stack_config_editor(
                         cpu_cores: state.cpu_cores,
                         memory_mb: state.memory_mb,
                         disk_gb: state.disk_gb,
+                        host_storage_path: format!("/opt/appdata/{}", state.stack_name),
+                        mount_point: "/appdata".to_string(),
+                        lxc_template: "debian-12-standard 12.12-1 amd64".to_string(),
+                        unprivileged: true,
+                        features: vec!["nesting=1".to_string()],
+                        tun_device: None,
                     };
 
                     match crate::opnsense::ensure_stack_reservation(&config, known_stacks) {
@@ -714,6 +720,12 @@ fn handle_stack_config_editor(
                         cpu_cores: state.cpu_cores,
                         memory_mb: state.memory_mb,
                         disk_gb: state.disk_gb,
+                        host_storage_path: format!("/opt/appdata/{}", state.stack_name),
+                        mount_point: "/appdata".to_string(),
+                        lxc_template: "debian-12-standard 12.12-1 amd64".to_string(),
+                        unprivileged: true,
+                        features: vec!["nesting=1".to_string()],
+                        tun_device: None,
                     };
 
                     match crate::scaffold::save_stack_config(&config) {
@@ -1088,7 +1100,8 @@ fn handle_backups_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
                 phase: "Restore dispatch".to_string(),
                 summary: format!(
                     "Queueing restore dispatch for {} stack(s) with backup_id='{}'.",
-                    entries.len(), app.restore_backup_id
+                    entries.len(),
+                    app.restore_backup_id
                 ),
                 entries,
             });

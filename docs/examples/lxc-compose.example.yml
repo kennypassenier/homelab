@@ -22,4 +22,20 @@ resources:
   memory_mb: 2048
   disk_gb: 32
 
+storage:
+  host_path: "/opt/appdata/media"
+  mount_point: "/appdata"
+
+lxc:
+  template: "debian-12-standard 12.12-1 amd64"
+  unprivileged: true
+  features:
+    - "nesting=1"
+
+hardware:
+  tun_device: null  # null=auto-detect, true=force, false=disable
+
+host_management:
+  managed: true
+
 notes: "Set deploy.enabled=true when the stack is activated in CLIENT."

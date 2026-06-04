@@ -13,8 +13,11 @@ use std::path::Path;
 
 mod app;
 mod backup;
+mod bootstrap;
+mod failsafe;
 mod hardware;
 mod policy;
+mod provision;
 mod self_update;
 mod storage;
 
@@ -31,6 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Channel for the backup thread to send status lines back to the TUI
     let (backup_tx, backup_rx) = std::sync::mpsc::channel::<String>();
     backup::start_policy_enforcer(backup_tx.clone());
+    failsafe::start_failsafe_enforcer(backup_tx.clone());
 
     loop {
         // Poll backup status from background thread
@@ -158,6 +162,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 app.backup_status.push(line);
                             }
                         }
+                        KeyCode::Char('r') => {
+                            let gitops_root = std::env::var("GITOPS_REPO")
+                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            app.backup_status
+                                .push("Scanning LXC provisioning state…".to_string());
+                            match provision::plan_provisioning_changes(Path::new(&gitops_root)) {
+                                Ok(actions) => {
+                                    let lines = provision::format_provision_summary(&actions);
+                                    for line in lines {
+                                        app.backup_status.push(line);
+                                    }
+                                }
+                                Err(e) => app
+                                    .backup_status
+                                    .push(format!("Provision scan failed: {}", e)),
+                            }
+                        }
+                        KeyCode::Char('R') => {
+                            let gitops_root = std::env::var("GITOPS_REPO")
+                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            app.backup_status
+                                .push("Applying LXC provisioning changes…".to_string());
+                            match provision::apply_provisioning_changes(
+                                Path::new(&gitops_root),
+                                false,
+                            ) {
+                                Ok(actions) => {
+                                    let lines = provision::format_provision_summary(&actions);
+                                    for line in lines {
+                                        app.backup_status.push(line);
+                                    }
+                                    app.backup_status.push("Provisioning complete.".to_string());
+                                }
+                                Err(e) => app
+                                    .backup_status
+                                    .push(format!("Provision apply failed: {}", e)),
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -189,7 +231,7 @@ fn draw_main(f: &mut ratatui::Frame, app: &app::App) {
     }
 
     let footer = Paragraph::new(
-        " HOST v0.1 | TABS: ↑↓/1-5 | [b] backup | [o/O] boot preview/apply | [h/H] resources preview/apply | [U] self-update | q=quit",
+        " HOST v0.1 | TABS: ↑↓/1-5 | [b] backup | [o/O] boot | [h/H] resources | [r/R] provision preview/apply | [U] self-update | q=quit",
     )
     .style(Style::default().fg(Color::DarkGray));
     let fx = area.x + area.width - 2;

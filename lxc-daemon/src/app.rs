@@ -86,6 +86,8 @@ pub struct AppState {
     pub is_syncing: bool,
     pub sync_requested: bool,
     pub backup_paused: bool,
+    /// Unix timestamp (seconds) of last CLIENT heartbeat received.
+    pub client_heartbeat_ts: Option<i64>,
     /// Broadcast channel sender — WebSocket clients receive every new log message.
     pub log_tx: broadcast::Sender<String>,
 }
@@ -121,6 +123,7 @@ impl AppState {
             is_syncing: false,
             sync_requested: false,
             backup_paused: false,
+            client_heartbeat_ts: None,
             log_tx,
         }
     }

@@ -18,13 +18,19 @@ This document defines the stack-level lxc-compose contract used by CLIENT, HOST,
 - resources.cores: CPU core allocation hint.
 - resources.memory_mb: memory allocation hint in MiB.
 - resources.disk_gb: root disk allocation hint in GiB.
+- storage.host_path: Host storage path for stack data (default `/opt/appdata/{stack}`).
+- storage.mount_point: Container mount point for storage (default `/appdata`).
+- lxc.template: LXC container template (default `debian-12-standard 12.12-1 amd64`).
+- lxc.unprivileged: Whether container runs unprivileged (default true).
+- lxc.features: List of LXC features to enable (e.g., `nesting=1` for Docker).
+- hardware.tun_device: TUN device passthrough (null=auto-detect, true=force, false=disable).
+- host_management.managed: when false, HOST reconciliation skips this container for boot/resource applies.
 
 ## Optional Keys
 
 - hardware.gpu.enabled: boolean host passthrough hint.
 - hardware.gpu.profile: GPU profile identifier (for example intel_igpu).
 - hardware.gpu.target_app: app folder name that should receive GPU compose wiring.
-- host_management.managed: when false, HOST reconciliation skips this container for boot/resource applies.
 
 ## Activation Contract
 

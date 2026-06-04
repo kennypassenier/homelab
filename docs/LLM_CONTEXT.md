@@ -40,3 +40,4 @@ Last updated: 2026-05-28
 - CLIENT streams live deploy logs from the LXC daemon during sync actions.
 - CLIENT app rows include a Git-managed config editor for Docker image updates.
 - CLIENT can sync stack-owned DHCP reservations to OPNsense from `lxc-compose.yml` network intent.
+- LXC failsafe sync uses an inverse heartbeat policy: periodic windows run recovery only when CLIENT heartbeat is stale; windows are skipped while CLIENT is actively connected.

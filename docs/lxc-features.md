@@ -18,6 +18,8 @@ Last updated: 2026-05-28
 - setup.sh hook support.
 - compose pull/up execution per stack app folder.
 - lock-file based sync exclusion.
+- failsafe sync windows (default hourly) with heartbeat-aware suppression when CLIENT is active.
+- heartbeat API endpoint (`POST /api/heartbeat`) for CLIENT session liveness.
 - websocket telemetry endpoint for CLIENT modal/log views.
 - restore execution backend endpoint (`POST /api/restore`) with phased status events.
 

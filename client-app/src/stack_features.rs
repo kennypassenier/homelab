@@ -321,7 +321,11 @@ pub fn read_app_docker_image(stack_name: &str, app_name: &str) -> io::Result<Str
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing image field"))
 }
 
-pub fn set_app_docker_image(stack_name: &str, app_name: &str, docker_image: &str) -> io::Result<()> {
+pub fn set_app_docker_image(
+    stack_name: &str,
+    app_name: &str,
+    docker_image: &str,
+) -> io::Result<()> {
     let compose_path = format!("stacks/{}/{}/docker-compose.yml", stack_name, app_name);
     let raw = fs::read_to_string(&compose_path)?;
     let mut doc: Value = serde_yaml::from_str(&raw)
@@ -573,6 +577,13 @@ fn scaffold_promtail(stack_name: &str) -> io::Result<()> {
             "server:\n  http_listen_port: 9080\n  grpc_listen_port: 0\n\npositions:\n  filename: /tmp/positions.yaml\n\nclients:\n  - url: ${{LOKI_URL}}/loki/api/v1/push\n\nscrape_configs:\n  - job_name: docker\n    static_configs:\n      - targets: [localhost]\n        labels:\n          job: docker\n          stack: {}\n          __path__: /var/log/docker/*.log\n",
             stack_name
         ),
+    )?;
+
+    // Subscribe-intent member of the latch promtail_config group.
+    // The runtime .env is written to /appdata/ by pre-sync.sh via infisical — this file is never read by Docker.
+    fs::write(
+        format!("{}/.env", app_dir),
+        "# latch:group=promtail_config\n",
     )?;
 
     fs::write(format!("{}/.gitkeep", cfg_dir), "")

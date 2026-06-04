@@ -65,6 +65,7 @@ pub async fn run_server(state: Arc<Mutex<AppState>>) {
 
     let app = Router::new()
         .route("/api/sync", post(handle_sync))
+        .route("/api/heartbeat", post(handle_heartbeat))
         .route("/api/backup/pause", post(handle_backup_pause))
         .route("/api/backup/resume", post(handle_backup_resume))
         .route("/api/restore", post(handle_restore))
@@ -210,6 +211,32 @@ async fn handle_sync(
         Json(ApiResponse {
             status: "accepted".to_string(),
             message: "Sync queued".to_string(),
+        }),
+    )
+}
+
+async fn handle_heartbeat(
+    headers: HeaderMap,
+    State(state): State<Arc<Mutex<AppState>>>,
+) -> (StatusCode, Json<ApiResponse>) {
+    if !is_authorized(&headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse {
+                status: "unauthorized".to_string(),
+                message: "Unauthorized".to_string(),
+            }),
+        );
+    }
+
+    let mut s = state.lock().unwrap();
+    s.client_heartbeat_ts = Some(chrono::Utc::now().timestamp());
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            status: "ok".to_string(),
+            message: "heartbeat recorded".to_string(),
         }),
     )
 }

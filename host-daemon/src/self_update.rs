@@ -5,23 +5,21 @@ use std::process::Command;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
-struct ReleaseAsset {
-    name: String,
-    browser_download_url: String,
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ReleaseInfo {
     tag_name: String,
     assets: Vec<ReleaseAsset>,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+struct ReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
 pub fn check_and_apply_update() -> Result<String, String> {
-    let repo =
-        std::env::var("HOST_UPDATE_REPO").unwrap_or_else(|_| "kennypassenier/homelab".to_string());
-    let expected_asset = std::env::var("HOST_UPDATE_ASSET")
-        .unwrap_or_else(|_| "HOST-linux-x86_64-unknown-linux-gnu".to_string());
+    let repo = env_nonempty("HOST_UPDATE_REPO", "kennypassenier/homelab");
+    let expected_asset = env_nonempty("HOST_UPDATE_ASSET", "HOST-linux-x86_64-unknown-linux-gnu");
 
     let release = fetch_latest_release(&repo)?;
     let latest = normalize_version(&release.tag_name);
@@ -78,9 +76,22 @@ fn fetch_latest_release(repo: &str) -> Result<ReleaseInfo, String> {
         .json::<Vec<ReleaseInfo>>()
         .map_err(|e| e.to_string())?;
 
-    releases
+    let mut host_releases: Vec<ReleaseInfo> = releases
         .into_iter()
-        .find(|r| r.tag_name.starts_with("host-daemon-v"))
+        .filter(|r| r.tag_name.starts_with("host-daemon-v"))
+        .collect();
+
+    if host_releases.is_empty() {
+        return Err("No host-daemon-v* release found on GitHub".to_string());
+    }
+
+    host_releases.sort_by(|a, b| {
+        parse_triplet(&normalize_version(&b.tag_name)).cmp(&parse_triplet(&normalize_version(&a.tag_name)))
+    });
+
+    host_releases
+        .into_iter()
+        .next()
         .ok_or_else(|| "No host-daemon-v* release found on GitHub".to_string())
 }
 
@@ -119,14 +130,15 @@ fn github_get(url: &str) -> reqwest::blocking::RequestBuilder {
 }
 
 fn try_restart_service() -> Result<(), String> {
+    let service = env_nonempty("HOST_UPDATE_SERVICE", "host-daemon.service");
     let status = Command::new("systemctl")
-        .args(["restart", "host-daemon.service"])
+        .args(["restart", &service])
         .status()
         .map_err(|e| e.to_string())?;
     if status.success() {
         Ok(())
     } else {
-        Err("systemctl restart host-daemon.service failed".to_string())
+        Err(format!("systemctl restart {} failed", service))
     }
 }
 
@@ -137,9 +149,11 @@ fn tmp_path_for(exe: &std::path::Path) -> PathBuf {
 }
 
 fn normalize_version(v: &str) -> String {
-    v.trim_start_matches('v')
+    let stripped = v
         .trim_start_matches("host-daemon-")
-        .to_string()
+        .trim_start_matches("host-daemon-v")
+        .trim_start_matches('v');
+    stripped.to_string()
 }
 
 fn version_cmp(a: &str, b: &str) -> i32 {
@@ -155,4 +169,12 @@ fn parse_triplet(v: &str) -> (u64, u64, u64) {
         it.next().unwrap_or(0),
         it.next().unwrap_or(0),
     )
+}
+
+fn env_nonempty(key: &str, default: &str) -> String {
+    std::env::var(key)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| default.to_string())
 }

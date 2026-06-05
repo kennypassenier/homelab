@@ -33,7 +33,25 @@ Last updated: 2026-06-05
 - `GET /api/health` for service liveness.
 - `GET /api/version` for binary version (Postman-friendly).
 - `GET /api/metrics` for runtime metrics including process uptime seconds.
+- `POST /api/update` to trigger an immediate self-update check.
 - `GET /api/logs/ws` for live log streaming over WebSocket.
+
+## One-Time Bootstrap: Manual Deploy of v0.1.10+ to Proxmox
+
+If HOST is stuck on an older version and won't auto-update, bootstrap it with the fixed binary:
+
+```bash
+# On Proxmox host
+sudo systemctl stop host-daemon.service
+cd /tmp
+curl -fLo HOST-linux-x86_64-unknown-linux-gnu \
+  https://github.com/kennypassenier/homelab/releases/download/host-daemon-v0.1.10/HOST-linux-x86_64-unknown-linux-gnu
+chmod +x HOST-linux-x86_64-unknown-linux-gnu
+sudo install -m 755 HOST-linux-x86_64-unknown-linux-gnu /root/homelab/apps/HOST-linux-x86_64-unknown-linux-gnu
+sudo systemctl start host-daemon.service
+```
+
+After this bootstrap, future `make push` releases should auto-update HOST without manual intervention (watch CLIENT Logs tab for "HOST updated" messages).
 
 ## Backup Policy Enforcement
 
@@ -48,6 +66,12 @@ Last updated: 2026-06-05
 - Update checks target GitHub Releases latest tag and compare against local binary version.
 - On update availability, HOST downloads the release asset, atomically replaces the local executable, and requests a service restart.
 - HOST now emits websocket-visible lifecycle/update telemetry including startup `daemon_version=...`, update check status, and post-update reconnect expectations.
+- Empty `HOST_UPDATE_REPO` / `HOST_UPDATE_ASSET` env values fall back to safe defaults; the updater now picks the highest `host-daemon-v*` release tag.
+
+## WebSocket Keepalive
+
+- HOST websocket stream emits periodic keepalive frames while idle.
+- CLIENT websocket worker actively sends ping frames and auto-recovers stale links.
 
 ## Heartbeat-Gated Failsafe Recovery
 

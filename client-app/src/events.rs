@@ -940,6 +940,7 @@ fn handle_navigation(app: &mut App, key: KeyEvent) -> EventOutcome {
         Tab::Backups => handle_backups_nav(app, key),
         Tab::Logs => handle_logs_nav(app, key),
         Tab::HostManagement => handle_host_management_nav(app, key),
+            Tab::Update => handle_update_nav(app, key),
         _ => handle_generic_nav(app, key),
     }
 }
@@ -1225,6 +1226,39 @@ fn handle_logs_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
         _ => {}
     }
     EventOutcome::Continue
+}
+
+/// Handles key presses on the Update tab: numeric/letter keys for update triggers.
+fn handle_update_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
+    // Don't allow new updates while one is in progress
+    if app.update_in_progress.is_some() {
+        return EventOutcome::Continue;
+    }
+
+    match key.code {
+        KeyCode::Char('1') | KeyCode::Char('h') | KeyCode::Char('H') => {
+            app.update_in_progress = Some("HOST".to_string());
+            app.update_status = "Initiating HOST update...".to_string();
+            EventOutcome::Continue
+        }
+        KeyCode::Char(c) if c.is_numeric() => {
+            // Keys 2-9 map to stacks (if they exist)
+            let idx = (c.to_digit(10).unwrap_or(0) as usize).saturating_sub(2);
+            if idx < app.stacks.len() {
+                let stack = app.stacks[idx].clone();
+                app.update_in_progress = Some(stack.clone());
+                app.update_status = format!("Initiating {} update...", stack);
+            }
+            EventOutcome::Continue
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            // UPDATE ALL: trigger HOST + all stacks sequentially
+            app.update_in_progress = Some("UPDATING_ALL".to_string());
+            app.update_status = "UPDATE ALL: starting HOST...".to_string();
+            EventOutcome::Continue
+        }
+        _ => handle_generic_nav(app, key),
+    }
 }
 
 fn handle_generic_nav(app: &mut App, key: KeyEvent) -> EventOutcome {

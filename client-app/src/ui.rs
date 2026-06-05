@@ -95,6 +95,7 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
             Tab::Dashboard => draw_dashboard(f, root[1], app),
             Tab::Backups => draw_backups(f, root[1], app),
             Tab::HostManagement => draw_host_management(f, root[1], app),
+                        Tab::Update => draw_update(f, root[1], app),
             Tab::Logs => draw_logs(f, root[1], app),
         },
     }
@@ -877,6 +878,129 @@ fn format_duration(total_secs: u64) -> String {
     }
 }
 
+fn draw_update(f: &mut Frame, area: Rect, app: &App) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(4),  // Title + instructions
+            Constraint::Min(3),     // Buttons
+            Constraint::Length(3),  // Status display
+        ])
+        .split(area);
+
+    // ── Header ────────────────────────────────────────────────────────────────
+    let header = Block::default()
+        .borders(Borders::ALL)
+        .title(" Update Control ")
+        .style(Style::default().fg(Color::Cyan));
+    let instructions = vec![
+        Line::from(Span::raw("Select a daemon to update. Auto-update checks every 30 minutes.")),
+        Line::from(Span::raw("Manual trigger: force immediate update and restart.")),
+    ];
+    f.render_widget(
+        Paragraph::new(instructions).block(header),
+        layout[0],
+    );
+
+    // ── Button grid ───────────────────────────────────────────────────────────
+    let button_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![Constraint::Percentage((100 / (app.stacks.len() + 2).max(2)) as u16)])
+        .split(layout[1]);
+
+    let mut col_idx = 0;
+    let is_updating = app.update_in_progress.is_some();
+    let spinner = if is_updating {
+        match (app.pulse_phase * 4.0) as usize % 4 {
+            0 => "◐",
+            1 => "◓",
+            2 => "◑",
+            _ => "◒",
+        }
+    } else {
+        " "
+    };
+
+    // HOST button
+    if col_idx < button_cols.len() {
+        let btn_style = if app.update_in_progress == Some("HOST".to_string()) {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Green)
+        };
+        let btn_text = format!("{} HOST UPDATE {}", spinner, spinner);
+        f.render_widget(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(btn_style)
+                .title(btn_text),
+            button_cols[col_idx],
+        );
+        col_idx += 1;
+    }
+
+    // LXC buttons
+    for stack in &app.stacks {
+        if col_idx >= button_cols.len() {
+            break;
+        }
+        let btn_style = if app.update_in_progress == Some(stack.clone()) {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Magenta)
+        };
+        let btn_text = format!("{} {} {}", spinner, stack.to_uppercase(), spinner);
+        f.render_widget(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(btn_style)
+                .title(btn_text),
+            button_cols[col_idx],
+        );
+        col_idx += 1;
+    }
+
+    // UPDATE ALL button (always visible at bottom)
+    let update_all_style = if app.update_in_progress.is_some() {
+        Style::default().fg(Color::Gray)
+    } else {
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+    };
+    f.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .style(update_all_style)
+            .title(" >>> UPDATE ALL <<< "),
+        layout[2],
+    );
+
+    // ── Status display ────────────────────────────────────────────────────────
+    let status_text = if let Some(in_prog) = &app.update_in_progress {
+        format!("Updating {} ...", in_prog)
+    } else if app.update_status.is_empty() {
+        "Ready".to_string()
+    } else {
+        app.update_status.clone()
+    };
+
+    let status_color = if app.update_status.contains("failed") || app.update_status.contains("error") {
+        Color::Red
+    } else if app.update_status.contains("success") {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
+
+    let status_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Status ")
+        .style(Style::default().fg(status_color));
+    f.render_widget(
+        Paragraph::new(status_text).block(status_block),
+        layout[2],
+    );
+}
+
 fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     // ── Outer layout: header row (3) + log list (fill) + status footer (1) ──
     let chunks = Layout::default()
@@ -887,6 +1011,129 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
             Constraint::Length(1),
         ])
         .split(area);
+
+fn draw_update(f: &mut Frame, area: Rect, app: &App) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(4),  // Title + instructions
+            Constraint::Min(3),     // Buttons
+            Constraint::Length(3),  // Status display
+        ])
+        .split(area);
+
+    // ── Header ────────────────────────────────────────────────────────────────
+    let header = Block::default()
+        .borders(Borders::ALL)
+        .title(" Update Control ")
+        .style(Style::default().fg(Color::Cyan));
+    let instructions = vec![
+        Line::from(Span::raw("Select a daemon to update. Auto-update checks every 30 minutes.")),
+        Line::from(Span::raw("Manual trigger: force immediate update and restart.")),
+    ];
+    f.render_widget(
+        Paragraph::new(instructions).block(header),
+        layout[0],
+    );
+
+    // ── Button grid ───────────────────────────────────────────────────────────
+    let button_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![Constraint::Percentage((100 / (app.stacks.len() + 2).max(2)) as u16)])
+        .split(layout[1]);
+
+    let mut col_idx = 0;
+    let is_updating = app.update_in_progress.is_some();
+    let spinner = if is_updating {
+        match (app.pulse_phase * 4.0) as usize % 4 {
+            0 => "◐",
+            1 => "◓",
+            2 => "◑",
+            _ => "◒",
+        }
+    } else {
+        " "
+    };
+
+    // HOST button
+    if col_idx < button_cols.len() {
+        let btn_style = if app.update_in_progress == Some("HOST".to_string()) {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Green)
+        };
+        let btn_text = format!("{} HOST UPDATE {}", spinner, spinner);
+        f.render_widget(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(btn_style)
+                .title(btn_text),
+            button_cols[col_idx],
+        );
+        col_idx += 1;
+    }
+
+    // LXC buttons
+    for stack in &app.stacks {
+        if col_idx >= button_cols.len() {
+            break;
+        }
+        let btn_style = if app.update_in_progress == Some(stack.clone()) {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Magenta)
+        };
+        let btn_text = format!("{} {} {}", spinner, stack.to_uppercase(), spinner);
+        f.render_widget(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(btn_style)
+                .title(btn_text),
+            button_cols[col_idx],
+        );
+        col_idx += 1;
+    }
+
+    // UPDATE ALL button (always visible at bottom)
+    let update_all_style = if app.update_in_progress.is_some() {
+        Style::default().fg(Color::Gray)
+    } else {
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+    };
+    f.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .style(update_all_style)
+            .title(" >>> UPDATE ALL <<< "),
+        layout[2],
+    );
+
+    // ── Status display ────────────────────────────────────────────────────────
+    let status_text = if let Some(in_prog) = &app.update_in_progress {
+        format!("Updating {} ...", in_prog)
+    } else if app.update_status.is_empty() {
+        "Ready".to_string()
+    } else {
+        app.update_status.clone()
+    };
+
+    let status_color = if app.update_status.contains("failed") || app.update_status.contains("error") {
+        Color::Red
+    } else if app.update_status.contains("success") {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
+
+    let status_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Status ")
+        .style(Style::default().fg(status_color));
+    f.render_widget(
+        Paragraph::new(status_text).block(status_block),
+        layout[2],
+    );
+}
 
     // ── Header: Sources (scrollable) | Level filter ──────────────────────────
     let header_cols = Layout::default()

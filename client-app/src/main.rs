@@ -109,6 +109,14 @@ enum HostProbeEvent {
     },
 }
 
+enum UpdateDispatchEvent {
+    Finished {
+        target: String,
+        ok: bool,
+        msg: String,
+    },
+}
+
 /// Bootstraps the Tokio runtime and hands off to the async event loop.
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -138,6 +146,7 @@ async fn async_main() -> Result<()> {
     // Channel for background tasks (sync HTTP calls) to report results back to the TUI.
     let (sync_tx, mut sync_rx) = mpsc::unbounded_channel::<SyncEvent>();
     let (restore_tx, mut restore_rx) = mpsc::unbounded_channel::<RestoreDispatchEvent>();
+    let (update_tx, mut update_rx) = mpsc::unbounded_channel::<UpdateDispatchEvent>();
     // WebSocket event channel: receives continuous log streams from HOST and LXC stacks.
     let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<WsEvent>();
     let (host_probe_tx, mut host_probe_rx) = mpsc::unbounded_channel::<HostProbeEvent>();
@@ -155,6 +164,7 @@ async fn async_main() -> Result<()> {
     let mut host_probe_tick = tokio::time::interval(Duration::from_secs(15));
 
     let mut lxc_ws_tasks: HashMap<String, JoinHandle<()>> = HashMap::new();
+    let mut update_dispatch_running = false;
 
     // Always keep HOST websocket connected while CLIENT is running.
     let host_ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
@@ -371,6 +381,27 @@ async fn async_main() -> Result<()> {
                         uptime,
                         lxc_runtime,
                         error,
+                    );
+                }
+            }
+        }
+
+        while let Ok(event) = update_rx.try_recv() {
+            match event {
+                UpdateDispatchEvent::Finished { target, ok, msg } => {
+                    update_dispatch_running = false;
+                    app.update_in_progress = None;
+                    app.update_status = if ok {
+                        format!("{} update success: {}", target, msg)
+                    } else {
+                        format!("{} update failed: {}", target, msg)
+                    };
+                    app.push_client_logfmt(
+                        if ok { "INFO" } else { "ERROR" },
+                        Some(&target),
+                        Some("update_result"),
+                        &msg,
+                        if ok { None } else { Some(&msg) },
                     );
                 }
             }
@@ -625,6 +656,75 @@ async fn async_main() -> Result<()> {
                     }
                 }
             });
+        }
+
+        if !update_dispatch_running {
+            if let Some(target) = app.update_in_progress.clone() {
+                update_dispatch_running = true;
+                let tx = update_tx.clone();
+                let stacks = app.stacks.clone();
+                let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+
+                tokio::spawn(async move {
+                    if target == "UPDATING_ALL" {
+                        let mut ok = true;
+                        let mut parts: Vec<String> = Vec::new();
+
+                        let host_result = trigger_host_update().await;
+                        match host_result {
+                            Ok(msg) => parts.push(format!("HOST: {}", msg)),
+                            Err(err) => {
+                                ok = false;
+                                parts.push(format!("HOST: {}", err));
+                            }
+                        }
+
+                        for stack in stacks {
+                            let ip = resolve_stack_api_ip(&stack);
+                            match trigger_lxc_update(&ip, &token).await {
+                                Ok(msg) => parts.push(format!("{}: {}", stack, msg)),
+                                Err(err) => {
+                                    ok = false;
+                                    parts.push(format!("{}: {}", stack, err));
+                                }
+                            }
+                        }
+
+                        let _ = tx.send(UpdateDispatchEvent::Finished {
+                            target: "UPDATING_ALL".to_string(),
+                            ok,
+                            msg: parts.join(" | "),
+                        });
+                        return;
+                    }
+
+                    if target == "HOST" {
+                        let result = trigger_host_update().await;
+                        let (ok, msg) = match result {
+                            Ok(msg) => (true, msg),
+                            Err(err) => (false, err),
+                        };
+                        let _ = tx.send(UpdateDispatchEvent::Finished {
+                            target,
+                            ok,
+                            msg,
+                        });
+                        return;
+                    }
+
+                    let ip = resolve_stack_api_ip(&target);
+                    let result = trigger_lxc_update(&ip, &token).await;
+                    let (ok, msg) = match result {
+                        Ok(msg) => (true, msg),
+                        Err(err) => (false, err),
+                    };
+                    let _ = tx.send(UpdateDispatchEvent::Finished {
+                        target,
+                        ok,
+                        msg,
+                    });
+                });
+            }
         }
 
         // Always draw before polling — keeps the UI responsive
@@ -969,6 +1069,80 @@ fn ws_request_id(prefix: &str) -> String {
             .map(|d| d.as_millis())
             .unwrap_or(0)
     )
+}
+
+async fn request_host_update_ws() -> Result<(), String> {
+    let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+    let request_id = ws_request_id("update");
+    let payload = serde_json::json!({
+        "kind": "update_request",
+        "request_id": &request_id,
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+    });
+
+    send_ws_rpc(&ip, payload, "update_response", &request_id).await?;
+    Ok(())
+}
+
+async fn request_lxc_update_ws(ip: &str, token: &str) -> Result<(), String> {
+    let request_id = ws_request_id("update");
+    let payload = serde_json::json!({
+        "kind": "update_request",
+        "request_id": &request_id,
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+    });
+
+    send_ws_rpc(ip, payload, "update_response", &request_id).await?;
+    Ok(())
+}
+
+async fn request_host_update_http() -> Result<String, String> {
+    let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let url = format!("http://{}:8080/api/update", ip);
+    let response = reqwest::Client::new()
+        .post(url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        Ok("HOST update check started".to_string())
+    } else {
+        Err(format!("HOST update HTTP {}", response.status()))
+    }
+}
+
+async fn request_lxc_update_http(ip: &str, token: &str) -> Result<String, String> {
+    let url = format!("http://{}:8080/api/update", ip);
+    let client = reqwest::Client::new();
+    let mut req = client.post(url);
+    if !token.is_empty() {
+        req = req.bearer_auth(token);
+    }
+    let response = req.send().await.map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        Ok("LXC update started".to_string())
+    } else {
+        Err(format!("LXC update HTTP {}", response.status()))
+    }
+}
+
+async fn trigger_host_update() -> Result<String, String> {
+    if request_host_update_ws().await.is_ok() {
+        Ok("HOST update check started via websocket".to_string())
+    } else {
+        request_host_update_http().await
+    }
+}
+
+async fn trigger_lxc_update(ip: &str, token: &str) -> Result<String, String> {
+    if request_lxc_update_ws(ip, token).await.is_ok() {
+        Ok(format!("LXC update started via websocket ({})", ip))
+    } else {
+        request_lxc_update_http(ip, token).await
+    }
 }
 
 fn track_daemon_version(app: &mut App, source: &str, message: &str) {

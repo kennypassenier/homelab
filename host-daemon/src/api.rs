@@ -5,13 +5,14 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
 use crate::app::{App, LogLevel};
+use crate::self_update;
 
 #[derive(Serialize)]
 struct ApiResponse {
@@ -65,6 +66,7 @@ pub async fn run_server(app: Arc<Mutex<App>>) {
         .route("/api/health", get(handle_health))
         .route("/api/version", get(handle_version))
         .route("/api/metrics", get(handle_metrics))
+        .route("/api/update", post(handle_update))
         .route("/api/logs/ws", get(handle_ws))
         .with_state(app);
 
@@ -93,6 +95,31 @@ async fn handle_metrics(State(app): State<Arc<Mutex<App>>>) -> Json<HostMetrics>
     Json(a.current_metrics.clone())
 }
 
+async fn handle_update(State(app): State<Arc<Mutex<App>>>) -> Json<ApiResponse> {
+    {
+        let mut a = app.lock().unwrap();
+        a.add_log(
+            LogLevel::Info,
+            "HOST update requested via HTTP API".to_string(),
+        );
+    }
+
+    let app_clone = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let result = self_update::check_and_apply_update();
+        let mut a = app_clone.lock().unwrap();
+        match result {
+            Ok(msg) => a.add_log(LogLevel::Info, format!("[update-http] {}", msg)),
+            Err(err) => a.add_log(LogLevel::Error, format!("[update-http] {}", err)),
+        }
+    });
+
+    Json(ApiResponse {
+        status: "accepted".to_string(),
+        message: "HOST update check started".to_string(),
+    })
+}
+
 async fn handle_ws(ws: WebSocketUpgrade, State(app): State<Arc<Mutex<App>>>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_ws_client(socket, app))
 }
@@ -110,8 +137,19 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
         }
     }
 
+    let mut keepalive_tick = tokio::time::interval(std::time::Duration::from_secs(20));
+
     loop {
         tokio::select! {
+            _ = keepalive_tick.tick() => {
+                let keepalive = serde_json::json!({
+                    "kind": "ws_keepalive",
+                    "component": "host-daemon"
+                });
+                if socket.send(Message::Text(keepalive.to_string())).await.is_err() {
+                    break;
+                }
+            }
             result = rx.recv() => {
                 match result {
                     Ok(msg) => {
@@ -125,6 +163,45 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
             }
             msg = socket.recv() => {
                 match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        // Handle RPC messages from CLIENT (update_request, etc.)
+                        if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if let Some(kind) = req.get("kind").and_then(|v| v.as_str()) {
+                                let request_id = req.get("request_id").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                if kind == "update_request" {
+                                    {
+                                        let mut guard = app.lock().unwrap();
+                                        guard.add_log(
+                                            LogLevel::Info,
+                                            "HOST update requested via WebSocket RPC".to_string(),
+                                        );
+                                    }
+
+                                    let app_clone = app.clone();
+                                    tokio::task::spawn_blocking(move || {
+                                        let result = self_update::check_and_apply_update();
+                                        let mut guard = app_clone.lock().unwrap();
+                                        match result {
+                                            Ok(msg) => guard.add_log(LogLevel::Info, format!("[update-rpc] {}", msg)),
+                                            Err(err) => guard.add_log(LogLevel::Error, format!("[update-rpc] {}", err)),
+                                        }
+                                    });
+
+                                    let response = serde_json::json!({
+                                        "kind": "update_response",
+                                        "request_id": request_id,
+                                        "ok": true,
+                                        "message": "HOST update check started"
+                                    });
+                                    let _ = socket.send(Message::Text(response.to_string())).await;
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        let _ = socket.send(Message::Pong(payload)).await;
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(_)) => break,
                     _ => {} // ignore ping/pong/binary from client

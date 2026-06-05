@@ -130,6 +130,7 @@ HOST currently cares about:
 - `HOST_UPDATE_REPO`
 - `HOST_UPDATE_ASSET`
 - optional `HOST_UPDATE_TOKEN`
+- optional `HOST_UPDATE_SERVICE` (default `host-daemon.service`)
 - optional `LXC_<STACK>_IP` values used during backup orchestration
 - optional `RESTIC_REPO_BASE` for HOST daemon per-stack restic target base
 - optional `RCLONE_CONFIG_FILE` for rclone-backed restic repositories (Google Drive, etc.)
@@ -145,6 +146,10 @@ LXC currently cares about:
 - `STACK_IP`
 - `GITOPS_REPO_URL`
 - optional `GITOPS_REPO_TOKEN`
+- optional `LXC_SELF_UPDATE_CMD` (overrides full update command used by update APIs)
+- optional `LXC_DAEMON_IMAGE` (default `ghcr.io/kennypassenier/homelab-lxc-daemon:latest`)
+- optional `LXC_DAEMON_COMPOSE_DIR` (default `/opt/lxc-daemon`)
+- optional `LXC_DAEMON_COMPOSE_SERVICE` (default `lxc-daemon`)
 
 ## 5. Stack Secret Files
 

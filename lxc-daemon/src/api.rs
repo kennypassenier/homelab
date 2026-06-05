@@ -72,6 +72,21 @@ struct WsHeartbeatResponse {
 }
 
 #[derive(Deserialize)]
+struct WsUpdateRequest {
+    kind: String,
+    request_id: String,
+    token: Option<String>,
+}
+
+#[derive(Serialize)]
+struct WsUpdateResponse {
+    kind: String,
+    request_id: String,
+    ok: bool,
+    message: String,
+}
+
+#[derive(Deserialize)]
 struct WsRestoreRequest {
     kind: String,
     request_id: String,
@@ -138,6 +153,7 @@ pub async fn run_server(state: Arc<Mutex<AppState>>) {
     let app = Router::new()
         .route("/api/sync", post(handle_sync))
         .route("/api/heartbeat", post(handle_heartbeat))
+        .route("/api/update", post(handle_update))
         .route("/api/backup/pause", post(handle_backup_pause))
         .route("/api/backup/resume", post(handle_backup_resume))
         .route("/api/restore", post(handle_restore))
@@ -262,8 +278,20 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
         }
     }
 
+    let mut keepalive_tick = tokio::time::interval(std::time::Duration::from_secs(20));
+
     loop {
         tokio::select! {
+            _ = keepalive_tick.tick() => {
+                let keepalive = serde_json::json!({
+                    "kind": "ws_keepalive",
+                    "component": "lxc-daemon",
+                    "stack": stack_name
+                });
+                if socket.send(Message::Text(keepalive.to_string())).await.is_err() {
+                    break;
+                }
+            }
             result = rx.recv() => {
                 match result {
                     Ok(msg) => {
@@ -363,6 +391,47 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
                                         })
                                         .unwrap_or_else(|_| {
                                             "{\"kind\":\"heartbeat_response\",\"ok\":true,\"message\":\"heartbeat recorded\"}".to_string()
+                                        }),
+                                    ))
+                                    .await;
+                                continue;
+                            }
+                        }
+
+                        if let Ok(req) = serde_json::from_str::<WsUpdateRequest>(&text) {
+                            if req.kind == "update_request" {
+                                if !is_ws_authorized(req.token.as_deref()) {
+                                    let _ = socket
+                                        .send(Message::Text(
+                                            serde_json::to_string(&WsUpdateResponse {
+                                                kind: "update_response".to_string(),
+                                                request_id: req.request_id,
+                                                ok: false,
+                                                message: "Unauthorized".to_string(),
+                                            })
+                                            .unwrap_or_else(|_| {
+                                                "{\"kind\":\"update_response\",\"ok\":false,\"message\":\"Unauthorized\"}".to_string()
+                                            }),
+                                        ))
+                                        .await;
+                                    continue;
+                                }
+
+                                let state_clone = state.clone();
+                                tokio::spawn(async move {
+                                    let _ = perform_lxc_self_update(state_clone).await;
+                                });
+
+                                let _ = socket
+                                    .send(Message::Text(
+                                        serde_json::to_string(&WsUpdateResponse {
+                                            kind: "update_response".to_string(),
+                                            request_id: req.request_id,
+                                            ok: true,
+                                            message: "LXC update check started".to_string(),
+                                        })
+                                        .unwrap_or_else(|_| {
+                                            "{\"kind\":\"update_response\",\"ok\":false,\"message\":\"serialization error\"}".to_string()
                                         }),
                                     ))
                                     .await;
@@ -566,6 +635,10 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
                             );
                         }
                     }
+                    Some(Ok(Message::Ping(payload))) => {
+                        let _ = socket.send(Message::Pong(payload)).await;
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(_)) => break,
                     _ => {} // ignore ping/pong/binary from client
@@ -632,6 +705,100 @@ async fn handle_heartbeat(
             message: "heartbeat recorded".to_string(),
         }),
     )
+}
+
+async fn handle_update(
+    headers: HeaderMap,
+    State(state): State<Arc<Mutex<AppState>>>,
+) -> (StatusCode, Json<ApiResponse>) {
+    if !is_authorized(&headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse {
+                status: "unauthorized".to_string(),
+                message: "Unauthorized".to_string(),
+            }),
+        );
+    }
+
+    tokio::spawn(async move {
+        let _ = perform_lxc_self_update(state).await;
+    });
+
+    (
+        StatusCode::ACCEPTED,
+        Json(ApiResponse {
+            status: "accepted".to_string(),
+            message: "LXC update check started".to_string(),
+        }),
+    )
+}
+
+async fn perform_lxc_self_update(state: Arc<Mutex<AppState>>) -> Result<String, String> {
+    let update_cmd = std::env::var("LXC_SELF_UPDATE_CMD")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| {
+            let image = std::env::var("LXC_DAEMON_IMAGE")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "ghcr.io/kennypassenier/homelab-lxc-daemon:latest".to_string());
+            let compose_dir = std::env::var("LXC_DAEMON_COMPOSE_DIR")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "/opt/lxc-daemon".to_string());
+            let service = std::env::var("LXC_DAEMON_COMPOSE_SERVICE")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "lxc-daemon".to_string());
+
+            format!(
+                "docker pull {image} && cd {compose_dir} && docker compose up -d --force-recreate --no-deps {service}",
+            )
+        });
+
+    {
+        let mut s = state.lock().unwrap();
+        s.add_log(
+            LogLevel::Info,
+            format!("LXC self-update requested via API (cmd={})", update_cmd),
+        );
+    }
+
+    let output = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("sh")
+            .args(["-lc", &update_cmd])
+            .output()
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let message = if stdout.is_empty() {
+            "LXC update applied (image pull + service recreate)".to_string()
+        } else {
+            format!("LXC update applied: {}", stdout)
+        };
+        let mut s = state.lock().unwrap();
+        s.add_log(LogLevel::Ok, message.clone());
+        Ok(message)
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            "LXC self-update command failed".to_string()
+        } else {
+            format!("LXC self-update failed: {}", stderr)
+        };
+        let mut s = state.lock().unwrap();
+        s.add_log(LogLevel::Error, message.clone());
+        Err(message)
+    }
 }
 
 // ── Backup pause / resume ──────────────────────────────────────────────────

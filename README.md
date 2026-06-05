@@ -9,8 +9,10 @@ Welcome to the Homelab GitOps repository. This project contains the infrastructu
 - Deployment order, required tokens, and env templates are documented in `docs/deployment.md`.
 - HOST runs headless-only in deployed mode.
 - CLIENT keeps persistent websocket connections to HOST and active LXC stacks with automatic reconnect behavior.
+- CLIENT/HOST/LXC websocket links now use active keepalive traffic to prevent stale idle disconnects.
 - Upgrade visibility: HOST and LXC emit `daemon_version=...` lifecycle logs; CLIENT highlights version changes and reconnect transitions in the Logs tab.
 - HOST API quick checks (for Postman/curl): `GET /api/health`, `GET /api/version`, `GET /api/metrics` on `http://<host-ip>:8080`.
+- Update triggers: `POST /api/update` on HOST and LXC starts immediate update checks outside the periodic windows.
 
 ## 🚀 Quick Start: Central Managers
 

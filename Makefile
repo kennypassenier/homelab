@@ -105,20 +105,20 @@ version-check:
 	@git tag -l 'lxc-daemon-v*' --sort=-version:refname | head -1 || echo "  (none found)"
 	@echo "  Current LXC version: $(LXC_VERSION)"
 
-# Increment the patch version for the host application
+# Increment the patch version for the host application by calling bash directly
 version-bump-host:
 	@echo "Auto-bumping HOST version (patch increment)..."
-	@./scripts/shared/bump-patch-version.sh $(HOST_SRC)/Cargo.toml HOST
+	@bash ./scripts/shared/bump-patch-version.sh $(HOST_SRC)/Cargo.toml HOST
 
-# Increment the patch version for the client application
+# Increment the patch version for the client application by calling bash directly
 version-bump-client:
 	@echo "Auto-bumping CLIENT version (patch increment)..."
-	@./scripts/shared/bump-patch-version.sh $(CLIENT_SRC)/Cargo.toml CLIENT
+	@bash ./scripts/shared/bump-patch-version.sh $(CLIENT_SRC)/Cargo.toml CLIENT
 
-# Increment the patch version for the lxc application
+# Increment the patch version for the lxc application by calling bash directly
 version-bump-lxc:
 	@echo "Auto-bumping LXC version (patch increment)..."
-	@./scripts/shared/bump-patch-version.sh $(LXC_SRC)/Cargo.toml LXC
+	@bash ./scripts/shared/bump-patch-version.sh $(LXC_SRC)/Cargo.toml LXC
 
 # Build the Docker image and immediately push it
 docker: docker-build-only docker-push

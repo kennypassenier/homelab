@@ -247,6 +247,34 @@ Operational notes:
 - HOST logs go to the systemd journal in headless mode.
 - CLIENT heartbeat writes still work independently of whether you are attached to HOST over SSH.
 
+Day-to-day HOST operations:
+
+```bash
+# Check whether HOST is up
+systemctl status host-daemon.service
+
+# Follow live HOST logs
+journalctl -u host-daemon.service -f
+
+# Show recent HOST logs (last 200 lines)
+journalctl -u host-daemon.service -n 200 --no-pager
+
+# Restart HOST after config or binary updates
+systemctl restart host-daemon.service
+
+# Stop HOST manually
+systemctl stop host-daemon.service
+
+# Start HOST manually
+systemctl start host-daemon.service
+
+# Confirm service is enabled at boot
+systemctl is-enabled host-daemon.service
+
+# Confirm restart policy
+systemctl show host-daemon.service -p Restart -p RestartSec
+```
+
 ## 7. Verification Checklist
 
 After deployment, verify:

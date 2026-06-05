@@ -66,7 +66,10 @@ build: build-client build-host build-lxc
 build-client:
 	cd $(CLIENT_SRC) && cargo build --release
 	@mkdir -p $(APPS_DIR)
-	cp $(CLIENT_SRC)/target/release/$(CLIENT_NAME) $(APPS_DIR)/$(CLIENT_NAME)
+	@tmp="$(APPS_DIR)/$(CLIENT_NAME).new"; \
+	cp $(CLIENT_SRC)/target/release/$(CLIENT_NAME) "$$tmp" && \
+	chmod +x "$$tmp" && \
+	mv -f "$$tmp" $(APPS_DIR)/$(CLIENT_NAME)
 
 # Add target and build the client application for Windows
 build-client-windows:
@@ -79,13 +82,19 @@ build-client-windows:
 build-host:
 	cd $(HOST_SRC) && cargo build --release
 	@mkdir -p $(APPS_DIR)
-	cp $(HOST_SRC)/target/release/$(HOST_NAME) $(APPS_DIR)/$(HOST_NAME)
+	@tmp="$(APPS_DIR)/$(HOST_NAME).new"; \
+	cp $(HOST_SRC)/target/release/$(HOST_NAME) "$$tmp" && \
+	chmod +x "$$tmp" && \
+	mv -f "$$tmp" $(APPS_DIR)/$(HOST_NAME)
 
 # Build the LXC daemon for Linux
 build-lxc:
 	cd $(LXC_SRC) && cargo build --release
 	@mkdir -p $(APPS_DIR)
-	cp $(LXC_SRC)/target/release/$(LXC_NAME) $(APPS_DIR)/$(LXC_NAME)
+	@tmp="$(APPS_DIR)/$(LXC_NAME).new"; \
+	cp $(LXC_SRC)/target/release/$(LXC_NAME) "$$tmp" && \
+	chmod +x "$$tmp" && \
+	mv -f "$$tmp" $(APPS_DIR)/$(LXC_NAME)
 
 # Print current application versions from their Cargo.toml files
 show-versions:
@@ -159,7 +168,10 @@ release-all: push
 release-host: version-bump-host build-host
 	@echo "Releasing host-daemon v$(HOST_VERSION)..."
 	@mkdir -p $(APPS_DIR)
-	@cp $(HOST_SRC)/target/release/$(HOST_NAME) $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
+	@tmp="$(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu.new"; \
+	cp $(HOST_SRC)/target/release/$(HOST_NAME) "$$tmp" && \
+	chmod +x "$$tmp" && \
+	mv -f "$$tmp" $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
 	@chmod +x $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
 	@git add $(HOST_SRC)/Cargo.toml
 	@git diff --cached --quiet || git commit -m "Bump host-daemon version to v$(HOST_VERSION)"
@@ -188,7 +200,10 @@ release-host: version-bump-host build-host
 release-client: version-bump-client build-client build-client-windows
 	@echo "Releasing client v$(CLIENT_VERSION)..."
 	@mkdir -p $(APPS_DIR)
-	@cp $(CLIENT_SRC)/target/release/$(CLIENT_NAME) $(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu
+	@tmp="$(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu.new"; \
+	cp $(CLIENT_SRC)/target/release/$(CLIENT_NAME) "$$tmp" && \
+	chmod +x "$$tmp" && \
+	mv -f "$$tmp" $(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu
 	@chmod +x $(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu
 	@cp $(CLIENT_SRC)/target/x86_64-pc-windows-gnu/release/$(CLIENT_NAME).exe $(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe
 	@chmod +x $(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe
@@ -222,7 +237,10 @@ release-client: version-bump-client build-client build-client-windows
 release-lxc: version-bump-lxc build-lxc
 	@echo "Releasing lxc-daemon v$(LXC_VERSION)..."
 	@mkdir -p $(APPS_DIR)
-	@cp $(LXC_SRC)/target/release/$(LXC_NAME) $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu
+	@tmp="$(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu.new"; \
+	cp $(LXC_SRC)/target/release/$(LXC_NAME) "$$tmp" && \
+	chmod +x "$$tmp" && \
+	mv -f "$$tmp" $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu
 	@chmod +x $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu
 	@git add $(LXC_SRC)/Cargo.toml
 	@git diff --cached --quiet || git commit -m "Bump lxc-daemon version to v$(LXC_VERSION)"

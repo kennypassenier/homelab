@@ -14,6 +14,13 @@ Last updated: 2026-05-28
 - Boot policy reconciliation (preview/apply) from stack `lxc-compose.yml` intent.
 - Hot-applicable CPU/memory reconciliation (preview/apply) from stack `lxc-compose.yml` intent.
 
+## Runtime Modes
+
+- When launched in a terminal, HOST starts the Ratatui interface for manual inspection and ad-hoc actions.
+- When launched without a TTY (for example via `systemd`), HOST automatically switches to headless mode and keeps only the background workers active.
+- The canonical host-side repo path is `~/homelab` (usually `/root/homelab` on Proxmox).
+- The canonical host env file is `~/homelab/host-daemon/.env`.
+
 ## Contract with CLIENT
 
 - HOST is invoked by CLIENT APIs.

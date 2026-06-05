@@ -9,6 +9,7 @@ use ratatui::{
     prelude::*,
     widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
 };
+use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::mpsc;
 
@@ -23,6 +24,67 @@ mod self_update;
 mod storage;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    load_host_env();
+
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        run_tui()
+    } else {
+        run_headless()
+    }
+}
+
+fn load_host_env() {
+    let candidates = [
+        std::env::var("HOST_ENV_FILE").ok(),
+        Some("host-daemon/.env".to_string()),
+        Some(default_host_env_file()),
+        Some(".env".to_string()),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        let path = Path::new(&candidate);
+        if path.exists() {
+            let _ = dotenvy::from_path(path);
+            break;
+        }
+    }
+}
+
+fn default_gitops_repo() -> String {
+    std::env::var("GITOPS_REPO").unwrap_or_else(|_| {
+        std::env::var("HOME")
+            .map(|home| format!("{}/homelab", home))
+            .unwrap_or_else(|_| "/root/homelab".to_string())
+    })
+}
+
+fn default_host_env_file() -> String {
+    format!("{}/host-daemon/.env", default_gitops_repo())
+}
+
+fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
+    let (status_tx, status_rx) = mpsc::channel::<String>();
+    backup::start_policy_enforcer(status_tx.clone());
+    failsafe::start_failsafe_enforcer(status_tx.clone());
+    start_update_checker(status_tx);
+
+    println!(
+        "HOST running in headless mode (gitops_root={})",
+        default_gitops_repo()
+    );
+
+    loop {
+        match status_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(line) => println!("{}", line),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    Ok(())
+}
+
+fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     stdout.execute(EnterAlternateScreen)?;
@@ -129,8 +191,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         KeyCode::Char('o') => {
-                            let gitops_root = std::env::var("GITOPS_REPO")
-                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            let gitops_root = default_gitops_repo();
                             for line in
                                 policy::reconcile_boot_policies(Path::new(&gitops_root), false)
                             {
@@ -138,8 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         KeyCode::Char('O') => {
-                            let gitops_root = std::env::var("GITOPS_REPO")
-                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            let gitops_root = default_gitops_repo();
                             for line in
                                 policy::reconcile_boot_policies(Path::new(&gitops_root), true)
                             {
@@ -147,8 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         KeyCode::Char('h') => {
-                            let gitops_root = std::env::var("GITOPS_REPO")
-                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            let gitops_root = default_gitops_repo();
                             for line in
                                 policy::reconcile_hot_resources(Path::new(&gitops_root), false)
                             {
@@ -156,8 +215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         KeyCode::Char('H') => {
-                            let gitops_root = std::env::var("GITOPS_REPO")
-                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            let gitops_root = default_gitops_repo();
                             for line in
                                 policy::reconcile_hot_resources(Path::new(&gitops_root), true)
                             {
@@ -165,8 +223,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         KeyCode::Char('r') => {
-                            let gitops_root = std::env::var("GITOPS_REPO")
-                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            let gitops_root = default_gitops_repo();
                             app.backup_status
                                 .push("Scanning LXC provisioning state…".to_string());
                             match provision::plan_provisioning_changes(Path::new(&gitops_root)) {
@@ -182,8 +239,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         KeyCode::Char('R') => {
-                            let gitops_root = std::env::var("GITOPS_REPO")
-                                .unwrap_or_else(|_| "/opt/gitops".to_string());
+                            let gitops_root = default_gitops_repo();
                             app.backup_status
                                 .push("Applying LXC provisioning changes…".to_string());
                             match provision::apply_provisioning_changes(
@@ -468,7 +524,7 @@ fn draw_storage(f: &mut ratatui::Frame, _app: &app::App, area: Rect) {
 }
 
 fn draw_hardware(f: &mut ratatui::Frame, _app: &app::App, area: Rect) {
-    let gitops_root = std::env::var("GITOPS_REPO").unwrap_or_else(|_| "/opt/gitops".to_string());
+    let gitops_root = default_gitops_repo();
     let gpu = hardware::check_gpu_readiness();
     let tun = hardware::check_tun_readiness();
 

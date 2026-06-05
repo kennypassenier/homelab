@@ -41,19 +41,16 @@ pct push $VMID /home/kenny/Projects/homelab/scripts/lxc/setup-latch.sh /tmp/
 pct exec $VMID /bin/bash /tmp/setup-latch.sh
 ```
 
-### 3. Set Up Credentials on CLIENT (Using Existing Infisical/Latch)
+### 3. Set Up Credentials on CLIENT
 
-Configure your credentials using your current method (Infisical or native latch):
+Configure your credentials with the native latch flow:
 
 ```bash
-# Example: Store GitHub PAT
-latch keyring set github.pat "ghp_xxxxxxxxxxxx"
-
-# Example: Store project-specific key
-latch keyring set my-app.key "secret-key-value"
+latch login
+latch init
 ```
 
-This stores credentials in your OS keyring securely.
+Use `latch key --env prod` if you want a separate production-only key.
 
 ### 4. Sync to LXC Container
 
@@ -67,20 +64,16 @@ cargo run --release --bin CLIENT -- --sync-credentials-to <lxc-container-ip>
 ```
 
 The workflow is:
-1. **CLIENT requests offer** from LXC (generate ephemeral key pair + 10-min TTL)
-2. **CLIENT encrypts payload** with offer's public key (never exposes plaintext)
-3. **LXC decrypts and applies** credentials to its keyring
+1. **Target LXC requests offer** with `latch clone offer`
+2. **Source machine creates payload** with `latch clone create --offer-stdin`
+3. **Target LXC applies payload** with `latch clone apply --stdin`
 
 ### 5. Verify Credentials Synced
 
 Inside LXC container:
 ```bash
-# Check keyring
-latch keyring list
-
-# Example output:
-# github.pat ............. ✓ set
-# my-app.key ............. ✓ set
+# Check sync status
+latch status
 ```
 
 Or via CLIENT API:
@@ -177,20 +170,14 @@ EOF
 pass init "LXC Daemon <lxc@homelab.local>"
 ```
 
-## Coexistence with Infisical
+## Current Model
 
-**Latch Clone does NOT replace Infisical yet.** Current state:
+Latch is now the primary secret workflow in this repo.
 
-- **Infisical:** Still used for app-level secret injection and backend storage
-- **Latch:** Manages OS keyring for CLI tools, Git operations, and inter-container credential migration
-
-### Gradual Migration Path
-
-1. **Phase 1 (now):** Latch Clone syncs credentials to LXC; apps still use Infisical
-2. **Phase 2:** LXC apps pull from latch keyring when available
-3. **Phase 3:** Latch becomes primary; Infisical remains optional for centralized backends
-
-You can test both side-by-side safely.
+- `latch commit` encrypts local `.env` files
+- `latch push` uploads encrypted blobs to the secrets repo
+- `latch pull` restores local `.env` files
+- `latch clone offer/create/apply` transfers credential state between machines
 
 ## Security Properties
 

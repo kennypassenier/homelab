@@ -569,7 +569,7 @@ fn scaffold_promtail(stack_name: &str) -> io::Result<()> {
     )?;
 
     // Subscribe-intent member of the latch promtail_config group.
-    // The runtime .env is written to /appdata/ by pre-sync.sh via infisical — this file is never read by Docker.
+    // The runtime .env is written to /appdata/ by pre-sync.sh via latch sync — this file is never read by Docker.
     fs::write(
         format!("{}/.env", app_dir),
         "# latch:group=promtail_config\n",

@@ -1,0 +1,1 @@
+# This use case has moved to the implemented Latch migration doc.

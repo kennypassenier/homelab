@@ -30,7 +30,7 @@ You need these services/accounts before deployment:
 - Docker / Docker Compose inside each LXC
 - Secret source for per-app `.env` material
 
-Current stack hooks in this repo already assume Infisical CLI exports in several `pre-sync.sh` files. If you keep that model, Infisical access must exist before first sync.
+Current stack hooks in this repo now assume Latch-based `.env` sync in several `pre-sync.sh` files. If you use those hooks, the host or client must be able to run `latch pull` before first sync.
 
 ## 3. GitHub Setup
 
@@ -81,6 +81,14 @@ Create these files from the examples in the repo:
 
 Use them as service `EnvironmentFile=` inputs or shell exports for local testing.
 
+For the Proxmox host, the default layout is now:
+
+- repo checkout: `~/homelab` (typically `/root/homelab`)
+- HOST env file: `~/homelab/host-daemon/.env`
+- HOST binary: `~/homelab/apps/HOST` or `~/homelab/apps/HOST-linux-x86_64-unknown-linux-gnu`
+
+When HOST is launched without a TTY, it auto-loads `host-daemon/.env` and runs headless so it can be managed by `systemd`.
+
 ### Optional Central Bundle (recommended when secrets grow)
 
 If you prefer one central source of truth, use:
@@ -115,6 +123,8 @@ CLIENT currently cares about:
 
 HOST currently cares about:
 
+- `GITOPS_REPO` (recommended: `/root/homelab`)
+- `HOST_ENV_FILE` (recommended: `/root/homelab/host-daemon/.env`)
 - `HOST_UPDATE_REPO`
 - `HOST_UPDATE_ASSET`
 - optional `HOST_UPDATE_TOKEN`
@@ -161,8 +171,9 @@ Use this order.
 - Create CLIENT env file from `client-app/.env.example`.
 
 3. Prepare the Proxmox host.
-- Install/start the HOST daemon.
-- Create HOST env file from `host-daemon/.env.example`.
+- Clone this repo to `~/homelab` on the host.
+- Restore `host-daemon/.env` in that repo checkout.
+- Install the persistent HOST service with `./install-host-service.sh`.
 - Ensure the systemd service name is `host-daemon.service` if you want self-update restarts to work unchanged.
 - Ensure `/opt/appdata` and backup storage roots exist.
 
@@ -171,9 +182,9 @@ Use this order.
  
  
 5. *(Optional)* Sync credentials to LXC via Latch Clone.
-- On CLIENT, run `./scripts/client/setup-latch.sh` to set up latch CLI + keyring.
-- Configure credentials in your keyring (see `docs/latch-clone-setup.md`).
-- Use CLIENT TUI "Secrets" menu to sync to LXC containers securely.
+- On CLIENT, run `./scripts/client/setup-latch.sh` to set up the latch CLI + keyring.
+- Configure credentials with `latch login` and `latch init` or `latch project`.
+- Use the CLIENT TUI secrets flow or `latch clone offer/create/apply` for encrypted machine transfer.
 - Latch Clone supports end-to-end encrypted credential migration without temp files.
 
 6. Deploy stacks via GitOps.
@@ -215,6 +226,26 @@ Host setup checklist:
 - From CLIENT, deploy selected stack(s).
 - Confirm LXC sparse checkout initializes correctly.
 - Confirm setup hook, compose pull, and compose up complete.
+
+## 7.1 HOST Service Bring-Up
+
+Recommended host flow:
+
+1. Clone or update the repo in `~/homelab`.
+2. Ensure `~/homelab/.latch/config.toml` is present from Git.
+3. Authenticate Latch on the host.
+4. Pull the correct secrets environment into `~/homelab`.
+5. Verify `~/homelab/host-daemon/.env` exists and points `GITOPS_REPO` to `~/homelab`.
+6. Run `./install-host-service.sh` as root.
+7. Check status with `systemctl status host-daemon.service`.
+8. Follow logs with `journalctl -u host-daemon.service -f`.
+
+Operational notes:
+
+- `systemd` is the correct runtime for "always active on reboot/crash".
+- `tmux` is fine for manual interactive testing but is not the persistent production path.
+- HOST logs go to the systemd journal in headless mode.
+- CLIENT heartbeat writes still work independently of whether you are attached to HOST over SSH.
 
 ## 7. Verification Checklist
 

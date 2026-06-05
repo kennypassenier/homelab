@@ -17,7 +17,7 @@ Every stack ships a promtail sidecar. All promtail containers point to the same 
   ```dotenv
   # latch:group=promtail_config
   ```
-- At runtime, `pre-sync.sh` writes the actual `.env` to `/appdata/<stack>/promtail/.env` via infisical export. The pragma file is not used at runtime — it is a latch metadata hint only.
+- At runtime, `pre-sync.sh` writes the actual `.env` to `/appdata/<stack>/promtail/.env` via `latch pull` or the stack-specific sync hook. The pragma file is not used at runtime — it is a latch metadata hint only.
 - When `latch push` is run, discovery reads the pragma, groups all members under `promtail_config`, encrypts the shared content once, and stores it as `group.promtail_config.enc`.
 - When `latch pull` is run, the group blob is decrypted and fanned out to all member paths.
 - `latch group list` / `latch group show promtail_config` show current membership.
@@ -33,4 +33,4 @@ Every stack ships a promtail sidecar. All promtail containers point to the same 
 - Pragma must be the **first line** of the `.env` file.
 - Group name validated to `[a-zA-Z0-9_-]+` — `promtail_config` is valid.
 - Subscribe-intent members (pragma-only, no key/value pairs) pull from the existing remote group blob; they do not define content.
-- The infisical export in `pre-sync.sh` writes the runtime `.env` to `/appdata/` and is unaffected by this change.
+- The Latch sync step in `pre-sync.sh` writes the runtime `.env` to `/appdata/` and is unaffected by this change.

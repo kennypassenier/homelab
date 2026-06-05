@@ -6,6 +6,18 @@ use std::time::Duration;
 
 use crate::provision::StackIntent;
 
+fn default_host_gitops_repo() -> String {
+    std::env::var("GITOPS_REPO").unwrap_or_else(|_| {
+        std::env::var("HOME")
+            .map(|home| format!("{}/homelab", home))
+            .unwrap_or_else(|_| "/root/homelab".to_string())
+    })
+}
+
+fn default_host_env_file() -> String {
+    format!("{}/host-daemon/.env", default_host_gitops_repo())
+}
+
 #[derive(Debug, Clone)]
 pub struct BootstrapResult {
     #[allow(dead_code)]
@@ -44,7 +56,7 @@ pub fn bootstrap_lxc(vmid: u32, intent: &StackIntent) -> Result<BootstrapResult,
     // Create directories
     create_appdata_directories(vmid, &intent.stack_name)?;
 
-    // Inject secrets (INFISICAL_ only)
+    // Inject secrets (LATCH_ only)
     inject_secrets(vmid)?;
 
     // Install dependencies
@@ -265,14 +277,16 @@ fn create_appdata_directories(vmid: u32, _stack_name: &str) -> Result<(), String
     Ok(())
 }
 
-/// Inject INFISICAL_* secrets from HOST environment
+/// Inject LATCH_* secrets from HOST environment
 fn inject_secrets(vmid: u32) -> Result<(), String> {
     // Look for env file in multiple locations
     let host_env_file = std::env::var("HOST_ENV_FILE").ok();
+    let default_env_file = default_host_env_file();
     let possible_paths = vec![
-        "/opt/gitops/host-daemon/.env",
-        "/root/.env",
         host_env_file.as_deref().unwrap_or(""),
+        default_env_file.as_str(),
+        "host-daemon/.env",
+        "/root/.env",
     ];
 
     let env_file = possible_paths
@@ -284,21 +298,21 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
         return Ok(());
     };
 
-    // Extract only INFISICAL_ variables
+    // Extract only LATCH_ variables
     let content =
         std::fs::read_to_string(env_file).map_err(|e| format!("Failed to read env file: {}", e))?;
 
-    let infisical_vars: Vec<&str> = content
+    let latch_vars: Vec<&str> = content
         .lines()
-        .filter(|line| line.starts_with("INFISICAL_"))
+        .filter(|line| line.starts_with("LATCH_"))
         .collect();
 
-    if infisical_vars.is_empty() {
-        println!("No INFISICAL_ variables found");
+    if latch_vars.is_empty() {
+        println!("No LATCH_ variables found");
         return Ok(());
     }
 
-    let secrets_content = infisical_vars.join("\n");
+    let secrets_content = latch_vars.join("\n");
 
     // Write to container /root/.env
     let temp_file = format!("/tmp/lxc-secrets-{}", vmid);
@@ -318,10 +332,10 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
         ));
     }
 
-    // Also append to /etc/environment
+    // Also append to /etc/environment so latch can run non-interactively.
     pct_exec(
         vmid,
-        "bash -c 'if [ -f /root/.env ]; then grep ^INFISICAL_ /root/.env >> /etc/environment 2>/dev/null || true; fi'",
+        "bash -c 'if [ -f /root/.env ]; then grep ^LATCH_ /root/.env >> /etc/environment 2>/dev/null || true; fi'",
     )?;
 
     // Cleanup
@@ -331,7 +345,7 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// Install dependencies (Docker, Infisical, Git, etc.)
+/// Install dependencies (Docker, Latch wrapper, Git, etc.)
 fn install_dependencies(vmid: u32) -> Result<(), String> {
     println!("Installing dependencies in LXC {}...", vmid);
 
@@ -355,10 +369,21 @@ if ! command -v docker &> /dev/null; then
     systemctl start docker
 fi
 
-# Install Infisical CLI
-if ! command -v infisical &> /dev/null; then
-    curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash
-    apt-get update -qq && apt-get install -y -qq infisical
+# Install Latch CLI wrapper backed by the official container image.
+if ! command -v latch &> /dev/null; then
+    cat > /usr/local/bin/latch <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec docker run --rm -i \
+    -v "$PWD:$PWD" \
+    -w "$PWD" \
+    -e LATCH_KEY \
+    -e LATCH_PAT \
+    -e RUST_LOG \
+    ghcr.io/kennypassenier/latch-rs:latest "$@"
+EOF
+    chmod +x /usr/local/bin/latch
 fi
 
 echo "Dependencies installed successfully"
@@ -489,19 +514,25 @@ fi
 
     // Strategy 2: Copy binary from HOST build artifacts
     let binary_paths = vec![
-        "/opt/homelab/lxc-daemon/target/release/LXC",
-        "apps/LXC-linux-x86_64-unknown-linux-gnu",
-        "lxc-daemon/target/release/LXC",
+        format!("{}/apps/LXC", default_host_gitops_repo()),
+        format!(
+            "{}/apps/LXC-linux-x86_64-unknown-linux-gnu",
+            default_host_gitops_repo()
+        ),
+        format!("{}/lxc-daemon/target/release/LXC", default_host_gitops_repo()),
+        "/opt/homelab/lxc-daemon/target/release/LXC".to_string(),
+        "apps/LXC-linux-x86_64-unknown-linux-gnu".to_string(),
+        "lxc-daemon/target/release/LXC".to_string(),
     ];
 
     for binary_path in binary_paths {
-        if Path::new(binary_path).exists() {
+        if Path::new(&binary_path).exists() {
             println!("Found LXC daemon binary at: {}", binary_path);
             let output = Command::new("pct")
                 .args([
                     "push",
                     &vmid.to_string(),
-                    binary_path,
+                    &binary_path,
                     "/usr/local/bin/lxc-daemon",
                 ])
                 .output()

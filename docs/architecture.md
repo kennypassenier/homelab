@@ -9,6 +9,8 @@ Last updated: 2026-05-28
 - CLIENT calls HOST and CLIENT calls LXC.
 - CLIENT may also call external control-plane APIs for Git-managed infrastructure intent, such as OPNsense DHCP reservation automation.
 - HOST and LXC do not call each other directly.
+- On the Proxmox host, the canonical local repo location for HOST is `~/homelab` (typically `/root/homelab`).
+- HOST auto-loads `host-daemon/.env` from the cloned repo and runs headless when started without a TTY (for example under systemd).
 
 ## GitOps and Deployment Scope
 

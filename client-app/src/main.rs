@@ -704,11 +704,7 @@ async fn async_main() -> Result<()> {
                             Ok(msg) => (true, msg),
                             Err(err) => (false, err),
                         };
-                        let _ = tx.send(UpdateDispatchEvent::Finished {
-                            target,
-                            ok,
-                            msg,
-                        });
+                        let _ = tx.send(UpdateDispatchEvent::Finished { target, ok, msg });
                         return;
                     }
 
@@ -718,11 +714,7 @@ async fn async_main() -> Result<()> {
                         Ok(msg) => (true, msg),
                         Err(err) => (false, err),
                     };
-                    let _ = tx.send(UpdateDispatchEvent::Finished {
-                        target,
-                        ok,
-                        msg,
-                    });
+                    let _ = tx.send(UpdateDispatchEvent::Finished { target, ok, msg });
                 });
             }
         }

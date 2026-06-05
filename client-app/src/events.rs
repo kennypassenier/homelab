@@ -940,7 +940,7 @@ fn handle_navigation(app: &mut App, key: KeyEvent) -> EventOutcome {
         Tab::Backups => handle_backups_nav(app, key),
         Tab::Logs => handle_logs_nav(app, key),
         Tab::HostManagement => handle_host_management_nav(app, key),
-            Tab::Update => handle_update_nav(app, key),
+        Tab::Update => handle_update_nav(app, key),
         _ => handle_generic_nav(app, key),
     }
 }

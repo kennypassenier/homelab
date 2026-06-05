@@ -86,7 +86,8 @@ fn fetch_latest_release(repo: &str) -> Result<ReleaseInfo, String> {
     }
 
     host_releases.sort_by(|a, b| {
-        parse_triplet(&normalize_version(&b.tag_name)).cmp(&parse_triplet(&normalize_version(&a.tag_name)))
+        parse_triplet(&normalize_version(&b.tag_name))
+            .cmp(&parse_triplet(&normalize_version(&a.tag_name)))
     });
 
     host_releases

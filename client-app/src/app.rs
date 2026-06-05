@@ -31,7 +31,7 @@ impl Tab {
             Tab::Scaffolding,
             Tab::Backups,
             Tab::HostManagement,
-                        Tab::Update,
+            Tab::Update,
             Tab::Logs,
         ]
     }
@@ -43,7 +43,7 @@ impl Tab {
             Tab::Scaffolding => "Scaffolding",
             Tab::Backups => "Backups",
             Tab::HostManagement => "Host Management",
-                        Tab::Update => "Update",
+            Tab::Update => "Update",
             Tab::Logs => "Logs",
         }
     }
@@ -200,10 +200,10 @@ pub struct App {
     pub sync_status: String,
     /// Backup schedule policy edited in Backups tab.
     pub backup_schedule: BackupSchedule,
-        /// Update operation in progress (stack name or "HOST").
-        pub update_in_progress: Option<String>,
-        /// Latest update result message.
-        pub update_status: String,
+    /// Update operation in progress (stack name or "HOST").
+    pub update_in_progress: Option<String>,
+    /// Latest update result message.
+    pub update_status: String,
     /// Status line in Backups tab.
     pub backup_status: String,
     /// When true, main loop dispatches a restore API request.
@@ -298,8 +298,8 @@ impl App {
             sync_queue: VecDeque::new(),
             sync_status: "Idle".to_string(),
             backup_schedule: BackupSchedule::load_or_default(),
-                        update_in_progress: None,
-                        update_status: String::new(),
+            update_in_progress: None,
+            update_status: String::new(),
             backup_status: "Backup policy loaded".to_string(),
             restore_pending: false,
             restore_stack: String::new(),

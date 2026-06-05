@@ -1,7 +1,7 @@
 //! Application state — Tab enum, App struct, and all state-management helpers.
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     fs,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -109,156 +109,15 @@ pub struct LogLine {
     pub message: String,
 }
 
-/// Cyclic mock telemetry entries used until a live WebSocket stream is connected.
-/// Each tuple is (source, level, message).
-const MOCK_SEQUENCE: &[(&str, &str, &str)] = &[
-    (
-        "lxc-cloudflared",
-        "INFO",
-        "[node-sync] Checking for upstream changes...",
-    ),
-    ("lxc-cloudflared", "INFO", "[git] Already up to date"),
-    (
-        "lxc-cloudflared",
-        "INFO",
-        "[docker] cloudflared: Image up to date",
-    ),
-    (
-        "lxc-downloader",
-        "INFO",
-        "[node-sync] Checking for upstream changes...",
-    ),
-    ("lxc-downloader", "INFO", "[git] Already up to date"),
-    (
-        "lxc-downloader",
-        "INFO",
-        "[docker] qbittorrent: Image up to date",
-    ),
-    (
-        "lxc-downloader",
-        "INFO",
-        "[promtail] Shipping 17 log lines to Loki",
-    ),
-    (
-        "lxc-gateway",
-        "INFO",
-        "[node-sync] Checking for upstream changes...",
-    ),
-    ("lxc-gateway", "INFO", "[git] Already up to date"),
-    ("lxc-gateway", "INFO", "[docker] crowdsec: Image up to date"),
-    (
-        "lxc-gateway",
-        "WARN",
-        "[crowdsec] Decision added: ban 203.0.113.42 (SSH bruteforce, 48 attempts)",
-    ),
-    (
-        "lxc-gateway",
-        "INFO",
-        "[docker] nginx-proxy-manager: Image up to date",
-    ),
-    (
-        "lxc-gateway",
-        "INFO",
-        "[promtail] Shipping 31 log lines to Loki",
-    ),
-    (
-        "lxc-media",
-        "INFO",
-        "[node-sync] Checking for upstream changes...",
-    ),
-    ("lxc-media", "INFO", "[git] Fast-forward: 1 new commit"),
-    ("lxc-media", "INFO", "[pre-sync] Running pre-sync.sh..."),
-    ("lxc-media", "INFO", "[docker] bazarr: Pulling newer image"),
-    ("lxc-media", "INFO", "[docker] bazarr: Container recreated"),
-    ("lxc-media", "INFO", "[docker] bazarr: Started"),
-    ("lxc-media", "INFO", "[docker] jellyfin: Image up to date"),
-    (
-        "lxc-media",
-        "INFO",
-        "[promtail] Shipping 52 log lines to Loki",
-    ),
-    (
-        "lxc-monitoring",
-        "INFO",
-        "[node-sync] Checking for upstream changes...",
-    ),
-    ("lxc-monitoring", "INFO", "[git] Already up to date"),
-    (
-        "lxc-monitoring",
-        "INFO",
-        "[loki] Received 100 lines from 4 sources",
-    ),
-    (
-        "lxc-monitoring",
-        "INFO",
-        "[grafana] Dashboard scraped: uptime-kuma",
-    ),
-    (
-        "lxc-monitoring",
-        "INFO",
-        "[promtail] Shipping 8 log lines to Loki",
-    ),
-    (
-        "lxc-paperless",
-        "INFO",
-        "[node-sync] Checking for upstream changes...",
-    ),
-    ("lxc-paperless", "INFO", "[git] Already up to date"),
-    (
-        "lxc-vikunja",
-        "INFO",
-        "[node-sync] Checking for upstream changes...",
-    ),
-    ("lxc-vikunja", "INFO", "[git] Already up to date"),
-    (
-        "HOST",
-        "INFO",
-        "sync-host.sh: Syncing bind-mounts to lxc-media",
-    ),
-    ("HOST", "INFO", "sync-host.sh: Sync complete"),
-    (
-        "lxc-media",
-        "INFO",
-        "[watchtower] Checking all images for updates...",
-    ),
-    (
-        "lxc-media",
-        "INFO",
-        "[watchtower] All containers up to date",
-    ),
-    (
-        "lxc-downloader",
-        "INFO",
-        "[qbittorrent] Torrent completed: ubuntu-24.04.iso (4.6 GB)",
-    ),
-    (
-        "lxc-gateway",
-        "ERROR",
-        "[nginx-proxy-manager] Upstream unreachable: lxc-vikunja:3456 (timeout)",
-    ),
-    (
-        "lxc-gateway",
-        "WARN",
-        "[crowdsec] 5 new IPs banned this cycle",
-    ),
-    (
-        "CLIENT",
-        "INFO",
-        "Git push triggered: feat(media): add bazarr",
-    ),
-    (
-        "lxc-media",
-        "INFO",
-        "[node-sync] Fast-forward: 1 new commit",
-    ),
-    ("lxc-media", "INFO", "[pre-sync] Running pre-sync.sh..."),
-    ("lxc-media", "INFO", "[docker] bazarr: Pulling image"),
-    (
-        "lxc-media",
-        "INFO",
-        "[docker] bazarr: Container created and started",
-    ),
-];
+#[derive(Clone, Debug)]
+pub struct HostLxcRuntime {
+    pub vmid: u32,
+    pub status: String,
+    pub name: String,
+    pub cpu_pct: u8,
+    pub ram_pct: u8,
+    pub uptime_secs: u64,
+}
 
 /// Returns the current wall-clock time as HH:MM:SS.
 fn current_time_str() -> String {
@@ -304,11 +163,13 @@ pub struct App {
     pub log_scroll: usize,
     /// Horizontal scroll offset for the Sources legend (index of first visible source).
     pub log_source_scroll: usize,
+    /// Currently selected source in the Logs source legend.
+    pub log_source_selected: usize,
+    /// When enabled, the Logs tab only renders lines from the selected source.
+    pub log_focus_mode: bool,
     /// Which log levels are visible (default: All).
     pub log_level_filter: LogLevelFilter,
-    /// Index into MOCK_SEQUENCE, advances on every tick.
-    log_tick: usize,
-    /// Disable synthetic log playback once real LXC telemetry arrives.
+    /// True when live log telemetry has been observed.
     pub live_logs_seen: bool,
 
     // ── Animation state (driven by anim_tick at 33 ms) ─────────────────────
@@ -346,6 +207,24 @@ pub struct App {
     pub restore_queue: VecDeque<String>,
     /// Backup snapshot id sent to restore backend.
     pub restore_backup_id: String,
+    /// SSH destination used for host connectivity polling.
+    pub host_target: String,
+    /// Whether the HOST alias is reachable over SSH.
+    pub host_connected: bool,
+    /// Last discovered Proxmox node hostname.
+    pub host_node_name: String,
+    /// Last discovered Proxmox node primary IP.
+    pub host_node_ip: String,
+    /// Last discovered host uptime string.
+    pub host_uptime: String,
+    /// Last known LXC runtime rows from `pct list` over SSH.
+    pub host_lxc_runtime: Vec<HostLxcRuntime>,
+    /// Last host polling error (shown when disconnected).
+    pub host_last_error: String,
+    /// Last observed HOST daemon version from websocket log stream.
+    pub host_daemon_version: String,
+    /// Last observed LXC daemon version per websocket source (`lxc-<stack>`).
+    pub lxc_daemon_versions: HashMap<String, String>,
 }
 
 impl App {
@@ -384,7 +263,7 @@ impl App {
             })
             .collect();
 
-        let mut app = Self {
+        let app = Self {
             active_tab: 0,
             theme: Theme::cyberpunk(),
             modal: ActiveModal::None,
@@ -396,8 +275,9 @@ impl App {
             logs: Vec::new(),
             log_scroll: 0,
             log_source_scroll: 0,
+            log_source_selected: 0,
+            log_focus_mode: false,
             log_level_filter: LogLevelFilter::All,
-            log_tick: 0,
             live_logs_seen: false,
             pulse_phase: 0.0,
             ticker_offset: 0,
@@ -417,11 +297,27 @@ impl App {
             restore_queue: VecDeque::new(),
             restore_backup_id: std::env::var("BACKUP_ID_DEFAULT")
                 .unwrap_or_else(|_| "latest".to_string()),
+            host_target: {
+                let explicit = std::env::var("HOST_SSH_TARGET").unwrap_or_default();
+                if !explicit.trim().is_empty() {
+                    explicit
+                } else {
+                    let host_ip =
+                        std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+                    let host_user =
+                        std::env::var("HOST_SSH_USER").unwrap_or_else(|_| "root".to_string());
+                    format!("{}@{}", host_user, host_ip)
+                }
+            },
+            host_connected: false,
+            host_node_name: "unknown".to_string(),
+            host_node_ip: "unknown".to_string(),
+            host_uptime: "unknown".to_string(),
+            host_lxc_runtime: Vec::new(),
+            host_last_error: "not connected yet".to_string(),
+            host_daemon_version: "unknown".to_string(),
+            lxc_daemon_versions: HashMap::new(),
         };
-        // Pre-fill with a page of mock entries so the Logs tab is not blank on startup.
-        for _ in 0..20 {
-            app.tick_logs();
-        }
         app
     }
 
@@ -521,30 +417,40 @@ impl App {
         Tab::all()[self.active_tab]
     }
 
-    /// Adds the next mock log entry to the ring buffer.
-    ///
-    /// Once the buffer exceeds 500 lines the oldest entry is dropped.
-    /// Auto-scrolling is only applied when the user has not manually scrolled up
-    /// (i.e. `log_scroll == 0`).
-    pub fn tick_logs(&mut self) {
-        if self.live_logs_seen {
-            return;
-        }
-        let (source, level, message) = MOCK_SEQUENCE[self.log_tick % MOCK_SEQUENCE.len()];
-        self.logs.push(LogLine {
-            time: current_time_str(),
-            source: source.to_string(),
-            level: level.to_string(),
-            message: message.to_string(),
-        });
-        if self.logs.len() > 500 {
-            self.logs.remove(0);
-        }
-        self.log_tick += 1;
-    }
-
     pub fn mark_live_logs_seen(&mut self) {
         self.live_logs_seen = true;
+    }
+
+    pub fn focused_source(&self) -> Option<&'static str> {
+        if !self.log_focus_mode {
+            return None;
+        }
+        LOG_SOURCES
+            .get(self.log_source_selected)
+            .map(|(name, _)| *name)
+    }
+
+    pub fn update_host_runtime(
+        &mut self,
+        connected: bool,
+        node_name: Option<String>,
+        node_ip: Option<String>,
+        uptime: Option<String>,
+        lxc_runtime: Vec<HostLxcRuntime>,
+        error: Option<String>,
+    ) {
+        self.host_connected = connected;
+        if let Some(name) = node_name {
+            self.host_node_name = name;
+        }
+        if let Some(ip) = node_ip {
+            self.host_node_ip = ip;
+        }
+        if let Some(uptime) = uptime {
+            self.host_uptime = uptime;
+        }
+        self.host_lxc_runtime = lxc_runtime;
+        self.host_last_error = error.unwrap_or_default();
     }
 
     // ── private helpers ─────────────────────────────────────────────────────

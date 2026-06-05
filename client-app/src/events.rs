@@ -1196,18 +1196,27 @@ fn handle_logs_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
         }
         // Source legend horizontal scroll.
         KeyCode::Left => {
-            app.log_source_scroll = app.log_source_scroll.saturating_sub(1);
+            app.log_source_selected = app.log_source_selected.saturating_sub(1);
+            app.log_source_scroll = app.log_source_scroll.min(app.log_source_selected);
         }
         KeyCode::Right => {
             use crate::app::LOG_SOURCES;
-            if app.log_source_scroll + 1 < LOG_SOURCES.len() {
-                app.log_source_scroll += 1;
+            if app.log_source_selected + 1 < LOG_SOURCES.len() {
+                app.log_source_selected += 1;
+                if app.log_source_selected > app.log_source_scroll + 4 {
+                    app.log_source_scroll += 1;
+                }
             }
         }
         // Cycle log-level filter.
         KeyCode::Char('f') => {
             app.log_level_filter = app.log_level_filter.next();
             // Reset scroll so we don't overshoot the filtered view.
+            app.log_scroll = 0;
+        }
+        // Toggle source focus mode on the selected source.
+        KeyCode::Char('F') => {
+            app.log_focus_mode = !app.log_focus_mode;
             app.log_scroll = 0;
         }
         KeyCode::Tab => app.tab_right(),

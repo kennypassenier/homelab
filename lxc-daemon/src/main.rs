@@ -25,6 +25,20 @@ use app::AppState;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(Mutex::new(AppState::new()));
+    {
+        let mut s = state.lock().unwrap();
+        let stack_name = s.stack_name.clone();
+        let stack_ip = s.stack_ip.clone();
+        s.add_log(
+            app::LogLevel::Info,
+            format!(
+                "LXC daemon online daemon_version={} stack={} stack_ip={}",
+                env!("CARGO_PKG_VERSION"),
+                stack_name,
+                stack_ip
+            ),
+        );
+    }
 
     // Spawn background tasks — these run concurrently while the TUI blocks the main thread
     tokio::spawn(api::run_server(state.clone()));

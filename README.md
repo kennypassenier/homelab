@@ -7,6 +7,9 @@ Welcome to the Homelab GitOps repository. This project contains the infrastructu
 - HOST daemon updates are release-driven (GitHub Releases) rather than push-triggered.
 - LXC daemon image is built and published to GHCR via change-aware GitHub Actions.
 - Deployment order, required tokens, and env templates are documented in `docs/deployment.md`.
+- HOST runs headless-only in deployed mode.
+- CLIENT keeps persistent websocket connections to HOST and active LXC stacks with automatic reconnect behavior.
+- Upgrade visibility: HOST and LXC emit `daemon_version=...` lifecycle logs; CLIENT highlights version changes and reconnect transitions in the Logs tab.
 
 ## 🚀 Quick Start: Central Managers
 

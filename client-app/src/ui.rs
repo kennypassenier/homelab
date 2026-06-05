@@ -293,6 +293,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
 
 fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
     let total_apps: usize = app.stack_dropdowns.iter().map(|d| d.apps.len()).sum();
+    let (git_status_text, git_status_color) = live_git_status_text();
 
     // Vertical split: stat row (5 rows) + stack table (rest)
     let rows = Layout::default()
@@ -353,8 +354,8 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
         stat_cols[1],
     );
     f.render_widget(
-        Paragraph::new("\n  SSH agent \u{b7} branch: main [CLEAN]")
-            .style(Style::default().fg(Color::Green))
+        Paragraph::new(format!("\n  {}", git_status_text))
+            .style(Style::default().fg(git_status_color))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -506,11 +507,23 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
     // ── Banner: >> HOST_MESH << ──────────────────────────────────────────────
     let node_count = app.stacks.len();
     let online_count = app
-        .stacks
+        .host_lxc_runtime
         .iter()
-        .enumerate()
-        .filter(|(i, _)| i % 5 != 3)
+        .filter(|row| row.status.eq_ignore_ascii_case("running"))
         .count();
+    let host_status = if app.host_connected {
+        Span::styled(
+            "HOST: ONLINE",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled(
+            "HOST: OFFLINE",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )
+    };
     let banner_line = Line::from(vec![
         Span::raw("  "),
         Span::styled(
@@ -520,12 +533,17 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
-        Span::styled("NODE: pve-01", Style::default().fg(Color::White)),
+        Span::styled(
+            format!("NODE: {}", app.host_node_name),
+            Style::default().fg(Color::White),
+        ),
         Span::raw("  \u{b7}  "),
         Span::styled(
-            "192.168.1.10",
+            &app.host_node_ip,
             Style::default().fg(Color::Rgb(100, 150, 200)),
         ),
+        Span::raw("  \u{b7}  "),
+        host_status,
         Span::raw("  \u{b7}  "),
         Span::styled(
             format!("{}/{} ONLINE", online_count, node_count),
@@ -534,11 +552,9 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  \u{b7}  "),
-        Span::styled("uptime: 47d 12h", Style::default().fg(Color::DarkGray)),
-        Span::raw("  \u{b7}  "),
         Span::styled(
-            "\u{26a0} LXC: MOCK DATA",
-            Style::default().fg(Color::Yellow),
+            format!("uptime: {}", app.host_uptime),
+            Style::default().fg(Color::DarkGray),
         ),
     ]);
     f.render_widget(
@@ -546,7 +562,7 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .title(" [ PROXMOX_NODE :: pve-01 ] ")
+                .title(" [ PROXMOX_NODE ] ")
                 .title_style(
                     Style::default()
                         .fg(Color::Cyan)
@@ -578,23 +594,42 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
     ])
     .bottom_margin(1);
 
-    // Mock uptime: cyclic values for a realistic-looking mix.
-    const MOCK_UPTIMES: &[&str] = &[
-        "47d 12h", "12d  3h", " 3d 18h", " 0d  4h", "31d  0h", "47d 12h",
-    ];
-
     let lxc_rows: Vec<Row> = app
         .stacks
         .iter()
         .enumerate()
         .map(|(i, name)| {
             let is_selected = i == app.host_selected;
-            let is_running = i % 5 != 3;
-            let id = 101 + i;
-            let ip = format!("192.168.1.{}", id);
             let container = crate::scaffold::read_stack_config(name)
                 .map(|cfg| cfg.hostname)
                 .unwrap_or_else(|_| crate::scaffold::legacy_lxc_alias(name));
+
+            let runtime = app.host_lxc_runtime.iter().find(|row| {
+                row.name == container
+                    || row.name.ends_with(&crate::scaffold::legacy_lxc_alias(name))
+                    || row.name.ends_with(name)
+            });
+
+            let is_running = runtime
+                .map(|row| row.status.eq_ignore_ascii_case("running"))
+                .unwrap_or(false);
+            let id = runtime
+                .map(|row| row.vmid.to_string())
+                .unwrap_or_else(|| "--".to_string());
+
+            let ip = if let Ok(cfg) = crate::scaffold::read_stack_config(name) {
+                if let Some(reserved) = cfg.reserved_ipv4.filter(|v| !v.trim().is_empty()) {
+                    reserved
+                } else {
+                    let env_key = format!("LXC_{}_IP", name.replace('-', "_").to_uppercase());
+                    std::env::var(&env_key)
+                        .ok()
+                        .filter(|v| !v.trim().is_empty())
+                        .unwrap_or_else(|| "unknown".to_string())
+                }
+            } else {
+                "unknown".to_string()
+            };
 
             let (status_text, status_color) = if is_running {
                 ("\u{25cf} RUN", Color::Green)
@@ -602,26 +637,25 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
                 ("\u{25cb} STP", Color::DarkGray)
             };
 
-            // CPU sparkline string from ring buffer (last 8 samples).
-            let (cpu_spark, cpu_pct, cpu_color) = if let Some(d) = app.lxc_cpu.get(i) {
-                let pct = d.back().copied().unwrap_or(0);
-                let spark = mini_spark(d, 8);
-                let color = load_color(pct);
-                (spark, pct, color)
+            let cpu_text = if runtime.is_some() { "--" } else { "n/a" };
+            let ram_text = if runtime.is_some() { "--" } else { "n/a" };
+            let uptime = if let Some(row) = runtime {
+                format_duration(row.uptime_secs)
             } else {
-                (String::from("        "), 0, Color::DarkGray)
+                "n/a".to_string()
             };
 
-            let (ram_spark, ram_pct, ram_color) = if let Some(d) = app.lxc_ram.get(i) {
-                let pct = d.back().copied().unwrap_or(0);
-                let spark = mini_spark(d, 8);
-                let color = load_color(pct);
-                (spark, pct, color)
-            } else {
-                (String::from("        "), 0, Color::DarkGray)
-            };
+            let cpu_pct = runtime.map(|row| row.cpu_pct);
+            let ram_pct = runtime.map(|row| row.ram_pct);
+            let cpu_cell = cpu_pct
+                .map(|value| format!("{:>3}%", value))
+                .unwrap_or_else(|| cpu_text.to_string());
+            let ram_cell = ram_pct
+                .map(|value| format!("{:>3}%", value))
+                .unwrap_or_else(|| ram_text.to_string());
 
-            let uptime = MOCK_UPTIMES[i % MOCK_UPTIMES.len()];
+            let cpu_color = load_color(cpu_pct.unwrap_or(0));
+            let ram_color = load_color(ram_pct.unwrap_or(0));
 
             // Selected row pulses; others use default style.
             let row_style = if is_selected {
@@ -634,13 +668,11 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
 
             Row::new(vec![
                 Cell::from(status_text).style(Style::default().fg(status_color)),
-                Cell::from(id.to_string()).style(Style::default().fg(Color::White)),
+                Cell::from(id).style(Style::default().fg(Color::White)),
                 Cell::from(container).style(Style::default().fg(Color::White)),
                 Cell::from(ip).style(Style::default().fg(Color::Rgb(100, 150, 200))),
-                Cell::from(format!("{} {:2}%", cpu_spark, cpu_pct))
-                    .style(Style::default().fg(cpu_color)),
-                Cell::from(format!("{} {:2}%", ram_spark, ram_pct))
-                    .style(Style::default().fg(ram_color)),
+                Cell::from(cpu_cell).style(Style::default().fg(cpu_color)),
+                Cell::from(ram_cell).style(Style::default().fg(ram_color)),
                 Cell::from(uptime).style(Style::default().fg(Color::DarkGray)),
             ])
             .style(row_style)
@@ -761,6 +793,20 @@ fn draw_host_management(f: &mut Frame, area: Rect, app: &App) {
             .style(Style::default().fg(Color::DarkGray)),
         ssh_inner[1],
     );
+
+    if !app.host_connected && !app.host_last_error.is_empty() {
+        let warn = Rect {
+            x: cols[0].x,
+            y: cols[0].y.saturating_add(cols[0].height.saturating_sub(1)),
+            width: cols[0].width,
+            height: 1,
+        };
+        f.render_widget(
+            Paragraph::new(format!("HOST probe error: {}", app.host_last_error))
+                .style(Style::default().fg(Color::Red)),
+            warn,
+        );
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -781,30 +827,54 @@ fn draw_ticker_bar(f: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-/// Maps a CPU/RAM percentage to a colour: green < 50, yellow < 80, red otherwise.
-fn load_color(pct: u64) -> Color {
-    if pct < 50 {
+fn live_git_status_text() -> (String, Color) {
+    let Ok(repo) = git2::Repository::discover(".") else {
+        return ("git unavailable".to_string(), Color::DarkGray);
+    };
+
+    let branch = repo
+        .head()
+        .ok()
+        .and_then(|head| head.shorthand().map(ToString::to_string))
+        .unwrap_or_else(|| "detached".to_string());
+
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true);
+
+    let dirty = repo
+        .statuses(Some(&mut opts))
+        .map(|statuses| !statuses.is_empty())
+        .unwrap_or(false);
+
+    if dirty {
+        (format!("branch: {} [DIRTY]", branch), Color::Yellow)
+    } else {
+        (format!("branch: {} [CLEAN]", branch), Color::Green)
+    }
+}
+
+fn load_color(percent: u8) -> Color {
+    if percent < 50 {
         Color::Green
-    } else if pct < 80 {
+    } else if percent < 80 {
         Color::Yellow
     } else {
         Color::Red
     }
 }
 
-/// Builds a mini Unicode block-character sparkline from the last `width` samples.
-///
-/// Maps 0–100 → ' ' `▁▂▃▄▅▆▇█` (9 levels).
-fn mini_spark(data: &std::collections::VecDeque<u64>, width: usize) -> String {
-    const BLOCKS: [char; 9] = [
-        ' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
-        '\u{2588}',
-    ];
-    let start = data.len().saturating_sub(width);
-    data.iter()
-        .skip(start)
-        .map(|&v| BLOCKS[((v * 8 / 100) as usize).min(8)])
-        .collect()
+fn format_duration(total_secs: u64) -> String {
+    let days = total_secs / 86_400;
+    let hours = (total_secs % 86_400) / 3_600;
+    let minutes = (total_secs % 3_600) / 60;
+
+    if days > 0 {
+        format!("{}d {:02}h", days, hours)
+    } else if hours > 0 {
+        format!("{}h {:02}m", hours, minutes)
+    } else {
+        format!("{}m", minutes)
+    }
 }
 
 fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
@@ -819,7 +889,6 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         .split(area);
 
     // ── Header: Sources (scrollable) | Level filter ──────────────────────────
-    // The level block has a fixed width; sources get everything else.
     let header_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(0), Constraint::Length(30)])
@@ -827,7 +896,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 
     // -- Sources block (horizontal scroll) -----------------------------------
     {
-        let inner_w = header_cols[0].width.saturating_sub(4) as usize; // borders + 2 pad
+        let inner_w = header_cols[0].width.saturating_sub(4) as usize;
         let has_left = app.log_source_scroll > 0;
 
         let mut spans: Vec<Span> = Vec::new();
@@ -842,19 +911,19 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         }
 
         let mut last_end = app.log_source_scroll;
-        for (name, color) in &LOG_SOURCES[app.log_source_scroll..] {
-            // "+2": reserve space for " ▶" right-indicator if there are more after
+        for (idx, (name, color)) in LOG_SOURCES.iter().enumerate().skip(app.log_source_scroll) {
             let label = format!("{} ", name);
-            let reserve = if last_end + 1 < LOG_SOURCES.len() {
-                2
-            } else {
-                0
-            };
+            let reserve = if last_end + 1 < LOG_SOURCES.len() { 2 } else { 0 };
             if used + label.len() + reserve > inner_w {
                 break;
             }
-            spans.push(Span::styled(label.clone(), Style::default().fg(*color)));
-            used += label.len();
+            let style = if app.log_source_selected == idx {
+                Style::default().fg(*color).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(*color)
+            };
+            spans.push(Span::styled(label, style));
+            used += name.len() + 1;
             last_end += 1;
         }
 
@@ -870,7 +939,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .title(" Sources  [</> scroll] ")
+                    .title(" Sources  [</> select] [Shift+f focus] ")
                     .style(app.theme.border_style()),
             ),
             header_cols[0],
@@ -920,12 +989,13 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     // ── Scrollable log list ──────────────────────────────────────────────────
     let inner_height = chunks[1].height.saturating_sub(2) as usize;
     let scroll = app.log_scroll;
+    let focused_source = app.focused_source();
 
-    // Apply level filter.
     let filtered: Vec<_> = app
         .logs
         .iter()
         .filter(|l| app.log_level_filter.matches(&l.level))
+        .filter(|l| focused_source.map(|source| l.source == source).unwrap_or(true))
         .collect();
 
     let total = filtered.len();
@@ -954,16 +1024,20 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let title = if scroll == 0 {
-        " Logs [live] "
+        if let Some(source) = focused_source {
+            format!(" Logs [live | focus:{}] ", source)
+        } else {
+            " Logs [live] ".to_string()
+        }
     } else {
-        " Logs [paused \u{2014} End to resume] "
+        " Logs [paused \u{2014} End to resume] ".to_string()
     };
     f.render_widget(
         List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .title(title)
+                .title(title.as_str())
                 .title_style(if scroll == 0 {
                     Style::default().fg(Color::Green)
                 } else {
@@ -976,24 +1050,28 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 
     // ── Footer: counts and hints ─────────────────────────────────────────────
     let all_total = app.logs.len();
+    let focus_suffix = focused_source
+        .map(|source| format!("  |  focus={}", source))
+        .unwrap_or_default();
     let status = if app.log_level_filter == LogLevelFilter::All {
         if scroll == 0 {
             format!(
-                " {} lines  |  \u{2191}/\u{2193} scroll  |  </> source",
-                all_total
+                " {} lines  |  \u{2191}/\u{2193} scroll  |  </> source{}",
+                all_total, focus_suffix
             )
         } else {
             format!(
-                " -{} from latest  |  End = resume  |  {}/{} lines",
-                scroll, end, total
+                " -{} from latest  |  End = resume  |  {}/{} lines{}",
+                scroll, end, total, focus_suffix
             )
         }
     } else {
         format!(
-            " {} / {} lines  [filter: {}]  |  [f] cycle filter",
+            " {} / {} lines  [filter: {}]  |  [f] cycle filter{}",
             total,
             all_total,
-            app.log_level_filter.label()
+            app.log_level_filter.label(),
+            focus_suffix
         )
     };
     f.render_widget(

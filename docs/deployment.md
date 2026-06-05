@@ -116,7 +116,9 @@ CLIENT currently cares about:
 - `OPNSENSE_API_SECRET`
 - optional `OPNSENSE_TLS_INSECURE=true` for lab-only self-signed HTTPS
 - optional per-stack overrides like `LXC_MEDIA_IP`
-- optional `HOST_HEARTBEAT_SSH_ALIAS` for HOST heartbeat pulse target (default `HOST`)
+- optional `HOST_IP` for direct Proxmox host targeting (default `10.10.5.250`)
+- optional `HOST_SSH_USER` for host SSH login user (default `root`)
+- optional `HOST_SSH_TARGET` to override full SSH destination (`user@host`)
 - optional `HOST_HEARTBEAT_FILE` remote heartbeat file path (default `/tmp/homelab-client-heartbeat.ts`)
 
 ### HOST variables

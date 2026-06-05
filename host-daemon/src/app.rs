@@ -29,21 +29,62 @@ pub struct BackupStack {
     pub snapshots: u32,
 }
 
+#[derive(Clone, Debug)]
+pub enum LogLevel {
+    Info,
+    Warn,
+    Error,
+    Ok,
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Info => write!(f, "INFO"),
+            Self::Warn => write!(f, "WARN"),
+            Self::Error => write!(f, "ERROR"),
+            Self::Ok => write!(f, "OK"),
+        }
+    }
+}
+
+use crate::api::HostMetrics;
+
 pub struct App {
     pub tab: usize,
     /// Live status lines from the backup orchestrator thread.
     pub backup_status: Vec<String>,
     /// True while a backup run is in progress.
     pub backup_running: bool,
+    /// Broadcast channel for streaming logs to WebSocket clients.
+    pub log_tx: tokio::sync::broadcast::Sender<String>,
+    /// Current HOST metrics exposed via /api/metrics endpoint.
+    pub current_metrics: HostMetrics,
 }
 
 impl App {
     pub fn new() -> Self {
+        let (log_tx, _) = tokio::sync::broadcast::channel(128);
         Self {
             tab: 0,
             backup_status: Vec::new(),
             backup_running: false,
+            log_tx,
+            current_metrics: HostMetrics {
+                hostname: "proxmox".to_string(),
+                ip: "10.10.5.250".to_string(),
+                uptime_secs: 0,
+            },
         }
+    }
+
+    pub fn add_log(&mut self, level: LogLevel, message: String) {
+        let log_line = format!("[{}] {}", level, message);
+        self.backup_status.push(log_line.clone());
+        if self.backup_status.len() > 500 {
+            self.backup_status.remove(0);
+        }
+        let _ = self.log_tx.send(log_line);
     }
 
     pub fn lxc_nodes(&self) -> Vec<LxcNode> {

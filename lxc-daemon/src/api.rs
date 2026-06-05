@@ -21,6 +21,78 @@ struct ApiResponse {
 }
 
 #[derive(Deserialize)]
+struct WsExecRequest {
+    kind: String,
+    request_id: String,
+    cmd: String,
+    args: Option<Vec<String>>,
+    stdin: Option<String>,
+    timeout_secs: Option<u64>,
+    token: Option<String>,
+}
+
+#[derive(Serialize)]
+struct WsExecResponse {
+    kind: String,
+    request_id: String,
+    exit_code: Option<i32>,
+    stdout: Option<String>,
+    stderr: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct WsSyncRequest {
+    kind: String,
+    request_id: String,
+    token: Option<String>,
+}
+
+#[derive(Serialize)]
+struct WsSyncResponse {
+    kind: String,
+    request_id: String,
+    ok: bool,
+    message: String,
+}
+
+#[derive(Deserialize)]
+struct WsHeartbeatRequest {
+    kind: String,
+    request_id: String,
+    token: Option<String>,
+}
+
+#[derive(Serialize)]
+struct WsHeartbeatResponse {
+    kind: String,
+    request_id: String,
+    ok: bool,
+    message: String,
+}
+
+#[derive(Deserialize)]
+struct WsRestoreRequest {
+    kind: String,
+    request_id: String,
+    token: Option<String>,
+    scope: String,
+    stack_names: Vec<String>,
+    backup_id: String,
+    verify_only: bool,
+    skip_post_hooks: bool,
+}
+
+#[derive(Serialize)]
+struct WsRestoreResponse {
+    kind: String,
+    request_id: String,
+    ok: bool,
+    status: RestoreStatus,
+    message: String,
+}
+
+#[derive(Deserialize)]
 pub struct ExecRequest {
     pub cmd: String,
     pub args: Option<Vec<String>>,
@@ -164,9 +236,31 @@ async fn handle_ws(
 }
 
 async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
-    // Subscribe before dropping the lock so we don't miss the first messages.
-    let mut rx: broadcast::Receiver<String> = { state.lock().unwrap().log_tx.subscribe() };
-    drop(state);
+    // Subscribe and capture current ring-buffer snapshot before entering stream loop.
+    let (mut rx, snapshot, stack_name): (broadcast::Receiver<String>, Vec<String>, String) = {
+        let guard = state.lock().unwrap();
+        let stack_name = guard.stack_name.clone();
+        let snapshot = guard
+            .logs
+            .iter()
+            .map(|entry| {
+                format!(
+                    "ts={} level={} stack={} msg=\"{}\"",
+                    entry.timestamp.format("%Y-%m-%dT%H:%M:%S"),
+                    entry.level,
+                    stack_name,
+                    entry.msg.replace('"', "'")
+                )
+            })
+            .collect::<Vec<_>>();
+        (guard.log_tx.subscribe(), snapshot, stack_name)
+    };
+
+    for line in snapshot {
+        if socket.send(Message::Text(line)).await.is_err() {
+            return;
+        }
+    }
 
     loop {
         tokio::select! {
@@ -185,6 +279,293 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
             }
             msg = socket.recv() => {
                 match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(req) = serde_json::from_str::<WsSyncRequest>(&text) {
+                            if req.kind == "sync_request" {
+                                if !is_ws_authorized(req.token.as_deref()) {
+                                    let _ = socket
+                                        .send(Message::Text(
+                                            serde_json::to_string(&WsSyncResponse {
+                                                kind: "sync_response".to_string(),
+                                                request_id: req.request_id,
+                                                ok: false,
+                                                message: "Unauthorized".to_string(),
+                                            })
+                                            .unwrap_or_else(|_| {
+                                                "{\"kind\":\"sync_response\",\"ok\":false,\"message\":\"Unauthorized\"}".to_string()
+                                            }),
+                                        ))
+                                        .await;
+                                    continue;
+                                }
+
+                                {
+                                    let mut s = state.lock().unwrap();
+                                    s.sync_requested = true;
+                                    s.add_log(
+                                        LogLevel::Info,
+                                        "Sync triggered via WebSocket RPC".to_string(),
+                                    );
+                                }
+
+                                let _ = socket
+                                    .send(Message::Text(
+                                        serde_json::to_string(&WsSyncResponse {
+                                            kind: "sync_response".to_string(),
+                                            request_id: req.request_id,
+                                            ok: true,
+                                            message: "Sync queued".to_string(),
+                                        })
+                                        .unwrap_or_else(|_| {
+                                            "{\"kind\":\"sync_response\",\"ok\":true,\"message\":\"Sync queued\"}".to_string()
+                                        }),
+                                    ))
+                                    .await;
+                                continue;
+                            }
+                        }
+
+                        if let Ok(req) = serde_json::from_str::<WsHeartbeatRequest>(&text) {
+                            if req.kind == "heartbeat_request" {
+                                if !is_ws_authorized(req.token.as_deref()) {
+                                    let _ = socket
+                                        .send(Message::Text(
+                                            serde_json::to_string(&WsHeartbeatResponse {
+                                                kind: "heartbeat_response".to_string(),
+                                                request_id: req.request_id,
+                                                ok: false,
+                                                message: "Unauthorized".to_string(),
+                                            })
+                                            .unwrap_or_else(|_| {
+                                                "{\"kind\":\"heartbeat_response\",\"ok\":false,\"message\":\"Unauthorized\"}".to_string()
+                                            }),
+                                        ))
+                                        .await;
+                                    continue;
+                                }
+
+                                {
+                                    let mut s = state.lock().unwrap();
+                                    s.client_heartbeat_ts = Some(chrono::Utc::now().timestamp());
+                                    s.add_log(
+                                        LogLevel::Debug,
+                                        "Heartbeat recorded via WebSocket RPC".to_string(),
+                                    );
+                                }
+
+                                let _ = socket
+                                    .send(Message::Text(
+                                        serde_json::to_string(&WsHeartbeatResponse {
+                                            kind: "heartbeat_response".to_string(),
+                                            request_id: req.request_id,
+                                            ok: true,
+                                            message: "heartbeat recorded".to_string(),
+                                        })
+                                        .unwrap_or_else(|_| {
+                                            "{\"kind\":\"heartbeat_response\",\"ok\":true,\"message\":\"heartbeat recorded\"}".to_string()
+                                        }),
+                                    ))
+                                    .await;
+                                continue;
+                            }
+                        }
+
+                        if let Ok(req) = serde_json::from_str::<WsRestoreRequest>(&text) {
+                            if req.kind == "restore_request" {
+                                if !is_ws_authorized(req.token.as_deref()) {
+                                    let scope = match req.scope.as_str() {
+                                        "Environment" => restore::RestoreScope::Environment,
+                                        _ => restore::RestoreScope::Stack,
+                                    };
+                                    let denied_request = RestoreRequest {
+                                        scope,
+                                        stack_names: req.stack_names,
+                                        backup_id: req.backup_id,
+                                        verify_only: req.verify_only,
+                                        skip_post_hooks: req.skip_post_hooks,
+                                    };
+                                    let mut denied = RestoreStatus::new(
+                                        "restore-unauthorized".to_string(),
+                                        &denied_request,
+                                    );
+                                    denied.error_message = Some("Unauthorized".to_string());
+
+                                    let _ = socket
+                                        .send(Message::Text(
+                                            serde_json::to_string(&WsRestoreResponse {
+                                                kind: "restore_response".to_string(),
+                                                request_id: req.request_id,
+                                                ok: false,
+                                                status: denied,
+                                                message: "Unauthorized".to_string(),
+                                            })
+                                            .unwrap_or_else(|_| {
+                                                "{\"kind\":\"restore_response\",\"ok\":false,\"message\":\"Unauthorized\"}".to_string()
+                                            }),
+                                        ))
+                                        .await;
+                                    continue;
+                                }
+
+                                let scope = match req.scope.as_str() {
+                                    "Environment" => restore::RestoreScope::Environment,
+                                    _ => restore::RestoreScope::Stack,
+                                };
+                                let restore_req = RestoreRequest {
+                                    scope,
+                                    stack_names: req.stack_names,
+                                    backup_id: req.backup_id,
+                                    verify_only: req.verify_only,
+                                    skip_post_hooks: req.skip_post_hooks,
+                                };
+
+                                {
+                                    let mut s = state.lock().unwrap();
+                                    s.add_log(
+                                        LogLevel::Info,
+                                        format!(
+                                            "Restore requested via WebSocket RPC: backup_id={} stacks={}",
+                                            restore_req.backup_id,
+                                            restore_req.stack_names.join(",")
+                                        ),
+                                    );
+                                }
+
+                                let lxc_api_base = std::env::var("LXC_API_BASE")
+                                    .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+                                let backup_root = std::env::var("BACKUP_ROOT")
+                                    .unwrap_or_else(|_| "/backups".to_string());
+                                let host_appdata_root = std::env::var("HOST_APPDATA_ROOT")
+                                    .unwrap_or_else(|_| "/appdata".to_string());
+
+                                let status = restore::execute_restore(
+                                    &restore_req,
+                                    &lxc_api_base,
+                                    &backup_root,
+                                    &host_appdata_root,
+                                )
+                                .await;
+
+                                {
+                                    let mut s = state.lock().unwrap();
+                                    if status.success {
+                                        s.sync_requested = true;
+                                        s.add_log(
+                                            LogLevel::Ok,
+                                            format!(
+                                                "Restore completed via WebSocket RPC: operation_id={}",
+                                                status.operation_id
+                                            ),
+                                        );
+                                    } else {
+                                        s.add_log(
+                                            LogLevel::Error,
+                                            format!(
+                                                "Restore failed via WebSocket RPC: operation_id={} error={}",
+                                                status.operation_id,
+                                                status
+                                                    .error_message
+                                                    .clone()
+                                                    .unwrap_or_else(|| "unknown".to_string())
+                                            ),
+                                        );
+                                    }
+                                }
+
+                                let _ = socket
+                                    .send(Message::Text(
+                                        serde_json::to_string(&WsRestoreResponse {
+                                            kind: "restore_response".to_string(),
+                                            request_id: req.request_id,
+                                            ok: status.success,
+                                            message: if status.success {
+                                                "Restore completed".to_string()
+                                            } else {
+                                                status
+                                                    .error_message
+                                                    .clone()
+                                                    .unwrap_or_else(|| "Restore failed".to_string())
+                                            },
+                                            status,
+                                        })
+                                        .unwrap_or_else(|_| {
+                                            "{\"kind\":\"restore_response\",\"ok\":false,\"message\":\"serialization error\"}".to_string()
+                                        }),
+                                    ))
+                                    .await;
+                                continue;
+                            }
+                        }
+
+                        if let Ok(req) = serde_json::from_str::<WsExecRequest>(&text) {
+                            if req.kind != "exec_request" {
+                                continue;
+                            }
+
+                            if !is_ws_authorized(req.token.as_deref()) {
+                                let _ = socket.send(Message::Text(
+                                    serde_json::to_string(&WsExecResponse {
+                                        kind: "exec_response".to_string(),
+                                        request_id: req.request_id,
+                                        exit_code: None,
+                                        stdout: None,
+                                        stderr: None,
+                                        error: Some("Unauthorized".to_string()),
+                                    }).unwrap_or_else(|_| "{\"kind\":\"exec_response\",\"error\":\"Unauthorized\"}".to_string())
+                                )).await;
+                                continue;
+                            }
+
+                            let timeout_secs = req.timeout_secs.unwrap_or(30);
+                            let result = tokio::time::timeout(
+                                std::time::Duration::from_secs(timeout_secs),
+                                execute_command(&req.cmd, req.args.unwrap_or_default(), req.stdin),
+                            ).await;
+
+                            let response = match result {
+                                Ok(Ok(output)) => WsExecResponse {
+                                    kind: "exec_response".to_string(),
+                                    request_id: req.request_id.clone(),
+                                    exit_code: Some(output.exit_code),
+                                    stdout: Some(output.stdout),
+                                    stderr: Some(output.stderr),
+                                    error: None,
+                                },
+                                Ok(Err(err)) => WsExecResponse {
+                                    kind: "exec_response".to_string(),
+                                    request_id: req.request_id.clone(),
+                                    exit_code: None,
+                                    stdout: None,
+                                    stderr: None,
+                                    error: Some(err.to_string()),
+                                },
+                                Err(_) => WsExecResponse {
+                                    kind: "exec_response".to_string(),
+                                    request_id: req.request_id.clone(),
+                                    exit_code: None,
+                                    stdout: None,
+                                    stderr: None,
+                                    error: Some(format!("Command timed out after {}s", timeout_secs)),
+                                },
+                            };
+
+                            if let Ok(payload) = serde_json::to_string(&response) {
+                                if socket.send(Message::Text(payload)).await.is_err() {
+                                    break;
+                                }
+                            }
+
+                            let mut s = state.lock().unwrap();
+                            s.add_log(
+                                LogLevel::Info,
+                                format!(
+                                    "WebSocket exec handled cmd={} stack={}",
+                                    req.cmd,
+                                    stack_name
+                                ),
+                            );
+                        }
+                    }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(_)) => break,
                     _ => {} // ignore ping/pong/binary from client
@@ -192,6 +573,14 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
             }
         }
     }
+}
+
+fn is_ws_authorized(token: Option<&str>) -> bool {
+    let expected = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+    if expected.is_empty() {
+        return true;
+    }
+    token.map(|t| t == expected).unwrap_or(false)
 }
 
 // ── Sync trigger ───────────────────────────────────────────────────────────
@@ -231,6 +620,10 @@ async fn handle_heartbeat(
 
     let mut s = state.lock().unwrap();
     s.client_heartbeat_ts = Some(chrono::Utc::now().timestamp());
+    s.add_log(
+        LogLevel::Debug,
+        "Heartbeat recorded via HTTP API".to_string(),
+    );
 
     (
         StatusCode::OK,
@@ -396,7 +789,7 @@ async fn execute_command(
     cmd: &str,
     args: Vec<String>,
     stdin: Option<String>,
-) -> Result<ExecResponse, Box<dyn std::error::Error>> {
+) -> Result<ExecResponse, Box<dyn std::error::Error + Send + Sync>> {
     let mut child = tokio::process::Command::new(cmd)
         .args(args)
         .stdin(if stdin.is_some() {

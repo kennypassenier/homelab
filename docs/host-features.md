@@ -1,6 +1,6 @@
 # HOST Features (Current)
 
-Last updated: 2026-05-28
+Last updated: 2026-06-05
 
 ## Scope
 
@@ -16,8 +16,8 @@ Last updated: 2026-05-28
 
 ## Runtime Modes
 
-- When launched in a terminal, HOST starts the Ratatui interface for manual inspection and ad-hoc actions.
-- When launched without a TTY (for example via `systemd`), HOST automatically switches to headless mode and keeps only the background workers active.
+- HOST runs as a headless daemon in deployed operation.
+- Runtime workers (API server, backup policy enforcer, failsafe enforcer, release update checker) stay active continuously.
 - The canonical host-side repo path is `~/homelab` (usually `/root/homelab` on Proxmox).
 - The canonical host env file is `~/homelab/host-daemon/.env`.
 
@@ -39,6 +39,7 @@ Last updated: 2026-05-28
 - HOST supports release-based self-update, not per-push updates.
 - Update checks target GitHub Releases latest tag and compare against local binary version.
 - On update availability, HOST downloads the release asset, atomically replaces the local executable, and requests a service restart.
+- HOST now emits websocket-visible lifecycle/update telemetry including startup `daemon_version=...`, update check status, and post-update reconnect expectations.
 
 ## Heartbeat-Gated Failsafe Recovery
 

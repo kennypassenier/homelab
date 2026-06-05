@@ -9,15 +9,16 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::signal;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio_tungstenite::connect_async;
 
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
 mod app;
@@ -35,9 +36,12 @@ mod stack_features;
 mod theme;
 mod transactions;
 mod ui;
+mod ws_client;
 
 use app::App;
+use app::HostLxcRuntime;
 use blast_radius::{ActiveModal, OperationEntry, OperationProgressState};
+use ws_client::WsEvent;
 
 enum SyncEvent {
     Accepted {
@@ -78,12 +82,30 @@ struct RestoreStatusPayload {
     error_message: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct WsRestoreResponsePayload {
+    ok: bool,
+    status: RestoreStatusPayload,
+    message: String,
+}
+
 enum RestoreDispatchEvent {
     Finished {
         stack: String,
         payload: Option<RestoreStatusPayload>,
         ok: bool,
         msg: String,
+    },
+}
+
+enum HostProbeEvent {
+    Snapshot {
+        connected: bool,
+        node_name: Option<String>,
+        node_ip: Option<String>,
+        uptime: Option<String>,
+        lxc_runtime: Vec<HostLxcRuntime>,
+        error: Option<String>,
     },
 }
 
@@ -116,16 +138,49 @@ async fn async_main() -> Result<()> {
     // Channel for background tasks (sync HTTP calls) to report results back to the TUI.
     let (sync_tx, mut sync_rx) = mpsc::unbounded_channel::<SyncEvent>();
     let (restore_tx, mut restore_rx) = mpsc::unbounded_channel::<RestoreDispatchEvent>();
+    // WebSocket event channel: receives continuous log streams from HOST and LXC stacks.
+    let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<WsEvent>();
+    let (host_probe_tx, mut host_probe_rx) = mpsc::unbounded_channel::<HostProbeEvent>();
 
     let sigint = signal::ctrl_c();
     tokio::pin!(sigint);
 
-    // Drives mock log messages (and will drive live WebSocket ticks once connected).
-    let mut log_tick = tokio::time::interval(Duration::from_millis(400));
     // Drives all visual animations: pulse, ticker, sparklines. Target ~30 FPS.
     let mut anim_tick = tokio::time::interval(Duration::from_millis(33));
     // While CLIENT is active, periodically pulse heartbeats so LXC can suppress failsafe pulls.
     let mut heartbeat_tick = tokio::time::interval(Duration::from_secs(30));
+    // Reconcile websocket workers against active stacks.
+    let mut ws_reconcile_tick = tokio::time::interval(Duration::from_secs(5));
+    // Refresh host runtime telemetry for Host Management tab.
+    let mut host_probe_tick = tokio::time::interval(Duration::from_secs(15));
+
+    let mut lxc_ws_tasks: HashMap<String, JoinHandle<()>> = HashMap::new();
+
+    // Always keep HOST websocket connected while CLIENT is running.
+    let host_ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let ws_tx_host = ws_tx.clone();
+    tokio::spawn(async move {
+        ws_client::connect_host_logs(&host_ip, 8080, ws_tx_host).await;
+    });
+
+    for (stack, ip) in active_stack_targets(&app.stacks) {
+        let stack_clone = stack.clone();
+        let ip_clone = ip.clone();
+        let ws_tx_lxc = ws_tx.clone();
+        let handle = tokio::spawn(async move {
+            ws_client::connect_lxc_logs(&stack_clone, &ip_clone, 8080, ws_tx_lxc).await;
+        });
+        lxc_ws_tasks.insert(stack, handle);
+    }
+
+    {
+        let host_target = app.host_target.clone();
+        let tx = host_probe_tx.clone();
+        tokio::spawn(async move {
+            let snapshot = probe_host_runtime(&host_target).await;
+            let _ = tx.send(snapshot);
+        });
+    }
 
     loop {
         // Drain any sync results that arrived from background tasks
@@ -248,6 +303,72 @@ async fn async_main() -> Result<()> {
             }
         }
 
+        while let Ok(event) = ws_rx.try_recv() {
+            match event {
+                WsEvent::LogMessage { source, line } => {
+                    // Parse log level from the line (e.g., "[INFO] message" or "message")
+                    let (level, message) = if let Some(stripped) = line.strip_prefix("[INFO] ") {
+                        ("INFO".to_string(), stripped.to_string())
+                    } else if let Some(stripped) = line.strip_prefix("[ERROR] ") {
+                        ("ERROR".to_string(), stripped.to_string())
+                    } else if let Some(stripped) = line.strip_prefix("[WARN] ") {
+                        ("WARN".to_string(), stripped.to_string())
+                    } else if let Some(stripped) = line.strip_prefix("[OK] ") {
+                        ("OK".to_string(), stripped.to_string())
+                    } else {
+                        ("INFO".to_string(), line.clone())
+                    };
+
+                    app.push_log(&source, &level, &message);
+                    track_daemon_version(&mut app, &source, &message);
+                }
+                WsEvent::ConnectionStateChanged {
+                    source,
+                    connected,
+                    error,
+                } => {
+                    if source == "HOST" {
+                        app.host_connected = connected;
+                        let msg = if connected {
+                            "HOST WebSocket connected".to_string()
+                        } else {
+                            format!(
+                                "HOST WebSocket disconnected: {}",
+                                error.unwrap_or_else(|| "unknown".to_string())
+                            )
+                        };
+                        app.push_log("HOST", if connected { "INFO" } else { "WARN" }, &msg);
+                    } else {
+                        let msg = if connected {
+                            format!("{} WebSocket connected", source)
+                        } else {
+                            format!(
+                                "{} WebSocket disconnected: {}",
+                                source,
+                                error.unwrap_or_else(|| "unknown".to_string())
+                            )
+                        };
+                        app.push_log(&source, if connected { "INFO" } else { "WARN" }, &msg);
+                    }
+                }
+            }
+        }
+
+        while let Ok(event) = host_probe_rx.try_recv() {
+            match event {
+                HostProbeEvent::Snapshot {
+                    connected,
+                    node_name,
+                    node_ip,
+                    uptime,
+                    lxc_runtime,
+                    error,
+                } => {
+                    app.update_host_runtime(connected, node_name, node_ip, uptime, lxc_runtime, error);
+                }
+            }
+        }
+
         // Promote queued batch sync work into the single-sync execution slot.
         if !app.sync_pending {
             if let Some(next_stack) = app.sync_queue.pop_front() {
@@ -278,11 +399,54 @@ async fn async_main() -> Result<()> {
                 "INFO",
                 Some(&stack),
                 Some("sync_dispatch"),
-                &format!("POST {}", url),
+                &format!("WS sync_request -> {}:8080", ip),
                 None,
             );
 
             tokio::spawn(async move {
+                if request_lxc_sync_ws(&ip, &token).await.is_ok() {
+                    let _ = tx.send(SyncEvent::Accepted {
+                        stack: stack.clone(),
+                    });
+
+                    let ws_url = format!("ws://{}:8080/api/logs/ws", ip);
+                    if let Ok((mut socket, _)) = connect_async(&ws_url).await {
+                        let mut streamed_any = false;
+                        loop {
+                            match tokio::time::timeout(Duration::from_secs(2), socket.next()).await {
+                                Ok(Some(Ok(message))) => {
+                                    if let Ok(text) = message.into_text() {
+                                        streamed_any = true;
+                                        let _ = tx.send(SyncEvent::LiveLog {
+                                            stack: stack.clone(),
+                                            line: text,
+                                        });
+                                    }
+                                }
+                                Ok(Some(Err(err))) => {
+                                    let _ = tx.send(SyncEvent::Finished {
+                                        stack,
+                                        ok: false,
+                                        msg: format!("Live log stream failed: {}", err),
+                                    });
+                                    return;
+                                }
+                                Ok(None) => break,
+                                Err(_) if streamed_any => break,
+                                Err(_) => break,
+                            }
+                        }
+                    }
+
+                    let _ = tx.send(SyncEvent::Finished {
+                        stack,
+                        ok: true,
+                        msg: "Sync completed via WebSocket RPC; live logs streamed to CLIENT"
+                            .to_string(),
+                    });
+                    return;
+                }
+
                 let client = reqwest::Client::new();
                 let mut req = client.post(&url);
                 if !token.is_empty() {
@@ -363,7 +527,7 @@ async fn async_main() -> Result<()> {
                 "INFO",
                 Some(&stack),
                 Some("restore_dispatch"),
-                &format!("POST {} backup_id={}", url, backup_id),
+                &format!("WS restore_request -> {}:8080 backup_id={}", ip, backup_id),
                 None,
             );
 
@@ -375,6 +539,25 @@ async fn async_main() -> Result<()> {
                     verify_only: false,
                     skip_post_hooks: false,
                 };
+
+                if let Ok(ws_body) = request_lxc_restore_ws(&ip, &token, &payload).await {
+                    let msg = if ws_body.ok {
+                        ws_body.message
+                    } else {
+                        ws_body
+                            .status
+                            .error_message
+                            .clone()
+                            .unwrap_or(ws_body.message)
+                    };
+                    let _ = tx.send(RestoreDispatchEvent::Finished {
+                        stack,
+                        payload: Some(ws_body.status),
+                        ok: ws_body.ok,
+                        msg,
+                    });
+                    return;
+                }
 
                 let client = reqwest::Client::new();
                 let mut req = client.post(&url).json(&payload);
@@ -446,10 +629,6 @@ async fn async_main() -> Result<()> {
                 return Ok(());
             }
 
-            _ = log_tick.tick() => {
-                app.tick_logs();
-            }
-
             _ = anim_tick.tick() => {
                 app.tick_anim();
             }
@@ -460,6 +639,59 @@ async fn async_main() -> Result<()> {
                 tokio::spawn(async move {
                     send_heartbeats(stacks, token).await;
                     send_host_heartbeat().await;
+                });
+            }
+
+            _ = ws_reconcile_tick.tick() => {
+                let active_targets = active_stack_targets(&app.stacks);
+                let active_set: HashSet<String> = active_targets.iter().map(|(stack, _)| stack.clone()).collect();
+
+                for (stack, ip) in active_targets {
+                    if lxc_ws_tasks.contains_key(&stack) {
+                        continue;
+                    }
+                    let ws_tx_lxc = ws_tx.clone();
+                    let stack_clone = stack.clone();
+                    let ip_clone = ip.clone();
+                    let handle = tokio::spawn(async move {
+                        ws_client::connect_lxc_logs(&stack_clone, &ip_clone, 8080, ws_tx_lxc).await;
+                    });
+                    lxc_ws_tasks.insert(stack.clone(), handle);
+                    app.push_client_logfmt(
+                        "INFO",
+                        Some(&stack),
+                        Some("ws_reconcile"),
+                        "started LXC websocket worker for active stack",
+                        None,
+                    );
+                }
+
+                let stale: Vec<String> = lxc_ws_tasks
+                    .keys()
+                    .filter(|stack| !active_set.contains(*stack))
+                    .cloned()
+                    .collect();
+
+                for stack in stale {
+                    if let Some(handle) = lxc_ws_tasks.remove(&stack) {
+                        handle.abort();
+                        app.push_client_logfmt(
+                            "INFO",
+                            Some(&stack),
+                            Some("ws_reconcile"),
+                            "stopped LXC websocket worker because stack is inactive",
+                            None,
+                        );
+                    }
+                }
+            }
+
+            _ = host_probe_tick.tick() => {
+                let host_target = app.host_target.clone();
+                let tx = host_probe_tx.clone();
+                tokio::spawn(async move {
+                    let snapshot = probe_host_runtime(&host_target).await;
+                    let _ = tx.send(snapshot);
                 });
             }
 
@@ -475,6 +707,33 @@ async fn async_main() -> Result<()> {
                             }
                             events::EventOutcome::Reload => {
                                 app.reload_stacks_and_dropdowns();
+
+                                let active_targets = active_stack_targets(&app.stacks);
+                                let active_set: HashSet<String> = active_targets.iter().map(|(stack, _)| stack.clone()).collect();
+
+                                for (stack, ip) in active_targets {
+                                    if lxc_ws_tasks.contains_key(&stack) {
+                                        continue;
+                                    }
+                                    let ws_tx_lxc = ws_tx.clone();
+                                    let stack_clone = stack.clone();
+                                    let ip_clone = ip.clone();
+                                    let handle = tokio::spawn(async move {
+                                        ws_client::connect_lxc_logs(&stack_clone, &ip_clone, 8080, ws_tx_lxc).await;
+                                    });
+                                    lxc_ws_tasks.insert(stack, handle);
+                                }
+
+                                let stale: Vec<String> = lxc_ws_tasks
+                                    .keys()
+                                    .filter(|stack| !active_set.contains(*stack))
+                                    .cloned()
+                                    .collect();
+                                for stack in stale {
+                                    if let Some(handle) = lxc_ws_tasks.remove(&stack) {
+                                        handle.abort();
+                                    }
+                                }
                             }
                             events::EventOutcome::Continue => {}
                         }
@@ -509,26 +768,53 @@ fn parse_live_log_line(line: &str) -> (String, String) {
 }
 
 fn resolve_stack_api_ip(stack: &str) -> String {
-    let mut aliases = vec![crate::scaffold::legacy_lxc_alias(stack)];
-
     if let Ok(config) = crate::scaffold::read_stack_config(stack) {
-        aliases.push(config.hostname);
-        aliases.push(crate::scaffold::canonical_lxc_name(config.vmid, stack));
-    }
+        if let Some(ip) = config.reserved_ipv4.filter(|ip| !ip.trim().is_empty()) {
+            return ip;
+        }
 
-    let entries = ssh_config::parse_ssh_config();
-    for alias in aliases {
-        if let Some(entry) = entries.iter().find(|e| e.host == alias) {
-            return entry.hostname.clone();
+        let key = format!("LXC_{}_IP", stack.replace('-', "_").to_uppercase());
+        if let Ok(ip) = std::env::var(&key) {
+            if !ip.trim().is_empty() {
+                return ip;
+            }
         }
     }
 
     std::env::var("LXC_API_IP").unwrap_or_else(|_| "127.0.0.1".to_string())
 }
 
+fn active_stack_targets(stacks: &[String]) -> Vec<(String, String)> {
+    let mut targets = Vec::new();
+
+    for stack in stacks {
+        let cfg = match crate::scaffold::read_stack_config(stack) {
+            Ok(cfg) => cfg,
+            Err(_) => continue,
+        };
+
+        if !cfg.deploy_enabled {
+            continue;
+        }
+
+        targets.push((stack.clone(), resolve_stack_api_ip(stack)));
+    }
+
+    targets
+}
+
 async fn send_heartbeats(stacks: Vec<String>, token: String) {
     let mut targets = HashSet::new();
     for stack in stacks {
+        let cfg = match crate::scaffold::read_stack_config(&stack) {
+            Ok(cfg) => cfg,
+            Err(_) => continue,
+        };
+
+        if !cfg.deploy_enabled {
+            continue;
+        }
+
         let ip = resolve_stack_api_ip(&stack);
         if !ip.trim().is_empty() {
             targets.insert(ip);
@@ -539,19 +825,200 @@ async fn send_heartbeats(stacks: Vec<String>, token: String) {
         return;
     }
 
-    let client = reqwest::Client::new();
     for ip in targets {
-        let url = format!("http://{}:8080/api/heartbeat", ip);
-        let mut req = client.post(url);
-        if !token.is_empty() {
-            req = req.bearer_auth(&token);
+        if request_lxc_heartbeat_ws(&ip, &token).await.is_err() {
+            let client = reqwest::Client::new();
+            let url = format!("http://{}:8080/api/heartbeat", ip);
+            let mut req = client.post(url);
+            if !token.is_empty() {
+                req = req.bearer_auth(&token);
+            }
+            let _ = req.send().await;
         }
-        let _ = req.send().await;
     }
 }
 
+async fn request_lxc_sync_ws(ip: &str, token: &str) -> Result<(), String> {
+    let request_id = ws_request_id("sync");
+    let payload = serde_json::json!({
+        "kind": "sync_request",
+        "request_id": request_id,
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) }
+    });
+
+    let value = send_ws_rpc(ip, payload, "sync_response", &request_id).await?;
+    let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    if ok {
+        Ok(())
+    } else {
+        Err(value
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("sync rejected")
+            .to_string())
+    }
+}
+
+async fn request_lxc_heartbeat_ws(ip: &str, token: &str) -> Result<(), String> {
+    let request_id = ws_request_id("heartbeat");
+    let payload = serde_json::json!({
+        "kind": "heartbeat_request",
+        "request_id": request_id,
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) }
+    });
+
+    let value = send_ws_rpc(ip, payload, "heartbeat_response", &request_id).await?;
+    let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    if ok {
+        Ok(())
+    } else {
+        Err(value
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("heartbeat rejected")
+            .to_string())
+    }
+}
+
+async fn request_lxc_restore_ws(
+    ip: &str,
+    token: &str,
+    payload: &RestoreRequestPayload,
+) -> Result<WsRestoreResponsePayload, String> {
+    let request_id = ws_request_id("restore");
+    let frame = serde_json::json!({
+        "kind": "restore_request",
+        "request_id": request_id,
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+        "scope": &payload.scope,
+        "stack_names": &payload.stack_names,
+        "backup_id": &payload.backup_id,
+        "verify_only": payload.verify_only,
+        "skip_post_hooks": payload.skip_post_hooks
+    });
+
+    let value = send_ws_rpc(ip, frame, "restore_response", &request_id).await?;
+    serde_json::from_value::<WsRestoreResponsePayload>(value).map_err(|e| e.to_string())
+}
+
+async fn send_ws_rpc(
+    ip: &str,
+    payload: serde_json::Value,
+    expected_kind: &str,
+    request_id: &str,
+) -> Result<serde_json::Value, String> {
+    let ws_url = format!("ws://{}:8080/api/logs/ws", ip);
+    let (mut socket, _) = connect_async(&ws_url).await.map_err(|e| e.to_string())?;
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            serde_json::to_string(&payload).map_err(|e| e.to_string())?,
+        ))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    loop {
+        let next = tokio::time::timeout(Duration::from_secs(25), socket.next())
+            .await
+            .map_err(|_| "ws rpc timeout".to_string())?;
+        let Some(message) = next else {
+            return Err("ws rpc connection closed".to_string());
+        };
+        let message = message.map_err(|e| e.to_string())?;
+        let text = match message {
+            tokio_tungstenite::tungstenite::Message::Text(text) => text,
+            tokio_tungstenite::tungstenite::Message::Close(_) => {
+                return Err("ws rpc connection closed".to_string());
+            }
+            _ => continue,
+        };
+
+        let value: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let kind = value.get("kind").and_then(|v| v.as_str()).unwrap_or_default();
+        let rid = value
+            .get("request_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+
+        if kind == expected_kind && rid == request_id {
+            return Ok(value);
+        }
+    }
+}
+
+fn ws_request_id(prefix: &str) -> String {
+    format!(
+        "{}-{}",
+        prefix,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    )
+}
+
+fn track_daemon_version(app: &mut App, source: &str, message: &str) {
+    let Some(version) = extract_daemon_version(message) else {
+        return;
+    };
+
+    if source == "HOST" {
+        if app.host_daemon_version != version {
+            let previous = app.host_daemon_version.clone();
+            app.host_daemon_version = version.clone();
+            if previous != "unknown" {
+                app.push_log(
+                    "HOST",
+                    "OK",
+                    &format!("HOST daemon version changed {} -> {}", previous, version),
+                );
+            } else {
+                app.push_log(
+                    "HOST",
+                    "INFO",
+                    &format!("HOST daemon version detected {}", version),
+                );
+            }
+        }
+        return;
+    }
+
+    if source.starts_with("lxc-") {
+        let previous = app
+            .lxc_daemon_versions
+            .insert(source.to_string(), version.clone());
+        match previous {
+            Some(prev) if prev != version => {
+                app.push_log(
+                    source,
+                    "OK",
+                    &format!("LXC daemon version changed {} -> {}", prev, version),
+                );
+            }
+            None => {
+                app.push_log(
+                    source,
+                    "INFO",
+                    &format!("LXC daemon version detected {}", version),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn extract_daemon_version(message: &str) -> Option<String> {
+    message
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("daemon_version="))
+        .map(|raw| raw.trim_matches('"').to_string())
+}
+
 async fn send_host_heartbeat() {
-    let alias = std::env::var("HOST_HEARTBEAT_SSH_ALIAS").unwrap_or_else(|_| "HOST".to_string());
+    let alias = host_ssh_target();
     if alias.trim().is_empty() {
         return;
     }
@@ -569,4 +1036,149 @@ async fn send_host_heartbeat() {
             .output(),
     )
     .await;
+}
+
+fn host_ssh_target() -> String {
+    if let Ok(target) = std::env::var("HOST_SSH_TARGET") {
+        if !target.trim().is_empty() {
+            return target;
+        }
+    }
+
+    let host_ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let host_user = std::env::var("HOST_SSH_USER").unwrap_or_else(|_| "root".to_string());
+    format!("{}@{}", host_user, host_ip)
+}
+
+async fn probe_host_runtime(alias: &str) -> HostProbeEvent {
+    let remote_cmd = r#"
+node="$(hostname -s)"
+echo "__NODE__:$node"
+echo "__IP__:$(hostname -I | awk '{print $1}')"
+echo "__UPTIME__:$(uptime -p)"
+echo "__LXC_JSON__"
+pvesh get "/nodes/$node/lxc" --output-format json 2>/dev/null || echo "[]"
+"#;
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(6),
+        tokio::process::Command::new("ssh")
+            .arg("-o")
+            .arg("BatchMode=yes")
+            .arg("-o")
+            .arg("ConnectTimeout=4")
+            .arg(alias)
+            .arg(remote_cmd)
+            .output(),
+    )
+    .await;
+
+    match output {
+        Ok(Ok(result)) if result.status.success() => {
+            let stdout = String::from_utf8_lossy(&result.stdout);
+            let mut node_name: Option<String> = None;
+            let mut node_ip: Option<String> = None;
+            let mut uptime: Option<String> = None;
+
+            for line in stdout.lines() {
+                if let Some(value) = line.strip_prefix("__NODE__:") {
+                    let value = value.trim();
+                    if !value.is_empty() {
+                        node_name = Some(value.to_string());
+                    }
+                } else if let Some(value) = line.strip_prefix("__IP__:") {
+                    let value = value.trim();
+                    if !value.is_empty() {
+                        node_ip = Some(value.to_string());
+                    }
+                } else if let Some(value) = line.strip_prefix("__UPTIME__:") {
+                    let value = value.trim();
+                    if !value.is_empty() {
+                        uptime = Some(value.to_string());
+                    }
+                }
+            }
+
+            let mut lxc_runtime = Vec::new();
+            if let Some((_, json_blob)) = stdout.split_once("__LXC_JSON__\n") {
+                if let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(json_blob.trim())
+                {
+                    for item in items {
+                        let vmid = item.get("vmid").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        let status = item
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let name = item
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+
+                        if vmid == 0 || name.is_empty() {
+                            continue;
+                        }
+
+                        let cpu_raw = item.get("cpu").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let cpu_pct = (cpu_raw * 100.0).round().clamp(0.0, 100.0) as u8;
+
+                        let mem_raw = item.get("mem").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let maxmem_raw = item.get("maxmem").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let ram_pct = if maxmem_raw > 0 {
+                            ((mem_raw as f64 / maxmem_raw as f64) * 100.0)
+                                .round()
+                                .clamp(0.0, 100.0) as u8
+                        } else {
+                            0
+                        };
+
+                        let uptime_secs = item.get("uptime").and_then(|v| v.as_u64()).unwrap_or(0);
+
+                        lxc_runtime.push(HostLxcRuntime {
+                            vmid,
+                            status,
+                            name,
+                            cpu_pct,
+                            ram_pct,
+                            uptime_secs,
+                        });
+                    }
+                }
+            }
+
+            HostProbeEvent::Snapshot {
+                connected: true,
+                node_name,
+                node_ip,
+                uptime,
+                lxc_runtime,
+                error: None,
+            }
+        }
+        Ok(Ok(result)) => HostProbeEvent::Snapshot {
+            connected: false,
+            node_name: None,
+            node_ip: None,
+            uptime: None,
+            lxc_runtime: Vec::new(),
+            error: Some(String::from_utf8_lossy(&result.stderr).trim().to_string()),
+        },
+        Ok(Err(err)) => HostProbeEvent::Snapshot {
+            connected: false,
+            node_name: None,
+            node_ip: None,
+            uptime: None,
+            lxc_runtime: Vec::new(),
+            error: Some(err.to_string()),
+        },
+        Err(_) => HostProbeEvent::Snapshot {
+            connected: false,
+            node_name: None,
+            node_ip: None,
+            uptime: None,
+            lxc_runtime: Vec::new(),
+            error: Some("host probe timeout".to_string()),
+        },
+    }
 }

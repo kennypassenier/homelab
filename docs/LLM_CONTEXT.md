@@ -1,6 +1,6 @@
 # LLM Context (Current)
 
-Last updated: 2026-05-28
+Last updated: 2026-06-05
 
 ## Architecture Summary
 
@@ -40,4 +40,10 @@ Last updated: 2026-05-28
 - CLIENT streams live deploy logs from the LXC daemon during sync actions.
 - CLIENT app rows include a Git-managed config editor for Docker image updates.
 - CLIENT can sync stack-owned DHCP reservations to OPNsense from `lxc-compose.yml` network intent.
+- CLIENT Host Management uses live Proxmox host queries over SSH (default target `root@10.10.5.250`) and displays runtime LXC status/CPU/RAM/uptime.
 - LXC failsafe sync uses an inverse heartbeat policy: periodic windows run recovery only when CLIENT heartbeat is stale; windows are skipped while CLIENT is actively connected.
+- CLIENT now supervises websocket workers for all deploy-enabled stacks and reconnects stale streams automatically.
+- LXC websocket endpoint supports command RPC (`exec_request`/`exec_response`) in addition to log streaming.
+- HOST daemon runs headless-only in deployed operation.
+- CLIENT uses websocket RPC over LXC `/api/logs/ws` for sync, restore, heartbeat, and command execution, with HTTP endpoints retained as compatibility fallback.
+- HOST and LXC now emit startup lifecycle logs containing `daemon_version=...`; CLIENT surfaces version detection and version-change events in Logs.

@@ -9,10 +9,10 @@ use ratatui::{
     prelude::*,
     widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
 };
-use std::io::IsTerminal;
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 
+mod api;
 mod app;
 mod backup;
 mod bootstrap;
@@ -23,14 +23,10 @@ mod provision;
 mod self_update;
 mod storage;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     load_host_env();
-
-    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
-        run_tui()
-    } else {
-        run_headless()
-    }
+    run_headless().await
 }
 
 fn load_host_env() {
@@ -62,7 +58,25 @@ fn default_host_env_file() -> String {
     format!("{}/host-daemon/.env", default_gitops_repo())
 }
 
-fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
+    let app = Arc::new(Mutex::new(app::App::new()));
+    {
+        let mut a = app.lock().unwrap();
+        a.add_log(
+            app::LogLevel::Info,
+            format!(
+                "HOST daemon online mode=headless daemon_version={}",
+                env!("CARGO_PKG_VERSION")
+            ),
+        );
+    }
+
+    // Spawn API server to listen for CLIENT connections
+    let app_for_api = app.clone();
+    tokio::spawn(async move {
+        api::run_server(app_for_api).await;
+    });
+
     let (status_tx, status_rx) = mpsc::channel::<String>();
     backup::start_policy_enforcer(status_tx.clone());
     failsafe::start_failsafe_enforcer(status_tx.clone());
@@ -75,7 +89,11 @@ fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         match status_rx.recv_timeout(std::time::Duration::from_secs(30)) {
-            Ok(line) => println!("{}", line),
+            Ok(line) => {
+                println!("{}", line);
+                let mut a = app.lock().unwrap();
+                a.add_log(status_line_level(&line), line);
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
@@ -84,14 +102,34 @@ fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
+fn status_line_level(line: &str) -> app::LogLevel {
+    let lower = line.to_lowercase();
+    if lower.contains("failed") || lower.contains("error") {
+        app::LogLevel::Error
+    } else if lower.contains("updated") || lower.contains("complete") {
+        app::LogLevel::Ok
+    } else if lower.contains("warn") || lower.contains("stale") {
+        app::LogLevel::Warn
+    } else {
+        app::LogLevel::Info
+    }
+}
+
+async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
+    let app = Arc::new(Mutex::new(app::App::new()));
+
+    // Spawn API server to listen for CLIENT connections
+    let app_for_api = app.clone();
+    tokio::spawn(async move {
+        api::run_server(app_for_api).await;
+    });
+
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     stdout.execute(EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal: Terminal<CrosstermBackend<_>> = Terminal::new(backend)?;
 
-    let mut app = app::App::new();
     let mut last_time = std::time::Instant::now();
 
     // Shared status channel for backup, update, and failsafe workers.
@@ -102,44 +140,47 @@ fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         // Poll backup status from background thread
-        while let Ok(line) = status_rx.try_recv() {
-            app.backup_status.push(line);
-            if app.backup_status.len() > 200 {
-                app.backup_status.remove(0);
-            }
-            if app
-                .backup_status
-                .last()
-                .map(|l| l.starts_with("DONE"))
-                .unwrap_or(false)
-            {
-                app.backup_running = false;
+        {
+            let mut a = app.lock().unwrap();
+            while let Ok(line) = status_rx.try_recv() {
+                a.backup_status.push(line);
+                if a.backup_status.len() > 200 {
+                    a.backup_status.remove(0);
+                }
+                if a.backup_status
+                    .last()
+                    .map(|l| l.starts_with("DONE"))
+                    .unwrap_or(false)
+                {
+                    a.backup_running = false;
+                }
             }
         }
 
         if crossterm::event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = crossterm::event::read()? {
                 if key.kind == KeyEventKind::Press {
+                    let mut a = app.lock().unwrap();
                     match key.code {
                         KeyCode::Char('q') => break,
                         KeyCode::Down | KeyCode::Char('j' | 'n') => {
-                            app.tab = (app.tab + 1).min(4);
+                            a.tab = (a.tab + 1).min(4);
                         }
                         KeyCode::Up | KeyCode::Char('k' | 'p') => {
-                            if app.tab > 0 {
-                                app.tab -= 1;
+                            if a.tab > 0 {
+                                a.tab -= 1;
                             }
                         }
-                        KeyCode::Char('1') => app.tab = 0,
-                        KeyCode::Char('2') => app.tab = 1,
-                        KeyCode::Char('3') => app.tab = 2,
-                        KeyCode::Char('4') => app.tab = 3,
-                        KeyCode::Char('5') => app.tab = 4,
+                        KeyCode::Char('1') => a.tab = 0,
+                        KeyCode::Char('2') => a.tab = 1,
+                        KeyCode::Char('3') => a.tab = 2,
+                        KeyCode::Char('4') => a.tab = 3,
+                        KeyCode::Char('5') => a.tab = 4,
                         // 'b' triggers the backup orchestration cycle
-                        KeyCode::Char('b') if !app.backup_running => {
-                            app.backup_running = true;
-                            app.backup_status.push("Starting backup cycle…".to_string());
-                            let stacks: Vec<(String, String)> = app
+                        KeyCode::Char('b') if !a.backup_running => {
+                            a.backup_running = true;
+                            a.backup_status.push("Starting backup cycle…".to_string());
+                            let stacks: Vec<(String, String)> = a
                                 .lxc_nodes()
                                 .into_iter()
                                 .filter(|n| n.status == "RUN")
@@ -182,65 +223,72 @@ fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                             });
                         }
                         KeyCode::Char('U') => {
-                            app.backup_status.push("Checking HOST updates…".to_string());
+                            let mut a = app.lock().unwrap();
+                            a.backup_status.push("Checking HOST updates…".to_string());
                             match self_update::check_and_apply_update() {
-                                Ok(msg) => app.backup_status.push(msg),
-                                Err(err) => app
-                                    .backup_status
-                                    .push(format!("HOST update failed: {}", err)),
+                                Ok(msg) => a.backup_status.push(msg),
+                                Err(err) => {
+                                    a.backup_status.push(format!("HOST update failed: {}", err))
+                                }
                             }
                         }
                         KeyCode::Char('o') => {
+                            let mut a = app.lock().unwrap();
                             let gitops_root = default_gitops_repo();
                             for line in
                                 policy::reconcile_boot_policies(Path::new(&gitops_root), false)
                             {
-                                app.backup_status.push(line);
+                                a.backup_status.push(line);
                             }
                         }
                         KeyCode::Char('O') => {
+                            let mut a = app.lock().unwrap();
                             let gitops_root = default_gitops_repo();
                             for line in
                                 policy::reconcile_boot_policies(Path::new(&gitops_root), true)
                             {
-                                app.backup_status.push(line);
+                                a.backup_status.push(line);
                             }
                         }
                         KeyCode::Char('h') => {
+                            let mut a = app.lock().unwrap();
                             let gitops_root = default_gitops_repo();
                             for line in
                                 policy::reconcile_hot_resources(Path::new(&gitops_root), false)
                             {
-                                app.backup_status.push(line);
+                                a.backup_status.push(line);
                             }
                         }
                         KeyCode::Char('H') => {
+                            let mut a = app.lock().unwrap();
                             let gitops_root = default_gitops_repo();
                             for line in
                                 policy::reconcile_hot_resources(Path::new(&gitops_root), true)
                             {
-                                app.backup_status.push(line);
+                                a.backup_status.push(line);
                             }
                         }
                         KeyCode::Char('r') => {
+                            let mut a = app.lock().unwrap();
                             let gitops_root = default_gitops_repo();
-                            app.backup_status
+                            a.backup_status
                                 .push("Scanning LXC provisioning state…".to_string());
                             match provision::plan_provisioning_changes(Path::new(&gitops_root)) {
                                 Ok(actions) => {
                                     let lines = provision::format_provision_summary(&actions);
                                     for line in lines {
-                                        app.backup_status.push(line);
+                                        a.backup_status.push(line);
                                     }
                                 }
-                                Err(e) => app
+                                Err(e) => a
                                     .backup_status
                                     .push(format!("Provision scan failed: {}", e)),
                             }
                         }
                         KeyCode::Char('R') => {
+                            let mut a = app.lock().unwrap();
                             let gitops_root = default_gitops_repo();
-                            app.backup_status
+                            a.backup_status
                                 .push("Applying LXC provisioning changes…".to_string());
                             match provision::apply_provisioning_changes(
                                 Path::new(&gitops_root),
@@ -249,11 +297,11 @@ fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                                 Ok(actions) => {
                                     let lines = provision::format_provision_summary(&actions);
                                     for line in lines {
-                                        app.backup_status.push(line);
+                                        a.backup_status.push(line);
                                     }
-                                    app.backup_status.push("Provisioning complete.".to_string());
+                                    a.backup_status.push("Provisioning complete.".to_string());
                                 }
-                                Err(e) => app
+                                Err(e) => a
                                     .backup_status
                                     .push(format!("Provision apply failed: {}", e)),
                             }
@@ -265,7 +313,8 @@ fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if last_time.elapsed() > std::time::Duration::from_millis(100) {
-            terminal.draw(|f| draw_main(f, &app))?;
+            let a = app.lock().unwrap();
+            terminal.draw(|f| draw_main(f, &*a))?;
             last_time = std::time::Instant::now();
         }
     }
@@ -291,10 +340,20 @@ fn start_update_checker(status_tx: mpsc::Sender<String>) {
                     "[host-update] checking GitHub releases (interval={}s)",
                     interval_secs
                 ));
+                let _ = status_tx.send(format!(
+                    "[host-update] current daemon_version={} checking for newer release",
+                    env!("CARGO_PKG_VERSION")
+                ));
 
                 match self_update::check_and_apply_update() {
                     Ok(msg) => {
                         let _ = status_tx.send(format!("[host-update] {}", msg));
+                        if msg.contains("HOST updated") {
+                            let _ = status_tx.send(
+                                "[host-update] update applied; restart expected, CLIENT should observe reconnect"
+                                    .to_string(),
+                            );
+                        }
                     }
                     Err(err) => {
                         let _ = status_tx.send(format!("[host-update] failed: {}", err));

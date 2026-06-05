@@ -364,7 +364,14 @@ async fn async_main() -> Result<()> {
                     lxc_runtime,
                     error,
                 } => {
-                    app.update_host_runtime(connected, node_name, node_ip, uptime, lxc_runtime, error);
+                    app.update_host_runtime(
+                        connected,
+                        node_name,
+                        node_ip,
+                        uptime,
+                        lxc_runtime,
+                        error,
+                    );
                 }
             }
         }
@@ -413,7 +420,8 @@ async fn async_main() -> Result<()> {
                     if let Ok((mut socket, _)) = connect_async(&ws_url).await {
                         let mut streamed_any = false;
                         loop {
-                            match tokio::time::timeout(Duration::from_secs(2), socket.next()).await {
+                            match tokio::time::timeout(Duration::from_secs(2), socket.next()).await
+                            {
                                 Ok(Some(Ok(message))) => {
                                     if let Ok(text) = message.into_text() {
                                         streamed_any = true;
@@ -937,7 +945,10 @@ async fn send_ws_rpc(
             Err(_) => continue,
         };
 
-        let kind = value.get("kind").and_then(|v| v.as_str()).unwrap_or_default();
+        let kind = value
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         let rid = value
             .get("request_id")
             .and_then(|v| v.as_str())
@@ -1031,6 +1042,14 @@ async fn send_host_heartbeat() {
     let _ = tokio::time::timeout(
         Duration::from_secs(5),
         tokio::process::Command::new("ssh")
+            .arg("-o")
+            .arg("BatchMode=yes")
+            .arg("-o")
+            .arg("ConnectTimeout=4")
+            .arg("-o")
+            .arg("StrictHostKeyChecking=accept-new")
+            .arg("-o")
+            .arg("LogLevel=ERROR")
             .arg(alias)
             .arg(cmd)
             .output(),

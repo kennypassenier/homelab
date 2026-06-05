@@ -25,6 +25,11 @@ mod storage;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     load_host_env();
     run_headless().await
 }
@@ -326,7 +331,8 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
 
 fn start_update_checker(status_tx: mpsc::Sender<String>) {
     std::thread::spawn(move || {
-        let mut last_check = std::time::Instant::now();
+        // Set last_check far in the past so the first iteration triggers immediately.
+        let mut last_check = std::time::Instant::now() - std::time::Duration::from_secs(9999);
 
         loop {
             let interval_secs = std::env::var("HOST_UPDATE_INTERVAL_SECS")

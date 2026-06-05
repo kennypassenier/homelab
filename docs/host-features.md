@@ -20,12 +20,20 @@ Last updated: 2026-06-05
 - Runtime workers (API server, backup policy enforcer, failsafe enforcer, release update checker) stay active continuously.
 - The canonical host-side repo path is `~/homelab` (usually `/root/homelab` on Proxmox).
 - The canonical host env file is `~/homelab/host-daemon/.env`.
+- `HOST --version` (or `HOST -V`) prints the running binary version.
 
 ## Contract with CLIENT
 
 - HOST is invoked by CLIENT APIs.
 - CLIENT remains orchestration owner for multi-step flows.
 - HOST emits status/events for CLIENT rendering.
+
+## API Surface
+
+- `GET /api/health` for service liveness.
+- `GET /api/version` for binary version (Postman-friendly).
+- `GET /api/metrics` for runtime metrics including process uptime seconds.
+- `GET /api/logs/ws` for live log streaming over WebSocket.
 
 ## Backup Policy Enforcement
 

@@ -60,6 +60,8 @@ pub struct App {
     pub log_tx: tokio::sync::broadcast::Sender<String>,
     /// Current HOST metrics exposed via /api/metrics endpoint.
     pub current_metrics: HostMetrics,
+    /// Process start timestamp for uptime calculation.
+    pub started_at: std::time::Instant,
 }
 
 impl App {
@@ -75,6 +77,7 @@ impl App {
                 ip: "10.10.5.250".to_string(),
                 uptime_secs: 0,
             },
+            started_at: std::time::Instant::now(),
         }
     }
 

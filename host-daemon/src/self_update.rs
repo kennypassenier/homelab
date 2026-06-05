@@ -65,14 +65,23 @@ pub fn check_and_apply_update() -> Result<String, String> {
 }
 
 fn fetch_latest_release(repo: &str) -> Result<ReleaseInfo, String> {
-    let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
-    github_get(&url)
+    // Fetch recent releases and find the most recent one tagged host-daemon-v*.
+    // /releases/latest returns whichever release GitHub marks as "Latest", which may
+    // be an LXC or CLIENT release — not a HOST release — causing a completely wrong
+    // version comparison and silently skipping every legitimate HOST update.
+    let url = format!("https://api.github.com/repos/{}/releases?per_page=20", repo);
+    let releases: Vec<ReleaseInfo> = github_get(&url)
         .send()
         .map_err(|e| e.to_string())?
         .error_for_status()
         .map_err(|e| e.to_string())?
-        .json::<ReleaseInfo>()
-        .map_err(|e| e.to_string())
+        .json::<Vec<ReleaseInfo>>()
+        .map_err(|e| e.to_string())?;
+
+    releases
+        .into_iter()
+        .find(|r| r.tag_name.starts_with("host-daemon-v"))
+        .ok_or_else(|| "No host-daemon-v* release found on GitHub".to_string())
 }
 
 fn download_asset(url: &str, path: &PathBuf) -> Result<(), String> {

@@ -19,6 +19,12 @@ struct ApiResponse {
     message: String,
 }
 
+#[derive(Serialize)]
+struct VersionResponse {
+    component: String,
+    version: String,
+}
+
 /// Runtime metrics for the HOST (Proxmox node).
 #[derive(Serialize, Clone, Debug)]
 pub struct HostMetrics {
@@ -57,6 +63,7 @@ pub async fn run_server(app: Arc<Mutex<App>>) {
 
     let router = Router::new()
         .route("/api/health", get(handle_health))
+        .route("/api/version", get(handle_version))
         .route("/api/metrics", get(handle_metrics))
         .route("/api/logs/ws", get(handle_ws))
         .with_state(app);
@@ -73,8 +80,16 @@ async fn handle_health() -> Json<ApiResponse> {
     })
 }
 
+async fn handle_version() -> Json<VersionResponse> {
+    Json(VersionResponse {
+        component: "host-daemon".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+}
+
 async fn handle_metrics(State(app): State<Arc<Mutex<App>>>) -> Json<HostMetrics> {
-    let a = app.lock().unwrap();
+    let mut a = app.lock().unwrap();
+    a.current_metrics.uptime_secs = a.started_at.elapsed().as_secs();
     Json(a.current_metrics.clone())
 }
 

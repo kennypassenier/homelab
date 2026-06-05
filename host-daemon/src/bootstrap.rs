@@ -519,7 +519,10 @@ fi
             "{}/apps/LXC-linux-x86_64-unknown-linux-gnu",
             default_host_gitops_repo()
         ),
-        format!("{}/lxc-daemon/target/release/LXC", default_host_gitops_repo()),
+        format!(
+            "{}/lxc-daemon/target/release/LXC",
+            default_host_gitops_repo()
+        ),
         "/opt/homelab/lxc-daemon/target/release/LXC".to_string(),
         "apps/LXC-linux-x86_64-unknown-linux-gnu".to_string(),
         "lxc-daemon/target/release/LXC".to_string(),

@@ -1,65 +1,72 @@
 #!/usr/bin/env bash
 # =============================================================================
-# bump-patch-version.sh
-# Auto-increment patch version in Cargo.toml if major/minor haven't changed
-# since the last git tag.
+# bump-patch-version.sh — idempotent patch-version incrementor
 #
-# Usage: ./bump-patch-version.sh <path-to-Cargo.toml> <component-name>
-#   e.g., ./bump-patch-version.sh host-daemon/Cargo.toml HOST
+# Usage: ./bump-patch-version.sh <Cargo.toml> <component-name> [tag-prefix]
+#   host-daemon/Cargo.toml  HOST                          → prefix: host-daemon
+#   client-app/Cargo.toml   CLIENT  client                → prefix: client
+#   lxc-daemon/Cargo.toml   LXC     lxc-daemon            → prefix: lxc-daemon
 #
-# Exit codes:
-#   0 = version bumped successfully
-#   1 = no prior tag found; version not incremented
-#   2 = major/minor version changed; manual version management required
+# Idempotency contract:
+#   No prior tag          → use current Cargo.toml version as baseline (no bump, exit 0)
+#   Cargo.toml == tag     → standard case: bump patch by 1               (exit 0)
+#   Cargo.toml >  tag     → previous run was interrupted; already bumped  (no-op, exit 0)
+#   Cargo.toml <  tag     → Cargo.toml is stale; advance to tag+1 patch   (exit 0)
+#
+# Exit codes:  0 = success (Cargo.toml is ready)   1 = fatal error
 # =============================================================================
+set -euo pipefail
 
-set -e
+CARGO_TOML="${1:?Usage: $0 <Cargo.toml> <name> [tag-prefix]}"
+COMPONENT_NAME="${2:?Usage: $0 <Cargo.toml> <name> [tag-prefix]}"
+TAG_PREFIX="${3:-${COMPONENT_NAME,,}-daemon}"
 
-CARGO_TOML="$1"
-COMPONENT_NAME="${2:-Component}"
-COMPONENT_TAG_PREFIX="${COMPONENT_NAME,,}-daemon"  # e.g., "host-daemon" or "lxc-daemon"
+[[ -f "$CARGO_TOML" ]] || { echo "✗ $CARGO_TOML not found" >&2; exit 1; }
 
-if [[ ! -f "$CARGO_TOML" ]]; then
-    echo "✗ Cargo.toml not found at: $CARGO_TOML" >&2
-    exit 1
-fi
+CURRENT=$(grep '^version' "$CARGO_TOML" | head -1 | cut -d'"' -f2)
+[[ -n "$CURRENT" ]] || { echo "✗ Could not read version from $CARGO_TOML" >&2; exit 1; }
+IFS='.' read -r C_MAJ C_MIN C_PAT <<< "$CURRENT"
 
-# Extract current version from Cargo.toml
-CURRENT_VERSION=$(grep '^version' "$CARGO_TOML" | head -1 | cut -d'"' -f2)
-if [[ -z "$CURRENT_VERSION" ]]; then
-    echo "✗ Could not extract version from $CARGO_TOML" >&2
-    exit 1
-fi
-
-# Parse major.minor.patch
-IFS='.' read -r CURRENT_MAJOR CURRENT_MINOR CURRENT_PATCH <<< "$CURRENT_VERSION"
-
-# Find the latest git tag for this component
-LATEST_TAG=$(git tag -l "${COMPONENT_TAG_PREFIX}-v*" --sort=-version:refname | head -1)
+LATEST_TAG=$(git tag -l "${TAG_PREFIX}-v*" --sort=-version:refname 2>/dev/null | head -1)
 
 if [[ -z "$LATEST_TAG" ]]; then
-    echo "⚠ No prior tag found for $COMPONENT_NAME; skipping version bump"
-    exit 1
+    echo "✓ $COMPONENT_NAME: no prior tag — using $CURRENT as baseline"
+    exit 0
 fi
 
-# Extract version from tag (e.g., "host-daemon-v1.2.3" → "1.2.3")
-TAGGED_VERSION="${LATEST_TAG##*-v}"
-IFS='.' read -r TAGGED_MAJOR TAGGED_MINOR TAGGED_PATCH <<< "$TAGGED_VERSION"
+TAGGED="${LATEST_TAG##*-v}"
+IFS='.' read -r T_MAJ T_MIN T_PAT <<< "$TAGGED"
 
-# Check if major or minor changed
-if [[ "$CURRENT_MAJOR" != "$TAGGED_MAJOR" ]] || [[ "$CURRENT_MINOR" != "$TAGGED_MINOR" ]]; then
-    echo "⚠ Major or minor version changed (was $TAGGED_VERSION, now $CURRENT_VERSION);"
-    echo "   Manual version management detected; not auto-incrementing patch"
-    exit 2
-fi
+# Numeric three-way compare: prints "gt", "eq", or "lt"
+cmp3() {
+    if   (( $1 > $4 )); then echo gt
+    elif (( $1 < $4 )); then echo lt
+    elif (( $2 > $5 )); then echo gt
+    elif (( $2 < $5 )); then echo lt
+    elif (( $3 > $6 )); then echo gt
+    elif (( $3 < $6 )); then echo lt
+    else echo eq; fi
+}
 
-# Auto-increment patch version
-NEW_PATCH=$((TAGGED_PATCH + 1))
-NEW_VERSION="${CURRENT_MAJOR}.${CURRENT_MINOR}.${NEW_PATCH}"
+case $(cmp3 "$C_MAJ" "$C_MIN" "$C_PAT" "$T_MAJ" "$T_MIN" "$T_PAT") in
+    gt)
+        # Cargo.toml already ahead — previous run bumped but didn't complete; no-op
+        echo "✓ $COMPONENT_NAME: already at $CURRENT (ahead of tag $TAGGED) — no bump needed"
+        ;;
+    eq)
+        # Standard path: bump patch
+        NEW="${T_MAJ}.${T_MIN}.$((T_PAT + 1))"
+        sed -i.bak "s/^version = \"$CURRENT\"/version = \"$NEW\"/" "$CARGO_TOML"
+        rm -f "$CARGO_TOML.bak"
+        echo "✓ $COMPONENT_NAME version bumped: $CURRENT → $NEW"
+        ;;
+    lt)
+        # Cargo.toml is behind the latest tag (unusual — advance to tag+1)
+        NEW="${T_MAJ}.${T_MIN}.$((T_PAT + 1))"
+        sed -i.bak "s/^version = \"$CURRENT\"/version = \"$NEW\"/" "$CARGO_TOML"
+        rm -f "$CARGO_TOML.bak"
+        echo "✓ $COMPONENT_NAME: Cargo.toml ($CURRENT) was behind tag ($TAGGED) — advanced to $NEW"
+        ;;
+esac
 
-# Update Cargo.toml in-place
-sed -i.bak "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" "$CARGO_TOML"
-rm -f "$CARGO_TOML.bak"
-
-echo "✓ $COMPONENT_NAME version bumped: $CURRENT_VERSION → $NEW_VERSION"
 exit 0

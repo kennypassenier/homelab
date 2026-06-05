@@ -8,8 +8,10 @@ use crate::provision::StackIntent;
 
 #[derive(Debug, Clone)]
 pub struct BootstrapResult {
+    #[allow(dead_code)]
     pub success: bool,
     pub duration: Duration,
+    #[allow(dead_code)]
     pub error: Option<String>,
 }
 
@@ -150,7 +152,7 @@ fn wait_for_container_ready(vmid: u32, timeout: Duration) -> Result<(), String> 
 }
 
 /// Configure storage bind mount
-fn setup_storage(vmid: u32, intent: &StackIntent) -> Result<(), String> {
+fn setup_storage(_vmid: u32, intent: &StackIntent) -> Result<(), String> {
     let host_path = &intent.host_storage_path;
     let mount_point = &intent.mount_point;
 

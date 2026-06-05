@@ -282,8 +282,53 @@ systemctl is-enabled host-daemon.service
 systemctl show host-daemon.service -p Restart -p RestartSec
 ```
 
-## 7. Verification Checklist
+### HOST Manual Update Recovery (Only if Auto-Update Fails)
 
+Use this only when HOST is stuck on an old version and release-based self-update does not converge.
+
+```bash
+# On Proxmox host (check systemd unit first)
+set -euo pipefail
+
+REPO="kennypassenier/homelab"
+ASSET="HOST-linux-x86_64-unknown-linux-gnu"
+DEST="/root/homelab/apps/HOST"  # Match your systemd ExecStart binary path
+
+TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" \
+  | sed -n 's/.*"tag_name":[[:space:]]*"\(host-daemon-v[^"]*\)".*/\1/p' \
+  | sort -V \
+  | tail -1)"
+
+if [ -z "${TAG}" ]; then
+  echo "Could not detect latest host-daemon-v tag" >&2
+  exit 1
+fi
+
+URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
+
+echo "Installing ${URL}"
+systemctl stop host-daemon.service
+curl -fLo /tmp/${ASSET} "${URL}"
+chmod +x /tmp/${ASSET}
+install -m 755 /tmp/${ASSET} "${DEST}"
+systemctl start host-daemon.service
+systemctl is-active host-daemon.service
+
+Verify:
+
+```bash
+curl -fsSL http://127.0.0.1:8080/api/version
+journalctl -u host-daemon.service -n 50 --no-pager
+```
+
+Pinned fallback (if release API lookup is blocked):
+
+```bash
+systemctl stop host-daemon.service
+curl -fLo /tmp/HOST-linux-x86_64-unknown-linux-gnu \
+  https://github.com/kennypassenier/homelab/releases/download/host-daemon-v0.1.18/HOST-linux-x86_64-unknown-linux-gnu
+chmod +x /tmp/HOST-linux-x86_64-unknown-linux-gnu
+install -m 755 /tmp/HOST-linux-x86_64-unknown-linux-gnu /root/homelab/apps/HOST
 After deployment, verify:
 
 - CLIENT `cargo check` passes locally

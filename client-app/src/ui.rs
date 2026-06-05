@@ -45,19 +45,44 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
         ])
         .split(size);
 
-    // ── Tab bar ─────────────────────────────────────────────────────────────
-    let tab_titles: Vec<_> = Tab::all().iter().map(|t| t.title()).collect();
-    let tabs = Tabs::new(tab_titles)
+    // ── Tab bar with cyberpunk glitch effects ───────────────────────────────
+    let tab_titles: Vec<String> = Tab::all()
+        .iter()
+        .enumerate()
+        .map(|(idx, t)| {
+            let title = t.title();
+            if idx == app.active_tab {
+                apply_glitch_effect(title, app.pulse_phase, 0.18)
+            } else {
+                apply_glitch_effect(title, app.pulse_phase * 0.5, 0.08)
+            }
+        })
+        .collect();
+    let tab_titles_static: Vec<&str> = tab_titles.iter().map(|s| s.as_str()).collect();
+    
+    let pulse_strength = app.pulse_phase.sin() * 0.5 + 0.5;
+    let tab_bar_style = if pulse_strength > 0.6 {
+        app.theme.active_border_style().add_modifier(Modifier::BOLD)
+    } else {
+        app.theme.active_border_style()
+    };
+    
+    let tabs = Tabs::new(tab_titles_static)
         .select(app.active_tab)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .title(" [ SYS_CORE :: CLIENT ] ")
-                .style(app.theme.active_border_style()),
+                .border_type(BorderType::Double)
+                .title(apply_glitch_effect(" [ SYS_CORE :: CLIENT ] ", app.pulse_phase, 0.06))
+                .style(tab_bar_style),
         )
-        .highlight_style(app.theme.tab_style(true))
-        .style(app.theme.tab_style(false));
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED),
+        )
+        .style(Style::default().fg(Color::Rgb(100, 110, 130)));
     f.render_widget(tabs, root[0]);
 
     // ── Body: modals take priority over tab content ──────────────────────────
@@ -882,28 +907,34 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4), // Title + instructions
-            Constraint::Min(3),    // Buttons
-            Constraint::Length(3), // Status display
+            Constraint::Length(6),
+            Constraint::Min(3),
+            Constraint::Length(3),
         ])
         .split(area);
 
-    // ── Header ────────────────────────────────────────────────────────────────
     let header = Block::default()
         .borders(Borders::ALL)
-        .title(" Update Control ")
-        .style(Style::default().fg(Color::Cyan));
+        .border_type(BorderType::Rounded)
+        .title(apply_glitch_effect(" DAEMON_UPDATE_CONTROL ", app.pulse_phase, 0.12))
+        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+    
     let instructions = vec![
         Line::from(Span::raw(
-            "Select a daemon to update. Auto-update checks every 30 minutes.",
+            "Auto-update checks every 30 minutes. Manual trigger forces immediate update.",
         )),
-        Line::from(Span::raw(
-            "Manual trigger: force immediate update and restart.",
-        )),
+        Line::from(Span::raw("")),
+        Line::from(vec![
+            Span::styled("[1/h] ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::raw("HOST daemon  "),
+            Span::styled("[2-9] ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::raw("individual LXC stacks  "),
+            Span::styled("[a] ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::raw("UPDATE ALL"),
+        ]),
     ];
     f.render_widget(Paragraph::new(instructions).block(header), layout[0]);
 
-    // ── Button grid ───────────────────────────────────────────────────────────
     let button_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(vec![Constraint::Percentage(
@@ -924,7 +955,6 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         " "
     };
 
-    // HOST button
     if col_idx < button_cols.len() {
         let btn_style = if app.update_in_progress == Some("HOST".to_string()) {
             Style::default()
@@ -944,7 +974,6 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         col_idx += 1;
     }
 
-    // LXC buttons
     for stack in &app.stacks {
         if col_idx >= button_cols.len() {
             break;
@@ -967,7 +996,6 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         col_idx += 1;
     }
 
-    // UPDATE ALL button (always visible at bottom)
     let update_all_style = if app.update_in_progress.is_some() {
         Style::default().fg(Color::Gray)
     } else {
@@ -983,7 +1011,6 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         layout[2],
     );
 
-    // ── Status display ────────────────────────────────────────────────────────
     let status_text = if let Some(in_prog) = &app.update_in_progress {
         format!("Updating {} ...", in_prog)
     } else if app.update_status.is_empty() {
@@ -1239,4 +1266,31 @@ fn log_level_style(level: &str) -> Style {
         "ERROR" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         _ => Style::default().fg(Color::DarkGray),
     }
+}
+
+/// Applies subtle cyberpunk glitch effects to text.
+/// Randomly mutates characters into symbols at the specified threshold.
+/// Returns the text with occasional character replacements for a brief glitch effect.
+fn apply_glitch_effect(text: &str, phase: f32, glitch_rate: f32) -> String {
+    const GLITCH_CHARS: &[char] = &[
+        '◆', '▲', '■', '✧', '⚡', '✹', '◈', '▬', '⬓', '◐', '◑', '◒', '◓',
+        '◀', '▶', '▼', '░', '▓', '█', '◊', '●', '◯', '◎', '◉', '⬟',
+    ];
+
+    let seed = (phase.sin().abs() * 10000.0) as u32;
+    let mut hash = seed;
+
+    text.chars()
+        .map(|ch| {
+            hash = hash.wrapping_mul(1103515245).wrapping_add(12345);
+            let rand_val = ((hash / 65536) % 100) as f32 / 100.0;
+
+            if ch.is_alphanumeric() && rand_val < glitch_rate {
+                let glyph_idx = ((hash / 65536) as usize) % GLITCH_CHARS.len();
+                GLITCH_CHARS[glyph_idx]
+            } else {
+                ch
+            }
+        })
+        .collect()
 }

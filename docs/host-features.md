@@ -36,22 +36,60 @@ Last updated: 2026-06-05
 - `POST /api/update` to trigger an immediate self-update check.
 - `GET /api/logs/ws` for live log streaming over WebSocket.
 
-## One-Time Bootstrap: Manual Deploy of v0.1.10+ to Proxmox
+## Manual Recovery: HOST Update Runbook
 
-If HOST is stuck on an older version and won't auto-update, bootstrap it with the fixed binary:
+Use this only when automatic HOST self-update is not converging.
+
+Step 1: Replace HOST with the latest GitHub release asset.
 
 ```bash
-# On Proxmox host
-sudo systemctl stop host-daemon.service
-cd /tmp
-curl -fLo HOST-linux-x86_64-unknown-linux-gnu \
-  https://github.com/kennypassenier/homelab/releases/download/host-daemon-v0.1.10/HOST-linux-x86_64-unknown-linux-gnu
-chmod +x HOST-linux-x86_64-unknown-linux-gnu
-sudo install -m 755 HOST-linux-x86_64-unknown-linux-gnu /root/homelab/apps/HOST-linux-x86_64-unknown-linux-gnu
-sudo systemctl start host-daemon.service
+# On Proxmox host (check systemd unit first)
+set -euo pipefail
+
+REPO="kennypassenier/homelab"
+ASSET="HOST-linux-x86_64-unknown-linux-gnu"
+DEST="/root/homelab/apps/HOST"  # Match your systemd ExecStart binary path
+
+TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" \
+  | sed -n 's/.*"tag_name":[[:space:]]*"\(host-daemon-v[^"]*\)".*/\1/p' \
+  | sort -V \
+  | tail -1)"
+
+if [ -z "${TAG}" ]; then
+  echo "Could not detect latest host-daemon-v tag" >&2
+  exit 1
+fi
+
+URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
+
+echo "Installing ${URL}"
+systemctl stop host-daemon.service
+curl -fLo /tmp/${ASSET} "${URL}"
+chmod +x /tmp/${ASSET}
+install -m 755 /tmp/${ASSET} "${DEST}"
+systemctl start host-daemon.service
+systemctl is-active host-daemon.service
 ```
 
-After this bootstrap, future `make push` releases should auto-update HOST without manual intervention (watch CLIENT Logs tab for "HOST updated" messages).
+Step 2: Verify runtime version.
+
+```bash
+curl -fsSL http://127.0.0.1:8080/api/version
+journalctl -u host-daemon.service -n 50 --no-pager
+```
+
+Pinned fallback (if API tag lookup is blocked):
+
+```bash
+systemctl stop host-daemon.service
+curl -fLo /tmp/HOST-linux-x86_64-unknown-linux-gnu \
+  https://github.com/kennypassenier/homelab/releases/download/host-daemon-v0.1.18/HOST-linux-x86_64-unknown-linux-gnu
+chmod +x /tmp/HOST-linux-x86_64-unknown-linux-gnu
+install -m 755 /tmp/HOST-linux-x86_64-unknown-linux-gnu /root/homelab/apps/HOST
+systemctl start host-daemon.service
+```
+
+After manual recovery, future releases should self-update normally again.
 
 ## Backup Policy Enforcement
 

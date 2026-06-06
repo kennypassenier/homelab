@@ -232,6 +232,10 @@ pub struct App {
     pub host_daemon_version: String,
     /// Last observed LXC daemon version per websocket source (`lxc-<stack>`).
     pub lxc_daemon_versions: HashMap<String, String>,
+    /// Last manual update result summary per target (`HOST`, stack name, `UPDATING_ALL`).
+    pub update_last_result: HashMap<String, String>,
+    /// Wall-clock timestamp (`HH:MM:SS`) for the last update result per target.
+    pub update_last_at: HashMap<String, String>,
 }
 
 impl App {
@@ -326,6 +330,8 @@ impl App {
             host_last_error: "not connected yet".to_string(),
             host_daemon_version: "unknown".to_string(),
             lxc_daemon_versions: HashMap::new(),
+            update_last_result: HashMap::new(),
+            update_last_at: HashMap::new(),
         };
         app
     }
@@ -460,6 +466,23 @@ impl App {
         }
         self.host_lxc_runtime = lxc_runtime;
         self.host_last_error = error.unwrap_or_default();
+    }
+
+    /// Stores per-target update outcome metadata for Update tab cards.
+    pub fn record_update_result(&mut self, target: &str, ok: bool, msg: &str) {
+        let status = if ok { "success" } else { "failed" };
+        let summary = format!("{}: {}", status, msg);
+        let compact = if summary.chars().count() > 110 {
+            let mut clipped: String = summary.chars().take(107).collect();
+            clipped.push_str("...");
+            clipped
+        } else {
+            summary
+        };
+
+        self.update_last_result.insert(target.to_string(), compact);
+        self.update_last_at
+            .insert(target.to_string(), current_time_str());
     }
 
     // ── private helpers ─────────────────────────────────────────────────────

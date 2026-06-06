@@ -8,7 +8,9 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Cell, List, ListItem, Paragraph, Row, Table, Tabs},
+    widgets::{
+        Block, BorderType, Borders, Cell, List, ListItem, Paragraph, Row, Table, Tabs, Wrap,
+    },
 };
 
 use crate::app::{App, LOG_SOURCES, LogLevelFilter, Tab};
@@ -52,35 +54,39 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
         .map(|(idx, t)| {
             let title = t.title();
             if idx == app.active_tab {
-                apply_glitch_effect(title, app.pulse_phase, 0.18)
+                apply_glitch_effect(title, app.pulse_phase * 0.18 + (idx as f32 * 0.37), 0.06)
             } else {
-                apply_glitch_effect(title, app.pulse_phase * 0.5, 0.08)
+                apply_glitch_effect(title, app.pulse_phase * 0.12 + (idx as f32 * 0.21), 0.03)
             }
         })
         .collect();
     let tab_titles_static: Vec<&str> = tab_titles.iter().map(|s| s.as_str()).collect();
-    
+
     let pulse_strength = app.pulse_phase.sin() * 0.5 + 0.5;
     let tab_bar_style = if pulse_strength > 0.6 {
         app.theme.active_border_style().add_modifier(Modifier::BOLD)
     } else {
         app.theme.active_border_style()
     };
-    
+
     let tabs = Tabs::new(tab_titles_static)
         .select(app.active_tab)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Double)
-                .title(apply_glitch_effect(" [ SYS_CORE :: CLIENT ] ", app.pulse_phase, 0.06))
+                .title(apply_glitch_effect(
+                    " [ SYS_CORE :: CLIENT ] ",
+                    app.pulse_phase * 0.1 + 1.37,
+                    0.02,
+                ))
                 .style(tab_bar_style),
         )
         .highlight_style(
             Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::UNDERLINED),
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )
         .style(Style::default().fg(Color::Rgb(100, 110, 130)));
     f.render_widget(tabs, root[0]);
@@ -908,38 +914,56 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(6),
-            Constraint::Min(3),
-            Constraint::Length(3),
+            Constraint::Min(5),
+            Constraint::Length(5),
         ])
         .split(area);
 
     let header = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(apply_glitch_effect(" DAEMON_UPDATE_CONTROL ", app.pulse_phase, 0.12))
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
-    
+        .title(" DAEMON UPDATE CONTROL ")
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+
     let instructions = vec![
         Line::from(Span::raw(
             "Auto-update checks every 30 minutes. Manual trigger forces immediate update.",
         )),
         Line::from(Span::raw("")),
         Line::from(vec![
-            Span::styled("[1/h] ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[1/h] ",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("HOST daemon  "),
-            Span::styled("[2-9] ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[2-9] ",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("individual LXC stacks  "),
-            Span::styled("[a] ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[a] ",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("UPDATE ALL"),
         ]),
     ];
     f.render_widget(Paragraph::new(instructions).block(header), layout[0]);
 
+    let total_targets = (app.stacks.len() + 1).max(1);
     let button_cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(vec![Constraint::Percentage(
-            (100 / (app.stacks.len() + 2).max(2)) as u16,
-        )])
+        .constraints(vec![Constraint::Ratio(1, total_targets as u32); total_targets])
         .split(layout[1]);
 
     let mut col_idx = 0;
@@ -964,11 +988,38 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::Green)
         };
         let btn_text = format!("{} HOST UPDATE {}", spinner, spinner);
+        let host_state = if app.update_in_progress == Some("HOST".to_string()) {
+            "updating"
+        } else {
+            "idle"
+        };
         f.render_widget(
-            Block::default()
+            Paragraph::new(vec![
+                Line::from("key [1/h]  target HOST"),
+                Line::from(format!("version {}", app.host_daemon_version)),
+                Line::from(format!("state {}", host_state)),
+                Line::from(format!(
+                    "last {}",
+                    app.update_last_result
+                        .get("HOST")
+                        .map(String::as_str)
+                        .unwrap_or("idle")
+                )),
+                Line::from(format!(
+                    "at {}",
+                    app.update_last_at
+                        .get("HOST")
+                        .map(String::as_str)
+                        .unwrap_or("-")
+                )),
+            ])
+            .wrap(Wrap { trim: true })
+            .block(
+                Block::default()
                 .borders(Borders::ALL)
                 .style(btn_style)
                 .title(btn_text),
+            ),
             button_cols[col_idx],
         );
         col_idx += 1;
@@ -986,15 +1037,54 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::Magenta)
         };
         let btn_text = format!("{} {} {}", spinner, stack.to_uppercase(), spinner);
+        let source_key = format!("lxc-{}", stack);
+        let stack_state = if app.update_in_progress == Some(stack.clone()) {
+            "updating"
+        } else {
+            "idle"
+        };
         f.render_widget(
-            Block::default()
+            Paragraph::new(vec![
+                Line::from(format!("target {}", source_key)),
+                Line::from(format!(
+                    "version {}",
+                    app.lxc_daemon_versions
+                        .get(&source_key)
+                        .map(String::as_str)
+                        .unwrap_or("unknown")
+                )),
+                Line::from(format!("state {}", stack_state)),
+                Line::from(format!(
+                    "last {}",
+                    app.update_last_result
+                        .get(stack)
+                        .map(String::as_str)
+                        .unwrap_or("idle")
+                )),
+                Line::from(format!(
+                    "at {}",
+                    app.update_last_at
+                        .get(stack)
+                        .map(String::as_str)
+                        .unwrap_or("-")
+                )),
+            ])
+            .wrap(Wrap { trim: true })
+            .block(
+                Block::default()
                 .borders(Borders::ALL)
                 .style(btn_style)
                 .title(btn_text),
+            ),
             button_cols[col_idx],
         );
         col_idx += 1;
     }
+
+    let footer_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(26), Constraint::Min(10)])
+        .split(layout[2]);
 
     let update_all_style = if app.update_in_progress.is_some() {
         Style::default().fg(Color::Gray)
@@ -1004,11 +1094,24 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
             .add_modifier(Modifier::BOLD)
     };
     f.render_widget(
-        Block::default()
-            .borders(Borders::ALL)
-            .style(update_all_style)
-            .title(" >>> UPDATE ALL <<< "),
-        layout[2],
+        Paragraph::new(vec![
+            Line::from("[a] trigger batch"),
+            Line::from("HOST -> all stacks"),
+            Line::from(
+                app.update_last_result
+                    .get("UPDATING_ALL")
+                    .map(String::as_str)
+                    .unwrap_or("idle"),
+            ),
+        ])
+        .wrap(Wrap { trim: true })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(update_all_style)
+                .title(" >>> UPDATE ALL <<< "),
+        ),
+        footer_cols[0],
     );
 
     let status_text = if let Some(in_prog) = &app.update_in_progress {
@@ -1032,7 +1135,12 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .title(" Status ")
         .style(Style::default().fg(status_color));
-    f.render_widget(Paragraph::new(status_text).block(status_block), layout[2]);
+    f.render_widget(
+        Paragraph::new(status_text)
+            .wrap(Wrap { trim: true })
+            .block(status_block),
+        footer_cols[1],
+    );
 }
 
 fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
@@ -1273,8 +1381,8 @@ fn log_level_style(level: &str) -> Style {
 /// Returns the text with occasional character replacements for a brief glitch effect.
 fn apply_glitch_effect(text: &str, phase: f32, glitch_rate: f32) -> String {
     const GLITCH_CHARS: &[char] = &[
-        '◆', '▲', '■', '✧', '⚡', '✹', '◈', '▬', '⬓', '◐', '◑', '◒', '◓',
-        '◀', '▶', '▼', '░', '▓', '█', '◊', '●', '◯', '◎', '◉', '⬟',
+        '◆', '▲', '■', '✧', '⚡', '✹', '◈', '▬', '⬓', '◐', '◑', '◒', '◓', '◀', '▶', '▼', '░', '▓',
+        '█', '◊', '●', '◯', '◎', '◉', '⬟',
     ];
 
     let seed = (phase.sin().abs() * 10000.0) as u32;

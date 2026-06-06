@@ -391,6 +391,7 @@ async fn async_main() -> Result<()> {
                 UpdateDispatchEvent::Finished { target, ok, msg } => {
                     update_dispatch_running = false;
                     app.update_in_progress = None;
+                    app.record_update_result(&target, ok, &msg);
                     app.update_status = if ok {
                         format!("{} update success: {}", target, msg)
                     } else {

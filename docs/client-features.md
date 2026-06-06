@@ -1,6 +1,6 @@
 # CLIENT Features (Current)
 
-Last updated: 2026-06-05
+Last updated: 2026-06-06
 
 ## Scope
 
@@ -15,6 +15,9 @@ Last updated: 2026-06-05
 - Live HOST connectivity polling over SSH (default `root@10.10.5.250`) with runtime node/LXC status in the Host Management tab.
 - Logs tab source focus mode (Shift+f) to isolate one source without dropping global log ingestion.
 - CLIENT detects `daemon_version=` markers from HOST/LXC websocket logs and emits explicit version-detected/version-changed log lines.
+- Update tab cards now render per-target metadata: detected daemon version plus last manual update outcome/timestamp for HOST and each LXC stack.
+- Top tab bar keeps the glitch treatment while other sections render stable titles; selected tab uses a filled highlight style for clearer focus.
+- Update tab cards include richer action context (trigger key/target and live state `idle|updating`) alongside version and last-result telemetry.
 
 ## Implemented Highlights
 

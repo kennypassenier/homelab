@@ -12,6 +12,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::io;
+use std::path::Path;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::signal;
@@ -140,8 +141,39 @@ fn main() -> Result<()> {
     Runtime::new()?.block_on(async_main())
 }
 
+fn load_client_env() {
+    let candidates = [
+        std::env::var("CLIENT_ENV_FILE").ok(),
+        Some("client-app/.env".to_string()),
+        Some(".env".to_string()),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        let path = Path::new(&candidate);
+        if path.exists() {
+            let _ = dotenvy::from_path(path);
+            break;
+        }
+    }
+}
+
 /// Core event loop: draw → wait for input → handle → repeat.
 async fn async_main() -> Result<()> {
+    // Change to project root so relative paths work correctly
+    if let Ok(mut current) = std::env::current_dir() {
+        for _ in 0..10 {
+            if current.join(".git").exists() {
+                std::env::set_current_dir(&current)?;
+                break;
+            }
+            if !current.pop() {
+                break;
+            }
+        }
+    }
+
+    load_client_env();
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -155,7 +187,8 @@ async fn async_main() -> Result<()> {
     let (sync_tx, mut sync_rx) = mpsc::unbounded_channel::<SyncEvent>();
     let (restore_tx, mut restore_rx) = mpsc::unbounded_channel::<RestoreDispatchEvent>();
     let (update_tx, mut update_rx) = mpsc::unbounded_channel::<UpdateDispatchEvent>();
-    let (update_catalog_tx, mut update_catalog_rx) = mpsc::unbounded_channel::<UpdateCatalogEvent>();
+    let (update_catalog_tx, mut update_catalog_rx) =
+        mpsc::unbounded_channel::<UpdateCatalogEvent>();
     // WebSocket event channel: receives continuous log streams from HOST and LXC stacks.
     let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<WsEvent>();
     let (host_probe_tx, mut host_probe_rx) = mpsc::unbounded_channel::<HostProbeEvent>();
@@ -465,8 +498,8 @@ async fn async_main() -> Result<()> {
             let stack = app.sync_stack.clone();
             let tx = sync_tx.clone();
 
-            // Resolve LXC IP: look up `lxc-<stack>` in ~/.ssh/config, then fall
-            // back to the LXC_API_IP env var, then 127.0.0.1.
+            // Resolve LXC IP: prefer stacks/<name>/lxc-compose.yml reserved_ipv4,
+            // then fall back to LXC_API_IP env var, then 127.0.0.1.
             let ip = resolve_stack_api_ip(&stack);
             let url = format!("http://{}:8080/api/sync", ip);
             let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
@@ -994,13 +1027,6 @@ fn resolve_stack_api_ip(stack: &str) -> String {
     if let Ok(config) = crate::scaffold::read_stack_config(stack) {
         if let Some(ip) = config.reserved_ipv4.filter(|ip| !ip.trim().is_empty()) {
             return ip;
-        }
-
-        let key = format!("LXC_{}_IP", stack.replace('-', "_").to_uppercase());
-        if let Ok(ip) = std::env::var(&key) {
-            if !ip.trim().is_empty() {
-                return ip;
-            }
         }
     }
 

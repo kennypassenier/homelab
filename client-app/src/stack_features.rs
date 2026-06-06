@@ -12,6 +12,7 @@ const GPU_NODES_INTEL: [&str; 2] = ["/dev/dri/renderD128", "/dev/dri/card0"];
 pub struct AddAppOptions {
     pub include_promtail: bool,
     pub include_traefik: bool,
+    pub subdomain: Option<String>,
 }
 
 pub struct AddCoreAppsResult {
@@ -279,7 +280,8 @@ pub fn add_app_to_stack(
     crate::scaffold::ensure_lxc_compose(stack_name)?;
     crate::scaffold::ensure_app_config_mount(stack_name, app_name)?;
 
-    let compose = app_compose_yaml(stack_name, app_name, docker_image, options);
+    let domain = std::env::var("DOMAIN").unwrap_or_else(|_| "example.com".to_string());
+    let compose = app_compose_yaml(stack_name, app_name, docker_image, options, &domain);
     fs::write(
         format!("stacks/{}/{}/docker-compose.yml", stack_name, app_name),
         compose,
@@ -508,6 +510,7 @@ fn app_compose_yaml(
     app_name: &str,
     docker_image: &str,
     options: &AddAppOptions,
+    domain: &str,
 ) -> String {
     let mut out = String::new();
     out.push_str("services:\n");
@@ -520,10 +523,22 @@ fn app_compose_yaml(
     if options.include_traefik {
         out.push_str("    labels:\n");
         out.push_str("      - \"traefik.enable=true\"\n");
-        out.push_str(&format!(
-            "      - \"traefik.http.routers.{}.rule=Host(\\\"{}.local\\\")\"\n",
-            app_name, app_name
-        ));
+        if let Some(subdomain) = &options.subdomain {
+            let fqdn = format!("{}.{}", subdomain, domain);
+            out.push_str(&format!(
+                "      - \"traefik.http.routers.{}.rule=Host(\\\"{}\\\") || Host(\\\"{}\\\") || Host(\\\"{}\\\") || Host(\\\"{}\\\")\"\n",
+                app_name, 
+                fqdn,
+                format!("{}.{}", subdomain, domain), // FQDN
+                subdomain,
+                app_name
+            ));
+        } else {
+            out.push_str(&format!(
+                "      - \"traefik.http.routers.{}.rule=Host(\\\"{}.local\\\")\"\n",
+                app_name, app_name
+            ));
+        }
         out.push_str("      - \"traefik.http.services.app.loadbalancer.server.port=80\"\n");
     }
 
@@ -585,7 +600,7 @@ fn scaffold_watchtower(stack_name: &str) -> io::Result<()> {
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(
-            "services:\n  watchtower:\n    image: containrrr/watchtower:latest\n    container_name: {}-watchtower\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n    environment:\n      WATCHTOWER_LABEL_ENABLE: \"true\"\n      WATCHTOWER_CLEANUP: \"true\"\n      WATCHTOWER_POLL_INTERVAL: \"86400\"\n      WATCHTOWER_ROLLING_RESTART: \"true\"\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n",
+            "services:\n  watchtower:\n    image: nicholas-fedor/watchtower:latest\n    container_name: {}-watchtower\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n    environment:\n      WATCHTOWER_LABEL_ENABLE: \"true\"\n      WATCHTOWER_CLEANUP: \"true\"\n      WATCHTOWER_POLL_INTERVAL: \"86400\"\n      WATCHTOWER_ROLLING_RESTART: \"true\"\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n",
             stack_name
         ),
     )

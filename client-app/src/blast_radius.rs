@@ -30,6 +30,7 @@ pub struct AppCreationWizardState {
     pub app_name: Option<String>,
     pub docker_image: Option<String>,
     pub selected_defaults: Vec<String>,
+    pub subdomain: Option<String>,
     pub step: AppCreationStep,
     pub multiselect_cursor: usize, // for DefaultsMultiselect step
 }
@@ -46,6 +47,11 @@ pub enum AppCreationStep {
     DefaultsMultiselect {
         options: Vec<DefaultServiceOption>,
         selected: Vec<bool>,
+    },
+    SubdomainInput {
+        input: Input,
+        error: Option<String>,
+        domain: String,
     },
     Review {
         summary: String,
@@ -65,6 +71,7 @@ pub struct StackCreationWizardState {
     pub disk_gb: u32,
     pub autostart: bool,
     pub startup_order: u32,
+    pub vmid: u32,
     pub step: StackCreationStep,
 }
 
@@ -75,6 +82,7 @@ pub enum StackCreationStep {
     DiskInput { input: Input, error: Option<String> },
     AutoStartSelect,
     BootOrderSelect,
+    VmidInput { input: Input, error: Option<String> },
     Review { summary: String },
     Done,
 }
@@ -188,6 +196,35 @@ pub fn draw_app_creation_wizard(
             let mut text = format!(
                 "Enter Docker image for app:\n> {}\n\n[Enter to continue, ESC to cancel]",
                 input.value()
+            );
+            if let Some(err) = error {
+                text.push_str(&format!("\n\n[Error: {}]", err));
+            }
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Cyan));
+            f.render_widget(para, popup_area);
+        }
+        AppCreationStep::SubdomainInput { input, error, domain } => {
+            let block = Block::default()
+                .title("Subdomain (Traefik Routing)")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let preview = if input.value().is_empty() {
+                format!("(will be: ?.{})", domain)
+            } else {
+                format!("(will be: {}.{})", input.value(), domain)
+            };
+            let mut text = format!(
+                "Enter subdomain for Traefik routing:\n> {}\n{}\n\n[Enter to continue, ESC to cancel]",
+                input.value(),
+                preview
             );
             if let Some(err) = error {
                 text.push_str(&format!("\n\n[Error: {}]", err));
@@ -404,6 +441,29 @@ pub fn draw_stack_creation_wizard(
                 "Set boot order priority (higher means later / lower priority):\n\n  boot order: {}\n\nDefault 90 keeps stacks behind critical infra.\n\n[←/→ or +/- adjust, Enter continue, ESC cancel]",
                 state.startup_order
             );
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Cyan));
+            f.render_widget(para, popup_area);
+        }
+        StackCreationStep::VmidInput { input, error } => {
+            let block = Block::default()
+                .title("Container ID (VMID)")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let mut text = format!(
+                "Enter VMID for this LXC container (101-354, e.g., 105):\n> {}\n\n[Enter continue, ESC cancel]",
+                input.value()
+            );
+            if let Some(err) = error {
+                text.push_str(&format!("\n\n[Error: {}]", err));
+            }
             let para = Paragraph::new(text)
                 .block(block)
                 .alignment(Alignment::Left)

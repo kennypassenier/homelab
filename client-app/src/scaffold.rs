@@ -37,6 +37,30 @@ pub fn canonical_lxc_name(vmid: u32, stack_name: &str) -> String {
     format!("{}-{}-{}", vmid, DEFAULT_LXC_ROLE, stack_name)
 }
 
+/// Derive reserved IPv4 from VMID using an adjustable prefix.
+///
+/// Mapping rule:
+/// - host octet = vmid - 100
+/// - valid host octet range: 1..=254
+/// - prefix comes from STACK_IP_PREFIX (default: 10.10.10.)
+pub fn derive_reserved_ipv4_from_vmid(vmid: u32) -> Option<String> {
+    let host_octet = vmid.checked_sub(100)?;
+    if !(1..=254).contains(&host_octet) {
+        return None;
+    }
+
+    let mut prefix = std::env::var("STACK_IP_PREFIX").unwrap_or_else(|_| "10.10.10.".to_string());
+    prefix = prefix.trim().to_string();
+    if prefix.is_empty() {
+        prefix = "10.10.10.".to_string();
+    }
+    if !prefix.ends_with('.') {
+        prefix.push('.');
+    }
+
+    Some(format!("{}{}", prefix, host_octet))
+}
+
 /// Legacy alias kept for migration compatibility.
 pub fn legacy_lxc_alias(stack_name: &str) -> String {
     format!("lxc-{}", stack_name)
@@ -626,6 +650,7 @@ pub fn list_deploy_enabled_stacks(stacks: &[String]) -> Vec<String> {
 /// Writes stack-level provisioning defaults used by HOST provisioning flows.
 pub fn set_stack_provisioning_defaults(
     stack_name: &str,
+    vmid: u32,
     cpu_cores: u8,
     memory_mb: u32,
     disk_gb: u32,
@@ -633,6 +658,10 @@ pub fn set_stack_provisioning_defaults(
     startup_order: u32,
 ) -> io::Result<()> {
     let mut config = read_stack_config(stack_name)?;
+    config.vmid = vmid;
+    config.hostname = canonical_lxc_name(vmid, stack_name);
+    config.ip_mode = "dhcp-reserved".to_string();
+    config.reserved_ipv4 = derive_reserved_ipv4_from_vmid(vmid);
     config.cpu_cores = cpu_cores;
     config.memory_mb = memory_mb;
     config.disk_gb = disk_gb;

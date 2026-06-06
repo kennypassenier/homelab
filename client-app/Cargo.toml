@@ -19,6 +19,7 @@ reqwest = { version = "0.12", features = ["blocking", "json", "stream"] }
 futures = "0.3"
 tui-input = "0.8"
 tokio-tungstenite = "0.21"
+dotenvy = "0.15"
 
 [[bin]]
 name = "CLIENT"

@@ -19,6 +19,7 @@ Last updated: 2026-06-06
 - Top tab bar keeps the glitch treatment while other sections render stable titles; selected tab uses a filled highlight style for clearer focus.
 - Update tab cards include richer action context (trigger key/target and live state `idle|updating`) alongside version and last-result telemetry.
 - Update tab now shows latest available HOST release tag (GitHub `host-daemon-v*`) with refresh timestamp, plus LXC update channel visibility (image/tag target used by self-update).
+- CLIENT now auto-loads environment from `client-app/.env` (or `CLIENT_ENV_FILE` override) at startup.
 
 ## Implemented Highlights
 
@@ -31,6 +32,7 @@ Last updated: 2026-06-06
 - GPU compose wiring toggles per selected app (g/G) and host hint writes to lxc-compose.
 - Stack creation wizard now captures provisioning defaults (CPU 1-8, memory in 512 MiB steps, root disk GiB) and writes them into stack `lxc-compose.yml`.
 - Stack creation wizard now captures boot policy defaults (autostart + boot order) and writes them into stack `lxc-compose.yml`.
+- Stack creation wizard now requires VMID `101..354` and deterministically derives reserved IPv4 as `STACK_IP_PREFIX + (vmid - 100)` (default prefix `10.10.10.`).
 - Stack config editor allows stack-level editing of deploy state, resources, hostname, MAC address, IP mode, and reserved IPv4 from the Scaffolding tab.
 - Stack config editor allows stack-level editing of autostart and boot order policy.
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.

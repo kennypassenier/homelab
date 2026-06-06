@@ -349,10 +349,26 @@ impl App {
         app
     }
 
-    /// Scans `stacks/` (relative to the binary's CWD) for infrastructure stacks.
+    /// Finds the project root by searching for .git directory.
+    fn find_project_root() -> std::path::PathBuf {
+        let mut current = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        for _ in 0..10 {
+            if current.join(".git").exists() {
+                return current;
+            }
+            if !current.pop() {
+                break;
+            }
+        }
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    }
+
+    /// Scans `stacks/` (at project root) for infrastructure stacks.
     pub fn load_stacks() -> Vec<String> {
         let mut result = Vec::new();
-        if let Ok(entries) = fs::read_dir("stacks") {
+        let root = Self::find_project_root();
+        let stacks_dir = root.join("stacks");
+        if let Ok(entries) = fs::read_dir(&stacks_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {

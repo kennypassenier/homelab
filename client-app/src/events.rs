@@ -300,22 +300,61 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                     selected[*cursor] = !selected[*cursor];
                 }
                 KeyCode::Enter => {
-                    let app_name = state.app_name.as_deref().unwrap_or("");
-                    let docker_image = state.docker_image.as_deref().unwrap_or("");
                     state.selected_defaults.clear();
-                    let mut summary = format!(
-                        "Stack: {}\nApp: {}\nDocker image: {}\n\nDefault services:\n",
-                        state.stack_name, app_name, docker_image
-                    );
                     for (i, opt) in options.iter().enumerate() {
                         if selected[i] {
-                            summary.push_str(&format!("- {}\n", opt.label));
                             state.selected_defaults.push(opt.label.to_string());
                         }
                     }
-                    state.step = AppCreationStep::Review { summary };
+                    
+                    // If Traefik is selected, ask for subdomain; otherwise, go to Review
+                    if state.selected_defaults.iter().any(|x| x == "Traefik") {
+                        let domain = std::env::var("DOMAIN").unwrap_or_else(|_| "example.com".to_string());
+                        state.step = AppCreationStep::SubdomainInput {
+                            input: Input::default(),
+                            error: None,
+                            domain,
+                        };
+                    } else {
+                        let app_name = state.app_name.as_deref().unwrap_or("");
+                        let docker_image = state.docker_image.as_deref().unwrap_or("");
+                        let mut summary = format!(
+                            "Stack: {}\nApp: {}\nDocker image: {}\n\nDefault services:\n",
+                            state.stack_name, app_name, docker_image
+                        );
+                        for default in &state.selected_defaults {
+                            summary.push_str(&format!("- {}\n", default));
+                        }
+                        state.step = AppCreationStep::Review { summary };
+                    }
                 }
                 _ => {}
+            }
+        }
+
+        AppCreationStep::SubdomainInput { input, error, domain } => {
+            if key.code == KeyCode::Esc {
+                return WizardOutcome::Close;
+            } else if key.code == KeyCode::Enter {
+                let subdomain = input.value().trim();
+                if subdomain.is_empty() {
+                    *error = Some("Subdomain cannot be empty".to_string());
+                } else {
+                    state.subdomain = Some(subdomain.to_string());
+                    let app_name = state.app_name.as_deref().unwrap_or("");
+                    let docker_image = state.docker_image.as_deref().unwrap_or("");
+                    let fqdn = format!("{}.{}", subdomain, domain);
+                    let mut summary = format!(
+                        "Stack: {}\nApp: {}\nDocker image: {}\nSubdomain: {}\n\nDefault services:\n",
+                        state.stack_name, app_name, docker_image, fqdn
+                    );
+                    for default in &state.selected_defaults {
+                        summary.push_str(&format!("- {}\n", default));
+                    }
+                    state.step = AppCreationStep::Review { summary };
+                }
+            } else {
+                input.handle_event(&crossterm::event::Event::Key(key));
             }
         }
 
@@ -333,6 +372,7 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                 let options = crate::stack_features::AddAppOptions {
                     include_promtail: state.selected_defaults.iter().any(|x| x == "Promtail"),
                     include_traefik: state.selected_defaults.iter().any(|x| x == "Traefik"),
+                    subdomain: state.subdomain.clone(),
                 };
 
                 let _ = crate::stack_features::add_app_to_stack(
@@ -455,22 +495,51 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
                 state.startup_order = state.startup_order.saturating_add(5).min(500);
             }
             KeyCode::Enter => {
-                let stack_name = state.stack_name.as_deref().unwrap_or("new-stack");
-                state.step = StackCreationStep::Review {
-                    summary: format!(
-                        "Stack: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nDisk: {} GiB\nAutostart: {}\nBoot order: {}\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create setup.sh\n- create lxc-compose.yml\n- scaffold missing core apps",
-                        stack_name,
-                        state.cpu_cores,
-                        state.memory_mb as f32 / 1024.0,
-                        state.memory_mb,
-                        state.disk_gb,
-                        state.autostart,
-                        state.startup_order,
-                        stack_name
-                    ),
+                state.step = StackCreationStep::VmidInput {
+                    input: Input::default(),
+                    error: None,
                 };
             }
             _ => {}
+        },
+
+        StackCreationStep::VmidInput { input, error } => match key.code {
+            KeyCode::Esc => return WizardOutcome::Close,
+            KeyCode::Enter => {
+                let raw = input.value().trim();
+                match raw.parse::<u32>() {
+                    Ok(v) if (101..=354).contains(&v) => {
+                        state.vmid = v;
+                        let stack_name = state.stack_name.as_deref().unwrap_or("new-stack");
+                        let reserved_ip = crate::scaffold::derive_reserved_ipv4_from_vmid(v)
+                            .unwrap_or_else(|| "n/a".to_string());
+                        state.step = StackCreationStep::Review {
+                            summary: format!(
+                                "Stack: {}\nVMID: {}\nReserved IPv4: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nDisk: {} GiB\nAutostart: {}\nBoot order: {}\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create setup.sh\n- create lxc-compose.yml\n- scaffold missing core apps",
+                                stack_name,
+                                v,
+                                reserved_ip,
+                                state.cpu_cores,
+                                state.memory_mb as f32 / 1024.0,
+                                state.memory_mb,
+                                state.disk_gb,
+                                state.autostart,
+                                state.startup_order,
+                                stack_name
+                            ),
+                        };
+                    }
+                    _ => {
+                        *error = Some(
+                            "VMID must be 101..354 (maps to STACK_IP_PREFIX + (vmid - 100))"
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+            _ => {
+                input.handle_event(&crossterm::event::Event::Key(key));
+            }
         },
 
         StackCreationStep::Review { summary: _ } => match key.code {
@@ -491,6 +560,7 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
                     Ok(_) => {
                         if let Err(e) = crate::scaffold::set_stack_provisioning_defaults(
                             stack_name,
+                            state.vmid,
                             state.cpu_cores,
                             state.memory_mb,
                             state.disk_gb,
@@ -1285,6 +1355,7 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
             disk_gb: 32,
             autostart: true,
             startup_order: 90,
+            vmid: 0,
             step: StackCreationStep::Name {
                 input: Input::default(),
                 error: None,
@@ -1750,6 +1821,7 @@ fn handle_scaffolding_enter(app: &mut App) -> EventOutcome {
                         app_name: None,
                         docker_image: None,
                         selected_defaults: Vec::new(),
+                        subdomain: None,
                         step: AppCreationStep::Name {
                             input: Input::default(),
                             error: None,

@@ -11,6 +11,8 @@ const DEFAULT_HEARTBEAT_TTL_SECS: u64 = 180;
 pub fn start_failsafe_enforcer(status_tx: Sender<String>) {
     thread::spawn(move || {
         let mut last_window = Instant::now();
+        let mut last_no_update_log = Instant::now() - Duration::from_secs(9999);
+        let mut last_no_heartbeat_log = Instant::now() - Duration::from_secs(9999);
 
         loop {
             let interval_secs = env_u64(
@@ -30,13 +32,23 @@ pub fn start_failsafe_enforcer(status_tx: Sender<String>) {
                         ));
                     }
                     Some(age) => {
-                        let _ = status_tx.send(format!(
-                            "[failsafe] heartbeat stale (age={}s ttl={}s) -> checking self-update",
-                            age, heartbeat_ttl_secs
-                        ));
+                        if last_no_heartbeat_log.elapsed().as_secs() >= 3600 {
+                            let _ = status_tx.send(format!(
+                                "[failsafe] heartbeat stale (age={}s ttl={}s) -> checking self-update",
+                                age, heartbeat_ttl_secs
+                            ));
+                            last_no_heartbeat_log = Instant::now();
+                        }
                         match self_update::check_and_apply_update() {
                             Ok(msg) => {
-                                let _ = status_tx.send(format!("[failsafe] {}", msg));
+                                if !msg.contains("No HOST update available")
+                                    || last_no_update_log.elapsed().as_secs() >= 21_600
+                                {
+                                    let _ = status_tx.send(format!("[failsafe] {}", msg));
+                                    if msg.contains("No HOST update available") {
+                                        last_no_update_log = Instant::now();
+                                    }
+                                }
                             }
                             Err(err) => {
                                 let _ = status_tx
@@ -45,10 +57,23 @@ pub fn start_failsafe_enforcer(status_tx: Sender<String>) {
                         }
                     }
                     None => {
-                        let _ = status_tx.send("[failsafe] no client heartbeat yet -> checking self-update".to_string());
+                        if last_no_heartbeat_log.elapsed().as_secs() >= 3600 {
+                            let _ = status_tx.send(
+                                "[failsafe] no client heartbeat yet -> checking self-update"
+                                    .to_string(),
+                            );
+                            last_no_heartbeat_log = Instant::now();
+                        }
                         match self_update::check_and_apply_update() {
                             Ok(msg) => {
-                                let _ = status_tx.send(format!("[failsafe] {}", msg));
+                                if !msg.contains("No HOST update available")
+                                    || last_no_update_log.elapsed().as_secs() >= 21_600
+                                {
+                                    let _ = status_tx.send(format!("[failsafe] {}", msg));
+                                    if msg.contains("No HOST update available") {
+                                        last_no_update_log = Instant::now();
+                                    }
+                                }
                             }
                             Err(err) => {
                                 let _ = status_tx

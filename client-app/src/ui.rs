@@ -1332,7 +1332,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         .map(|line| {
             let src_color = log_source_color(&line.source);
             let level_style = log_level_style(&line.level);
-            let spans = vec![
+            let mut spans = vec![
                 Span::styled(
                     format!(" {} ", line.time),
                     Style::default().fg(Color::DarkGray),
@@ -1342,8 +1342,8 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
                     Style::default().fg(src_color),
                 ),
                 Span::styled(format!("{:<6} ", line.level), level_style),
-                Span::raw(line.message.as_str()),
             ];
+            spans.extend(styled_log_message(&line.message));
             ListItem::new(Line::from(spans))
         })
         .collect();
@@ -1425,6 +1425,30 @@ fn log_level_style(level: &str) -> Style {
         "ERROR" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         _ => Style::default().fg(Color::DarkGray),
     }
+}
+
+fn styled_log_message<'a>(message: &'a str) -> Vec<Span<'a>> {
+    let tags = [
+        ("[host-update]", Color::Cyan),
+        ("[failsafe]", Color::Yellow),
+        ("[update-rpc]", Color::Magenta),
+        ("[update-http]", Color::Blue),
+        ("[sync]", Color::Green),
+    ];
+
+    for (tag, color) in tags {
+        if let Some(rest) = message.strip_prefix(tag) {
+            return vec![
+                Span::styled(
+                    tag,
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(rest),
+            ];
+        }
+    }
+
+    vec![Span::raw(message)]
 }
 
 /// Applies subtle cyberpunk glitch effects to text.

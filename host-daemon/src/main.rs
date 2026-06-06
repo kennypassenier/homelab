@@ -333,6 +333,7 @@ fn start_update_checker(status_tx: mpsc::Sender<String>) {
     std::thread::spawn(move || {
         // Set last_check far in the past so the first iteration triggers immediately.
         let mut last_check = std::time::Instant::now() - std::time::Duration::from_secs(9999);
+        let mut last_no_update_log = std::time::Instant::now() - std::time::Duration::from_secs(9999);
 
         loop {
             let interval_secs = std::env::var("HOST_UPDATE_INTERVAL_SECS")
@@ -342,23 +343,25 @@ fn start_update_checker(status_tx: mpsc::Sender<String>) {
                 .max(60);
 
             if last_check.elapsed().as_secs() >= interval_secs {
-                let _ = status_tx.send(format!(
-                    "[host-update] checking GitHub releases (interval={}s)",
-                    interval_secs
-                ));
-                let _ = status_tx.send(format!(
-                    "[host-update] current daemon_version={} checking for newer release",
-                    env!("CARGO_PKG_VERSION")
-                ));
-
                 match self_update::check_and_apply_update() {
                     Ok(msg) => {
-                        let _ = status_tx.send(format!("[host-update] {}", msg));
                         if msg.contains("HOST updated") {
+                            let _ = status_tx.send(format!("[host-update] {}", msg));
                             let _ = status_tx.send(
                                 "[host-update] update applied; restart expected, CLIENT should observe reconnect"
                                     .to_string(),
                             );
+                        } else if msg.contains("No HOST update available")
+                            && last_no_update_log.elapsed().as_secs() >= 21_600
+                        {
+                            // Keep one periodic heartbeat line so operators know checker is alive.
+                            let _ = status_tx.send(format!(
+                                "[host-update] {} (interval={}s)",
+                                msg, interval_secs
+                            ));
+                            last_no_update_log = std::time::Instant::now();
+                        } else if !msg.contains("No HOST update available") {
+                            let _ = status_tx.send(format!("[host-update] {}", msg));
                         }
                     }
                     Err(err) => {

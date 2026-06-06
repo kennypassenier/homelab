@@ -50,6 +50,8 @@ impl std::fmt::Display for LogLevel {
 
 use crate::api::HostMetrics;
 
+const DEFAULT_LOG_HISTORY_LIMIT: usize = 500;
+
 pub struct App {
     pub tab: usize,
     /// Live status lines from the backup orchestrator thread.
@@ -62,6 +64,8 @@ pub struct App {
     pub current_metrics: HostMetrics,
     /// Process start timestamp for uptime calculation.
     pub started_at: std::time::Instant,
+    /// Max retained log lines kept in memory for websocket replay.
+    log_history_limit: usize,
 }
 
 impl App {
@@ -79,13 +83,14 @@ impl App {
                 lxc_runtime: Vec::new(),
             },
             started_at: std::time::Instant::now(),
+            log_history_limit: parse_log_history_limit(),
         }
     }
 
     pub fn add_log(&mut self, level: LogLevel, message: String) {
         let log_line = format!("[{}] {}", level, message);
         self.backup_status.push(log_line.clone());
-        if self.backup_status.len() > 500 {
+        if self.backup_status.len() > self.log_history_limit {
             self.backup_status.remove(0);
         }
         let _ = self.log_tx.send(log_line);
@@ -155,4 +160,12 @@ impl App {
             snapshots: 42,
         }
     }
+}
+
+fn parse_log_history_limit() -> usize {
+    std::env::var("HOST_LOG_HISTORY_MAX")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(50, 10_000))
+        .unwrap_or(DEFAULT_LOG_HISTORY_LIMIT)
 }

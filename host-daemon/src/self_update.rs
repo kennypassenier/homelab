@@ -32,16 +32,7 @@ pub fn check_and_apply_update() -> Result<String, String> {
         ));
     }
 
-    let asset = release
-        .assets
-        .iter()
-        .find(|a| a.name == expected_asset)
-        .ok_or_else(|| {
-            format!(
-                "Release {} missing asset {}",
-                release.tag_name, expected_asset
-            )
-        })?;
+    let (asset, fallback_used) = select_host_asset(&release, &expected_asset)?;
 
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let tmp = tmp_path_for(&exe);
@@ -56,9 +47,51 @@ pub fn check_and_apply_update() -> Result<String, String> {
         Err(e) => format!("binary replaced; manual restart may be required ({})", e),
     };
 
+    let selection = if fallback_used {
+        format!("fallback asset {}", asset.name)
+    } else {
+        format!("asset {}", asset.name)
+    };
+
     Ok(format!(
-        "HOST updated {} -> {} ({})",
-        current, latest, restart_msg
+        "HOST updated {} -> {} ({}, {})",
+        current, latest, restart_msg, selection
+    ))
+}
+
+fn select_host_asset<'a>(
+    release: &'a ReleaseInfo,
+    expected_asset: &str,
+) -> Result<(&'a ReleaseAsset, bool), String> {
+    if let Some(asset) = release.assets.iter().find(|a| a.name == expected_asset) {
+        return Ok((asset, false));
+    }
+
+    let fallback_candidates = ["HOST", "HOST-linux-x86_64-unknown-linux-gnu"];
+    for name in fallback_candidates {
+        if let Some(asset) = release.assets.iter().find(|a| a.name == name) {
+            return Ok((asset, true));
+        }
+    }
+
+    if let Some(asset) = release.assets.iter().find(|a| a.name.starts_with("HOST")) {
+        return Ok((asset, true));
+    }
+
+    let available = if release.assets.is_empty() {
+        "none".to_string()
+    } else {
+        release
+            .assets
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    Err(format!(
+        "Release {} missing asset {} (available: {})",
+        release.tag_name, expected_asset, available
     ))
 }
 

@@ -209,7 +209,10 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
     // Subscribe and snapshot existing logs so reconnecting clients don't miss history.
     let (mut rx, snapshot): (broadcast::Receiver<String>, Vec<String>) = {
         let guard = app.lock().unwrap();
-        (guard.log_tx.subscribe(), guard.backup_status.clone())
+        (
+            guard.log_tx.subscribe(),
+            compact_snapshot(&guard.backup_status, 120),
+        )
     };
 
     for line in snapshot {
@@ -298,5 +301,30 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
                 }
             }
         }
+    }
+}
+
+fn compact_snapshot(lines: &[String], max_lines: usize) -> Vec<String> {
+    if lines.is_empty() || max_lines == 0 {
+        return Vec::new();
+    }
+
+    let start = lines.len().saturating_sub(max_lines * 3);
+    let mut compacted = Vec::new();
+    let mut previous: Option<&str> = None;
+
+    for line in &lines[start..] {
+        let as_str = line.as_str();
+        if previous == Some(as_str) {
+            continue;
+        }
+        compacted.push(line.clone());
+        previous = Some(as_str);
+    }
+
+    if compacted.len() > max_lines {
+        compacted[compacted.len() - max_lines..].to_vec()
+    } else {
+        compacted
     }
 }

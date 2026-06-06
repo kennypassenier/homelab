@@ -149,6 +149,7 @@ HOST currently cares about:
 - optional `RCLONE_CONFIG_FILE` for rclone-backed restic repositories (Google Drive, etc.)
 - optional `FAILSAFE_SYNC_INTERVAL_SECS` for inverse heartbeat failsafe window cadence
 - optional `HEARTBEAT_TTL_SECS` freshness threshold for heartbeat suppression
+- optional `HOST_LOG_HISTORY_MAX` for in-memory HOST websocket replay retention (default `500`, clamp `50..10000`)
 
 ### LXC variables
 

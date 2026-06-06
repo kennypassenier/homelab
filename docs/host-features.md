@@ -19,7 +19,7 @@ Last updated: 2026-06-05
 - HOST runs as a headless daemon in deployed operation.
 - Runtime workers (API server, backup policy enforcer, failsafe enforcer, release update checker) stay active continuously.
 - The canonical host-side repo path is `~/homelab` (usually `/root/homelab` on Proxmox).
-- The canonical host env file is `~/homelab/host-daemon/.env`.
+- The canonical host env file is `~/homelab/config/.env`.
 - `HOST --version` (or `HOST -V`) prints the running binary version.
 
 ## Contract with CLIENT
@@ -32,9 +32,36 @@ Last updated: 2026-06-05
 
 - `GET /api/health` for service liveness.
 - `GET /api/version` for binary version (Postman-friendly).
-- `GET /api/metrics` for runtime metrics including process uptime seconds.
+- `GET /api/metrics` for runtime metrics including process uptime and per-LXC runtime rows.
+  - Optional Bearer auth via `Authorization: Bearer <LXC_API_TOKEN>` when `LXC_API_TOKEN` is configured.
 - `POST /api/update` to trigger an immediate self-update check.
 - `GET /api/logs/ws` for live log streaming over WebSocket.
+
+### Metrics Response Schema (`GET /api/metrics`)
+
+```json
+{
+  "hostname": "proxmox",
+  "ip": "10.10.5.250",
+  "uptime_secs": 12345,
+  "lxc_runtime": [
+    {
+      "vmid": 101,
+      "name": "lxc-cloudflared",
+      "status": "RUN",
+      "cpu_pct": 3,
+      "ram_pct": 25,
+      "uptime_secs": 12345
+    }
+  ]
+}
+```
+
+- `hostname`: Proxmox node short hostname.
+- `ip`: host IP exposed by HOST daemon metrics.
+- `uptime_secs`: HOST daemon process uptime in seconds.
+- `lxc_runtime[]`: runtime rows visible to CLIENT Host Management.
+- `lxc_runtime[].uptime_secs`: mirrors host uptime for running rows and `0` for stopped rows.
 
 ## Manual Recovery: HOST Update Runbook
 
@@ -47,7 +74,7 @@ Step 1: Replace HOST with the latest GitHub release asset.
 set -euo pipefail
 
 REPO="kennypassenier/homelab"
-ASSET="HOST-linux-x86_64-unknown-linux-gnu"
+ASSET="HOST"
 DEST="/root/homelab/apps/HOST"  # Match your systemd ExecStart binary path
 
 TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" \
@@ -82,10 +109,10 @@ Pinned fallback (if API tag lookup is blocked):
 
 ```bash
 systemctl stop host-daemon.service
-curl -fLo /tmp/HOST-linux-x86_64-unknown-linux-gnu \
-  https://github.com/kennypassenier/homelab/releases/download/host-daemon-v0.1.18/HOST-linux-x86_64-unknown-linux-gnu
-chmod +x /tmp/HOST-linux-x86_64-unknown-linux-gnu
-install -m 755 /tmp/HOST-linux-x86_64-unknown-linux-gnu /root/homelab/apps/HOST
+curl -fLo /tmp/HOST \
+  https://github.com/kennypassenier/homelab/releases/download/host-daemon-v0.1.18/HOST
+chmod +x /tmp/HOST
+install -m 755 /tmp/HOST /root/homelab/apps/HOST
 systemctl start host-daemon.service
 ```
 
@@ -114,7 +141,7 @@ After manual recovery, future releases should self-update normally again.
 ## Heartbeat-Gated Failsafe Recovery
 
 - HOST runs periodic failsafe windows (default hourly).
-- CLIENT sends heartbeat pulses while the TUI is active.
+- CLIENT sends heartbeat pulses while the TUI is active, primarily via websocket RPC (`client_heartbeat`) with HTTP `POST /api/heartbeat` as backup.
 - If heartbeat is fresh at a failsafe window, HOST skips emergency update checks.
 - If heartbeat is stale/missing, HOST performs emergency release self-update check.
 

@@ -4,6 +4,7 @@ use axum::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
+    http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -12,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
 use crate::app::{App, LogLevel};
+use crate::liveness;
 use crate::self_update;
 
 #[derive(Serialize)]
@@ -32,6 +34,7 @@ pub struct HostMetrics {
     pub hostname: String,
     pub ip: String,
     pub uptime_secs: u64,
+    pub lxc_runtime: Vec<LxcMetric>,
 }
 
 /// Per-LXC runtime state visible to CLIENT.
@@ -64,6 +67,7 @@ pub async fn run_server(app: Arc<Mutex<App>>) {
 
     let router = Router::new()
         .route("/api/health", get(handle_health))
+        .route("/api/heartbeat", post(handle_client_heartbeat))
         .route("/api/version", get(handle_version))
         .route("/api/metrics", get(handle_metrics))
         .route("/api/update", post(handle_update))
@@ -82,6 +86,14 @@ async fn handle_health() -> Json<ApiResponse> {
     })
 }
 
+async fn handle_client_heartbeat() -> Json<ApiResponse> {
+    liveness::touch_client_heartbeat();
+    Json(ApiResponse {
+        status: "ok".to_string(),
+        message: "CLIENT heartbeat accepted".to_string(),
+    })
+}
+
 async fn handle_version() -> Json<VersionResponse> {
     Json(VersionResponse {
         component: "host-daemon".to_string(),
@@ -89,10 +101,79 @@ async fn handle_version() -> Json<VersionResponse> {
     })
 }
 
-async fn handle_metrics(State(app): State<Arc<Mutex<App>>>) -> Json<HostMetrics> {
+async fn handle_metrics(
+    headers: HeaderMap,
+    State(app): State<Arc<Mutex<App>>>,
+) -> Result<Json<HostMetrics>, (StatusCode, Json<ApiResponse>)> {
+    let expected_token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+    if !is_authorized_request(&headers, &expected_token) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse {
+                status: "error".to_string(),
+                message: "unauthorized".to_string(),
+            }),
+        ));
+    }
+
     let mut a = app.lock().unwrap();
-    a.current_metrics.uptime_secs = a.started_at.elapsed().as_secs();
-    Json(a.current_metrics.clone())
+    let uptime_secs = a.started_at.elapsed().as_secs();
+    let lxc_runtime = a
+        .lxc_nodes()
+        .into_iter()
+        .map(|node| {
+            let status = node.status;
+            let is_running = status.eq_ignore_ascii_case("RUN");
+            let ram_pct = node
+                .ram
+                .as_deref()
+                .and_then(parse_ram_pct)
+                .unwrap_or(0);
+            LxcMetric {
+                vmid: node.id,
+                name: node.name,
+                status,
+                cpu_pct: node.cpu.round().clamp(0.0, 100.0) as u8,
+                ram_pct,
+                uptime_secs: if is_running {
+                    uptime_secs
+                } else {
+                    0
+                },
+            }
+        })
+        .collect();
+
+    a.current_metrics.uptime_secs = uptime_secs;
+    a.current_metrics.lxc_runtime = lxc_runtime;
+    Ok(Json(a.current_metrics.clone()))
+}
+
+fn is_authorized_request(headers: &HeaderMap, expected_token: &str) -> bool {
+    let expected = expected_token.trim();
+    if expected.is_empty() {
+        return true;
+    }
+
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(|token| token.trim() == expected)
+        .unwrap_or(false)
+}
+
+fn parse_ram_pct(ram: &str) -> Option<u8> {
+    let (used_str, total_str) = ram.split_once('/')?;
+    let used = used_str.trim().parse::<f64>().ok()?;
+    let total = total_str
+        .split_whitespace()
+        .next()
+        .and_then(|v| v.parse::<f64>().ok())?;
+    if total <= 0.0 {
+        return None;
+    }
+    Some(((used / total) * 100.0).round().clamp(0.0, 100.0) as u8)
 }
 
 async fn handle_update(State(app): State<Arc<Mutex<App>>>) -> Json<ApiResponse> {
@@ -192,6 +273,15 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
                                         "request_id": request_id,
                                         "ok": true,
                                         "message": "HOST update check started"
+                                    });
+                                    let _ = socket.send(Message::Text(response.to_string())).await;
+                                } else if kind == "client_heartbeat" {
+                                    liveness::touch_client_heartbeat();
+                                    let response = serde_json::json!({
+                                        "kind": "client_heartbeat_response",
+                                        "request_id": request_id,
+                                        "ok": true,
+                                        "message": "CLIENT heartbeat accepted"
                                     });
                                     let _ = socket.send(Message::Text(response.to_string())).await;
                                 }

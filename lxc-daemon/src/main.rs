@@ -11,6 +11,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Cell, List, ListItem, Paragraph, Row, Table, Tabs},
     Terminal,
 };
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 mod api;
@@ -22,8 +23,24 @@ mod restore;
 
 use app::AppState;
 
+fn load_lxc_env() {
+    let candidates = [
+        std::env::var("LXC_ENV_FILE").ok(),
+        Some("config/.env".to_string()),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        let path = Path::new(&candidate);
+        if path.exists() {
+            let _ = dotenvy::from_path(path);
+            break;
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    load_lxc_env();
     let state = Arc::new(Mutex::new(AppState::new()));
     {
         let mut s = state.lock().unwrap();

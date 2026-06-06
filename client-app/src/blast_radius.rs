@@ -256,6 +256,7 @@ pub fn draw_app_creation_wizard(
             let para = Paragraph::new(text)
                 .block(block)
                 .alignment(Alignment::Left)
+                .wrap(Wrap { trim: false })
                 .style(Style::default().fg(Color::Green));
             f.render_widget(para, popup_area);
         }
@@ -315,11 +316,15 @@ pub fn draw_stack_creation_wizard(
     state: &StackCreationWizardState,
 ) {
     use ratatui::{style::*, widgets::*};
+    let popup_height = match &state.step {
+        StackCreationStep::Review { .. } => area.height.saturating_sub(4).clamp(14, 20),
+        _ => 10,
+    };
     let popup_area = ratatui::layout::Rect {
         x: area.width / 4,
         y: area.height / 3,
         width: area.width / 2,
-        height: 10,
+        height: popup_height,
     };
     f.render_widget(Clear, popup_area);
 

@@ -1,5 +1,7 @@
 use chrono::{DateTime, Local};
 use std::collections::VecDeque;
+use std::fs;
+use std::path::Path;
 use tokio::sync::broadcast;
 
 #[derive(Debug, Clone)]
@@ -94,8 +96,8 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        let stack_name = std::env::var("STACK_NAME").unwrap_or_else(|_| "unknown".to_string());
-        let stack_ip = std::env::var("STACK_IP").unwrap_or_else(|_| "—".to_string());
+        let stack_name = detect_stack_name();
+        let stack_ip = detect_stack_ip(&stack_name);
         let target = format!("/opt/appdata/{}/.env", stack_name);
         let (log_tx, _) = broadcast::channel(512);
         Self {
@@ -162,4 +164,73 @@ impl AppState {
         // Broadcast to any connected WebSocket clients (ignore if no subscribers)
         let _ = self.log_tx.send(logfmt);
     }
+}
+
+fn detect_stack_name() -> String {
+    if let Ok(env_stack) = std::env::var("STACK_NAME") {
+        let trimmed = env_stack.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    if let Some(stack) = read_stack_name_from_daemon_config() {
+        return stack;
+    }
+
+    "unknown".to_string()
+}
+
+fn detect_stack_ip(stack_name: &str) -> String {
+    if let Ok(env_ip) = std::env::var("STACK_IP") {
+        let trimmed = env_ip.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    read_reserved_ip_from_lxc_compose(stack_name).unwrap_or_else(|| "—".to_string())
+}
+
+fn read_stack_name_from_daemon_config() -> Option<String> {
+    let config_path = Path::new("/etc/homelab/lxc-daemon.toml");
+    let content = fs::read_to_string(config_path).ok()?;
+
+    let mut in_sync_section = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_sync_section = trimmed == "[sync]";
+            continue;
+        }
+
+        if in_sync_section && trimmed.starts_with("stack_name") {
+            let (_, value) = trimmed.split_once('=')?;
+            let parsed = value.trim().trim_matches('"');
+            if !parsed.is_empty() {
+                return Some(parsed.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn read_reserved_ip_from_lxc_compose(stack_name: &str) -> Option<String> {
+    if stack_name.is_empty() || stack_name == "unknown" {
+        return None;
+    }
+
+    let compose_path = format!("/opt/gitops/stacks/{}/lxc-compose.yml", stack_name);
+    let content = fs::read_to_string(&compose_path).ok()?;
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&content).ok()?;
+
+    yaml["network"]["reserved_ipv4"]
+        .as_str()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }

@@ -4,13 +4,7 @@
   "envs": {
     "dev": [
       {
-        "local_path": "client-app/.env"
-      },
-      {
-        "local_path": "host-daemon/.env"
-      },
-      {
-        "local_path": "lxc-daemon/.env"
+        "local_path": "config/.env"
       }
     ]
   }

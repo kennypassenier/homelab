@@ -32,18 +32,20 @@ This keeps protection when CLIENT is offline while avoiding unnecessary steady-s
   - failsafe sync windows run in checker loop
   - windows are skipped when heartbeat is fresh
 - HOST
+  - `POST /api/heartbeat` records heartbeat timestamp
+  - websocket RPC `client_heartbeat` also records heartbeat timestamp
   - failsafe enforcer thread evaluates heartbeat freshness each window
   - stale/missing heartbeat triggers release-based self-update check
   - status lines are surfaced in HOST backup/event panel
 - CLIENT
   - emits LXC heartbeat pulses while running
-  - emits HOST heartbeat pulse via SSH alias while running
+  - emits HOST heartbeat pulses via websocket RPC with HTTP fallback while running
 
 ## Environment Knobs
 
 - LXC: `FAILSAFE_SYNC_INTERVAL_SECS`, `HEARTBEAT_TTL_SECS`
-- HOST: `FAILSAFE_SYNC_INTERVAL_SECS`, `HEARTBEAT_TTL_SECS`, `HOST_HEARTBEAT_FILE`
-- CLIENT: `HOST_IP`/`HOST_SSH_USER` (or `HOST_SSH_TARGET`), `HOST_HEARTBEAT_FILE`
+- HOST: `FAILSAFE_SYNC_INTERVAL_SECS`, `HEARTBEAT_TTL_SECS`
+- CLIENT: `HOST_IP` (heartbeat transport + host metrics API target)
 
 ## Files
 

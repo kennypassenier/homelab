@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
 SERVICE_PATH="/etc/systemd/system/host-daemon.service"
-ENV_FILE="$REPO_ROOT/host-daemon/.env"
+ENV_FILE="$REPO_ROOT/config/.env"
 
 source "$REPO_ROOT/scripts/shared/lib-ui.sh"
 
@@ -24,7 +24,6 @@ fi
 binary_path=""
 binary_candidates=(
     "$REPO_ROOT/apps/HOST"
-    "$REPO_ROOT/apps/HOST-linux-x86_64-unknown-linux-gnu"
     "$REPO_ROOT/host-daemon/target/release/HOST"
 )
 
@@ -37,7 +36,7 @@ done
 
 if [[ -z "$binary_path" ]]; then
     ui_error "HOST binary not found in repo."
-    ui_info "Expected one of: apps/HOST, apps/HOST-linux-x86_64-unknown-linux-gnu, or host-daemon/target/release/HOST"
+    ui_info "Expected one of: apps/HOST or host-daemon/target/release/HOST"
     exit 1
 fi
 

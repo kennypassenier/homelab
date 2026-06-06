@@ -12,14 +12,15 @@ Last updated: 2026-06-06
 - Persistent websocket supervision for HOST plus all deploy-enabled stacks, with auto-reconnect for stale/no-signal streams.
 - CLIENT control-plane actions now use websocket RPC on LXC `/api/logs/ws` for sync, restore, heartbeat, and remote command execution (with HTTP fallback kept for compatibility).
 - Session heartbeat pulses to LXC daemons while CLIENT is running, used to suppress unnecessary failsafe sync windows.
-- Live HOST connectivity polling over SSH (default `root@10.10.5.250`) with runtime node/LXC status in the Host Management tab.
+- Session heartbeat pulses to HOST now use websocket RPC (`client_heartbeat`) with HTTP `POST /api/heartbeat` fallback.
+- Live HOST connectivity polling via HOST metrics API (`GET /api/metrics`) with runtime node/LXC status in the Host Management tab.
 - Logs tab source focus mode (Shift+f) to isolate one source without dropping global log ingestion.
 - CLIENT detects `daemon_version=` markers from HOST/LXC websocket logs and emits explicit version-detected/version-changed log lines.
 - Update tab cards now render per-target metadata: detected daemon version plus last manual update outcome/timestamp for HOST and each LXC stack.
 - Top tab bar keeps the glitch treatment while other sections render stable titles; selected tab uses a filled highlight style for clearer focus.
 - Update tab cards include richer action context (trigger key/target and live state `idle|updating`) alongside version and last-result telemetry.
 - Update tab now shows latest available HOST release tag (GitHub `host-daemon-v*`) with refresh timestamp, plus LXC update channel visibility (image/tag target used by self-update).
-- CLIENT now auto-loads environment from `client-app/.env` (or `CLIENT_ENV_FILE` override) at startup.
+- CLIENT now auto-loads environment from `config/.env` (or `CLIENT_ENV_FILE` override).
 
 ## Implemented Highlights
 
@@ -47,4 +48,4 @@ Last updated: 2026-06-06
 - CLIENT remains GitOps-first and commits generated changes through the existing Git helper path.
 - HOST-only operations (for example real GPU passthrough on Proxmox) are represented as CLIENT orchestration intent, not direct local host mutation.
 - DHCP automation only mutates reservations proven to be homelab stack-owned; unrelated/manual reservations are treated as hard conflicts.
-- Host Management data now comes from live SSH probes (direct host target) and Proxmox runtime queries (`pvesh /nodes/<node>/lxc`); the tab no longer relies on synthetic host-state rows.
+- Host Management data now comes from the HOST daemon metrics API (`GET /api/metrics`), including runtime LXC rows and uptime telemetry; the tab no longer relies on synthetic host-state rows.

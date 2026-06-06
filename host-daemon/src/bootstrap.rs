@@ -15,7 +15,7 @@ fn default_host_gitops_repo() -> String {
 }
 
 fn default_host_env_file() -> String {
-    format!("{}/host-daemon/.env", default_host_gitops_repo())
+    format!("{}/config/.env", default_host_gitops_repo())
 }
 
 #[derive(Debug, Clone)]
@@ -285,7 +285,6 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
     let possible_paths = vec![
         host_env_file.as_deref().unwrap_or(""),
         default_env_file.as_str(),
-        "host-daemon/.env",
         "/root/.env",
     ];
 
@@ -516,15 +515,11 @@ fi
     let binary_paths = vec![
         format!("{}/apps/LXC", default_host_gitops_repo()),
         format!(
-            "{}/apps/LXC-linux-x86_64-unknown-linux-gnu",
-            default_host_gitops_repo()
-        ),
-        format!(
             "{}/lxc-daemon/target/release/LXC",
             default_host_gitops_repo()
         ),
         "/opt/homelab/lxc-daemon/target/release/LXC".to_string(),
-        "apps/LXC-linux-x86_64-unknown-linux-gnu".to_string(),
+        "apps/LXC".to_string(),
         "lxc-daemon/target/release/LXC".to_string(),
     ];
 

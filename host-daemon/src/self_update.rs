@@ -19,7 +19,7 @@ struct ReleaseAsset {
 
 pub fn check_and_apply_update() -> Result<String, String> {
     let repo = env_nonempty("HOST_UPDATE_REPO", "kennypassenier/homelab");
-    let expected_asset = env_nonempty("HOST_UPDATE_ASSET", "HOST-linux-x86_64-unknown-linux-gnu");
+    let expected_asset = env_nonempty("HOST_UPDATE_ASSET", "HOST");
 
     let release = fetch_latest_release(&repo)?;
     let latest = normalize_version(&release.tag_name);

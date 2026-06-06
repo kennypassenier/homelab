@@ -109,7 +109,7 @@ INFISICAL_ENVIRONMENT=prod
 LXC_DAEMON_URL=https://github.com/.../lxc-daemon/releases/latest/download/LXC
 ```
 
-**See:** [`host-daemon/.env.example`](../host-daemon/.env.example)
+**See:** [`config/.env.example`](../config/.env.example)
 
 ### LXC Daemon (created by HOST bootstrap)
 ```bash
@@ -133,7 +133,7 @@ INFISICAL_ENVIRONMENT=prod
 LXC_API_TOKEN=secret  # For HTTP API
 ```
 
-**See:** [`lxc-daemon/.env.example`](../lxc-daemon/.env.example)
+**See:** [`config/.env.example`](../config/.env.example)
 
 ---
 

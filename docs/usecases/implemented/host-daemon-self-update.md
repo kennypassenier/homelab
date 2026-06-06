@@ -16,7 +16,7 @@ The HOST daemon checks GitHub releases for a newer `HOST` binary, downloads the 
 - Manual update check is available from the HOST TUI with `U`
 - A background update worker runs on a 30-minute interval by default
 - Failsafe recovery also triggers update checks when the client heartbeat is stale
-- Release asset lookup defaults to `HOST-linux-x86_64-unknown-linux-gnu`
+- Release asset lookup defaults to `HOST`
 - Version comparison prevents downgrade attempts
 - The running binary is replaced atomically and `host-daemon.service` is restarted
 

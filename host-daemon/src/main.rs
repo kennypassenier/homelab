@@ -18,6 +18,7 @@ mod backup;
 mod bootstrap;
 mod failsafe;
 mod hardware;
+mod liveness;
 mod policy;
 mod provision;
 mod self_update;
@@ -37,9 +38,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn load_host_env() {
     let candidates = [
         std::env::var("HOST_ENV_FILE").ok(),
-        Some("host-daemon/.env".to_string()),
+        Some("config/.env".to_string()),
         Some(default_host_env_file()),
-        Some(".env".to_string()),
     ];
 
     for candidate in candidates.into_iter().flatten() {
@@ -60,7 +60,7 @@ fn default_gitops_repo() -> String {
 }
 
 fn default_host_env_file() -> String {
-    format!("{}/host-daemon/.env", default_gitops_repo())
+    format!("{}/config/.env", default_gitops_repo())
 }
 
 async fn run_headless() -> Result<(), Box<dyn std::error::Error>> {

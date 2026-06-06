@@ -76,6 +76,7 @@ impl App {
                 hostname: "proxmox".to_string(),
                 ip: "10.10.5.250".to_string(),
                 uptime_secs: 0,
+                lxc_runtime: Vec::new(),
             },
             started_at: std::time::Instant::now(),
         }

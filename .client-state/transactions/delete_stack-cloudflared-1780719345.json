@@ -1,7 +1,7 @@
 {
   "operation": "delete_stack",
   "stack_name": "cloudflared",
-  "status": "in_progress",
+  "status": "completed",
   "phases": [
     {
       "name": "delete_stack_scaffold",
@@ -18,6 +18,12 @@
     {
       "name": "git_push",
       "status": "in_progress",
+      "error": null,
+      "ts_unix": 1780719345
+    },
+    {
+      "name": "git_push",
+      "status": "completed",
       "error": null,
       "ts_unix": 1780719345
     }

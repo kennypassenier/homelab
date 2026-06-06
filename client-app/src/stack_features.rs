@@ -587,10 +587,26 @@ fn scaffold_promtail(stack_name: &str) -> io::Result<()> {
     // The runtime .env is written to /appdata/ by pre-sync.sh via latch sync — this file is never read by Docker.
     fs::write(
         format!("{}/.env", app_dir),
-        "# latch:group=promtail_config\n",
+        "# latch:group=promtail_config\nLOKI_URL=\n",
     )?;
 
+    ensure_shared_promtail_env_template()?;
+
     fs::write(format!("{}/.gitkeep", cfg_dir), "")
+}
+
+fn ensure_shared_promtail_env_template() -> io::Result<()> {
+    let dir = "config/promtail";
+    let path = format!("{}/.env", dir);
+    fs::create_dir_all(dir)?;
+    if Path::new(&path).exists() {
+        return Ok(());
+    }
+
+    fs::write(
+        path,
+        "# Central Promtail configuration for all stacks.\n# This file is managed via latch group sync.\n# latch:group=promtail_config\n\n# Loki push endpoint (without /loki/api/v1/push).\n# Example: https://loki.kp-soft.dev\nLOKI_URL=\n",
+    )
 }
 
 fn scaffold_watchtower(stack_name: &str) -> io::Result<()> {

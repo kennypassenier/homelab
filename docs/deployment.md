@@ -73,37 +73,27 @@ You do not need a PAT for the current workflows to create releases or push GHCR 
 
 ## 4. Environment Files
 
-Create these files from the examples in the repo:
+Use one central file only:
 
-- `client-app/.env.example`
-- `host-daemon/.env.example`
-- `lxc-daemon/.env.example`
+- `config/.env.example` -> copy to `config/.env`
 
-Use them as service `EnvironmentFile=` inputs or shell exports for local testing.
+This is the single source of truth for CLIENT, HOST, and LXC daemon runtime configuration.
 
 For the Proxmox host, the default layout is now:
 
 - repo checkout: `~/homelab` (typically `/root/homelab`)
-- HOST env file: `~/homelab/host-daemon/.env`
-- HOST binary: `~/homelab/apps/HOST` or `~/homelab/apps/HOST-linux-x86_64-unknown-linux-gnu`
+- HOST env file: `~/homelab/config/.env`
+- HOST binary: `~/homelab/apps/HOST`
 
-When HOST is launched without a TTY, it auto-loads `host-daemon/.env` and runs headless so it can be managed by `systemd`.
+When HOST is launched without a TTY, it auto-loads `config/.env` and runs headless so it can be managed by `systemd`.
 
-### Optional Central Bundle (recommended when secrets grow)
+Runtime loading precedence:
 
-If you prefer one central source of truth, use:
+- CLIENT: `CLIENT_ENV_FILE` -> `config/.env`
+- HOST: `HOST_ENV_FILE` -> `config/.env` -> `~/homelab/config/.env`
+- LXC (local dev): `LXC_ENV_FILE` -> `config/.env`
 
-- `config/env.bundle.example` -> copy to `config/env.bundle`
-- run `./scripts/shared/sync-env-bundle.sh --bundle config/env.bundle`
-
-This generates tier-specific files automatically:
-
-- `client-app/.env`
-- `host-daemon/.env`
-- `lxc-daemon/.env`
-- `scripts/host/.env`
-
-This keeps deployment ergonomic while preserving per-service runtime boundaries.
+This keeps setup user-friendly (single place) and removes split-brain config between app folders.
 
 ### CLIENT variables
 
@@ -115,41 +105,67 @@ CLIENT currently cares about:
 - `OPNSENSE_API_KEY`
 - `OPNSENSE_API_SECRET`
 - optional `OPNSENSE_TLS_INSECURE=true` for lab-only self-signed HTTPS
-- optional per-stack overrides like `LXC_MEDIA_IP`
-- optional `HOST_IP` for direct Proxmox host targeting (default `10.10.5.250`)
-- optional `HOST_SSH_USER` for host SSH login user (default `root`)
-- optional `HOST_SSH_TARGET` to override full SSH destination (`user@host`)
-- optional `HOST_HEARTBEAT_FILE` remote heartbeat file path (default `/tmp/homelab-client-heartbeat.ts`)
+- optional `HOST_IP` for Proxmox HOST metrics API targeting (default `10.10.5.250`)
+
+### HOST metrics API quick checks
+
+Use these checks from CLIENT or HOST to validate Host Management telemetry.
+
+When `LXC_API_TOKEN` is empty (no auth required):
+
+```bash
+HOST_IP="10.10.5.250"
+curl -fsSL "http://${HOST_IP}:8080/api/metrics"
+```
+
+When `LXC_API_TOKEN` is set (Bearer required):
+
+```bash
+HOST_IP="10.10.5.250"
+TOKEN="$(grep '^LXC_API_TOKEN=' config/.env | cut -d '=' -f2-)"
+curl -fsSL \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "http://${HOST_IP}:8080/api/metrics"
+```
+
+Expected auth failure if token is configured but missing/wrong:
+
+```bash
+curl -i "http://${HOST_IP}:8080/api/metrics"
+# HTTP/1.1 401 Unauthorized
+```
 
 ### HOST variables
 
 HOST currently cares about:
 
 - `GITOPS_REPO` (recommended: `/root/homelab`)
-- `HOST_ENV_FILE` (recommended: `/root/homelab/host-daemon/.env`)
+- `HOST_ENV_FILE` (recommended: `/root/homelab/config/.env`)
 - `HOST_UPDATE_REPO`
 - `HOST_UPDATE_ASSET`
 - optional `HOST_UPDATE_TOKEN`
 - optional `HOST_UPDATE_SERVICE` (default `host-daemon.service`)
-- optional `LXC_<STACK>_IP` values used during backup orchestration
 - optional `RESTIC_REPO_BASE` for HOST daemon per-stack restic target base
 - optional `RCLONE_CONFIG_FILE` for rclone-backed restic repositories (Google Drive, etc.)
 - optional `FAILSAFE_SYNC_INTERVAL_SECS` for inverse heartbeat failsafe window cadence
 - optional `HEARTBEAT_TTL_SECS` freshness threshold for heartbeat suppression
-- optional `HOST_HEARTBEAT_FILE` heartbeat timestamp file path on host
 
 ### LXC variables
 
 LXC currently cares about:
 
-- `STACK_NAME`
-- `STACK_IP`
 - `GITOPS_REPO_URL`
 - optional `GITOPS_REPO_TOKEN`
 - optional `LXC_SELF_UPDATE_CMD` (overrides full update command used by update APIs)
 - optional `LXC_DAEMON_IMAGE` (default `ghcr.io/kennypassenier/homelab-lxc-daemon:latest`)
 - optional `LXC_DAEMON_COMPOSE_DIR` (default `/opt/lxc-daemon`)
 - optional `LXC_DAEMON_COMPOSE_SERVICE` (default `lxc-daemon`)
+
+LXC stack identity is not sourced from central `config/.env`.
+It is derived per container from:
+
+- `/etc/homelab/lxc-daemon.toml` (`[sync].stack_name`) written by HOST bootstrap
+- `stacks/<stack>/lxc-compose.yml` (for `network.reserved_ipv4`)
 
 ## 5. Stack Secret Files
 
@@ -175,11 +191,11 @@ Use this order.
 2. Prepare the client workstation.
 - Install Rust toolchain if building locally.
 - Ensure Git SSH access works.
-- Create CLIENT env file from `client-app/.env.example`.
+- Create central env file from `config/.env.example`.
 
 3. Prepare the Proxmox host.
 - Clone this repo to `~/homelab` on the host.
-- Restore `host-daemon/.env` in that repo checkout.
+- Ensure `config/.env` exists in that repo checkout.
 - Install the persistent HOST service with `./install-host-service.sh`.
 - Ensure the systemd service name is `host-daemon.service` if you want self-update restarts to work unchanged.
 - Ensure `/opt/appdata` and backup storage roots exist.
@@ -242,7 +258,7 @@ Recommended host flow:
 2. Ensure `~/homelab/.latch/config.toml` is present from Git.
 3. Authenticate Latch on the host.
 4. Pull the correct secrets environment into `~/homelab`.
-5. Verify `~/homelab/host-daemon/.env` exists and points `GITOPS_REPO` to `~/homelab`.
+5. Verify `~/homelab/config/.env` exists and points `GITOPS_REPO` to `~/homelab`.
 6. Run `./install-host-service.sh` as root.
 7. Check status with `systemctl status host-daemon.service`.
 8. Follow logs with `journalctl -u host-daemon.service -f`.
@@ -252,7 +268,7 @@ Operational notes:
 - `systemd` is the correct runtime for "always active on reboot/crash".
 - `tmux` is fine for manual interactive testing but is not the persistent production path.
 - HOST logs go to the systemd journal in headless mode.
-- CLIENT heartbeat writes still work independently of whether you are attached to HOST over SSH.
+- CLIENT heartbeat now flows over websocket RPC with HTTP fallback and does not require SSH reachability.
 
 Day-to-day HOST operations:
 
@@ -291,7 +307,7 @@ Use this only when HOST is stuck on an old version and release-based self-update
 set -euo pipefail
 
 REPO="kennypassenier/homelab"
-ASSET="HOST-linux-x86_64-unknown-linux-gnu"
+ASSET="HOST"
 DEST="/root/homelab/apps/HOST"  # Match your systemd ExecStart binary path
 
 TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" \
@@ -325,10 +341,10 @@ Pinned fallback (if release API lookup is blocked):
 
 ```bash
 systemctl stop host-daemon.service
-curl -fLo /tmp/HOST-linux-x86_64-unknown-linux-gnu \
-  https://github.com/kennypassenier/homelab/releases/download/host-daemon-v0.1.18/HOST-linux-x86_64-unknown-linux-gnu
-chmod +x /tmp/HOST-linux-x86_64-unknown-linux-gnu
-install -m 755 /tmp/HOST-linux-x86_64-unknown-linux-gnu /root/homelab/apps/HOST
+curl -fLo /tmp/HOST \
+  https://github.com/kennypassenier/homelab/releases/download/host-daemon-v0.1.18/HOST
+chmod +x /tmp/HOST
+install -m 755 /tmp/HOST /root/homelab/apps/HOST
 After deployment, verify:
 
 - CLIENT `cargo check` passes locally

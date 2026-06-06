@@ -7,6 +7,7 @@ use std::{
 };
 
 use rand::{Rng, SeedableRng, rngs::SmallRng};
+use serde::Deserialize;
 
 use crate::backup_schedule::BackupSchedule;
 use crate::blast_radius::ActiveModal;
@@ -112,7 +113,7 @@ pub struct LogLine {
     pub message: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct HostLxcRuntime {
     pub vmid: u32,
     pub status: String,
@@ -214,9 +215,7 @@ pub struct App {
     pub restore_queue: VecDeque<String>,
     /// Backup snapshot id sent to restore backend.
     pub restore_backup_id: String,
-    /// SSH destination used for host connectivity polling.
-    pub host_target: String,
-    /// Whether the HOST alias is reachable over SSH.
+    /// Whether HOST metrics are reachable via HTTP API.
     pub host_connected: bool,
     /// Last discovered Proxmox node hostname.
     pub host_node_name: String,
@@ -224,9 +223,9 @@ pub struct App {
     pub host_node_ip: String,
     /// Last discovered host uptime string.
     pub host_uptime: String,
-    /// Last known LXC runtime rows from `pct list` over SSH.
+    /// Last known LXC runtime rows from HOST metrics API.
     pub host_lxc_runtime: Vec<HostLxcRuntime>,
-    /// Last host polling error (shown when disconnected).
+    /// Last host metrics polling error (shown when disconnected).
     pub host_last_error: String,
     /// Last observed HOST daemon version from websocket log stream.
     pub host_daemon_version: String,
@@ -316,18 +315,6 @@ impl App {
             restore_queue: VecDeque::new(),
             restore_backup_id: std::env::var("BACKUP_ID_DEFAULT")
                 .unwrap_or_else(|_| "latest".to_string()),
-            host_target: {
-                let explicit = std::env::var("HOST_SSH_TARGET").unwrap_or_default();
-                if !explicit.trim().is_empty() {
-                    explicit
-                } else {
-                    let host_ip =
-                        std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
-                    let host_user =
-                        std::env::var("HOST_SSH_USER").unwrap_or_else(|_| "root".to_string());
-                    format!("{}@{}", host_user, host_ip)
-                }
-            },
             host_connected: false,
             host_node_name: "unknown".to_string(),
             host_node_ip: "unknown".to_string(),

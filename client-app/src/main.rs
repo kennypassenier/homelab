@@ -111,6 +111,14 @@ enum HostProbeEvent {
     },
 }
 
+#[derive(Deserialize)]
+struct HostMetricsResponse {
+    hostname: String,
+    ip: String,
+    uptime_secs: u64,
+    lxc_runtime: Vec<HostLxcRuntime>,
+}
+
 enum UpdateDispatchEvent {
     Finished {
         target: String,
@@ -144,8 +152,7 @@ fn main() -> Result<()> {
 fn load_client_env() {
     let candidates = [
         std::env::var("CLIENT_ENV_FILE").ok(),
-        Some("client-app/.env".to_string()),
-        Some(".env".to_string()),
+        Some("config/.env".to_string()),
     ];
 
     for candidate in candidates.into_iter().flatten() {
@@ -228,10 +235,9 @@ async fn async_main() -> Result<()> {
     }
 
     {
-        let host_target = app.host_target.clone();
         let tx = host_probe_tx.clone();
         tokio::spawn(async move {
-            let snapshot = probe_host_runtime(&host_target).await;
+            let snapshot = probe_host_runtime().await;
             let _ = tx.send(snapshot);
         });
     }
@@ -857,10 +863,9 @@ async fn async_main() -> Result<()> {
             }
 
             _ = host_probe_tick.tick() => {
-                let host_target = app.host_target.clone();
                 let tx = host_probe_tx.clone();
                 tokio::spawn(async move {
-                    let snapshot = probe_host_runtime(&host_target).await;
+                    let snapshot = probe_host_runtime().await;
                     let _ = tx.send(snapshot);
                 });
             }
@@ -1226,6 +1231,47 @@ async fn request_host_update_ws() -> Result<(), String> {
     Ok(())
 }
 
+async fn request_host_heartbeat_ws() -> Result<(), String> {
+    let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+    let request_id = ws_request_id("host-heartbeat");
+    let payload = serde_json::json!({
+        "kind": "client_heartbeat",
+        "request_id": &request_id,
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+    });
+
+    let value = send_ws_rpc(&ip, payload, "client_heartbeat_response", &request_id).await?;
+    let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    if ok {
+        Ok(())
+    } else {
+        Err(value
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("host heartbeat rejected")
+            .to_string())
+    }
+}
+
+async fn request_host_heartbeat_http() -> Result<(), String> {
+    let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+    let url = format!("http://{}:8080/api/heartbeat", ip);
+    let client = reqwest::Client::new();
+    let mut req = client.post(url);
+    if !token.is_empty() {
+        req = req.bearer_auth(token);
+    }
+
+    let response = req.send().await.map_err(|e| e.to_string())?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("HOST heartbeat HTTP {}", response.status()))
+    }
+}
+
 async fn request_lxc_update_ws(ip: &str, token: &str) -> Result<(), String> {
     let request_id = ws_request_id("update");
     let payload = serde_json::json!({
@@ -1344,159 +1390,51 @@ fn extract_daemon_version(message: &str) -> Option<String> {
 }
 
 async fn send_host_heartbeat() {
-    let alias = host_ssh_target();
-    if alias.trim().is_empty() {
-        return;
+    if request_host_heartbeat_ws().await.is_err() {
+        let _ = request_host_heartbeat_http().await;
     }
-
-    let heartbeat_file = std::env::var("HOST_HEARTBEAT_FILE")
-        .unwrap_or_else(|_| "/tmp/homelab-client-heartbeat.ts".to_string());
-
-    let cmd = format!("date +%s > {}", heartbeat_file);
-
-    let _ = tokio::time::timeout(
-        Duration::from_secs(5),
-        tokio::process::Command::new("ssh")
-            .arg("-o")
-            .arg("BatchMode=yes")
-            .arg("-o")
-            .arg("ConnectTimeout=4")
-            .arg("-o")
-            .arg("StrictHostKeyChecking=accept-new")
-            .arg("-o")
-            .arg("LogLevel=ERROR")
-            .arg(alias)
-            .arg(cmd)
-            .output(),
-    )
-    .await;
 }
 
-fn host_ssh_target() -> String {
-    if let Ok(target) = std::env::var("HOST_SSH_TARGET") {
-        if !target.trim().is_empty() {
-            return target;
-        }
-    }
-
+async fn probe_host_runtime() -> HostProbeEvent {
     let host_ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
-    let host_user = std::env::var("HOST_SSH_USER").unwrap_or_else(|_| "root".to_string());
-    format!("{}@{}", host_user, host_ip)
-}
+    let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+    let url = format!("http://{}:8080/api/metrics", host_ip);
+    let client = reqwest::Client::new();
+    let mut request = client.get(&url);
+    if !token.trim().is_empty() {
+        request = request.bearer_auth(token);
+    }
 
-async fn probe_host_runtime(alias: &str) -> HostProbeEvent {
-    let remote_cmd = r#"
-node="$(hostname -s)"
-echo "__NODE__:$node"
-echo "__IP__:$(hostname -I | awk '{print $1}')"
-echo "__UPTIME__:$(uptime -p)"
-echo "__LXC_JSON__"
-pvesh get "/nodes/$node/lxc" --output-format json 2>/dev/null || echo "[]"
-"#;
+    let response = tokio::time::timeout(Duration::from_secs(6), request.send()).await;
 
-    let output = tokio::time::timeout(
-        Duration::from_secs(6),
-        tokio::process::Command::new("ssh")
-            .arg("-o")
-            .arg("BatchMode=yes")
-            .arg("-o")
-            .arg("ConnectTimeout=4")
-            .arg(alias)
-            .arg(remote_cmd)
-            .output(),
-    )
-    .await;
-
-    match output {
-        Ok(Ok(result)) if result.status.success() => {
-            let stdout = String::from_utf8_lossy(&result.stdout);
-            let mut node_name: Option<String> = None;
-            let mut node_ip: Option<String> = None;
-            let mut uptime: Option<String> = None;
-
-            for line in stdout.lines() {
-                if let Some(value) = line.strip_prefix("__NODE__:") {
-                    let value = value.trim();
-                    if !value.is_empty() {
-                        node_name = Some(value.to_string());
-                    }
-                } else if let Some(value) = line.strip_prefix("__IP__:") {
-                    let value = value.trim();
-                    if !value.is_empty() {
-                        node_ip = Some(value.to_string());
-                    }
-                } else if let Some(value) = line.strip_prefix("__UPTIME__:") {
-                    let value = value.trim();
-                    if !value.is_empty() {
-                        uptime = Some(value.to_string());
-                    }
-                }
-            }
-
-            let mut lxc_runtime = Vec::new();
-            if let Some((_, json_blob)) = stdout.split_once("__LXC_JSON__\n") {
-                if let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(json_blob.trim())
-                {
-                    for item in items {
-                        let vmid = item.get("vmid").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                        let status = item
-                            .get("status")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("unknown")
-                            .to_string();
-                        let name = item
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or_default()
-                            .to_string();
-
-                        if vmid == 0 || name.is_empty() {
-                            continue;
-                        }
-
-                        let cpu_raw = item.get("cpu").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                        let cpu_pct = (cpu_raw * 100.0).round().clamp(0.0, 100.0) as u8;
-
-                        let mem_raw = item.get("mem").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let maxmem_raw = item.get("maxmem").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let ram_pct = if maxmem_raw > 0 {
-                            ((mem_raw as f64 / maxmem_raw as f64) * 100.0)
-                                .round()
-                                .clamp(0.0, 100.0) as u8
-                        } else {
-                            0
-                        };
-
-                        let uptime_secs = item.get("uptime").and_then(|v| v.as_u64()).unwrap_or(0);
-
-                        lxc_runtime.push(HostLxcRuntime {
-                            vmid,
-                            status,
-                            name,
-                            cpu_pct,
-                            ram_pct,
-                            uptime_secs,
-                        });
-                    }
-                }
-            }
-
-            HostProbeEvent::Snapshot {
-                connected: true,
-                node_name,
-                node_ip,
-                uptime,
-                lxc_runtime,
-                error: None,
+    match response {
+        Ok(Ok(resp)) if resp.status().is_success() => {
+            match resp.json::<HostMetricsResponse>().await {
+                Ok(metrics) => HostProbeEvent::Snapshot {
+                    connected: true,
+                    node_name: Some(metrics.hostname),
+                    node_ip: Some(metrics.ip),
+                    uptime: Some(format_uptime(metrics.uptime_secs)),
+                    lxc_runtime: metrics.lxc_runtime,
+                    error: None,
+                },
+                Err(err) => HostProbeEvent::Snapshot {
+                    connected: false,
+                    node_name: None,
+                    node_ip: None,
+                    uptime: None,
+                    lxc_runtime: Vec::new(),
+                    error: Some(format!("metrics parse failed: {}", err)),
+                },
             }
         }
-        Ok(Ok(result)) => HostProbeEvent::Snapshot {
+        Ok(Ok(resp)) => HostProbeEvent::Snapshot {
             connected: false,
             node_name: None,
             node_ip: None,
             uptime: None,
             lxc_runtime: Vec::new(),
-            error: Some(String::from_utf8_lossy(&result.stderr).trim().to_string()),
+            error: Some(format!("metrics HTTP {}", resp.status())),
         },
         Ok(Err(err)) => HostProbeEvent::Snapshot {
             connected: false,
@@ -1512,7 +1450,21 @@ pvesh get "/nodes/$node/lxc" --output-format json 2>/dev/null || echo "[]"
             node_ip: None,
             uptime: None,
             lxc_runtime: Vec::new(),
-            error: Some("host probe timeout".to_string()),
+            error: Some("host metrics timeout".to_string()),
         },
+    }
+}
+
+fn format_uptime(seconds: u64) -> String {
+    let days = seconds / 86_400;
+    let hours = (seconds % 86_400) / 3_600;
+    let minutes = (seconds % 3_600) / 60;
+
+    if days > 0 {
+        format!("up {}d {}h {}m", days, hours, minutes)
+    } else if hours > 0 {
+        format!("up {}h {}m", hours, minutes)
+    } else {
+        format!("up {}m", minutes)
     }
 }

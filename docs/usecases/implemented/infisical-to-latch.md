@@ -22,10 +22,7 @@ This keeps the repository aligned around one secret workflow for local editing, 
 
 - host-daemon/src/bootstrap.rs
 - scripts/shared/sync-env-bundle.sh
-- client-app/.env.example
-- host-daemon/.env.example
-- scripts/host/.env.example
-- lxc-daemon/.env.example
+- config/.env.example
 - config/env.bundle.example
 - docs/deployment.md
 - docs/latch-clone-setup.md

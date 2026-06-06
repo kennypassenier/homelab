@@ -1,0 +1,2 @@
+I'd like all communication to be encrypted, maybe they can share
+a common encryption key in our config/.env file and use that to encrypt all websocket and HTTP traffic between the binaries. This would prevent any sensitive information from being exposed in plaintext, even if someone were to intercept the traffic. We could use a symmetric encryption algorithm like AES for this purpose, where both the client and host have the same key for encryption and decryption.

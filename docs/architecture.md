@@ -1,6 +1,6 @@
 # Architecture (Current)
 
-Last updated: 2026-05-28
+Last updated: 2026-06-06
 
 ## System Model
 
@@ -10,7 +10,7 @@ Last updated: 2026-05-28
 - CLIENT may also call external control-plane APIs for Git-managed infrastructure intent, such as OPNsense DHCP reservation automation.
 - HOST and LXC do not call each other directly.
 - On the Proxmox host, the canonical local repo location for HOST is `~/homelab` (typically `/root/homelab`).
-- HOST auto-loads `host-daemon/.env` from the cloned repo and runs headless when started without a TTY (for example under systemd).
+- HOST auto-loads `config/.env` from the cloned repo and runs headless when started without a TTY (for example under systemd).
 
 ## GitOps and Deployment Scope
 
@@ -40,3 +40,4 @@ Last updated: 2026-05-28
 - HOST binary updates are release-version driven (GitHub Releases), not direct push-triggered runtime updates.
 - LXC daemon image publication to GHCR is CI-based and path-gated to daemon/workflow changes.
 - LXC deploy telemetry is streamed back to CLIENT over the daemon WebSocket API during sync operations.
+- CLIENT sends HOST heartbeat over websocket RPC with HTTP fallback, and HOST failsafe windows use that API-level heartbeat state (not SSH-written files).

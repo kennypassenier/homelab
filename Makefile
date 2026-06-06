@@ -168,11 +168,12 @@ release-all: push
 release-host: version-bump-host build-host
 	@echo "Releasing host-daemon v$(HOST_VERSION)..."
 	@mkdir -p $(APPS_DIR)
-	@tmp="$(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu.new"; \
+	@tmp="$(APPS_DIR)/HOST.new"; \
 	cp $(HOST_SRC)/target/release/$(HOST_NAME) "$$tmp" && \
 	chmod +x "$$tmp" && \
-	mv -f "$$tmp" $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
-	@chmod +x $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
+	mv -f "$$tmp" $(APPS_DIR)/HOST
+	@chmod +x $(APPS_DIR)/HOST
+	@rm -f $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
 	@git add $(HOST_SRC)/Cargo.toml
 	@git diff --cached --quiet || git commit -m "Bump host-daemon version to v$(HOST_VERSION)"
 	@if git rev-parse -q --verify "refs/tags/host-daemon-v$(HOST_VERSION)" > /dev/null 2>&1; then \
@@ -187,7 +188,7 @@ release-host: version-bump-host build-host
 			echo "GitHub Release host-daemon-v$(HOST_VERSION) already exists; skipping"; \
 		else \
 			gh release create "host-daemon-v$(HOST_VERSION)" \
-				$(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu \
+				$(APPS_DIR)/HOST \
 				--title "host-daemon v$(HOST_VERSION)" \
 				--generate-notes; \
 		fi; \
@@ -200,13 +201,14 @@ release-host: version-bump-host build-host
 release-client: version-bump-client build-client build-client-windows
 	@echo "Releasing client v$(CLIENT_VERSION)..."
 	@mkdir -p $(APPS_DIR)
-	@tmp="$(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu.new"; \
+	@tmp="$(APPS_DIR)/CLIENT.new"; \
 	cp $(CLIENT_SRC)/target/release/$(CLIENT_NAME) "$$tmp" && \
 	chmod +x "$$tmp" && \
-	mv -f "$$tmp" $(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu
-	@chmod +x $(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu
-	@cp $(CLIENT_SRC)/target/x86_64-pc-windows-gnu/release/$(CLIENT_NAME).exe $(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe
-	@chmod +x $(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe
+	mv -f "$$tmp" $(APPS_DIR)/CLIENT
+	@chmod +x $(APPS_DIR)/CLIENT
+	@cp $(CLIENT_SRC)/target/x86_64-pc-windows-gnu/release/$(CLIENT_NAME).exe $(APPS_DIR)/CLIENT.exe
+	@chmod +x $(APPS_DIR)/CLIENT.exe
+	@rm -f $(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu $(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe
 	@git add $(CLIENT_SRC)/Cargo.toml
 	@git diff --cached --quiet || git commit -m "Bump client version to v$(CLIENT_VERSION)"
 	@if git rev-parse -q --verify "refs/tags/client-v$(CLIENT_VERSION)" > /dev/null 2>&1; then \
@@ -221,8 +223,8 @@ release-client: version-bump-client build-client build-client-windows
 			echo "GitHub Release client-v$(CLIENT_VERSION) already exists; skipping"; \
 		else \
 			gh release create "client-v$(CLIENT_VERSION)" \
-				$(APPS_DIR)/CLIENT-linux-x86_64-unknown-linux-gnu \
-				$(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe \
+				$(APPS_DIR)/CLIENT \
+				$(APPS_DIR)/CLIENT.exe \
 				--title "CLIENT v$(CLIENT_VERSION)" \
 				--generate-notes; \
 		fi; \
@@ -237,11 +239,12 @@ release-client: version-bump-client build-client build-client-windows
 release-lxc: version-bump-lxc build-lxc
 	@echo "Releasing lxc-daemon v$(LXC_VERSION)..."
 	@mkdir -p $(APPS_DIR)
-	@tmp="$(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu.new"; \
+	@tmp="$(APPS_DIR)/LXC.new"; \
 	cp $(LXC_SRC)/target/release/$(LXC_NAME) "$$tmp" && \
 	chmod +x "$$tmp" && \
-	mv -f "$$tmp" $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu
-	@chmod +x $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu
+	mv -f "$$tmp" $(APPS_DIR)/LXC
+	@chmod +x $(APPS_DIR)/LXC
+	@rm -f $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu
 	@git add $(LXC_SRC)/Cargo.toml
 	@git diff --cached --quiet || git commit -m "Bump lxc-daemon version to v$(LXC_VERSION)"
 	@if git rev-parse -q --verify "refs/tags/lxc-daemon-v$(LXC_VERSION)" > /dev/null 2>&1; then \
@@ -256,7 +259,7 @@ release-lxc: version-bump-lxc build-lxc
 			echo "GitHub Release lxc-daemon-v$(LXC_VERSION) already exists; skipping"; \
 		else \
 			gh release create "lxc-daemon-v$(LXC_VERSION)" \
-				$(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu \
+				$(APPS_DIR)/LXC \
 				--title "lxc-daemon v$(LXC_VERSION)" \
 				--notes "Docker image: $(GHCR_LXC_IMAGE):v$(LXC_VERSION)" \
 				--generate-notes; \

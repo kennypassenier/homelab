@@ -206,7 +206,11 @@ pub fn draw_app_creation_wizard(
                 .style(Style::default().fg(Color::Cyan));
             f.render_widget(para, popup_area);
         }
-        AppCreationStep::SubdomainInput { input, error, domain } => {
+        AppCreationStep::SubdomainInput {
+            input,
+            error,
+            domain,
+        } => {
             let block = Block::default()
                 .title("Subdomain (Traefik Routing)")
                 .borders(Borders::ALL)

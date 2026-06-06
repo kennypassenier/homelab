@@ -306,10 +306,11 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                             state.selected_defaults.push(opt.label.to_string());
                         }
                     }
-                    
+
                     // If Traefik is selected, ask for subdomain; otherwise, go to Review
                     if state.selected_defaults.iter().any(|x| x == "Traefik") {
-                        let domain = std::env::var("DOMAIN").unwrap_or_else(|_| "example.com".to_string());
+                        let domain =
+                            std::env::var("DOMAIN").unwrap_or_else(|_| "example.com".to_string());
                         state.step = AppCreationStep::SubdomainInput {
                             input: Input::default(),
                             error: None,
@@ -332,7 +333,11 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
             }
         }
 
-        AppCreationStep::SubdomainInput { input, error, domain } => {
+        AppCreationStep::SubdomainInput {
+            input,
+            error,
+            domain,
+        } => {
             if key.code == KeyCode::Esc {
                 return WizardOutcome::Close;
             } else if key.code == KeyCode::Enter {

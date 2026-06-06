@@ -1,0 +1,31 @@
+version: 1
+stack_name: cloudflared
+vmid: 109
+hostname: 109-app-cloudflared
+hwaddr: 02:10:2b:c3:b8:9e
+deploy:
+  enabled: false
+  activated_at: null
+network:
+  bridge: vmbr0
+  ip_mode: dhcp-reserved
+  reserved_ipv4: 10.10.10.9
+boot:
+  autostart: true
+  order: 90
+resources:
+  cores: 1
+  memory_mb: 512
+  disk_gb: 4
+storage:
+  host_path: /opt/appdata/cloudflared
+  mount_point: /appdata
+lxc:
+  template: debian-12-standard 12.12-1 amd64
+  unprivileged: true
+  features:
+  - nesting=1
+hardware:
+  tun_device: null
+host_management:
+  managed: true

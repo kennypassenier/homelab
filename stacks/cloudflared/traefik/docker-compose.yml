@@ -1,0 +1,15 @@
+services:
+  traefik:
+    image: traefik:v3
+    container_name: cloudflared-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ../traefik-config:/etc/traefik
+      - ../traefik-config/acme:/acme
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+      traefik.enable: "true"

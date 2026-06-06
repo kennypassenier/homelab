@@ -1,0 +1,25 @@
+{
+  "operation": "add_stack",
+  "stack_name": "cloudflared",
+  "status": "in_progress",
+  "phases": [
+    {
+      "name": "scaffold_git_files",
+      "status": "in_progress",
+      "error": null,
+      "ts_unix": 1780718915
+    },
+    {
+      "name": "scaffold_git_files",
+      "status": "completed",
+      "error": null,
+      "ts_unix": 1780718915
+    },
+    {
+      "name": "git_push",
+      "status": "in_progress",
+      "error": null,
+      "ts_unix": 1780718915
+    }
+  ]
+}

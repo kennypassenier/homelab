@@ -422,12 +422,12 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
             } else if key.code == KeyCode::Enter {
                 let raw = input.value().trim();
                 match raw.parse::<u32>() {
-                    Ok(v) if v >= 8 => {
+                    Ok(v) if v >= 1 => {
                         state.disk_gb = v;
                         state.step = StackCreationStep::AutoStartSelect;
                     }
                     _ => {
-                        *error = Some("disk must be an integer >= 8".to_string());
+                        *error = Some("disk must be an integer >= 1".to_string());
                     }
                 }
             } else {
@@ -601,7 +601,7 @@ fn handle_stack_config_editor(
                     }
                     1 => state.cpu_cores = state.cpu_cores.saturating_sub(1).max(1),
                     2 => state.memory_mb = state.memory_mb.saturating_sub(512).max(512),
-                    3 => state.disk_gb = state.disk_gb.saturating_sub(1).max(8),
+                    3 => state.disk_gb = state.disk_gb.saturating_sub(1).max(1),
                     6 => state.ip_mode = previous_ip_mode(&state.ip_mode),
                     8 => state.autostart = false,
                     9 => state.startup_order = state.startup_order.saturating_sub(5).max(5),

@@ -914,8 +914,8 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(6),
-            Constraint::Min(5),
-            Constraint::Length(5),
+            Constraint::Min(7),
+            Constraint::Length(6),
         ])
         .split(area);
 
@@ -963,7 +963,10 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
     let total_targets = (app.stacks.len() + 1).max(1);
     let button_cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(vec![Constraint::Ratio(1, total_targets as u32); total_targets])
+        .constraints(vec![
+            Constraint::Ratio(1, total_targets as u32);
+            total_targets
+        ])
         .split(layout[1]);
 
     let mut col_idx = 0;
@@ -993,39 +996,62 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         } else {
             "idle"
         };
+        let host_last = app
+            .update_last_result
+            .get("HOST")
+            .map(String::as_str)
+            .unwrap_or("not run yet");
+        let host_last_at = app
+            .update_last_at
+            .get("HOST")
+            .map(String::as_str)
+            .unwrap_or("n/a");
         f.render_widget(
             Paragraph::new(vec![
-                Line::from("key [1/h]  target HOST"),
-                Line::from(format!("version {}", app.host_daemon_version)),
-                Line::from(format!("state {}", host_state)),
-                Line::from(format!(
-                    "last {}",
-                    app.update_last_result
-                        .get("HOST")
-                        .map(String::as_str)
-                        .unwrap_or("idle")
-                )),
-                Line::from(format!(
-                    "at {}",
-                    app.update_last_at
-                        .get("HOST")
-                        .map(String::as_str)
-                        .unwrap_or("-")
-                )),
+                Line::from(vec![
+                    Span::styled(" key ", Style::default().fg(Color::Cyan)),
+                    Span::raw("[1/h]"),
+                    Span::raw("   "),
+                    Span::styled("target ", Style::default().fg(Color::Cyan)),
+                    Span::raw("HOST"),
+                ]),
+                Line::from(vec![
+                    Span::styled(" running ", Style::default().fg(Color::Green)),
+                    Span::raw(app.host_daemon_version.clone()),
+                ]),
+                Line::from(vec![
+                    Span::styled(" available ", Style::default().fg(Color::LightMagenta)),
+                    Span::raw(app.host_latest_release.clone()),
+                ]),
+                Line::from(vec![
+                    Span::styled(" checked ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(app.host_latest_checked_at.clone()),
+                    Span::raw("   "),
+                    Span::styled("state ", Style::default().fg(Color::Cyan)),
+                    Span::raw(host_state),
+                ]),
+                Line::from(vec![
+                    Span::styled(" last ", Style::default().fg(Color::Yellow)),
+                    Span::raw(host_last),
+                ]),
+                Line::from(vec![
+                    Span::styled(" at ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(host_last_at),
+                ]),
             ])
             .wrap(Wrap { trim: true })
             .block(
                 Block::default()
-                .borders(Borders::ALL)
-                .style(btn_style)
-                .title(btn_text),
+                    .borders(Borders::ALL)
+                    .style(btn_style)
+                    .title(btn_text),
             ),
             button_cols[col_idx],
         );
         col_idx += 1;
     }
 
-    for stack in &app.stacks {
+    for (stack_idx, stack) in app.stacks.iter().enumerate() {
         if col_idx >= button_cols.len() {
             break;
         }
@@ -1043,38 +1069,62 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         } else {
             "idle"
         };
+        let stack_last = app
+            .update_last_result
+            .get(stack)
+            .map(String::as_str)
+            .unwrap_or("not run yet");
+        let stack_last_at = app
+            .update_last_at
+            .get(stack)
+            .map(String::as_str)
+            .unwrap_or("n/a");
+        let lxc_available = if app.lxc_update_channel.contains(":latest") {
+            "rolling latest".to_string()
+        } else {
+            app.lxc_update_channel.clone()
+        };
         f.render_widget(
             Paragraph::new(vec![
-                Line::from(format!("target {}", source_key)),
-                Line::from(format!(
-                    "version {}",
-                    app.lxc_daemon_versions
-                        .get(&source_key)
-                        .map(String::as_str)
-                        .unwrap_or("unknown")
-                )),
-                Line::from(format!("state {}", stack_state)),
-                Line::from(format!(
-                    "last {}",
-                    app.update_last_result
-                        .get(stack)
-                        .map(String::as_str)
-                        .unwrap_or("idle")
-                )),
-                Line::from(format!(
-                    "at {}",
-                    app.update_last_at
-                        .get(stack)
-                        .map(String::as_str)
-                        .unwrap_or("-")
-                )),
+                Line::from(vec![
+                    Span::styled(" key ", Style::default().fg(Color::Cyan)),
+                    Span::raw(format!("[{}]", stack_idx + 2)),
+                    Span::raw("   "),
+                    Span::styled("target ", Style::default().fg(Color::Cyan)),
+                    Span::raw(source_key.clone()),
+                ]),
+                Line::from(vec![
+                    Span::styled(" running ", Style::default().fg(Color::Green)),
+                    Span::raw(
+                        app.lxc_daemon_versions
+                            .get(&source_key)
+                            .map(String::as_str)
+                            .unwrap_or("unknown"),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled(" available ", Style::default().fg(Color::LightMagenta)),
+                    Span::raw(lxc_available),
+                ]),
+                Line::from(vec![
+                    Span::styled(" state ", Style::default().fg(Color::Cyan)),
+                    Span::raw(stack_state),
+                ]),
+                Line::from(vec![
+                    Span::styled(" last ", Style::default().fg(Color::Yellow)),
+                    Span::raw(stack_last),
+                ]),
+                Line::from(vec![
+                    Span::styled(" at ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(stack_last_at),
+                ]),
             ])
             .wrap(Wrap { trim: true })
             .block(
                 Block::default()
-                .borders(Borders::ALL)
-                .style(btn_style)
-                .title(btn_text),
+                    .borders(Borders::ALL)
+                    .style(btn_style)
+                    .title(btn_text),
             ),
             button_cols[col_idx],
         );
@@ -1097,11 +1147,12 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(vec![
             Line::from("[a] trigger batch"),
             Line::from("HOST -> all stacks"),
+            Line::from(format!("latest host {}", app.host_latest_release)),
             Line::from(
                 app.update_last_result
                     .get("UPDATING_ALL")
                     .map(String::as_str)
-                    .unwrap_or("idle"),
+                    .unwrap_or("not run yet"),
             ),
         ])
         .wrap(Wrap { trim: true })

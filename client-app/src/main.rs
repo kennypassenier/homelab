@@ -9,6 +9,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::time::Duration;
@@ -117,6 +118,13 @@ enum UpdateDispatchEvent {
     },
 }
 
+enum UpdateCatalogEvent {
+    HostLatest {
+        latest_release: String,
+        checked_at: String,
+    },
+}
+
 /// Bootstraps the Tokio runtime and hands off to the async event loop.
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -147,6 +155,7 @@ async fn async_main() -> Result<()> {
     let (sync_tx, mut sync_rx) = mpsc::unbounded_channel::<SyncEvent>();
     let (restore_tx, mut restore_rx) = mpsc::unbounded_channel::<RestoreDispatchEvent>();
     let (update_tx, mut update_rx) = mpsc::unbounded_channel::<UpdateDispatchEvent>();
+    let (update_catalog_tx, mut update_catalog_rx) = mpsc::unbounded_channel::<UpdateCatalogEvent>();
     // WebSocket event channel: receives continuous log streams from HOST and LXC stacks.
     let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<WsEvent>();
     let (host_probe_tx, mut host_probe_rx) = mpsc::unbounded_channel::<HostProbeEvent>();
@@ -162,6 +171,8 @@ async fn async_main() -> Result<()> {
     let mut ws_reconcile_tick = tokio::time::interval(Duration::from_secs(5));
     // Refresh host runtime telemetry for Host Management tab.
     let mut host_probe_tick = tokio::time::interval(Duration::from_secs(15));
+    // Refresh available update metadata shown in Update cards.
+    let mut update_catalog_tick = tokio::time::interval(Duration::from_secs(900));
 
     let mut lxc_ws_tasks: HashMap<String, JoinHandle<()>> = HashMap::new();
     let mut update_dispatch_running = false;
@@ -189,6 +200,19 @@ async fn async_main() -> Result<()> {
         tokio::spawn(async move {
             let snapshot = probe_host_runtime(&host_target).await;
             let _ = tx.send(snapshot);
+        });
+    }
+
+    {
+        let tx = update_catalog_tx.clone();
+        tokio::spawn(async move {
+            let latest = fetch_latest_host_release_tag()
+                .await
+                .unwrap_or_else(|e| format!("unavailable ({})", e));
+            let _ = tx.send(UpdateCatalogEvent::HostLatest {
+                latest_release: latest,
+                checked_at: current_hms(),
+            });
         });
     }
 
@@ -404,6 +428,18 @@ async fn async_main() -> Result<()> {
                         &msg,
                         if ok { None } else { Some(&msg) },
                     );
+                }
+            }
+        }
+
+        while let Ok(event) = update_catalog_rx.try_recv() {
+            match event {
+                UpdateCatalogEvent::HostLatest {
+                    latest_release,
+                    checked_at,
+                } => {
+                    app.host_latest_release = latest_release;
+                    app.host_latest_checked_at = checked_at;
                 }
             }
         }
@@ -796,6 +832,19 @@ async fn async_main() -> Result<()> {
                 });
             }
 
+            _ = update_catalog_tick.tick() => {
+                let tx = update_catalog_tx.clone();
+                tokio::spawn(async move {
+                    let latest = fetch_latest_host_release_tag()
+                        .await
+                        .unwrap_or_else(|e| format!("unavailable ({})", e));
+                    let _ = tx.send(UpdateCatalogEvent::HostLatest {
+                        latest_release: latest,
+                        checked_at: current_hms(),
+                    });
+                });
+            }
+
             res = async {
                 if let Ok(true) = event::poll(std::time::Duration::from_millis(100)) {
                     if let Ok(event::Event::Key(key)) = event::read() {
@@ -852,6 +901,79 @@ async fn async_main() -> Result<()> {
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen)?;
     Ok(())
+}
+
+fn current_hms() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let h = (secs % 86_400) / 3_600;
+    let m = (secs % 3_600) / 60;
+    let s = secs % 60;
+    format!("{:02}:{:02}:{:02}", h, m, s)
+}
+
+async fn fetch_latest_host_release_tag() -> Result<String, String> {
+    let repo = std::env::var("HOST_UPDATE_REPO")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "kennypassenier/homelab".to_string());
+    let url = format!("https://api.github.com/repos/{}/releases", repo);
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(url)
+        .header("User-Agent", "homelab-client")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("github_http_{}", response.status()));
+    }
+
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let tags = payload
+        .as_array()
+        .ok_or_else(|| "unexpected_release_payload".to_string())?
+        .iter()
+        .filter_map(|release| release.get("tag_name").and_then(|v| v.as_str()))
+        .filter(|tag| tag.starts_with("host-daemon-v"));
+
+    let latest = tags
+        .max_by(|a, b| compare_host_tag_versions(a, b))
+        .ok_or_else(|| "no_host_daemon_release".to_string())?;
+
+    Ok(latest.to_string())
+}
+
+fn compare_host_tag_versions(a: &str, b: &str) -> Ordering {
+    let parse = |tag: &str| -> Vec<u64> {
+        tag.trim_start_matches("host-daemon-v")
+            .split('.')
+            .filter_map(|p| p.parse::<u64>().ok())
+            .collect()
+    };
+
+    let a_parts = parse(a);
+    let b_parts = parse(b);
+    let len = a_parts.len().max(b_parts.len());
+
+    for idx in 0..len {
+        let av = a_parts.get(idx).copied().unwrap_or(0);
+        let bv = b_parts.get(idx).copied().unwrap_or(0);
+        match av.cmp(&bv) {
+            Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+    Ordering::Equal
 }
 
 fn parse_live_log_line(line: &str) -> (String, String) {

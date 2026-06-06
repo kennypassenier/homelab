@@ -230,8 +230,14 @@ pub struct App {
     pub host_last_error: String,
     /// Last observed HOST daemon version from websocket log stream.
     pub host_daemon_version: String,
+    /// Latest available HOST release tag from GitHub (`host-daemon-v*`).
+    pub host_latest_release: String,
+    /// Wall-clock timestamp for the last HOST release metadata refresh.
+    pub host_latest_checked_at: String,
     /// Last observed LXC daemon version per websocket source (`lxc-<stack>`).
     pub lxc_daemon_versions: HashMap<String, String>,
+    /// LXC self-update channel (compose image reference, usually `:latest`).
+    pub lxc_update_channel: String,
     /// Last manual update result summary per target (`HOST`, stack name, `UPDATING_ALL`).
     pub update_last_result: HashMap<String, String>,
     /// Wall-clock timestamp (`HH:MM:SS`) for the last update result per target.
@@ -329,7 +335,14 @@ impl App {
             host_lxc_runtime: Vec::new(),
             host_last_error: "not connected yet".to_string(),
             host_daemon_version: "unknown".to_string(),
+            host_latest_release: "checking...".to_string(),
+            host_latest_checked_at: "-".to_string(),
             lxc_daemon_versions: HashMap::new(),
+            lxc_update_channel: std::env::var("LXC_DAEMON_IMAGE")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "ghcr.io/kennypassenier/homelab-lxc-daemon:latest".to_string()),
             update_last_result: HashMap::new(),
             update_last_at: HashMap::new(),
         };

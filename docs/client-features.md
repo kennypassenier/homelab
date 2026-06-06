@@ -18,6 +18,7 @@ Last updated: 2026-06-06
 - Update tab cards now render per-target metadata: detected daemon version plus last manual update outcome/timestamp for HOST and each LXC stack.
 - Top tab bar keeps the glitch treatment while other sections render stable titles; selected tab uses a filled highlight style for clearer focus.
 - Update tab cards include richer action context (trigger key/target and live state `idle|updating`) alongside version and last-result telemetry.
+- Update tab now shows latest available HOST release tag (GitHub `host-daemon-v*`) with refresh timestamp, plus LXC update channel visibility (image/tag target used by self-update).
 
 ## Implemented Highlights
 

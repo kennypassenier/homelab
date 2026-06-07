@@ -1439,10 +1439,7 @@ fn styled_log_message<'a>(message: &'a str) -> Vec<Span<'a>> {
     for (tag, color) in tags {
         if let Some(rest) = message.strip_prefix(tag) {
             return vec![
-                Span::styled(
-                    tag,
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(tag, Style::default().fg(color).add_modifier(Modifier::BOLD)),
                 Span::raw(rest),
             ];
         }

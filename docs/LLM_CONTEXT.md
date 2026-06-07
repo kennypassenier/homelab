@@ -36,6 +36,8 @@ Last updated: 2026-06-05
 
 - HOST self-update is release-based (version/tag check), not push-based.
 - LXC daemon image delivery is automated via GHCR workflow with path-based change gating.
+- LXC bootstrap installs the native `latch` release binary and uses persistent `LATCH_PAT` / `LATCH_KEY` for headless operation; pass/keyring inside LXCs is optional.
+- HOST and LXC both expose installed `latch` binary version and update status via API: `GET /api/version` (HOST) and `GET /api/secrets/keyring` (LXC) include `latch_version` and `latch_last_update_secs` fields for operational visibility.
 - CLIENT stack wizard sets CPU/RAM/Disk defaults in `lxc-compose.yml` and keeps deploy disabled until explicit activation.
 - CLIENT streams live deploy logs from the LXC daemon during sync actions.
 - CLIENT app rows include a Git-managed config editor for Docker image updates.

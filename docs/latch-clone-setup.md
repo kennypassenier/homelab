@@ -5,7 +5,7 @@ This guide walks through setting up and using the **Latch Clone** feature to mig
 ## Prerequisites
 
 - **CLIENT:** Linux desktop with `latch` CLI and an OS keyring installed
-- **LXC:** Debian/Ubuntu or Alpine-based container with `latch` CLI and keyring support
+- **LXC:** Debian/Ubuntu or Alpine-based container with native `latch` CLI installed
 - **Network:** CLIENT must be able to reach LXC daemon on `:8080` (typically via SSH tunnel or internal network)
 
 ## Quick Start
@@ -32,6 +32,19 @@ Verify:
 During LXC bootstrap, run:
 ```bash
 ./scripts/lxc/setup-latch.sh
+```
+
+Default LXC mode is headless and env-backed:
+
+- installs the latest `latch` GitHub release binary to `/usr/local/bin/latch`
+- enables a guarded daily update timer
+- relies on persistent `LATCH_PAT` / `LATCH_KEY` injected by HOST
+- does not require `pass` or another keyring backend
+
+If you explicitly want `pass` as an extra backend:
+
+```bash
+./scripts/lxc/setup-latch.sh --with-pass
 ```
 
 Or integrate into your `scripts/host/bootstrap-lxc.sh`:
@@ -82,8 +95,8 @@ curl http://lxc.local:8080/api/secrets/keyring
 # Returns:
 # {
 #   "latch_available": true,
-#   "keyring_available": true,
-#   "message": "Ready for credential sync"
+#   "keyring_available": false,
+#   "message": "Ready for headless latch operation via persistent LATCH_PAT/LATCH_KEY"
 # }
 ```
 
@@ -135,12 +148,16 @@ pct exec $VMID which latch || pct exec $VMID /bin/bash ./scripts/lxc/setup-latch
 
 ### "Keyring not available"
 
+This is acceptable for normal LXC operation.
+LXC containers default to persistent env-backed credentials via `LATCH_PAT` and `LATCH_KEY`.
+Only install `pass` if you explicitly want an extra keyring backend.
+
 ```bash
 # CLIENT: Install pass + GPG
 sudo apt-get install -y pass gnupg
 pass init "Your Name <you@example.com>"
 
-# LXC:
+# LXC (optional only):
 apt-get install -y pass gnupg
 ```
 
@@ -153,7 +170,7 @@ Offers are valid for 10 minutes by default. If sync takes longer:
 
 ### "Keyring initialization failed"
 
-If using `pass`, GPG setup might fail in containerized environments:
+If you explicitly chose `--with-pass`, GPG setup might fail in containerized environments:
 
 ```bash
 # LXC: Manually init GPG
@@ -176,7 +193,7 @@ Latch is now the primary secret workflow in this repo.
 
 - `latch commit` encrypts local `.env` files
 - `latch push` uploads encrypted blobs to the secrets repo
-- `latch pull` restores local `.env` files
+- `latch pull --sparse` restores only stack-owned local `.env` files whose parent directories already exist
 - `latch clone offer/create/apply` transfers credential state between machines
 
 ## Security Properties

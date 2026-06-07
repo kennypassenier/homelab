@@ -146,8 +146,8 @@ generate_promtail() {
     local app_data_dir="/appdata/${stack_name}/${app_name}"
     if ! grep -q "mkdir -p ${app_data_dir}" "$pre_sync" 2>/dev/null; then
       # Insert mkdir -p before any latch pull or .env generation for this app
-      if grep -q "latch pull --env=prod" "$pre_sync" 2>/dev/null; then
-        sed -i "/latch pull --env=prod/i mkdir -p ${app_data_dir}" "$pre_sync" 2>/dev/null
+      if grep -q "latch pull" "$pre_sync" 2>/dev/null; then
+        sed -i "/latch pull/i mkdir -p ${app_data_dir}" "$pre_sync" 2>/dev/null
         else
             echo "mkdir -p ${app_data_dir}" >> "$pre_sync"
         fi

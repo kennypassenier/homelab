@@ -30,7 +30,7 @@ You need these services/accounts before deployment:
 - Docker / Docker Compose inside each LXC
 - Secret source for per-app `.env` material
 
-Current stack hooks in this repo now assume Latch-based `.env` sync in several `pre-sync.sh` files. If you use those hooks, the host or client must be able to run `latch pull` before first sync.
+Current stack hooks in this repo now assume Latch-based `.env` sync in several `pre-sync.sh` files. If you use those hooks, the host or client must be able to run `latch pull --sparse` before first sync.
 
 ## 3. GitHub Setup
 
@@ -157,6 +157,9 @@ LXC currently cares about:
 
 - `GITOPS_REPO_URL`
 - optional `GITOPS_REPO_TOKEN`
+- `LATCH_UPDATE_REPO=kennypassenier/latch-rs`
+- `LATCH_UPDATE_ASSET=latch-linux-x86_64.tar.gz`
+- `LATCH_UPDATE_INTERVAL_SECS=86400`
 - optional `LXC_SELF_UPDATE_CMD` (overrides full update command used by update APIs)
 - optional `LXC_DAEMON_IMAGE` (default `ghcr.io/kennypassenier/homelab-lxc-daemon:latest`)
 - optional `LXC_DAEMON_COMPOSE_DIR` (default `/opt/lxc-daemon`)
@@ -167,6 +170,13 @@ It is derived per container from:
 
 - `/etc/homelab/lxc-daemon.toml` (`[sync].stack_name`) written by HOST bootstrap
 - `stacks/<stack>/lxc-compose.yml` (for `network.reserved_ipv4`)
+
+LXC `latch` runtime strategy is:
+
+- HOST bootstrap installs the latest native `latch` GitHub release binary into `/usr/local/bin/latch`
+- a guarded systemd timer re-checks for updates on a daily cadence (`LATCH_UPDATE_INTERVAL_SECS`)
+- non-interactive operation uses persistent `LATCH_PAT` / `LATCH_KEY` injected by HOST
+- LXC keyring/pass setup is optional, not required
 
 ## 5. Stack Secret Files
 
@@ -335,6 +345,8 @@ Verify:
 
 ```bash
 curl -fsSL http://127.0.0.1:8080/api/version
+# Response includes: component, version, latch_version (or null if not installed)
+
 journalctl -u host-daemon.service -n 50 --no-pager
 ```
 
@@ -360,6 +372,33 @@ After deployment, verify:
 - per-app `.env` files exist under `/appdata/...`
 - Docker containers start successfully inside each LXC
 - backup orchestration can reach `http://<lxc_ip>:8080`
+
+## 7. Latch Version and Update Status
+
+Both HOST and LXC daemons expose latch version and update status via their API endpoints:
+
+### HOST latch version
+
+```bash
+HOST_IP="10.10.5.250"
+curl -fsSL "http://${HOST_IP}:8080/api/version"
+# Response: {"component":"host-daemon","version":"0.1.x","latch_version":"1.0.0"}
+```
+
+If `latch_version` is `null`, the latch binary is not installed or not in PATH.
+
+### LXC latch status
+
+```bash
+LXC_IP="10.10.10.101"
+curl -fsSL "http://${LXC_IP}:8080/api/secrets/keyring"
+# Response includes:
+#   latch_available: bool
+#   latch_version: "1.0.0" or null
+#   latch_last_update_secs: 3600 (seconds since last update check) or null
+```
+
+The `latch_last_update_secs` field indicates how long ago the guarded daily update check ran. If `null`, the timer has not yet fired.
 
 ## 8. Known Remaining Gaps
 

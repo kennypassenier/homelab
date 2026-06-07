@@ -134,6 +134,8 @@ pub struct KeyringSlot {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct KeyringStatus {
     pub latch_available: bool,
+    pub latch_version: Option<String>,
+    pub latch_last_update_secs: Option<u64>,
     pub keyring_available: bool,
     pub global_slots: Vec<KeyringSlot>,
     pub project_slots: Vec<KeyringSlot>,
@@ -993,11 +995,18 @@ async fn execute_command(
 async fn handle_keyring_status(
     State(state): State<Arc<Mutex<AppState>>>,
 ) -> (StatusCode, Json<KeyringStatus>) {
-    // Check if latch CLI is available
-    let latch_check = match execute_command("which", vec!["latch".to_string()], None).await {
-        Ok(resp) => resp.exit_code == 0,
-        Err(_) => false,
+    // Check if latch CLI is available and get version
+    let (latch_check, latch_version) = match execute_command("latch", vec!["--version".to_string()], None).await {
+        Ok(resp) if resp.exit_code == 0 => (true, Some(resp.stdout.trim().to_string())),
+        _ => (false, None),
     };
+    
+    // Get last latch update check timestamp
+    let latch_last_update_secs = std::fs::metadata("/var/lib/homelab/latch-update.last")
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.elapsed().ok())
+        .map(|elapsed| elapsed.as_secs());
 
     // Check if keyring is available (common on Linux)
     let keyring_check = match execute_command(
@@ -1014,12 +1023,24 @@ async fn handle_keyring_status(
         Err(_) => false,
     };
 
-    let message = match (latch_check, keyring_check) {
-        (true, true) => "Ready for credential sync".to_string(),
-        (true, false) => {
-            "Latch available but keyring not detected; install pass or another keyring".to_string()
+    let env_check = std::env::var("LATCH_PAT")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .is_some()
+        && std::env::var("LATCH_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .is_some();
+
+    let message = match (latch_check, keyring_check, env_check) {
+        (true, true, _) => "Ready for credential sync (keyring backend available)".to_string(),
+        (true, false, true) => {
+            "Ready for headless latch operation via persistent LATCH_PAT/LATCH_KEY".to_string()
         }
-        (false, _) => "Latch CLI not found; run setup-latch.sh in LXC to install".to_string(),
+        (true, false, false) => {
+            "Latch available but no keyring backend or LATCH_PAT/LATCH_KEY detected".to_string()
+        }
+        (false, _, _) => "Latch CLI not found; run setup-latch.sh in LXC to install".to_string(),
     };
 
     {
@@ -1027,8 +1048,8 @@ async fn handle_keyring_status(
         s.add_log(
             LogLevel::Info,
             format!(
-                "Keyring status check: latch={}, keyring={}",
-                latch_check, keyring_check
+                "Keyring status check: latch={}, keyring={}, env_fallback={}",
+                latch_check, keyring_check, env_check
             ),
         );
     }
@@ -1037,6 +1058,8 @@ async fn handle_keyring_status(
     // For now, return empty lists to avoid blocking on keyring queries
     let status = KeyringStatus {
         latch_available: latch_check,
+        latch_version,
+        latch_last_update_secs,
         keyring_available: keyring_check,
         global_slots: vec![],
         project_slots: vec![],

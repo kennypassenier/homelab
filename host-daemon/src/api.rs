@@ -26,6 +26,7 @@ struct ApiResponse {
 struct VersionResponse {
     component: String,
     version: String,
+    latch_version: Option<String>,
 }
 
 /// Runtime metrics for the HOST (Proxmox node).
@@ -95,10 +96,23 @@ async fn handle_client_heartbeat() -> Json<ApiResponse> {
 }
 
 async fn handle_version() -> Json<VersionResponse> {
+    let latch_version = get_latch_version().ok();
     Json(VersionResponse {
         component: "host-daemon".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        latch_version,
     })
+}
+
+fn get_latch_version() -> Result<String, Box<dyn std::error::Error>> {
+    use std::process::Command;
+    let output = Command::new("latch").arg("--version").output()?;
+    if output.status.success() {
+        let version_str = String::from_utf8(output.stdout)?.trim().to_string();
+        Ok(version_str)
+    } else {
+        Err("latch not found or failed".into())
+    }
 }
 
 async fn handle_metrics(

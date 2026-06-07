@@ -333,7 +333,8 @@ fn start_update_checker(status_tx: mpsc::Sender<String>) {
     std::thread::spawn(move || {
         // Set last_check far in the past so the first iteration triggers immediately.
         let mut last_check = std::time::Instant::now() - std::time::Duration::from_secs(9999);
-        let mut last_no_update_log = std::time::Instant::now() - std::time::Duration::from_secs(9999);
+        let mut last_no_update_log =
+            std::time::Instant::now() - std::time::Duration::from_secs(9999);
 
         loop {
             let interval_secs = std::env::var("HOST_UPDATE_INTERVAL_SECS")

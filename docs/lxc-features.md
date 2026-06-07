@@ -16,6 +16,8 @@ Last updated: 2026-05-28
 ## Runtime Behaviors
 
 - setup.sh hook support.
+- native `latch` release binary install during bootstrap with guarded daily update checks.
+- env-backed non-interactive secrets workflow via persistent `LATCH_PAT` / `LATCH_KEY` injection.
 - compose pull/up execution per stack app folder.
 - lock-file based sync exclusion.
 - failsafe sync windows (default hourly) with heartbeat-aware suppression when CLIENT is active.

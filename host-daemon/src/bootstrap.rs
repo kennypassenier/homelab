@@ -61,6 +61,7 @@ pub fn bootstrap_lxc(vmid: u32, intent: &StackIntent) -> Result<BootstrapResult,
 
     // Install dependencies
     install_dependencies(vmid)?;
+    install_latch_cli(vmid)?;
 
     // Git setup
     setup_git_sparse_checkout(vmid, &intent.stack_name)?;
@@ -344,7 +345,7 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// Install dependencies (Docker, Latch wrapper, Git, etc.)
+/// Install base dependencies (Docker, Git, unattended-upgrades, etc.)
 fn install_dependencies(vmid: u32) -> Result<(), String> {
     println!("Installing dependencies in LXC {}...", vmid);
 
@@ -356,7 +357,7 @@ apt-get update -qq
 
 # Install base packages
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    curl git wget openssl jq unattended-upgrades ca-certificates
+    curl git wget openssl jq tar unattended-upgrades ca-certificates
 
 # Configure unattended upgrades
 dpkg-reconfigure -f noninteractive unattended-upgrades
@@ -368,29 +369,45 @@ if ! command -v docker &> /dev/null; then
     systemctl start docker
 fi
 
-# Install Latch CLI wrapper backed by the official container image.
-if ! command -v latch &> /dev/null; then
-    cat > /usr/local/bin/latch <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-exec docker run --rm -i \
-    -v "$PWD:$PWD" \
-    -w "$PWD" \
-    -e LATCH_KEY \
-    -e LATCH_PAT \
-    -e RUST_LOG \
-    ghcr.io/kennypassenier/latch-rs:latest "$@"
-EOF
-    chmod +x /usr/local/bin/latch
-fi
-
 echo "Dependencies installed successfully"
 "#;
 
     pct_exec(vmid, install_script)?;
 
     println!("Dependencies installed in LXC {}", vmid);
+    Ok(())
+}
+
+/// Install the native Latch CLI in the LXC using the shared setup script.
+fn install_latch_cli(vmid: u32) -> Result<(), String> {
+    println!("Installing Latch CLI in LXC {}...", vmid);
+
+    let script_candidates = [
+        format!("{}/scripts/lxc/setup-latch.sh", default_host_gitops_repo()),
+        "scripts/lxc/setup-latch.sh".to_string(),
+    ];
+
+    let script_path = script_candidates
+        .iter()
+        .find(|path| Path::new(path.as_str()).exists())
+        .ok_or_else(|| "Cannot find scripts/lxc/setup-latch.sh on HOST".to_string())?;
+
+    let remote_script = "/tmp/setup-latch.sh";
+    let push_output = Command::new("pct")
+        .args(["push", &vmid.to_string(), script_path, remote_script])
+        .output()
+        .map_err(|e| format!("Failed to push latch setup script: {}", e))?;
+
+    if !push_output.status.success() {
+        return Err(format!(
+            "Failed to push latch setup script: {}",
+            String::from_utf8_lossy(&push_output.stderr)
+        ));
+    }
+
+    pct_exec(vmid, &format!("chmod +x {} && {}", remote_script, remote_script))?;
+
+    println!("Latch CLI installed in LXC {}", vmid);
     Ok(())
 }
 

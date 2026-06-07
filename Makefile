@@ -20,6 +20,8 @@ GHCR_OWNER ?= kennypassenier
 GHCR_LXC_IMAGE := ghcr.io/$(GHCR_OWNER)/homelab-lxc-daemon
 LXC_BASE_IMAGE_BUILDER := rust:1.88-bookworm
 LXC_BASE_IMAGE_RUNTIME := debian:bookworm-slim
+LATCH_AUTO_SYNC ?= 1
+LATCH_SYNC_REQUIRED ?= 0
 
 # Get current versions from Cargo.toml files.
 # Use recursive expansion so the value is re-read after version-bump targets run.
@@ -30,7 +32,7 @@ LXC_VERSION = $(shell grep '^version' $(LXC_SRC)/Cargo.toml | head -1 | cut -d'"
 # Define all targets that are not actual files
 .PHONY: help build build-client build-client-windows build-host build-lxc clean
 .PHONY: docker release-host release-client release-lxc version-check version-bump-host
-.PHONY: version-bump-client version-bump-lxc show-versions docker-build-only docker-push docker-warm-cache
+.PHONY: version-bump-client version-bump-lxc show-versions docker-build-only docker-push docker-warm-cache latch-sync-secrets
 .PHONY: push release-all
 
 # Help menu providing information about available commands
@@ -58,15 +60,54 @@ help:
 	@echo "  make release-lxc            - Build LXC, auto-bump patch, create GitHub release & push image"
 	@echo ""
 	@echo "Utility Targets:"
+	@echo "  make latch-sync-secrets     - Run latch commit + push (desktop source of truth)"
 	@echo "  make show-versions          - Display current versions"
 	@echo "  make version-check          - Check git tags vs Cargo.toml versions"
 	@echo "  make clean                  - Clean all build artifacts"
+	@echo ""
+	@echo "Latch Variables:"
+	@echo "  LATCH_AUTO_SYNC=1           - Auto-run latch commit/push in build/release flows"
+	@echo "  LATCH_SYNC_REQUIRED=0       - If 1, fail when latch sync cannot run"
 
 # Target to build all standard Linux binaries
-build: build-client build-host build-lxc
+build: latch-sync-secrets build-client build-host build-lxc
+
+# Sync secrets from desktop source of truth before build/release operations.
+# CI is skipped automatically because latch typically relies on desktop credentials/keyring.
+latch-sync-secrets:
+	@echo "Syncing secrets with latch (commit + push)..."
+	@if [ "$$CI" = "true" ] || [ "$$CI" = "1" ]; then \
+		echo "CI environment detected; skipping latch sync"; \
+		exit 0; \
+	fi
+	@if [ "$(LATCH_AUTO_SYNC)" != "1" ]; then \
+		echo "Latch auto sync disabled (LATCH_AUTO_SYNC=$(LATCH_AUTO_SYNC)); skipping"; \
+		exit 0; \
+	fi
+	@if ! command -v latch > /dev/null 2>&1; then \
+		echo "latch CLI not found"; \
+		if [ "$(LATCH_SYNC_REQUIRED)" = "1" ]; then \
+			exit 1; \
+		fi; \
+		echo "Continuing without latch sync (set LATCH_SYNC_REQUIRED=1 to enforce)"; \
+		exit 0; \
+	fi
+	@latch commit > /dev/null 2>&1 || { \
+		echo "latch commit failed"; \
+		if [ "$(LATCH_SYNC_REQUIRED)" = "1" ]; then exit 1; fi; \
+		echo "Continuing without blocking build/release"; \
+		exit 0; \
+	}
+	@latch push > /dev/null 2>&1 || { \
+		echo "latch push failed"; \
+		if [ "$(LATCH_SYNC_REQUIRED)" = "1" ]; then exit 1; fi; \
+		echo "Continuing without blocking build/release"; \
+		exit 0; \
+	}
+	@echo "Latch secrets sync complete"
 
 # Build the client application for Linux
-build-client:
+build-client: latch-sync-secrets
 	cd $(CLIENT_SRC) && cargo build --release
 	@mkdir -p $(APPS_DIR)
 	@tmp="$(APPS_DIR)/$(CLIENT_NAME).new"; \
@@ -75,14 +116,14 @@ build-client:
 	mv -f "$$tmp" $(APPS_DIR)/$(CLIENT_NAME)
 
 # Add target and build the client application for Windows
-build-client-windows:
+build-client-windows: latch-sync-secrets
 	rustup target add x86_64-pc-windows-gnu
 	cd $(CLIENT_SRC) && cargo build --release --target x86_64-pc-windows-gnu
 	@mkdir -p $(APPS_DIR)
 	cp $(CLIENT_SRC)/target/x86_64-pc-windows-gnu/release/$(CLIENT_NAME).exe $(APPS_DIR)/$(CLIENT_NAME).exe
 
 # Build the host daemon for Linux
-build-host:
+build-host: latch-sync-secrets
 	cd $(HOST_SRC) && cargo build --release
 	@mkdir -p $(APPS_DIR)
 	@tmp="$(APPS_DIR)/$(HOST_NAME).new"; \
@@ -91,7 +132,7 @@ build-host:
 	mv -f "$$tmp" $(APPS_DIR)/$(HOST_NAME)
 
 # Build the LXC daemon for Linux
-build-lxc:
+build-lxc: latch-sync-secrets
 	cd $(LXC_SRC) && cargo build --release
 	@mkdir -p $(APPS_DIR)
 	@tmp="$(APPS_DIR)/$(LXC_NAME).new"; \

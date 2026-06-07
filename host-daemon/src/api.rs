@@ -194,7 +194,7 @@ async fn handle_update(State(app): State<Arc<Mutex<App>>>) -> Json<ApiResponse> 
 
     let app_clone = app.clone();
     tokio::task::spawn_blocking(move || {
-        let result = self_update::check_and_apply_update();
+        let result = self_update::check_and_apply_update_with_latch_pull();
         let mut a = app_clone.lock().unwrap();
         match result {
             Ok(msg) => a.add_log(LogLevel::Info, format!("[update-http] {}", msg)),
@@ -270,7 +270,7 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
 
                                     let app_clone = app.clone();
                                     tokio::task::spawn_blocking(move || {
-                                        let result = self_update::check_and_apply_update();
+                                        let result = self_update::check_and_apply_update_with_latch_pull();
                                         let mut guard = app_clone.lock().unwrap();
                                         match result {
                                             Ok(msg) => guard.add_log(LogLevel::Info, format!("[update-rpc] {}", msg)),

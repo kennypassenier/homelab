@@ -737,6 +737,18 @@ async fn handle_update(
 }
 
 async fn perform_lxc_self_update(state: Arc<Mutex<AppState>>) -> Result<String, String> {
+    let latch_pull_result = tokio::task::spawn_blocking(run_latch_pull_before_remote_update)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    {
+        let mut s = state.lock().unwrap();
+        match latch_pull_result {
+            Ok(msg) => s.add_log(LogLevel::Info, msg),
+            Err(err) => s.add_log(LogLevel::Warn, err),
+        }
+    }
+
     let update_cmd = std::env::var("LXC_SELF_UPDATE_CMD")
         .ok()
         .map(|v| v.trim().to_string())
@@ -800,6 +812,42 @@ async fn perform_lxc_self_update(state: Arc<Mutex<AppState>>) -> Result<String, 
         let mut s = state.lock().unwrap();
         s.add_log(LogLevel::Error, message.clone());
         Err(message)
+    }
+}
+
+fn run_latch_pull_before_remote_update() -> Result<String, String> {
+    if !env_bool("LXC_LATCH_PULL_ON_UPDATE", true) {
+        return Ok("LXC latch pull disabled for remote update".to_string());
+    }
+
+    let repo = std::env::var("GITOPS_REPO")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "/opt/gitops".to_string());
+
+    let output = std::process::Command::new("latch")
+        .args(["pull", "--sparse"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("LXC latch pull unavailable: {}", e))?;
+
+    if output.status.success() {
+        Ok("LXC latch pull --sparse complete before self-update".to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let short = stderr.lines().next().unwrap_or("unknown latch error").trim();
+        Err(format!("LXC latch pull failed before self-update: {}", short))
+    }
+}
+
+fn env_bool(key: &str, default: bool) -> bool {
+    match std::env::var(key) {
+        Ok(v) => {
+            let norm = v.trim().to_ascii_lowercase();
+            !matches!(norm.as_str(), "0" | "false" | "no" | "off")
+        }
+        Err(_) => default,
     }
 }
 

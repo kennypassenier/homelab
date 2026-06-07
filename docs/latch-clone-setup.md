@@ -196,6 +196,12 @@ Latch is now the primary secret workflow in this repo.
 - `latch pull --sparse` restores only stack-owned local `.env` files whose parent directories already exist
 - `latch clone offer/create/apply` transfers credential state between machines
 
+Additional automation in this repo:
+
+- Makefile build/release targets auto-run `latch commit` + `latch push` on desktop (configurable via `LATCH_AUTO_SYNC` / `LATCH_SYNC_REQUIRED`)
+- HOST API/RPC remote update checks run `latch pull --sparse` first (toggle: `HOST_LATCH_PULL_ON_UPDATE`)
+- LXC API/RPC self-update runs `latch pull --sparse` first (toggle: `LXC_LATCH_PULL_ON_UPDATE`)
+
 ## Security Properties
 
 ✅ **End-to-end encryption:** x25519 ECDH between CLIENT and LXC  

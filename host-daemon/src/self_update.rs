@@ -59,6 +59,41 @@ pub fn check_and_apply_update() -> Result<String, String> {
     ))
 }
 
+pub fn check_and_apply_update_with_latch_pull() -> Result<String, String> {
+    let latch_note = run_latch_pull_before_remote_update();
+    match check_and_apply_update() {
+        Ok(msg) => Ok(format!("{} [{}]", msg, latch_note)),
+        Err(err) => Err(format!("{} [{}]", err, latch_note)),
+    }
+}
+
+fn run_latch_pull_before_remote_update() -> String {
+    if !env_bool("HOST_LATCH_PULL_ON_UPDATE", true) {
+        return "latch pull disabled".to_string();
+    }
+
+    let repo = env_nonempty("GITOPS_REPO", "/root/homelab");
+
+    let output = Command::new("latch")
+        .args(["pull", "--sparse"])
+        .current_dir(&repo)
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => "latch pull --sparse ok".to_string(),
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            let short = stderr
+                .lines()
+                .next()
+                .unwrap_or("unknown latch error")
+                .trim();
+            format!("latch pull failed: {}", short)
+        }
+        Err(e) => format!("latch pull unavailable: {}", e),
+    }
+}
+
 fn select_host_asset<'a>(
     release: &'a ReleaseInfo,
     expected_asset: &str,
@@ -211,4 +246,14 @@ fn env_nonempty(key: &str, default: &str) -> String {
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| default.to_string())
+}
+
+fn env_bool(key: &str, default: bool) -> bool {
+    match std::env::var(key) {
+        Ok(v) => {
+            let norm = v.trim().to_ascii_lowercase();
+            !matches!(norm.as_str(), "0" | "false" | "no" | "off")
+        }
+        Err(_) => default,
+    }
 }

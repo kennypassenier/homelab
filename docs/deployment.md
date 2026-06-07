@@ -101,6 +101,8 @@ CLIENT currently cares about:
 
 - `LXC_API_TOKEN`
 - `LXC_API_IP`
+- optional `LATCH_AUTO_SYNC=1` to auto-run latch commit/push in Makefile build/release flows
+- optional `LATCH_SYNC_REQUIRED=0` to fail build/release when latch sync fails (set `1` for strict mode)
 - `OPNSENSE_BASE_URL` (for example `https://10.10.5.1`)
 - `OPNSENSE_API_KEY`
 - `OPNSENSE_API_SECRET`
@@ -144,6 +146,7 @@ HOST currently cares about:
 - `HOST_UPDATE_REPO`
 - `HOST_UPDATE_ASSET`
 - optional `HOST_UPDATE_TOKEN`
+- optional `HOST_LATCH_PULL_ON_UPDATE=true` to run `latch pull --sparse` before API/RPC remote update checks
 - optional `HOST_UPDATE_SERVICE` (default `host-daemon.service`)
 - optional `RESTIC_REPO_BASE` for HOST daemon per-stack restic target base
 - optional `RCLONE_CONFIG_FILE` for rclone-backed restic repositories (Google Drive, etc.)
@@ -162,6 +165,7 @@ LXC currently cares about:
 - `LATCH_UPDATE_REPO=kennypassenier/latch-rs`
 - `LATCH_UPDATE_ASSET=latch-linux-x86_64.tar.gz`
 - `LATCH_UPDATE_INTERVAL_SECS=86400`
+- optional `LXC_LATCH_PULL_ON_UPDATE=true` to run `latch pull --sparse` before API/RPC self-update commands
 - optional `LXC_SELF_UPDATE_CMD` (overrides full update command used by update APIs)
 - optional `LXC_DAEMON_IMAGE` (default `ghcr.io/kennypassenier/homelab-lxc-daemon:latest`)
 - optional `LXC_DAEMON_COMPOSE_DIR` (default `/opt/lxc-daemon`)
@@ -179,6 +183,17 @@ LXC `latch` runtime strategy is:
 - a guarded systemd timer re-checks for updates on a daily cadence (`LATCH_UPDATE_INTERVAL_SECS`)
 - non-interactive operation uses persistent `LATCH_PAT` / `LATCH_KEY` injected by HOST
 - LXC keyring/pass setup is optional, not required
+
+Desktop build/release latch strategy is:
+
+- Makefile build targets (`build`, `build-client`, `build-host`, `build-lxc`) auto-run `latch commit` + `latch push`
+- CI auto-skips this latch sync path
+- `LATCH_AUTO_SYNC` and `LATCH_SYNC_REQUIRED` control behavior
+
+Remote update latch strategy is:
+
+- HOST API/RPC update requests run `latch pull --sparse` before checking/applying updates
+- LXC API/RPC self-update requests run `latch pull --sparse` before image pull/recreate
 
 ## 5. Stack Secret Files
 

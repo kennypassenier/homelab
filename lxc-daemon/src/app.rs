@@ -92,7 +92,12 @@ pub struct AppState {
     pub client_heartbeat_ts: Option<i64>,
     /// Broadcast channel sender — WebSocket clients receive every new log message.
     pub log_tx: broadcast::Sender<String>,
+    /// Max retained log lines kept in memory for websocket replay.
+    log_history_limit: usize,
 }
+
+const DEFAULT_LOG_HISTORY_LIMIT: usize = 10_000;
+const DEFAULT_LOG_HISTORY_AGE_SECS: u64 = 3600;
 
 impl AppState {
     pub fn new() -> Self {
@@ -121,12 +126,13 @@ impl AppState {
                 target,
                 ..Default::default()
             },
-            logs: VecDeque::with_capacity(500),
+            logs: VecDeque::with_capacity(DEFAULT_LOG_HISTORY_LIMIT),
             is_syncing: false,
             sync_requested: false,
             backup_paused: false,
             client_heartbeat_ts: None,
             log_tx,
+            log_history_limit: parse_log_history_limit(),
         }
     }
 
@@ -158,11 +164,37 @@ impl AppState {
             msg: msg.clone(),
         };
         self.logs.push_back(entry);
-        if self.logs.len() > 500 {
-            self.logs.pop_front();
-        }
+        self.trim_log_history();
         // Broadcast to any connected WebSocket clients (ignore if no subscribers)
         let _ = self.log_tx.send(logfmt);
+    }
+
+    fn trim_log_history(&mut self) {
+        let cutoff = chrono::Local::now() - chrono::Duration::seconds(self.log_history_age_secs() as i64);
+        let old_logs_count = self.logs.iter().filter(|log| log.timestamp < cutoff).count();
+
+        if old_logs_count > self.log_history_limit {
+            let excess = old_logs_count - self.log_history_limit;
+            let mut removed = 0;
+
+            while removed < excess {
+                match self.logs.front() {
+                    Some(front) if front.timestamp < cutoff => {
+                        self.logs.pop_front();
+                        removed += 1;
+                    }
+                    _ => break,
+                }
+            }
+        }
+    }
+
+    fn log_history_age_secs(&self) -> u64 {
+        std::env::var("LOG_HISTORY_AGE_SECS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(DEFAULT_LOG_HISTORY_AGE_SECS)
     }
 }
 
@@ -190,6 +222,14 @@ fn detect_stack_ip(stack_name: &str) -> String {
     }
 
     read_reserved_ip_from_lxc_compose(stack_name).unwrap_or_else(|| "—".to_string())
+}
+
+fn parse_log_history_limit() -> usize {
+    std::env::var("LXC_LOG_HISTORY_MAX")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(50, DEFAULT_LOG_HISTORY_LIMIT))
+        .unwrap_or(DEFAULT_LOG_HISTORY_LIMIT)
 }
 
 fn read_stack_name_from_daemon_config() -> Option<String> {

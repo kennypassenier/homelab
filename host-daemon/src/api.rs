@@ -9,10 +9,11 @@ use axum::{
     routing::{get, post},
 };
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
-use crate::app::{App, LogLevel};
+use crate::app::{App, BackupStatusLine, LogLevel};
 use crate::liveness;
 use crate::self_update;
 
@@ -138,22 +139,14 @@ async fn handle_metrics(
         .map(|node| {
             let status = node.status;
             let is_running = status.eq_ignore_ascii_case("RUN");
-            let ram_pct = node
-                .ram
-                .as_deref()
-                .and_then(parse_ram_pct)
-                .unwrap_or(0);
+            let ram_pct = node.ram.as_deref().and_then(parse_ram_pct).unwrap_or(0);
             LxcMetric {
                 vmid: node.id,
                 name: node.name,
                 status,
                 cpu_pct: node.cpu.round().clamp(0.0, 100.0) as u8,
                 ram_pct,
-                uptime_secs: if is_running {
-                    uptime_secs
-                } else {
-                    0
-                },
+                uptime_secs: if is_running { uptime_secs } else { 0 },
             }
         })
         .collect();
@@ -318,7 +311,7 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
     }
 }
 
-fn compact_snapshot(lines: &[String], max_lines: usize) -> Vec<String> {
+fn compact_snapshot(lines: &VecDeque<BackupStatusLine>, max_lines: usize) -> Vec<String> {
     if lines.is_empty() || max_lines == 0 {
         return Vec::new();
     }
@@ -327,12 +320,12 @@ fn compact_snapshot(lines: &[String], max_lines: usize) -> Vec<String> {
     let mut compacted = Vec::new();
     let mut previous: Option<&str> = None;
 
-    for line in &lines[start..] {
-        let as_str = line.as_str();
+    for line in lines.iter().skip(start) {
+        let as_str = line.message.as_str();
         if previous == Some(as_str) {
             continue;
         }
-        compacted.push(line.clone());
+        compacted.push(line.message.clone());
         previous = Some(as_str);
     }
 

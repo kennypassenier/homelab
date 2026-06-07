@@ -48,14 +48,26 @@ impl std::fmt::Display for LogLevel {
     }
 }
 
+use std::{
+    collections::VecDeque,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
 use crate::api::HostMetrics;
 
-const DEFAULT_LOG_HISTORY_LIMIT: usize = 500;
+const DEFAULT_LOG_HISTORY_LIMIT: usize = 10_000;
+const DEFAULT_LOG_HISTORY_AGE_SECS: u64 = 3600;
+
+#[derive(Debug, Clone)]
+pub struct BackupStatusLine {
+    pub message: String,
+    pub created_at: SystemTime,
+}
 
 pub struct App {
     pub tab: usize,
     /// Live status lines from the backup orchestrator thread.
-    pub backup_status: Vec<String>,
+    pub backup_status: VecDeque<BackupStatusLine>,
     /// True while a backup run is in progress.
     pub backup_running: bool,
     /// Broadcast channel for streaming logs to WebSocket clients.
@@ -66,6 +78,8 @@ pub struct App {
     pub started_at: std::time::Instant,
     /// Max retained log lines kept in memory for websocket replay.
     log_history_limit: usize,
+    /// Age threshold for deciding which entries count toward the old-line cap.
+    log_history_age_secs: u64,
 }
 
 impl App {
@@ -73,7 +87,7 @@ impl App {
         let (log_tx, _) = tokio::sync::broadcast::channel(128);
         Self {
             tab: 0,
-            backup_status: Vec::new(),
+            backup_status: VecDeque::new(),
             backup_running: false,
             log_tx,
             current_metrics: HostMetrics {
@@ -84,16 +98,53 @@ impl App {
             },
             started_at: std::time::Instant::now(),
             log_history_limit: parse_log_history_limit(),
+            log_history_age_secs: parse_log_history_age_secs(),
         }
     }
 
     pub fn add_log(&mut self, level: LogLevel, message: String) {
         let log_line = format!("[{}] {}", level, message);
-        self.backup_status.push(log_line.clone());
-        if self.backup_status.len() > self.log_history_limit {
-            self.backup_status.remove(0);
-        }
+        self.push_status_line_internal(log_line.clone());
         let _ = self.log_tx.send(log_line);
+    }
+
+    pub fn push_status_line(&mut self, line: String) {
+        self.push_status_line_internal(line);
+    }
+
+    fn push_status_line_internal(&mut self, line: String) {
+        self.backup_status.push_back(BackupStatusLine {
+            message: line,
+            created_at: SystemTime::now(),
+        });
+        self.trim_backup_status();
+    }
+
+    fn trim_backup_status(&mut self) {
+        let cutoff = SystemTime::now()
+            .checked_sub(Duration::from_secs(self.log_history_age_secs))
+            .unwrap_or(UNIX_EPOCH);
+
+        let old_logs_count = self
+            .backup_status
+            .iter()
+            .filter(|log| log.created_at < cutoff)
+            .count();
+
+        if old_logs_count > self.log_history_limit {
+            let excess = old_logs_count - self.log_history_limit;
+            let mut removed = 0;
+
+            while removed < excess {
+                match self.backup_status.front() {
+                    Some(front) if front.created_at < cutoff => {
+                        self.backup_status.pop_front();
+                        removed += 1;
+                    }
+                    _ => break,
+                }
+            }
+        }
     }
 
     pub fn lxc_nodes(&self) -> Vec<LxcNode> {
@@ -166,6 +217,43 @@ fn parse_log_history_limit() -> usize {
     std::env::var("HOST_LOG_HISTORY_MAX")
         .ok()
         .and_then(|v| v.trim().parse::<usize>().ok())
-        .map(|v| v.clamp(50, 10_000))
+        .map(|v| v.clamp(50, DEFAULT_LOG_HISTORY_LIMIT))
         .unwrap_or(DEFAULT_LOG_HISTORY_LIMIT)
+}
+
+fn parse_log_history_age_secs() -> u64 {
+    std::env::var("LOG_HISTORY_AGE_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_LOG_HISTORY_AGE_SECS)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use super::{App, BackupStatusLine, LogLevel};
+
+    #[test]
+    fn status_history_is_bounded() {
+        let mut app = App::new();
+        let old_timestamp = SystemTime::now() - Duration::from_secs(7200);
+
+        for index in 0..=10_000 {
+            app.backup_status.push_back(BackupStatusLine {
+                message: format!("line-{index}"),
+                created_at: old_timestamp,
+            });
+        }
+
+        app.trim_backup_status();
+
+        assert_eq!(app.backup_status.len(), 10_000);
+        assert_eq!(app.backup_status.front().map(|line| line.message.as_str()), Some("line-1"));
+
+        app.add_log(LogLevel::Info, "final log".to_string());
+        assert_eq!(app.backup_status.len(), 10_001);
+        assert!(app.backup_status.back().is_some());
+    }
 }

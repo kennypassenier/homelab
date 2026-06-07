@@ -405,7 +405,10 @@ fn install_latch_cli(vmid: u32) -> Result<(), String> {
         ));
     }
 
-    pct_exec(vmid, &format!("chmod +x {} && {}", remote_script, remote_script))?;
+    pct_exec(
+        vmid,
+        &format!("chmod +x {} && {}", remote_script, remote_script),
+    )?;
 
     println!("Latch CLI installed in LXC {}", vmid);
     Ok(())

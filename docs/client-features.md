@@ -8,6 +8,7 @@ Last updated: 2026-06-06
 - Stack/app scaffolding, activation/deactivation, deploy/update queueing.
 - Backup/restore/patch orchestration surfaces.
 - Structured client logfmt-style event emission for critical operations.
+- CLIENT keeps the full session log stream because HOST and LXC now bound their own replay histories.
 - Live deploy telemetry streamed from LXC daemon WebSocket logs during sync actions.
 - Persistent websocket supervision for HOST plus all deploy-enabled stacks, with auto-reconnect for stale/no-signal streams.
 - CLIENT control-plane actions now use websocket RPC on LXC `/api/logs/ws` for sync, restore, heartbeat, and remote command execution (with HTTP fallback kept for compatibility).

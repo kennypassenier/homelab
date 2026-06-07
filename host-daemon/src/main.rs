@@ -148,13 +148,10 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
         {
             let mut a = app.lock().unwrap();
             while let Ok(line) = status_rx.try_recv() {
-                a.backup_status.push(line);
-                if a.backup_status.len() > 200 {
-                    a.backup_status.remove(0);
-                }
+                a.push_status_line(line);
                 if a.backup_status
-                    .last()
-                    .map(|l| l.starts_with("DONE"))
+                    .back()
+                    .map(|l| l.message.starts_with("DONE"))
                     .unwrap_or(false)
                 {
                     a.backup_running = false;
@@ -184,7 +181,7 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                         // 'b' triggers the backup orchestration cycle
                         KeyCode::Char('b') if !a.backup_running => {
                             a.backup_running = true;
-                            a.backup_status.push("Starting backup cycle…".to_string());
+                            a.push_status_line("Starting backup cycle…".to_string());
                             let stacks: Vec<(String, String)> = a
                                 .lxc_nodes()
                                 .into_iter()
@@ -229,11 +226,11 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         KeyCode::Char('U') => {
                             let mut a = app.lock().unwrap();
-                            a.backup_status.push("Checking HOST updates…".to_string());
+                            a.push_status_line("Checking HOST updates…".to_string());
                             match self_update::check_and_apply_update() {
-                                Ok(msg) => a.backup_status.push(msg),
+                                Ok(msg) => a.push_status_line(msg),
                                 Err(err) => {
-                                    a.backup_status.push(format!("HOST update failed: {}", err))
+                                    a.push_status_line(format!("HOST update failed: {}", err))
                                 }
                             }
                         }
@@ -243,7 +240,7 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                             for line in
                                 policy::reconcile_boot_policies(Path::new(&gitops_root), false)
                             {
-                                a.backup_status.push(line);
+                                a.push_status_line(line);
                             }
                         }
                         KeyCode::Char('O') => {
@@ -252,7 +249,7 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                             for line in
                                 policy::reconcile_boot_policies(Path::new(&gitops_root), true)
                             {
-                                a.backup_status.push(line);
+                                a.push_status_line(line);
                             }
                         }
                         KeyCode::Char('h') => {
@@ -261,7 +258,7 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                             for line in
                                 policy::reconcile_hot_resources(Path::new(&gitops_root), false)
                             {
-                                a.backup_status.push(line);
+                                a.push_status_line(line);
                             }
                         }
                         KeyCode::Char('H') => {
@@ -270,31 +267,27 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                             for line in
                                 policy::reconcile_hot_resources(Path::new(&gitops_root), true)
                             {
-                                a.backup_status.push(line);
+                                a.push_status_line(line);
                             }
                         }
                         KeyCode::Char('r') => {
                             let mut a = app.lock().unwrap();
                             let gitops_root = default_gitops_repo();
-                            a.backup_status
-                                .push("Scanning LXC provisioning state…".to_string());
+                            a.push_status_line("Scanning LXC provisioning state…".to_string());
                             match provision::plan_provisioning_changes(Path::new(&gitops_root)) {
                                 Ok(actions) => {
                                     let lines = provision::format_provision_summary(&actions);
                                     for line in lines {
-                                        a.backup_status.push(line);
+                                        a.push_status_line(line);
                                     }
                                 }
-                                Err(e) => a
-                                    .backup_status
-                                    .push(format!("Provision scan failed: {}", e)),
+                                Err(e) => a.push_status_line(format!("Provision scan failed: {}", e)),
                             }
                         }
                         KeyCode::Char('R') => {
                             let mut a = app.lock().unwrap();
                             let gitops_root = default_gitops_repo();
-                            a.backup_status
-                                .push("Applying LXC provisioning changes…".to_string());
+                            a.push_status_line("Applying LXC provisioning changes…".to_string());
                             match provision::apply_provisioning_changes(
                                 Path::new(&gitops_root),
                                 false,
@@ -302,13 +295,11 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                                 Ok(actions) => {
                                     let lines = provision::format_provision_summary(&actions);
                                     for line in lines {
-                                        a.backup_status.push(line);
+                                        a.push_status_line(line);
                                     }
-                                    a.backup_status.push("Provisioning complete.".to_string());
+                                    a.push_status_line("Provisioning complete.".to_string());
                                 }
-                                Err(e) => a
-                                    .backup_status
-                                    .push(format!("Provision apply failed: {}", e)),
+                                Err(e) => a.push_status_line(format!("Provision apply failed: {}", e)),
                             }
                         }
                         _ => {}
@@ -507,15 +498,16 @@ fn draw_backups(f: &mut ratatui::Frame, app: &app::App, area: Rect) {
             .rev()
             .take(area.height as usize)
             .map(|l| {
-                let colour = if l.contains("FAIL") || l.contains("err") {
+                let message = l.message.as_str();
+                let colour = if message.contains("FAIL") || message.contains("err") {
                     Color::Red
-                } else if l.starts_with("DONE") || l.contains("OK") {
+                } else if message.starts_with("DONE") || message.contains("OK") {
                     Color::Green
                 } else {
                     Color::White
                 };
                 ratatui::text::Line::from(ratatui::text::Span::styled(
-                    l.as_str(),
+                    message,
                     Style::default().fg(colour),
                 ))
             })

@@ -23,7 +23,7 @@ Last updated: 2026-05-28
 - failsafe sync windows (default hourly) with heartbeat-aware suppression when CLIENT is active.
 - heartbeat API endpoint (`POST /api/heartbeat`) for CLIENT session liveness.
 - update API endpoint (`POST /api/update`) for immediate daemon image refresh/recreate.
-- websocket telemetry endpoint for CLIENT modal/log views.
+- websocket telemetry endpoint for CLIENT modal/log views, with bounded in-memory replay history capped at 10,000 old lines and an age threshold controlled by `LOG_HISTORY_AGE_SECS`.
 - restore execution backend endpoint (`POST /api/restore`) with phased status events.
 - websocket update RPC (`update_request`/`update_response`) and keepalive frames for idle-stable connections.
 

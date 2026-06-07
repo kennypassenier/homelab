@@ -996,11 +996,12 @@ async fn handle_keyring_status(
     State(state): State<Arc<Mutex<AppState>>>,
 ) -> (StatusCode, Json<KeyringStatus>) {
     // Check if latch CLI is available and get version
-    let (latch_check, latch_version) = match execute_command("latch", vec!["--version".to_string()], None).await {
-        Ok(resp) if resp.exit_code == 0 => (true, Some(resp.stdout.trim().to_string())),
-        _ => (false, None),
-    };
-    
+    let (latch_check, latch_version) =
+        match execute_command("latch", vec!["--version".to_string()], None).await {
+            Ok(resp) if resp.exit_code == 0 => (true, Some(resp.stdout.trim().to_string())),
+            _ => (false, None),
+        };
+
     // Get last latch update check timestamp
     let latch_last_update_secs = std::fs::metadata("/var/lib/homelab/latch-update.last")
         .and_then(|meta| meta.modified())

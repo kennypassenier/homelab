@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     fs,
-    time::{SystemTime, UNIX_EPOCH, Duration},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use rand::{Rng, SeedableRng, rngs::SmallRng};
@@ -382,15 +382,11 @@ impl App {
 
     /// Pushes a real log entry into the ring buffer (used by background tasks).
     ///
-    /// Ring buffer retention policy:
-    /// - Keep ALL logs from the last hour (recent large outputs don't cause truncation)
-    /// - For logs older than 1 hour, apply a max history limit of 500
-    /// - This prevents UI freeze from recent output while preventing unbounded memory growth
+    /// HOST and LXC now cap their own replay histories, so the client can keep the
+    /// full session stream without trimming older entries here.
     pub fn push_log(&mut self, source: &str, level: &str, message: &str) {
         let now = SystemTime::now();
-        let one_hour_ago = now - Duration::from_secs(3600);
-        const MAX_OLD_LOGS: usize = 500;
-        
+
         self.logs.push(LogLine {
             time: current_time_str(),
             source: source.to_string(),
@@ -398,25 +394,6 @@ impl App {
             message: message.to_string(),
             created_at: now,
         });
-        
-        // Count logs older than 1 hour
-        let old_logs_count = self.logs.iter()
-            .filter(|log| log.created_at < one_hour_ago)
-            .count();
-        
-        // If we have more than MAX_OLD_LOGS that are old, trim from the front
-        if old_logs_count > MAX_OLD_LOGS {
-            let excess = old_logs_count - MAX_OLD_LOGS;
-            let mut removed = 0;
-            while removed < excess && !self.logs.is_empty() {
-                if self.logs[0].created_at < one_hour_ago {
-                    self.logs.remove(0);
-                    removed += 1;
-                } else {
-                    break; // Reached recent logs, stop removing
-                }
-            }
-        }
     }
 
     /// Builds a canonical logfmt message used across client-side events.

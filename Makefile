@@ -18,6 +18,8 @@ LXC_SRC := lxc-daemon
 # GitHub container registry settings
 GHCR_OWNER ?= kennypassenier
 GHCR_LXC_IMAGE := ghcr.io/$(GHCR_OWNER)/homelab-lxc-daemon
+LXC_BASE_IMAGE_BUILDER := rust:1.88-bookworm
+LXC_BASE_IMAGE_RUNTIME := debian:bookworm-slim
 
 # Get current versions from Cargo.toml files.
 # Use recursive expansion so the value is re-read after version-bump targets run.
@@ -28,7 +30,7 @@ LXC_VERSION = $(shell grep '^version' $(LXC_SRC)/Cargo.toml | head -1 | cut -d'"
 # Define all targets that are not actual files
 .PHONY: help build build-client build-client-windows build-host build-lxc clean
 .PHONY: docker release-host release-client release-lxc version-check version-bump-host
-.PHONY: version-bump-client version-bump-lxc show-versions docker-build-only docker-push
+.PHONY: version-bump-client version-bump-lxc show-versions docker-build-only docker-push docker-warm-cache
 .PHONY: push release-all
 
 # Help menu providing information about available commands
@@ -44,6 +46,7 @@ help:
 	@echo ""
 	@echo "Docker Targets:"
 	@echo "  make docker                 - Build and push LXC image to GHCR"
+	@echo "  make docker-warm-cache      - Ensure local Docker base images are cached"
 	@echo "  make docker-build-only      - Build LXC image locally (no push)"
 	@echo "  make docker-push            - Push LXC image to GHCR"
 	@echo ""
@@ -130,9 +133,21 @@ version-bump-lxc:
 # Build the Docker image and immediately push it
 docker: docker-build-only docker-push
 
+# Ensure Docker base images used by lxc-daemon/Dockerfile are cached locally.
+# This avoids repeated large layer downloads unless the local cache was removed.
+docker-warm-cache:
+	@echo "Warming Docker base image cache..."
+	@if ! command -v docker > /dev/null 2>&1; then \
+		echo "docker not found; cannot warm cache"; \
+		exit 1; \
+	fi
+	@docker image inspect $(LXC_BASE_IMAGE_BUILDER) > /dev/null 2>&1 || docker pull $(LXC_BASE_IMAGE_BUILDER)
+	@docker image inspect $(LXC_BASE_IMAGE_RUNTIME) > /dev/null 2>&1 || docker pull $(LXC_BASE_IMAGE_RUNTIME)
+	@echo "Docker base image cache ready"
+
 # Build the LXC Docker image and tag it appropriately.
 # Does NOT depend on build-lxc: the Docker image runs its own cargo build inside the container.
-docker-build-only:
+docker-build-only: docker-warm-cache
 	@echo "Building LXC daemon Docker image..."
 	docker build \
 		-f $(LXC_SRC)/Dockerfile \

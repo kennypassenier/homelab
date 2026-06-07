@@ -14,6 +14,7 @@ The LXC daemon is built and published as a Docker image to GHCR, and HOST bootst
 ## Implemented Behavior
 
 - `make release-lxc` bumps the patch version, builds the LXC binary, builds the Docker image, and pushes both release artifacts
+- Docker base images required by `lxc-daemon/Dockerfile` are warmed automatically in `make docker` / `make release-lxc` via `make docker-warm-cache`
 - The image is published to `ghcr.io/kennypassenier/homelab-lxc-daemon`
 - `host-daemon/src/bootstrap.rs::install_lxc_daemon()` prefers the Docker image when `LXC_DAEMON_IMAGE` is configured
 - If the image path is unavailable, HOST falls back to the built binary or a placeholder for development-only setups

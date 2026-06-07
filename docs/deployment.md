@@ -202,7 +202,7 @@ Use this order.
 - If the repo or packages are private, create the optional read tokens above.
 
 2. Prepare the client workstation.
-- Install Rust toolchain if building locally.
+- Run `./scripts/linux/install-requirements.sh` to install Docker, Rust, gh, and build prerequisites on Linux.
 - Ensure Git SSH access works.
 - Create central env file from `config/.env.example`.
 

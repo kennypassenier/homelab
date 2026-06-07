@@ -47,12 +47,20 @@ homelab/
 │   │   └── ...
 │   └── ...
 ├── docs/                     # Detailed documentation and guidelines (Wiki)
-├── scripts/                  # Individual script modules (client, host, container, shared)
+├── scripts/                  # Individual script modules (client, host, container, linux, shared)
 ├── secrets/                  # (Legacy) Encrypted secrets (no longer used)
 ├── client.sh                 # Central manager for local workstation actions
 ├── host.sh                   # Central manager for Proxmox host actions
 └── container.sh              # Central manager for container actions
 ```
+
+## Linux Requirements Bootstrap
+
+To install build/release dependencies on a Linux workstation (including Docker, Rust, GH CLI, and cross-target tooling), use:
+
+- `./scripts/linux/install-requirements.sh` (auto-detect distro family)
+- `./scripts/linux/install-requirements-arch.sh` (Arch/Garuda/EndeavourOS)
+- `./scripts/linux/install-requirements-debian.sh` (Debian/Ubuntu)
 
 ### New Storage & Config Layout (Inside Container)
 

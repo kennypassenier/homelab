@@ -35,7 +35,7 @@ Last updated: 2026-06-05
 - `GET /api/metrics` for runtime metrics including process uptime and per-LXC runtime rows.
   - Optional Bearer auth via `Authorization: Bearer <LXC_API_TOKEN>` when `LXC_API_TOKEN` is configured.
 - `POST /api/update` to trigger an immediate self-update check.
-- `GET /api/logs/ws` for live log streaming over WebSocket, with bounded in-memory replay history capped at 10,000 old lines and an age threshold controlled by `LOG_HISTORY_AGE_SECS`.
+- `GET /api/logs/ws` for live log streaming over WebSocket, with bounded in-memory replay history capped at 10,000 old lines, an age threshold controlled by `LOG_HISTORY_AGE_SECS`, and severity-aware eviction that removes old `INFO` lines before `WARN` or `ERROR` lines.
 
 ### Metrics Response Schema (`GET /api/metrics`)
 

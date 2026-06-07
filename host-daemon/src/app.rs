@@ -58,10 +58,41 @@ use crate::api::HostMetrics;
 const DEFAULT_LOG_HISTORY_LIMIT: usize = 10_000;
 const DEFAULT_LOG_HISTORY_AGE_SECS: u64 = 3600;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum BackupStatusPriority {
+    Info,
+    Warn,
+    Ok,
+    Error,
+}
+
+impl BackupStatusPriority {
+    fn weight(self) -> u8 {
+        match self {
+            Self::Info => 0,
+            Self::Warn => 1,
+            Self::Ok => 2,
+            Self::Error => 3,
+        }
+    }
+}
+
+impl From<LogLevel> for BackupStatusPriority {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Info => Self::Info,
+            LogLevel::Warn => Self::Warn,
+            LogLevel::Ok => Self::Ok,
+            LogLevel::Error => Self::Error,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BackupStatusLine {
     pub message: String,
     pub created_at: SystemTime,
+    priority: BackupStatusPriority,
 }
 
 pub struct App {
@@ -104,18 +135,19 @@ impl App {
 
     pub fn add_log(&mut self, level: LogLevel, message: String) {
         let log_line = format!("[{}] {}", level, message);
-        self.push_status_line_internal(log_line.clone());
+        self.push_status_line_internal(log_line.clone(), level.into());
         let _ = self.log_tx.send(log_line);
     }
 
     pub fn push_status_line(&mut self, line: String) {
-        self.push_status_line_internal(line);
+        self.push_status_line_internal(line, BackupStatusPriority::Info);
     }
 
-    fn push_status_line_internal(&mut self, line: String) {
+    fn push_status_line_internal(&mut self, line: String, priority: BackupStatusPriority) {
         self.backup_status.push_back(BackupStatusLine {
             message: line,
             created_at: SystemTime::now(),
+            priority,
         });
         self.trim_backup_status();
     }
@@ -131,19 +163,26 @@ impl App {
             .filter(|log| log.created_at < cutoff)
             .count();
 
-        if old_logs_count > self.log_history_limit {
-            let excess = old_logs_count - self.log_history_limit;
-            let mut removed = 0;
+        if old_logs_count <= self.log_history_limit {
+            return;
+        }
 
-            while removed < excess {
-                match self.backup_status.front() {
-                    Some(front) if front.created_at < cutoff => {
-                        self.backup_status.pop_front();
-                        removed += 1;
-                    }
-                    _ => break,
-                }
-            }
+        let mut excess = old_logs_count - self.log_history_limit;
+        while excess > 0 {
+            let candidate_index = self
+                .backup_status
+                .iter()
+                .enumerate()
+                .filter(|(_, log)| log.created_at < cutoff)
+                .min_by_key(|(index, log)| (log.priority.weight(), *index))
+                .map(|(index, _)| index);
+
+            let Some(index) = candidate_index else {
+                break;
+            };
+
+            self.backup_status.remove(index);
+            excess -= 1;
         }
     }
 
@@ -233,27 +272,59 @@ fn parse_log_history_age_secs() -> u64 {
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use super::{App, BackupStatusLine, LogLevel};
+    use super::{App, BackupStatusLine, BackupStatusPriority};
 
     #[test]
     fn status_history_is_bounded() {
         let mut app = App::new();
         let old_timestamp = SystemTime::now() - Duration::from_secs(7200);
 
+        app.backup_status.push_back(BackupStatusLine {
+            message: "info-a".to_string(),
+            created_at: old_timestamp,
+            priority: BackupStatusPriority::Info,
+        });
+        app.backup_status.push_back(BackupStatusLine {
+            message: "warn-a".to_string(),
+            created_at: old_timestamp,
+            priority: BackupStatusPriority::Warn,
+        });
+        app.backup_status.push_back(BackupStatusLine {
+            message: "error-a".to_string(),
+            created_at: old_timestamp,
+            priority: BackupStatusPriority::Error,
+        });
+
+        app.trim_backup_status();
+
+        assert_eq!(app.backup_status.len(), 3);
+        assert_eq!(app.backup_status[0].message, "info-a");
+
         for index in 0..=10_000 {
             app.backup_status.push_back(BackupStatusLine {
                 message: format!("line-{index}"),
                 created_at: old_timestamp,
+                priority: BackupStatusPriority::Info,
             });
         }
 
         app.trim_backup_status();
 
         assert_eq!(app.backup_status.len(), 10_000);
-        assert_eq!(app.backup_status.front().map(|line| line.message.as_str()), Some("line-1"));
-
-        app.add_log(LogLevel::Info, "final log".to_string());
-        assert_eq!(app.backup_status.len(), 10_001);
-        assert!(app.backup_status.back().is_some());
+        assert!(
+            !app.backup_status
+                .iter()
+                .any(|line| line.message == "info-a")
+        );
+        assert!(
+            app.backup_status
+                .iter()
+                .any(|line| line.message == "warn-a")
+        );
+        assert!(
+            app.backup_status
+                .iter()
+                .any(|line| line.message == "error-a")
+        );
     }
 }

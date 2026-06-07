@@ -31,6 +31,40 @@ pub struct LogEntry {
     pub timestamp: DateTime<Local>,
     pub level: LogLevel,
     pub msg: String,
+    priority: LogRetentionPriority,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LogRetentionPriority {
+    Debug,
+    Info,
+    Ok,
+    Warn,
+    Error,
+}
+
+impl LogRetentionPriority {
+    fn weight(self) -> u8 {
+        match self {
+            Self::Debug => 0,
+            Self::Info => 1,
+            Self::Ok => 2,
+            Self::Warn => 3,
+            Self::Error => 4,
+        }
+    }
+}
+
+impl From<LogLevel> for LogRetentionPriority {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Debug => Self::Debug,
+            LogLevel::Info => Self::Info,
+            LogLevel::Ok => Self::Ok,
+            LogLevel::Warn => Self::Warn,
+            LogLevel::Error => Self::Error,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -158,10 +192,13 @@ impl AppState {
         );
         println!("{}", logfmt);
 
+        let priority = level.clone().into();
+
         let entry = LogEntry {
             timestamp: chrono::Local::now(),
             level,
             msg: msg.clone(),
+            priority,
         };
         self.logs.push_back(entry);
         self.trim_log_history();
@@ -170,22 +207,34 @@ impl AppState {
     }
 
     fn trim_log_history(&mut self) {
-        let cutoff = chrono::Local::now() - chrono::Duration::seconds(self.log_history_age_secs() as i64);
-        let old_logs_count = self.logs.iter().filter(|log| log.timestamp < cutoff).count();
+        let cutoff =
+            chrono::Local::now() - chrono::Duration::seconds(self.log_history_age_secs() as i64);
+        let old_logs_count = self
+            .logs
+            .iter()
+            .filter(|log| log.timestamp < cutoff)
+            .count();
 
-        if old_logs_count > self.log_history_limit {
-            let excess = old_logs_count - self.log_history_limit;
-            let mut removed = 0;
+        if old_logs_count <= self.log_history_limit {
+            return;
+        }
 
-            while removed < excess {
-                match self.logs.front() {
-                    Some(front) if front.timestamp < cutoff => {
-                        self.logs.pop_front();
-                        removed += 1;
-                    }
-                    _ => break,
-                }
-            }
+        let mut excess = old_logs_count - self.log_history_limit;
+        while excess > 0 {
+            let candidate_index = self
+                .logs
+                .iter()
+                .enumerate()
+                .filter(|(_, log)| log.timestamp < cutoff)
+                .min_by_key(|(index, log)| (log.priority.weight(), *index))
+                .map(|(index, _)| index);
+
+            let Some(index) = candidate_index else {
+                break;
+            };
+
+            self.logs.remove(index);
+            excess -= 1;
         }
     }
 
@@ -195,6 +244,59 @@ impl AppState {
             .and_then(|v| v.trim().parse::<u64>().ok())
             .filter(|v| *v > 0)
             .unwrap_or(DEFAULT_LOG_HISTORY_AGE_SECS)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Duration as ChronoDuration;
+
+    use super::{AppState, LogEntry, LogLevel, LogRetentionPriority};
+
+    #[test]
+    fn old_info_logs_are_trimmed_before_more_important_levels() {
+        let mut state = AppState::new();
+        let old_timestamp = chrono::Local::now() - ChronoDuration::seconds(7200);
+
+        state.logs.push_back(LogEntry {
+            timestamp: old_timestamp,
+            level: LogLevel::Info,
+            msg: "info-a".to_string(),
+            priority: LogRetentionPriority::Info,
+        });
+        state.logs.push_back(LogEntry {
+            timestamp: old_timestamp,
+            level: LogLevel::Warn,
+            msg: "warn-a".to_string(),
+            priority: LogRetentionPriority::Warn,
+        });
+        state.logs.push_back(LogEntry {
+            timestamp: old_timestamp,
+            level: LogLevel::Error,
+            msg: "error-a".to_string(),
+            priority: LogRetentionPriority::Error,
+        });
+
+        state.trim_log_history();
+
+        assert_eq!(state.logs.len(), 3);
+        assert_eq!(state.logs[0].msg, "info-a");
+
+        for index in 0..=10_000 {
+            state.logs.push_back(LogEntry {
+                timestamp: old_timestamp,
+                level: LogLevel::Info,
+                msg: format!("line-{index}"),
+                priority: LogRetentionPriority::Info,
+            });
+        }
+
+        state.trim_log_history();
+
+        assert_eq!(state.logs.len(), 10_000);
+        assert!(!state.logs.iter().any(|entry| entry.msg == "info-a"));
+        assert!(state.logs.iter().any(|entry| entry.msg == "warn-a"));
+        assert!(state.logs.iter().any(|entry| entry.msg == "error-a"));
     }
 }
 

@@ -281,7 +281,9 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                                         a.push_status_line(line);
                                     }
                                 }
-                                Err(e) => a.push_status_line(format!("Provision scan failed: {}", e)),
+                                Err(e) => {
+                                    a.push_status_line(format!("Provision scan failed: {}", e))
+                                }
                             }
                         }
                         KeyCode::Char('R') => {
@@ -299,7 +301,9 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     a.push_status_line("Provisioning complete.".to_string());
                                 }
-                                Err(e) => a.push_status_line(format!("Provision apply failed: {}", e)),
+                                Err(e) => {
+                                    a.push_status_line(format!("Provision apply failed: {}", e))
+                                }
                             }
                         }
                         _ => {}

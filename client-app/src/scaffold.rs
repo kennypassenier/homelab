@@ -151,7 +151,7 @@ deploy:
 
 network:
   bridge: "vmbr0"
-  ip_mode: "dhcp-reserved"
+  ip_mode: "static"
   reserved_ipv4: null
   vlan_tag: 10
   firewall: false
@@ -846,7 +846,7 @@ pub fn set_stack_provisioning_defaults(
     let mut config = read_stack_config(stack_name)?;
     config.vmid = vmid;
     config.hostname = canonical_lxc_name(vmid, stack_name);
-    config.ip_mode = "dhcp-reserved".to_string();
+    config.ip_mode = "static".to_string();
     config.reserved_ipv4 = derive_reserved_ipv4_from_vmid(vmid);
     config.cpu_cores = cpu_cores;
     config.memory_mb = memory_mb;

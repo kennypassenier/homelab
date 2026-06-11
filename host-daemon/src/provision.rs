@@ -766,9 +766,16 @@ pub fn apply_provisioning_changes(
 
     for action in &actions {
         match action {
-            ProvisionAction::Create { stack, vmid: _, .. } => {
+            ProvisionAction::Create { stack, vmid, .. } => {
                 if let Some(intent) = intent_map.get(stack) {
                     create_lxc(intent, dry_run)?;
+                    if !dry_run {
+                        eprintln!("[provision] bootstrapping LXC {} ({})...", vmid, stack);
+                        match crate::bootstrap::bootstrap_lxc(*vmid, intent) {
+                            Ok(_) => eprintln!("[provision] bootstrap completed for LXC {}", vmid),
+                            Err(e) => eprintln!("[provision] WARN: bootstrap failed for LXC {}: {}", vmid, e),
+                        }
+                    }
                 }
             }
             ProvisionAction::Recreate {
@@ -781,6 +788,13 @@ pub fn apply_provisioning_changes(
                     // Pass expected name for safety validation
                     destroy_lxc(*vmid, expected_name, dry_run)?;
                     create_lxc(intent, dry_run)?;
+                    if !dry_run {
+                        eprintln!("[provision] bootstrapping LXC {} ({})...", vmid, stack);
+                        match crate::bootstrap::bootstrap_lxc(*vmid, intent) {
+                            Ok(_) => eprintln!("[provision] bootstrap completed for LXC {}", vmid),
+                            Err(e) => eprintln!("[provision] WARN: bootstrap failed for LXC {}: {}", vmid, e),
+                        }
+                    }
                 }
             }
             ProvisionAction::Update { vmid, stack, .. } => {

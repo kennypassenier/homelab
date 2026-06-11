@@ -244,7 +244,13 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
 
     let vlan_tag = network
         .and_then(|m| m.get(Value::String("vlan_tag".to_string())))
-        .and_then(|v| if v.is_null() { None } else { v.as_u64().map(|n| n as u16) });
+        .and_then(|v| {
+            if v.is_null() {
+                None
+            } else {
+                v.as_u64().map(|n| n as u16)
+            }
+        });
 
     let firewall = network
         .and_then(|m| m.get(Value::String("firewall".to_string())))
@@ -253,7 +259,13 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
 
     let ip_mode_v6 = network
         .and_then(|m| m.get(Value::String("ip_mode_v6".to_string())))
-        .and_then(|v| if v.is_null() { None } else { v.as_str().map(|s| s.to_string()) });
+        .and_then(|v| {
+            if v.is_null() {
+                None
+            } else {
+                v.as_str().map(|s| s.to_string())
+            }
+        });
 
     let boot = root
         .get(Value::String("boot".to_string()))
@@ -384,7 +396,11 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
     let tags: Vec<String> = root
         .get(Value::String("tags".to_string()))
         .and_then(Value::as_sequence)
-        .map(|seq| seq.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
     let protection = root
@@ -461,11 +477,12 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
         Value::String(config.hwaddr.clone()),
     );
 
-    let tags_seq: Vec<Value> = config.tags.iter().map(|t| Value::String(t.clone())).collect();
-    root.insert(
-        Value::String("tags".to_string()),
-        Value::Sequence(tags_seq),
-    );
+    let tags_seq: Vec<Value> = config
+        .tags
+        .iter()
+        .map(|t| Value::String(t.clone()))
+        .collect();
+    root.insert(Value::String("tags".to_string()), Value::Sequence(tags_seq));
 
     let mut deploy = Mapping::new();
     deploy.insert(
@@ -501,7 +518,10 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
     );
     network.insert(
         Value::String("vlan_tag".to_string()),
-        config.vlan_tag.map(|v| Value::Number((v as u64).into())).unwrap_or(Value::Null),
+        config
+            .vlan_tag
+            .map(|v| Value::Number((v as u64).into()))
+            .unwrap_or(Value::Null),
     );
     network.insert(
         Value::String("firewall".to_string()),
@@ -509,7 +529,11 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
     );
     network.insert(
         Value::String("ip_mode_v6".to_string()),
-        config.ip_mode_v6.as_ref().map(|v| Value::String(v.clone())).unwrap_or(Value::Null),
+        config
+            .ip_mode_v6
+            .as_ref()
+            .map(|v| Value::String(v.clone()))
+            .unwrap_or(Value::Null),
     );
     root.insert(
         Value::String("network".to_string()),
@@ -534,7 +558,8 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
     );
     resources.insert(
         Value::String("cpu_limit".to_string()),
-        config.cpu_limit
+        config
+            .cpu_limit
             .map(|v| serde_yaml::to_value(v).unwrap_or(Value::Null))
             .unwrap_or(Value::Null),
     );
@@ -631,7 +656,10 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
         Mapping::new()
     };
     host_mgmt.insert(Value::String("managed".to_string()), Value::Bool(true));
-    host_mgmt.insert(Value::String("protection".to_string()), Value::Bool(config.protection));
+    host_mgmt.insert(
+        Value::String("protection".to_string()),
+        Value::Bool(config.protection),
+    );
     root.insert(
         Value::String("host_management".to_string()),
         Value::Mapping(host_mgmt),
@@ -833,7 +861,8 @@ pub fn set_stack_provisioning_defaults(
         config.vlan_tag = Some(10);
     }
     if config.rootfs_pool.is_empty() {
-        config.rootfs_pool = std::env::var("LXC_STORAGE_POOL").unwrap_or_else(|_| "local-lvm".to_string());
+        config.rootfs_pool =
+            std::env::var("LXC_STORAGE_POOL").unwrap_or_else(|_| "local-lvm".to_string());
     }
     if config.host_storage_path.is_empty() {
         config.host_storage_path = format!("/opt/appdata/{}", stack_name);

@@ -9,7 +9,7 @@ deploy:
   activated_at: '1781181343'
 network:
   bridge: vmbr0
-  ip_mode: dhcp-reserved
+  ip_mode: static
   reserved_ipv4: 10.10.10.9
   vlan_tag: 10
   firewall: false

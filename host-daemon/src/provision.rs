@@ -98,10 +98,12 @@ pub struct ValidationResult {
 pub fn scan_stack_intents(repo_root: &Path) -> Result<Vec<StackIntent>, String> {
     let stacks_dir = repo_root.join("stacks");
     if !stacks_dir.exists() {
+        eprintln!("[provision] WARN: stacks/ directory does not exist at {:?}", stacks_dir);
         return Ok(Vec::new());
     }
 
     let mut intents = Vec::new();
+    let mut skipped_dirs = Vec::new();
 
     for entry in
         std::fs::read_dir(&stacks_dir).map_err(|e| format!("Failed to read stacks dir: {}", e))?
@@ -115,17 +117,30 @@ pub fn scan_stack_intents(repo_root: &Path) -> Result<Vec<StackIntent>, String> 
 
         let lxc_compose_path = stack_path.join("lxc-compose.yml");
         if !lxc_compose_path.exists() {
+            skipped_dirs.push(stack_path.file_name().unwrap().to_string_lossy().to_string());
             continue;
         }
 
         match parse_lxc_compose(&lxc_compose_path) {
-            Ok(intent) => intents.push(intent),
-            Err(e) => eprintln!(
-                "Warning: Failed to parse {}: {}",
-                lxc_compose_path.display(),
-                e
-            ),
+            Ok(intent) => {
+                eprintln!("[provision] discovered stack '{}' (vmid={}, hostname={}, deploy={})", 
+                    intent.stack_name, intent.vmid, intent.hostname, intent.deploy_enabled);
+                intents.push(intent);
+            }
+            Err(e) => {
+                eprintln!("[provision] ERROR parsing {}: {}", lxc_compose_path.display(), e);
+            }
         }
+    }
+
+    if !skipped_dirs.is_empty() {
+        eprintln!("[provision] skipped dirs without lxc-compose.yml: {}", skipped_dirs.join(", "));
+    }
+
+    if intents.is_empty() {
+        eprintln!("[provision] WARN: found 0 stacks with lxc-compose.yml in {:?}", stacks_dir);
+    } else {
+        eprintln!("[provision] found {} stack(s) with lxc-compose.yml", intents.len());
     }
 
     Ok(intents)

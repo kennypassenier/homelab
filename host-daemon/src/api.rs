@@ -383,12 +383,67 @@ fn compact_snapshot(lines: &VecDeque<BackupStatusLine>, max_lines: usize) -> Vec
 /// Logs all results back into the app log buffer so CLIENT can see them via WS.
 pub fn run_provisioning_cycle(app: &Arc<Mutex<App>>, dry_run: bool) {
     use std::path::Path;
+    use std::process::Command;
 
     let gitops_root = std::env::var("GITOPS_REPO").unwrap_or_else(|_| {
         std::env::var("HOME")
             .map(|home| format!("{}/homelab", home))
             .unwrap_or_else(|_| "/root/homelab".to_string())
     });
+
+    // Force git pull to ensure we have latest stacks before provisioning.
+    // Use reset --hard to discard local changes (build artifacts, etc).
+    {
+        let mut a = app.lock().unwrap();
+        a.add_log(LogLevel::Info, format!("[provision] force pulling latest changes from git repo: {}", gitops_root));
+    }
+
+    let reset_output = Command::new("git")
+        .args(["reset", "--hard", "origin/main"])
+        .current_dir(&gitops_root)
+        .output();
+
+    match reset_output {
+        Ok(out) if out.status.success() => {
+            let mut a = app.lock().unwrap();
+            a.add_log(LogLevel::Info, "[provision] git reset --hard origin/main succeeded".to_string());
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let mut a = app.lock().unwrap();
+            a.add_log(LogLevel::Error, format!("[provision] git reset failed: {}", stderr));
+            return;
+        }
+        Err(e) => {
+            let mut a = app.lock().unwrap();
+            a.add_log(LogLevel::Error, format!("[provision] git reset command failed: {}", e));
+            return;
+        }
+    }
+
+    let pull_output = Command::new("git")
+        .args(["pull"])
+        .current_dir(&gitops_root)
+        .output();
+
+    match pull_output {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let mut a = app.lock().unwrap();
+            a.add_log(LogLevel::Info, format!("[provision] git pull succeeded: {}", stdout.lines().next().unwrap_or("up to date")));
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let mut a = app.lock().unwrap();
+            a.add_log(LogLevel::Error, format!("[provision] git pull failed: {}", stderr));
+            return;
+        }
+        Err(e) => {
+            let mut a = app.lock().unwrap();
+            a.add_log(LogLevel::Error, format!("[provision] git pull command failed: {}", e));
+            return;
+        }
+    }
 
     let actions = match provision::apply_provisioning_changes(Path::new(&gitops_root), dry_run) {
         Ok(actions) => actions,

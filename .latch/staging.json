@@ -4,6 +4,9 @@
   "envs": {
     "dev": [
       {
+        "local_path": "stacks/cloudflared/cloudflared/.env"
+      },
+      {
         "local_path": "config/.env"
       },
       {

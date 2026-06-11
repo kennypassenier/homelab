@@ -45,3 +45,6 @@ mounts:
 - name: cloudflared-test-config
   source: /opt/appdata/cloudflared/cloudflared-test-config
   target: /appdata/cloudflared-test-config
+- name: cloudflared-config
+  source: /opt/appdata/cloudflared/cloudflared-config
+  target: /appdata/cloudflared-config

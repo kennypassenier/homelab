@@ -1,0 +1,19 @@
+services:
+  cloudflared:
+    image: cloudflared/cloudflared:latest
+    container_name: cloudflared
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    env_file:
+      - .env
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    restart: unless-stopped
+    volumes:
+      - ../cloudflared-config:/config
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cloudflared.rule=Host(\"cloudflared.kp-soft.dev\") || Host(\"cloudflared.kp-soft.dev\") || Host(\"cloudflared\") || Host(\"cloudflared\")"
+      - "traefik.http.services.app.loadbalancer.server.port=80"
+      - "com.centurylinklabs.watchtower.enable=true"

@@ -1,6 +1,5 @@
 *.env
 
-apps/*
 *.log
 
 # OS / Editor files

@@ -428,6 +428,19 @@ fn parse_pct_config(output: &str) -> HashMap<String, String> {
     config
 }
 
+/// Convert human-readable template name to Proxmox storage path.
+/// Example: "debian-12-standard 12.12-1 amd64" → "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
+fn normalize_template_name(template: &str) -> String {
+    // If already in Proxmox format (has : and / and .tar), return as-is
+    if template.contains(':') && template.contains('/') && template.contains(".tar") {
+        return template.to_string();
+    }
+
+    // Convert spaces to underscores and add storage prefix + extension
+    let normalized = template.replace(' ', "_");
+    format!("local:vztmpl/{}.tar.zst", normalized)
+}
+
 /// Create a new LXC container based on stack intent
 pub fn create_lxc(intent: &StackIntent, dry_run: bool) -> Result<(), String> {
     if dry_run {
@@ -442,11 +455,14 @@ pub fn create_lxc(intent: &StackIntent, dry_run: bool) -> Result<(), String> {
     std::fs::create_dir_all(&intent.host_storage_path)
         .map_err(|e| format!("Failed to create storage path: {}", e))?;
 
+    // Convert template name to Proxmox format
+    let template_path = normalize_template_name(&intent.lxc_template);
+
     // Build pct create command
     let mut cmd = Command::new("pct");
     cmd.arg("create")
         .arg(intent.vmid.to_string())
-        .arg(&intent.lxc_template)
+        .arg(&template_path)
         .arg("--hostname")
         .arg(&intent.hostname)
         .arg("--cores")

@@ -15,6 +15,7 @@ use tokio::sync::broadcast;
 
 use crate::app::{App, BackupStatusLine, LogLevel};
 use crate::liveness;
+use crate::provision;
 use crate::self_update;
 
 #[derive(Serialize)]
@@ -73,6 +74,7 @@ pub async fn run_server(app: Arc<Mutex<App>>) {
         .route("/api/version", get(handle_version))
         .route("/api/metrics", get(handle_metrics))
         .route("/api/update", post(handle_update))
+        .route("/api/provision", post(handle_provision))
         .route("/api/logs/ws", get(handle_ws))
         .with_state(app);
 
@@ -208,6 +210,26 @@ async fn handle_update(State(app): State<Arc<Mutex<App>>>) -> Json<ApiResponse> 
     })
 }
 
+async fn handle_provision(State(app): State<Arc<Mutex<App>>>) -> Json<ApiResponse> {
+    {
+        let mut a = app.lock().unwrap();
+        a.add_log(
+            LogLevel::Info,
+            "[provision] LXC provisioning requested via HTTP API".to_string(),
+        );
+    }
+
+    let app_clone = app.clone();
+    tokio::task::spawn_blocking(move || {
+        run_provisioning_cycle(&app_clone, false);
+    });
+
+    Json(ApiResponse {
+        status: "accepted".to_string(),
+        message: "LXC provisioning cycle started".to_string(),
+    })
+}
+
 async fn handle_ws(ws: WebSocketUpgrade, State(app): State<Arc<Mutex<App>>>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_ws_client(socket, app))
 }
@@ -285,6 +307,27 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
                                         "message": "HOST update check started"
                                     });
                                     let _ = socket.send(Message::Text(response.to_string())).await;
+                                } else if kind == "provision_request" {
+                                    {
+                                        let mut guard = app.lock().unwrap();
+                                        guard.add_log(
+                                            LogLevel::Info,
+                                            "[provision] LXC provisioning requested via WebSocket RPC".to_string(),
+                                        );
+                                    }
+
+                                    let app_clone = app.clone();
+                                    tokio::task::spawn_blocking(move || {
+                                        run_provisioning_cycle(&app_clone, false);
+                                    });
+
+                                    let response = serde_json::json!({
+                                        "kind": "provision_response",
+                                        "request_id": request_id,
+                                        "ok": true,
+                                        "message": "LXC provisioning cycle started"
+                                    });
+                                    let _ = socket.send(Message::Text(response.to_string())).await;
                                 } else if kind == "client_heartbeat" {
                                     liveness::touch_client_heartbeat();
                                     let response = serde_json::json!({
@@ -333,5 +376,42 @@ fn compact_snapshot(lines: &VecDeque<BackupStatusLine>, max_lines: usize) -> Vec
         compacted[compacted.len() - max_lines..].to_vec()
     } else {
         compacted
+    }
+}
+
+/// Run one provisioning reconcile cycle (called from HTTP and WS RPC handlers).
+/// Logs all results back into the app log buffer so CLIENT can see them via WS.
+pub fn run_provisioning_cycle(app: &Arc<Mutex<App>>, dry_run: bool) {
+    use std::path::Path;
+
+    let gitops_root = std::env::var("GITOPS_REPO").unwrap_or_else(|_| {
+        std::env::var("HOME")
+            .map(|home| format!("{}/homelab", home))
+            .unwrap_or_else(|_| "/root/homelab".to_string())
+    });
+
+    let actions = match provision::apply_provisioning_changes(Path::new(&gitops_root), dry_run) {
+        Ok(actions) => actions,
+        Err(e) => {
+            let mut a = app.lock().unwrap();
+            a.add_log(LogLevel::Error, format!("[provision] failed: {}", e));
+            return;
+        }
+    };
+
+    let summary = provision::format_provision_summary(&actions);
+    let mut a = app.lock().unwrap();
+    for line in summary {
+        if line.is_empty() {
+            continue;
+        }
+        let level = if line.contains("SKIP") || line.contains("Summary") {
+            LogLevel::Info
+        } else if line.contains("CREATE") || line.contains("RECREATE") || line.contains("UPDATE") {
+            LogLevel::Ok
+        } else {
+            LogLevel::Info
+        };
+        a.add_log(level, format!("[provision] {}", line));
     }
 }

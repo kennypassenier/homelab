@@ -498,6 +498,26 @@ async fn async_main() -> Result<()> {
             }
         }
 
+        // If a provision was requested, ask HOST to create/reconcile LXC containers.
+        // This fires before the sync so the container exists when sync is attempted.
+        if app.provision_pending {
+            app.provision_pending = false;
+            let stack = app.sync_stack.clone();
+            app.push_client_logfmt(
+                "INFO",
+                Some(&stack),
+                Some("provision_dispatch"),
+                "requesting HOST to provision LXC container",
+                None,
+            );
+            tokio::spawn(async move {
+                match trigger_host_provision().await {
+                    Ok(msg) => eprintln!("[provision] {}", msg),
+                    Err(e) => eprintln!("[provision] failed: {}", e),
+                }
+            });
+        }
+
         // If a sync was queued by key actions, spawn the HTTP request now.
         if app.sync_pending {
             app.sync_pending = false;
@@ -1321,6 +1341,44 @@ async fn trigger_host_update() -> Result<String, String> {
         Ok("HOST update check started via websocket".to_string())
     } else {
         request_host_update_http().await
+    }
+}
+
+/// Ask HOST to run an LXC provisioning cycle immediately via WS RPC or HTTP fallback.
+async fn trigger_host_provision() -> Result<String, String> {
+    if request_host_provision_ws().await.is_ok() {
+        Ok("HOST provisioning cycle started via websocket".to_string())
+    } else {
+        request_host_provision_http().await
+    }
+}
+
+async fn request_host_provision_ws() -> Result<(), String> {
+    let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+    let request_id = ws_request_id("provision");
+    let payload = serde_json::json!({
+        "kind": "provision_request",
+        "request_id": &request_id,
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+    });
+    send_ws_rpc(&ip, payload, "provision_response", &request_id).await?;
+    Ok(())
+}
+
+async fn request_host_provision_http() -> Result<String, String> {
+    let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let url = format!("http://{}:8080/api/provision", ip);
+    let response = reqwest::Client::new()
+        .post(url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        Ok("HOST provisioning cycle started".to_string())
+    } else {
+        Err(format!("HOST provision HTTP {}", response.status()))
     }
 }
 

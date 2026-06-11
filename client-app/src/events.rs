@@ -1625,9 +1625,10 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
 
                 match activation_state {
                     Ok(true) => {
+                        app.provision_pending = true;
                         app.sync_stack = stack_name.clone();
                         app.sync_pending = true;
-                        app.sync_status = format!("Queued sync for '{}'…", stack_name);
+                        app.sync_status = format!("Queued provision + sync for '{}'…", stack_name);
                     }
                     Ok(false) => {
                         app.sync_status = format!(

@@ -193,6 +193,8 @@ pub struct App {
     pub host_selected: usize,
     /// RNG seeded once at startup — only for animations, never for security.
     rng: SmallRng,
+    /// When `true`, the main loop will ask HOST to run a provisioning cycle before syncing.
+    pub provision_pending: bool,
     /// When `true`, the main loop will look up the LXC IP and POST /api/sync.
     pub sync_pending: bool,
     /// The stack name to sync (set alongside `sync_pending = true`).
@@ -304,6 +306,7 @@ impl App {
             lxc_ram,
             host_selected: 0,
             rng,
+            provision_pending: false,
             sync_pending: false,
             sync_stack: String::new(),
             sync_queue: VecDeque::new(),

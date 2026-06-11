@@ -9,6 +9,15 @@ const READ_TIMEOUT_SECS: u64 = 30;
 const PING_INTERVAL_SECS: u64 = 20;
 const STALE_TIMEOUT_SECS: u64 = 240;
 
+/// After this many consecutive failures, stop logging each reconnect attempt.
+/// One suppression notice is logged instead, then only once per SPAM_QUIET_SECS.
+const SPAM_SUPPRESS_AFTER: u32 = 3;
+const SPAM_QUIET_SECS: u64 = 120;
+
+/// Reconnect backoff: capped at 60 seconds.
+const RECONNECT_BASE_SECS: u64 = 4;
+const RECONNECT_MAX_SECS: u64 = 60;
+
 #[derive(Debug, Clone)]
 pub enum WsEvent {
     /// Log message from a source (stack_name or "HOST")
@@ -41,9 +50,15 @@ pub async fn connect_lxc_logs(
 }
 
 async fn stream_logs(source: String, url: &str, tx: mpsc::UnboundedSender<WsEvent>) {
+    let mut consecutive_failures: u32 = 0;
+    let mut last_spam_notice = Instant::now() - Duration::from_secs(9999);
+
     loop {
         match tokio_tungstenite::connect_async(url).await {
             Ok((ws_stream, _)) => {
+                // Reset backoff on successful connection.
+                consecutive_failures = 0;
+
                 let _ = tx.send(WsEvent::ConnectionStateChanged {
                     source: source.clone(),
                     connected: true,
@@ -134,15 +149,34 @@ async fn stream_logs(source: String, url: &str, tx: mpsc::UnboundedSender<WsEven
                 }
             }
             Err(e) => {
-                let _ = tx.send(WsEvent::ConnectionStateChanged {
-                    source: source.clone(),
-                    connected: false,
-                    error: Some(e.to_string()),
-                });
+                consecutive_failures += 1;
+
+                if consecutive_failures <= SPAM_SUPPRESS_AFTER {
+                    // Log the first few failures verbatim so the user sees what's happening.
+                    let _ = tx.send(WsEvent::ConnectionStateChanged {
+                        source: source.clone(),
+                        connected: false,
+                        error: Some(e.to_string()),
+                    });
+                } else if last_spam_notice.elapsed().as_secs() >= SPAM_QUIET_SECS {
+                    // After spam threshold: emit one suppressed notice every SPAM_QUIET_SECS.
+                    let _ = tx.send(WsEvent::ConnectionStateChanged {
+                        source: source.clone(),
+                        connected: false,
+                        error: Some(format!(
+                            "still unreachable (attempt {}) — waiting for container to come online",
+                            consecutive_failures
+                        )),
+                    });
+                    last_spam_notice = Instant::now();
+                }
+                // else: silently skip this reconnect attempt
             }
         }
 
-        // Wait before reconnecting
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        // Exponential backoff: 4s → 8s → 16s → 32s → 60s (cap).
+        let wait_secs = (RECONNECT_BASE_SECS * (1u64 << consecutive_failures.min(4)))
+            .min(RECONNECT_MAX_SECS);
+        tokio::time::sleep(Duration::from_secs(wait_secs)).await;
     }
 }

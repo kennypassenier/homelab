@@ -85,7 +85,8 @@ async fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
     let (status_tx, status_rx) = mpsc::channel::<String>();
     backup::start_policy_enforcer(status_tx.clone());
     failsafe::start_failsafe_enforcer(status_tx.clone());
-    start_update_checker(status_tx);
+    start_update_checker(status_tx.clone());
+    start_auto_provisioner(status_tx);
 
     println!(
         "HOST running in headless mode (gitops_root={})",
@@ -366,6 +367,68 @@ fn start_update_checker(status_tx: mpsc::Sender<String>) {
                 }
 
                 last_check = std::time::Instant::now();
+            }
+
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        }
+    });
+}
+
+/// Runs `apply_provisioning_changes` on a regular interval in headless mode.
+///
+/// This ensures newly activated stacks (deploy.enabled=true) get their LXC container
+/// created automatically without requiring a CLIENT deploy trigger or manual 'R' key.
+/// Interval is controlled by HOST_PROVISION_INTERVAL_SECS (default: 300s).
+fn start_auto_provisioner(status_tx: mpsc::Sender<String>) {
+    std::thread::spawn(move || {
+        // First run after 10 seconds so HOST is fully initialised before we start pct calls.
+        std::thread::sleep(std::time::Duration::from_secs(10));
+
+        let mut last_run = std::time::Instant::now() - std::time::Duration::from_secs(9999);
+
+        loop {
+            let interval_secs = std::env::var("HOST_PROVISION_INTERVAL_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(300)
+                .max(60);
+
+            if last_run.elapsed().as_secs() >= interval_secs {
+                let gitops_root = std::env::var("GITOPS_REPO").unwrap_or_else(|_| {
+                    std::env::var("HOME")
+                        .map(|home| format!("{}/homelab", home))
+                        .unwrap_or_else(|_| "/root/homelab".to_string())
+                });
+
+                match provision::apply_provisioning_changes(
+                    std::path::Path::new(&gitops_root),
+                    false,
+                ) {
+                    Ok(actions) => {
+                        let summary = provision::format_provision_summary(&actions);
+                        // Only log if something interesting happened (not all OK/SKIP).
+                        let has_changes = actions.iter().any(|a| {
+                            matches!(
+                                a,
+                                provision::ProvisionAction::Create { .. }
+                                    | provision::ProvisionAction::Recreate { .. }
+                                    | provision::ProvisionAction::Update { .. }
+                            )
+                        });
+                        if has_changes {
+                            for line in summary {
+                                if !line.is_empty() {
+                                    let _ = status_tx.send(format!("[provision] {}", line));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = status_tx.send(format!("[provision] reconcile failed: {}", e));
+                    }
+                }
+
+                last_run = std::time::Instant::now();
             }
 
             std::thread::sleep(std::time::Duration::from_secs(30));

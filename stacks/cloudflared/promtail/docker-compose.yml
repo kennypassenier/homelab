@@ -1,7 +1,7 @@
 services:
   promtail:
     image: grafana/promtail:latest
-    container_name: test-promtail
+    container_name: cloudflared-promtail
     restart: unless-stopped
     volumes:
       - /var/log:/var/log:ro

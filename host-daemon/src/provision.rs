@@ -194,7 +194,7 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
         _ => None,
     };
 
-    let firewall = yaml["network"]["firewall"].as_bool().unwrap_or(true);
+    let firewall = yaml["network"]["firewall"].as_bool().unwrap_or(false);
 
     let ip_mode_v6 = match &yaml["network"]["ip_mode_v6"] {
         serde_yaml::Value::String(s) => Some(s.clone()),
@@ -208,7 +208,8 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
 
     let cpu_units = yaml["resources"]["cpu_units"].as_u64().unwrap_or(1024) as u32;
 
-    let swap_mb = yaml["resources"]["swap_mb"].as_u64()
+    let swap_mb = yaml["resources"]["swap_mb"]
+        .as_u64()
         .map(|v| v as u32)
         .unwrap_or_else(|| calculate_swap_mb(memory_mb));
 
@@ -221,9 +222,14 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
 
     let appdata_backup = yaml["storage"]["appdata_backup"].as_bool().unwrap_or(true);
 
-    let appdata_read_only = yaml["storage"]["appdata_read_only"].as_bool().unwrap_or(false);
+    let appdata_read_only = yaml["storage"]["appdata_read_only"]
+        .as_bool()
+        .unwrap_or(false);
 
-    let timezone = yaml["lxc"]["timezone"].as_str().unwrap_or("host").to_string();
+    let timezone = yaml["lxc"]["timezone"]
+        .as_str()
+        .unwrap_or("host")
+        .to_string();
 
     let host_storage_path = yaml["storage"]["host_path"]
         .as_str()
@@ -267,10 +273,16 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
 
     let tags: Vec<String> = yaml["tags"]
         .as_sequence()
-        .map(|seq| seq.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
-    let protection = yaml["host_management"]["protection"].as_bool().unwrap_or(false);
+    let protection = yaml["host_management"]["protection"]
+        .as_bool()
+        .unwrap_or(false);
 
     Ok(StackIntent {
         stack_name,
@@ -429,7 +441,12 @@ pub fn create_lxc(intent: &StackIntent, dry_run: bool) -> Result<(), String> {
         .arg("--swap")
         .arg(intent.swap_mb.to_string())
         .arg("--cpulimit")
-        .arg(intent.cpu_limit.map(|v| v.to_string()).unwrap_or("0".to_string()))
+        .arg(
+            intent
+                .cpu_limit
+                .map(|v| v.to_string())
+                .unwrap_or("0".to_string()),
+        )
         .arg("--cpuunits")
         .arg(intent.cpu_units.to_string())
         .arg("--rootfs")
@@ -618,7 +635,12 @@ pub fn reconcile_lxc(vmid: u32, intent: &StackIntent, dry_run: bool) -> Result<(
         .arg("set")
         .arg(vmid.to_string())
         .arg("--cpulimit")
-        .arg(intent.cpu_limit.map(|v| v.to_string()).unwrap_or("0".to_string()))
+        .arg(
+            intent
+                .cpu_limit
+                .map(|v| v.to_string())
+                .unwrap_or("0".to_string()),
+        )
         .output();
 
     // Update autostart

@@ -1,7 +1,7 @@
 services:
   watchtower:
     image: nicholas-fedor/watchtower:latest
-    container_name: test-watchtower
+    container_name: cloudflared-watchtower
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

@@ -154,7 +154,7 @@ network:
   ip_mode: "dhcp-reserved"
   reserved_ipv4: null
   vlan_tag: 10
-  firewall: true
+  firewall: false
   ip_mode_v6: null
 
 boot:
@@ -255,7 +255,7 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
     let firewall = network
         .and_then(|m| m.get(Value::String("firewall".to_string())))
         .and_then(Value::as_bool)
-        .unwrap_or(true);
+        .unwrap_or(false);
 
     let ip_mode_v6 = network
         .and_then(|m| m.get(Value::String("ip_mode_v6".to_string())))

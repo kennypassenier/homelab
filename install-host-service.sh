@@ -55,6 +55,8 @@ User=root
 WorkingDirectory=$REPO_ROOT
 Environment=GITOPS_REPO=$REPO_ROOT
 Environment=HOST_ENV_FILE=$ENV_FILE
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-/etc/environment
 EnvironmentFile=-$ENV_FILE
 ExecStart=$binary_path
 Restart=always

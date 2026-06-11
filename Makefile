@@ -229,7 +229,8 @@ release-host: version-bump-host build-host
 	chmod +x "$$tmp" && \
 	mv -f "$$tmp" $(APPS_DIR)/HOST
 	@chmod +x $(APPS_DIR)/HOST
-	@rm -f $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
+	@cp $(APPS_DIR)/HOST $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
+	@chmod +x $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
 	@git add $(HOST_SRC)/Cargo.toml
 	@git diff --cached --quiet || git commit -m "Bump host-daemon version to v$(HOST_VERSION)"
 	@if git rev-parse -q --verify "refs/tags/host-daemon-v$(HOST_VERSION)" > /dev/null 2>&1; then \
@@ -245,6 +246,7 @@ release-host: version-bump-host build-host
 		else \
 			gh release create "host-daemon-v$(HOST_VERSION)" \
 				$(APPS_DIR)/HOST \
+				$(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu \
 				--title "host-daemon v$(HOST_VERSION)" \
 				--generate-notes; \
 		fi; \
@@ -338,3 +340,4 @@ clean:
 	@rm -f $(APPS_DIR)/CLIENT-windows-x86_64-pc-windows-gnu.exe
 	@rm -f $(APPS_DIR)/HOST-linux-x86_64-unknown-linux-gnu
 	@rm -f $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu
+	@echo "Clean complete"

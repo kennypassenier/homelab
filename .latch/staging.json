@@ -17,7 +17,7 @@
       "env": "dev",
       "remote_blob": "homelab/dev/group.promtail_config.enc",
       "members": [
-        "stacks/test/promtail/.env"
+        "stacks/cloudflared/promtail/.env"
       ]
     }
   ]

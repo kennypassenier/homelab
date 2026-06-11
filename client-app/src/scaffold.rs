@@ -15,18 +15,39 @@ pub struct StackConfig {
     pub bridge: String,
     pub ip_mode: String,
     pub reserved_ipv4: Option<String>,
+    pub vlan_tag: Option<u16>,
+    pub firewall: bool,
+    pub ip_mode_v6: Option<String>,
     pub autostart: bool,
     pub startup_order: u32,
     pub cpu_cores: u8,
+    pub cpu_limit: Option<f64>,
+    pub cpu_units: u32,
     pub memory_mb: u32,
+    pub swap_mb: u32,
     pub disk_gb: u32,
-    // New fields for GitOps provisioning
+    pub rootfs_pool: String,
     pub host_storage_path: String,
     pub mount_point: String,
+    pub appdata_backup: bool,
+    pub appdata_read_only: bool,
     pub lxc_template: String,
+    pub timezone: String,
     pub unprivileged: bool,
     pub features: Vec<String>,
     pub tun_device: Option<bool>, // None = auto-detect, Some(true) = force, Some(false) = disable
+    pub tags: Vec<String>,
+    pub protection: bool,
+}
+
+pub fn calculate_swap_mb(memory_mb: u32) -> u32 {
+    if memory_mb < 2048 {
+        memory_mb
+    } else if memory_mb <= 8192 {
+        2048
+    } else {
+        4096
+    }
 }
 
 const DEFAULT_LXC_ROLE: &str = "app";
@@ -122,6 +143,7 @@ stack_name: "{}"
 vmid: 0
 hostname: "{}"
 hwaddr: "{}"
+tags: []
 
 deploy:
   enabled: false
@@ -131,6 +153,9 @@ network:
   bridge: "vmbr0"
   ip_mode: "dhcp-reserved"
   reserved_ipv4: null
+  vlan_tag: 10
+  firewall: true
+  ip_mode_v6: null
 
 boot:
   autostart: true
@@ -138,16 +163,23 @@ boot:
 
 resources:
   cores: 2
+  cpu_limit: null
+  cpu_units: 1024
   memory_mb: 2048
+  swap_mb: 2048
   disk_gb: 32
 
 storage:
+  rootfs_pool: "local-lvm"
   host_path: "/opt/appdata/{}"
   mount_point: "/appdata"
+  appdata_backup: true
+  appdata_read_only: false
 
 lxc:
   template: "{}"
   unprivileged: true
+  timezone: "host"
   features:
     - "nesting=1"
 
@@ -156,6 +188,7 @@ hardware:
 
 host_management:
   managed: true
+  protection: false
 "#,
         stack_name,
         canonical_lxc_name(0, stack_name),
@@ -209,6 +242,19 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         .and_then(Value::as_str)
         .map(|v| v.to_string());
 
+    let vlan_tag = network
+        .and_then(|m| m.get(Value::String("vlan_tag".to_string())))
+        .and_then(|v| if v.is_null() { None } else { v.as_u64().map(|n| n as u16) });
+
+    let firewall = network
+        .and_then(|m| m.get(Value::String("firewall".to_string())))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    let ip_mode_v6 = network
+        .and_then(|m| m.get(Value::String("ip_mode_v6".to_string())))
+        .and_then(|v| if v.is_null() { None } else { v.as_str().map(|s| s.to_string()) });
+
     let boot = root
         .get(Value::String("boot".to_string()))
         .and_then(Value::as_mapping);
@@ -240,6 +286,11 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
                 .and_then(Value::as_u64)
         })
         .unwrap_or(2048) as u32;
+    let swap_mb = resources
+        .and_then(|m| m.get(Value::String("swap_mb".to_string())))
+        .and_then(Value::as_u64)
+        .map(|v| v as u32)
+        .unwrap_or_else(|| calculate_swap_mb(memory_mb));
     let disk_gb = resources
         .and_then(|m| m.get(Value::String("disk_gb".to_string())))
         .and_then(Value::as_u64)
@@ -249,7 +300,15 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         })
         .unwrap_or(32) as u32;
 
-    // New fields for GitOps provisioning
+    let cpu_limit = resources
+        .and_then(|m| m.get(Value::String("cpu_limit".to_string())))
+        .and_then(|v| if v.is_null() { None } else { v.as_f64() });
+
+    let cpu_units = resources
+        .and_then(|m| m.get(Value::String("cpu_units".to_string())))
+        .and_then(Value::as_u64)
+        .unwrap_or(1024) as u32;
+
     let storage = root
         .get(Value::String("storage".to_string()))
         .and_then(Value::as_mapping);
@@ -263,6 +322,22 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         .and_then(Value::as_str)
         .unwrap_or("/appdata")
         .to_string();
+
+    let rootfs_pool = storage
+        .and_then(|m| m.get(Value::String("rootfs_pool".to_string())))
+        .and_then(Value::as_str)
+        .unwrap_or("local-lvm")
+        .to_string();
+
+    let appdata_backup = storage
+        .and_then(|m| m.get(Value::String("appdata_backup".to_string())))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    let appdata_read_only = storage
+        .and_then(|m| m.get(Value::String("appdata_read_only".to_string())))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
     let lxc_config = root
         .get(Value::String("lxc".to_string()))
@@ -286,6 +361,12 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         })
         .unwrap_or_else(|| vec!["nesting=1".to_string()]);
 
+    let timezone = lxc_config
+        .and_then(|m| m.get(Value::String("timezone".to_string())))
+        .and_then(Value::as_str)
+        .unwrap_or("host")
+        .to_string();
+
     let hardware = root
         .get(Value::String("hardware".to_string()))
         .and_then(Value::as_mapping);
@@ -300,6 +381,19 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         })
         .unwrap_or(None); // Missing = auto-detect
 
+    let tags: Vec<String> = root
+        .get(Value::String("tags".to_string()))
+        .and_then(Value::as_sequence)
+        .map(|seq| seq.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+
+    let protection = root
+        .get(Value::String("host_management".to_string()))
+        .and_then(Value::as_mapping)
+        .and_then(|m| m.get(Value::String("protection".to_string())))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
     Ok(StackConfig {
         stack_name: stack_name.to_string(),
         vmid,
@@ -310,17 +404,29 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         bridge,
         ip_mode,
         reserved_ipv4,
+        vlan_tag,
+        firewall,
+        ip_mode_v6,
         autostart,
         startup_order,
         cpu_cores,
+        cpu_limit,
+        cpu_units,
         memory_mb,
+        swap_mb,
         disk_gb,
+        rootfs_pool,
         host_storage_path,
         mount_point,
+        appdata_backup,
+        appdata_read_only,
         lxc_template,
+        timezone,
         unprivileged,
         features,
         tun_device,
+        tags,
+        protection,
     })
 }
 
@@ -355,6 +461,12 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
         Value::String(config.hwaddr.clone()),
     );
 
+    let tags_seq: Vec<Value> = config.tags.iter().map(|t| Value::String(t.clone())).collect();
+    root.insert(
+        Value::String("tags".to_string()),
+        Value::Sequence(tags_seq),
+    );
+
     let mut deploy = Mapping::new();
     deploy.insert(
         Value::String("enabled".to_string()),
@@ -387,6 +499,18 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
             .map(|v| Value::String(v.clone()))
             .unwrap_or(Value::Null),
     );
+    network.insert(
+        Value::String("vlan_tag".to_string()),
+        config.vlan_tag.map(|v| Value::Number((v as u64).into())).unwrap_or(Value::Null),
+    );
+    network.insert(
+        Value::String("firewall".to_string()),
+        Value::Bool(config.firewall),
+    );
+    network.insert(
+        Value::String("ip_mode_v6".to_string()),
+        config.ip_mode_v6.as_ref().map(|v| Value::String(v.clone())).unwrap_or(Value::Null),
+    );
     root.insert(
         Value::String("network".to_string()),
         Value::Mapping(network),
@@ -409,8 +533,22 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
         Value::Number((config.cpu_cores as u64).into()),
     );
     resources.insert(
+        Value::String("cpu_limit".to_string()),
+        config.cpu_limit
+            .map(|v| serde_yaml::to_value(v).unwrap_or(Value::Null))
+            .unwrap_or(Value::Null),
+    );
+    resources.insert(
+        Value::String("cpu_units".to_string()),
+        Value::Number((config.cpu_units as u64).into()),
+    );
+    resources.insert(
         Value::String("memory_mb".to_string()),
         Value::Number((config.memory_mb as u64).into()),
+    );
+    resources.insert(
+        Value::String("swap_mb".to_string()),
+        Value::Number((config.swap_mb as u64).into()),
     );
     resources.insert(
         Value::String("disk_gb".to_string()),
@@ -421,8 +559,11 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
         Value::Mapping(resources),
     );
 
-    // New fields for GitOps provisioning
     let mut storage = Mapping::new();
+    storage.insert(
+        Value::String("rootfs_pool".to_string()),
+        Value::String(config.rootfs_pool.clone()),
+    );
     storage.insert(
         Value::String("host_path".to_string()),
         Value::String(config.host_storage_path.clone()),
@@ -430,6 +571,14 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
     storage.insert(
         Value::String("mount_point".to_string()),
         Value::String(config.mount_point.clone()),
+    );
+    storage.insert(
+        Value::String("appdata_backup".to_string()),
+        Value::Bool(config.appdata_backup),
+    );
+    storage.insert(
+        Value::String("appdata_read_only".to_string()),
+        Value::Bool(config.appdata_read_only),
     );
     root.insert(
         Value::String("storage".to_string()),
@@ -444,6 +593,10 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
     lxc_config.insert(
         Value::String("unprivileged".to_string()),
         Value::Bool(config.unprivileged),
+    );
+    lxc_config.insert(
+        Value::String("timezone".to_string()),
+        Value::String(config.timezone.clone()),
     );
     let features_seq: Vec<Value> = config
         .features
@@ -469,15 +622,20 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
         Value::Mapping(hardware),
     );
 
-    // Ensure host_management.managed exists (default true)
-    if !root.contains_key(&Value::String("host_management".to_string())) {
-        let mut host_mgmt = Mapping::new();
-        host_mgmt.insert(Value::String("managed".to_string()), Value::Bool(true));
-        root.insert(
-            Value::String("host_management".to_string()),
-            Value::Mapping(host_mgmt),
-        );
-    }
+    let mut host_mgmt = if root.contains_key(&Value::String("host_management".to_string())) {
+        root.get(&Value::String("host_management".to_string()))
+            .and_then(Value::as_mapping)
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        Mapping::new()
+    };
+    host_mgmt.insert(Value::String("managed".to_string()), Value::Bool(true));
+    host_mgmt.insert(Value::String("protection".to_string()), Value::Bool(config.protection));
+    root.insert(
+        Value::String("host_management".to_string()),
+        Value::Mapping(host_mgmt),
+    );
 
     root.remove(Value::String("cores".to_string()));
     root.remove(Value::String("memory_mb".to_string()));
@@ -664,12 +822,19 @@ pub fn set_stack_provisioning_defaults(
     config.reserved_ipv4 = derive_reserved_ipv4_from_vmid(vmid);
     config.cpu_cores = cpu_cores;
     config.memory_mb = memory_mb;
+    config.swap_mb = calculate_swap_mb(memory_mb);
     config.disk_gb = disk_gb;
     config.autostart = autostart;
     config.startup_order = startup_order;
     config.deploy_enabled = false;
     config.activated_at = None;
-    // Ensure new fields have defaults if not already set
+    // Ensure defaults for new fields if not already set
+    if config.vlan_tag.is_none() {
+        config.vlan_tag = Some(10);
+    }
+    if config.rootfs_pool.is_empty() {
+        config.rootfs_pool = std::env::var("LXC_STORAGE_POOL").unwrap_or_else(|_| "local-lvm".to_string());
+    }
     if config.host_storage_path.is_empty() {
         config.host_storage_path = format!("/opt/appdata/{}", stack_name);
     }
@@ -681,6 +846,9 @@ pub fn set_stack_provisioning_defaults(
     }
     if config.features.is_empty() {
         config.features = vec!["nesting=1".to_string()];
+    }
+    if config.timezone.is_empty() {
+        config.timezone = "host".to_string();
     }
     save_stack_config(&config)
 }

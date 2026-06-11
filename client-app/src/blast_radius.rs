@@ -99,9 +99,21 @@ pub struct StackConfigEditorState {
     pub startup_order: u32,
     pub cpu_cores: u8,
     pub memory_mb: u32,
+    pub swap_mb: u32,
+    pub cpu_limit: Option<f64>,
+    pub cpu_units: u32,
+    pub vlan_tag: Option<u16>,
+    pub firewall: bool,
+    pub ip_mode_v6: Option<String>,
     pub disk_gb: u32,
+    pub rootfs_pool: String,
+    pub appdata_backup: bool,
+    pub appdata_read_only: bool,
     pub deploy_enabled: bool,
     pub activated_at: Option<String>,
+    pub timezone: String,
+    pub protection: bool,
+    pub tags: Vec<String>,
     pub pre_sync_exists: bool,
     pub selected_field: usize,
     pub error: Option<String>,
@@ -490,7 +502,7 @@ pub fn draw_stack_creation_wizard(
                         .add_modifier(Modifier::BOLD),
                 );
             let text = format!(
-                "Review your new stack:\n\n{}\n\n[Enter to create, ESC to cancel]",
+                "Review your new stack:\n\n{}\n\n  [Enter] Create stack    [ESC] Cancel",
                 summary
             );
             let para = Paragraph::new(text)

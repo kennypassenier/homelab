@@ -28,18 +28,30 @@ pub struct StackIntent {
     pub bridge: String,
     pub ip_mode: String,
     pub reserved_ipv4: Option<String>,
+    pub vlan_tag: Option<u16>,
+    pub firewall: bool,
+    pub ip_mode_v6: Option<String>,
     pub autostart: bool,
     pub startup_order: u32,
     pub cpu_cores: u8,
+    pub cpu_limit: Option<f64>,
+    pub cpu_units: u32,
     pub memory_mb: u32,
+    pub swap_mb: u32,
     pub disk_gb: u32,
+    pub rootfs_pool: String,
     pub host_storage_path: String,
     pub mount_point: String,
+    pub appdata_backup: bool,
+    pub appdata_read_only: bool,
     pub lxc_template: String,
+    pub timezone: String,
     pub unprivileged: bool,
     pub features: Vec<String>,
     pub tun_device: Option<bool>,
     pub gpu_passthrough: Option<bool>,
+    pub tags: Vec<String>,
+    pub protection: bool,
     pub managed: bool,
 }
 
@@ -119,6 +131,16 @@ pub fn scan_stack_intents(repo_root: &Path) -> Result<Vec<StackIntent>, String> 
     Ok(intents)
 }
 
+fn calculate_swap_mb(memory_mb: u32) -> u32 {
+    if memory_mb < 2048 {
+        memory_mb
+    } else if memory_mb <= 8192 {
+        2048
+    } else {
+        4096
+    }
+}
+
 /// Parse a single lxc-compose.yml file
 fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
     let content =
@@ -167,6 +189,42 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
 
     let disk_gb = yaml["resources"]["disk_gb"].as_u64().unwrap_or(8) as u32;
 
+    let vlan_tag = match &yaml["network"]["vlan_tag"] {
+        serde_yaml::Value::Number(n) => n.as_u64().map(|v| v as u16),
+        _ => None,
+    };
+
+    let firewall = yaml["network"]["firewall"].as_bool().unwrap_or(true);
+
+    let ip_mode_v6 = match &yaml["network"]["ip_mode_v6"] {
+        serde_yaml::Value::String(s) => Some(s.clone()),
+        _ => None,
+    };
+
+    let cpu_limit = match &yaml["resources"]["cpu_limit"] {
+        serde_yaml::Value::Number(n) => n.as_f64(),
+        _ => None,
+    };
+
+    let cpu_units = yaml["resources"]["cpu_units"].as_u64().unwrap_or(1024) as u32;
+
+    let swap_mb = yaml["resources"]["swap_mb"].as_u64()
+        .map(|v| v as u32)
+        .unwrap_or_else(|| calculate_swap_mb(memory_mb));
+
+    let rootfs_pool = yaml["storage"]["rootfs_pool"]
+        .as_str()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            std::env::var("LXC_STORAGE_POOL").unwrap_or_else(|_| "local-lvm".to_string())
+        });
+
+    let appdata_backup = yaml["storage"]["appdata_backup"].as_bool().unwrap_or(true);
+
+    let appdata_read_only = yaml["storage"]["appdata_read_only"].as_bool().unwrap_or(false);
+
+    let timezone = yaml["lxc"]["timezone"].as_str().unwrap_or("host").to_string();
+
     let host_storage_path = yaml["storage"]["host_path"]
         .as_str()
         .map(|s| s.to_string())
@@ -207,6 +265,13 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
 
     let managed = yaml["host_management"]["managed"].as_bool().unwrap_or(true);
 
+    let tags: Vec<String> = yaml["tags"]
+        .as_sequence()
+        .map(|seq| seq.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+
+    let protection = yaml["host_management"]["protection"].as_bool().unwrap_or(false);
+
     Ok(StackIntent {
         stack_name,
         vmid,
@@ -216,18 +281,30 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
         bridge,
         ip_mode,
         reserved_ipv4,
+        vlan_tag,
+        firewall,
+        ip_mode_v6,
         autostart,
         startup_order,
         cpu_cores,
+        cpu_limit,
+        cpu_units,
         memory_mb,
+        swap_mb,
         disk_gb,
+        rootfs_pool,
         host_storage_path,
         mount_point,
+        appdata_backup,
+        appdata_read_only,
         lxc_template,
+        timezone,
         unprivileged,
         features,
         tun_device,
         gpu_passthrough,
+        tags,
+        protection,
         managed,
     })
 }
@@ -288,6 +365,14 @@ pub fn validate_lxc(vmid: u32, intent: &StackIntent) -> Result<ValidationResult,
         }
     }
 
+    if let Some(swap_str) = config.get("swap") {
+        if let Ok(swap) = swap_str.parse::<u32>() {
+            if swap != intent.swap_mb {
+                drift.push(format!("swap:{}→{}", swap, intent.swap_mb));
+            }
+        }
+    }
+
     if let Some(onboot_str) = config.get("onboot") {
         let onboot = onboot_str == "1";
         if onboot != intent.autostart {
@@ -341,30 +426,57 @@ pub fn create_lxc(intent: &StackIntent, dry_run: bool) -> Result<(), String> {
         .arg(intent.cpu_cores.to_string())
         .arg("--memory")
         .arg(intent.memory_mb.to_string())
+        .arg("--swap")
+        .arg(intent.swap_mb.to_string())
+        .arg("--cpulimit")
+        .arg(intent.cpu_limit.map(|v| v.to_string()).unwrap_or("0".to_string()))
+        .arg("--cpuunits")
+        .arg(intent.cpu_units.to_string())
         .arg("--rootfs")
-        .arg(format!("local-lvm:{}", intent.disk_gb))
-        .arg("--net0")
-        .arg(format!(
-            "name=eth0,bridge={},hwaddr={},ip=dhcp",
-            intent.bridge, intent.hwaddr
-        ))
-        .arg("--onboot")
+        .arg(format!("{}:{}", intent.rootfs_pool, intent.disk_gb));
+
+    let mut net0 = format!(
+        "name=eth0,bridge={},hwaddr={},ip=dhcp",
+        intent.bridge, intent.hwaddr
+    );
+    if let Some(tag) = intent.vlan_tag {
+        net0.push_str(&format!(",tag={}", tag));
+    }
+    if intent.firewall {
+        net0.push_str(",firewall=1");
+    }
+    cmd.arg("--net0").arg(net0);
+
+    cmd.arg("--onboot")
         .arg(if intent.autostart { "1" } else { "0" })
         .arg("--startup")
         .arg(format!("order={}", intent.startup_order))
         .arg("--unprivileged")
-        .arg(if intent.unprivileged { "1" } else { "0" });
+        .arg(if intent.unprivileged { "1" } else { "0" })
+        .arg("--timezone")
+        .arg(&intent.timezone)
+        .arg("--protection")
+        .arg(if intent.protection { "1" } else { "0" });
 
     // Add features
     if !intent.features.is_empty() {
         cmd.arg("--features").arg(intent.features.join(","));
     }
 
-    // Add storage mount
-    cmd.arg("--mp0").arg(format!(
-        "{},mp={}",
-        intent.host_storage_path, intent.mount_point
-    ));
+    // Add tags if non-empty (semicolon-separated)
+    if !intent.tags.is_empty() {
+        cmd.arg("--tags").arg(intent.tags.join(";"));
+    }
+
+    // Add storage mount with backup and read-only flags
+    let mut mp0 = format!("{},mp={}", intent.host_storage_path, intent.mount_point);
+    if intent.appdata_backup {
+        mp0.push_str(",backup=1");
+    }
+    if intent.appdata_read_only {
+        mp0.push_str(",ro=1");
+    }
+    cmd.arg("--mp0").arg(mp0);
 
     let output = cmd
         .output()
@@ -483,6 +595,30 @@ pub fn reconcile_lxc(vmid: u32, intent: &StackIntent, dry_run: bool) -> Result<(
         .arg(vmid.to_string())
         .arg("--memory")
         .arg(intent.memory_mb.to_string())
+        .output();
+
+    // Update swap
+    let _ = Command::new("pct")
+        .arg("set")
+        .arg(vmid.to_string())
+        .arg("--swap")
+        .arg(intent.swap_mb.to_string())
+        .output();
+
+    // Update cpu_units
+    let _ = Command::new("pct")
+        .arg("set")
+        .arg(vmid.to_string())
+        .arg("--cpuunits")
+        .arg(intent.cpu_units.to_string())
+        .output();
+
+    // Update cpu_limit
+    let _ = Command::new("pct")
+        .arg("set")
+        .arg(vmid.to_string())
+        .arg("--cpulimit")
+        .arg(intent.cpu_limit.map(|v| v.to_string()).unwrap_or("0".to_string()))
         .output();
 
     // Update autostart

@@ -1,0 +1,51 @@
+version: 1
+stack_name: test
+vmid: 350
+hostname: 350-app-test
+hwaddr: 02:ef:19:7c:2b:25
+tags: []
+
+deploy:
+  enabled: false
+  activated_at: null
+
+network:
+  bridge: vmbr0
+  ip_mode: dhcp-reserved
+  reserved_ipv4: 10.10.10.250
+  vlan_tag: 10
+  firewall: true
+  ip_mode_v6: null
+
+boot:
+  autostart: true
+  order: 90
+
+resources:
+  cores: 2
+  cpu_limit: null
+  cpu_units: 1024
+  memory_mb: 2048
+  swap_mb: 2048
+  disk_gb: 4
+
+storage:
+  rootfs_pool: local-lvm
+  host_path: /opt/appdata/test
+  mount_point: /appdata
+  appdata_backup: true
+  appdata_read_only: false
+
+lxc:
+  template: debian-12-standard 12.12-1 amd64
+  unprivileged: true
+  timezone: host
+  features:
+  - nesting=1
+
+hardware:
+  tun_device: null
+
+host_management:
+  managed: true
+  protection: false

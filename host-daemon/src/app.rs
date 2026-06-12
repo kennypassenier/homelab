@@ -111,6 +111,10 @@ pub struct App {
     log_history_limit: usize,
     /// Age threshold for deciding which entries count toward the old-line cap.
     log_history_age_secs: u64,
+    /// Latch credentials last pushed by CLIENT (via heartbeat).
+    /// Used by failsafe and update_checker so they can run `latch pull`
+    /// without needing stored credentials inside the daemon.
+    pub latch_credentials: Option<crate::self_update::LatchPullRequest>,
 }
 
 impl App {
@@ -130,6 +134,7 @@ impl App {
             started_at: std::time::Instant::now(),
             log_history_limit: parse_log_history_limit(),
             log_history_age_secs: parse_log_history_age_secs(),
+            latch_credentials: None,
         }
     }
 

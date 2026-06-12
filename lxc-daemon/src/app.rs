@@ -131,7 +131,11 @@ pub struct AppState {
     pub logs: VecDeque<LogEntry>,
     pub is_syncing: bool,
     pub sync_requested: bool,
+    /// One-shot latch payload from the latest explicit CLIENT sync/update request.
     pub pending_latch_pull: Option<LatchPullRequest>,
+    /// Persistent latch credentials pushed by CLIENT on every heartbeat.
+    /// Used by the sync loop whenever pending_latch_pull is absent.
+    pub latch_credentials: Option<LatchPullRequest>,
     pub backup_paused: bool,
     /// Unix timestamp (seconds) of last CLIENT heartbeat received.
     pub client_heartbeat_ts: Option<i64>,
@@ -176,6 +180,7 @@ impl AppState {
             is_syncing: false,
             sync_requested: false,
             pending_latch_pull: None,
+            latch_credentials: None,
             backup_paused: false,
             client_heartbeat_ts: None,
             log_tx,

@@ -67,6 +67,9 @@ struct WsHeartbeatRequest {
     kind: String,
     request_id: String,
     token: Option<String>,
+    /// CLIENT pushes cached latch credentials on every heartbeat so daemons
+    /// can run `latch pull` without storing credentials themselves.
+    latch: Option<LatchPullRequest>,
 }
 
 #[derive(Serialize)]
@@ -390,6 +393,10 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
                                 {
                                     let mut s = state.lock().unwrap();
                                     s.client_heartbeat_ts = Some(chrono::Utc::now().timestamp());
+                                    // Cache any credentials CLIENT included with this heartbeat.
+                                    if let Some(latch) = req.latch {
+                                        s.latch_credentials = Some(latch);
+                                    }
                                     s.add_log(
                                         LogLevel::Debug,
                                         "Heartbeat recorded via WebSocket RPC".to_string(),

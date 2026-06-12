@@ -357,32 +357,46 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         s.add_log(LogLevel::Ok, "git reset complete".to_string());
     }
 
-    let pending_latch_pull = {
+    // ── Step 3: latch pull (unconditional — creates .env files from secrets) ─
+    // Prefer a one-shot payload from CLIENT over the cached credentials; fall
+    // back to whatever CLIENT pushed last on a heartbeat.
+    let latch_creds = {
         let mut s = state.lock().unwrap();
-        s.pending_latch_pull.take()
+        s.pending_latch_pull.take().or_else(|| s.latch_credentials.clone())
     };
 
-    // ── Step 3: pre-sync hooks (pre-sync.sh) if present ────────────────────
+    if let Some(ref latch) = latch_creds {
+        let sn = stack_name.clone();
+        match run_latch_pull(GITOPS_REPO, latch) {
+            Ok(msg) => {
+                let mut s = state.lock().unwrap();
+                s.add_log(
+                    LogLevel::Ok,
+                    format!("ts=now level=info stack={} latch msg=\"{}\"", sn, msg),
+                );
+            }
+            Err(e) => {
+                let mut s = state.lock().unwrap();
+                s.add_log(
+                    LogLevel::Warn,
+                    format!("ts=now level=warn stack={} latch msg=\"pull failed: {}\"", sn, e),
+                );
+            }
+        }
+    } else {
+        let mut s = state.lock().unwrap();
+        s.add_log(
+            LogLevel::Info,
+            "latch pull skipped: no credentials available (CLIENT will push on next heartbeat)"
+                .to_string(),
+        );
+    }
+
+    // ── Step 4: pre-sync hooks (pre-sync.sh) if present ────────────────────
     let pre_sync_path = format!("{}/stacks/{}/pre-sync.sh", GITOPS_REPO, stack_name);
     if Path::new(&pre_sync_path).exists() {
         let stack_dir = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
         let sn = stack_name.clone();
-        let latch_pull_result = pending_latch_pull
-            .as_ref()
-            .map(|latch| run_latch_pull(&stack_dir, latch));
-        if let Some(result) = latch_pull_result {
-            let mut s = state.lock().unwrap();
-            match result {
-                Ok(message) => s.add_log(
-                    LogLevel::Ok,
-                    format!("ts=now level=info stack={} latch msg=\"{}\"", sn, message),
-                ),
-                Err(message) => s.add_log(
-                    LogLevel::Warn,
-                    format!("ts=now level=warn stack={} latch msg=\"{}\"", sn, message),
-                ),
-            }
-        }
         let hook_result = tokio::task::spawn_blocking(move || {
             Command::new("bash")
                 .arg(&pre_sync_path)
@@ -419,7 +433,7 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         }
     }
 
-    // ── Step 4: docker compose pull + up for every app in the stack ───────
+    // ── Step 5: docker compose pull + up for every app in the stack ───────
     let stack_dir = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
     let app_dirs = list_app_dirs(&stack_dir);
 

@@ -1215,10 +1215,12 @@ async fn request_lxc_sync_ws(ip: &str, token: &str) -> Result<(), String> {
 
 async fn request_lxc_heartbeat_ws(ip: &str, token: &str) -> Result<(), String> {
     let request_id = ws_request_id("heartbeat");
+    let latch = client_latch_pull_payload().unwrap_or(serde_json::Value::Null);
     let payload = serde_json::json!({
         "kind": "heartbeat_request",
         "request_id": request_id,
-        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) }
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+        "latch": latch,
     });
 
     let value = send_ws_rpc(ip, payload, "heartbeat_response", &request_id).await?;
@@ -1337,11 +1339,13 @@ async fn request_host_heartbeat_ws(active_stacks: &[String]) -> Result<(), Strin
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
     let request_id = ws_request_id("host-heartbeat");
+    let latch = client_latch_pull_payload().unwrap_or(serde_json::Value::Null);
     let payload = serde_json::json!({
         "kind": "client_heartbeat",
         "request_id": &request_id,
         "active_stacks": active_stacks,
         "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+        "latch": latch,
     });
 
     let value = send_ws_rpc(&ip, payload, "client_heartbeat_response", &request_id).await?;

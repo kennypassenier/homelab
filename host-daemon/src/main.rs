@@ -100,8 +100,8 @@ async fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
 
     let (status_tx, status_rx) = mpsc::channel::<String>();
     backup::start_policy_enforcer(status_tx.clone());
-    failsafe::start_failsafe_enforcer(status_tx.clone());
-    start_update_checker(status_tx.clone());
+    failsafe::start_failsafe_enforcer(status_tx.clone(), app.clone());
+    start_update_checker(status_tx.clone(), app.clone());
     start_auto_provisioner(status_tx);
 
     println!(
@@ -157,8 +157,8 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
     // Shared status channel for backup, update, and failsafe workers.
     let (status_tx, status_rx) = mpsc::channel::<String>();
     backup::start_policy_enforcer(status_tx.clone());
-    failsafe::start_failsafe_enforcer(status_tx.clone());
-    start_update_checker(status_tx.clone());
+    failsafe::start_failsafe_enforcer(status_tx.clone(), app.clone());
+    start_update_checker(status_tx.clone(), app.clone());
 
     loop {
         // Poll backup status from background thread
@@ -345,7 +345,7 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn start_update_checker(status_tx: mpsc::Sender<String>) {
+fn start_update_checker(status_tx: mpsc::Sender<String>, app: std::sync::Arc<std::sync::Mutex<app::App>>) {
     std::thread::spawn(move || {
         let auto_update_enabled = std::env::var("HOST_BACKGROUND_UPDATE_ENABLED")
             .ok()
@@ -375,7 +375,8 @@ fn start_update_checker(status_tx: mpsc::Sender<String>) {
                 .max(60);
 
             if last_check.elapsed().as_secs() >= interval_secs {
-                match self_update::check_and_apply_update() {
+                let latch = app.lock().unwrap().latch_credentials.clone();
+                match self_update::check_and_apply_update_with_latch_pull(latch.as_ref()) {
                     Ok(msg) => {
                         if msg.contains("HOST updated") {
                             let _ = status_tx.send(format!("[host-update] {}", msg));

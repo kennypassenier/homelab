@@ -454,6 +454,13 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
                                         .unwrap_or_default();
                                     liveness::touch_client_heartbeat();
                                     liveness::set_client_active_stacks(&active_stacks);
+                                    // Cache any latch credentials CLIENT included with this heartbeat.
+                                    if let Some(latch_val) = req.get("latch") {
+                                        if let Ok(latch) = serde_json::from_value::<self_update::LatchPullRequest>(latch_val.clone()) {
+                                            let mut guard = app.lock().unwrap();
+                                            guard.latch_credentials = Some(latch);
+                                        }
+                                    }
                                     let response = serde_json::json!({
                                         "kind": "client_heartbeat_response",
                                         "request_id": request_id,

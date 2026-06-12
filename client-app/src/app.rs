@@ -64,8 +64,11 @@ const SOURCE_COLORS: &[ratatui::style::Color] = &[
     ratatui::style::Color::Rgb(255, 128, 0),
 ];
 
-/// Suppress exact duplicate LXC log lines within this window.
-const LXC_DUPLICATE_LOG_SUPPRESS_WINDOW: Duration = Duration::from_secs(30);
+/// Suppress info/ok log lines that appeared within this window to eliminate
+/// repeating single-line and sequence spam. WARN and ERROR always pass through.
+const LOG_DEDUP_WINDOW: Duration = Duration::from_secs(60);
+/// Maximum number of fingerprints kept in the dedup ring-buffer.
+const LOG_DEDUP_RING_SIZE: usize = 256;
 
 /// Which log levels are visible in the Logs tab.
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -184,6 +187,9 @@ pub struct App {
     pub log_level_filter: LogLevelFilter,
     /// True when live log telemetry has been observed.
     pub live_logs_seen: bool,
+    /// Ring buffer of log fingerprints (source|level|message → created_at) used
+    /// to suppress repeating lines and sequences without hiding real errors.
+    log_dedup_ring: VecDeque<(String, SystemTime)>,
 
     // ── Animation state (driven by anim_tick at 33 ms) ─────────────────────
     /// Sinusoidal phase (0..2π) for pulse/breathing effects on selected items.
@@ -352,6 +358,7 @@ impl App {
                 .unwrap_or_else(|| "ghcr.io/kennypassenier/homelab-lxc-daemon:latest".to_string()),
             update_last_result: HashMap::new(),
             update_last_at: HashMap::new(),
+            log_dedup_ring: VecDeque::new(),
         };
         app
     }
@@ -405,16 +412,25 @@ impl App {
     pub fn push_log(&mut self, source: &str, level: &str, message: &str) {
         let now = SystemTime::now();
 
-        if source.starts_with("lxc-") {
-            if let Some(last) = self.logs.last() {
-                if last.source == source
-                    && last.level == level
-                    && last.message == message
-                    && now.duration_since(last.created_at).unwrap_or_default()
-                        < LXC_DUPLICATE_LOG_SUPPRESS_WINDOW
-                {
-                    return;
-                }
+        // WARN and ERROR always get through — suppressing them would make the
+        // logs useless when something actually breaks.
+        let is_important = matches!(level, "WARN" | "ERROR");
+
+        if !is_important {
+            let key = format!("{}|{}|{}", source, level, message);
+
+            // Drop fingerprints that have aged out of the window.
+            self.log_dedup_ring
+                .retain(|(_, ts)| now.duration_since(*ts).unwrap_or_default() < LOG_DEDUP_WINDOW);
+
+            // Suppress if this exact (source, level, message) appeared recently.
+            if self.log_dedup_ring.iter().any(|(k, _)| k == &key) {
+                return;
+            }
+
+            self.log_dedup_ring.push_back((key, now));
+            if self.log_dedup_ring.len() > LOG_DEDUP_RING_SIZE {
+                self.log_dedup_ring.pop_front();
             }
         }
 

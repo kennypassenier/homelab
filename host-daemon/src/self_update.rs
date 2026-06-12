@@ -49,7 +49,15 @@ pub fn check_and_apply_update(release_tag: Option<&str>) -> Result<String, Strin
 
     let (asset, fallback_used) = select_host_asset(&release, &expected_asset)?;
 
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe_raw = std::env::current_exe().map_err(|e| e.to_string())?;
+    // Linux appends " (deleted)" to /proc/self/exe when the file has been replaced
+    // while the process is running. Strip it so backup/tmp paths are valid.
+    let exe_str = exe_raw.to_string_lossy();
+    let exe_clean = exe_str
+        .strip_suffix(" (deleted)")
+        .unwrap_or(&exe_str)
+        .trim();
+    let exe = std::path::PathBuf::from(exe_clean);
     let tmp = tmp_path_for(&exe);
     let backup = backup_path_for(&exe);
 

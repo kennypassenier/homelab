@@ -899,7 +899,8 @@ async fn async_main() -> Result<()> {
         tokio::select! {
             _ = &mut sigint => {
                 disable_raw_mode()?;
-                execute!(io::stdout(), LeaveAlternateScreen)?;
+                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+                terminal.show_cursor()?;
                 return Ok(());
             }
 
@@ -1035,7 +1036,8 @@ async fn async_main() -> Result<()> {
     }
 
     disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
     Ok(())
 }
 

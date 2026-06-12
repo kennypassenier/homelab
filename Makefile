@@ -124,7 +124,21 @@ build-client-windows: latch-sync-secrets
 
 # Build the host daemon for Linux
 build-host: latch-sync-secrets
-	cd $(HOST_SRC) && cargo build --release
+	@if ! command -v docker > /dev/null 2>&1; then \
+		echo "docker not found; build-host requires a containerized Rust builder"; \
+		exit 1; \
+	fi
+	@echo "Building HOST daemon in $(LXC_BASE_IMAGE_BUILDER)..."
+	docker run --rm \
+		--user "$$(id -u):$$(id -g)" \
+		-e HOME=/tmp \
+		-e CARGO_HOME=/tmp/cargo \
+		-e RUSTUP_HOME=/tmp/rustup \
+		-e RUSTUP_TOOLCHAIN=stable \
+		-v "$${PWD}:/work" \
+		-w /work/$(HOST_SRC) \
+		$(LXC_BASE_IMAGE_BUILDER) \
+		cargo build --release --locked
 	@mkdir -p $(APPS_DIR)
 	@tmp="$(APPS_DIR)/$(HOST_NAME).new"; \
 	cp $(HOST_SRC)/target/release/$(HOST_NAME) "$$tmp" && \

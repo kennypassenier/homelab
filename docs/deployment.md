@@ -142,13 +142,15 @@ curl -i "http://${HOST_IP}:8080/api/metrics"
 HOST currently cares about:
 
 - `GITOPS_REPO` (recommended: `/root/homelab`)
-- `HOST_ENV_FILE` (recommended: `/root/homelab/config/.env`)
+- `HOST_ENV_FILE=/root/homelab/config/.env` (recommended canonical location; avoid legacy `/root/homelab/host-daemon/.env`)
+- local `make build-host` now builds in a Debian 12 Rust container to keep released HOST binaries compatible with Proxmox glibc
 - optional `HOST_AUTO_PROVISION_ENABLED=0` (default disabled; set `1` only if you want periodic autonomous reconcile without a CLIENT-triggered provision request)
 - `HOST_UPDATE_REPO`
 - `HOST_UPDATE_ASSET`
 - optional `HOST_UPDATE_TOKEN`
 - optional `HOST_LATCH_PULL_ON_UPDATE=true` to run `latch pull --sparse` before API/RPC remote update checks
 - optional `HOST_UPDATE_SERVICE` (default `host-daemon.service`)
+- optional `HOST_UPDATE_VERIFY_DELAY_SECS=35` for post-restart watchdog timing; watchdog restores backup binary automatically if service/port health checks fail
 - optional `RESTIC_REPO_BASE` for HOST daemon per-stack restic target base
 - optional `RCLONE_CONFIG_FILE` for rclone-backed restic repositories (Google Drive, etc.)
 - optional `FAILSAFE_SYNC_INTERVAL_SECS` for inverse heartbeat failsafe window cadence

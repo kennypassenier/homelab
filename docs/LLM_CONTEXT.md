@@ -35,6 +35,7 @@ Last updated: 2026-06-12
 ## Delivery Model Updates
 
 - HOST self-update is release-based (version/tag check), not push-based.
+- HOST self-update now includes binary preflight checks, backup-before-swap, and watchdog-based rollback if post-restart health checks fail.
 - LXC daemon image delivery is automated via GHCR workflow with path-based change gating.
 - Local `make build-lxc` builds the daemon inside a Debian 12 Rust container so the generated artifact stays compatible with the libc versions found in deployed LXCs.
 - LXC bootstrap installs a prebuilt Debian-12-compatible `latch` binary (asset `latch-linux-x86_64-lxc.tar.gz`) pushed by HOST, then uses persistent `LATCH_PAT` / `LATCH_KEY` for headless operation; pass/keyring inside LXCs is optional.

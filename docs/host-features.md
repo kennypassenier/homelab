@@ -1,6 +1,6 @@
 # HOST Features (Current)
 
-Last updated: 2026-06-05
+Last updated: 2026-06-12
 
 ## Scope
 
@@ -129,7 +129,9 @@ After manual recovery, future releases should self-update normally again.
 
 - HOST supports release-based self-update, not per-push updates.
 - Update checks target GitHub Releases latest tag and compare against local binary version.
-- On update availability, HOST downloads the release asset, atomically replaces the local executable, and requests a service restart.
+- On update availability, HOST downloads the release asset, preflights it (`--version` + dynamic-link sanity check), writes a backup of the current binary, atomically replaces the executable, and requests a service restart.
+- If restart request fails, HOST immediately restores the previous binary and attempts restart with the rollback version.
+- HOST arms a post-restart watchdog (`HOST_UPDATE_VERIFY_DELAY_SECS`, default 35s) that auto-rolls back to backup when the service is not active or port 8080 does not come up.
 - HOST now emits websocket-visible lifecycle/update telemetry including startup `daemon_version=...`, update check status, and post-update reconnect expectations.
 - Empty `HOST_UPDATE_REPO` / `HOST_UPDATE_ASSET` env values fall back to safe defaults; the updater now picks the highest `host-daemon-v*` release tag.
 

@@ -92,6 +92,49 @@ If missing, add them in `/root/homelab/config/.env` and restart HOST:
 systemctl restart host-daemon
 ```
 
+### 2.4 Prune obsolete local files safely (without reinstalling everything)
+
+Preview what would be removed first:
+
+```bash
+cd /root/homelab
+git clean -nd
+```
+
+Preview ignored/local artifact cleanup too:
+
+```bash
+cd /root/homelab
+git clean -ndX
+```
+
+If the preview looks correct, apply cleanup:
+
+```bash
+cd /root/homelab
+git clean -fd
+git clean -fdX
+```
+
+Recommended env canonicalization after cleanup:
+
+```bash
+mkdir -p /root/homelab/config
+test -f /root/homelab/config/.env || cp /root/homelab/config/.env.example /root/homelab/config/.env
+grep -q '^HOST_ENV_FILE=/root/homelab/config/.env$' /root/homelab/config/.env || echo 'HOST_ENV_FILE=/root/homelab/config/.env' >> /root/homelab/config/.env
+rm -f /root/homelab/host-daemon/.env
+```
+
+### 2.5 Validate hardened HOST self-update path
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:8080/api/update
+sleep 5
+journalctl -u host-daemon -n 120 --no-pager
+```
+
+Look for update logs that include backup + watchdog behavior.
+
 ## 3) LXC Debug (container 109)
 
 ### 3.1 One-shot diagnostic for service, logs, port, docker

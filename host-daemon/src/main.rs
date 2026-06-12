@@ -36,17 +36,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn load_host_env() {
-    let candidates = [
-        std::env::var("HOST_ENV_FILE").ok(),
-        Some("config/.env".to_string()),
-        Some(default_host_env_file()),
+    // Load canonical env first, then optional override sources.
+    // dotenvy::from_path does not clobber existing process vars, so earlier
+    // files remain authoritative while later files can fill missing keys.
+    let mut candidates = vec![
+        default_host_env_file(),
+        "config/.env".to_string(),
+        "/root/homelab/config/.env".to_string(),
     ];
 
-    for candidate in candidates.into_iter().flatten() {
-        let path = Path::new(&candidate);
+    if let Ok(path) = std::env::var("HOST_ENV_FILE") {
+        if !path.trim().is_empty() {
+            candidates.push(path);
+        }
+    }
+
+    // Legacy fallback path kept for backward compatibility only.
+    candidates.push("/root/homelab/host-daemon/.env".to_string());
+
+    let mut seen = std::collections::HashSet::new();
+    for candidate in candidates {
+        let normalized = candidate.trim();
+        if normalized.is_empty() || !seen.insert(normalized.to_string()) {
+            continue;
+        }
+        let path = Path::new(normalized);
         if path.exists() {
             let _ = dotenvy::from_path(path);
-            break;
         }
     }
 }

@@ -20,6 +20,7 @@ struct ReleaseAsset {
 pub fn check_and_apply_update() -> Result<String, String> {
     let repo = env_nonempty("HOST_UPDATE_REPO", "kennypassenier/homelab");
     let expected_asset = env_nonempty("HOST_UPDATE_ASSET", "HOST");
+    let service = env_nonempty("HOST_UPDATE_SERVICE", "host-daemon.service");
 
     let release = fetch_latest_release(&repo)?;
     let latest = normalize_version(&release.tag_name);
@@ -36,15 +37,42 @@ pub fn check_and_apply_update() -> Result<String, String> {
 
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let tmp = tmp_path_for(&exe);
+    let backup = backup_path_for(&exe);
 
     download_asset(&asset.browser_download_url, &tmp)?;
     make_executable(&tmp)?;
+    validate_candidate_binary(&tmp)?;
 
-    fs::rename(&tmp, &exe).map_err(|e| format!("Atomic replace failed: {}", e))?;
+    fs::copy(&exe, &backup)
+        .map_err(|e| format!("Failed to create update backup at {}: {}", backup.display(), e))?;
+    make_executable(&backup)?;
 
-    let restart_msg = match try_restart_service() {
+    fs::rename(&tmp, &exe).map_err(|e| {
+        format!(
+            "Atomic replace failed: {} (backup preserved at {})",
+            e,
+            backup.display()
+        )
+    })?;
+
+    let watchdog_note = match schedule_update_watchdog(&service, &exe, &backup) {
+        Ok(()) => "rollback watchdog armed".to_string(),
+        Err(e) => format!("rollback watchdog unavailable ({})", e),
+    };
+
+    let restart_msg = match try_restart_service(&service) {
         Ok(()) => "service restart requested".to_string(),
-        Err(e) => format!("binary replaced; manual restart may be required ({})", e),
+        Err(e) => {
+            // Immediate rollback path: if restart request itself fails, restore the old binary now.
+            let _ = fs::copy(&backup, &exe);
+            let _ = make_executable(&exe);
+            let _ = try_restart_service(&service);
+            return Err(format!(
+                "update rollback applied after restart failure: {} (backup={})",
+                e,
+                backup.display()
+            ));
+        }
     };
 
     let selection = if fallback_used {
@@ -54,8 +82,13 @@ pub fn check_and_apply_update() -> Result<String, String> {
     };
 
     Ok(format!(
-        "HOST updated {} -> {} ({}, {})",
-        current, latest, restart_msg, selection
+        "HOST updated {} -> {} ({}, {}, {}, backup={})",
+        current,
+        latest,
+        restart_msg,
+        selection,
+        watchdog_note,
+        backup.display()
     ))
 }
 
@@ -198,10 +231,9 @@ fn github_get(url: &str) -> reqwest::blocking::RequestBuilder {
     }
 }
 
-fn try_restart_service() -> Result<(), String> {
-    let service = env_nonempty("HOST_UPDATE_SERVICE", "host-daemon.service");
+fn try_restart_service(service: &str) -> Result<(), String> {
     let status = Command::new("systemctl")
-        .args(["restart", &service])
+        .args(["restart", service])
         .status()
         .map_err(|e| e.to_string())?;
     if status.success() {
@@ -215,6 +247,84 @@ fn tmp_path_for(exe: &std::path::Path) -> PathBuf {
     let mut p = exe.to_path_buf();
     p.set_extension("new");
     p
+}
+
+fn backup_path_for(exe: &std::path::Path) -> PathBuf {
+    let mut p = exe.to_path_buf();
+    p.set_extension("bak");
+    p
+}
+
+fn validate_candidate_binary(path: &PathBuf) -> Result<(), String> {
+    let version_output = Command::new(path)
+        .arg("--version")
+        .output()
+        .map_err(|e| format!("Failed to execute downloaded binary: {}", e))?;
+
+    if !version_output.status.success() {
+        let stderr = String::from_utf8_lossy(&version_output.stderr);
+        let detail = stderr.lines().next().unwrap_or("unknown error").trim();
+        return Err(format!(
+            "Downloaded binary failed --version preflight: {}",
+            detail
+        ));
+    }
+
+    // Best-effort dynamic dependency check: reject obvious unresolved libs.
+    if let Ok(ldd_output) = Command::new("ldd").arg(path).output() {
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&ldd_output.stdout),
+            String::from_utf8_lossy(&ldd_output.stderr)
+        );
+        if text.contains("not found") {
+            return Err(format!(
+                "Downloaded binary failed dynamic-link preflight: {}",
+                text.lines().find(|line| line.contains("not found")).unwrap_or("unresolved dependency")
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn schedule_update_watchdog(service: &str, exe: &std::path::Path, backup: &std::path::Path) -> Result<(), String> {
+    let delay_secs = std::env::var("HOST_UPDATE_VERIFY_DELAY_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(35)
+        .clamp(10, 300);
+
+    let unit = format!("host-daemon-update-verify-{}", std::process::id());
+    let script = format!(
+        "set -euo pipefail\nSERVICE={service}\nEXE={exe}\nBAK={backup}\nrollback=0\nif ! systemctl is-active --quiet \"$SERVICE\"; then rollback=1; fi\nif [[ $rollback -eq 0 ]] && command -v ss >/dev/null 2>&1; then\n  if ! ss -tln | grep -q ':8080 '; then rollback=1; fi\nfi\nif [[ $rollback -eq 1 ]]; then\n  cp \"$BAK\" \"$EXE\"\n  chmod +x \"$EXE\"\n  systemctl restart \"$SERVICE\" || true\nfi\n",
+        service = shell_quote(service),
+        exe = shell_quote(&exe.display().to_string()),
+        backup = shell_quote(&backup.display().to_string())
+    );
+
+    let output = Command::new("systemd-run")
+        .args([
+            "--unit",
+            &unit,
+            "--on-active",
+            &format!("{}s", delay_secs),
+            "/bin/bash",
+            "-lc",
+            &script,
+        ])
+        .output()
+        .map_err(|e| format!("systemd-run unavailable: {}", e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn normalize_version(v: &str) -> String {

@@ -409,9 +409,11 @@ pub fn delete_core_app_from_stack(stack_name: &str, app_name: &str) -> io::Resul
 
 pub fn add_missing_core_apps(stack_name: &str) -> io::Result<AddCoreAppsResult> {
     let mut added = Vec::new();
+    crate::scaffold::ensure_lxc_compose(stack_name)?;
 
     if !core_app_exists(stack_name, "promtail") {
         scaffold_promtail(stack_name)?;
+        crate::scaffold::ensure_app_config_mount(stack_name, "promtail")?;
         added.push("promtail".to_string());
     }
     if !core_app_exists(stack_name, "watchtower") {
@@ -420,6 +422,7 @@ pub fn add_missing_core_apps(stack_name: &str) -> io::Result<AddCoreAppsResult> 
     }
     if !core_app_exists(stack_name, "traefik") {
         scaffold_traefik(stack_name)?;
+        crate::scaffold::ensure_app_config_mount(stack_name, "traefik")?;
         added.push("traefik".to_string());
     }
 
@@ -518,7 +521,7 @@ fn app_compose_yaml(
     out.push_str(&format!("    image: {}\n", docker_image));
     out.push_str("    restart: unless-stopped\n");
     out.push_str("    volumes:\n");
-    out.push_str(&format!("      - ../{}-config:/config\n", app_name));
+    out.push_str(&format!("      - /appdata/{}-config:/config\n", app_name));
 
     if options.include_traefik {
         out.push_str("    labels:\n");
@@ -549,7 +552,7 @@ fn app_compose_yaml(
         out.push_str("    volumes:\n");
         out.push_str("      - /var/log:/var/log:ro\n");
         out.push_str("      - /var/run/docker.sock:/var/run/docker.sock:ro\n");
-        out.push_str("      - ../promtail-config:/etc/promtail\n");
+        out.push_str("      - /appdata/promtail-config:/etc/promtail\n");
         out.push_str(
             "    command: -config.file=/etc/promtail/config.yml -config.expand-env=true\n",
         );
@@ -570,7 +573,7 @@ fn scaffold_promtail(stack_name: &str) -> io::Result<()> {
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(
-            "services:\n  promtail:\n    image: grafana/promtail:latest\n    container_name: {}-promtail\n    restart: unless-stopped\n    volumes:\n      - /var/log:/var/log:ro\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - ../promtail-config:/etc/promtail\n    env_file:\n      - .env\n    command: -config.file=/etc/promtail/config.yml -config.expand-env=true\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n",
+            "services:\n  promtail:\n    image: grafana/promtail:latest\n    container_name: {}-promtail\n    restart: unless-stopped\n    volumes:\n      - /var/log:/var/log:ro\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - /appdata/promtail-config:/etc/promtail\n    env_file:\n      - .env\n    command: -config.file=/etc/promtail/config.yml -config.expand-env=true\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n",
             stack_name
         ),
     )?;
@@ -632,7 +635,7 @@ fn scaffold_traefik(stack_name: &str) -> io::Result<()> {
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(
-            "services:\n  traefik:\n    image: traefik:v3\n    container_name: {}-traefik\n    restart: unless-stopped\n    ports:\n      - \"80:80\"\n      - \"443:443\"\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - ../traefik-config:/etc/traefik\n      - ../traefik-config/acme:/acme\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n      traefik.enable: \"true\"\n",
+            "services:\n  traefik:\n    image: traefik:v3\n    container_name: {}-traefik\n    restart: unless-stopped\n    ports:\n      - \"80:80\"\n      - \"443:443\"\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - /appdata/traefik-config:/etc/traefik\n      - /appdata/traefik-config/acme:/acme\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n      traefik.enable: \"true\"\n",
             stack_name
         ),
     )?;

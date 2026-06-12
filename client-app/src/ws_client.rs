@@ -51,7 +51,9 @@ pub async fn connect_lxc_logs(
 
 async fn stream_logs(source: String, url: &str, tx: mpsc::UnboundedSender<WsEvent>) {
     let mut consecutive_failures: u32 = 0;
-    let mut last_spam_notice = Instant::now() - Duration::from_secs(9999);
+    let mut last_spam_notice = Instant::now()
+        .checked_sub(Duration::from_secs(9999))
+        .unwrap_or_else(Instant::now);
 
     loop {
         match tokio_tungstenite::connect_async(url).await {

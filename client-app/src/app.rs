@@ -1,7 +1,7 @@
 //! Application state — Tab enum, App struct, and all state-management helpers.
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     fs,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -63,8 +63,6 @@ const SOURCE_COLORS: &[ratatui::style::Color] = &[
     ratatui::style::Color::LightYellow,
     ratatui::style::Color::Rgb(255, 128, 0),
 ];
-
-/// Track only immediate CLIENT duplicates; keep folding strict and conservative.
 
 /// Which log levels are visible in the Logs tab.
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -185,10 +183,6 @@ pub struct App {
     pub live_logs_seen: bool,
     /// Currently connected LXC stacks (source names are rendered as `lxc-<stack>`).
     connected_lxc_stacks: Vec<String>,
-    /// Most recently emitted CLIENT signature (`level|message`).
-    client_last_signature: Option<String>,
-    /// Number of immediate CLIENT duplicate lines suppressed after first print.
-    client_repeat_suppressed: usize,
 
     // ── Animation state (driven by anim_tick at 33 ms) ─────────────────────
     /// Sinusoidal phase (0..2π) for pulse/breathing effects on selected items.
@@ -318,8 +312,6 @@ impl App {
             log_level_filter: LogLevelFilter::All,
             live_logs_seen: false,
             connected_lxc_stacks: Vec::new(),
-            client_last_signature: None,
-            client_repeat_suppressed: 0,
             pulse_phase: 0.0,
             ticker_offset: 0,
             ticker_content,
@@ -411,32 +403,7 @@ impl App {
     /// HOST and LXC now cap their own replay histories, so the client can keep the
     /// full session stream without trimming older entries here.
     pub fn push_log(&mut self, source: &str, level: &str, message: &str) {
-        let now = SystemTime::now();
-
-        // Zero-buffer pass-through for non-CLIENT sources.
-        if source != "CLIENT" {
-            self.flush_client_repeat_summary_if_needed();
-            self.push_log_raw(source, level, message, now);
-            return;
-        }
-
-        let signature = format!("{}|{}", level, message);
-
-        if self
-            .client_last_signature
-            .as_deref()
-            .map(|last| last == signature)
-            .unwrap_or(false)
-        {
-            self.client_repeat_suppressed += 1;
-            return;
-        }
-
-        // Signature changed: flush any trailing duplicate summary first,
-        // then pass through the first instance immediately.
-        self.flush_client_repeat_summary_if_needed();
-        self.push_log_raw(source, level, message, now);
-        self.client_last_signature = Some(signature);
+        self.push_log_raw(source, level, message, SystemTime::now());
     }
 
     fn push_log_raw(&mut self, source: &str, level: &str, message: &str, now: SystemTime) {
@@ -447,19 +414,6 @@ impl App {
             message: message.to_string(),
             created_at: now,
         });
-    }
-
-    fn flush_client_repeat_summary_if_needed(&mut self) {
-        if self.client_repeat_suppressed == 0 {
-            return;
-        }
-
-        let summary = format!(
-            "[ ↳ Above CLIENT pattern repeated {} times ]",
-            self.client_repeat_suppressed
-        );
-        self.push_log_raw("CLIENT", "INFO", &summary, SystemTime::now());
-        self.client_repeat_suppressed = 0;
     }
 
     /// Builds a canonical logfmt message used across client-side events.
@@ -532,18 +486,19 @@ impl App {
             .map(|(name, _)| name.clone())
     }
 
-    pub fn set_connected_lxc_stacks<I>(&mut self, stacks: I)
-    where
-        I: IntoIterator<Item = String>,
-    {
-        let mut unique = HashSet::new();
-        let mut values: Vec<String> = stacks
-            .into_iter()
-            .filter(|v| !v.trim().is_empty())
-            .filter(|v| unique.insert(v.clone()))
-            .collect();
-        values.sort();
-        self.connected_lxc_stacks = values;
+    pub fn set_lxc_source_connected(&mut self, source: &str, connected: bool) {
+        let Some(stack) = source.strip_prefix("lxc-") else {
+            return;
+        };
+
+        if connected {
+            if !self.connected_lxc_stacks.iter().any(|s| s == stack) {
+                self.connected_lxc_stacks.push(stack.to_string());
+                self.connected_lxc_stacks.sort();
+            }
+        } else {
+            self.connected_lxc_stacks.retain(|s| s != stack);
+        }
 
         let count = self.log_sources().len();
         if count == 0 {

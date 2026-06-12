@@ -456,7 +456,9 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
             }
         }
     } else {
-        eprintln!("No HOST env file found; falling back to process environment for secrets injection");
+        eprintln!(
+            "No HOST env file found; falling back to process environment for secrets injection"
+        );
     }
 
     // Env vars take precedence over the file for these critical keys
@@ -1168,10 +1170,10 @@ exit 1
         } else {
             detail
         };
-            return Err(format!(
-                "lxc-daemon did not start cleanly in LXC {}: {}",
-                vmid, msg
-            ));
+        return Err(format!(
+            "lxc-daemon did not start cleanly in LXC {}: {}",
+            vmid, msg
+        ));
     }
 
     eprintln!("LXC daemon service configured and healthy in LXC {}", vmid);

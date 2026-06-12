@@ -1,6 +1,6 @@
 [package]
 name = "client-app"
-version = "0.1.35"
+version = "0.1.36"
 edition = "2024"
 
 [dependencies]
@@ -20,6 +20,7 @@ futures = "0.3"
 tui-input = "0.8"
 tokio-tungstenite = "0.21"
 dotenvy = "0.15"
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 
 [[bin]]
 name = "CLIENT"

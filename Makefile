@@ -132,8 +132,24 @@ build-host: latch-sync-secrets
 	mv -f "$$tmp" $(APPS_DIR)/$(HOST_NAME)
 
 # Build the LXC daemon for Linux
+# Build inside a Debian 12-compatible Rust container so the binary stays portable
+# across the older glibc versions that exist inside deployed LXCs.
 build-lxc: latch-sync-secrets
-	cd $(LXC_SRC) && cargo build --release
+	@if ! command -v docker > /dev/null 2>&1; then \
+		echo "docker not found; build-lxc requires a containerized Rust builder"; \
+		exit 1; \
+	fi
+	@echo "Building LXC daemon in $(LXC_BASE_IMAGE_BUILDER)..."
+	docker run --rm \
+		--user "$$(id -u):$$(id -g)" \
+		-e HOME=/tmp \
+		-e CARGO_HOME=/tmp/cargo \
+		-e RUSTUP_HOME=/tmp/rustup \
+		-e RUSTUP_TOOLCHAIN=stable \
+		-v "$${PWD}:/work" \
+		-w /work/lxc-daemon \
+		$(LXC_BASE_IMAGE_BUILDER) \
+		cargo build --release --locked
 	@mkdir -p $(APPS_DIR)
 	@tmp="$(APPS_DIR)/$(LXC_NAME).new"; \
 	cp $(LXC_SRC)/target/release/$(LXC_NAME) "$$tmp" && \

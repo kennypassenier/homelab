@@ -6,6 +6,7 @@ Welcome to the Homelab GitOps repository. This project contains the infrastructu
 
 - HOST daemon updates are release-driven (GitHub Releases) rather than push-triggered.
 - LXC daemon image is built and published to GHCR via change-aware GitHub Actions.
+- Local `make build-lxc` now builds the daemon inside a Debian 12 Rust container so the resulting binary stays compatible with older glibc versions inside deployed LXCs.
 - Makefile build/release targets now auto-run `latch commit` + `latch push` on desktop before Rust builds (best-effort by default; configurable via env).
 - Deployment order, required tokens, and env templates are documented in `docs/deployment.md`.
 - HOST runs headless-only in deployed mode.

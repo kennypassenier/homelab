@@ -1,6 +1,6 @@
 # LXC Features (Current)
 
-Last updated: 2026-05-28
+Last updated: 2026-06-12
 
 ## Scope
 
@@ -31,4 +31,5 @@ Last updated: 2026-05-28
 
 - LXC daemon container image is built and published to GHCR through GitHub Actions.
 - Workflow is change-aware and only runs automatically when `lxc-daemon/` (or its workflow definition) changes.
+- Local `make build-lxc` uses a containerized Rust builder so the standalone daemon binary stays compatible with the older glibc versions present in deployed LXCs.
 - Runtime update endpoint can pull `ghcr.io/kennypassenier/homelab-lxc-daemon:latest` (or env override) and recreate the daemon compose service.

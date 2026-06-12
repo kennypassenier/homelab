@@ -1,6 +1,6 @@
 # LLM Context (Current)
 
-Last updated: 2026-06-05
+Last updated: 2026-06-12
 
 ## Architecture Summary
 
@@ -36,6 +36,7 @@ Last updated: 2026-06-05
 
 - HOST self-update is release-based (version/tag check), not push-based.
 - LXC daemon image delivery is automated via GHCR workflow with path-based change gating.
+- Local `make build-lxc` builds the daemon inside a Debian 12 Rust container so the generated artifact stays compatible with the libc versions found in deployed LXCs.
 - LXC bootstrap installs a prebuilt Debian-12-compatible `latch` binary (asset `latch-linux-x86_64-lxc.tar.gz`) pushed by HOST, then uses persistent `LATCH_PAT` / `LATCH_KEY` for headless operation; pass/keyring inside LXCs is optional.
 - HOST and LXC both expose installed `latch` binary version and update status via API: `GET /api/version` (HOST) and `GET /api/secrets/keyring` (LXC) include `latch_version` and `latch_last_update_secs` fields for operational visibility.
 - CLIENT stack wizard sets CPU/RAM/Disk defaults in `lxc-compose.yml` and keeps deploy disabled until explicit activation.

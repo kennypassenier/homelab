@@ -385,6 +385,21 @@ fn start_update_checker(status_tx: mpsc::Sender<String>) {
 /// Interval is controlled by HOST_PROVISION_INTERVAL_SECS (default: 300s).
 fn start_auto_provisioner(status_tx: mpsc::Sender<String>) {
     std::thread::spawn(move || {
+        let auto_enabled = std::env::var("HOST_AUTO_PROVISION_ENABLED")
+            .ok()
+            .map(|v| {
+                let normalized = v.trim().to_ascii_lowercase();
+                matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+            })
+            .unwrap_or(false);
+
+        if !auto_enabled {
+            let _ = status_tx.send(
+                "[provision] auto-provisioner disabled (set HOST_AUTO_PROVISION_ENABLED=1 to enable periodic reconcile)".to_string(),
+            );
+            return;
+        }
+
         // First run after 10 seconds so HOST is fully initialised before we start pct calls.
         std::thread::sleep(std::time::Duration::from_secs(10));
 

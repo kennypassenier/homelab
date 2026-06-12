@@ -319,7 +319,7 @@ release-lxc: version-bump-lxc build-lxc
 	mv -f "$$tmp" $(APPS_DIR)/LXC
 	@chmod +x $(APPS_DIR)/LXC
 	@rm -f $(APPS_DIR)/LXC-linux-x86_64-unknown-linux-gnu
-	@git add $(LXC_SRC)/Cargo.toml
+	@git add $(LXC_SRC)/Cargo.toml $(APPS_DIR)/LXC
 	@git diff --cached --quiet || git commit -m "Bump lxc-daemon version to v$(LXC_VERSION)"
 	@if git rev-parse -q --verify "refs/tags/lxc-daemon-v$(LXC_VERSION)" > /dev/null 2>&1; then \
 		echo "Tag lxc-daemon-v$(LXC_VERSION) already exists; skipping"; \

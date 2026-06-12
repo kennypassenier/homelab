@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Last updated: 2026-05-28
+Last updated: 2026-06-12
 
 This document describes the current deployment order, required credentials, environment files, and verification steps for bringing up the homelab stack safely.
 
@@ -143,6 +143,7 @@ HOST currently cares about:
 
 - `GITOPS_REPO` (recommended: `/root/homelab`)
 - `HOST_ENV_FILE` (recommended: `/root/homelab/config/.env`)
+- optional `HOST_AUTO_PROVISION_ENABLED=0` (default disabled; set `1` only if you want periodic autonomous reconcile without a CLIENT-triggered provision request)
 - `HOST_UPDATE_REPO`
 - `HOST_UPDATE_ASSET`
 - optional `HOST_UPDATE_TOKEN`
@@ -198,6 +199,13 @@ Desktop build/release latch strategy is:
 - Makefile build targets (`build`, `build-client`, `build-host`, `build-lxc`) auto-run `latch commit` + `latch push`
 - CI auto-skips this latch sync path
 - `LATCH_AUTO_SYNC` and `LATCH_SYNC_REQUIRED` control behavior
+
+## 9. Debug Runbook
+
+For copy/paste diagnostics and manual recovery commands for CLIENT, HOST, and LXC,
+use:
+
+- `docs/debug.md`
 
 Remote update latch strategy is:
 

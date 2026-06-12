@@ -8,7 +8,9 @@ Welcome to the Homelab GitOps repository. This project contains the infrastructu
 - LXC daemon image is built and published to GHCR via change-aware GitHub Actions.
 - Local `make build-lxc` now builds the daemon inside a Debian 12 Rust container so the resulting binary stays compatible with older glibc versions inside deployed LXCs.
 - Makefile build/release targets now auto-run `latch commit` + `latch push` on desktop before Rust builds (best-effort by default; configurable via env).
+- HOST auto-provisioning is now opt-in via `HOST_AUTO_PROVISION_ENABLED=1`; default behavior is provision only on explicit CLIENT/API trigger.
 - Deployment order, required tokens, and env templates are documented in `docs/deployment.md`.
+- Copy/paste diagnostics and manual recovery commands are documented in `docs/debug.md`.
 - HOST runs headless-only in deployed mode.
 - CLIENT keeps persistent websocket connections to HOST and active LXC stacks with automatic reconnect behavior.
 - CLIENT/HOST/LXC websocket links now use active keepalive traffic to prevent stale idle disconnects.

@@ -411,46 +411,52 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
     // Look for env file in multiple locations
     let host_env_file = std::env::var("HOST_ENV_FILE").ok();
     let default_env_file = default_host_env_file();
+    let persisted_env_file = "/var/lib/homelab/host-latch.env";
     let possible_paths = vec![
         host_env_file.as_deref().unwrap_or(""),
         default_env_file.as_str(),
         "/root/.env",
+        persisted_env_file,
     ];
 
     let env_file = possible_paths
         .iter()
         .find(|p| !p.is_empty() && Path::new(p).exists());
 
-    let Some(env_file) = env_file else {
-        eprintln!("No HOST env file found, skipping secrets injection");
-        return Ok(());
-    };
-
     // Extract LATCH_ variables from file and fallback to process env.
     // Also inject GITOPS_REPO_URL and GITOPS_REPO_TOKEN so the in-container
     // git operations can re-authenticate if the credential store is ever cleared.
-    let content =
-        std::fs::read_to_string(env_file).map_err(|e| format!("Failed to read env file: {}", e))?;
-
     let mut vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for raw_line in content.lines() {
-        let mut line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("export ") {
-            line = rest.trim();
-        }
-        if let Some((key, value)) = line.split_once('=') {
-            let key = key.trim();
-            if key.starts_with("LATCH_")
-                || key == "GITOPS_REPO_URL"
-                || key == "GITOPS_REPO_TOKEN"
-                || key == "GITHUB_PAT"
-            {
-                vars.insert(key.to_string(), value.trim().to_string());
+    if let Some(env_file) = env_file {
+        let content = std::fs::read_to_string(env_file)
+            .map_err(|e| format!("Failed to read env file '{}': {}", env_file, e))?;
+
+        for raw_line in content.lines() {
+            let mut line = raw_line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("export ") {
+                line = rest.trim();
+            }
+            if let Some((key, value)) = line.split_once('=') {
+                let key = key.trim();
+                if key.starts_with("LATCH_")
+                    || key == "GITOPS_REPO_URL"
+                    || key == "GITOPS_REPO_TOKEN"
+                    || key == "GITHUB_PAT"
+                {
+                    let clean = value
+                        .trim()
+                        .trim_matches('"')
+                        .trim_matches('\'')
+                        .to_string();
+                    vars.insert(key.to_string(), clean);
+                }
             }
         }
+    } else {
+        eprintln!("No HOST env file found; falling back to process environment for secrets injection");
     }
 
     // Env vars take precedence over the file for these critical keys
@@ -480,6 +486,25 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
     if vars.is_empty() {
         eprintln!("No secret variables found to inject");
         return Ok(());
+    }
+
+    // Persist only the core latch credentials so bootstrap can recover if HOST_ENV_FILE
+    // is temporarily unavailable after a restart.
+    if let (Some(pat), Some(key), Some(repo)) = (
+        vars.get("LATCH_PAT"),
+        vars.get("LATCH_KEY"),
+        vars.get("LATCH_SECRETS_REPO"),
+    ) {
+        let persisted_content = format!(
+            "LATCH_PAT={}\nLATCH_KEY={}\nLATCH_SECRETS_REPO={}\n",
+            pat, key, repo
+        );
+        let persisted_dir = Path::new("/var/lib/homelab");
+        let _ = std::fs::create_dir_all(persisted_dir);
+        let _ = std::fs::write(persisted_env_file, persisted_content);
+        let _ = Command::new("chmod")
+            .args(["600", persisted_env_file])
+            .output();
     }
 
     let mut keys: Vec<String> = vars.keys().cloned().collect();
@@ -901,34 +926,8 @@ echo "SSH access configured for GitHub user: ${{GITHUB_USER}}"
 fn install_lxc_daemon(vmid: u32) -> Result<(), String> {
     eprintln!("Installing LXC daemon in LXC {}...", vmid);
 
-    // Strategy 1: Try to pull the LXC daemon Docker image (preferred)
-    if let Ok(lxc_daemon_image) = std::env::var("LXC_DAEMON_IMAGE") {
-        let image = format!("{}:latest", lxc_daemon_image);
-        eprintln!("Attempting to pull LXC daemon image: {}", image);
-
-        let docker_pull = format!(
-            r#"
-if docker pull {} &>/dev/null; then
-    docker run --rm {} tar xOf /usr/local/bin/LXC > /tmp/lxc-daemon
-    mv /tmp/lxc-daemon /usr/local/bin/lxc-daemon
-    chmod +x /usr/local/bin/lxc-daemon
-    echo "LXC daemon extracted from docker image successfully"
-else
-    echo "Failed to pull docker image"
-    exit 1
-fi
-"#,
-            image, image
-        );
-
-        if pct_exec(vmid, &docker_pull).is_ok() {
-            eprintln!("LXC daemon installed from docker image");
-            return Ok(());
-        }
-        eprintln!("Docker image pull failed, falling back to binary method");
-    }
-
-    // Strategy 2: Copy binary from HOST build artifacts
+    // Strategy 1: Copy binary from HOST build artifacts first.
+    // This prevents stale remote images from overriding a freshly built compatible binary.
     let binary_paths = vec![
         format!("{}/apps/LXC", default_host_gitops_repo()),
         format!(
@@ -964,6 +963,33 @@ fi
             eprintln!("LXC daemon installed from binary");
             return Ok(());
         }
+    }
+
+    // Strategy 2: Try to pull the LXC daemon Docker image.
+    if let Ok(lxc_daemon_image) = std::env::var("LXC_DAEMON_IMAGE") {
+        let image = format!("{}:latest", lxc_daemon_image);
+        eprintln!("Attempting to pull LXC daemon image: {}", image);
+
+        let docker_pull = format!(
+            r#"
+if docker pull {} &>/dev/null; then
+    docker run --rm {} tar xOf /usr/local/bin/LXC > /tmp/lxc-daemon
+    mv /tmp/lxc-daemon /usr/local/bin/lxc-daemon
+    chmod +x /usr/local/bin/lxc-daemon
+    echo "LXC daemon extracted from docker image successfully"
+else
+    echo "Failed to pull docker image"
+    exit 1
+fi
+"#,
+            image, image
+        );
+
+        if pct_exec(vmid, &docker_pull).is_ok() {
+            eprintln!("LXC daemon installed from docker image");
+            return Ok(());
+        }
+        eprintln!("Docker image pull failed, falling back to placeholder");
     }
 
     // Strategy 3: Fallback to placeholder (should not reach in production)
@@ -1116,14 +1142,36 @@ sleep 3
 kill $DPID 2>/dev/null
 exit 1
 "#;
-    match pct_exec(vmid, health_script) {
-        Ok(out) => eprintln!("[lxc-daemon health] {}", out.trim()),
-        Err(e) => {
+    let output = Command::new("pct")
+        .arg("exec")
+        .arg(vmid.to_string())
+        .arg("--")
+        .arg("bash")
+        .arg("-c")
+        .arg(health_script)
+        .output()
+        .map_err(|e| format!("Failed to execute lxc-daemon health check: {}", e))?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !stdout.trim().is_empty() {
+            eprintln!("[lxc-daemon health] {}", stdout.trim());
+        }
+    } else {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = format!("{}\n{}", stdout.trim(), stderr.trim())
+            .trim()
+            .to_string();
+        let msg = if detail.is_empty() {
+            "health script returned a non-zero exit code without diagnostic output".to_string()
+        } else {
+            detail
+        };
             return Err(format!(
                 "lxc-daemon did not start cleanly in LXC {}: {}",
-                vmid, e
+                vmid, msg
             ));
-        }
     }
 
     eprintln!("LXC daemon service configured and healthy in LXC {}", vmid);

@@ -238,51 +238,78 @@ fn run_latch_pull(
     repo_path: &str,
     latch: &LatchPullRequest,
 ) -> Result<String, String> {
-    let command_preview = format!(
-        "{} pull{}{}",
-        resolve_latch_binary().unwrap_or_else(|| "latch".to_string()),
-        if latch.sparse.unwrap_or(true) {
-            " --sparse"
-        } else {
-            ""
-        },
-        latch
-            .env
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .map(|v| format!(" --env {}", v))
-            .unwrap_or_default()
-    );
+    let bin = resolve_latch_binary().unwrap_or_else(|| "latch".to_string());
+
+    // Build a display version with secrets redacted so the full command is visible in logs.
+    let mut preview_parts: Vec<String> = vec![bin.clone(), "pull".to_string()];
+    if latch.sparse.unwrap_or(true) { preview_parts.push("--sparse".to_string()); }
+    if let Some(v) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
+        preview_parts.extend(["--env".to_string(), v.to_string()]);
+    }
+    if latch.pat.as_deref().filter(|v| !v.trim().is_empty()).is_some() {
+        preview_parts.extend(["--PAT".to_string(), "[redacted]".to_string()]);
+    }
+    if latch.key.as_deref().filter(|v| !v.trim().is_empty()).is_some() {
+        preview_parts.extend(["--KEY".to_string(), "[redacted]".to_string()]);
+    }
+    if let Some(v) = latch.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
+        preview_parts.extend(["--REPO".to_string(), v.to_string()]);
+    }
+    if let Some(v) = latch.project.as_deref().filter(|v| !v.trim().is_empty()) {
+        preview_parts.extend(["--project".to_string(), v.to_string()]);
+    }
+    let command_preview = preview_parts.join(" ");
 
     {
         let mut s = state.lock().unwrap();
         s.add_log(
             LogLevel::Info,
-            format!(
-                "[sync] running command: cd {} && {}",
-                repo_path, command_preview
-            ),
+            format!("[sync] running command: cd {} && {}", repo_path, command_preview),
         );
     }
 
     let latch_bin = resolve_latch_binary().ok_or_else(|| "latch unavailable".to_string())?;
     let mut command = Command::new(latch_bin);
     command.arg("pull");
-    if latch.sparse.unwrap_or(true) {
-        command.arg("--sparse");
+    if latch.sparse.unwrap_or(true) { command.arg("--sparse"); }
+    if let Some(v) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
+        command.args(["--env", v]);
     }
-    if let Some(value) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
-        command.args(["--env", value]);
+    if let Some(v) = latch.pat.as_deref().filter(|v| !v.trim().is_empty()) {
+        command.args(["--PAT", v]);
+    }
+    if let Some(v) = latch.key.as_deref().filter(|v| !v.trim().is_empty()) {
+        command.args(["--KEY", v]);
+    }
+    if let Some(v) = latch.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
+        command.args(["--REPO", v]);
+    }
+    if let Some(v) = latch.project.as_deref().filter(|v| !v.trim().is_empty()) {
+        command.args(["--project", v]);
     }
 
     let output = command
         .current_dir(repo_path)
         .output()
         .map_err(|e| e.to_string())?;
+
     if output.status.success() {
-        Ok("latch pull ok".to_string())
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let out = stdout.trim();
+        if out.is_empty() {
+            Ok("latch pull ok".to_string())
+        } else {
+            Ok(format!("latch pull ok: {}", out))
+        }
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Err(format!(
+            "latch pull failed (exit {:?}):\nstderr: {}\nstdout: {}",
+            output.status.code(),
+            stderr.trim(),
+            stdout.trim()
+        ))
     }
 }
 

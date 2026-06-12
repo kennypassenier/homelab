@@ -75,35 +75,71 @@ fn run_latch_pull_before_update(latch: Option<&LatchPullRequest>) -> String {
     }
 
     let repo = env_nonempty("GITOPS_REPO", "/opt/gitops");
-    let Some(latch_bin) = resolve_latch_binary() else {
-        return "latch unavailable".to_string();
+    let latch_bin = match resolve_latch_binary() {
+        Some(bin) => bin,
+        None => return "latch unavailable (binary not found in PATH or known locations)".to_string(),
     };
 
-    let mut command = Command::new(latch_bin);
-    command.arg("pull");
-    if latch.and_then(|value| value.sparse).unwrap_or(true) {
-        command.arg("--sparse");
+    // Build display preview with secrets redacted.
+    let mut preview_parts: Vec<String> = vec![latch_bin.clone(), "pull".to_string()];
+    if latch.and_then(|l| l.sparse).unwrap_or(true) { preview_parts.push("--sparse".to_string()); }
+    if let Some(l) = latch {
+        if let Some(v) = l.env.as_deref().filter(|v| !v.trim().is_empty()) {
+            preview_parts.extend(["--env".to_string(), v.to_string()]);
+        }
+        if l.pat.as_deref().filter(|v| !v.trim().is_empty()).is_some() {
+            preview_parts.extend(["--PAT".to_string(), "[redacted]".to_string()]);
+        }
+        if l.key.as_deref().filter(|v| !v.trim().is_empty()).is_some() {
+            preview_parts.extend(["--KEY".to_string(), "[redacted]".to_string()]);
+        }
+        if let Some(v) = l.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
+            preview_parts.extend(["--REPO".to_string(), v.to_string()]);
+        }
+        if let Some(v) = l.project.as_deref().filter(|v| !v.trim().is_empty()) {
+            preview_parts.extend(["--project".to_string(), v.to_string()]);
+        }
     }
-    if let Some(latch) = latch {
-        if let Some(value) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
-            command.args(["--env", value]);
+    let preview = format!("cd {} && {}", repo, preview_parts.join(" "));
+    eprintln!("[self_update] latch pull: {}", preview); // appears in systemd journal
+
+    let mut command = Command::new(&latch_bin);
+    command.arg("pull");
+    if latch.and_then(|l| l.sparse).unwrap_or(true) { command.arg("--sparse"); }
+    if let Some(l) = latch {
+        if let Some(v) = l.env.as_deref().filter(|v| !v.trim().is_empty()) {
+            command.args(["--env", v]);
+        }
+        if let Some(v) = l.pat.as_deref().filter(|v| !v.trim().is_empty()) {
+            command.args(["--PAT", v]);
+        }
+        if let Some(v) = l.key.as_deref().filter(|v| !v.trim().is_empty()) {
+            command.args(["--KEY", v]);
+        }
+        if let Some(v) = l.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
+            command.args(["--REPO", v]);
+        }
+        if let Some(v) = l.project.as_deref().filter(|v| !v.trim().is_empty()) {
+            command.args(["--project", v]);
         }
     }
 
-    let output = command.current_dir(&repo).output();
-
-    match output {
-        Ok(o) if o.status.success() => "latch pull --sparse ok".to_string(),
+    match command.current_dir(&repo).output() {
+        Ok(o) if o.status.success() => {
+            let out = String::from_utf8_lossy(&o.stdout);
+            let out = out.trim();
+            if out.is_empty() { format!("latch pull ok [{}]", preview) }
+            else { format!("latch pull ok: {} [{}]", out, preview) }
+        }
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
-            let short = stderr
-                .lines()
-                .next()
-                .unwrap_or("unknown latch error")
-                .trim();
-            format!("latch pull failed: {}", short)
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            format!(
+                "latch pull failed (exit {:?}) [{}]\nstderr: {}\nstdout: {}",
+                o.status.code(), preview, stderr.trim(), stdout.trim()
+            )
         }
-        Err(e) => format!("latch pull unavailable: {}", e),
+        Err(e) => format!("latch pull spawn failed: {} [{}]", e, preview),
     }
 }
 

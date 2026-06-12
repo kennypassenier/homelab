@@ -115,12 +115,28 @@ enum HostProbeEvent {
     },
 }
 
+enum HostVersionEvent {
+    Snapshot {
+        connected: bool,
+        version: Option<String>,
+        latch_version: Option<String>,
+        error: Option<String>,
+    },
+}
+
 #[derive(Deserialize)]
 struct HostMetricsResponse {
     hostname: String,
     ip: String,
     uptime_secs: u64,
     lxc_runtime: Vec<HostLxcRuntime>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HostVersionResponse {
+    component: String,
+    version: String,
+    latch_version: Option<String>,
 }
 
 enum UpdateDispatchEvent {
@@ -205,6 +221,7 @@ async fn async_main() -> Result<()> {
     // WebSocket event channel: receives continuous log streams from HOST and LXC stacks.
     let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<WsEvent>();
     let (host_probe_tx, mut host_probe_rx) = mpsc::unbounded_channel::<HostProbeEvent>();
+    let (host_version_tx, mut host_version_rx) = mpsc::unbounded_channel::<HostVersionEvent>();
 
     let sigint = signal::ctrl_c();
     tokio::pin!(sigint);
@@ -226,10 +243,26 @@ async fn async_main() -> Result<()> {
 
     // Always keep HOST websocket connected while CLIENT is running.
     let host_ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    app.push_log(
+        "HOST",
+        "INFO",
+        &format!(
+            "HOST handshake: connecting websocket ws://{}:8080/api/logs/ws",
+            host_ip
+        ),
+    );
     let ws_tx_host = ws_tx.clone();
     tokio::spawn(async move {
         ws_client::connect_host_logs(&host_ip, 8080, ws_tx_host).await;
     });
+
+    {
+        let tx = host_version_tx.clone();
+        tokio::spawn(async move {
+            let snapshot = probe_host_version().await;
+            let _ = tx.send(snapshot);
+        });
+    }
 
     for (stack, ip) in active_stack_targets(&app.stacks) {
         let stack_clone = stack.clone();
@@ -410,6 +443,13 @@ async fn async_main() -> Result<()> {
                 } => {
                     if source == "HOST" {
                         app.host_connected = connected;
+                        if connected {
+                            let tx = host_version_tx.clone();
+                            tokio::spawn(async move {
+                                let snapshot = probe_host_version().await;
+                                let _ = tx.send(snapshot);
+                            });
+                        }
                         let msg = if connected {
                             "HOST WebSocket connected".to_string()
                         } else {
@@ -430,6 +470,34 @@ async fn async_main() -> Result<()> {
                             )
                         };
                         app.push_log(&source, if connected { "INFO" } else { "WARN" }, &msg);
+                    }
+                }
+            }
+        }
+
+        while let Ok(event) = host_version_rx.try_recv() {
+            match event {
+                HostVersionEvent::Snapshot {
+                    connected,
+                    version,
+                    latch_version,
+                    error,
+                } => {
+                    if connected {
+                        let daemon = version.unwrap_or_else(|| "unknown".to_string());
+                        let latch = latch_version.unwrap_or_else(|| "unknown".to_string());
+                        let msg = format!(
+                            "HOST announce daemon_version={} latch_version={}",
+                            daemon, latch
+                        );
+                        app.push_log("HOST", "INFO", &msg);
+                        track_daemon_version(&mut app, "HOST", &msg);
+                    } else if let Some(err) = error {
+                        app.push_log(
+                            "HOST",
+                            "WARN",
+                            &format!("HOST version probe failed: {}", err),
+                        );
                     }
                 }
             }
@@ -1675,6 +1743,59 @@ async fn probe_host_runtime() -> HostProbeEvent {
             uptime: None,
             lxc_runtime: Vec::new(),
             error: Some("host metrics timeout".to_string()),
+        },
+    }
+}
+
+async fn probe_host_version() -> HostVersionEvent {
+    let host_ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+    let url = format!("http://{}:8080/api/version", host_ip);
+    let client = reqwest::Client::new();
+    let mut request = client.get(&url);
+    if !token.trim().is_empty() {
+        request = request.bearer_auth(token);
+    }
+
+    let response = tokio::time::timeout(Duration::from_secs(6), request.send()).await;
+
+    match response {
+        Ok(Ok(resp)) if resp.status().is_success() => {
+            match resp.json::<HostVersionResponse>().await {
+                Ok(payload) => {
+                    let _component = payload.component;
+                    HostVersionEvent::Snapshot {
+                        connected: true,
+                        version: Some(payload.version),
+                        latch_version: payload.latch_version,
+                        error: None,
+                    }
+                }
+                Err(err) => HostVersionEvent::Snapshot {
+                    connected: false,
+                    version: None,
+                    latch_version: None,
+                    error: Some(format!("version parse failed: {}", err)),
+                },
+            }
+        }
+        Ok(Ok(resp)) => HostVersionEvent::Snapshot {
+            connected: false,
+            version: None,
+            latch_version: None,
+            error: Some(format!("version HTTP {}", resp.status())),
+        },
+        Ok(Err(err)) => HostVersionEvent::Snapshot {
+            connected: false,
+            version: None,
+            latch_version: None,
+            error: Some(err.to_string()),
+        },
+        Err(_) => HostVersionEvent::Snapshot {
+            connected: false,
+            version: None,
+            latch_version: None,
+            error: Some("host version timeout".to_string()),
         },
     }
 }

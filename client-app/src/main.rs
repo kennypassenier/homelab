@@ -7,7 +7,10 @@ use color_eyre::eyre::Result;
 use crossterm::{
     cursor::{MoveTo, Show},
     event, execute,
-    terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
+    },
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::cmp::Ordering;

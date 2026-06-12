@@ -16,8 +16,7 @@ use ratatui::{
 use crate::app::{App, LogLevelFilter, Tab};
 use crate::blast_radius::{
     ActiveModal, draw_app_config_editor, draw_app_creation_wizard, draw_delete_app_modal,
-    draw_delete_lxc_modal,
-    draw_operation_progress, draw_ssh_add_wizard, draw_stack_config_editor,
+    draw_delete_lxc_modal, draw_operation_progress, draw_ssh_add_wizard, draw_stack_config_editor,
     draw_stack_creation_wizard, draw_warning_modal,
 };
 

@@ -486,10 +486,7 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
     keys.sort();
     let secrets_content = keys
         .into_iter()
-        .filter_map(|key| {
-            vars.get(&key)
-                .map(|value| format!("{}={}", key, value))
-        })
+        .filter_map(|key| vars.get(&key).map(|value| format!("{}={}", key, value)))
         .collect::<Vec<String>>()
         .join("\n");
 

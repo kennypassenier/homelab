@@ -5,8 +5,8 @@ hostname: 109-app-cloudflared
 hwaddr: 02:10:2b:c3:b8:9e
 tags: []
 deploy:
-  enabled: true
-  activated_at: '1781257729'
+  enabled: false
+  activated_at: null
 network:
   bridge: vmbr0
   ip_mode: static

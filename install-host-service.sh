@@ -61,6 +61,9 @@ EnvironmentFile=-$ENV_FILE
 ExecStart=$binary_path
 Restart=always
 RestartSec=5
+# Disable the default burst limit so the service restarts unconditionally
+# after updates or crashes without ever entering the 'failed' state.
+StartLimitIntervalSec=0
 StandardOutput=journal
 StandardError=journal
 

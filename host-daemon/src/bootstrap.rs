@@ -771,45 +771,46 @@ fn setup_git_sparse_checkout(vmid: u32, stack_name: &str) -> Result<(), String> 
     let repo_url = std::env::var("GITOPS_REPO_URL")
         .unwrap_or_else(|_| "https://github.com/kennypassenier/homelab.git".to_string());
 
-    // Extract repo path from URL
-    let repo_path = repo_url
-        .strip_prefix("https://github.com/")
-        .or_else(|| repo_url.strip_prefix("https://"))
-        .unwrap_or(&repo_url);
+    // Inject PAT directly into the https:// URL, preserving the full hostname.
+    // e.g. https://github.com/owner/repo.git → https://<PAT>@github.com/owner/repo.git
+    let auth_url = if repo_url.starts_with("https://") {
+        format!("https://{}@{}", github_pat, &repo_url["https://".len()..])
+    } else {
+        repo_url.clone()
+    };
 
     let setup_script = format!(
         r#"
 set -euo pipefail
 
 GITOPS_DIR="/opt/gitops"
-STACK_NAME="{}"
-REPO_PATH="{}"
-GITHUB_PAT="{}"
+STACK_NAME="{stack}"
+AUTH_URL="{auth_url}"
 
 # Remove existing gitops dir if present
 rm -rf $GITOPS_DIR
 
 # Clone with PAT authentication
-git clone --filter=blob:none --no-checkout \
-    https://${{GITHUB_PAT}}@${{REPO_PATH}} $GITOPS_DIR
+git clone --filter=blob:none --no-checkout "$AUTH_URL" $GITOPS_DIR
 
 cd $GITOPS_DIR
 
 # Configure sparse checkout
 git sparse-checkout init --cone
-git sparse-checkout set stacks/${{STACK_NAME}}
+git sparse-checkout set stacks/$STACK_NAME
 
 # Checkout main branch
 git checkout main
 
-# Store PAT for future pulls
+# Store credentials for future pulls (strip PAT from display)
 git config credential.helper store
-echo "https://${{GITHUB_PAT}}@${{REPO_PATH}}" > ~/.git-credentials
+echo "$AUTH_URL" > ~/.git-credentials
 chmod 600 ~/.git-credentials
 
-echo "Sparse checkout completed for stack: ${{STACK_NAME}}"
+echo "Sparse checkout completed for stack: $STACK_NAME"
 "#,
-        stack_name, repo_path, github_pat
+        stack = stack_name,
+        auth_url = auth_url,
     );
 
     pct_exec(vmid, &setup_script)?;

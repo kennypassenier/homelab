@@ -264,16 +264,6 @@ async fn async_main() -> Result<()> {
         });
     }
 
-    for (stack, ip) in active_stack_targets(&app.stacks) {
-        let stack_clone = stack.clone();
-        let ip_clone = ip.clone();
-        let ws_tx_lxc = ws_tx.clone();
-        let handle = tokio::spawn(async move {
-            ws_client::connect_lxc_logs(&stack_clone, &ip_clone, 8080, ws_tx_lxc).await;
-        });
-        lxc_ws_tasks.insert(stack, handle);
-    }
-
     {
         let tx = host_probe_tx.clone();
         tokio::spawn(async move {
@@ -310,10 +300,11 @@ async fn async_main() -> Result<()> {
                     app.sync_status = format!("Sync accepted — '{}'", stack);
                 }
                 SyncEvent::LiveLog { stack, line } => {
-                    app.mark_live_logs_seen();
-                    let source = format!("lxc-{}", stack);
-                    let (level, message) = parse_live_log_line(&line);
-                    app.push_log(&source, &level, &message);
+                    if let Some((level, message)) = parse_live_log_line(&line) {
+                        app.mark_live_logs_seen();
+                        let source = format!("lxc-{}", stack);
+                        app.push_log(&source, &level, &message);
+                    }
                 }
                 SyncEvent::Finished { stack, ok, msg } => {
                     let level = if ok { "INFO" } else { "ERROR" };
@@ -700,132 +691,75 @@ async fn async_main() -> Result<()> {
 
         // If a sync was queued by key actions, spawn the HTTP request now.
         if app.sync_pending {
-            app.sync_pending = false;
             let stack = app.sync_stack.clone();
-            let tx = sync_tx.clone();
+            if !app.lxc_ready_stacks.contains(&stack) {
+                app.sync_status =
+                    format!("Waiting for HOST readiness gate before sync - '{}'", stack);
+            } else {
+                app.sync_pending = false;
+                let tx = sync_tx.clone();
 
-            // Resolve LXC IP: prefer stacks/<name>/lxc-compose.yml reserved_ipv4,
-            // then fall back to LXC_API_IP env var, then 127.0.0.1.
-            let ip = resolve_stack_api_ip(&stack);
-            let url = format!("http://{}:8080/api/sync", ip);
-            let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
-            app.push_client_logfmt(
-                "INFO",
-                Some(&stack),
-                Some("sync_dispatch"),
-                &format!("WS sync_request -> {}:8080", ip),
-                None,
-            );
+                // Resolve LXC IP: prefer stacks/<name>/lxc-compose.yml reserved_ipv4,
+                // then fall back to LXC_API_IP env var, then 127.0.0.1.
+                let ip = resolve_stack_api_ip(&stack);
+                let url = format!("http://{}:8080/api/sync", ip);
+                let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+                app.push_client_logfmt(
+                    "INFO",
+                    Some(&stack),
+                    Some("sync_dispatch"),
+                    &format!("WS sync_request -> {}:8080", ip),
+                    None,
+                );
 
-            tokio::spawn(async move {
-                if request_lxc_sync_ws(&ip, &token).await.is_ok() {
-                    let _ = tx.send(SyncEvent::Accepted {
-                        stack: stack.clone(),
-                    });
-
-                    let ws_url = format!("ws://{}:8080/api/logs/ws", ip);
-                    if let Ok((mut socket, _)) = connect_async(&ws_url).await {
-                        let mut streamed_any = false;
-                        loop {
-                            match tokio::time::timeout(Duration::from_secs(2), socket.next()).await
-                            {
-                                Ok(Some(Ok(message))) => {
-                                    if let Ok(text) = message.into_text() {
-                                        streamed_any = true;
-                                        let _ = tx.send(SyncEvent::LiveLog {
-                                            stack: stack.clone(),
-                                            line: text,
-                                        });
-                                    }
-                                }
-                                Ok(Some(Err(err))) => {
-                                    let _ = tx.send(SyncEvent::Finished {
-                                        stack,
-                                        ok: false,
-                                        msg: format!("Live log stream failed: {}", err),
-                                    });
-                                    return;
-                                }
-                                Ok(None) => break,
-                                Err(_) if streamed_any => break,
-                                Err(_) => break,
-                            }
-                        }
-                    }
-
-                    let _ = tx.send(SyncEvent::Finished {
-                        stack,
-                        ok: true,
-                        msg: "Sync completed via WebSocket RPC; live logs streamed to CLIENT"
-                            .to_string(),
-                    });
-                    return;
-                }
-
-                let client = reqwest::Client::new();
-                let mut req = client.post(&url);
-                if !token.is_empty() {
-                    req = req.bearer_auth(&token);
-                }
-                match req.send().await {
-                    Ok(resp) if resp.status().is_success() => {
+                tokio::spawn(async move {
+                    if request_lxc_sync_ws(&ip, &token).await.is_ok() {
                         let _ = tx.send(SyncEvent::Accepted {
                             stack: stack.clone(),
                         });
 
-                        let ws_url = format!("ws://{}:8080/api/logs/ws", ip);
-                        if let Ok((mut socket, _)) = connect_async(&ws_url).await {
-                            let mut streamed_any = false;
-                            loop {
-                                match tokio::time::timeout(Duration::from_secs(2), socket.next())
-                                    .await
-                                {
-                                    Ok(Some(Ok(message))) => {
-                                        if let Ok(text) = message.into_text() {
-                                            streamed_any = true;
-                                            let _ = tx.send(SyncEvent::LiveLog {
-                                                stack: stack.clone(),
-                                                line: text,
-                                            });
-                                        }
-                                    }
-                                    Ok(Some(Err(err))) => {
-                                        let _ = tx.send(SyncEvent::Finished {
-                                            stack,
-                                            ok: false,
-                                            msg: format!("Live log stream failed: {}", err),
-                                        });
-                                        return;
-                                    }
-                                    Ok(None) => break,
-                                    Err(_) if streamed_any => break,
-                                    Err(_) => break,
-                                }
-                            }
-                        }
-
                         let _ = tx.send(SyncEvent::Finished {
                             stack,
                             ok: true,
-                            msg: "Sync completed; live logs streamed to CLIENT".to_string(),
+                            msg: "Sync completed via WebSocket RPC; live logs streamed to CLIENT"
+                                .to_string(),
                         });
+                        return;
                     }
-                    Ok(resp) => {
-                        let _ = tx.send(SyncEvent::Finished {
-                            stack,
-                            ok: false,
-                            msg: format!("HTTP {}", resp.status()),
-                        });
+
+                    let client = reqwest::Client::new();
+                    let mut req = client.post(&url);
+                    if !token.is_empty() {
+                        req = req.bearer_auth(&token);
                     }
-                    Err(e) => {
-                        let _ = tx.send(SyncEvent::Finished {
-                            stack,
-                            ok: false,
-                            msg: e.to_string(),
-                        });
+                    match req.send().await {
+                        Ok(resp) if resp.status().is_success() => {
+                            let _ = tx.send(SyncEvent::Accepted {
+                                stack: stack.clone(),
+                            });
+                            let _ = tx.send(SyncEvent::Finished {
+                                stack,
+                                ok: true,
+                                msg: "Sync completed; live logs streamed to CLIENT".to_string(),
+                            });
+                        }
+                        Ok(resp) => {
+                            let _ = tx.send(SyncEvent::Finished {
+                                stack,
+                                ok: false,
+                                msg: format!("HTTP {}", resp.status()),
+                            });
+                        }
+                        Err(e) => {
+                            let _ = tx.send(SyncEvent::Finished {
+                                stack,
+                                ok: false,
+                                msg: e.to_string(),
+                            });
+                        }
                     }
-                }
-            });
+                });
+            }
         }
 
         if app.restore_pending {
@@ -1117,6 +1051,9 @@ async fn async_main() -> Result<()> {
                                     if lxc_ws_tasks.contains_key(&stack) {
                                         continue;
                                     }
+                                    if !app.lxc_ready_stacks.contains(&stack) {
+                                        continue;
+                                    }
                                     let ws_tx_lxc = ws_tx.clone();
                                     let stack_clone = stack.clone();
                                     let ip_clone = ip.clone();
@@ -1229,18 +1166,35 @@ fn compare_host_tag_versions(a: &str, b: &str) -> Ordering {
     Ordering::Equal
 }
 
-fn parse_live_log_line(line: &str) -> (String, String) {
-    let level = line
-        .split_whitespace()
-        .find_map(|part| part.strip_prefix("level="))
-        .map(|value| value.trim_matches('"').to_uppercase())
+fn parse_live_log_line(line: &str) -> Option<(String, String)> {
+    if line.contains("\"kind\":\"ws_keepalive\"") || line.contains("kind=ws_keepalive") {
+        return None;
+    }
+
+    let level = extract_logfmt_field(line, "level")
+        .map(|value| value.to_uppercase())
         .unwrap_or_else(|| "INFO".to_string());
-    let message = line
-        .split_whitespace()
-        .find_map(|part| part.strip_prefix("msg="))
-        .map(|value| value.trim_matches('"').replace('"', ""))
-        .unwrap_or_else(|| line.to_string());
-    (level, message)
+    if level == "DEBUG" {
+        return None;
+    }
+
+    let message = extract_logfmt_field(line, "msg").unwrap_or_else(|| line.trim().to_string());
+    Some((level, message))
+}
+
+fn extract_logfmt_field(line: &str, field: &str) -> Option<String> {
+    let needle = format!("{}=", field);
+    let idx = line.find(&needle)?;
+    let mut value = &line[idx + needle.len()..];
+
+    if let Some(stripped) = value.strip_prefix('"') {
+        value = stripped;
+        let end = value.find('"')?;
+        return Some(value[..end].to_string());
+    }
+
+    let end = value.find(char::is_whitespace).unwrap_or(value.len());
+    Some(value[..end].trim_matches('"').to_string())
 }
 
 fn resolve_stack_api_ip(stack: &str) -> String {

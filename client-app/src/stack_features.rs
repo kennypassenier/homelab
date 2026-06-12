@@ -619,7 +619,7 @@ fn scaffold_watchtower(stack_name: &str) -> io::Result<()> {
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(
-            "services:\n  watchtower:\n    image: nicholas-fedor/watchtower:latest\n    container_name: {}-watchtower\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n    environment:\n      WATCHTOWER_LABEL_ENABLE: \"true\"\n      WATCHTOWER_CLEANUP: \"true\"\n      WATCHTOWER_POLL_INTERVAL: \"86400\"\n      WATCHTOWER_ROLLING_RESTART: \"true\"\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n",
+            "services:\n  watchtower:\n    image: containrrr/watchtower:latest\n    container_name: {}-watchtower\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n    environment:\n      WATCHTOWER_LABEL_ENABLE: \"true\"\n      WATCHTOWER_CLEANUP: \"true\"\n      WATCHTOWER_POLL_INTERVAL: \"86400\"\n      WATCHTOWER_ROLLING_RESTART: \"true\"\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n",
             stack_name
         ),
     )

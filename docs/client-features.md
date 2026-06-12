@@ -9,8 +9,9 @@ Last updated: 2026-06-12
 - Backup/restore/patch orchestration surfaces.
 - Structured client logfmt-style event emission for critical operations.
 - CLIENT keeps the full session log stream because HOST and LXC now bound their own replay histories.
-- Live deploy telemetry streamed from LXC daemon WebSocket logs during sync actions.
+- Live deploy telemetry streamed from a single persistent LXC daemon WebSocket path during sync actions (no secondary replay stream).
 - Persistent websocket supervision for HOST plus all deploy-enabled stacks, with auto-reconnect for stale/no-signal streams.
+- Sync dispatch is now gated on HOST `lxc_ready` signals so CLIENT never sends LXC sync requests before HOST bootstrap finishes.
 - Client-side provisioning dispatch debounce suppresses duplicate HOST provision requests during reconnect/key-repeat storms.
 - Logs tab ingestion suppresses identical consecutive LXC log lines within a short window to reduce repeated warning noise.
 - CLIENT control-plane actions now use websocket RPC on LXC `/api/logs/ws` for sync, restore, heartbeat, and remote command execution (with HTTP fallback kept for compatibility).

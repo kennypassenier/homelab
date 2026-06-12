@@ -5,8 +5,9 @@
 
 use color_eyre::eyre::Result;
 use crossterm::{
+    cursor::{MoveTo, Show},
     event, execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::cmp::Ordering;
@@ -900,8 +901,8 @@ async fn async_main() -> Result<()> {
         tokio::select! {
             _ = &mut sigint => {
                 disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-                terminal.show_cursor()?;
+                execute!(terminal.backend_mut(), Show, LeaveAlternateScreen)?;
+                execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
                 return Ok(());
             }
 
@@ -1041,8 +1042,8 @@ async fn async_main() -> Result<()> {
     }
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    execute!(terminal.backend_mut(), Show, LeaveAlternateScreen)?;
+    execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
     Ok(())
 }
 

@@ -64,8 +64,7 @@ const SOURCE_COLORS: &[ratatui::style::Color] = &[
     ratatui::style::Color::Rgb(255, 128, 0),
 ];
 
-/// Keep a short trail of emitted CLIENT signatures to detect repeated patterns.
-const CLIENT_FOLD_TRAIL_LIMIT: usize = 24;
+/// Track only immediate CLIENT duplicates; keep folding strict and conservative.
 
 /// Which log levels are visible in the Logs tab.
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -186,14 +185,10 @@ pub struct App {
     pub live_logs_seen: bool,
     /// Currently connected LXC stacks (source names are rendered as `lxc-<stack>`).
     connected_lxc_stacks: Vec<String>,
-    /// Folded CLIENT pattern currently being suppressed.
-    client_fold_pattern: Option<Vec<String>>,
-    /// Next expected item index inside `client_fold_pattern`.
-    client_fold_next_index: usize,
-    /// Number of suppressed CLIENT lines while folding is active.
-    client_fold_suppressed_lines: usize,
-    /// Recently emitted CLIENT signatures (level|message), used to detect 1-3 line loops.
-    client_recent_emitted: VecDeque<String>,
+    /// Most recently emitted CLIENT signature (`level|message`).
+    client_last_signature: Option<String>,
+    /// Number of immediate CLIENT duplicate lines suppressed after first print.
+    client_repeat_suppressed: usize,
 
     // ── Animation state (driven by anim_tick at 33 ms) ─────────────────────
     /// Sinusoidal phase (0..2π) for pulse/breathing effects on selected items.
@@ -323,10 +318,8 @@ impl App {
             log_level_filter: LogLevelFilter::All,
             live_logs_seen: false,
             connected_lxc_stacks: Vec::new(),
-            client_fold_pattern: None,
-            client_fold_next_index: 0,
-            client_fold_suppressed_lines: 0,
-            client_recent_emitted: VecDeque::new(),
+            client_last_signature: None,
+            client_repeat_suppressed: 0,
             pulse_phase: 0.0,
             ticker_offset: 0,
             ticker_content,
@@ -422,49 +415,28 @@ impl App {
 
         // Zero-buffer pass-through for non-CLIENT sources.
         if source != "CLIENT" {
-            self.flush_client_fold_summary_if_needed();
+            self.flush_client_repeat_summary_if_needed();
             self.push_log_raw(source, level, message, now);
             return;
         }
 
         let signature = format!("{}|{}", level, message);
 
-        // If we're currently folding a CLIENT pattern, keep suppressing while it matches.
-        if self.client_fold_pattern.is_some() {
-            let expected = {
-                let pattern = self.client_fold_pattern.as_ref().unwrap();
-                pattern[self.client_fold_next_index].clone()
-            };
-            if signature == expected {
-                self.client_fold_suppressed_lines += 1;
-                let pattern_len = self
-                    .client_fold_pattern
-                    .as_ref()
-                    .map(|p| p.len())
-                    .unwrap_or(1)
-                    .max(1);
-                self.client_fold_next_index = (self.client_fold_next_index + 1) % pattern_len;
-                return;
-            }
-
-            // Pattern broke: emit one summary line, then continue with the current line.
-            self.flush_client_fold_summary_if_needed();
-        }
-
-        // Start folding only after the first instance has already been printed.
-        if let Some((pattern, next_index)) = self.detect_client_repeat_start(&signature) {
-            self.client_fold_pattern = Some(pattern);
-            self.client_fold_next_index = next_index;
-            self.client_fold_suppressed_lines = 1;
+        if self
+            .client_last_signature
+            .as_deref()
+            .map(|last| last == signature)
+            .unwrap_or(false)
+        {
+            self.client_repeat_suppressed += 1;
             return;
         }
 
-        // Default: immediate pass-through.
+        // Signature changed: flush any trailing duplicate summary first,
+        // then pass through the first instance immediately.
+        self.flush_client_repeat_summary_if_needed();
         self.push_log_raw(source, level, message, now);
-        self.client_recent_emitted.push_back(signature);
-        while self.client_recent_emitted.len() > CLIENT_FOLD_TRAIL_LIMIT {
-            self.client_recent_emitted.pop_front();
-        }
+        self.client_last_signature = Some(signature);
     }
 
     fn push_log_raw(&mut self, source: &str, level: &str, message: &str, now: SystemTime) {
@@ -477,50 +449,17 @@ impl App {
         });
     }
 
-    fn detect_client_repeat_start(&self, signature: &str) -> Option<(Vec<String>, usize)> {
-        if let Some(last) = self.client_recent_emitted.back() {
-            if last == signature {
-                return Some((vec![signature.to_string()], 0));
-            }
-        }
-
-        let recent: Vec<String> = self.client_recent_emitted.iter().cloned().collect();
-        for pattern_len in [2usize, 3usize] {
-            if recent.len() < pattern_len * 2 {
-                continue;
-            }
-            let start = recent.len() - (pattern_len * 2);
-            let first = &recent[start..start + pattern_len];
-            let second = &recent[start + pattern_len..start + pattern_len * 2];
-            if first == second && signature == first[0] {
-                let pattern: Vec<String> = first.to_vec();
-                return Some((pattern, 1 % pattern_len));
-            }
-        }
-
-        None
-    }
-
-    fn flush_client_fold_summary_if_needed(&mut self) {
-        if self.client_fold_suppressed_lines == 0 {
-            self.client_fold_pattern = None;
-            self.client_fold_next_index = 0;
+    fn flush_client_repeat_summary_if_needed(&mut self) {
+        if self.client_repeat_suppressed == 0 {
             return;
         }
 
-        let pattern_len = self
-            .client_fold_pattern
-            .as_ref()
-            .map(|p| p.len())
-            .unwrap_or(1)
-            .max(1);
-        let repeats = (self.client_fold_suppressed_lines / pattern_len).max(1);
-        let summary = format!("[ ↳ Above CLIENT pattern repeated {} times ]", repeats);
+        let summary = format!(
+            "[ ↳ Above CLIENT pattern repeated {} times ]",
+            self.client_repeat_suppressed
+        );
         self.push_log_raw("CLIENT", "INFO", &summary, SystemTime::now());
-
-        self.client_fold_pattern = None;
-        self.client_fold_next_index = 0;
-        self.client_fold_suppressed_lines = 0;
+        self.client_repeat_suppressed = 0;
     }
 
     /// Builds a canonical logfmt message used across client-side events.

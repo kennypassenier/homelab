@@ -432,21 +432,26 @@ async fn async_main() -> Result<()> {
                         ("INFO".to_string(), line.clone())
                     };
 
-                    app.push_log(&source, &level, &message);
-                    track_daemon_version(&mut app, &source, &message);
-
-                    // Parse HOST lxc_ready signals so ws_reconcile knows when
-                    // a container is actually bootstrapped and ready to connect.
+                    // Intercept HOST lxc_ready signals BEFORE pushing to the log.
+                    // add_log sends "[INFO] {json}" so we check the stripped `message`.
+                    // Suppress the raw JSON from the visible log; emit a human line instead.
                     if source == "HOST" {
-                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&message) {
                             if v.get("kind").and_then(|k| k.as_str()) == Some("lxc_ready") {
                                 if let Some(stack) = v.get("stack").and_then(|s| s.as_str()) {
                                     app.mark_lxc_ready(stack);
-                                    app.push_log("HOST", "INFO", &format!("[lxc_ready] stack={} — LXC is bootstrapped, starting WS worker", stack));
+                                    app.push_log("HOST", "INFO", &format!(
+                                        "[lxc_ready] stack={stack} — bootstrap done, connecting LXC websocket"
+                                    ));
                                 }
+                                // Don't push the raw JSON line to the visible log.
+                                continue;
                             }
                         }
                     }
+
+                    app.push_log(&source, &level, &message);
+                    track_daemon_version(&mut app, &source, &message);
                 }
                 WsEvent::ConnectionStateChanged {
                     source,

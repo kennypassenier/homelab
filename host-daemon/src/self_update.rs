@@ -57,6 +57,17 @@ pub fn check_and_apply_update(release_tag: Option<&str>) -> Result<String, Strin
     make_executable(&tmp)?;
     validate_candidate_binary(&tmp)?;
 
+    // Ensure parent directory exists before creating the backup.
+    if let Some(parent) = backup.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create backup directory {}: {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+
     fs::copy(&exe, &backup).map_err(|e| {
         format!(
             "Failed to create update backup at {}: {}",
@@ -115,13 +126,13 @@ pub fn check_and_apply_update_with_latch_pull(
     latch: Option<&LatchPullRequest>,
     release_tag: Option<&str>,
 ) -> Result<String, String> {
-    let latch_note = run_latch_pull_before_remote_update(latch);
-    match check_and_apply_update(release_tag) {
-        Ok(msg) => Ok(format!("{} [{}]", msg, latch_note)),
-        Err(err) => Err(format!("{} [{}]", err, latch_note)),
-    }
+    // HOST (Proxmox) does not have latch installed and does not need it —
+    // secret sync is the LXC daemon's job. Skip silently.
+    let _ = latch;
+    check_and_apply_update(release_tag)
 }
 
+#[allow(dead_code)]
 fn run_latch_pull_before_remote_update(latch: Option<&LatchPullRequest>) -> String {
     if !env_bool("HOST_LATCH_PULL_ON_UPDATE", true) {
         return "latch pull disabled".to_string();
@@ -131,7 +142,7 @@ fn run_latch_pull_before_remote_update(latch: Option<&LatchPullRequest>) -> Stri
     let latch_bin = match resolve_latch_binary() {
         Some(bin) => bin,
         None => {
-            return "latch unavailable (binary not found in PATH or known locations)".to_string();
+            return "latch unavailable".to_string();
         }
     };
 

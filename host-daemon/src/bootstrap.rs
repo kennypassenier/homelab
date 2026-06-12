@@ -136,12 +136,10 @@ pub fn bootstrap_lxc(
         &format!("[bootstrap] latch CLI installed in LXC {}", vmid),
     );
 
-    // Run latch login to configure secrets remote
-    log(
-        "info",
-        &format!("[bootstrap] Running latch login in LXC {}", vmid),
-    );
-    run_latch_login(vmid, log)?;
+    // NOTE: No latch login here. The LXC daemon receives full credentials
+    // (--PAT --KEY --REPO --project) from CLIENT on every sync request and
+    // calls `latch pull` directly with those flags. A stored ~/.latch/config.toml
+    // is not needed and can interfere by supplying wrong defaults.
 
     // Git setup
     log(

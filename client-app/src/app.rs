@@ -64,11 +64,14 @@ const SOURCE_COLORS: &[ratatui::style::Color] = &[
     ratatui::style::Color::Rgb(255, 128, 0),
 ];
 
-/// Suppress info/ok log lines that appeared within this window to eliminate
-/// repeating single-line and sequence spam. WARN and ERROR always pass through.
-const LOG_DEDUP_WINDOW: Duration = Duration::from_secs(60);
+/// Suppress INFO log lines that appear repeatedly within this window to kill
+/// rapid-fire burst spam (e.g. the same 2-3 lines cycling every second).
+/// WARN, ERROR and OK always pass through so real outcomes are never hidden.
+/// 8 seconds is enough to absorb a daemon's reconnect flood without hiding
+/// any intentional re-run of a sync/update cycle.
+const LOG_DEDUP_WINDOW: Duration = Duration::from_secs(8);
 /// Maximum number of fingerprints kept in the dedup ring-buffer.
-const LOG_DEDUP_RING_SIZE: usize = 256;
+const LOG_DEDUP_RING_SIZE: usize = 128;
 
 /// Which log levels are visible in the Logs tab.
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -412,9 +415,9 @@ impl App {
     pub fn push_log(&mut self, source: &str, level: &str, message: &str) {
         let now = SystemTime::now();
 
-        // WARN and ERROR always get through — suppressing them would make the
-        // logs useless when something actually breaks.
-        let is_important = matches!(level, "WARN" | "ERROR");
+        // WARN, ERROR and OK always get through — they signal real outcomes and
+        // suppressing them would make the logs useless when something completes or breaks.
+        let is_important = matches!(level, "WARN" | "ERROR" | "OK");
 
         if !is_important {
             let key = format!("{}|{}|{}", source, level, message);

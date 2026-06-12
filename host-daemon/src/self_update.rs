@@ -43,8 +43,13 @@ pub fn check_and_apply_update() -> Result<String, String> {
     make_executable(&tmp)?;
     validate_candidate_binary(&tmp)?;
 
-    fs::copy(&exe, &backup)
-        .map_err(|e| format!("Failed to create update backup at {}: {}", backup.display(), e))?;
+    fs::copy(&exe, &backup).map_err(|e| {
+        format!(
+            "Failed to create update backup at {}: {}",
+            backup.display(),
+            e
+        )
+    })?;
     make_executable(&backup)?;
 
     fs::rename(&tmp, &exe).map_err(|e| {
@@ -280,7 +285,9 @@ fn validate_candidate_binary(path: &PathBuf) -> Result<(), String> {
         if text.contains("not found") {
             return Err(format!(
                 "Downloaded binary failed dynamic-link preflight: {}",
-                text.lines().find(|line| line.contains("not found")).unwrap_or("unresolved dependency")
+                text.lines()
+                    .find(|line| line.contains("not found"))
+                    .unwrap_or("unresolved dependency")
             ));
         }
     }
@@ -288,7 +295,11 @@ fn validate_candidate_binary(path: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn schedule_update_watchdog(service: &str, exe: &std::path::Path, backup: &std::path::Path) -> Result<(), String> {
+fn schedule_update_watchdog(
+    service: &str,
+    exe: &std::path::Path,
+    backup: &std::path::Path,
+) -> Result<(), String> {
     let delay_secs = std::env::var("HOST_UPDATE_VERIFY_DELAY_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())

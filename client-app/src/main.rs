@@ -503,6 +503,7 @@ async fn async_main() -> Result<()> {
         if app.provision_pending {
             app.provision_pending = false;
             let stack = app.sync_stack.clone();
+            let tx = sync_tx.clone();
             app.push_client_logfmt(
                 "INFO",
                 Some(&stack),
@@ -512,8 +513,26 @@ async fn async_main() -> Result<()> {
             );
             tokio::spawn(async move {
                 match trigger_host_provision().await {
-                    Ok(msg) => eprintln!("[provision] {}", msg),
-                    Err(e) => eprintln!("[provision] failed: {}", e),
+                    Ok(msg) => {
+                        let _ = tx.send(SyncEvent::LiveLog {
+                            stack: stack.clone(),
+                            line: format!(
+                                "CLIENT INFO component=client level=info stack={} phase=provision_result msg=\"{}\"",
+                                stack,
+                                msg.replace('"', "'")
+                            ),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(SyncEvent::LiveLog {
+                            stack: stack.clone(),
+                            line: format!(
+                                "CLIENT ERROR component=client level=error stack={} phase=provision_result msg=\"HOST provision failed\" error=\"{}\"",
+                                stack,
+                                e.replace('"', "'")
+                            ),
+                        });
+                    }
                 }
             });
         }

@@ -167,6 +167,10 @@ pub struct App {
     pub logs: Vec<LogLine>,
     /// Lines from the bottom to scroll back by (0 = live / pinned to newest).
     pub log_scroll: usize,
+    /// Horizontal character offset for long log messages.
+    pub log_hscroll: usize,
+    /// When true, log messages are rendered in wrapped mode instead of horizontal pan mode.
+    pub log_wrap_mode: bool,
     /// Horizontal scroll offset for the Sources legend (index of first visible source).
     pub log_source_scroll: usize,
     /// Currently selected source in the Logs source legend.
@@ -294,6 +298,8 @@ impl App {
             stack_scroll: 0,
             logs: Vec::new(),
             log_scroll: 0,
+            log_hscroll: 0,
+            log_wrap_mode: false,
             log_source_scroll: 0,
             log_source_selected: 0,
             log_focus_mode: false,

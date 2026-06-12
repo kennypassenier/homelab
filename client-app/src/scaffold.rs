@@ -15,6 +15,8 @@ pub struct StackConfig {
     pub bridge: String,
     pub ip_mode: String,
     pub reserved_ipv4: Option<String>,
+    pub cidr: u8,
+    pub gateway: Option<String>,
     pub vlan_tag: Option<u16>,
     pub firewall: bool,
     pub ip_mode_v6: Option<String>,
@@ -153,6 +155,8 @@ network:
   bridge: "vmbr0"
   ip_mode: "static"
   reserved_ipv4: null
+    cidr: 24
+    gateway: "10.10.10.1"
   vlan_tag: 10
   firewall: false
   ip_mode_v6: null
@@ -241,6 +245,23 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         .and_then(|m| m.get(Value::String("reserved_ipv4".to_string())))
         .and_then(Value::as_str)
         .map(|v| v.to_string());
+
+    let cidr = network
+        .and_then(|m| m.get(Value::String("cidr".to_string())))
+        .and_then(Value::as_u64)
+        .map(|v| v as u8)
+        .unwrap_or(24);
+
+    let gateway = network
+        .and_then(|m| m.get(Value::String("gateway".to_string())))
+        .and_then(|v| {
+            if v.is_null() {
+                None
+            } else {
+                v.as_str().map(|s| s.to_string())
+            }
+        })
+        .or_else(|| Some("10.10.10.1".to_string()));
 
     let vlan_tag = network
         .and_then(|m| m.get(Value::String("vlan_tag".to_string())))
@@ -420,6 +441,8 @@ pub fn read_stack_config(stack_name: &str) -> io::Result<StackConfig> {
         bridge,
         ip_mode,
         reserved_ipv4,
+        cidr,
+        gateway,
         vlan_tag,
         firewall,
         ip_mode_v6,
@@ -512,6 +535,18 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
         Value::String("reserved_ipv4".to_string()),
         config
             .reserved_ipv4
+            .as_ref()
+            .map(|v| Value::String(v.clone()))
+            .unwrap_or(Value::Null),
+    );
+    network.insert(
+        Value::String("cidr".to_string()),
+        Value::Number((config.cidr as u64).into()),
+    );
+    network.insert(
+        Value::String("gateway".to_string()),
+        config
+            .gateway
             .as_ref()
             .map(|v| Value::String(v.clone()))
             .unwrap_or(Value::Null),

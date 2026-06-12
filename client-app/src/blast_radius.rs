@@ -95,6 +95,8 @@ pub struct StackConfigEditorState {
     pub bridge: String,
     pub ip_mode: String,
     pub reserved_ipv4: Option<String>,
+    pub cidr: u8,
+    pub gateway: Option<String>,
     pub autostart: bool,
     pub startup_order: u32,
     pub cpu_cores: u8,

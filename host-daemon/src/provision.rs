@@ -867,10 +867,7 @@ pub fn apply_provisioning_changes(
                                 ),
                             }
                         }
-                        return Err(format!(
-                            "CREATE failed for stack '{}': {}",
-                            stack, e
-                        ));
+                        return Err(format!("CREATE failed for stack '{}': {}", stack, e));
                     }
                 }
             }
@@ -961,10 +958,7 @@ pub fn apply_provisioning_changes(
                                 ),
                             }
                         }
-                        return Err(format!(
-                            "UPDATE failed for stack '{}': {}",
-                            stack, e
-                        ));
+                        return Err(format!("UPDATE failed for stack '{}': {}", stack, e));
                     }
                 }
             }

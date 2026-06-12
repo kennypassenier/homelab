@@ -141,6 +141,14 @@ fn stack_is_active(stack_name: &str) -> bool {
     crate::scaffold::is_stack_deploy_enabled(stack_name).unwrap_or(false)
 }
 
+fn single_line(text: &str) -> String {
+    text.replace('\n', " | ").replace('\r', " ")
+}
+
+fn slice_chars(text: &str, offset: usize, max_chars: usize) -> String {
+    text.chars().skip(offset).take(max_chars).collect()
+}
+
 fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -325,7 +333,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
     );
 
     f.render_widget(
-        Paragraph::new(format!("  status: {}", app.sync_status))
+        Paragraph::new(format!("  status: {}", single_line(&app.sync_status)))
             .style(Style::default().fg(Color::Rgb(140, 160, 170))),
         rows[2],
     );
@@ -548,7 +556,7 @@ Notify failure:     {}\n",
     );
 
     f.render_widget(
-        Paragraph::new(format!("  status: {}", app.backup_status))
+        Paragraph::new(format!("  status: {}", single_line(&app.backup_status)))
             .style(Style::default().fg(Color::Rgb(140, 160, 170))),
         rows[2],
     );
@@ -1195,7 +1203,7 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
     } else if app.update_status.is_empty() {
         "Ready".to_string()
     } else {
-        app.update_status.clone()
+        single_line(&app.update_status)
     };
 
     let status_color =
@@ -1351,12 +1359,17 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     let total = filtered.len();
     let end = total.saturating_sub(scroll);
     let start = end.saturating_sub(inner_height);
+    let inner_log_width = chunks[1].width.saturating_sub(2) as usize;
+    let prefix_width = 10 + 18 + 7;
+    let msg_width = inner_log_width.saturating_sub(prefix_width).max(1);
 
     let items: Vec<ListItem> = filtered[start..end]
         .iter()
         .map(|line| {
             let src_color = log_source_color(&line.source);
             let level_style = log_level_style(&line.level);
+            let msg = single_line(&line.message);
+            let visible_msg = slice_chars(&msg, app.log_hscroll, msg_width);
             let mut spans = vec![
                 Span::styled(
                     format!(" {} ", line.time),
@@ -1368,7 +1381,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
                 ),
                 Span::styled(format!("{:<6} ", line.level), level_style),
             ];
-            spans.extend(styled_log_message(&line.message));
+            spans.extend(styled_log_message(visible_msg));
             ListItem::new(Line::from(spans))
         })
         .collect();
@@ -1406,18 +1419,18 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     let status = if app.log_level_filter == LogLevelFilter::All {
         if scroll == 0 {
             format!(
-                " {} lines  |  \u{2191}/\u{2193} scroll  |  </> source{}",
+                " {} lines  |  \u{2191}/\u{2193} scroll  |  h/l line-pan  |  </> source{}",
                 all_total, focus_suffix
             )
         } else {
             format!(
-                " -{} from latest  |  End = resume  |  {}/{} lines{}",
-                scroll, end, total, focus_suffix
+                " -{} from latest  |  End = resume  |  hscroll={}  |  {}/{} lines{}",
+                scroll, app.log_hscroll, end, total, focus_suffix
             )
         }
     } else {
         format!(
-            " {} / {} lines  [filter: {}]  |  [f] cycle filter{}",
+            " {} / {} lines  [filter: {}]  |  [f] cycle filter  |  h/l line-pan{}",
             total,
             all_total,
             app.log_level_filter.label(),
@@ -1452,7 +1465,7 @@ fn log_level_style(level: &str) -> Style {
     }
 }
 
-fn styled_log_message<'a>(message: &'a str) -> Vec<Span<'a>> {
+fn styled_log_message(message: String) -> Vec<Span<'static>> {
     let tags = [
         ("[host-update]", Color::Cyan),
         ("[failsafe]", Color::Yellow),
@@ -1465,7 +1478,7 @@ fn styled_log_message<'a>(message: &'a str) -> Vec<Span<'a>> {
         if let Some(rest) = message.strip_prefix(tag) {
             return vec![
                 Span::styled(tag, Style::default().fg(color).add_modifier(Modifier::BOLD)),
-                Span::raw(rest),
+                Span::raw(rest.to_string()),
             ];
         }
     }

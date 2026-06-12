@@ -571,12 +571,20 @@ fn acquire_lxc_compatible_latch_binary_on_host() -> Result<String, String> {
         .unwrap_or_else(|_| "kennypassenier/latch-rs".to_string());
     let update_asset = std::env::var("LATCH_LXC_UPDATE_ASSET")
         .unwrap_or_else(|_| "latch-linux-x86_64-lxc.tar.gz".to_string());
-    let api_url = format!("https://api.github.com/repos/{}/releases/latest", update_repo);
+    let api_url = format!(
+        "https://api.github.com/repos/{}/releases/latest",
+        update_repo
+    );
 
     let client = reqwest::blocking::Client::builder()
         .user_agent("homelab-host-daemon/latch-bootstrap")
         .build()
-        .map_err(|e| format!("Failed to build HTTP client for latch release lookup: {}", e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to build HTTP client for latch release lookup: {}",
+                e
+            )
+        })?;
 
     let mut req = client.get(api_url);
     if let Ok(token) = std::env::var("HOST_UPDATE_TOKEN") {
@@ -602,7 +610,10 @@ fn acquire_lxc_compatible_latch_binary_on_host() -> Result<String, String> {
             arr.iter().find_map(|asset| {
                 let name = asset.get("name")?.as_str()?;
                 if name == update_asset {
-                    asset.get("browser_download_url")?.as_str().map(str::to_string)
+                    asset
+                        .get("browser_download_url")?
+                        .as_str()
+                        .map(str::to_string)
                 } else {
                     None
                 }
@@ -643,7 +654,12 @@ fn acquire_lxc_compatible_latch_binary_on_host() -> Result<String, String> {
     })?;
 
     let output = Command::new("tar")
-        .args(["-xzf", &archive_path.to_string_lossy(), "-C", &temp_dir.to_string_lossy()])
+        .args([
+            "-xzf",
+            &archive_path.to_string_lossy(),
+            "-C",
+            &temp_dir.to_string_lossy(),
+        ])
         .output()
         .map_err(|e| format!("Failed to run tar for latch LXC asset: {}", e))?;
 

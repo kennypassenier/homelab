@@ -8,11 +8,11 @@ deploy:
   enabled: false
   activated_at: null
 network:
-  bridge: vmbr0
-  ip_mode: static
-  reserved_ipv4: 10.10.10.9
+  bridge: "vmbr0"
+  ip_mode: "static"
+  reserved_ipv4: "10.10.10.9"
   cidr: 24
-  gateway: 10.10.10.1
+  gateway: "10.10.10.1"
   vlan_tag: 10
   firewall: false
   ip_mode_v6: null

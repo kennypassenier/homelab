@@ -730,6 +730,8 @@ fn handle_stack_config_editor(
                         bridge: state.bridge.clone(),
                         ip_mode: state.ip_mode.clone(),
                         reserved_ipv4: state.reserved_ipv4.clone(),
+                        cidr: state.cidr,
+                        gateway: state.gateway.clone(),
                         vlan_tag: state.vlan_tag,
                         firewall: state.firewall,
                         ip_mode_v6: state.ip_mode_v6.clone(),
@@ -798,6 +800,8 @@ fn handle_stack_config_editor(
                         bridge: state.bridge.clone(),
                         ip_mode: state.ip_mode.clone(),
                         reserved_ipv4: state.reserved_ipv4.clone(),
+                        cidr: state.cidr,
+                        gateway: state.gateway.clone(),
                         vlan_tag: state.vlan_tag,
                         firewall: state.firewall,
                         ip_mode_v6: state.ip_mode_v6.clone(),
@@ -1283,10 +1287,14 @@ fn handle_host_management_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
 fn handle_logs_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
     match key.code {
         KeyCode::Up => {
-            // Clamp at (total - 1) so we never scroll past the oldest line.
-            let max_scroll = app.logs.len().saturating_sub(1);
-            if app.log_scroll < max_scroll {
+            if app.log_wrap_mode {
                 app.log_scroll += 1;
+            } else {
+                // Clamp at (total - 1) so we never scroll past the oldest line.
+                let max_scroll = app.logs.len().saturating_sub(1);
+                if app.log_scroll < max_scroll {
+                    app.log_scroll += 1;
+                }
             }
         }
         KeyCode::Down => {
@@ -1294,6 +1302,17 @@ fn handle_logs_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
         }
         KeyCode::End => {
             app.log_scroll = 0;
+        }
+        // Horizontal message scroll (vim-style keys) for long log lines.
+        KeyCode::Char('h') => {
+            if !app.log_wrap_mode {
+                app.log_hscroll = app.log_hscroll.saturating_sub(8);
+            }
+        }
+        KeyCode::Char('l') => {
+            if !app.log_wrap_mode {
+                app.log_hscroll = app.log_hscroll.saturating_add(8);
+            }
         }
         // Source legend horizontal scroll.
         KeyCode::Left => {
@@ -1314,11 +1333,19 @@ fn handle_logs_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
             app.log_level_filter = app.log_level_filter.next();
             // Reset scroll so we don't overshoot the filtered view.
             app.log_scroll = 0;
+            app.log_hscroll = 0;
         }
         // Toggle source focus mode on the selected source.
         KeyCode::Char('F') => {
             app.log_focus_mode = !app.log_focus_mode;
             app.log_scroll = 0;
+            app.log_hscroll = 0;
+        }
+        // Toggle wrapped rendering for long log lines.
+        KeyCode::Char('w') | KeyCode::Char('W') => {
+            app.log_wrap_mode = !app.log_wrap_mode;
+            app.log_scroll = 0;
+            app.log_hscroll = 0;
         }
         KeyCode::Tab => app.tab_right(),
         KeyCode::BackTab => app.tab_left(),
@@ -1880,6 +1907,8 @@ fn handle_scaffolding_enter(app: &mut App) -> EventOutcome {
                             bridge: config.bridge,
                             ip_mode: config.ip_mode,
                             reserved_ipv4: config.reserved_ipv4,
+                            cidr: config.cidr,
+                            gateway: config.gateway,
                             autostart: config.autostart,
                             startup_order: config.startup_order,
                             cpu_cores: config.cpu_cores,

@@ -10,9 +10,9 @@ use axum::{
 };
 use serde::Serialize;
 use std::collections::VecDeque;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::process::Command;
 use tokio::sync::broadcast;
 
 static PROVISION_CYCLE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -235,23 +235,28 @@ fn resolve_latch_binary() -> Option<String> {
         }
     }
 
-    ["/usr/local/bin/latch", "/usr/bin/latch", "/home/linuxbrew/.linuxbrew/bin/latch", "latch"]
-        .iter()
-        .find_map(|candidate| {
-            if *candidate == "latch" {
-                let output = Command::new(candidate).arg("--version").output().ok()?;
-                if output.status.success() {
-                    return Some(candidate.to_string());
-                }
-                return None;
+    [
+        "/usr/local/bin/latch",
+        "/usr/bin/latch",
+        "/home/linuxbrew/.linuxbrew/bin/latch",
+        "latch",
+    ]
+    .iter()
+    .find_map(|candidate| {
+        if *candidate == "latch" {
+            let output = Command::new(candidate).arg("--version").output().ok()?;
+            if output.status.success() {
+                return Some(candidate.to_string());
             }
+            return None;
+        }
 
-            if std::path::Path::new(candidate).exists() {
-                Some(candidate.to_string())
-            } else {
-                None
-            }
-        })
+        if std::path::Path::new(candidate).exists() {
+            Some(candidate.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 async fn handle_update(
@@ -269,7 +274,9 @@ async fn handle_update(
     let app_clone = app.clone();
     tokio::task::spawn_blocking(move || {
         let latch = payload.as_ref().and_then(|Json(body)| body.latch.as_ref());
-        let release_tag = payload.as_ref().and_then(|Json(body)| body.release_tag.as_deref());
+        let release_tag = payload
+            .as_ref()
+            .and_then(|Json(body)| body.release_tag.as_deref());
         let result = self_update::check_and_apply_update_with_latch_pull(latch, release_tag);
         let mut a = app_clone.lock().unwrap();
         match result {

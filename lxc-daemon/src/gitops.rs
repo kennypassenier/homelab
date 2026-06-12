@@ -479,29 +479,71 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         match run_latch_pull(&state, GITOPS_REPO, latch) {
             Ok(msg) => {
                 let mut s = state.lock().unwrap();
-                s.add_log(
-                    LogLevel::Ok,
-                    format!("ts=now level=info stack={} latch msg=\"{}\"", sn, msg),
-                );
+                s.add_log(LogLevel::Ok, format!("[latch] stack={} {}", sn, msg));
             }
             Err(e) => {
+                // Log full multi-line error so every line is visible in CLIENT.
                 let mut s = state.lock().unwrap();
-                s.add_log(
-                    LogLevel::Warn,
-                    format!(
-                        "ts=now level=warn stack={} latch msg=\"pull failed: {}\"",
-                        sn, e
-                    ),
-                );
+                for line in e.lines() {
+                    s.add_log(LogLevel::Error, format!("[latch] stack={} {}", sn, line));
+                }
             }
         }
     } else {
+        // Tell operator exactly what is missing so they can fix the credential flow.
+        let s_ref = state.lock().unwrap();
+        let missing: Vec<&str> = [
+            (
+                "PAT",
+                s_ref
+                    .latch_credentials
+                    .as_ref()
+                    .and_then(|l| l.pat.as_deref())
+                    .filter(|v| !v.trim().is_empty())
+                    .is_none(),
+            ),
+            (
+                "KEY",
+                s_ref
+                    .latch_credentials
+                    .as_ref()
+                    .and_then(|l| l.key.as_deref())
+                    .filter(|v| !v.trim().is_empty())
+                    .is_none(),
+            ),
+            (
+                "REPO",
+                s_ref
+                    .latch_credentials
+                    .as_ref()
+                    .and_then(|l| l.secrets_repo.as_deref())
+                    .filter(|v| !v.trim().is_empty())
+                    .is_none(),
+            ),
+        ]
+        .iter()
+        .filter_map(|(name, missing)| if *missing { Some(*name) } else { None })
+        .collect();
+        let no_creds = s_ref.latch_credentials.is_none();
+        drop(s_ref);
         let mut s = state.lock().unwrap();
-        s.add_log(
-            LogLevel::Info,
-            "latch pull skipped: no credentials available (CLIENT will push on next heartbeat)"
-                .to_string(),
-        );
+        if no_creds {
+            s.add_log(
+                LogLevel::Error,
+                "[latch] SKIP — no credentials: CLIENT has not sent a latch payload yet. \
+                 Set LATCH_PAT/LATCH_KEY/LATCH_SECRETS_REPO in config/.env and restart CLIENT."
+                    .to_string(),
+            );
+        } else if !missing.is_empty() {
+            s.add_log(
+                LogLevel::Error,
+                format!(
+                    "[latch] SKIP — credentials incomplete, missing fields: {}. \
+                         Check LATCH_PAT/LATCH_KEY/LATCH_SECRETS_REPO in config/.env.",
+                    missing.join(", ")
+                ),
+            );
+        }
     }
 
     // ── Step 4: pre-sync hooks (pre-sync.sh) if present ────────────────────
@@ -564,10 +606,7 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
             let mut s = state.lock().unwrap();
             s.add_log(
                 LogLevel::Info,
-                format!(
-                    "[sync] running command: cd {} && docker compose pull -q",
-                    app_dir
-                ),
+                format!("[sync] cd {} && docker compose pull -q", app_dir),
             );
         }
 
@@ -580,10 +619,17 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
                 .output()
                 .map_err(|e| e.to_string())
                 .and_then(|o| {
+                    let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
                     if o.status.success() {
-                        Ok(())
+                        Ok(format!("exit=0 stdout={} stderr={}", stdout, stderr))
                     } else {
-                        Err(String::from_utf8_lossy(&o.stderr).to_string())
+                        Err(format!(
+                            "exit={:?} stdout={} stderr={}",
+                            o.status.code(),
+                            stdout,
+                            stderr
+                        ))
                     }
                 })
         })
@@ -593,22 +639,19 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         {
             let mut s = state.lock().unwrap();
             match &pull {
-                Ok(_) => s.add_log(
+                Ok(out) => s.add_log(
                     LogLevel::Info,
-                    format!(
-                        "ts=now stack={} app={} msg=\"images pulled\"",
-                        stack_name, app_name
-                    ),
+                    format!("[sync] docker compose pull app={} {}", app_name, out),
                 ),
-                Err(e) => s.add_log(
-                    LogLevel::Warn,
-                    format!(
-                        "ts=now level=warn stack={} app={} msg=\"pull warning: {}\"",
-                        stack_name,
-                        app_name,
-                        e.lines().next().unwrap_or("")
-                    ),
-                ),
+                Err(e) => {
+                    // Log every line of the error so nothing is hidden in CLIENT.
+                    for line in e.lines() {
+                        s.add_log(
+                            LogLevel::Error,
+                            format!("[sync] docker compose pull app={} {}", app_name, line),
+                        );
+                    }
+                }
             }
         }
 
@@ -617,7 +660,7 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
             s.add_log(
                 LogLevel::Info,
                 format!(
-                    "[sync] running command: cd {} && docker compose up -d --remove-orphans",
+                    "[sync] cd {} && docker compose up -d --remove-orphans",
                     app_dir
                 ),
             );
@@ -632,10 +675,17 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
                 .output()
                 .map_err(|e| e.to_string())
                 .and_then(|o| {
+                    let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
                     if o.status.success() {
-                        Ok(())
+                        Ok(format!("exit=0 stdout={} stderr={}", stdout, stderr))
                     } else {
-                        Err(String::from_utf8_lossy(&o.stderr).to_string())
+                        Err(format!(
+                            "exit={:?} stdout={} stderr={}",
+                            o.status.code(),
+                            stdout,
+                            stderr
+                        ))
                     }
                 })
         })
@@ -644,22 +694,18 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
 
         let mut s = state.lock().unwrap();
         match up {
-            Ok(_) => s.add_log(
+            Ok(out) => s.add_log(
                 LogLevel::Ok,
-                format!(
-                    "ts=now level=info stack={} app={} msg=\"containers up\"",
-                    stack_name, app_name
-                ),
+                format!("[sync] docker compose up app={} {}", app_name, out),
             ),
-            Err(e) => s.add_log(
-                LogLevel::Error,
-                format!(
-                    "ts=now level=error stack={} app={} msg=\"compose up failed: {}\"",
-                    stack_name,
-                    app_name,
-                    e.lines().next().unwrap_or("")
-                ),
-            ),
+            Err(e) => {
+                for line in e.lines() {
+                    s.add_log(
+                        LogLevel::Error,
+                        format!("[sync] docker compose up app={} {}", app_name, line),
+                    );
+                }
+            }
         }
     }
 

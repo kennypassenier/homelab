@@ -183,6 +183,9 @@ pub struct App {
     pub live_logs_seen: bool,
     /// Currently connected LXC stacks (source names are rendered as `lxc-<stack>`).
     connected_lxc_stacks: Vec<String>,
+    /// Stacks whose LXC container HOST has confirmed is fully bootstrapped and ready.
+    /// The ws_reconcile loop only starts a worker for a stack once it appears here.
+    pub lxc_ready_stacks: std::collections::HashSet<String>,
 
     // ── Animation state (driven by anim_tick at 33 ms) ─────────────────────
     /// Sinusoidal phase (0..2π) for pulse/breathing effects on selected items.
@@ -319,6 +322,7 @@ impl App {
             lxc_ram,
             host_selected: 0,
             rng,
+            lxc_ready_stacks: std::collections::HashSet::new(),
             provision_pending: false,
             sync_pending: false,
             sync_stack: String::new(),
@@ -484,6 +488,11 @@ impl App {
         self.log_sources()
             .get(self.log_source_selected)
             .map(|(name, _)| name.clone())
+    }
+
+    /// Mark a stack as ready (LXC fully bootstrapped). Called when HOST signals lxc_ready.
+    pub fn mark_lxc_ready(&mut self, stack: &str) {
+        self.lxc_ready_stacks.insert(stack.to_string());
     }
 
     pub fn set_lxc_source_connected(&mut self, source: &str, connected: bool) {

@@ -736,6 +736,24 @@ pub fn run_provisioning_cycle(app: &Arc<Mutex<App>>, dry_run: bool) {
         };
         a.add_log(level, format!("[provision] {}", line));
     }
+
+    // Signal CLIENT which stacks now have a live LXC container.
+    // CLIENT ws_reconcile waits for this before starting WS workers,
+    // preventing "connection refused" spam during bootstrap.
+    for action in &actions {
+        let stack_name = match action {
+            provision::ProvisionAction::Ok { stack, .. } => Some(stack.as_str()),
+            provision::ProvisionAction::Create { stack, .. } => Some(stack.as_str()),
+            provision::ProvisionAction::Recreate { stack, .. } => Some(stack.as_str()),
+            provision::ProvisionAction::Update { stack, .. } => Some(stack.as_str()),
+            provision::ProvisionAction::ResumeBootstrap { stack, .. } => Some(stack.as_str()),
+            provision::ProvisionAction::Skip { .. } => None,
+        };
+        if let Some(stack) = stack_name {
+            let signal = serde_json::json!({ "kind": "lxc_ready", "stack": stack });
+            a.add_log(LogLevel::Info, signal.to_string());
+        }
+    }
 }
 
 /// Destroy one stack container by stack name (called from HTTP and WS RPC handlers).

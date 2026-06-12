@@ -434,6 +434,19 @@ async fn async_main() -> Result<()> {
 
                     app.push_log(&source, &level, &message);
                     track_daemon_version(&mut app, &source, &message);
+
+                    // Parse HOST lxc_ready signals so ws_reconcile knows when
+                    // a container is actually bootstrapped and ready to connect.
+                    if source == "HOST" {
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                            if v.get("kind").and_then(|k| k.as_str()) == Some("lxc_ready") {
+                                if let Some(stack) = v.get("stack").and_then(|s| s.as_str()) {
+                                    app.mark_lxc_ready(stack);
+                                    app.push_log("HOST", "INFO", &format!("[lxc_ready] stack={} — LXC is bootstrapped, starting WS worker", stack));
+                                }
+                            }
+                        }
+                    }
                 }
                 WsEvent::ConnectionStateChanged {
                     source,
@@ -518,9 +531,20 @@ async fn async_main() -> Result<()> {
                         node_name,
                         node_ip,
                         uptime,
-                        lxc_runtime,
+                        lxc_runtime.clone(),
                         error,
                     );
+                    // Mark already-running LXCs as ready so their WS workers
+                    // start immediately on CLIENT reconnect (no need to wait for
+                    // a fresh bootstrap signal for containers that already exist).
+                    for lxc in &lxc_runtime {
+                        if lxc.status.eq_ignore_ascii_case("run") {
+                            // LXC name format is "<vmid>-app-<stack>" — extract stack part.
+                            if let Some(stack_part) = lxc.name.split("-app-").nth(1) {
+                                app.mark_lxc_ready(stack_part);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1002,6 +1026,13 @@ async fn async_main() -> Result<()> {
 
                 for (stack, ip) in active_targets {
                     if lxc_ws_tasks.contains_key(&stack) {
+                        continue;
+                    }
+                    // Only connect when HOST has signalled the LXC is ready
+                    // (bootstrapped + daemon running). This prevents a flood of
+                    // "connection refused" errors while the container is still
+                    // being created by HOST.
+                    if !app.lxc_ready_stacks.contains(&stack) {
                         continue;
                     }
                     let ws_tx_lxc = ws_tx.clone();

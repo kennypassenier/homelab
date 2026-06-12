@@ -99,6 +99,11 @@ async fn stream_logs(source: String, url: &str, tx: mpsc::UnboundedSender<WsEven
                                     if line.contains("\"kind\":\"ws_keepalive\"") {
                                         continue;
                                     }
+                                    // Drop heartbeat debug spam — these fire every 30s and
+                                    // add zero value to the operator log stream.
+                                    if line.contains("level=debug") || line.contains("\"level\":\"debug\"") {
+                                        continue;
+                                    }
                                     let _ = tx.send(WsEvent::LogMessage {
                                         source: source.clone(),
                                         line,

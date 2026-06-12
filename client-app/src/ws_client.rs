@@ -177,8 +177,8 @@ async fn stream_logs(source: String, url: &str, tx: mpsc::UnboundedSender<WsEven
         }
 
         // Exponential backoff: 4s → 8s → 16s → 32s → 60s (cap).
-        let wait_secs = (RECONNECT_BASE_SECS * (1u64 << consecutive_failures.min(4)))
-            .min(RECONNECT_MAX_SECS);
+        let wait_secs =
+            (RECONNECT_BASE_SECS * (1u64 << consecutive_failures.min(4))).min(RECONNECT_MAX_SECS);
         tokio::time::sleep(Duration::from_secs(wait_secs)).await;
     }
 }

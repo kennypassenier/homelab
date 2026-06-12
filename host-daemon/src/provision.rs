@@ -82,6 +82,12 @@ pub enum ProvisionAction {
         name: String,
         drift: Vec<String>,
     },
+    ResumeBootstrap {
+        stack: String,
+        vmid: u32,
+        name: String,
+        reason: String,
+    },
     Skip {
         stack: String,
         reason: String,
@@ -756,6 +762,39 @@ pub fn reconcile_lxc(vmid: u32, intent: &StackIntent, dry_run: bool) -> Result<(
     Ok(())
 }
 
+fn container_bootstrap_gap(vmid: u32) -> Option<String> {
+    let checks = [
+        (
+            "missing_lxc_daemon_install",
+            "test -x /usr/local/bin/lxc-daemon && test -f /etc/systemd/system/lxc-daemon.service",
+        ),
+        (
+            "lxc_daemon_not_active",
+            "systemctl is-enabled lxc-daemon >/dev/null 2>&1 && systemctl is-active lxc-daemon >/dev/null 2>&1",
+        ),
+        ("missing_gitops_sparse_checkout", "test -d /opt/gitops/.git"),
+    ];
+
+    for (reason, check_cmd) in checks {
+        let output = Command::new("pct")
+            .arg("exec")
+            .arg(vmid.to_string())
+            .arg("--")
+            .arg("bash")
+            .arg("-c")
+            .arg(check_cmd)
+            .output();
+
+        match output {
+            Ok(out) if out.status.success() => {}
+            Ok(_) => return Some(reason.to_string()),
+            Err(_) => return Some("container_exec_unavailable".to_string()),
+        }
+    }
+
+    None
+}
+
 /// Analyze all stacks and determine what provisioning actions are needed
 pub fn plan_provisioning_changes(repo_root: &Path) -> Result<Vec<ProvisionAction>, String> {
     let intents = scan_stack_intents(repo_root)?;
@@ -803,6 +842,21 @@ pub fn plan_provisioning_changes(repo_root: &Path) -> Result<Vec<ProvisionAction
                         name: intent.hostname.clone(),
                         drift: validation.config_drift,
                     });
+                } else if intent.deploy_enabled {
+                    if let Some(reason) = container_bootstrap_gap(intent.vmid) {
+                        actions.push(ProvisionAction::ResumeBootstrap {
+                            stack: intent.stack_name.clone(),
+                            vmid: intent.vmid,
+                            name: intent.hostname.clone(),
+                            reason,
+                        });
+                    } else {
+                        actions.push(ProvisionAction::Ok {
+                            stack: intent.stack_name.clone(),
+                            vmid: intent.vmid,
+                            name: intent.hostname.clone(),
+                        });
+                    }
                 } else {
                     actions.push(ProvisionAction::Ok {
                         stack: intent.stack_name.clone(),
@@ -962,6 +1016,46 @@ pub fn apply_provisioning_changes(
                     }
                 }
             }
+            ProvisionAction::ResumeBootstrap {
+                stack,
+                vmid,
+                reason,
+                ..
+            } => {
+                if let Some(intent) = intent_map.get(stack) {
+                    log(
+                        "warn",
+                        &format!(
+                            "[provision] RESUME_BOOTSTRAP vmid={} stack={} reason={}",
+                            vmid, stack, reason
+                        ),
+                    );
+                    if let Err(e) = crate::bootstrap::bootstrap_lxc(*vmid, intent, log) {
+                        if !dry_run {
+                            match disable_stack_deploy(repo_root, stack, &e) {
+                                Ok(()) => log(
+                                    "warn",
+                                    &format!(
+                                        "[provision] disabled deploy.enabled for stack '{}' after failed RESUME_BOOTSTRAP",
+                                        stack
+                                    ),
+                                ),
+                                Err(mark_err) => log(
+                                    "error",
+                                    &format!(
+                                        "[provision] failed to disable deploy.enabled for stack '{}': {}",
+                                        stack, mark_err
+                                    ),
+                                ),
+                            }
+                        }
+                        return Err(format!(
+                            "RESUME_BOOTSTRAP failed for stack '{}': {}",
+                            stack, e
+                        ));
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -1033,6 +1127,10 @@ pub fn format_provision_summary(actions: &[ProvisionAction]) -> Vec<String> {
         .iter()
         .filter(|a| matches!(a, ProvisionAction::Update { .. }))
         .count();
+    let resume_count = actions
+        .iter()
+        .filter(|a| matches!(a, ProvisionAction::ResumeBootstrap { .. }))
+        .count();
     let skip_count = actions
         .iter()
         .filter(|a| matches!(a, ProvisionAction::Skip { .. }))
@@ -1075,6 +1173,17 @@ pub fn format_provision_summary(actions: &[ProvisionAction]) -> Vec<String> {
                     drift.join(",")
                 )
             }
+            ProvisionAction::ResumeBootstrap {
+                stack,
+                vmid,
+                name,
+                reason,
+            } => {
+                format!(
+                    "[{}] RESUME_BOOTSTRAP vmid={} name={} reason={}",
+                    stack, vmid, name, reason
+                )
+            }
             ProvisionAction::Skip { stack, reason } => {
                 format!("[{}] SKIP reason={}", stack, reason)
             }
@@ -1084,8 +1193,8 @@ pub fn format_provision_summary(actions: &[ProvisionAction]) -> Vec<String> {
 
     lines.push(String::new());
     lines.push(format!(
-        "Summary: {} OK, {} CREATE, {} RECREATE, {} UPDATE, {} SKIP",
-        ok_count, create_count, recreate_count, update_count, skip_count
+        "Summary: {} OK, {} CREATE, {} RECREATE, {} UPDATE, {} RESUME_BOOTSTRAP, {} SKIP",
+        ok_count, create_count, recreate_count, update_count, resume_count, skip_count
     ));
 
     lines

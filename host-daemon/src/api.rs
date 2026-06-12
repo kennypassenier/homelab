@@ -395,7 +395,13 @@ pub fn run_provisioning_cycle(app: &Arc<Mutex<App>>, dry_run: bool) {
     // Use reset --hard to discard local changes (build artifacts, etc).
     {
         let mut a = app.lock().unwrap();
-        a.add_log(LogLevel::Info, format!("[provision] force pulling latest changes from git repo: {}", gitops_root));
+        a.add_log(
+            LogLevel::Info,
+            format!(
+                "[provision] force pulling latest changes from git repo: {}",
+                gitops_root
+            ),
+        );
     }
 
     let reset_output = Command::new("git")
@@ -406,17 +412,26 @@ pub fn run_provisioning_cycle(app: &Arc<Mutex<App>>, dry_run: bool) {
     match reset_output {
         Ok(out) if out.status.success() => {
             let mut a = app.lock().unwrap();
-            a.add_log(LogLevel::Info, "[provision] git reset --hard origin/main succeeded".to_string());
+            a.add_log(
+                LogLevel::Info,
+                "[provision] git reset --hard origin/main succeeded".to_string(),
+            );
         }
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
             let mut a = app.lock().unwrap();
-            a.add_log(LogLevel::Error, format!("[provision] git reset failed: {}", stderr));
+            a.add_log(
+                LogLevel::Error,
+                format!("[provision] git reset failed: {}", stderr),
+            );
             return;
         }
         Err(e) => {
             let mut a = app.lock().unwrap();
-            a.add_log(LogLevel::Error, format!("[provision] git reset command failed: {}", e));
+            a.add_log(
+                LogLevel::Error,
+                format!("[provision] git reset command failed: {}", e),
+            );
             return;
         }
     }
@@ -430,17 +445,29 @@ pub fn run_provisioning_cycle(app: &Arc<Mutex<App>>, dry_run: bool) {
         Ok(out) if out.status.success() => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             let mut a = app.lock().unwrap();
-            a.add_log(LogLevel::Info, format!("[provision] git pull succeeded: {}", stdout.lines().next().unwrap_or("up to date")));
+            a.add_log(
+                LogLevel::Info,
+                format!(
+                    "[provision] git pull succeeded: {}",
+                    stdout.lines().next().unwrap_or("up to date")
+                ),
+            );
         }
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
             let mut a = app.lock().unwrap();
-            a.add_log(LogLevel::Error, format!("[provision] git pull failed: {}", stderr));
+            a.add_log(
+                LogLevel::Error,
+                format!("[provision] git pull failed: {}", stderr),
+            );
             return;
         }
         Err(e) => {
             let mut a = app.lock().unwrap();
-            a.add_log(LogLevel::Error, format!("[provision] git pull command failed: {}", e));
+            a.add_log(
+                LogLevel::Error,
+                format!("[provision] git pull command failed: {}", e),
+            );
             return;
         }
     }
@@ -453,16 +480,22 @@ pub fn run_provisioning_cycle(app: &Arc<Mutex<App>>, dry_run: bool) {
             "ok" => LogLevel::Ok,
             _ => LogLevel::Info,
         };
-        app_for_log.lock().unwrap().add_log(log_level, msg.to_string());
+        app_for_log
+            .lock()
+            .unwrap()
+            .add_log(log_level, msg.to_string());
     };
 
-    let actions = match provision::apply_provisioning_changes(Path::new(&gitops_root), dry_run, &log) {
-        Ok(actions) => actions,
-        Err(e) => {
-            app.lock().unwrap().add_log(LogLevel::Error, format!("[provision] failed: {}", e));
-            return;
-        }
-    };
+    let actions =
+        match provision::apply_provisioning_changes(Path::new(&gitops_root), dry_run, &log) {
+            Ok(actions) => actions,
+            Err(e) => {
+                app.lock()
+                    .unwrap()
+                    .add_log(LogLevel::Error, format!("[provision] failed: {}", e));
+                return;
+            }
+        };
 
     let summary = provision::format_provision_summary(&actions);
     let mut a = app.lock().unwrap();
@@ -472,7 +505,11 @@ pub fn run_provisioning_cycle(app: &Arc<Mutex<App>>, dry_run: bool) {
         }
         let level = if line.contains("SKIP") || line.contains("Summary") {
             LogLevel::Info
-        } else if line.contains("CREATE") || line.contains("RECREATE") || line.contains("UPDATE") {
+        } else if line.contains("CREATE")
+            || line.contains("RECREATE")
+            || line.contains("UPDATE")
+            || line.contains("RESUME_BOOTSTRAP")
+        {
             LogLevel::Ok
         } else {
             LogLevel::Info

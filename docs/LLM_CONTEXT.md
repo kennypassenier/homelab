@@ -47,6 +47,7 @@ Last updated: 2026-06-05
 - CLIENT now supervises websocket workers for all deploy-enabled stacks and reconnects stale streams automatically.
 - CLIENT/HOST/LXC websocket streams now exchange keepalive traffic so idle periods do not drop otherwise healthy connections.
 - HOST provisioning now fail-closes stack activation: when CREATE/RECREATE/UPDATE fails for a stack, HOST writes `deploy.enabled=false` and `deploy.last_failure` into that stack `lxc-compose.yml` so retries require explicit re-enable.
+- HOST provisioning now resumes partially bootstrapped existing LXCs (`RESUME_BOOTSTRAP`) when bootstrap artifacts are missing, instead of treating them as fully `OK`.
 - Latch deployment to Proxmox LXCs is prebuilt-binary only: no in-container Rust toolchain/build-essential installation; HOST pushes binary + wrapper and wrapper verifies runtime compatibility before login.
 - LXC websocket endpoint supports command RPC (`exec_request`/`exec_response`) in addition to log streaming.
 - HOST and LXC websocket endpoints now support immediate `update_request` triggers; LXC also exposes `POST /api/update` for GHCR image pull + recreate flows.

@@ -164,6 +164,13 @@ After manual recovery, future releases should self-update normally again.
   - `deploy.last_failure=<error message>`
 - This prevents repeated auto-retries until the stack config is corrected and explicitly re-enabled.
 
+## Provisioning Resume on Existing VMID
+
+- HOST provisioning now detects partial bootstrap state even when `vmid` already exists and base config matches intent.
+- When required bootstrap artifacts are missing (LXC daemon binary/service, active daemon service, or sparse Git checkout), action is reported as `RESUME_BOOTSTRAP` instead of `OK`.
+- `RESUME_BOOTSTRAP` runs the normal bootstrap flow for that VMID to converge from partial state to a runnable stack.
+- If resume-bootstrap fails, HOST fail-closes stack activation by setting `deploy.enabled=false` and writing `deploy.last_failure`.
+
 ## Latch Bootstrap Reliability
 
 - LXC bootstrap latch install now enforces a deterministic PATH during non-interactive setup.

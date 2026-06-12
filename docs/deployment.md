@@ -204,7 +204,38 @@ Remote update latch strategy is:
 - HOST API/RPC update requests run `latch pull --sparse` before checking/applying updates
 - LXC API/RPC self-update requests run `latch pull --sparse` before image pull/recreate
 
-## 5. Stack Secret Files
+## 5. Deploy Idempotency Contract
+
+Stacks are safe to deploy/redeploy repeatedly; the sync flow is fully idempotent.
+
+**The GitOps sync flow inside each LXC:**
+
+1. `git fetch` — fetch remote changes
+2. `git reset --hard origin/main` — apply exact intent from repo
+3. `pre-sync.sh` (optional) — run per-stack hook if present
+4. For each app: `docker compose pull -q` → `docker compose up -d --remove-orphans`
+5. Garbage collection — remove apps no longer in Git
+
+**Why it's safe to re-run:**
+
+- `docker compose pull` is idempotent (just pulls images)
+- `docker compose up -d` is idempotent (creates/updates services, does not delete volumes)
+- App configuration in `/appdata/<stack>/<app>/` (bind-mounted from Proxmox host) is never touched
+- Secrets in container `.env` files survive because they live in persistent bind-mounts
+
+**One safety requirement:** `pre-sync.sh` scripts must be idempotent
+
+Pre-sync hooks run with `cwd = stacks/<stack>/` and have access to your secret backend.
+They **can modify files** before `docker compose` runs.
+Write them assuming they will run every sync (e.g., use `test -f` guards, don't truncate files).
+
+**Application-level config guarantee:**
+
+- Application state (databases, caches, user data) lives in Docker volumes or bind-mounts → survives sync
+- App config files (API tokens, database credentials, etc.) are your responsibility via `pre-sync.sh` or init containers
+- Sync will never delete app data unless you explicitly delete the entire app from Git
+
+## 6. Stack Secret Files
 
 Per-app runtime secrets should not be committed.
 
@@ -216,7 +247,7 @@ Current expected model:
 
 Before first deployment, verify that every stack hook can populate the required `.env` targets it references.
 
-## 6. Bring-Up Order
+## 7. Bring-Up Order
 
 Use this order.
 
@@ -287,7 +318,7 @@ Host setup checklist:
 - Confirm LXC sparse checkout initializes correctly.
 - Confirm setup hook, compose pull, and compose up complete.
 
-## 7.1 HOST Service Bring-Up
+## 8.1 HOST Service Bring-Up
 
 Recommended host flow:
 

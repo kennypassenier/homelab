@@ -605,7 +605,7 @@ async fn async_main() -> Result<()> {
                     None,
                 );
                 tokio::spawn(async move {
-                    match trigger_host_provision().await {
+                    match trigger_host_provision(&stack).await {
                         Ok(msg) => {
                             let _ = tx.send(SyncEvent::LiveLog {
                             stack: stack.clone(),
@@ -1520,11 +1520,11 @@ async fn trigger_host_update() -> Result<String, String> {
 }
 
 /// Ask HOST to run an LXC provisioning cycle immediately via WS RPC or HTTP fallback.
-async fn trigger_host_provision() -> Result<String, String> {
-    if request_host_provision_ws().await.is_ok() {
+async fn trigger_host_provision(stack_name: &str) -> Result<String, String> {
+    if request_host_provision_ws(stack_name).await.is_ok() {
         Ok("HOST provisioning cycle started via websocket".to_string())
     } else {
-        request_host_provision_http().await
+        request_host_provision_http(stack_name).await
     }
 }
 
@@ -1537,7 +1537,7 @@ async fn trigger_host_destroy_stack(stack_name: &str) -> Result<String, String> 
     }
 }
 
-async fn request_host_provision_ws() -> Result<(), String> {
+async fn request_host_provision_ws(stack_name: &str) -> Result<(), String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
     let request_id = ws_request_id("provision");
@@ -1545,6 +1545,7 @@ async fn request_host_provision_ws() -> Result<(), String> {
         "kind": "provision_request",
         "request_id": &request_id,
         "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+        "active_stacks": [stack_name],
     });
     send_ws_rpc(&ip, payload, "provision_response", &request_id).await?;
     Ok(())
@@ -1555,11 +1556,12 @@ fn client_latch_pull_payload() -> Option<serde_json::Value> {
     serde_json::to_value(ctx).ok()
 }
 
-async fn request_host_provision_http() -> Result<String, String> {
+async fn request_host_provision_http(stack_name: &str) -> Result<String, String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let url = format!("http://{}:8080/api/provision", ip);
     let response = reqwest::Client::new()
         .post(url)
+        .json(&serde_json::json!({ "active_stacks": [stack_name] }))
         .send()
         .await
         .map_err(|e| e.to_string())?;

@@ -36,6 +36,12 @@ struct DestroyStackPayload {
 }
 
 #[derive(serde::Deserialize)]
+struct ProvisionRequestBody {
+    #[serde(default)]
+    active_stacks: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
 struct UpdateRequestBody {
     latch: Option<self_update::LatchPullRequest>,
 }
@@ -247,13 +253,26 @@ async fn handle_update(
     })
 }
 
-async fn handle_provision(State(app): State<Arc<Mutex<App>>>) -> Json<ApiResponse> {
+async fn handle_provision(
+    State(app): State<Arc<Mutex<App>>>,
+    payload: Option<Json<ProvisionRequestBody>>,
+) -> Json<ApiResponse> {
+    let active_stacks = payload
+        .map(|Json(body)| body.active_stacks)
+        .unwrap_or_default();
     {
         let mut a = app.lock().unwrap();
         a.add_log(
             LogLevel::Info,
-            "[provision] LXC provisioning requested via HTTP API".to_string(),
+            format!(
+                "[provision] LXC provisioning requested via HTTP API active_stacks={}",
+                active_stacks.join(",")
+            ),
         );
+    }
+
+    if !active_stacks.is_empty() {
+        liveness::set_client_active_stacks(&active_stacks);
     }
 
     let app_clone = app.clone();
@@ -380,12 +399,28 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
                                     });
                                     let _ = socket.send(Message::Text(response.to_string())).await;
                                 } else if kind == "provision_request" {
+                                    let active_stacks = req
+                                        .get("active_stacks")
+                                        .and_then(|v| v.as_array())
+                                        .map(|arr| {
+                                            arr.iter()
+                                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                                .collect::<Vec<String>>()
+                                        })
+                                        .unwrap_or_default();
                                     {
                                         let mut guard = app.lock().unwrap();
                                         guard.add_log(
                                             LogLevel::Info,
-                                            "[provision] LXC provisioning requested via WebSocket RPC".to_string(),
+                                            format!(
+                                                "[provision] LXC provisioning requested via WebSocket RPC active_stacks={}",
+                                                active_stacks.join(",")
+                                            ),
                                         );
+                                    }
+
+                                    if !active_stacks.is_empty() {
+                                        liveness::set_client_active_stacks(&active_stacks);
                                     }
 
                                     let app_clone = app.clone();

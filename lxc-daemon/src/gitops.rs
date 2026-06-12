@@ -233,7 +233,61 @@ fn run_git(repo_path: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn run_latch_pull(repo_path: &str, latch: &LatchPullRequest) -> Result<String, String> {
+fn run_latch_pull(
+    state: &Arc<Mutex<AppState>>,
+    repo_path: &str,
+    latch: &LatchPullRequest,
+) -> Result<String, String> {
+    let command_preview = format!(
+        "latch pull{}{}{}{}{}{}",
+        if latch.sparse.unwrap_or(true) {
+            " --sparse"
+        } else {
+            ""
+        },
+        latch
+            .env
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+            .map(|v| format!(" --env {}", v))
+            .unwrap_or_default(),
+        latch
+            .pat
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+            .map(|_| " --PAT [redacted]".to_string())
+            .unwrap_or_default(),
+        latch
+            .key
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+            .map(|_| " --KEY [redacted]".to_string())
+            .unwrap_or_default(),
+        latch
+            .secrets_repo
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+            .map(|v| format!(" --REPO {}", v))
+            .unwrap_or_default(),
+        latch
+            .project
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+            .map(|v| format!(" --project {}", v))
+            .unwrap_or_default()
+    );
+
+    {
+        let mut s = state.lock().unwrap();
+        s.add_log(
+            LogLevel::Info,
+            format!(
+                "[sync] running command: cd {} && {}",
+                repo_path, command_preview
+            ),
+        );
+    }
+
     let mut command = Command::new("latch");
     command.arg("pull");
     if latch.sparse.unwrap_or(true) {
@@ -248,14 +302,21 @@ fn run_latch_pull(repo_path: &str, latch: &LatchPullRequest) -> Result<String, S
     if let Some(value) = latch.key.as_deref().filter(|v| !v.trim().is_empty()) {
         command.args(["--KEY", value]);
     }
-    if let Some(value) = latch.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
+    if let Some(value) = latch
+        .secrets_repo
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+    {
         command.args(["--REPO", value]);
     }
     if let Some(value) = latch.project.as_deref().filter(|v| !v.trim().is_empty()) {
         command.args(["--project", value]);
     }
 
-    let output = command.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+    let output = command
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
     if output.status.success() {
         Ok("latch pull ok".to_string())
     } else {
@@ -362,12 +423,14 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
     // back to whatever CLIENT pushed last on a heartbeat.
     let latch_creds = {
         let mut s = state.lock().unwrap();
-        s.pending_latch_pull.take().or_else(|| s.latch_credentials.clone())
+        s.pending_latch_pull
+            .take()
+            .or_else(|| s.latch_credentials.clone())
     };
 
     if let Some(ref latch) = latch_creds {
         let sn = stack_name.clone();
-        match run_latch_pull(GITOPS_REPO, latch) {
+        match run_latch_pull(&state, GITOPS_REPO, latch) {
             Ok(msg) => {
                 let mut s = state.lock().unwrap();
                 s.add_log(
@@ -379,7 +442,10 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
                 let mut s = state.lock().unwrap();
                 s.add_log(
                     LogLevel::Warn,
-                    format!("ts=now level=warn stack={} latch msg=\"pull failed: {}\"", sn, e),
+                    format!(
+                        "ts=now level=warn stack={} latch msg=\"pull failed: {}\"",
+                        sn, e
+                    ),
                 );
             }
         }
@@ -448,6 +514,17 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
+        {
+            let mut s = state.lock().unwrap();
+            s.add_log(
+                LogLevel::Info,
+                format!(
+                    "[sync] running command: cd {} && docker compose pull -q",
+                    app_dir
+                ),
+            );
+        }
+
         // docker compose pull -q
         let dir_clone = app_dir.clone();
         let pull = tokio::task::spawn_blocking(move || {
@@ -487,6 +564,17 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
                     ),
                 ),
             }
+        }
+
+        {
+            let mut s = state.lock().unwrap();
+            s.add_log(
+                LogLevel::Info,
+                format!(
+                    "[sync] running command: cd {} && docker compose up -d --remove-orphans",
+                    app_dir
+                ),
+            );
         }
 
         // docker compose up -d --remove-orphans

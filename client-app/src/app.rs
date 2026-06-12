@@ -512,7 +512,7 @@ impl App {
         self.log_source_scroll = self.log_source_scroll.min(self.log_source_selected);
     }
 
-    /// Dynamic log source list: connected LXC workers, then HOST (when connected), then CLIENT.
+    /// Dynamic log source list: connected LXC workers, HOST only before any LXC is active, then CLIENT.
     pub fn log_sources(&self) -> Vec<(String, ratatui::style::Color)> {
         let mut sources: Vec<(String, ratatui::style::Color)> = self
             .connected_lxc_stacks
@@ -525,7 +525,7 @@ impl App {
                 )
             })
             .collect();
-        if self.host_connected {
+        if self.host_connected && self.connected_lxc_stacks.is_empty() {
             sources.push(("HOST".to_string(), ratatui::style::Color::White));
         }
         sources.push(("CLIENT".to_string(), ratatui::style::Color::Cyan));

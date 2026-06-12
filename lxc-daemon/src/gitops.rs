@@ -242,17 +242,33 @@ fn run_latch_pull(
 
     // Build a display version with secrets redacted so the full command is visible in logs.
     let mut preview_parts: Vec<String> = vec![bin.clone(), "pull".to_string()];
-    if latch.sparse.unwrap_or(true) { preview_parts.push("--sparse".to_string()); }
+    if latch.sparse.unwrap_or(true) {
+        preview_parts.push("--sparse".to_string());
+    }
     if let Some(v) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
         preview_parts.extend(["--env".to_string(), v.to_string()]);
     }
-    if latch.pat.as_deref().filter(|v| !v.trim().is_empty()).is_some() {
+    if latch
+        .pat
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .is_some()
+    {
         preview_parts.extend(["--PAT".to_string(), "[redacted]".to_string()]);
     }
-    if latch.key.as_deref().filter(|v| !v.trim().is_empty()).is_some() {
+    if latch
+        .key
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .is_some()
+    {
         preview_parts.extend(["--KEY".to_string(), "[redacted]".to_string()]);
     }
-    if let Some(v) = latch.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
+    if let Some(v) = latch
+        .secrets_repo
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+    {
         preview_parts.extend(["--REPO".to_string(), v.to_string()]);
     }
     if let Some(v) = latch.project.as_deref().filter(|v| !v.trim().is_empty()) {
@@ -264,14 +280,19 @@ fn run_latch_pull(
         let mut s = state.lock().unwrap();
         s.add_log(
             LogLevel::Info,
-            format!("[sync] running command: cd {} && {}", repo_path, command_preview),
+            format!(
+                "[sync] running command: cd {} && {}",
+                repo_path, command_preview
+            ),
         );
     }
 
     let latch_bin = resolve_latch_binary().ok_or_else(|| "latch unavailable".to_string())?;
     let mut command = Command::new(latch_bin);
     command.arg("pull");
-    if latch.sparse.unwrap_or(true) { command.arg("--sparse"); }
+    if latch.sparse.unwrap_or(true) {
+        command.arg("--sparse");
+    }
     if let Some(v) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
         command.args(["--env", v]);
     }
@@ -281,7 +302,11 @@ fn run_latch_pull(
     if let Some(v) = latch.key.as_deref().filter(|v| !v.trim().is_empty()) {
         command.args(["--KEY", v]);
     }
-    if let Some(v) = latch.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
+    if let Some(v) = latch
+        .secrets_repo
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+    {
         command.args(["--REPO", v]);
     }
     if let Some(v) = latch.project.as_deref().filter(|v| !v.trim().is_empty()) {
@@ -330,23 +355,28 @@ fn resolve_latch_binary() -> Option<String> {
         }
     }
 
-    ["/usr/local/bin/latch", "/usr/bin/latch", "/home/linuxbrew/.linuxbrew/bin/latch", "latch"]
-        .iter()
-        .find_map(|candidate| {
-            if *candidate == "latch" {
-                let output = Command::new(candidate).arg("--version").output().ok()?;
-                if output.status.success() {
-                    return Some(candidate.to_string());
-                }
-                return None;
+    [
+        "/usr/local/bin/latch",
+        "/usr/bin/latch",
+        "/home/linuxbrew/.linuxbrew/bin/latch",
+        "latch",
+    ]
+    .iter()
+    .find_map(|candidate| {
+        if *candidate == "latch" {
+            let output = Command::new(candidate).arg("--version").output().ok()?;
+            if output.status.success() {
+                return Some(candidate.to_string());
             }
+            return None;
+        }
 
-            if std::path::Path::new(candidate).exists() {
-                Some(candidate.to_string())
-            } else {
-                None
-            }
-        })
+        if std::path::Path::new(candidate).exists() {
+            Some(candidate.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 fn check_is_synced(repo_path: &str) -> bool {

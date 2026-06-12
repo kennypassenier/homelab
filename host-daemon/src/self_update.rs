@@ -130,12 +130,16 @@ fn run_latch_pull_before_remote_update(latch: Option<&LatchPullRequest>) -> Stri
     let repo = env_nonempty("GITOPS_REPO", "/root/homelab");
     let latch_bin = match resolve_latch_binary() {
         Some(bin) => bin,
-        None => return "latch unavailable (binary not found in PATH or known locations)".to_string(),
+        None => {
+            return "latch unavailable (binary not found in PATH or known locations)".to_string();
+        }
     };
 
     // Build display preview with secrets redacted.
     let mut preview_parts: Vec<String> = vec![latch_bin.clone(), "pull".to_string()];
-    if latch.and_then(|l| l.sparse).unwrap_or(true) { preview_parts.push("--sparse".to_string()); }
+    if latch.and_then(|l| l.sparse).unwrap_or(true) {
+        preview_parts.push("--sparse".to_string());
+    }
     if let Some(l) = latch {
         if let Some(v) = l.env.as_deref().filter(|v| !v.trim().is_empty()) {
             preview_parts.extend(["--env".to_string(), v.to_string()]);
@@ -158,7 +162,9 @@ fn run_latch_pull_before_remote_update(latch: Option<&LatchPullRequest>) -> Stri
 
     let mut command = Command::new(&latch_bin);
     command.arg("pull");
-    if latch.and_then(|l| l.sparse).unwrap_or(true) { command.arg("--sparse"); }
+    if latch.and_then(|l| l.sparse).unwrap_or(true) {
+        command.arg("--sparse");
+    }
     if let Some(l) = latch {
         if let Some(v) = l.env.as_deref().filter(|v| !v.trim().is_empty()) {
             command.args(["--env", v]);
@@ -181,15 +187,21 @@ fn run_latch_pull_before_remote_update(latch: Option<&LatchPullRequest>) -> Stri
         Ok(o) if o.status.success() => {
             let out = String::from_utf8_lossy(&o.stdout);
             let out = out.trim();
-            if out.is_empty() { format!("latch pull ok [{}]", preview) }
-            else { format!("latch pull ok: {} [{}]", out, preview) }
+            if out.is_empty() {
+                format!("latch pull ok [{}]", preview)
+            } else {
+                format!("latch pull ok: {} [{}]", out, preview)
+            }
         }
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
             let stdout = String::from_utf8_lossy(&o.stdout);
             format!(
                 "latch pull failed (exit {:?}) [{}]\nstderr: {}\nstdout: {}",
-                o.status.code(), preview, stderr.trim(), stdout.trim()
+                o.status.code(),
+                preview,
+                stderr.trim(),
+                stdout.trim()
             )
         }
         Err(e) => format!("latch pull spawn failed: {} [{}]", e, preview),
@@ -267,7 +279,10 @@ fn fetch_latest_release(repo: &str) -> Result<ReleaseInfo, String> {
 }
 
 fn fetch_release_by_tag(repo: &str, tag: &str) -> Result<ReleaseInfo, String> {
-    let url = format!("https://api.github.com/repos/{}/releases/tags/{}", repo, tag);
+    let url = format!(
+        "https://api.github.com/repos/{}/releases/tags/{}",
+        repo, tag
+    );
     github_get(&url)
         .send()
         .map_err(|e| e.to_string())?
@@ -319,23 +334,28 @@ fn resolve_latch_binary() -> Option<String> {
         }
     }
 
-    ["/usr/local/bin/latch", "/usr/bin/latch", "/home/linuxbrew/.linuxbrew/bin/latch", "latch"]
-        .iter()
-        .find_map(|candidate| {
-            if *candidate == "latch" {
-                let output = Command::new(candidate).arg("--version").output().ok()?;
-                if output.status.success() {
-                    return Some(candidate.to_string());
-                }
-                return None;
+    [
+        "/usr/local/bin/latch",
+        "/usr/bin/latch",
+        "/home/linuxbrew/.linuxbrew/bin/latch",
+        "latch",
+    ]
+    .iter()
+    .find_map(|candidate| {
+        if *candidate == "latch" {
+            let output = Command::new(candidate).arg("--version").output().ok()?;
+            if output.status.success() {
+                return Some(candidate.to_string());
             }
+            return None;
+        }
 
-            if std::path::Path::new(candidate).exists() {
-                Some(candidate.to_string())
-            } else {
-                None
-            }
-        })
+        if std::path::Path::new(candidate).exists() {
+            Some(candidate.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 fn try_restart_service(service: &str) -> Result<(), String> {

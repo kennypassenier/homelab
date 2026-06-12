@@ -236,6 +236,7 @@ async fn async_main() -> Result<()> {
         });
         lxc_ws_tasks.insert(stack, handle);
     }
+    app.set_connected_lxc_stacks(lxc_ws_tasks.keys().cloned());
 
     {
         let tx = host_probe_tx.clone();
@@ -959,6 +960,8 @@ async fn async_main() -> Result<()> {
                         );
                     }
                 }
+
+                app.set_connected_lxc_stacks(lxc_ws_tasks.keys().cloned());
             }
 
             _ = host_probe_tick.tick() => {
@@ -1021,6 +1024,8 @@ async fn async_main() -> Result<()> {
                                         handle.abort();
                                     }
                                 }
+
+                                app.set_connected_lxc_stacks(lxc_ws_tasks.keys().cloned());
                             }
                             events::EventOutcome::Continue => {}
                         }

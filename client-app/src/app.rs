@@ -1,7 +1,7 @@
 //! Application state — Tab enum, App struct, and all state-management helpers.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -64,14 +64,8 @@ const SOURCE_COLORS: &[ratatui::style::Color] = &[
     ratatui::style::Color::Rgb(255, 128, 0),
 ];
 
-/// Suppress INFO log lines that appear repeatedly within this window to kill
-/// rapid-fire burst spam (e.g. the same 2-3 lines cycling every second).
-/// WARN, ERROR and OK always pass through so real outcomes are never hidden.
-/// 8 seconds is enough to absorb a daemon's reconnect flood without hiding
-/// any intentional re-run of a sync/update cycle.
-const LOG_DEDUP_WINDOW: Duration = Duration::from_secs(8);
-/// Maximum number of fingerprints kept in the dedup ring-buffer.
-const LOG_DEDUP_RING_SIZE: usize = 128;
+/// Keep a short trail of emitted CLIENT signatures to detect repeated patterns.
+const CLIENT_FOLD_TRAIL_LIMIT: usize = 24;
 
 /// Which log levels are visible in the Logs tab.
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -190,9 +184,16 @@ pub struct App {
     pub log_level_filter: LogLevelFilter,
     /// True when live log telemetry has been observed.
     pub live_logs_seen: bool,
-    /// Ring buffer of log fingerprints (source|level|message → created_at) used
-    /// to suppress repeating lines and sequences without hiding real errors.
-    log_dedup_ring: VecDeque<(String, SystemTime)>,
+    /// Currently connected LXC stacks (source names are rendered as `lxc-<stack>`).
+    connected_lxc_stacks: Vec<String>,
+    /// Folded CLIENT pattern currently being suppressed.
+    client_fold_pattern: Option<Vec<String>>,
+    /// Next expected item index inside `client_fold_pattern`.
+    client_fold_next_index: usize,
+    /// Number of suppressed CLIENT lines while folding is active.
+    client_fold_suppressed_lines: usize,
+    /// Recently emitted CLIENT signatures (level|message), used to detect 1-3 line loops.
+    client_recent_emitted: VecDeque<String>,
 
     // ── Animation state (driven by anim_tick at 33 ms) ─────────────────────
     /// Sinusoidal phase (0..2π) for pulse/breathing effects on selected items.
@@ -321,6 +322,11 @@ impl App {
             log_focus_mode: false,
             log_level_filter: LogLevelFilter::All,
             live_logs_seen: false,
+            connected_lxc_stacks: Vec::new(),
+            client_fold_pattern: None,
+            client_fold_next_index: 0,
+            client_fold_suppressed_lines: 0,
+            client_recent_emitted: VecDeque::new(),
             pulse_phase: 0.0,
             ticker_offset: 0,
             ticker_content,
@@ -361,7 +367,6 @@ impl App {
                 .unwrap_or_else(|| "ghcr.io/kennypassenier/homelab-lxc-daemon:latest".to_string()),
             update_last_result: HashMap::new(),
             update_last_at: HashMap::new(),
-            log_dedup_ring: VecDeque::new(),
         };
         app
     }
@@ -415,28 +420,54 @@ impl App {
     pub fn push_log(&mut self, source: &str, level: &str, message: &str) {
         let now = SystemTime::now();
 
-        // WARN, ERROR and OK always get through — they signal real outcomes and
-        // suppressing them would make the logs useless when something completes or breaks.
-        let is_important = matches!(level, "WARN" | "ERROR" | "OK");
+        // Zero-buffer pass-through for non-CLIENT sources.
+        if source != "CLIENT" {
+            self.flush_client_fold_summary_if_needed();
+            self.push_log_raw(source, level, message, now);
+            return;
+        }
 
-        if !is_important {
-            let key = format!("{}|{}|{}", source, level, message);
+        let signature = format!("{}|{}", level, message);
 
-            // Drop fingerprints that have aged out of the window.
-            self.log_dedup_ring
-                .retain(|(_, ts)| now.duration_since(*ts).unwrap_or_default() < LOG_DEDUP_WINDOW);
-
-            // Suppress if this exact (source, level, message) appeared recently.
-            if self.log_dedup_ring.iter().any(|(k, _)| k == &key) {
+        // If we're currently folding a CLIENT pattern, keep suppressing while it matches.
+        if self.client_fold_pattern.is_some() {
+            let expected = {
+                let pattern = self.client_fold_pattern.as_ref().unwrap();
+                pattern[self.client_fold_next_index].clone()
+            };
+            if signature == expected {
+                self.client_fold_suppressed_lines += 1;
+                let pattern_len = self
+                    .client_fold_pattern
+                    .as_ref()
+                    .map(|p| p.len())
+                    .unwrap_or(1)
+                    .max(1);
+                self.client_fold_next_index = (self.client_fold_next_index + 1) % pattern_len;
                 return;
             }
 
-            self.log_dedup_ring.push_back((key, now));
-            if self.log_dedup_ring.len() > LOG_DEDUP_RING_SIZE {
-                self.log_dedup_ring.pop_front();
-            }
+            // Pattern broke: emit one summary line, then continue with the current line.
+            self.flush_client_fold_summary_if_needed();
         }
 
+        // Start folding only after the first instance has already been printed.
+        if let Some((pattern, next_index)) = self.detect_client_repeat_start(&signature) {
+            self.client_fold_pattern = Some(pattern);
+            self.client_fold_next_index = next_index;
+            self.client_fold_suppressed_lines = 1;
+            return;
+        }
+
+        // Default: immediate pass-through.
+        self.push_log_raw(source, level, message, now);
+        self.client_recent_emitted.push_back(signature);
+        while self.client_recent_emitted.len() > CLIENT_FOLD_TRAIL_LIMIT {
+            self.client_recent_emitted.pop_front();
+        }
+    }
+
+    fn push_log_raw(&mut self, source: &str, level: &str, message: &str, now: SystemTime) {
         self.logs.push(LogLine {
             time: current_time_str(),
             source: source.to_string(),
@@ -444,6 +475,52 @@ impl App {
             message: message.to_string(),
             created_at: now,
         });
+    }
+
+    fn detect_client_repeat_start(&self, signature: &str) -> Option<(Vec<String>, usize)> {
+        if let Some(last) = self.client_recent_emitted.back() {
+            if last == signature {
+                return Some((vec![signature.to_string()], 0));
+            }
+        }
+
+        let recent: Vec<String> = self.client_recent_emitted.iter().cloned().collect();
+        for pattern_len in [2usize, 3usize] {
+            if recent.len() < pattern_len * 2 {
+                continue;
+            }
+            let start = recent.len() - (pattern_len * 2);
+            let first = &recent[start..start + pattern_len];
+            let second = &recent[start + pattern_len..start + pattern_len * 2];
+            if first == second && signature == first[0] {
+                let pattern: Vec<String> = first.to_vec();
+                return Some((pattern, 1 % pattern_len));
+            }
+        }
+
+        None
+    }
+
+    fn flush_client_fold_summary_if_needed(&mut self) {
+        if self.client_fold_suppressed_lines == 0 {
+            self.client_fold_pattern = None;
+            self.client_fold_next_index = 0;
+            return;
+        }
+
+        let pattern_len = self
+            .client_fold_pattern
+            .as_ref()
+            .map(|p| p.len())
+            .unwrap_or(1)
+            .max(1);
+        let repeats = (self.client_fold_suppressed_lines / pattern_len).max(1);
+        let summary = format!("[ ↳ Above CLIENT pattern repeated {} times ]", repeats);
+        self.push_log_raw("CLIENT", "INFO", &summary, SystemTime::now());
+
+        self.client_fold_pattern = None;
+        self.client_fold_next_index = 0;
+        self.client_fold_suppressed_lines = 0;
     }
 
     /// Builds a canonical logfmt message used across client-side events.
@@ -516,10 +593,35 @@ impl App {
             .map(|(name, _)| name.clone())
     }
 
-    /// Dynamic log source list: lxc-<stack> for every known stack, then HOST, then CLIENT.
+    pub fn set_connected_lxc_stacks<I>(&mut self, stacks: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let mut unique = HashSet::new();
+        let mut values: Vec<String> = stacks
+            .into_iter()
+            .filter(|v| !v.trim().is_empty())
+            .filter(|v| unique.insert(v.clone()))
+            .collect();
+        values.sort();
+        self.connected_lxc_stacks = values;
+
+        let count = self.log_sources().len();
+        if count == 0 {
+            self.log_source_selected = 0;
+            self.log_source_scroll = 0;
+            return;
+        }
+        if self.log_source_selected >= count {
+            self.log_source_selected = count - 1;
+        }
+        self.log_source_scroll = self.log_source_scroll.min(self.log_source_selected);
+    }
+
+    /// Dynamic log source list: connected LXC workers, then HOST (when connected), then CLIENT.
     pub fn log_sources(&self) -> Vec<(String, ratatui::style::Color)> {
         let mut sources: Vec<(String, ratatui::style::Color)> = self
-            .stacks
+            .connected_lxc_stacks
             .iter()
             .enumerate()
             .map(|(i, stack)| {
@@ -529,7 +631,9 @@ impl App {
                 )
             })
             .collect();
-        sources.push(("HOST".to_string(), ratatui::style::Color::White));
+        if self.host_connected {
+            sources.push(("HOST".to_string(), ratatui::style::Color::White));
+        }
         sources.push(("CLIENT".to_string(), ratatui::style::Color::Cyan));
         sources
     }

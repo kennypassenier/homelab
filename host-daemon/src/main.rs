@@ -244,7 +244,7 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                         KeyCode::Char('U') => {
                             let mut a = app.lock().unwrap();
                             a.push_status_line("Checking HOST updates…".to_string());
-                            match self_update::check_and_apply_update() {
+                            match self_update::check_and_apply_update(None) {
                                 Ok(msg) => a.push_status_line(msg),
                                 Err(err) => {
                                     a.push_status_line(format!("HOST update failed: {}", err))
@@ -376,7 +376,7 @@ fn start_update_checker(status_tx: mpsc::Sender<String>, app: std::sync::Arc<std
 
             if last_check.elapsed().as_secs() >= interval_secs {
                 let latch = app.lock().unwrap().latch_credentials.clone();
-                match self_update::check_and_apply_update_with_latch_pull(latch.as_ref()) {
+                match self_update::check_and_apply_update_with_latch_pull(latch.as_ref(), None) {
                     Ok(msg) => {
                         if msg.contains("HOST updated") {
                             let _ = status_tx.send(format!("[host-update] {}", msg));

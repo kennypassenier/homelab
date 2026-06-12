@@ -75,8 +75,11 @@ fn run_latch_pull_before_update(latch: Option<&LatchPullRequest>) -> String {
     }
 
     let repo = env_nonempty("GITOPS_REPO", "/opt/gitops");
+    let Some(latch_bin) = resolve_latch_binary() else {
+        return "latch unavailable".to_string();
+    };
 
-    let mut command = Command::new("latch");
+    let mut command = Command::new(latch_bin);
     command.arg("pull");
     if latch.and_then(|value| value.sparse).unwrap_or(true) {
         command.arg("--sparse");
@@ -84,18 +87,6 @@ fn run_latch_pull_before_update(latch: Option<&LatchPullRequest>) -> String {
     if let Some(latch) = latch {
         if let Some(value) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
             command.args(["--env", value]);
-        }
-        if let Some(value) = latch.pat.as_deref().filter(|v| !v.trim().is_empty()) {
-            command.args(["--PAT", value]);
-        }
-        if let Some(value) = latch.key.as_deref().filter(|v| !v.trim().is_empty()) {
-            command.args(["--KEY", value]);
-        }
-        if let Some(value) = latch.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
-            command.args(["--REPO", value]);
-        }
-        if let Some(value) = latch.project.as_deref().filter(|v| !v.trim().is_empty()) {
-            command.args(["--project", value]);
         }
     }
 
@@ -203,6 +194,33 @@ fn github_get(url: &str) -> reqwest::blocking::RequestBuilder {
     } else {
         req.bearer_auth(token)
     }
+}
+
+fn resolve_latch_binary() -> Option<String> {
+    if let Ok(value) = std::env::var("LATCH_BIN") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    ["/usr/local/bin/latch", "/usr/bin/latch", "/home/linuxbrew/.linuxbrew/bin/latch", "latch"]
+        .iter()
+        .find_map(|candidate| {
+            if *candidate == "latch" {
+                let output = Command::new(candidate).arg("--version").output().ok()?;
+                if output.status.success() {
+                    return Some(candidate.to_string());
+                }
+                return None;
+            }
+
+            if std::path::Path::new(candidate).exists() {
+                Some(candidate.to_string())
+            } else {
+                None
+            }
+        })
 }
 
 fn try_restart_service() -> Result<(), String> {

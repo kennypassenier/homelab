@@ -57,7 +57,7 @@ pub fn start_failsafe_enforcer(status_tx: Sender<String>, app: Arc<Mutex<App>>) 
                             last_no_heartbeat_log = Instant::now();
                         }
                         let latch = app.lock().unwrap().latch_credentials.clone();
-                        match self_update::check_and_apply_update_with_latch_pull(latch.as_ref()) {
+                        match self_update::check_and_apply_update_with_latch_pull(latch.as_ref(), None) {
                             Ok(msg) => {
                                 if !msg.contains("No HOST update available")
                                     || last_no_update_log.elapsed().as_secs() >= 21_600
@@ -83,7 +83,7 @@ pub fn start_failsafe_enforcer(status_tx: Sender<String>, app: Arc<Mutex<App>>) 
                             last_no_heartbeat_log = Instant::now();
                         }
                         let latch = app.lock().unwrap().latch_credentials.clone();
-                        match self_update::check_and_apply_update_with_latch_pull(latch.as_ref()) {
+                        match self_update::check_and_apply_update_with_latch_pull(latch.as_ref(), None) {
                             Ok(msg) => {
                                 if !msg.contains("No HOST update available")
                                     || last_no_update_log.elapsed().as_secs() >= 21_600

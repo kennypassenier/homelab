@@ -27,12 +27,16 @@ struct ReleaseAsset {
     browser_download_url: String,
 }
 
-pub fn check_and_apply_update() -> Result<String, String> {
+pub fn check_and_apply_update(release_tag: Option<&str>) -> Result<String, String> {
     let repo = env_nonempty("HOST_UPDATE_REPO", "kennypassenier/homelab");
     let expected_asset = env_nonempty("HOST_UPDATE_ASSET", "HOST");
     let service = env_nonempty("HOST_UPDATE_SERVICE", "host-daemon.service");
 
-    let release = fetch_latest_release(&repo)?;
+    let release = if let Some(tag) = release_tag.filter(|tag| !tag.trim().is_empty()) {
+        fetch_release_by_tag(&repo, tag)?
+    } else {
+        fetch_latest_release(&repo)?
+    };
     let latest = normalize_version(&release.tag_name);
     let current = normalize_version(env!("CARGO_PKG_VERSION"));
 
@@ -109,9 +113,10 @@ pub fn check_and_apply_update() -> Result<String, String> {
 
 pub fn check_and_apply_update_with_latch_pull(
     latch: Option<&LatchPullRequest>,
+    release_tag: Option<&str>,
 ) -> Result<String, String> {
     let latch_note = run_latch_pull_before_remote_update(latch);
-    match check_and_apply_update() {
+    match check_and_apply_update(release_tag) {
         Ok(msg) => Ok(format!("{} [{}]", msg, latch_note)),
         Err(err) => Err(format!("{} [{}]", err, latch_note)),
     }
@@ -123,8 +128,11 @@ fn run_latch_pull_before_remote_update(latch: Option<&LatchPullRequest>) -> Stri
     }
 
     let repo = env_nonempty("GITOPS_REPO", "/root/homelab");
+    let Some(latch_bin) = resolve_latch_binary() else {
+        return "latch unavailable".to_string();
+    };
 
-    let mut command = Command::new("latch");
+    let mut command = Command::new(latch_bin);
     command.arg("pull");
     if latch.and_then(|value| value.sparse).unwrap_or(true) {
         command.arg("--sparse");
@@ -132,18 +140,6 @@ fn run_latch_pull_before_remote_update(latch: Option<&LatchPullRequest>) -> Stri
     if let Some(latch) = latch {
         if let Some(value) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
             command.args(["--env", value]);
-        }
-        if let Some(value) = latch.pat.as_deref().filter(|v| !v.trim().is_empty()) {
-            command.args(["--PAT", value]);
-        }
-        if let Some(value) = latch.key.as_deref().filter(|v| !v.trim().is_empty()) {
-            command.args(["--KEY", value]);
-        }
-        if let Some(value) = latch.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
-            command.args(["--REPO", value]);
-        }
-        if let Some(value) = latch.project.as_deref().filter(|v| !v.trim().is_empty()) {
-            command.args(["--project", value]);
         }
     }
 
@@ -234,6 +230,17 @@ fn fetch_latest_release(repo: &str) -> Result<ReleaseInfo, String> {
         .ok_or_else(|| "No host-daemon-v* release found on GitHub".to_string())
 }
 
+fn fetch_release_by_tag(repo: &str, tag: &str) -> Result<ReleaseInfo, String> {
+    let url = format!("https://api.github.com/repos/{}/releases/tags/{}", repo, tag);
+    github_get(&url)
+        .send()
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json::<ReleaseInfo>()
+        .map_err(|e| e.to_string())
+}
+
 fn download_asset(url: &str, path: &PathBuf) -> Result<(), String> {
     let bytes = github_get(url)
         .send()
@@ -266,6 +273,33 @@ fn github_get(url: &str) -> reqwest::blocking::RequestBuilder {
     } else {
         req.bearer_auth(token)
     }
+}
+
+fn resolve_latch_binary() -> Option<String> {
+    if let Ok(value) = std::env::var("LATCH_BIN") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    ["/usr/local/bin/latch", "/usr/bin/latch", "/home/linuxbrew/.linuxbrew/bin/latch", "latch"]
+        .iter()
+        .find_map(|candidate| {
+            if *candidate == "latch" {
+                let output = Command::new(candidate).arg("--version").output().ok()?;
+                if output.status.success() {
+                    return Some(candidate.to_string());
+                }
+                return None;
+            }
+
+            if std::path::Path::new(candidate).exists() {
+                Some(candidate.to_string())
+            } else {
+                None
+            }
+        })
 }
 
 fn try_restart_service(service: &str) -> Result<(), String> {

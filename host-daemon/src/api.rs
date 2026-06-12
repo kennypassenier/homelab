@@ -12,6 +12,7 @@ use serde::Serialize;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::process::Command;
 use tokio::sync::broadcast;
 
 static PROVISION_CYCLE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -44,6 +45,7 @@ struct ProvisionRequestBody {
 #[derive(serde::Deserialize)]
 struct UpdateRequestBody {
     latch: Option<self_update::LatchPullRequest>,
+    release_tag: Option<String>,
 }
 
 use crate::app::{App, BackupStatusLine, LogLevel};
@@ -148,7 +150,8 @@ async fn handle_version() -> Json<VersionResponse> {
 
 fn get_latch_version() -> Result<String, Box<dyn std::error::Error>> {
     use std::process::Command;
-    let output = Command::new("latch").arg("--version").output()?;
+    let latch_bin = resolve_latch_binary().ok_or("latch not found")?;
+    let output = Command::new(latch_bin).arg("--version").output()?;
     if output.status.success() {
         let version_str = String::from_utf8(output.stdout)?.trim().to_string();
         Ok(version_str)
@@ -224,6 +227,33 @@ fn parse_ram_pct(ram: &str) -> Option<u8> {
     Some(((used / total) * 100.0).round().clamp(0.0, 100.0) as u8)
 }
 
+fn resolve_latch_binary() -> Option<String> {
+    if let Ok(value) = std::env::var("LATCH_BIN") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    ["/usr/local/bin/latch", "/usr/bin/latch", "/home/linuxbrew/.linuxbrew/bin/latch", "latch"]
+        .iter()
+        .find_map(|candidate| {
+            if *candidate == "latch" {
+                let output = Command::new(candidate).arg("--version").output().ok()?;
+                if output.status.success() {
+                    return Some(candidate.to_string());
+                }
+                return None;
+            }
+
+            if std::path::Path::new(candidate).exists() {
+                Some(candidate.to_string())
+            } else {
+                None
+            }
+        })
+}
+
 async fn handle_update(
     State(app): State<Arc<Mutex<App>>>,
     payload: Option<Json<UpdateRequestBody>>,
@@ -238,8 +268,9 @@ async fn handle_update(
 
     let app_clone = app.clone();
     tokio::task::spawn_blocking(move || {
-        let latch = payload.map(|Json(body)| body.latch).flatten();
-        let result = self_update::check_and_apply_update_with_latch_pull(latch.as_ref());
+        let latch = payload.as_ref().and_then(|Json(body)| body.latch.as_ref());
+        let release_tag = payload.as_ref().and_then(|Json(body)| body.release_tag.as_deref());
+        let result = self_update::check_and_apply_update_with_latch_pull(latch, release_tag);
         let mut a = app_clone.lock().unwrap();
         match result {
             Ok(msg) => a.add_log(LogLevel::Info, format!("[update-http] {}", msg)),
@@ -382,8 +413,15 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
                                             )
                                             .ok()
                                         });
+                                    let release_tag = req
+                                        .get("release_tag")
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.to_string());
                                     tokio::task::spawn_blocking(move || {
-                                        let result = self_update::check_and_apply_update_with_latch_pull(latch.as_ref());
+                                        let result = self_update::check_and_apply_update_with_latch_pull(
+                                            latch.as_ref(),
+                                            release_tag.as_deref(),
+                                        );
                                         let mut guard = app_clone.lock().unwrap();
                                         match result {
                                             Ok(msg) => guard.add_log(LogLevel::Info, format!("[update-rpc] {}", msg)),

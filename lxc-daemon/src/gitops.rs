@@ -239,7 +239,8 @@ fn run_latch_pull(
     latch: &LatchPullRequest,
 ) -> Result<String, String> {
     let command_preview = format!(
-        "latch pull{}{}{}{}{}{}",
+        "{} pull{}{}",
+        resolve_latch_binary().unwrap_or_else(|| "latch".to_string()),
         if latch.sparse.unwrap_or(true) {
             " --sparse"
         } else {
@@ -250,30 +251,6 @@ fn run_latch_pull(
             .as_deref()
             .filter(|v| !v.trim().is_empty())
             .map(|v| format!(" --env {}", v))
-            .unwrap_or_default(),
-        latch
-            .pat
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .map(|_| " --PAT [redacted]".to_string())
-            .unwrap_or_default(),
-        latch
-            .key
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .map(|_| " --KEY [redacted]".to_string())
-            .unwrap_or_default(),
-        latch
-            .secrets_repo
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .map(|v| format!(" --REPO {}", v))
-            .unwrap_or_default(),
-        latch
-            .project
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .map(|v| format!(" --project {}", v))
             .unwrap_or_default()
     );
 
@@ -288,29 +265,14 @@ fn run_latch_pull(
         );
     }
 
-    let mut command = Command::new("latch");
+    let latch_bin = resolve_latch_binary().ok_or_else(|| "latch unavailable".to_string())?;
+    let mut command = Command::new(latch_bin);
     command.arg("pull");
     if latch.sparse.unwrap_or(true) {
         command.arg("--sparse");
     }
     if let Some(value) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
         command.args(["--env", value]);
-    }
-    if let Some(value) = latch.pat.as_deref().filter(|v| !v.trim().is_empty()) {
-        command.args(["--PAT", value]);
-    }
-    if let Some(value) = latch.key.as_deref().filter(|v| !v.trim().is_empty()) {
-        command.args(["--KEY", value]);
-    }
-    if let Some(value) = latch
-        .secrets_repo
-        .as_deref()
-        .filter(|v| !v.trim().is_empty())
-    {
-        command.args(["--REPO", value]);
-    }
-    if let Some(value) = latch.project.as_deref().filter(|v| !v.trim().is_empty()) {
-        command.args(["--project", value]);
     }
 
     let output = command
@@ -331,6 +293,33 @@ fn authenticated_repo_url(repo_url: &str) -> String {
     }
 
     repo_url.replacen("https://", &format!("https://{}@", token), 1)
+}
+
+fn resolve_latch_binary() -> Option<String> {
+    if let Ok(value) = std::env::var("LATCH_BIN") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    ["/usr/local/bin/latch", "/usr/bin/latch", "/home/linuxbrew/.linuxbrew/bin/latch", "latch"]
+        .iter()
+        .find_map(|candidate| {
+            if *candidate == "latch" {
+                let output = Command::new(candidate).arg("--version").output().ok()?;
+                if output.status.success() {
+                    return Some(candidate.to_string());
+                }
+                return None;
+            }
+
+            if std::path::Path::new(candidate).exists() {
+                Some(candidate.to_string())
+            } else {
+                None
+            }
+        })
 }
 
 fn check_is_synced(repo_path: &str) -> bool {

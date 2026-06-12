@@ -912,12 +912,18 @@ async fn async_main() -> Result<()> {
                 let stacks = app.stacks.clone();
                 let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
 
+                let host_release_tag = if app.host_latest_release.starts_with("host-daemon-v") {
+                    Some(app.host_latest_release.clone())
+                } else {
+                    None
+                };
+
                 tokio::spawn(async move {
                     if target == "UPDATING_ALL" {
                         let mut ok = true;
                         let mut parts: Vec<String> = Vec::new();
 
-                        let host_result = trigger_host_update().await;
+                        let host_result = trigger_host_update(host_release_tag.clone()).await;
                         match host_result {
                             Ok(msg) => parts.push(format!("HOST: {}", msg)),
                             Err(err) => {
@@ -946,7 +952,7 @@ async fn async_main() -> Result<()> {
                     }
 
                     if target == "HOST" {
-                        let result = trigger_host_update().await;
+                        let result = trigger_host_update(host_release_tag).await;
                         let (ok, msg) = match result {
                             Ok(msg) => (true, msg),
                             Err(err) => (false, err),
@@ -1394,7 +1400,7 @@ fn ws_request_id(prefix: &str) -> String {
     )
 }
 
-async fn request_host_update_ws() -> Result<(), String> {
+async fn request_host_update_ws(release_tag: Option<&str>) -> Result<(), String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
     let request_id = ws_request_id("update");
@@ -1404,6 +1410,7 @@ async fn request_host_update_ws() -> Result<(), String> {
         "request_id": &request_id,
         "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
         "latch": latch,
+        "release_tag": release_tag,
     });
 
     send_ws_rpc(&ip, payload, "update_response", &request_id).await?;
@@ -1472,13 +1479,16 @@ async fn request_lxc_update_ws(ip: &str, token: &str) -> Result<(), String> {
     Ok(())
 }
 
-async fn request_host_update_http() -> Result<String, String> {
+async fn request_host_update_http(release_tag: Option<&str>) -> Result<String, String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let url = format!("http://{}:8080/api/update", ip);
     let latch = client_latch_pull_payload();
     let response = reqwest::Client::new()
         .post(url)
-        .json(&serde_json::json!({ "latch": latch.unwrap_or(serde_json::Value::Null) }))
+        .json(&serde_json::json!({
+            "latch": latch.unwrap_or(serde_json::Value::Null),
+            "release_tag": release_tag,
+        }))
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -1511,11 +1521,12 @@ async fn request_lxc_update_http(ip: &str, token: &str) -> Result<String, String
     }
 }
 
-async fn trigger_host_update() -> Result<String, String> {
-    if request_host_update_ws().await.is_ok() {
+async fn trigger_host_update(release_tag: Option<String>) -> Result<String, String> {
+    let release_tag = release_tag.as_deref();
+    if request_host_update_ws(release_tag).await.is_ok() {
         Ok("HOST update check started via websocket".to_string())
     } else {
-        request_host_update_http().await
+        request_host_update_http(release_tag).await
     }
 }
 

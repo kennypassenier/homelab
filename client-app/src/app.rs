@@ -525,7 +525,7 @@ impl App {
                 )
             })
             .collect();
-        if self.host_connected && self.connected_lxc_stacks.is_empty() {
+        if self.host_connected {
             sources.push(("HOST".to_string(), ratatui::style::Color::White));
         }
         sources.push(("CLIENT".to_string(), ratatui::style::Color::Cyan));

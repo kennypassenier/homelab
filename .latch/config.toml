@@ -1,3 +1,0 @@
-name = "homelab"
-secrets_repo = "kennypassenier/secrets"
-default_env = "dev"

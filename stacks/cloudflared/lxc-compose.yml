@@ -5,8 +5,8 @@ hostname: 109-app-cloudflared
 hwaddr: 02:10:2b:c3:b8:9e
 tags: []
 deploy:
-  enabled: false
-  activated_at: null
+  enabled: true
+  activated_at: '1781264214'
 network:
   bridge: vmbr0
   ip_mode: static
@@ -44,9 +44,6 @@ host_management:
   managed: true
   protection: false
 mounts:
-- name: cloudflared-test-config
-  source: /opt/appdata/cloudflared/cloudflared-test-config
-  target: /appdata/cloudflared-test-config
 - name: cloudflared-config
   source: /opt/appdata/cloudflared/cloudflared-config
   target: /appdata/cloudflared-config

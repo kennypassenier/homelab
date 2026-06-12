@@ -416,13 +416,14 @@ fn start_auto_provisioner(status_tx: mpsc::Sender<String>) {
                 ) {
                     Ok(actions) => {
                         let summary = provision::format_provision_summary(&actions);
-                        // Only log if something interesting happened (not all OK/SKIP).
+                        // Log any interesting actions (Create, Recreate, Update, or ResumeBootstrap).
                         let has_changes = actions.iter().any(|a| {
                             matches!(
                                 a,
                                 provision::ProvisionAction::Create { .. }
                                     | provision::ProvisionAction::Recreate { .. }
                                     | provision::ProvisionAction::Update { .. }
+                                    | provision::ProvisionAction::ResumeBootstrap { .. }
                             )
                         });
                         if has_changes {

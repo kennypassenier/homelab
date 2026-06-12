@@ -537,6 +537,44 @@ async fn async_main() -> Result<()> {
             });
         }
 
+        // If a stack-destroy was requested, ask HOST to destroy the selected LXC.
+        if app.destroy_stack_pending {
+            app.destroy_stack_pending = false;
+            let stack = app.destroy_stack.clone();
+            let tx = sync_tx.clone();
+            app.push_client_logfmt(
+                "WARN",
+                Some(&stack),
+                Some("destroy_dispatch"),
+                "requesting HOST to destroy stack LXC container",
+                None,
+            );
+            tokio::spawn(async move {
+                match trigger_host_destroy_stack(&stack).await {
+                    Ok(msg) => {
+                        let _ = tx.send(SyncEvent::LiveLog {
+                            stack: stack.clone(),
+                            line: format!(
+                                "CLIENT WARN component=client level=warn stack={} phase=destroy_result msg=\"{}\"",
+                                stack,
+                                msg.replace('"', "'")
+                            ),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(SyncEvent::LiveLog {
+                            stack: stack.clone(),
+                            line: format!(
+                                "CLIENT ERROR component=client level=error stack={} phase=destroy_result msg=\"HOST destroy failed\" error=\"{}\"",
+                                stack,
+                                e.replace('"', "'")
+                            ),
+                        });
+                    }
+                }
+            });
+        }
+
         // If a sync was queued by key actions, spawn the HTTP request now.
         if app.sync_pending {
             app.sync_pending = false;
@@ -852,8 +890,8 @@ async fn async_main() -> Result<()> {
                 let stacks = app.stacks.clone();
                 let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
                 tokio::spawn(async move {
-                    send_heartbeats(stacks, token).await;
-                    send_host_heartbeat().await;
+                    send_heartbeats(stacks.clone(), token).await;
+                    send_host_heartbeat(stacks).await;
                 });
             }
 
@@ -1270,13 +1308,14 @@ async fn request_host_update_ws() -> Result<(), String> {
     Ok(())
 }
 
-async fn request_host_heartbeat_ws() -> Result<(), String> {
+async fn request_host_heartbeat_ws(active_stacks: &[String]) -> Result<(), String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
     let request_id = ws_request_id("host-heartbeat");
     let payload = serde_json::json!({
         "kind": "client_heartbeat",
         "request_id": &request_id,
+        "active_stacks": active_stacks,
         "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
     });
 
@@ -1293,7 +1332,7 @@ async fn request_host_heartbeat_ws() -> Result<(), String> {
     }
 }
 
-async fn request_host_heartbeat_http() -> Result<(), String> {
+async fn request_host_heartbeat_http(active_stacks: &[String]) -> Result<(), String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
     let url = format!("http://{}:8080/api/heartbeat", ip);
@@ -1303,7 +1342,11 @@ async fn request_host_heartbeat_http() -> Result<(), String> {
         req = req.bearer_auth(token);
     }
 
-    let response = req.send().await.map_err(|e| e.to_string())?;
+    let response = req
+        .json(&serde_json::json!({ "active_stacks": active_stacks }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if response.status().is_success() {
         Ok(())
     } else {
@@ -1372,6 +1415,15 @@ async fn trigger_host_provision() -> Result<String, String> {
     }
 }
 
+/// Ask HOST to destroy one stack container via WS RPC or HTTP fallback.
+async fn trigger_host_destroy_stack(stack_name: &str) -> Result<String, String> {
+    if request_host_destroy_stack_ws(stack_name).await.is_ok() {
+        Ok("HOST stack destroy started via websocket".to_string())
+    } else {
+        request_host_destroy_stack_http(stack_name).await
+    }
+}
+
 async fn request_host_provision_ws() -> Result<(), String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
@@ -1398,6 +1450,37 @@ async fn request_host_provision_http() -> Result<String, String> {
         Ok("HOST provisioning cycle started".to_string())
     } else {
         Err(format!("HOST provision HTTP {}", response.status()))
+    }
+}
+
+async fn request_host_destroy_stack_ws(stack_name: &str) -> Result<(), String> {
+    let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+    let request_id = ws_request_id("destroy-stack");
+    let payload = serde_json::json!({
+        "kind": "destroy_stack_request",
+        "request_id": &request_id,
+        "stack_name": stack_name,
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+    });
+    send_ws_rpc(&ip, payload, "destroy_stack_response", &request_id).await?;
+    Ok(())
+}
+
+async fn request_host_destroy_stack_http(stack_name: &str) -> Result<String, String> {
+    let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let url = format!("http://{}:8080/api/provision/destroy", ip);
+    let response = reqwest::Client::new()
+        .post(url)
+        .json(&serde_json::json!({ "stack_name": stack_name }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        Ok("HOST stack destroy started".to_string())
+    } else {
+        Err(format!("HOST destroy HTTP {}", response.status()))
     }
 }
 
@@ -1466,9 +1549,19 @@ fn extract_daemon_version(message: &str) -> Option<String> {
         .map(|raw| raw.trim_matches('"').to_string())
 }
 
-async fn send_host_heartbeat() {
-    if request_host_heartbeat_ws().await.is_err() {
-        let _ = request_host_heartbeat_http().await;
+async fn send_host_heartbeat(stacks: Vec<String>) {
+    let active_stacks: Vec<String> = stacks
+        .iter()
+        .filter_map(|stack| {
+            crate::scaffold::read_stack_config(stack)
+                .ok()
+                .filter(|cfg| cfg.deploy_enabled)
+                .map(|_| stack.clone())
+        })
+        .collect();
+
+    if request_host_heartbeat_ws(&active_stacks).await.is_err() {
+        let _ = request_host_heartbeat_http(&active_stacks).await;
     }
 }
 

@@ -6,7 +6,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
-
 use crate::app::{App, Tab};
 use crate::blast_radius::{
     ActiveModal, AppConfigEditorState, AppConfigEditorStep, AppCreationStep,
@@ -107,6 +106,25 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
                                 format!("Delete stack blocked for '{}': {}", app_name, e);
                         }
                     }
+                }
+            } else {
+                input.handle_event(&crossterm::event::Event::Key(key));
+            }
+        }
+
+        ActiveModal::DeleteLxcConfirmation { stack_name, input } => {
+            if key.code == KeyCode::Esc {
+                app.modal = ActiveModal::None;
+            } else if key.code == KeyCode::Enter {
+                if input.value() == stack_name {
+                    let _ = crate::scaffold::set_stack_deploy_enabled(stack_name, false);
+                    app.destroy_stack = stack_name.clone();
+                    app.destroy_stack_pending = true;
+                    app.sync_status = format!(
+                        "Queued destroy for stack '{}' (deploy.enabled forced false).",
+                        stack_name
+                    );
+                    app.modal = ActiveModal::None;
                 }
             } else {
                 input.handle_event(&crossterm::event::Event::Key(key));
@@ -1320,8 +1338,7 @@ fn handle_logs_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
             app.log_source_scroll = app.log_source_scroll.min(app.log_source_selected);
         }
         KeyCode::Right => {
-            use crate::app::LOG_SOURCES;
-            if app.log_source_selected + 1 < LOG_SOURCES.len() {
+            if app.log_source_selected + 1 < app.log_sources().len() {
                 app.log_source_selected += 1;
                 if app.log_source_selected > app.log_source_scroll + 4 {
                     app.log_source_scroll += 1;
@@ -1346,6 +1363,32 @@ fn handle_logs_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
             app.log_wrap_mode = !app.log_wrap_mode;
             app.log_scroll = 0;
             app.log_hscroll = 0;
+        }
+        // Copy all visible logs to clipboard.
+        KeyCode::Char('y') => {
+            let focused = app.focused_source();
+            let text: String = app
+                .logs
+                .iter()
+                .filter(|l| app.log_level_filter.matches(&l.level))
+                .filter(|l| {
+                    focused
+                        .as_deref()
+                        .map(|source| l.source == source)
+                        .unwrap_or(true)
+                })
+                .map(|l| format!("{} {:<18} {:<6} {}", l.time, l.source, l.level, l.message))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text)) {
+                Ok(()) => {
+                    app.push_log("CLIENT", "INFO", "Logs copied to clipboard");
+                }
+                Err(e) => {
+                    app.push_log("CLIENT", "WARN", &format!("Clipboard unavailable: {}", e));
+                }
+            }
         }
         KeyCode::Tab => app.tab_right(),
         KeyCode::BackTab => app.tab_left(),
@@ -1462,7 +1505,7 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
             }
             1 => {
                 let d = &mut app.stack_dropdowns[app.selected_stack];
-                if d.selected_option + 1 < 3 {
+                if d.selected_option + 1 < 4 {
                     d.selected_option += 1;
                 }
             }
@@ -1939,6 +1982,12 @@ fn handle_scaffolding_enter(app: &mut App) -> EventOutcome {
                             format!("Cannot open stack config for '{}': {}", stack_name, e);
                     }
                 },
+                3 => {
+                    app.modal = ActiveModal::DeleteLxcConfirmation {
+                        stack_name,
+                        input: Input::default(),
+                    };
+                }
                 _ => {}
             }
         }

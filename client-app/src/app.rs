@@ -50,18 +50,18 @@ impl Tab {
     }
 }
 
-/// Each log source displayed in the Logs tab legend, with its display colour.
-/// Add new stacks here as the homelab grows.
-pub const LOG_SOURCES: &[(&str, ratatui::style::Color)] = &[
-    ("lxc-cloudflared", ratatui::style::Color::Blue),
-    ("lxc-downloader", ratatui::style::Color::Magenta),
-    ("lxc-gateway", ratatui::style::Color::Yellow),
-    ("lxc-media", ratatui::style::Color::Cyan),
-    ("lxc-monitoring", ratatui::style::Color::Green),
-    ("lxc-paperless", ratatui::style::Color::LightCyan),
-    ("lxc-vikunja", ratatui::style::Color::LightMagenta),
-    ("HOST", ratatui::style::Color::White),
-    ("CLIENT", ratatui::style::Color::Cyan),
+/// Per-source colours — cycled through for all `lxc-*` sources by index.
+const SOURCE_COLORS: &[ratatui::style::Color] = &[
+    ratatui::style::Color::Blue,
+    ratatui::style::Color::Magenta,
+    ratatui::style::Color::Yellow,
+    ratatui::style::Color::LightCyan,
+    ratatui::style::Color::Green,
+    ratatui::style::Color::LightMagenta,
+    ratatui::style::Color::LightBlue,
+    ratatui::style::Color::LightGreen,
+    ratatui::style::Color::LightYellow,
+    ratatui::style::Color::Rgb(255, 128, 0),
 ];
 
 /// Which log levels are visible in the Logs tab.
@@ -207,6 +207,10 @@ pub struct App {
     pub sync_queue: VecDeque<String>,
     /// Human-readable status line shown at the bottom of the Scaffolding tab.
     pub sync_status: String,
+    /// When true, main loop dispatches a HOST request to destroy one stack LXC.
+    pub destroy_stack_pending: bool,
+    /// Stack currently targeted for HOST-side container destroy.
+    pub destroy_stack: String,
     /// Backup schedule policy edited in Backups tab.
     pub backup_schedule: BackupSchedule,
     /// Update operation in progress (stack name or "HOST").
@@ -317,6 +321,8 @@ impl App {
             sync_stack: String::new(),
             sync_queue: VecDeque::new(),
             sync_status: "Idle".to_string(),
+            destroy_stack_pending: false,
+            destroy_stack: String::new(),
             backup_schedule: BackupSchedule::load_or_default(),
             update_in_progress: None,
             update_status: String::new(),
@@ -466,13 +472,31 @@ impl App {
         self.live_logs_seen = true;
     }
 
-    pub fn focused_source(&self) -> Option<&'static str> {
+    pub fn focused_source(&self) -> Option<String> {
         if !self.log_focus_mode {
             return None;
         }
-        LOG_SOURCES
+        self.log_sources()
             .get(self.log_source_selected)
-            .map(|(name, _)| *name)
+            .map(|(name, _)| name.clone())
+    }
+
+    /// Dynamic log source list: lxc-<stack> for every known stack, then HOST, then CLIENT.
+    pub fn log_sources(&self) -> Vec<(String, ratatui::style::Color)> {
+        let mut sources: Vec<(String, ratatui::style::Color)> = self
+            .stacks
+            .iter()
+            .enumerate()
+            .map(|(i, stack)| {
+                (
+                    format!("lxc-{}", stack),
+                    SOURCE_COLORS[i % SOURCE_COLORS.len()],
+                )
+            })
+            .collect();
+        sources.push(("HOST".to_string(), ratatui::style::Color::White));
+        sources.push(("CLIENT".to_string(), ratatui::style::Color::Cyan));
+        sources
     }
 
     pub fn update_host_runtime(

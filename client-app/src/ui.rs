@@ -13,9 +13,10 @@ use ratatui::{
     },
 };
 
-use crate::app::{App, LOG_SOURCES, LogLevelFilter, Tab};
+use crate::app::{App, LogLevelFilter, Tab};
 use crate::blast_radius::{
     ActiveModal, draw_app_config_editor, draw_app_creation_wizard, draw_delete_app_modal,
+    draw_delete_lxc_modal,
     draw_operation_progress, draw_ssh_add_wizard, draw_stack_config_editor,
     draw_stack_creation_wizard, draw_warning_modal,
 };
@@ -95,6 +96,9 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
     match &app.modal {
         ActiveModal::DeleteConfirmation { app_name, input } => {
             draw_warning_modal(f, size, app_name, input);
+        }
+        ActiveModal::DeleteLxcConfirmation { stack_name, input } => {
+            draw_delete_lxc_modal(f, size, stack_name, input);
         }
         ActiveModal::DeleteAppConfirmation {
             stack_name,
@@ -225,7 +229,12 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
     }
 
     // ── Actions column ─────────────────────────────────────────────────────
-    let actions = ["+ add app", "✗ delete stack", "≡ stack config"];
+    let actions = [
+        "+ add app",
+        "✗ delete stack",
+        "≡ stack config",
+        "☠ destroy lxc",
+    ];
     let dropdown = &app.stack_dropdowns[app.selected_stack];
     let action_items: Vec<ListItem> = actions
         .iter()
@@ -233,7 +242,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
         .map(|(j, label)| {
             let selected = app.column_focus == 1 && dropdown.selected_option == j;
             let base = match j {
-                1 => Style::default()
+                1 | 3 => Style::default()
                     .fg(app.theme.warning)
                     .add_modifier(Modifier::BOLD),
                 _ => Style::default().fg(app.theme.accent_cyan),
@@ -1246,6 +1255,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 
     // -- Sources block (horizontal scroll) -----------------------------------
     {
+        let log_sources = app.log_sources();
         let inner_w = header_cols[0].width.saturating_sub(4) as usize;
         let has_left = app.log_source_scroll > 0;
 
@@ -1261,9 +1271,9 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         }
 
         let mut last_end = app.log_source_scroll;
-        for (idx, (name, color)) in LOG_SOURCES.iter().enumerate().skip(app.log_source_scroll) {
+        for (idx, (name, color)) in log_sources.iter().enumerate().skip(app.log_source_scroll) {
             let label = format!("{} ", name);
-            let reserve = if last_end + 1 < LOG_SOURCES.len() {
+            let reserve = if last_end + 1 < log_sources.len() {
                 2
             } else {
                 0
@@ -1281,7 +1291,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
             last_end += 1;
         }
 
-        if last_end < LOG_SOURCES.len() {
+        if last_end < log_sources.len() {
             spans.push(Span::styled(
                 " \u{25b6}",
                 Style::default().fg(Color::Yellow),
@@ -1351,6 +1361,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         .filter(|l| app.log_level_filter.matches(&l.level))
         .filter(|l| {
             focused_source
+                .as_deref()
                 .map(|source| l.source == source)
                 .unwrap_or(true)
         })
@@ -1366,7 +1377,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = filtered[start..end]
         .iter()
         .map(|line| {
-            let src_color = log_source_color(&line.source);
+            let src_color = log_source_color(app, &line.source);
             let level_style = log_level_style(&line.level);
             let msg = single_line(&line.message);
             let visible_msg = slice_chars(&msg, app.log_hscroll, msg_width);
@@ -1387,7 +1398,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let title = if scroll == 0 {
-        if let Some(source) = focused_source {
+        if let Some(ref source) = focused_source {
             format!(" Logs [live | focus:{}] ", source)
         } else {
             " Logs [live] ".to_string()
@@ -1414,23 +1425,24 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     // ── Footer: counts and hints ─────────────────────────────────────────────
     let all_total = app.logs.len();
     let focus_suffix = focused_source
+        .as_deref()
         .map(|source| format!("  |  focus={}", source))
         .unwrap_or_default();
     let status = if app.log_level_filter == LogLevelFilter::All {
         if scroll == 0 {
             format!(
-                " {} lines  |  \u{2191}/\u{2193} scroll  |  h/l line-pan  |  </> source{}",
+                " {} lines  |  \u{2191}/\u{2193} scroll  |  h/l line-pan  |  </> source  |  [y] copy{}",
                 all_total, focus_suffix
             )
         } else {
             format!(
-                " -{} from latest  |  End = resume  |  hscroll={}  |  {}/{} lines{}",
+                " -{} from latest  |  End = resume  |  hscroll={}  |  {}/{} lines  |  [y] copy{}",
                 scroll, app.log_hscroll, end, total, focus_suffix
             )
         }
     } else {
         format!(
-            " {} / {} lines  [filter: {}]  |  [f] cycle filter  |  h/l line-pan{}",
+            " {} / {} lines  [filter: {}]  |  [f] cycle  |  h/l pan  |  [y] copy{}",
             total,
             all_total,
             app.log_level_filter.label(),
@@ -1443,12 +1455,11 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-/// Maps a log source name to a display colour.
-fn log_source_color(source: &str) -> Color {
-    // Walk LOG_SOURCES so this stays in sync with the legend automatically.
-    for (name, color) in LOG_SOURCES {
-        if *name == source {
-            return *color;
+/// Maps a log source name to a display colour using the app's dynamic source list.
+fn log_source_color(app: &App, source: &str) -> Color {
+    for (name, color) in app.log_sources() {
+        if name == source {
+            return color;
         }
     }
     Color::Gray

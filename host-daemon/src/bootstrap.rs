@@ -426,21 +426,72 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
         return Ok(());
     };
 
-    // Extract only LATCH_ variables
+    // Extract LATCH_ variables from file and fallback to process env.
+    // Also inject GITOPS_REPO_URL and GITOPS_REPO_TOKEN so the in-container
+    // git operations can re-authenticate if the credential store is ever cleared.
     let content =
         std::fs::read_to_string(env_file).map_err(|e| format!("Failed to read env file: {}", e))?;
 
-    let latch_vars: Vec<&str> = content
-        .lines()
-        .filter(|line| line.starts_with("LATCH_"))
-        .collect();
+    let mut vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for raw_line in content.lines() {
+        let mut line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("export ") {
+            line = rest.trim();
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            let key = key.trim();
+            if key.starts_with("LATCH_")
+                || key == "GITOPS_REPO_URL"
+                || key == "GITOPS_REPO_TOKEN"
+                || key == "GITHUB_PAT"
+            {
+                vars.insert(key.to_string(), value.trim().to_string());
+            }
+        }
+    }
 
-    if latch_vars.is_empty() {
-        eprintln!("No LATCH_ variables found");
+    // Env vars take precedence over the file for these critical keys
+    for key in [
+        "LATCH_PAT",
+        "LATCH_KEY",
+        "LATCH_SECRETS_REPO",
+        "GITOPS_REPO_URL",
+        "GITOPS_REPO_TOKEN",
+        "GITHUB_PAT",
+    ] {
+        if let Ok(value) = std::env::var(key) {
+            if !value.trim().is_empty() {
+                vars.insert(key.to_string(), value);
+            }
+        }
+    }
+
+    // GITOPS_REPO_URL default if not set anywhere
+    if !vars.contains_key("GITOPS_REPO_URL") {
+        vars.insert(
+            "GITOPS_REPO_URL".to_string(),
+            "https://github.com/kennypassenier/homelab.git".to_string(),
+        );
+    }
+
+    if vars.is_empty() {
+        eprintln!("No secret variables found to inject");
         return Ok(());
     }
 
-    let secrets_content = latch_vars.join("\n");
+    let mut keys: Vec<String> = vars.keys().cloned().collect();
+    keys.sort();
+    let secrets_content = keys
+        .into_iter()
+        .filter_map(|key| {
+            vars.get(&key)
+                .map(|value| format!("{}={}", key, value))
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
 
     // Write to container /root/.env
     let temp_file = format!("/tmp/lxc-secrets-{}", vmid);
@@ -989,16 +1040,20 @@ auth_token_env = "LXC_API_TOKEN"
 
     std::fs::remove_file(&temp_file).ok();
 
-    // Create systemd service
+    // Create systemd service.
+    // Intentionally use Wants= (not Requires=) for docker so the daemon starts
+    // even when docker is slow to initialise; the docker poller retries gracefully.
     let service_content = r#"[Unit]
 Description=Homelab LXC GitOps Daemon
-After=network.target docker.service
-Requires=docker.service
+After=network-online.target docker.service
+Wants=network-online.target docker.service
 
 [Service]
 Type=simple
+WorkingDirectory=/opt/gitops
 EnvironmentFile=-/root/.env
-ExecStart=/usr/local/bin/lxc-daemon --config /etc/homelab/lxc-daemon.toml
+Environment=GITOPS_REPO=/opt/gitops
+ExecStart=/usr/local/bin/lxc-daemon
 Restart=always
 RestartSec=5
 # Disable burst limit so the service always restarts after updates or crashes.
@@ -1038,6 +1093,42 @@ WantedBy=multi-user.target
     pct_exec(vmid, "systemctl enable lxc-daemon")?;
     pct_exec(vmid, "systemctl start lxc-daemon")?;
 
-    eprintln!("LXC daemon service configured and started in LXC {}", vmid);
+    // Health check: wait up to 20 seconds for the daemon to be active and listening.
+    let health_script = r#"
+for i in $(seq 1 20); do
+    if systemctl is-active --quiet lxc-daemon; then
+        echo "lxc-daemon active after ${i}s"
+        exit 0
+    fi
+    sleep 1
+done
+echo "=== HEALTH CHECK FAILED ==="
+echo "--- systemctl status ---"
+systemctl status lxc-daemon --no-pager 2>&1 | tail -20
+echo "--- journal ---"
+journalctl -u lxc-daemon -n 40 --no-pager 2>&1
+echo "--- log file ---"
+cat /var/log/lxc-daemon.log 2>/dev/null | tail -30
+echo "--- port check ---"
+ss -tlnp | grep 8080 || echo 'port 8080 not listening'
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+echo "--- manual test ---"
+/usr/local/bin/lxc-daemon 2>&1 &
+DPID=$!
+sleep 3
+kill $DPID 2>/dev/null
+exit 1
+"#;
+    match pct_exec(vmid, health_script) {
+        Ok(out) => eprintln!("[lxc-daemon health] {}", out.trim()),
+        Err(e) => {
+            return Err(format!(
+                "lxc-daemon did not start cleanly in LXC {}: {}",
+                vmid, e
+            ));
+        }
+    }
+
+    eprintln!("LXC daemon service configured and healthy in LXC {}", vmid);
     Ok(())
 }

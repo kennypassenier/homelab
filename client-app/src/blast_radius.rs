@@ -10,6 +10,10 @@ pub enum ActiveModal {
         app_name: String,
         input: Input,
     },
+    DeleteLxcConfirmation {
+        stack_name: String,
+        input: Input,
+    },
     DeleteAppConfirmation {
         stack_name: String,
         app_name: String,
@@ -912,6 +916,32 @@ pub fn draw_delete_app_modal(
         "DANGER: Type the exact app name to delete it.\n\nStack: {}\nApp: {}\n> {}\n\n[ESC to cancel]",
         stack_name,
         app_name,
+        input.value()
+    );
+    let para = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::Red));
+    f.render_widget(para, popup_area);
+}
+
+/// Draws a warning modal for deleting a stack container in Proxmox.
+pub fn draw_delete_lxc_modal(f: &mut ratatui::Frame, area: Rect, stack_name: &str, input: &Input) {
+    let popup_area = Rect {
+        x: area.width / 4,
+        y: area.height / 3,
+        width: area.width / 2,
+        height: 10,
+    };
+    f.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .title("DANGER")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD));
+    let text = format!(
+        "DANGER: Type the exact stack name to destroy its Proxmox LXC.\n\nStack: {}\n> {}\n\nThis deletes only the container (not Git files).\n[ESC to cancel]",
+        stack_name,
         input.value()
     );
     let para = Paragraph::new(text)

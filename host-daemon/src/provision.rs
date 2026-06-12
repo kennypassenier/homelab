@@ -2,6 +2,67 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
+
+// ── Bootstrap grace-period tracking ─────────────────────────────────────────
+// After a successful bootstrap we suppress RESUME_BOOTSTRAP checks for
+// BOOTSTRAP_GRACE_SECS so the auto-provisioner doesn't immediately re-run it
+// while the container is still starting up.
+const BOOTSTRAP_GRACE_SECS: u64 = 600; // 10 minutes
+
+static LAST_BOOTSTRAP: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+
+fn bootstrap_registry() -> &'static Mutex<HashMap<String, Instant>> {
+    LAST_BOOTSTRAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Record a successful bootstrap so the grace period starts.
+pub fn record_successful_bootstrap(stack_name: &str) {
+    let mut map = bootstrap_registry().lock().unwrap();
+    map.insert(stack_name.to_string(), Instant::now());
+}
+
+fn within_bootstrap_grace(stack_name: &str) -> bool {
+    let map = bootstrap_registry().lock().unwrap();
+    map.get(stack_name)
+        .map(|t| t.elapsed().as_secs() < BOOTSTRAP_GRACE_SECS)
+        .unwrap_or(false)
+}
+
+fn effective_deploy_enabled(intent: &StackIntent) -> bool {
+    let ttl_secs = std::env::var("HOST_CLIENT_AUTH_TTL_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(120)
+        .max(30);
+
+    if crate::liveness::heartbeat_is_fresh(ttl_secs) {
+        let active = crate::liveness::client_active_stacks();
+        active.iter().any(|stack| stack == &intent.stack_name)
+    } else {
+        intent.deploy_enabled
+    }
+}
+
+fn provisioning_authority_summary() -> String {
+    let ttl_secs = std::env::var("HOST_CLIENT_AUTH_TTL_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(120)
+        .max(30);
+
+    if crate::liveness::heartbeat_is_fresh(ttl_secs) {
+        let active = crate::liveness::client_active_stacks();
+        format!(
+            "source=client_runtime_active_stacks ttl={}s active_count={}",
+            ttl_secs,
+            active.len()
+        )
+    } else {
+        format!("source=git_deploy_enabled_fallback ttl={}s", ttl_secs)
+    }
+}
 
 // ============================================================================
 // SAFETY GUARANTEE: This module uses a WHITELIST approach
@@ -445,6 +506,13 @@ pub fn validate_lxc(vmid: u32, intent: &StackIntent) -> Result<ValidationResult,
         }
     }
 
+    if let Some(protection_str) = config.get("protection") {
+        let protection = protection_str == "1";
+        if protection != intent.protection {
+            drift.push(format!("protection:{}→{}", protection, intent.protection));
+        }
+    }
+
     Ok(ValidationResult {
         exists: true,
         name_matches,
@@ -615,6 +683,7 @@ pub fn create_lxc(
     );
     match crate::bootstrap::bootstrap_lxc(intent.vmid, intent, log) {
         Ok(result) => {
+            record_successful_bootstrap(&intent.stack_name);
             log(
                 "ok",
                 &format!(
@@ -759,10 +828,23 @@ pub fn reconcile_lxc(vmid: u32, intent: &StackIntent, dry_run: bool) -> Result<(
         .arg(if intent.autostart { "1" } else { "0" })
         .output();
 
+    // Update protection flag so Proxmox UI deletion behavior matches stack intent.
+    let _ = Command::new("pct")
+        .arg("set")
+        .arg(vmid.to_string())
+        .arg("--protection")
+        .arg(if intent.protection { "1" } else { "0" })
+        .output();
+
     Ok(())
 }
 
-fn container_bootstrap_gap(vmid: u32) -> Option<String> {
+fn container_bootstrap_gap(vmid: u32, stack_name: &str) -> Option<String> {
+    // Suppress gap checks for recently bootstrapped stacks while the daemon is still starting.
+    if within_bootstrap_grace(stack_name) {
+        return None;
+    }
+
     let checks = [
         (
             "missing_lxc_daemon_install",
@@ -817,6 +899,16 @@ pub fn plan_provisioning_changes(repo_root: &Path) -> Result<Vec<ProvisionAction
             continue;
         }
 
+        let deploy_active = effective_deploy_enabled(&intent);
+        if !deploy_active {
+            actions.push(ProvisionAction::Skip {
+                stack: intent.stack_name.clone(),
+                reason: "deploy_inactive (CLIENT runtime authority or git deploy.enabled=false)"
+                    .to_string(),
+            });
+            continue;
+        }
+
         match validate_lxc(intent.vmid, &intent) {
             Ok(validation) => {
                 if !validation.exists {
@@ -842,8 +934,8 @@ pub fn plan_provisioning_changes(repo_root: &Path) -> Result<Vec<ProvisionAction
                         name: intent.hostname.clone(),
                         drift: validation.config_drift,
                     });
-                } else if intent.deploy_enabled {
-                    if let Some(reason) = container_bootstrap_gap(intent.vmid) {
+                } else if deploy_active {
+                    if let Some(reason) = container_bootstrap_gap(intent.vmid, &intent.stack_name) {
                         actions.push(ProvisionAction::ResumeBootstrap {
                             stack: intent.stack_name.clone(),
                             vmid: intent.vmid,
@@ -883,6 +975,11 @@ pub fn apply_provisioning_changes(
     dry_run: bool,
     log: &dyn Fn(&str, &str),
 ) -> Result<Vec<ProvisionAction>, String> {
+    log(
+        "info",
+        &format!("[provision] authority {}", provisioning_authority_summary()),
+    );
+
     let actions = plan_provisioning_changes(repo_root)?;
     let intents = scan_stack_intents(repo_root)?;
     let intent_map: HashMap<String, StackIntent> = intents
@@ -1053,6 +1150,8 @@ pub fn apply_provisioning_changes(
                             "RESUME_BOOTSTRAP failed for stack '{}': {}",
                             stack, e
                         ));
+                    } else {
+                        record_successful_bootstrap(stack);
                     }
                 }
             }
@@ -1061,6 +1160,56 @@ pub fn apply_provisioning_changes(
     }
 
     Ok(actions)
+}
+
+/// Destroy a single stack container by stack name (without deleting Git files).
+/// Intended for CLIENT-triggered cleanup from the Scaffolding tab.
+pub fn destroy_stack_container(
+    repo_root: &Path,
+    stack_name: &str,
+    dry_run: bool,
+    log: &dyn Fn(&str, &str),
+) -> Result<(), String> {
+    let intents = scan_stack_intents(repo_root)?;
+    let Some(intent) = intents.into_iter().find(|i| i.stack_name == stack_name) else {
+        return Err(format!(
+            "stack '{}' not found in stacks/*/lxc-compose.yml",
+            stack_name
+        ));
+    };
+
+    let validation = validate_lxc(intent.vmid, &intent)?;
+    if !validation.exists {
+        log(
+            "info",
+            &format!(
+                "[provision] destroy stack='{}' vmid={} skipped (container not found)",
+                stack_name, intent.vmid
+            ),
+        );
+        return Ok(());
+    }
+
+    if !dry_run {
+        // Always unlock protection before destroy so Proxmox UI and API behavior stays consistent.
+        let _ = Command::new("pct")
+            .arg("set")
+            .arg(intent.vmid.to_string())
+            .arg("--protection")
+            .arg("0")
+            .output();
+    }
+
+    destroy_lxc(intent.vmid, &intent.hostname, dry_run)?;
+    log(
+        "ok",
+        &format!(
+            "[provision] destroyed stack='{}' vmid={} hostname={}",
+            stack_name, intent.vmid, intent.hostname
+        ),
+    );
+
+    Ok(())
 }
 
 fn disable_stack_deploy(repo_root: &Path, stack_name: &str, reason: &str) -> Result<(), String> {

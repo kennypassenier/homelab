@@ -1,5 +1,5 @@
 *.env
-
+.latch/*
 *.log
 
 # OS / Editor files

@@ -1,6 +1,6 @@
 # CLIENT Features (Current)
 
-Last updated: 2026-06-06
+Last updated: 2026-06-12
 
 ## Scope
 
@@ -11,7 +11,10 @@ Last updated: 2026-06-06
 - CLIENT keeps the full session log stream because HOST and LXC now bound their own replay histories.
 - Live deploy telemetry streamed from LXC daemon WebSocket logs during sync actions.
 - Persistent websocket supervision for HOST plus all deploy-enabled stacks, with auto-reconnect for stale/no-signal streams.
+- Client-side provisioning dispatch debounce suppresses duplicate HOST provision requests during reconnect/key-repeat storms.
+- Logs tab ingestion suppresses identical consecutive LXC log lines within a short window to reduce repeated warning noise.
 - CLIENT control-plane actions now use websocket RPC on LXC `/api/logs/ws` for sync, restore, heartbeat, and remote command execution (with HTTP fallback kept for compatibility).
+- CLIENT now attaches one-shot latch pull context (`PAT` / `KEY` / `REPO` / `project` / optional `env` / `sparse`) to HOST and LXC update requests and to LXC sync requests.
 - Session heartbeat pulses to LXC daemons while CLIENT is running, used to suppress unnecessary failsafe sync windows.
 - Session heartbeat pulses to HOST now use websocket RPC (`client_heartbeat`) with HTTP `POST /api/heartbeat` fallback.
 - Live HOST connectivity polling via HOST metrics API (`GET /api/metrics`) with runtime node/LXC status in the Host Management tab.

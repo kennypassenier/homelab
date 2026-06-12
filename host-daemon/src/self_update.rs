@@ -5,6 +5,16 @@ use std::process::Command;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct LatchPullRequest {
+    pub pat: Option<String>,
+    pub key: Option<String>,
+    pub secrets_repo: Option<String>,
+    pub project: Option<String>,
+    pub env: Option<String>,
+    pub sparse: Option<bool>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 struct ReleaseInfo {
     tag_name: String,
@@ -97,25 +107,47 @@ pub fn check_and_apply_update() -> Result<String, String> {
     ))
 }
 
-pub fn check_and_apply_update_with_latch_pull() -> Result<String, String> {
-    let latch_note = run_latch_pull_before_remote_update();
+pub fn check_and_apply_update_with_latch_pull(
+    latch: Option<&LatchPullRequest>,
+) -> Result<String, String> {
+    let latch_note = run_latch_pull_before_remote_update(latch);
     match check_and_apply_update() {
         Ok(msg) => Ok(format!("{} [{}]", msg, latch_note)),
         Err(err) => Err(format!("{} [{}]", err, latch_note)),
     }
 }
 
-fn run_latch_pull_before_remote_update() -> String {
+fn run_latch_pull_before_remote_update(latch: Option<&LatchPullRequest>) -> String {
     if !env_bool("HOST_LATCH_PULL_ON_UPDATE", true) {
         return "latch pull disabled".to_string();
     }
 
     let repo = env_nonempty("GITOPS_REPO", "/root/homelab");
 
-    let output = Command::new("latch")
-        .args(["pull", "--sparse"])
-        .current_dir(&repo)
-        .output();
+    let mut command = Command::new("latch");
+    command.arg("pull");
+    if latch.and_then(|value| value.sparse).unwrap_or(true) {
+        command.arg("--sparse");
+    }
+    if let Some(latch) = latch {
+        if let Some(value) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
+            command.args(["--env", value]);
+        }
+        if let Some(value) = latch.pat.as_deref().filter(|v| !v.trim().is_empty()) {
+            command.args(["--PAT", value]);
+        }
+        if let Some(value) = latch.key.as_deref().filter(|v| !v.trim().is_empty()) {
+            command.args(["--KEY", value]);
+        }
+        if let Some(value) = latch.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
+            command.args(["--REPO", value]);
+        }
+        if let Some(value) = latch.project.as_deref().filter(|v| !v.trim().is_empty()) {
+            command.args(["--project", value]);
+        }
+    }
+
+    let output = command.current_dir(&repo).output();
 
     match output {
         Ok(o) if o.status.success() => "latch pull --sparse ok".to_string(),

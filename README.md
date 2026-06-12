@@ -19,6 +19,8 @@ Welcome to the Homelab GitOps repository. This project contains the infrastructu
 - Upgrade visibility: HOST and LXC emit `daemon_version=...` lifecycle logs; CLIENT highlights version changes and reconnect transitions in the Logs tab.
 - HOST API quick checks (for Postman/curl): `GET /api/health`, `GET /api/version`, `GET /api/metrics` on `http://<host-ip>:8080`.
 - Update triggers: `POST /api/update` on HOST and LXC starts immediate update checks outside the periodic windows.
+- Background HOST release checker loop is opt-in (`HOST_BACKGROUND_UPDATE_ENABLED=1`), but failsafe stale-heartbeat self-update checks are enabled by default (set `HOST_FAILSAFE_UPDATE_ENABLED=0` to disable).
+- CLIENT attaches one-shot latch pull context to HOST/LXC update requests (and LXC sync RPC) so `latch pull` can run without persistent daemon credential state.
 - Provisioning fail-close: if HOST provisioning fails for a stack, that stack is automatically set to `deploy.enabled=false` in its `stacks/<stack>/lxc-compose.yml` until you explicitly re-enable it.
 - LXC bootstrap strategy: HOST pushes a Debian-12-compatible prebuilt latch binary (`latch-linux-x86_64-lxc.tar.gz` release path or local `make build-lxc` output), then runs the lightweight wrapper installer inside the LXC.
 

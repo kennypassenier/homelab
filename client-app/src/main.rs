@@ -13,7 +13,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tokio::signal;
 use tokio::sync::mpsc;
@@ -134,6 +134,8 @@ enum UpdateCatalogEvent {
     },
 }
 
+const PROVISION_DISPATCH_DEBOUNCE_SECS: u64 = 8;
+
 /// Bootstraps the Tokio runtime and hands off to the async event loop.
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -215,6 +217,7 @@ async fn async_main() -> Result<()> {
     let mut update_catalog_tick = tokio::time::interval(Duration::from_secs(900));
 
     let mut lxc_ws_tasks: HashMap<String, JoinHandle<()>> = HashMap::new();
+    let mut last_provision_dispatch: HashMap<String, Instant> = HashMap::new();
     let mut update_dispatch_running = false;
 
     // Always keep HOST websocket connected while CLIENT is running.
@@ -503,18 +506,35 @@ async fn async_main() -> Result<()> {
         if app.provision_pending {
             app.provision_pending = false;
             let stack = app.sync_stack.clone();
-            let tx = sync_tx.clone();
-            app.push_client_logfmt(
-                "INFO",
-                Some(&stack),
-                Some("provision_dispatch"),
-                "requesting HOST to provision LXC container",
-                None,
-            );
-            tokio::spawn(async move {
-                match trigger_host_provision().await {
-                    Ok(msg) => {
-                        let _ = tx.send(SyncEvent::LiveLog {
+
+            let should_dispatch = match last_provision_dispatch.get(&stack) {
+                Some(last) => last.elapsed().as_secs() >= PROVISION_DISPATCH_DEBOUNCE_SECS,
+                None => true,
+            };
+
+            if !should_dispatch {
+                app.push_client_logfmt(
+                    "INFO",
+                    Some(&stack),
+                    Some("provision_dispatch"),
+                    "duplicate HOST provision request suppressed by debounce",
+                    None,
+                );
+            } else {
+                last_provision_dispatch.insert(stack.clone(), Instant::now());
+
+                let tx = sync_tx.clone();
+                app.push_client_logfmt(
+                    "INFO",
+                    Some(&stack),
+                    Some("provision_dispatch"),
+                    "requesting HOST to provision LXC container",
+                    None,
+                );
+                tokio::spawn(async move {
+                    match trigger_host_provision().await {
+                        Ok(msg) => {
+                            let _ = tx.send(SyncEvent::LiveLog {
                             stack: stack.clone(),
                             line: format!(
                                 "CLIENT INFO component=client level=info stack={} phase=provision_result msg=\"{}\"",
@@ -522,9 +542,9 @@ async fn async_main() -> Result<()> {
                                 msg.replace('"', "'")
                             ),
                         });
-                    }
-                    Err(e) => {
-                        let _ = tx.send(SyncEvent::LiveLog {
+                        }
+                        Err(e) => {
+                            let _ = tx.send(SyncEvent::LiveLog {
                             stack: stack.clone(),
                             line: format!(
                                 "CLIENT ERROR component=client level=error stack={} phase=provision_result msg=\"HOST provision failed\" error=\"{}\"",
@@ -532,9 +552,10 @@ async fn async_main() -> Result<()> {
                                 e.replace('"', "'")
                             ),
                         });
+                        }
                     }
-                }
-            });
+                });
+            }
         }
 
         // If a stack-destroy was requested, ask HOST to destroy the selected LXC.
@@ -1171,10 +1192,12 @@ async fn send_heartbeats(stacks: Vec<String>, token: String) {
 
 async fn request_lxc_sync_ws(ip: &str, token: &str) -> Result<(), String> {
     let request_id = ws_request_id("sync");
+    let latch = client_latch_pull_payload().unwrap_or(serde_json::Value::Null);
     let payload = serde_json::json!({
         "kind": "sync_request",
         "request_id": request_id,
-        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) }
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+        "latch": latch,
     });
 
     let value = send_ws_rpc(ip, payload, "sync_response", &request_id).await?;
@@ -1298,10 +1321,12 @@ async fn request_host_update_ws() -> Result<(), String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
     let request_id = ws_request_id("update");
+    let latch = client_latch_pull_payload().unwrap_or(serde_json::Value::Null);
     let payload = serde_json::json!({
         "kind": "update_request",
         "request_id": &request_id,
         "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+        "latch": latch,
     });
 
     send_ws_rpc(&ip, payload, "update_response", &request_id).await?;
@@ -1356,10 +1381,12 @@ async fn request_host_heartbeat_http(active_stacks: &[String]) -> Result<(), Str
 
 async fn request_lxc_update_ws(ip: &str, token: &str) -> Result<(), String> {
     let request_id = ws_request_id("update");
+    let latch = client_latch_pull_payload().unwrap_or(serde_json::Value::Null);
     let payload = serde_json::json!({
         "kind": "update_request",
         "request_id": &request_id,
         "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+        "latch": latch,
     });
 
     send_ws_rpc(ip, payload, "update_response", &request_id).await?;
@@ -1369,8 +1396,10 @@ async fn request_lxc_update_ws(ip: &str, token: &str) -> Result<(), String> {
 async fn request_host_update_http() -> Result<String, String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let url = format!("http://{}:8080/api/update", ip);
+    let latch = client_latch_pull_payload();
     let response = reqwest::Client::new()
         .post(url)
+        .json(&serde_json::json!({ "latch": latch.unwrap_or(serde_json::Value::Null) }))
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -1389,7 +1418,12 @@ async fn request_lxc_update_http(ip: &str, token: &str) -> Result<String, String
     if !token.is_empty() {
         req = req.bearer_auth(token);
     }
-    let response = req.send().await.map_err(|e| e.to_string())?;
+    let latch = client_latch_pull_payload();
+    let response = req
+        .json(&serde_json::json!({ "latch": latch.unwrap_or(serde_json::Value::Null) }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if response.status().is_success() {
         Ok("LXC update started".to_string())
@@ -1435,6 +1469,11 @@ async fn request_host_provision_ws() -> Result<(), String> {
     });
     send_ws_rpc(&ip, payload, "provision_response", &request_id).await?;
     Ok(())
+}
+
+fn client_latch_pull_payload() -> Option<serde_json::Value> {
+    let ctx = crate::latch::load_latch_pull_context()?;
+    serde_json::to_value(ctx).ok()
 }
 
 async fn request_host_provision_http() -> Result<String, String> {

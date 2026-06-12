@@ -18,6 +18,9 @@ Last updated: 2026-06-12
 
 - HOST runs as a headless daemon in deployed operation.
 - Runtime workers (API server, backup policy enforcer, failsafe enforcer, release update checker) stay active continuously.
+- Runtime workers (API server, backup policy enforcer) stay active continuously.
+- Background release update checker is opt-in via `HOST_BACKGROUND_UPDATE_ENABLED=1`.
+- Failsafe-triggered emergency self-update checks are enabled by default; set `HOST_FAILSAFE_UPDATE_ENABLED=0` to disable.
 - The canonical host-side repo path is `~/homelab` (usually `/root/homelab` on Proxmox).
 - The canonical host env file is `~/homelab/config/.env`.
 - `HOST --version` (or `HOST -V`) prints the running binary version.
@@ -35,6 +38,13 @@ Last updated: 2026-06-12
 - `GET /api/metrics` for runtime metrics including process uptime and per-LXC runtime rows.
   - Optional Bearer auth via `Authorization: Bearer <LXC_API_TOKEN>` when `LXC_API_TOKEN` is configured.
 - `POST /api/update` to trigger an immediate self-update check.
+  - Accepts optional one-shot latch payload body:
+    - `latch.pat`
+    - `latch.key`
+    - `latch.secrets_repo`
+    - `latch.project`
+    - `latch.env`
+    - `latch.sparse`
 - `GET /api/logs/ws` for live log streaming over WebSocket, with bounded in-memory replay history capped at 10,000 old lines, an age threshold controlled by `LOG_HISTORY_AGE_SECS`, and severity-aware eviction that removes old `INFO` lines before `WARN` or `ERROR` lines.
 
 ### Metrics Response Schema (`GET /api/metrics`)
@@ -128,12 +138,14 @@ After manual recovery, future releases should self-update normally again.
 ## Release-Based Self Update
 
 - HOST supports release-based self-update, not per-push updates.
+- Default behavior is CLIENT-commanded update checks; autonomous periodic checks are disabled unless explicitly enabled with env flags above.
 - Update checks target GitHub Releases latest tag and compare against local binary version.
 - On update availability, HOST downloads the release asset, preflights it (`--version` + dynamic-link sanity check), writes a backup of the current binary, atomically replaces the executable, and requests a service restart.
 - If restart request fails, HOST immediately restores the previous binary and attempts restart with the rollback version.
 - HOST arms a post-restart watchdog (`HOST_UPDATE_VERIFY_DELAY_SECS`, default 35s) that auto-rolls back to backup when the service is not active or port 8080 does not come up.
 - HOST now emits websocket-visible lifecycle/update telemetry including startup `daemon_version=...`, update check status, and post-update reconnect expectations.
 - Empty `HOST_UPDATE_REPO` / `HOST_UPDATE_ASSET` env values fall back to safe defaults; the updater now picks the highest `host-daemon-v*` release tag.
+- When CLIENT provides one-shot latch pull context in HTTP/WebSocket update requests, HOST runs `latch pull` with that request-scoped context before checking remote releases.
 
 ## WebSocket Keepalive
 
@@ -146,6 +158,7 @@ After manual recovery, future releases should self-update normally again.
 - CLIENT sends heartbeat pulses while the TUI is active, primarily via websocket RPC (`client_heartbeat`) with HTTP `POST /api/heartbeat` as backup.
 - If heartbeat is fresh at a failsafe window, HOST skips emergency update checks.
 - If heartbeat is stale/missing, HOST performs emergency release self-update check.
+- Failsafe self-update checks are enabled by default and can be disabled with `HOST_FAILSAFE_UPDATE_ENABLED=0`.
 
 ## GPU Clarification
 
@@ -165,6 +178,12 @@ After manual recovery, future releases should self-update normally again.
   - `deploy.enabled=false`
   - `deploy.last_failure=<error message>`
 - This prevents repeated auto-retries until the stack config is corrected and explicitly re-enabled.
+
+## Provisioning Request Coalescing
+
+- HOST now enforces a single in-flight provisioning cycle.
+- Duplicate HTTP/WebSocket provisioning requests received while a cycle is already running are skipped with an informational log line.
+- This prevents concurrent `pct create` races against the same VMID and avoids false fail-close toggles caused by duplicate requests.
 
 ## Provisioning Resume on Existing VMID
 

@@ -10,8 +10,19 @@ use axum::{
 };
 use serde::Serialize;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
+
+static PROVISION_CYCLE_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+struct ProvisionCycleGuard;
+
+impl Drop for ProvisionCycleGuard {
+    fn drop(&mut self) {
+        PROVISION_CYCLE_ACTIVE.store(false, Ordering::SeqCst);
+    }
+}
 
 #[derive(serde::Deserialize)]
 struct ClientHeartbeatPayload {
@@ -22,6 +33,11 @@ struct ClientHeartbeatPayload {
 #[derive(serde::Deserialize)]
 struct DestroyStackPayload {
     stack_name: String,
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateRequestBody {
+    latch: Option<self_update::LatchPullRequest>,
 }
 
 use crate::app::{App, BackupStatusLine, LogLevel};
@@ -202,7 +218,10 @@ fn parse_ram_pct(ram: &str) -> Option<u8> {
     Some(((used / total) * 100.0).round().clamp(0.0, 100.0) as u8)
 }
 
-async fn handle_update(State(app): State<Arc<Mutex<App>>>) -> Json<ApiResponse> {
+async fn handle_update(
+    State(app): State<Arc<Mutex<App>>>,
+    payload: Option<Json<UpdateRequestBody>>,
+) -> Json<ApiResponse> {
     {
         let mut a = app.lock().unwrap();
         a.add_log(
@@ -213,7 +232,8 @@ async fn handle_update(State(app): State<Arc<Mutex<App>>>) -> Json<ApiResponse> 
 
     let app_clone = app.clone();
     tokio::task::spawn_blocking(move || {
-        let result = self_update::check_and_apply_update_with_latch_pull();
+        let latch = payload.map(|Json(body)| body.latch).flatten();
+        let result = self_update::check_and_apply_update_with_latch_pull(latch.as_ref());
         let mut a = app_clone.lock().unwrap();
         match result {
             Ok(msg) => a.add_log(LogLevel::Info, format!("[update-http] {}", msg)),
@@ -335,8 +355,16 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
                                     }
 
                                     let app_clone = app.clone();
+                                    let latch = req
+                                        .get("latch")
+                                        .and_then(|v| {
+                                            serde_json::from_value::<self_update::LatchPullRequest>(
+                                                v.clone(),
+                                            )
+                                            .ok()
+                                        });
                                     tokio::task::spawn_blocking(move || {
-                                        let result = self_update::check_and_apply_update_with_latch_pull();
+                                        let result = self_update::check_and_apply_update_with_latch_pull(latch.as_ref());
                                         let mut guard = app_clone.lock().unwrap();
                                         match result {
                                             Ok(msg) => guard.add_log(LogLevel::Info, format!("[update-rpc] {}", msg)),
@@ -480,6 +508,15 @@ fn compact_snapshot(lines: &VecDeque<BackupStatusLine>, max_lines: usize) -> Vec
 pub fn run_provisioning_cycle(app: &Arc<Mutex<App>>, dry_run: bool) {
     use std::path::Path;
     use std::process::Command;
+
+    if PROVISION_CYCLE_ACTIVE.swap(true, Ordering::SeqCst) {
+        app.lock().unwrap().add_log(
+            LogLevel::Info,
+            "[provision] cycle already running; skipping duplicate request".to_string(),
+        );
+        return;
+    }
+    let _provision_cycle_guard = ProvisionCycleGuard;
 
     let gitops_root = std::env::var("GITOPS_REPO").unwrap_or_else(|_| {
         std::env::var("HOME")
@@ -640,10 +677,10 @@ pub fn run_destroy_stack_cycle(app: &Arc<Mutex<App>>, stack_name: &str) {
     };
 
     match provision::destroy_stack_container(Path::new(&gitops_root), &stack, false, &log) {
-        Ok(()) => app
-            .lock()
-            .unwrap()
-            .add_log(LogLevel::Ok, format!("[provision] destroy complete stack={}", stack)),
+        Ok(()) => app.lock().unwrap().add_log(
+            LogLevel::Ok,
+            format!("[provision] destroy complete stack={}", stack),
+        ),
         Err(e) => app.lock().unwrap().add_log(
             LogLevel::Error,
             format!("[provision] destroy failed stack={} error={}", stack, e),

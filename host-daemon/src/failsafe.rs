@@ -10,6 +10,21 @@ const DEFAULT_HEARTBEAT_TTL_SECS: u64 = 180;
 
 pub fn start_failsafe_enforcer(status_tx: Sender<String>) {
     thread::spawn(move || {
+        let auto_update_enabled = std::env::var("HOST_FAILSAFE_UPDATE_ENABLED")
+            .ok()
+            .map(|v| {
+                let normalized = v.trim().to_ascii_lowercase();
+                matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+            })
+            .unwrap_or(true);
+
+        if !auto_update_enabled {
+            let _ = status_tx.send(
+                "[failsafe] self-update checks disabled (set HOST_FAILSAFE_UPDATE_ENABLED=1 to re-enable stale-heartbeat update checks)".to_string(),
+            );
+            return;
+        }
+
         let mut last_window = Instant::now();
         let mut last_no_update_log = Instant::now() - Duration::from_secs(9999);
         let mut last_no_heartbeat_log = Instant::now() - Duration::from_secs(9999);

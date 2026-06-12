@@ -1,4 +1,4 @@
-use crate::app::{AppState, LogLevel};
+use crate::app::{AppState, LatchPullRequest, LogLevel};
 use crate::restore::{self, RestoreRequest, RestoreStatus};
 use axum::{
     extract::{
@@ -46,6 +46,12 @@ struct WsSyncRequest {
     kind: String,
     request_id: String,
     token: Option<String>,
+    latch: Option<LatchPullRequest>,
+}
+
+#[derive(Deserialize)]
+struct SyncRequestBody {
+    latch: Option<LatchPullRequest>,
 }
 
 #[derive(Serialize)]
@@ -76,6 +82,12 @@ struct WsUpdateRequest {
     kind: String,
     request_id: String,
     token: Option<String>,
+    latch: Option<LatchPullRequest>,
+}
+
+#[derive(Deserialize)]
+struct UpdateRequestBody {
+    latch: Option<LatchPullRequest>,
 }
 
 #[derive(Serialize)]
@@ -332,6 +344,7 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
                                 {
                                     let mut s = state.lock().unwrap();
                                     s.sync_requested = true;
+                                    s.pending_latch_pull = req.latch;
                                     s.add_log(
                                         LogLevel::Info,
                                         "Sync triggered via WebSocket RPC".to_string(),
@@ -420,8 +433,9 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
                                 }
 
                                 let state_clone = state.clone();
+                                let latch = req.latch;
                                 tokio::spawn(async move {
-                                    let _ = perform_lxc_self_update(state_clone).await;
+                                    let _ = perform_lxc_self_update(state_clone, latch).await;
                                 });
 
                                 let _ = socket
@@ -663,9 +677,11 @@ fn is_ws_authorized(token: Option<&str>) -> bool {
 async fn handle_sync(
     _headers: HeaderMap,
     State(state): State<Arc<Mutex<AppState>>>,
+    payload: Option<Json<SyncRequestBody>>,
 ) -> (StatusCode, Json<ApiResponse>) {
     let mut s = state.lock().unwrap();
     s.sync_requested = true;
+    s.pending_latch_pull = payload.map(|Json(body)| body.latch).flatten();
     s.add_log(
         LogLevel::Info,
         "Sync triggered via HTTP Push API".to_string(),
@@ -712,6 +728,7 @@ async fn handle_heartbeat(
 async fn handle_update(
     headers: HeaderMap,
     State(state): State<Arc<Mutex<AppState>>>,
+    payload: Option<Json<UpdateRequestBody>>,
 ) -> (StatusCode, Json<ApiResponse>) {
     if !is_authorized(&headers) {
         return (
@@ -724,7 +741,8 @@ async fn handle_update(
     }
 
     tokio::spawn(async move {
-        let _ = perform_lxc_self_update(state).await;
+        let latch = payload.map(|Json(body)| body.latch).flatten();
+        let _ = perform_lxc_self_update(state, latch).await;
     });
 
     (
@@ -736,11 +754,15 @@ async fn handle_update(
     )
 }
 
-async fn perform_lxc_self_update(state: Arc<Mutex<AppState>>) -> Result<String, String> {
-    let result =
-        tokio::task::spawn_blocking(crate::self_update::check_and_apply_update_with_latch_pull)
-            .await
-            .map_err(|e| e.to_string())?;
+async fn perform_lxc_self_update(
+    state: Arc<Mutex<AppState>>,
+    latch: Option<LatchPullRequest>,
+) -> Result<String, String> {
+    let result = tokio::task::spawn_blocking(move || {
+        crate::self_update::check_and_apply_update_with_latch_pull(latch.as_ref())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     let mut s = state.lock().unwrap();
     match result {

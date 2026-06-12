@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     fs,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use rand::{Rng, SeedableRng, rngs::SmallRng};
@@ -63,6 +63,9 @@ const SOURCE_COLORS: &[ratatui::style::Color] = &[
     ratatui::style::Color::LightYellow,
     ratatui::style::Color::Rgb(255, 128, 0),
 ];
+
+/// Suppress exact duplicate LXC log lines within this window.
+const LXC_DUPLICATE_LOG_SUPPRESS_WINDOW: Duration = Duration::from_secs(30);
 
 /// Which log levels are visible in the Logs tab.
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -401,6 +404,19 @@ impl App {
     /// full session stream without trimming older entries here.
     pub fn push_log(&mut self, source: &str, level: &str, message: &str) {
         let now = SystemTime::now();
+
+        if source.starts_with("lxc-") {
+            if let Some(last) = self.logs.last() {
+                if last.source == source
+                    && last.level == level
+                    && last.message == message
+                    && now.duration_since(last.created_at).unwrap_or_default()
+                        < LXC_DUPLICATE_LOG_SUPPRESS_WINDOW
+                {
+                    return;
+                }
+            }
+        }
 
         self.logs.push(LogLine {
             time: current_time_str(),

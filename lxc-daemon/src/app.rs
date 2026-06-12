@@ -109,6 +109,16 @@ pub struct SecretsStatus {
     pub last_run_log: Vec<(String, bool)>,
 }
 
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct LatchPullRequest {
+    pub pat: Option<String>,
+    pub key: Option<String>,
+    pub secrets_repo: Option<String>,
+    pub project: Option<String>,
+    pub env: Option<String>,
+    pub sparse: Option<bool>,
+}
+
 pub struct AppState {
     pub tab: usize,
     pub stack_name: String,
@@ -121,6 +131,7 @@ pub struct AppState {
     pub logs: VecDeque<LogEntry>,
     pub is_syncing: bool,
     pub sync_requested: bool,
+    pub pending_latch_pull: Option<LatchPullRequest>,
     pub backup_paused: bool,
     /// Unix timestamp (seconds) of last CLIENT heartbeat received.
     pub client_heartbeat_ts: Option<i64>,
@@ -151,8 +162,9 @@ impl AppState {
                 ..Default::default()
             },
             mounts: MountStatus {
-                docker_path: "/docker".to_string(),
-                config_path: "/config".to_string(),
+                docker_path: std::env::var("MOUNT_CHECK_PRIMARY")
+                    .unwrap_or_else(|_| "/appdata".to_string()),
+                config_path: std::env::var("MOUNT_CHECK_SECONDARY").unwrap_or_default(),
                 ..Default::default()
             },
             secrets: SecretsStatus {
@@ -163,6 +175,7 @@ impl AppState {
             logs: VecDeque::with_capacity(DEFAULT_LOG_HISTORY_LIMIT),
             is_syncing: false,
             sync_requested: false,
+            pending_latch_pull: None,
             backup_paused: false,
             client_heartbeat_ts: None,
             log_tx,

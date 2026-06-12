@@ -7,6 +7,7 @@
 
 use crate::shell::{execute_local, execute_remote, ExecRequest};
 use serde_json::Value;
+use std::path::Path;
 use std::time::SystemTime;
 
 /// Error types for latch operations
@@ -55,6 +56,104 @@ pub struct LatchCloneResult {
     pub offer_id: String,
     pub slot_count: usize,
     pub duration_secs: u64,
+}
+
+/// One-shot latch pull/update inputs sourced from CLIENT env/config.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct LatchPullContext {
+    pub pat: Option<String>,
+    pub key: Option<String>,
+    pub secrets_repo: Option<String>,
+    pub project: Option<String>,
+    pub env: Option<String>,
+    pub sparse: bool,
+}
+
+/// Load latch defaults from env first, then from `.latch/config.toml`.
+/// This keeps CLIENT as the source of truth when daemons need a one-shot pull.
+pub fn load_latch_pull_context() -> Option<LatchPullContext> {
+    let project_root = find_project_root();
+    let latch_config = read_latch_project_config(&project_root);
+
+    let pat = env_or_file("LATCH_PAT");
+    let key = env_or_file("LATCH_KEY");
+    let secrets_repo = env_or_file("LATCH_SECRETS_REPO").or_else(|| latch_config.secrets_repo);
+    let project = env_or_file("LATCH_PROJECT")
+        .or_else(|| latch_config.project)
+        .or_else(|| Some(project_root.file_name()?.to_string_lossy().to_string()));
+    let env = env_or_file("LATCH_ENV").or_else(|| latch_config.default_env);
+
+    if pat.as_deref().unwrap_or_default().is_empty()
+        && key.as_deref().unwrap_or_default().is_empty()
+        && secrets_repo.as_deref().unwrap_or_default().is_empty()
+    {
+        return None;
+    }
+
+    Some(LatchPullContext {
+        pat,
+        key,
+        secrets_repo,
+        project,
+        env,
+        sparse: true,
+    })
+}
+
+fn env_or_file(key: &str) -> Option<String> {
+    std::env::var(key).ok().and_then(|v| {
+        let trimmed = v.trim().to_string();
+        if trimmed.is_empty() { None } else { Some(trimmed) }
+    })
+}
+
+#[derive(Debug, Clone, Default)]
+struct LatchProjectConfig {
+    project: Option<String>,
+    secrets_repo: Option<String>,
+    default_env: Option<String>,
+}
+
+fn read_latch_project_config(root: &Path) -> LatchProjectConfig {
+    let path = root.join(".latch/config.toml");
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return LatchProjectConfig::default();
+    };
+
+    let mut config = LatchProjectConfig::default();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('[') {
+            continue;
+        }
+
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim().trim_matches('"').to_string();
+        match key {
+            "name" if !value.is_empty() => config.project = Some(value),
+            "secrets_repo" if !value.is_empty() => config.secrets_repo = Some(value),
+            "default_env" if !value.is_empty() => config.default_env = Some(value),
+            _ => {}
+        }
+    }
+
+    config
+}
+
+fn find_project_root() -> std::path::PathBuf {
+    let mut current = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    for _ in 0..10 {
+        if current.join(".git").exists() {
+            return current;
+        }
+        if !current.pop() {
+            break;
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
 
 /// Step 1: Generate offer on target (LXC)

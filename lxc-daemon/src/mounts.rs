@@ -1,6 +1,5 @@
-use std::os::unix::fs::MetadataExt;
-use std::sync::{Arc, Mutex};
 use crate::app::{AppState, LogLevel, MountStatus};
+use std::sync::{Arc, Mutex};
 
 pub async fn run_checker(state: Arc<Mutex<AppState>>) {
     loop {
@@ -15,25 +14,8 @@ fn check_mounts(state: Arc<Mutex<AppState>>) {
         (s.mounts.docker_path.clone(), s.mounts.config_path.clone())
     };
 
-    // Get the root device as baseline — a path that has the SAME dev as root is NOT mounted
-    let root_dev = std::fs::metadata("/").map(|m| m.dev()).unwrap_or(0);
-
-    let (docker_ok, docker_dev) = match std::fs::metadata(&docker_path) {
-        Ok(m) => {
-            let dev = m.dev();
-            // If dev differs from root, it's a real bind mount
-            (dev != root_dev, format!("0x{:04x}", dev))
-        }
-        Err(_) => (false, "\u{2014}".to_string()),
-    };
-
-    let (config_ok, config_dev) = match std::fs::metadata(&config_path) {
-        Ok(m) => {
-            let dev = m.dev();
-            (dev != root_dev, format!("0x{:04x}", dev))
-        }
-        Err(_) => (false, "\u{2014}".to_string()),
-    };
+    let (docker_ok, docker_dev) = check_mount_path(&docker_path, true);
+    let (config_ok, config_dev) = check_mount_path(&config_path, false);
 
     let status = MountStatus {
         docker_ok,
@@ -52,4 +34,36 @@ fn check_mounts(state: Arc<Mutex<AppState>>) {
         );
     }
     s.mounts = status;
+}
+
+fn check_mount_path(path: &str, required: bool) -> (bool, String) {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return if required {
+            (false, "missing-path".to_string())
+        } else {
+            (true, "disabled".to_string())
+        };
+    }
+
+    if std::fs::metadata(trimmed).is_err() {
+        return (false, "missing".to_string());
+    }
+
+    if is_mountpoint(trimmed) {
+        (true, "mounted".to_string())
+    } else {
+        (false, "not-mounted".to_string())
+    }
+}
+
+fn is_mountpoint(path: &str) -> bool {
+    let Ok(mountinfo) = std::fs::read_to_string("/proc/self/mountinfo") else {
+        return false;
+    };
+
+    mountinfo
+        .lines()
+        .filter_map(|line| line.split_whitespace().nth(4))
+        .any(|mountpoint| mountpoint == path)
 }

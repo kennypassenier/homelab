@@ -1,4 +1,4 @@
-use crate::app::{AppState, GitStatus, LogLevel};
+use crate::app::{AppState, GitStatus, LatchPullRequest, LogLevel};
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -233,6 +233,36 @@ fn run_git(repo_path: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+fn run_latch_pull(repo_path: &str, latch: &LatchPullRequest) -> Result<String, String> {
+    let mut command = Command::new("latch");
+    command.arg("pull");
+    if latch.sparse.unwrap_or(true) {
+        command.arg("--sparse");
+    }
+    if let Some(value) = latch.env.as_deref().filter(|v| !v.trim().is_empty()) {
+        command.args(["--env", value]);
+    }
+    if let Some(value) = latch.pat.as_deref().filter(|v| !v.trim().is_empty()) {
+        command.args(["--PAT", value]);
+    }
+    if let Some(value) = latch.key.as_deref().filter(|v| !v.trim().is_empty()) {
+        command.args(["--KEY", value]);
+    }
+    if let Some(value) = latch.secrets_repo.as_deref().filter(|v| !v.trim().is_empty()) {
+        command.args(["--REPO", value]);
+    }
+    if let Some(value) = latch.project.as_deref().filter(|v| !v.trim().is_empty()) {
+        command.args(["--project", value]);
+    }
+
+    let output = command.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok("latch pull ok".to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
 fn authenticated_repo_url(repo_url: &str) -> String {
     let token = std::env::var("GITOPS_REPO_TOKEN").unwrap_or_default();
     if token.is_empty() || !repo_url.starts_with("https://") {
@@ -327,11 +357,32 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         s.add_log(LogLevel::Ok, "git reset complete".to_string());
     }
 
+    let pending_latch_pull = {
+        let mut s = state.lock().unwrap();
+        s.pending_latch_pull.take()
+    };
+
     // ── Step 3: pre-sync hooks (pre-sync.sh) if present ────────────────────
     let pre_sync_path = format!("{}/stacks/{}/pre-sync.sh", GITOPS_REPO, stack_name);
     if Path::new(&pre_sync_path).exists() {
         let stack_dir = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
         let sn = stack_name.clone();
+        let latch_pull_result = pending_latch_pull
+            .as_ref()
+            .map(|latch| run_latch_pull(&stack_dir, latch));
+        if let Some(result) = latch_pull_result {
+            let mut s = state.lock().unwrap();
+            match result {
+                Ok(message) => s.add_log(
+                    LogLevel::Ok,
+                    format!("ts=now level=info stack={} latch msg=\"{}\"", sn, message),
+                ),
+                Err(message) => s.add_log(
+                    LogLevel::Warn,
+                    format!("ts=now level=warn stack={} latch msg=\"{}\"", sn, message),
+                ),
+            }
+        }
         let hook_result = tokio::task::spawn_blocking(move || {
             Command::new("bash")
                 .arg(&pre_sync_path)

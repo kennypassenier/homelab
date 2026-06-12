@@ -155,3 +155,21 @@ After manual recovery, future releases should self-update normally again.
 
 - `o` / `O`: preview/apply boot policy reconciliation.
 - `h` / `H`: preview/apply hot-applicable CPU+memory reconciliation.
+
+## Provisioning Failure Safety
+
+- HOST provisioning now fail-closes stack activation.
+- If a stack action fails (`CREATE`, `RECREATE`, or `UPDATE`), HOST updates that stack `lxc-compose.yml` and sets:
+  - `deploy.enabled=false`
+  - `deploy.last_failure=<error message>`
+- This prevents repeated auto-retries until the stack config is corrected and explicitly re-enabled.
+
+## Latch Bootstrap Reliability
+
+- LXC bootstrap latch install now enforces a deterministic PATH during non-interactive setup.
+- LXC latch install uses a prebuilt Debian-12-compatible binary pushed from HOST (default pushed path: `/root/latch`).
+- Preferred source is latch-rs release asset `latch-linux-x86_64-lxc.tar.gz` built by the dedicated pipeline job.
+- Optional local source is `make build-lxc` output from the latch-rs repository (Docker `debian:12-slim` sandbox).
+- Wrapper script installs `/usr/local/bin/latch`, enforces executable permissions, and verifies runtime compatibility before login.
+- No Rust toolchain or latch source compilation is performed inside Proxmox LXCs.
+- HOST verifies latch availability immediately after running `setup-latch.sh` before proceeding to login.

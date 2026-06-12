@@ -445,11 +445,21 @@ pub fn run_provisioning_cycle(app: &Arc<Mutex<App>>, dry_run: bool) {
         }
     }
 
-    let actions = match provision::apply_provisioning_changes(Path::new(&gitops_root), dry_run) {
+    let app_for_log = app.clone();
+    let log = move |level: &str, msg: &str| {
+        let log_level = match level {
+            "error" => LogLevel::Error,
+            "warn" => LogLevel::Warn,
+            "ok" => LogLevel::Ok,
+            _ => LogLevel::Info,
+        };
+        app_for_log.lock().unwrap().add_log(log_level, msg.to_string());
+    };
+
+    let actions = match provision::apply_provisioning_changes(Path::new(&gitops_root), dry_run, &log) {
         Ok(actions) => actions,
         Err(e) => {
-            let mut a = app.lock().unwrap();
-            a.add_log(LogLevel::Error, format!("[provision] failed: {}", e));
+            app.lock().unwrap().add_log(LogLevel::Error, format!("[provision] failed: {}", e));
             return;
         }
     };

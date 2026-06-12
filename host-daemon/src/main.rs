@@ -291,9 +291,13 @@ async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
                             let mut a = app.lock().unwrap();
                             let gitops_root = default_gitops_repo();
                             a.push_status_line("Applying LXC provisioning changes…".to_string());
+                            let log = |_level: &str, msg: &str| {
+                                eprintln!("[provision] {}", msg);
+                            };
                             match provision::apply_provisioning_changes(
                                 Path::new(&gitops_root),
                                 false,
+                                &log,
                             ) {
                                 Ok(actions) => {
                                     let lines = provision::format_provision_summary(&actions);
@@ -400,9 +404,15 @@ fn start_auto_provisioner(status_tx: mpsc::Sender<String>) {
                         .unwrap_or_else(|_| "/root/homelab".to_string())
                 });
 
+                let tx_for_log = status_tx.clone();
+                let log = move |_level: &str, msg: &str| {
+                    let _ = tx_for_log.send(format!("[provision] {}", msg));
+                };
+
                 match provision::apply_provisioning_changes(
                     std::path::Path::new(&gitops_root),
                     false,
+                    &log,
                 ) {
                     Ok(actions) => {
                         let summary = provision::format_provision_summary(&actions);

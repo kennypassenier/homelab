@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # =============================================================================
 # setup-latch.sh (LXC)
-# Install latch CLI from the latest GitHub release and configure a guarded
-# updater for headless LXC containers.
+# Lightweight latch installer wrapper for Proxmox LXCs.
+#
+# This script intentionally does NOT compile from source and does NOT install
+# Rust toolchains in the container. It expects a pre-built Debian-12-compatible
+# binary to be pushed by HOST (default: /root/latch).
 #
 # Usage: ./setup-latch.sh [--verify-only] [--with-pass]
-#
-# Exit codes:
-#   0 = setup successful
-#   1 = setup failed
 # =============================================================================
 
-set -e
+set -euo pipefail
+
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
 VERIFY_ONLY="${1:-}"
 WITH_PASS="false"
@@ -19,180 +20,131 @@ if [[ "${1:-}" == "--with-pass" || "${2:-}" == "--with-pass" ]]; then
     WITH_PASS="true"
 fi
 
-# Color output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 log_info() {
-    echo -e "${BLUE}ℹ${NC} $*"
+    echo -e "${BLUE}i${NC} $*"
 }
 
 log_success() {
-    echo -e "${GREEN}✓${NC} $*"
+    echo -e "${GREEN}OK${NC} $*"
 }
 
 log_warning() {
-    echo -e "${YELLOW}⚠${NC} $*"
+    echo -e "${YELLOW}WARN${NC} $*"
 }
 
 log_error() {
-    echo -e "${RED}✗${NC} $*" >&2
+    echo -e "${RED}ERR${NC} $*" >&2
 }
 
-# Detect OS and package manager
 detect_os() {
     if [[ -f /etc/os-release ]]; then
+        # shellcheck disable=SC1091
         . /etc/os-release
-        OS=$ID
-        VERSION=$VERSION_ID
+        OS="${ID:-unknown}"
     else
-        log_error "Cannot detect OS"
-        return 1
+        OS="unknown"
     fi
 }
 
-# Install latch CLI from the latest GitHub release
+resolve_binary_source() {
+    local source="${LATCH_BINARY_SOURCE:-/root/latch}"
+
+    if [[ -f "$source" ]]; then
+        printf '%s\n' "$source"
+        return 0
+    fi
+
+    if [[ -f /tmp/latch ]]; then
+        printf '%s\n' "/tmp/latch"
+        return 0
+    fi
+
+    if [[ -f /root/latch-linux-x86_64-lxc.tar.gz ]]; then
+        printf '%s\n' "/root/latch-linux-x86_64-lxc.tar.gz"
+        return 0
+    fi
+
+    return 1
+}
+
+extract_if_archive() {
+    local src="$1"
+    local out="$2"
+
+    if [[ "$src" != *.tar.gz ]]; then
+        cp "$src" "$out"
+        chmod 755 "$out"
+        return 0
+    fi
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' RETURN
+
+    local entry
+    entry="$(tar -tzf "$src" | grep -E '(^|/)latch$' | head -1 || true)"
+    if [[ -z "$entry" ]]; then
+        return 1
+    fi
+
+    tar -xzf "$src" -C "$tmp_dir" "$entry"
+    if [[ ! -f "$tmp_dir/$entry" ]]; then
+        return 1
+    fi
+
+    cp "$tmp_dir/$entry" "$out"
+    chmod 755 "$out"
+    return 0
+}
+
+verify_runtime_compat() {
+    if command -v ldd >/dev/null 2>&1; then
+        local ldd_out
+        ldd_out="$(ldd /usr/local/bin/latch 2>&1 || true)"
+        if echo "$ldd_out" | grep -qi "not found"; then
+            log_error "latch has unresolved runtime deps: $ldd_out"
+            return 1
+        fi
+    fi
+
+    if ! /usr/local/bin/latch --version >/dev/null 2>&1; then
+        log_error "latch binary failed runtime check (possibly glibc mismatch)"
+        return 1
+    fi
+
+    return 0
+}
+
 install_latch_cli() {
-    install_release_prereqs
-    write_release_helper
-    /usr/local/bin/install-latch-release
-    write_guarded_update_helper
-    install_update_timer
-    log_success "latch CLI installed ($(latch --version 2>/dev/null || echo 'unknown version'))"
-}
+    local source
+    if ! source="$(resolve_binary_source)"; then
+        log_error "No prebuilt latch binary found. Expected /root/latch or /tmp/latch."
+        log_error "Push binary first: pct push <vmid> <host-binary-path> /root/latch"
+        return 1
+    fi
 
-install_release_prereqs() {
-    case "$OS" in
-        debian | ubuntu)
-            apt-get update -qq
-            apt-get install -y -qq curl jq tar ca-certificates
-            ;;
-        alpine)
-            apk update >/dev/null
-            apk add curl jq tar ca-certificates
-            ;;
-        *)
-            log_warning "Unknown OS ($OS); assuming curl/jq/tar are already present"
-            ;;
-    esac
-}
+    local staged="/tmp/latch-install-src"
+    if ! extract_if_archive "$source" "$staged"; then
+        log_error "Failed to stage latch binary from $source"
+        return 1
+    fi
 
-write_release_helper() {
-    cat > /usr/local/bin/install-latch-release <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
+    install -m 755 "$staged" /usr/local/bin/latch
+    if [[ -d /usr/bin ]]; then
+        ln -sfn /usr/local/bin/latch /usr/bin/latch || true
+    fi
 
-if [[ -f /root/.env ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    . /root/.env
-    set +a
-fi
+    if ! verify_runtime_compat; then
+        return 1
+    fi
 
-REPO="${LATCH_UPDATE_REPO:-kennypassenier/latch-rs}"
-ASSET="${LATCH_UPDATE_ASSET:-latch-linux-x86_64.tar.gz}"
-API_URL="https://api.github.com/repos/${REPO}/releases/latest"
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
-
-release_json="$(curl -fsSL "$API_URL")"
-tag="$(printf '%s' "$release_json" | jq -r '.tag_name')"
-asset_url="$(printf '%s' "$release_json" | jq -r --arg asset "$ASSET" '.assets[] | select(.name == $asset) | .browser_download_url' | head -1)"
-
-if [[ -z "$asset_url" || "$asset_url" == "null" ]]; then
-    echo "Latch release ${tag} missing asset ${ASSET}" >&2
-    exit 1
-fi
-
-current_version=""
-if command -v latch >/dev/null 2>&1; then
-    current_version="$(latch --version 2>/dev/null | awk 'NR==1{print $NF}')"
-fi
-
-latest_version="${tag#v}"
-if [[ -n "$current_version" && "$current_version" == "$latest_version" && -x /usr/local/bin/latch ]]; then
-    echo "Latch already current at ${current_version}"
-    exit 0
-fi
-
-curl -fsSL "$asset_url" -o "$TMP_DIR/latch.tar.gz"
-tar -xzf "$TMP_DIR/latch.tar.gz" -C "$TMP_DIR"
-
-if [[ ! -f "$TMP_DIR/latch" ]]; then
-    echo "Latch archive did not contain binary 'latch'" >&2
-    exit 1
-fi
-
-install -m 755 "$TMP_DIR/latch" /usr/local/bin/latch
-echo "Installed latch ${latest_version} to /usr/local/bin/latch"
-EOF
-    chmod 755 /usr/local/bin/install-latch-release
-}
-
-write_guarded_update_helper() {
-    cat > /usr/local/bin/latch-update-safe <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ -f /root/.env ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    . /root/.env
-    set +a
-fi
-
-STATE_DIR="/var/lib/homelab"
-STAMP_FILE="${STATE_DIR}/latch-update.last"
-INTERVAL_SECS="${LATCH_UPDATE_INTERVAL_SECS:-86400}"
-FORCE="${1:-}"
-
-mkdir -p "$STATE_DIR"
-now="$(date +%s)"
-last="0"
-if [[ -f "$STAMP_FILE" ]]; then
-    last="$(cat "$STAMP_FILE" 2>/dev/null || echo 0)"
-fi
-
-if [[ "$FORCE" != "--force" ]] && (( now - last < INTERVAL_SECS )); then
-    exit 0
-fi
-
-/usr/local/bin/install-latch-release
-date +%s > "$STAMP_FILE"
-EOF
-    chmod 755 /usr/local/bin/latch-update-safe
-}
-
-install_update_timer() {
-    cat > /etc/systemd/system/latch-update.service <<'EOF'
-[Unit]
-Description=Guarded latch binary updater
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/latch-update-safe
-EOF
-
-    cat > /etc/systemd/system/latch-update.timer <<'EOF'
-[Unit]
-Description=Daily guarded latch binary update check
-
-[Timer]
-OnBootSec=15m
-OnUnitActiveSec=1d
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-
-    systemctl daemon-reload
-    systemctl enable --now latch-update.timer >/dev/null 2>&1 || true
+    log_success "latch CLI installed from $source"
 }
 
 install_optional_pass() {
@@ -214,42 +166,50 @@ install_optional_pass() {
     log_success "pass installed (optional backend)"
 }
 
-# Verify setup
 verify_setup() {
     log_info "Verifying setup..."
 
     local success=true
 
-    # Check latch
-    if command -v latch &> /dev/null; then
-        log_success "✓ latch CLI available"
+    if [[ -x /usr/local/bin/latch ]]; then
+        if verify_runtime_compat; then
+            log_success "latch CLI available (/usr/local/bin/latch)"
+        else
+            success=false
+        fi
+    elif command -v latch >/dev/null 2>&1; then
+        if latch --version >/dev/null 2>&1; then
+            log_success "latch CLI available ($(command -v latch))"
+        else
+            log_error "latch exists but is not runnable"
+            success=false
+        fi
     else
-        log_error "✗ latch CLI not found"
+        log_error "latch CLI not found"
         success=false
     fi
 
-    # Check optional keyring / env fallback
-    if command -v pass &> /dev/null || command -v secret-tool &> /dev/null; then
-        log_success "✓ optional keyring backend available"
+    if command -v pass >/dev/null 2>&1 || command -v secret-tool >/dev/null 2>&1; then
+        log_success "optional keyring backend available"
     elif [[ -n "${LATCH_PAT:-}" && -n "${LATCH_KEY:-}" ]]; then
-        log_success "✓ headless env fallback available via LATCH_PAT/LATCH_KEY"
+        log_success "env fallback available via LATCH_PAT/LATCH_KEY"
     else
-        log_warning "⚠ No keyring backend detected and LATCH_PAT/LATCH_KEY are not exported in this shell"
+        log_warning "No keyring backend detected and LATCH_PAT/LATCH_KEY are not exported in this shell"
     fi
 
     if [[ "$success" == "true" ]]; then
         log_success "Setup verification passed"
         return 0
-    else
-        log_error "Setup verification failed"
-        return 1
     fi
+
+    log_error "Setup verification failed"
+    return 1
 }
 
 main() {
     log_info "Latch binary setup for LXC container"
 
-    detect_os || exit 1
+    detect_os
 
     if [[ "$VERIFY_ONLY" == "--verify-only" ]]; then
         verify_setup
@@ -262,11 +222,12 @@ main() {
             log_warning "pass installation failed; continuing with env-backed mode"
         }
     else
-        log_info "Skipping pass/keyring install; env-backed headless mode is the default for LXCs"
+        log_info "Skipping pass/keyring install; env-backed headless mode is default"
     fi
+
     verify_setup || exit 1
 
-    log_success "Latch setup complete!"
+    log_success "Latch setup complete"
     log_info "Credentials remain persistent via /root/.env and /etc/environment once injected by HOST"
 }
 

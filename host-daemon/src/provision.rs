@@ -28,6 +28,8 @@ pub struct StackIntent {
     pub bridge: String,
     pub ip_mode: String,
     pub reserved_ipv4: Option<String>,
+    pub cidr: u8,
+    pub gateway: Option<String>,
     pub vlan_tag: Option<u16>,
     pub firewall: bool,
     pub ip_mode_v6: Option<String>,
@@ -98,7 +100,10 @@ pub struct ValidationResult {
 pub fn scan_stack_intents(repo_root: &Path) -> Result<Vec<StackIntent>, String> {
     let stacks_dir = repo_root.join("stacks");
     if !stacks_dir.exists() {
-        eprintln!("[provision] WARN: stacks/ directory does not exist at {:?}", stacks_dir);
+        eprintln!(
+            "[provision] WARN: stacks/ directory does not exist at {:?}",
+            stacks_dir
+        );
         return Ok(Vec::new());
     }
 
@@ -117,30 +122,51 @@ pub fn scan_stack_intents(repo_root: &Path) -> Result<Vec<StackIntent>, String> 
 
         let lxc_compose_path = stack_path.join("lxc-compose.yml");
         if !lxc_compose_path.exists() {
-            skipped_dirs.push(stack_path.file_name().unwrap().to_string_lossy().to_string());
+            skipped_dirs.push(
+                stack_path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+            );
             continue;
         }
 
         match parse_lxc_compose(&lxc_compose_path) {
             Ok(intent) => {
-                eprintln!("[provision] discovered stack '{}' (vmid={}, hostname={}, deploy={})", 
-                    intent.stack_name, intent.vmid, intent.hostname, intent.deploy_enabled);
+                eprintln!(
+                    "[provision] discovered stack '{}' (vmid={}, hostname={}, deploy={})",
+                    intent.stack_name, intent.vmid, intent.hostname, intent.deploy_enabled
+                );
                 intents.push(intent);
             }
             Err(e) => {
-                eprintln!("[provision] ERROR parsing {}: {}", lxc_compose_path.display(), e);
+                eprintln!(
+                    "[provision] ERROR parsing {}: {}",
+                    lxc_compose_path.display(),
+                    e
+                );
             }
         }
     }
 
     if !skipped_dirs.is_empty() {
-        eprintln!("[provision] skipped dirs without lxc-compose.yml: {}", skipped_dirs.join(", "));
+        eprintln!(
+            "[provision] skipped dirs without lxc-compose.yml: {}",
+            skipped_dirs.join(", ")
+        );
     }
 
     if intents.is_empty() {
-        eprintln!("[provision] WARN: found 0 stacks with lxc-compose.yml in {:?}", stacks_dir);
+        eprintln!(
+            "[provision] WARN: found 0 stacks with lxc-compose.yml in {:?}",
+            stacks_dir
+        );
     } else {
-        eprintln!("[provision] found {} stack(s) with lxc-compose.yml", intents.len());
+        eprintln!(
+            "[provision] found {} stack(s) with lxc-compose.yml",
+            intents.len()
+        );
     }
 
     Ok(intents)
@@ -193,6 +219,10 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
     let reserved_ipv4 = yaml["network"]["reserved_ipv4"]
         .as_str()
         .map(|s| s.to_string());
+
+    let cidr = yaml["network"]["cidr"].as_u64().unwrap_or(24) as u8;
+
+    let gateway = yaml["network"]["gateway"].as_str().map(|s| s.to_string());
 
     let autostart = yaml["boot"]["autostart"].as_bool().unwrap_or(true);
 
@@ -308,6 +338,8 @@ fn parse_lxc_compose(path: &Path) -> Result<StackIntent, String> {
         bridge,
         ip_mode,
         reserved_ipv4,
+        cidr,
+        gateway,
         vlan_tag,
         firewall,
         ip_mode_v6,
@@ -442,11 +474,18 @@ fn normalize_template_name(template: &str) -> String {
 }
 
 /// Create a new LXC container based on stack intent
-pub fn create_lxc(intent: &StackIntent, dry_run: bool) -> Result<(), String> {
+pub fn create_lxc(
+    intent: &StackIntent,
+    dry_run: bool,
+    log: &dyn Fn(&str, &str),
+) -> Result<(), String> {
     if dry_run {
-        println!(
-            "DRY-RUN: Would create LXC {} with template {}",
-            intent.vmid, intent.lxc_template
+        log(
+            "info",
+            &format!(
+                "DRY-RUN: Would create LXC {} with template {}",
+                intent.vmid, intent.lxc_template
+            ),
         );
         return Ok(());
     }
@@ -483,10 +522,33 @@ pub fn create_lxc(intent: &StackIntent, dry_run: bool) -> Result<(), String> {
         .arg("--rootfs")
         .arg(format!("{}:{}", intent.rootfs_pool, intent.disk_gb));
 
-    let mut net0 = format!(
-        "name=eth0,bridge={},hwaddr={},ip=dhcp",
-        intent.bridge, intent.hwaddr
-    );
+    let mut net0 = if intent.ip_mode == "static" {
+        if let (Some(ip), Some(gw)) = (&intent.reserved_ipv4, &intent.gateway) {
+            format!(
+                "name=eth0,bridge={},hwaddr={},ip={}/{},gw={}",
+                intent.bridge, intent.hwaddr, ip, intent.cidr, gw
+            )
+        } else {
+            // static mode requested but no ip/gateway configured — fall back to DHCP and warn
+            log(
+                "warn",
+                &format!(
+                    "ip_mode=static for {} but reserved_ipv4 or gateway is missing; falling back to dhcp",
+                    intent.hostname
+                ),
+            );
+            format!(
+                "name=eth0,bridge={},hwaddr={},ip=dhcp",
+                intent.bridge, intent.hwaddr
+            )
+        }
+    } else {
+        // dhcp / dhcp-reserved modes — Proxmox DHCP reservation is handled via OPNsense/MAC
+        format!(
+            "name=eth0,bridge={},hwaddr={},ip=dhcp",
+            intent.bridge, intent.hwaddr
+        )
+    };
     if let Some(tag) = intent.vlan_tag {
         net0.push_str(&format!(",tag={}", tag));
     }
@@ -538,12 +600,21 @@ pub fn create_lxc(intent: &StackIntent, dry_run: bool) -> Result<(), String> {
     }
 
     // Bootstrap the newly created container
-    println!("LXC {} created, starting bootstrap...", intent.vmid);
-    match crate::bootstrap::bootstrap_lxc(intent.vmid, intent) {
+    log(
+        "info",
+        &format!(
+            "LXC {} created successfully, starting bootstrap...",
+            intent.vmid
+        ),
+    );
+    match crate::bootstrap::bootstrap_lxc(intent.vmid, intent, log) {
         Ok(result) => {
-            println!(
-                "Bootstrap completed for LXC {} in {:?}",
-                intent.vmid, result.duration
+            log(
+                "ok",
+                &format!(
+                    "Bootstrap completed for LXC {} in {:?}",
+                    intent.vmid, result.duration
+                ),
             );
             Ok(())
         }
@@ -756,6 +827,7 @@ pub fn plan_provisioning_changes(repo_root: &Path) -> Result<Vec<ProvisionAction
 pub fn apply_provisioning_changes(
     repo_root: &Path,
     dry_run: bool,
+    log: &dyn Fn(&str, &str),
 ) -> Result<Vec<ProvisionAction>, String> {
     let actions = plan_provisioning_changes(repo_root)?;
     let intents = scan_stack_intents(repo_root)?;
@@ -766,15 +838,39 @@ pub fn apply_provisioning_changes(
 
     for action in &actions {
         match action {
-            ProvisionAction::Create { stack, vmid, .. } => {
+            ProvisionAction::Create { stack, vmid, name } => {
                 if let Some(intent) = intent_map.get(stack) {
-                    create_lxc(intent, dry_run)?;
-                    if !dry_run {
-                        eprintln!("[provision] bootstrapping LXC {} ({})...", vmid, stack);
-                        match crate::bootstrap::bootstrap_lxc(*vmid, intent) {
-                            Ok(_) => eprintln!("[provision] bootstrap completed for LXC {}", vmid),
-                            Err(e) => eprintln!("[provision] WARN: bootstrap failed for LXC {}: {}", vmid, e),
+                    log(
+                        "info",
+                        &format!(
+                            "[provision] CREATE vmid={} name={} stack={}",
+                            vmid, name, stack
+                        ),
+                    );
+                    // create_lxc already calls bootstrap internally — no double-bootstrap
+                    if let Err(e) = create_lxc(intent, dry_run, log) {
+                        if !dry_run {
+                            match disable_stack_deploy(repo_root, stack, &e) {
+                                Ok(()) => log(
+                                    "warn",
+                                    &format!(
+                                        "[provision] disabled deploy.enabled for stack '{}' after failed CREATE",
+                                        stack
+                                    ),
+                                ),
+                                Err(mark_err) => log(
+                                    "error",
+                                    &format!(
+                                        "[provision] failed to disable deploy.enabled for stack '{}': {}",
+                                        stack, mark_err
+                                    ),
+                                ),
+                            }
                         }
+                        return Err(format!(
+                            "CREATE failed for stack '{}': {}",
+                            stack, e
+                        ));
                     }
                 }
             }
@@ -785,21 +881,91 @@ pub fn apply_provisioning_changes(
                 ..
             } => {
                 if let Some(intent) = intent_map.get(stack) {
+                    log(
+                        "warn",
+                        &format!(
+                            "[provision] RECREATE vmid={} stack={} (destroying old container first)",
+                            vmid, stack
+                        ),
+                    );
                     // Pass expected name for safety validation
-                    destroy_lxc(*vmid, expected_name, dry_run)?;
-                    create_lxc(intent, dry_run)?;
-                    if !dry_run {
-                        eprintln!("[provision] bootstrapping LXC {} ({})...", vmid, stack);
-                        match crate::bootstrap::bootstrap_lxc(*vmid, intent) {
-                            Ok(_) => eprintln!("[provision] bootstrap completed for LXC {}", vmid),
-                            Err(e) => eprintln!("[provision] WARN: bootstrap failed for LXC {}: {}", vmid, e),
+                    if let Err(e) = destroy_lxc(*vmid, expected_name, dry_run) {
+                        if !dry_run {
+                            match disable_stack_deploy(repo_root, stack, &e) {
+                                Ok(()) => log(
+                                    "warn",
+                                    &format!(
+                                        "[provision] disabled deploy.enabled for stack '{}' after failed RECREATE destroy",
+                                        stack
+                                    ),
+                                ),
+                                Err(mark_err) => log(
+                                    "error",
+                                    &format!(
+                                        "[provision] failed to disable deploy.enabled for stack '{}': {}",
+                                        stack, mark_err
+                                    ),
+                                ),
+                            }
                         }
+                        return Err(format!(
+                            "RECREATE destroy failed for stack '{}': {}",
+                            stack, e
+                        ));
+                    }
+                    // create_lxc already calls bootstrap internally — no double-bootstrap
+                    if let Err(e) = create_lxc(intent, dry_run, log) {
+                        if !dry_run {
+                            match disable_stack_deploy(repo_root, stack, &e) {
+                                Ok(()) => log(
+                                    "warn",
+                                    &format!(
+                                        "[provision] disabled deploy.enabled for stack '{}' after failed RECREATE create/bootstrap",
+                                        stack
+                                    ),
+                                ),
+                                Err(mark_err) => log(
+                                    "error",
+                                    &format!(
+                                        "[provision] failed to disable deploy.enabled for stack '{}': {}",
+                                        stack, mark_err
+                                    ),
+                                ),
+                            }
+                        }
+                        return Err(format!(
+                            "RECREATE create/bootstrap failed for stack '{}': {}",
+                            stack, e
+                        ));
                     }
                 }
             }
             ProvisionAction::Update { vmid, stack, .. } => {
                 if let Some(intent) = intent_map.get(stack) {
-                    reconcile_lxc(*vmid, intent, dry_run)?;
+                    if let Err(e) = reconcile_lxc(*vmid, intent, dry_run) {
+                        if !dry_run {
+                            match disable_stack_deploy(repo_root, stack, &e) {
+                                Ok(()) => log(
+                                    "warn",
+                                    &format!(
+                                        "[provision] disabled deploy.enabled for stack '{}' after failed UPDATE",
+                                        stack
+                                    ),
+                                ),
+                                Err(mark_err) => log(
+                                    "error",
+                                    &format!(
+                                        "[provision] failed to disable deploy.enabled for stack '{}': {}",
+                                        stack, mark_err
+                                    ),
+                                ),
+                            }
+                        }
+                        return Err(format!(
+                            "UPDATE failed for stack '{}': {}",
+                            stack, e
+                        ));
+                    }
                 }
             }
             _ => {}
@@ -807,6 +973,50 @@ pub fn apply_provisioning_changes(
     }
 
     Ok(actions)
+}
+
+fn disable_stack_deploy(repo_root: &Path, stack_name: &str, reason: &str) -> Result<(), String> {
+    let compose_path = repo_root
+        .join("stacks")
+        .join(stack_name)
+        .join("lxc-compose.yml");
+
+    let content = std::fs::read_to_string(&compose_path)
+        .map_err(|e| format!("failed to read {}: {}", compose_path.display(), e))?;
+    let mut doc: serde_yaml::Value = serde_yaml::from_str(&content)
+        .map_err(|e| format!("failed to parse {}: {}", compose_path.display(), e))?;
+
+    let Some(root) = doc.as_mapping_mut() else {
+        return Err(format!(
+            "failed to update {}: root is not a mapping",
+            compose_path.display()
+        ));
+    };
+
+    let deploy_key = serde_yaml::Value::String("deploy".to_string());
+    let enabled_key = serde_yaml::Value::String("enabled".to_string());
+    let failure_key = serde_yaml::Value::String("last_failure".to_string());
+
+    let deploy_value = root
+        .entry(deploy_key)
+        .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+
+    let Some(deploy_map) = deploy_value.as_mapping_mut() else {
+        return Err(format!(
+            "failed to update {}: deploy is not a mapping",
+            compose_path.display()
+        ));
+    };
+
+    deploy_map.insert(enabled_key, serde_yaml::Value::Bool(false));
+    deploy_map.insert(failure_key, serde_yaml::Value::String(reason.to_string()));
+
+    let updated = serde_yaml::to_string(&doc)
+        .map_err(|e| format!("failed to serialize {}: {}", compose_path.display(), e))?;
+    std::fs::write(&compose_path, updated)
+        .map_err(|e| format!("failed to write {}: {}", compose_path.display(), e))?;
+
+    Ok(())
 }
 
 /// Format provisioning actions for display

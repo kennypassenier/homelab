@@ -28,54 +28,182 @@ pub struct BootstrapResult {
 }
 
 /// Bootstrap a newly created LXC container with all necessary configuration
-pub fn bootstrap_lxc(vmid: u32, intent: &StackIntent) -> Result<BootstrapResult, String> {
+pub fn bootstrap_lxc(
+    vmid: u32,
+    intent: &StackIntent,
+    log: &dyn Fn(&str, &str),
+) -> Result<BootstrapResult, String> {
     let start_time = std::time::Instant::now();
 
-    println!("Bootstrapping LXC {} for stack {}", vmid, intent.stack_name);
+    log(
+        "info",
+        &format!(
+            "[bootstrap] Starting bootstrap for LXC {} (stack={})",
+            vmid, intent.stack_name
+        ),
+    );
 
     // Stop container for configuration
+    log(
+        "info",
+        &format!(
+            "[bootstrap] Stopping LXC {} for pre-boot configuration",
+            vmid
+        ),
+    );
     pct_stop(vmid)?;
 
     // Storage
+    log(
+        "info",
+        &format!(
+            "[bootstrap] Configuring host storage at {}",
+            intent.host_storage_path
+        ),
+    );
     setup_storage(vmid, intent)?;
 
     // Hardware (TUN device)
     if intent.tun_device.unwrap_or(false) {
+        log(
+            "info",
+            &format!(
+                "[bootstrap] Configuring TUN device passthrough for LXC {}",
+                vmid
+            ),
+        );
         setup_tun_device(vmid)?;
     }
 
     // Hardware (GPU passthrough)
     if intent.gpu_passthrough.unwrap_or(false) {
+        log(
+            "info",
+            &format!("[bootstrap] Configuring GPU passthrough for LXC {}", vmid),
+        );
         setup_gpu_passthrough(vmid)?;
     }
 
     // Start container
+    log("info", &format!("[bootstrap] Starting LXC {}", vmid));
     pct_start(vmid)?;
-    wait_for_container_ready(vmid, Duration::from_secs(30))?;
+    log(
+        "info",
+        &format!("[bootstrap] Waiting for LXC {} to become ready...", vmid),
+    );
+    wait_for_container_ready(vmid, Duration::from_secs(60))?;
+    log("ok", &format!("[bootstrap] LXC {} is ready", vmid));
 
     // Create directories
+    log(
+        "info",
+        &format!(
+            "[bootstrap] Creating /appdata directory inside LXC {}",
+            vmid
+        ),
+    );
     create_appdata_directories(vmid, &intent.stack_name)?;
 
-    // Inject secrets (LATCH_ only)
+    // Inject secrets (LATCH_* only) into container /root/.env
+    log(
+        "info",
+        &format!("[bootstrap] Injecting LATCH_* secrets into LXC {}", vmid),
+    );
     inject_secrets(vmid)?;
 
     // Install dependencies
+    log(
+        "info",
+        &format!(
+            "[bootstrap] Installing system dependencies in LXC {} (apt, Docker)...",
+            vmid
+        ),
+    );
     install_dependencies(vmid)?;
+    log(
+        "ok",
+        &format!("[bootstrap] System dependencies installed in LXC {}", vmid),
+    );
+
+    // Install latch CLI binary
+    log(
+        "info",
+        &format!("[bootstrap] Installing latch CLI in LXC {}", vmid),
+    );
     install_latch_cli(vmid)?;
+    log(
+        "ok",
+        &format!("[bootstrap] latch CLI installed in LXC {}", vmid),
+    );
+
+    // Run latch login to configure secrets remote
+    log(
+        "info",
+        &format!("[bootstrap] Running latch login in LXC {}", vmid),
+    );
+    run_latch_login(vmid, log)?;
 
     // Git setup
+    log(
+        "info",
+        &format!(
+            "[bootstrap] Configuring sparse Git checkout for stack '{}' in LXC {}",
+            intent.stack_name, vmid
+        ),
+    );
     setup_git_sparse_checkout(vmid, &intent.stack_name)?;
+    log(
+        "ok",
+        &format!("[bootstrap] Sparse checkout configured for LXC {}", vmid),
+    );
 
     // SSH access
     let github_username =
         std::env::var("GITHUB_USERNAME").unwrap_or_else(|_| "kennypassenier".to_string());
+    log(
+        "info",
+        &format!(
+            "[bootstrap] Installing SSH keys from GitHub user '{}'",
+            github_username
+        ),
+    );
     setup_ssh_access(vmid, &github_username)?;
+    log(
+        "ok",
+        &format!("[bootstrap] SSH access configured in LXC {}", vmid),
+    );
 
     // Install LXC daemon
+    log(
+        "info",
+        &format!("[bootstrap] Installing LXC daemon binary in LXC {}", vmid),
+    );
     install_lxc_daemon(vmid)?;
+    log(
+        "info",
+        &format!(
+            "[bootstrap] Creating LXC daemon service config for stack '{}'",
+            intent.stack_name
+        ),
+    );
     create_daemon_config(vmid, &intent.stack_name)?;
+    log(
+        "ok",
+        &format!(
+            "[bootstrap] LXC daemon installed and started in LXC {}",
+            vmid
+        ),
+    );
 
     let duration = start_time.elapsed();
+    log(
+        "ok",
+        &format!(
+            "[bootstrap] Bootstrap complete for LXC {} in {:.1}s",
+            vmid,
+            duration.as_secs_f64()
+        ),
+    );
 
     Ok(BootstrapResult {
         success: true,
@@ -188,7 +316,7 @@ fn setup_storage(_vmid: u32, intent: &StackIntent) -> Result<(), String> {
         }
     }
 
-    println!("Storage configured: {} -> {}", host_path, mount_point);
+    eprintln!("Storage configured: {} -> {}", host_path, mount_point);
 
     Ok(())
 }
@@ -201,7 +329,7 @@ fn setup_tun_device(vmid: u32) -> Result<(), String> {
 
     // Check if already configured
     if conf_content.contains("lxc.cgroup2.devices.allow: c 10:200") {
-        println!("TUN device already configured for LXC {}", vmid);
+        eprintln!("TUN device already configured for LXC {}", vmid);
         return Ok(());
     }
 
@@ -225,7 +353,7 @@ lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
     file.write_all(tun_config.as_bytes())
         .map_err(|e| format!("Failed to write TUN config: {}", e))?;
 
-    println!("TUN device passthrough configured for LXC {}", vmid);
+    eprintln!("TUN device passthrough configured for LXC {}", vmid);
     Ok(())
 }
 
@@ -237,7 +365,7 @@ fn setup_gpu_passthrough(vmid: u32) -> Result<(), String> {
 
     // Idempotency: skip if DRM cgroup entry already present
     if conf_content.contains("lxc.cgroup2.devices.allow: c 226:") {
-        println!("GPU passthrough already configured for LXC {}", vmid);
+        eprintln!("GPU passthrough already configured for LXC {}", vmid);
         return Ok(());
     }
 
@@ -265,7 +393,7 @@ lxc.mount.entry: /dev/dri/renderD128 dev/dri/renderD128 none bind,optional,creat
     file.write_all(gpu_config.as_bytes())
         .map_err(|e| format!("Failed to write GPU config: {}", e))?;
 
-    println!("GPU passthrough configured for LXC {}", vmid);
+    eprintln!("GPU passthrough configured for LXC {}", vmid);
     Ok(())
 }
 
@@ -274,7 +402,7 @@ fn create_appdata_directories(vmid: u32, _stack_name: &str) -> Result<(), String
     pct_exec(vmid, "mkdir -p /appdata")?;
     pct_exec(vmid, "chmod 755 /appdata")?;
 
-    println!("Created /appdata directory in LXC {}", vmid);
+    eprintln!("Created /appdata directory in LXC {}", vmid);
     Ok(())
 }
 
@@ -294,7 +422,7 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
         .find(|p| !p.is_empty() && Path::new(p).exists());
 
     let Some(env_file) = env_file else {
-        println!("No HOST env file found, skipping secrets injection");
+        eprintln!("No HOST env file found, skipping secrets injection");
         return Ok(());
     };
 
@@ -308,7 +436,7 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
         .collect();
 
     if latch_vars.is_empty() {
-        println!("No LATCH_ variables found");
+        eprintln!("No LATCH_ variables found");
         return Ok(());
     }
 
@@ -341,13 +469,13 @@ fn inject_secrets(vmid: u32) -> Result<(), String> {
     // Cleanup
     std::fs::remove_file(&temp_file).ok();
 
-    println!("Secrets injected into LXC {}", vmid);
+    eprintln!("Secrets injected into LXC {}", vmid);
     Ok(())
 }
 
 /// Install base dependencies (Docker, Git, unattended-upgrades, etc.)
 fn install_dependencies(vmid: u32) -> Result<(), String> {
-    println!("Installing dependencies in LXC {}...", vmid);
+    eprintln!("Installing dependencies in LXC {}...", vmid);
 
     let install_script = r#"
 set -euo pipefail
@@ -374,13 +502,12 @@ echo "Dependencies installed successfully"
 
     pct_exec(vmid, install_script)?;
 
-    println!("Dependencies installed in LXC {}", vmid);
     Ok(())
 }
 
 /// Install the native Latch CLI in the LXC using the shared setup script.
 fn install_latch_cli(vmid: u32) -> Result<(), String> {
-    println!("Installing Latch CLI in LXC {}...", vmid);
+    let latch_binary_path = acquire_lxc_compatible_latch_binary_on_host()?;
 
     let script_candidates = [
         format!("{}/scripts/lxc/setup-latch.sh", default_host_gitops_repo()),
@@ -392,7 +519,19 @@ fn install_latch_cli(vmid: u32) -> Result<(), String> {
         .find(|path| Path::new(path.as_str()).exists())
         .ok_or_else(|| "Cannot find scripts/lxc/setup-latch.sh on HOST".to_string())?;
 
-    let remote_script = "/tmp/setup-latch.sh";
+    let push_binary = Command::new("pct")
+        .args(["push", &vmid.to_string(), &latch_binary_path, "/root/latch"])
+        .output()
+        .map_err(|e| format!("Failed to push latch binary to LXC: {}", e))?;
+
+    if !push_binary.status.success() {
+        return Err(format!(
+            "Failed to push latch binary to LXC: {}",
+            String::from_utf8_lossy(&push_binary.stderr)
+        ));
+    }
+
+    let remote_script = "/root/setup-latch.sh";
     let push_output = Command::new("pct")
         .args(["push", &vmid.to_string(), script_path, remote_script])
         .output()
@@ -407,10 +546,203 @@ fn install_latch_cli(vmid: u32) -> Result<(), String> {
 
     pct_exec(
         vmid,
-        &format!("chmod +x {} && {}", remote_script, remote_script),
+        &format!(
+            "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH && chmod +x {} && {}",
+            remote_script, remote_script
+        ),
     )?;
 
-    println!("Latch CLI installed in LXC {}", vmid);
+    pct_exec(
+        vmid,
+        "if [[ -x /usr/local/bin/latch ]]; then /usr/local/bin/latch --version; elif command -v latch >/dev/null 2>&1; then latch --version; else echo 'latch binary missing after setup' >&2; exit 1; fi",
+    )?;
+
+    Ok(())
+}
+
+fn acquire_lxc_compatible_latch_binary_on_host() -> Result<String, String> {
+    if let Ok(path) = std::env::var("LATCH_LXC_BINARY_PATH") {
+        if !path.trim().is_empty() && Path::new(&path).exists() {
+            return Ok(path);
+        }
+    }
+
+    let update_repo = std::env::var("LATCH_UPDATE_REPO")
+        .unwrap_or_else(|_| "kennypassenier/latch-rs".to_string());
+    let update_asset = std::env::var("LATCH_LXC_UPDATE_ASSET")
+        .unwrap_or_else(|_| "latch-linux-x86_64-lxc.tar.gz".to_string());
+    let api_url = format!("https://api.github.com/repos/{}/releases/latest", update_repo);
+
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("homelab-host-daemon/latch-bootstrap")
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client for latch release lookup: {}", e))?;
+
+    let mut req = client.get(api_url);
+    if let Ok(token) = std::env::var("HOST_UPDATE_TOKEN") {
+        if !token.trim().is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+    }
+
+    let release_text = req
+        .send()
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("Failed to fetch latch release metadata: {}", e))?
+        .text()
+        .map_err(|e| format!("Failed to read latch release metadata body: {}", e))?;
+
+    let release_json: serde_json::Value = serde_json::from_str(&release_text)
+        .map_err(|e| format!("Failed to parse latch release metadata JSON: {}", e))?;
+
+    let asset_url = release_json
+        .get("assets")
+        .and_then(|a| a.as_array())
+        .and_then(|arr| {
+            arr.iter().find_map(|asset| {
+                let name = asset.get("name")?.as_str()?;
+                if name == update_asset {
+                    asset.get("browser_download_url")?.as_str().map(str::to_string)
+                } else {
+                    None
+                }
+            })
+        })
+        .ok_or_else(|| {
+            format!(
+                "Latest latch release does not contain asset '{}'",
+                update_asset
+            )
+        })?;
+
+    let temp_dir = std::env::temp_dir().join(format!("latch-lxc-{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp dir {}: {}", temp_dir.display(), e))?;
+    let archive_path = temp_dir.join(&update_asset);
+
+    let mut download_req = client.get(asset_url);
+    if let Ok(token) = std::env::var("HOST_UPDATE_TOKEN") {
+        if !token.trim().is_empty() {
+            download_req = download_req.header("Authorization", format!("Bearer {}", token));
+        }
+    }
+
+    let archive_bytes = download_req
+        .send()
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("Failed to download latch LXC asset: {}", e))?
+        .bytes()
+        .map_err(|e| format!("Failed to read latch LXC asset body: {}", e))?;
+
+    std::fs::write(&archive_path, &archive_bytes).map_err(|e| {
+        format!(
+            "Failed to write latch LXC archive to {}: {}",
+            archive_path.display(),
+            e
+        )
+    })?;
+
+    let output = Command::new("tar")
+        .args(["-xzf", &archive_path.to_string_lossy(), "-C", &temp_dir.to_string_lossy()])
+        .output()
+        .map_err(|e| format!("Failed to run tar for latch LXC asset: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to extract latch LXC asset: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let binary_path = find_latch_binary_in_dir(&temp_dir)
+        .ok_or_else(|| "Extracted latch LXC asset did not contain 'latch' binary".to_string())?;
+
+    Ok(binary_path.to_string_lossy().to_string())
+}
+
+fn find_latch_binary_in_dir(dir: &Path) -> Option<std::path::PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_latch_binary_in_dir(&path) {
+                return Some(found);
+            }
+            continue;
+        }
+
+        if path.file_name().and_then(|n| n.to_str()) == Some("latch") {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Run `latch login` inside the LXC using LATCH_PAT, LATCH_KEY, and LATCH_SECRETS_REPO
+/// from /root/.env (already injected by inject_secrets).
+fn run_latch_login(vmid: u32, log: &dyn Fn(&str, &str)) -> Result<(), String> {
+    let login_script = r#"
+set -euo pipefail
+
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
+
+if [[ -f /root/.env ]]; then
+    set -a
+    . /root/.env
+    set +a
+fi
+
+PAT="${LATCH_PAT:-}"
+KEY="${LATCH_KEY:-}"
+REPO="${LATCH_SECRETS_REPO:-}"
+
+if [[ -z "$PAT" || -z "$KEY" || -z "$REPO" ]]; then
+    echo "WARN: LATCH_PAT, LATCH_KEY, or LATCH_SECRETS_REPO not set — skipping latch login"
+    exit 0
+fi
+
+LATCH_BIN=""
+if [[ -x /usr/local/bin/latch ]]; then
+    LATCH_BIN="/usr/local/bin/latch"
+elif command -v latch >/dev/null 2>&1; then
+    LATCH_BIN="$(command -v latch)"
+fi
+
+if [[ -z "$LATCH_BIN" ]]; then
+    echo "ERROR: latch binary not found — cannot run latch login"
+    exit 1
+fi
+
+echo "Running: ${LATCH_BIN} login --REPO ${REPO}"
+"${LATCH_BIN}" login --PAT "${PAT}" --KEY "${KEY}" --REPO "${REPO}"
+echo "latch login succeeded"
+"#;
+
+    match pct_exec(vmid, login_script) {
+        Ok(output) => {
+            for line in output.lines() {
+                if line.to_lowercase().contains("warn") || line.to_lowercase().contains("skip") {
+                    log("warn", &format!("[latch-login] {}", line));
+                } else if line.to_lowercase().contains("error")
+                    || line.to_lowercase().contains("fail")
+                {
+                    log("error", &format!("[latch-login] {}", line));
+                } else {
+                    log("info", &format!("[latch-login] {}", line));
+                }
+            }
+        }
+        Err(e) => {
+            // latch login failure is non-fatal — the container will fall back to env-backed mode
+            log(
+                "warn",
+                &format!(
+                    "[latch-login] Failed (non-fatal, will use env fallback): {}",
+                    e
+                ),
+            );
+        }
+    }
     Ok(())
 }
 
@@ -466,7 +798,7 @@ echo "Sparse checkout completed for stack: ${{STACK_NAME}}"
 
     pct_exec(vmid, &setup_script)?;
 
-    println!("Git sparse checkout configured for LXC {}", vmid);
+    eprintln!("Git sparse checkout configured for LXC {}", vmid);
     Ok(())
 }
 
@@ -493,7 +825,7 @@ echo "SSH access configured for GitHub user: ${{GITHUB_USER}}"
 
     pct_exec(vmid, &setup_script)?;
 
-    println!(
+    eprintln!(
         "SSH access configured for LXC {} (GitHub user: {})",
         vmid, github_username
     );
@@ -502,12 +834,12 @@ echo "SSH access configured for GitHub user: ${{GITHUB_USER}}"
 
 /// Install LXC daemon binary
 fn install_lxc_daemon(vmid: u32) -> Result<(), String> {
-    println!("Installing LXC daemon in LXC {}...", vmid);
+    eprintln!("Installing LXC daemon in LXC {}...", vmid);
 
     // Strategy 1: Try to pull the LXC daemon Docker image (preferred)
     if let Ok(lxc_daemon_image) = std::env::var("LXC_DAEMON_IMAGE") {
         let image = format!("{}:latest", lxc_daemon_image);
-        println!("Attempting to pull LXC daemon image: {}", image);
+        eprintln!("Attempting to pull LXC daemon image: {}", image);
 
         let docker_pull = format!(
             r#"
@@ -525,10 +857,10 @@ fi
         );
 
         if pct_exec(vmid, &docker_pull).is_ok() {
-            println!("LXC daemon installed from docker image");
+            eprintln!("LXC daemon installed from docker image");
             return Ok(());
         }
-        println!("Docker image pull failed, falling back to binary method");
+        eprintln!("Docker image pull failed, falling back to binary method");
     }
 
     // Strategy 2: Copy binary from HOST build artifacts
@@ -545,7 +877,7 @@ fi
 
     for binary_path in binary_paths {
         if Path::new(&binary_path).exists() {
-            println!("Found LXC daemon binary at: {}", binary_path);
+            eprintln!("Found LXC daemon binary at: {}", binary_path);
             let output = Command::new("pct")
                 .args([
                     "push",
@@ -564,14 +896,14 @@ fi
             }
 
             pct_exec(vmid, "chmod +x /usr/local/bin/lxc-daemon")?;
-            println!("LXC daemon installed from binary");
+            eprintln!("LXC daemon installed from binary");
             return Ok(());
         }
     }
 
     // Strategy 3: Fallback to placeholder (should not reach in production)
-    println!("Warning: LXC daemon binary not found in standard locations");
-    println!("Creating placeholder - build and deploy the actual daemon from `make release-lxc`");
+    eprintln!("Warning: LXC daemon binary not found in standard locations");
+    eprintln!("Creating placeholder - build and deploy the actual daemon from `make release-lxc`");
 
     pct_exec(
         vmid,
@@ -584,7 +916,7 @@ fi
     "#,
     )?;
 
-    println!("LXC daemon installed (placeholder - update required)");
+    eprintln!("LXC daemon installed (placeholder - update required)");
     Ok(())
 }
 
@@ -687,6 +1019,6 @@ WantedBy=multi-user.target
     pct_exec(vmid, "systemctl enable lxc-daemon")?;
     pct_exec(vmid, "systemctl start lxc-daemon")?;
 
-    println!("LXC daemon service configured and started in LXC {}", vmid);
+    eprintln!("LXC daemon service configured and started in LXC {}", vmid);
     Ok(())
 }

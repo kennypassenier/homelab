@@ -163,8 +163,8 @@ LXC currently cares about:
 - `GITOPS_REPO_URL`
 - optional `GITOPS_REPO_TOKEN`
 - `LATCH_UPDATE_REPO=kennypassenier/latch-rs`
-- `LATCH_UPDATE_ASSET=latch-linux-x86_64.tar.gz`
-- `LATCH_UPDATE_INTERVAL_SECS=86400`
+- `LATCH_LXC_UPDATE_ASSET=latch-linux-x86_64-lxc.tar.gz`
+- optional `LATCH_LXC_BINARY_PATH` (absolute host path override for a prebuilt `latch` binary)
 - optional `LXC_LATCH_PULL_ON_UPDATE=true` to run `latch pull --sparse` before API/RPC self-update commands
 - optional `LXC_SELF_UPDATE_CMD` (overrides full update command used by update APIs)
 - optional `LXC_DAEMON_IMAGE` (default `ghcr.io/kennypassenier/homelab-lxc-daemon:latest`)
@@ -179,10 +179,19 @@ It is derived per container from:
 
 LXC `latch` runtime strategy is:
 
-- HOST bootstrap installs the latest native `latch` GitHub release binary into `/usr/local/bin/latch`
-- a guarded systemd timer re-checks for updates on a daily cadence (`LATCH_UPDATE_INTERVAL_SECS`)
+- HOST bootstrap pushes a Debian-12-compatible prebuilt binary into the LXC and installs it via `scripts/lxc/setup-latch.sh`
+- preferred source is latch-rs release asset `latch-linux-x86_64-lxc.tar.gz` (pipeline-built in Debian 12)
+- local fallback source is `make build-lxc` output built inside a `debian:12-slim` Docker sandbox
 - non-interactive operation uses persistent `LATCH_PAT` / `LATCH_KEY` injected by HOST
 - LXC keyring/pass setup is optional, not required
+- never install Rust toolchains or build dependencies in Proxmox LXCs for latch installation
+
+LXC latch deployment execution sequence:
+
+1. Push prebuilt binary to container (default target `/root/latch`).
+2. Push wrapper script `scripts/lxc/setup-latch.sh` to `/root/setup-latch.sh`.
+3. Execute wrapper to install `/usr/local/bin/latch` with runtime compatibility checks.
+4. Authenticate with `latch login` using `/root/.env` (`LATCH_PAT`, `LATCH_KEY`, `LATCH_SECRETS_REPO`).
 
 Desktop build/release latch strategy is:
 

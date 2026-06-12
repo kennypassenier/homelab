@@ -137,6 +137,10 @@ pub fn draw_ui(f: &mut Frame, app: &App) {
 
 // ── Tab renderers ────────────────────────────────────────────────────────────
 
+fn stack_is_active(stack_name: &str) -> bool {
+    crate::scaffold::is_stack_deploy_enabled(stack_name).unwrap_or(false)
+}
+
 fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -168,13 +172,17 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
         .skip(scroll)
         .take(visible)
         .map(|(i, name)| {
+            let is_active = stack_is_active(name);
             let selected = i == app.selected_stack && app.column_focus == 0;
             let style = if selected {
                 crate::theme::Theme::pulse_style(app.pulse_phase).add_modifier(Modifier::BOLD)
+            } else if is_active {
+                Style::default().fg(Color::Green)
             } else {
-                Style::default().fg(app.theme.text)
+                Style::default().fg(Color::DarkGray)
             };
-            ListItem::new(format!(" {}", name)).style(style)
+            let state_tag = if is_active { "[ON ]" } else { "[OFF]" };
+            ListItem::new(format!(" {} {}", state_tag, name)).style(style)
         })
         .collect();
 
@@ -183,7 +191,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .title(" [ STACKS ] ")
+                .title(" [ STACKS :: ON/OFF ] ")
                 .title_style(
                     Style::default()
                         .fg(Color::Cyan)
@@ -405,6 +413,11 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
 
     // ── Stack summary table ───────────────────────────────────────────────
     let header = Row::new(vec![
+        Cell::from("STATE").style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Cell::from("STACK").style(
             Style::default()
                 .fg(Color::Cyan)
@@ -428,16 +441,27 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
         .iter()
         .enumerate()
         .map(|(i, name)| {
+            let is_active = stack_is_active(name);
             let app_count = app.stack_dropdowns[i].apps.len();
             let has_presync =
                 std::path::Path::new(&format!("stacks/{}/pre-sync.sh", name)).exists();
+            let state_cell = if is_active {
+                Cell::from("  ON").style(Style::default().fg(Color::Green))
+            } else {
+                Cell::from(" OFF").style(Style::default().fg(Color::DarkGray))
+            };
             let presync_cell = if has_presync {
                 Cell::from("  \u{2713} YES").style(Style::default().fg(Color::Green))
             } else {
                 Cell::from("  \u{2717} no").style(Style::default().fg(Color::DarkGray))
             };
             Row::new(vec![
-                Cell::from(name.as_str()).style(Style::default().fg(Color::White)),
+                state_cell,
+                Cell::from(name.as_str()).style(Style::default().fg(if is_active {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                })),
                 Cell::from(format!("  {}", app_count)).style(Style::default().fg(Color::White)),
                 presync_cell,
             ])
@@ -445,6 +469,7 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let widths = [
+        Constraint::Length(7),
         Constraint::Percentage(50),
         Constraint::Length(6),
         Constraint::Length(10),

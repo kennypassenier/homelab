@@ -1000,7 +1000,9 @@ Type=simple
 EnvironmentFile=-/root/.env
 ExecStart=/usr/local/bin/lxc-daemon --config /etc/homelab/lxc-daemon.toml
 Restart=always
-RestartSec=10
+RestartSec=5
+# Disable burst limit so the service always restarts after updates or crashes.
+StartLimitIntervalSec=0
 StandardOutput=append:/var/log/lxc-daemon.log
 StandardError=append:/var/log/lxc-daemon.log
 

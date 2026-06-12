@@ -737,118 +737,17 @@ async fn handle_update(
 }
 
 async fn perform_lxc_self_update(state: Arc<Mutex<AppState>>) -> Result<String, String> {
-    let latch_pull_result = tokio::task::spawn_blocking(run_latch_pull_before_remote_update)
-        .await
-        .map_err(|e| e.to_string())?;
+    let result =
+        tokio::task::spawn_blocking(crate::self_update::check_and_apply_update_with_latch_pull)
+            .await
+            .map_err(|e| e.to_string())?;
 
-    {
-        let mut s = state.lock().unwrap();
-        match latch_pull_result {
-            Ok(msg) => s.add_log(LogLevel::Info, msg),
-            Err(err) => s.add_log(LogLevel::Warn, err),
-        }
+    let mut s = state.lock().unwrap();
+    match result {
+        Ok(ref msg) => s.add_log(LogLevel::Ok, format!("[update] {}", msg)),
+        Err(ref err) => s.add_log(LogLevel::Error, format!("[update] {}", err)),
     }
-
-    let update_cmd = std::env::var("LXC_SELF_UPDATE_CMD")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| {
-            let image = std::env::var("LXC_DAEMON_IMAGE")
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| "ghcr.io/kennypassenier/homelab-lxc-daemon:latest".to_string());
-            let compose_dir = std::env::var("LXC_DAEMON_COMPOSE_DIR")
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| "/opt/lxc-daemon".to_string());
-            let service = std::env::var("LXC_DAEMON_COMPOSE_SERVICE")
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| "lxc-daemon".to_string());
-
-            format!(
-                "docker pull {image} && cd {compose_dir} && docker compose up -d --force-recreate --no-deps {service}",
-            )
-        });
-
-    {
-        let mut s = state.lock().unwrap();
-        s.add_log(
-            LogLevel::Info,
-            format!("LXC self-update requested via API (cmd={})", update_cmd),
-        );
-    }
-
-    let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("sh")
-            .args(["-lc", &update_cmd])
-            .output()
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let message = if stdout.is_empty() {
-            "LXC update applied (image pull + service recreate)".to_string()
-        } else {
-            format!("LXC update applied: {}", stdout)
-        };
-        let mut s = state.lock().unwrap();
-        s.add_log(LogLevel::Ok, message.clone());
-        Ok(message)
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = if stderr.is_empty() {
-            "LXC self-update command failed".to_string()
-        } else {
-            format!("LXC self-update failed: {}", stderr)
-        };
-        let mut s = state.lock().unwrap();
-        s.add_log(LogLevel::Error, message.clone());
-        Err(message)
-    }
-}
-
-fn run_latch_pull_before_remote_update() -> Result<String, String> {
-    if !env_bool("LXC_LATCH_PULL_ON_UPDATE", true) {
-        return Ok("LXC latch pull disabled for remote update".to_string());
-    }
-
-    let repo = std::env::var("GITOPS_REPO")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "/opt/gitops".to_string());
-
-    let output = std::process::Command::new("latch")
-        .args(["pull", "--sparse"])
-        .current_dir(&repo)
-        .output()
-        .map_err(|e| format!("LXC latch pull unavailable: {}", e))?;
-
-    if output.status.success() {
-        Ok("LXC latch pull --sparse complete before self-update".to_string())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let short = stderr.lines().next().unwrap_or("unknown latch error").trim();
-        Err(format!("LXC latch pull failed before self-update: {}", short))
-    }
-}
-
-fn env_bool(key: &str, default: bool) -> bool {
-    match std::env::var(key) {
-        Ok(v) => {
-            let norm = v.trim().to_ascii_lowercase();
-            !matches!(norm.as_str(), "0" | "false" | "no" | "off")
-        }
-        Err(_) => default,
-    }
+    result
 }
 
 // ── Backup pause / resume ──────────────────────────────────────────────────

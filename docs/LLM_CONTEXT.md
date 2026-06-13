@@ -37,6 +37,7 @@ Last updated: 2026-06-12
 - HOST self-update is release-based (version/tag check), not push-based.
 - HOST background release checker is opt-in (`HOST_BACKGROUND_UPDATE_ENABLED=1`), while failsafe stale-heartbeat self-update checks are enabled by default (`HOST_FAILSAFE_UPDATE_ENABLED=0` disables).
 - HOST self-update now includes binary preflight checks, backup-before-swap, and watchdog-based rollback if post-restart health checks fail.
+- HOST self-update sanitizes `(deleted)` path markers from running executable paths and falls back to canonical `/root/homelab/apps/HOST*` paths before backup/swap.
 - LXC daemon image delivery is automated via GHCR workflow with path-based change gating.
 - Local `make build-lxc` builds the daemon inside a Debian 12 Rust container so the generated artifact stays compatible with the libc versions found in deployed LXCs.
 - LXC bootstrap installs a prebuilt Debian-12-compatible `latch` binary (asset `latch-linux-x86_64-lxc.tar.gz`) pushed by HOST.
@@ -49,6 +50,7 @@ Last updated: 2026-06-12
 - CLIENT Host Management uses HOST metrics API polling (`GET /api/metrics`, target `HOST_IP`) and displays runtime LXC status/CPU/RAM/uptime.
 - LXC failsafe sync uses an inverse heartbeat policy: periodic windows run recovery only when CLIENT heartbeat is stale; windows are skipped while CLIENT is actively connected.
 - CLIENT now supervises websocket workers for all deploy-enabled stacks and reconnects stale streams automatically.
+- CLIENT now retries sync automatically after LXC websocket connect when an earlier dispatch failed during bootstrap-time connection refusal.
 - CLIENT/HOST/LXC websocket streams now exchange keepalive traffic so idle periods do not drop otherwise healthy connections.
 - CLIENT now debounces duplicate HOST provision dispatches and suppresses identical consecutive LXC log lines in the Logs tab to reduce reconnect-noise spam.
 - HOST provisioning now fail-closes stack activation: when CREATE/RECREATE/UPDATE fails for a stack, HOST writes `deploy.enabled=false` and `deploy.last_failure` into that stack `lxc-compose.yml` so retries require explicit re-enable.

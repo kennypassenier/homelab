@@ -137,10 +137,7 @@ After manual recovery, future releases should self-update normally again.
 
 ## Release-Based Self Update
 
-- HOST supports release-based self-update, not per-push updates.
-- Default behavior is CLIENT-commanded update checks; autonomous periodic checks are disabled unless explicitly enabled with env flags above.
-- Update checks target GitHub Releases latest tag and compare against local binary version.
-- On update availability, HOST downloads the release asset, preflights it (`--version` + dynamic-link sanity check), writes a backup of the current binary, atomically replaces the executable, and requests a service restart.
+- HOST self-update now sanitizes `/proc/self/exe` paths containing Linux `(deleted)` markers and falls back to canonical `/root/homelab/apps/HOST*` paths when choosing the backup/replace target, reducing update failures after in-place binary swaps.
 - If restart request fails, HOST immediately restores the previous binary and attempts restart with the rollback version.
 - HOST arms a post-restart watchdog (`HOST_UPDATE_VERIFY_DELAY_SECS`, default 35s) that auto-rolls back to backup when the service is not active or port 8080 does not come up.
 - HOST now emits websocket-visible lifecycle/update telemetry including startup `daemon_version=...`, update check status, and post-update reconnect expectations.

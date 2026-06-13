@@ -321,7 +321,19 @@ async fn async_main() -> Result<()> {
                         format!("Sync failed — {} : {}", stack, msg)
                     };
 
+                    if !ok && is_retryable_sync_dispatch_error(&msg) {
+                        app.sync_retry_on_connect.insert(stack.clone());
+                        app.push_client_logfmt(
+                            "WARN",
+                            Some(&stack),
+                            Some("sync_retry"),
+                            "sync dispatch failed before LXC daemon was ready; will retry on next websocket connect",
+                            Some(&msg),
+                        );
+                    }
+
                     if ok {
+                        app.sync_retry_on_connect.remove(&stack);
                         let summary = crate::stack_features::post_deploy_summary(&stack);
                         if summary.missing_compose.is_empty() {
                             app.push_client_logfmt(
@@ -469,6 +481,25 @@ async fn async_main() -> Result<()> {
                         app.push_log("HOST", if connected { "INFO" } else { "WARN" }, &msg);
                     } else {
                         app.set_lxc_source_connected(&source, connected);
+                        if connected {
+                            if let Some(stack) = source.strip_prefix("lxc-") {
+                                if app.sync_retry_on_connect.remove(stack) {
+                                    app.sync_stack = stack.to_string();
+                                    app.sync_pending = true;
+                                    app.sync_status = format!(
+                                        "LXC websocket connected — retrying sync for '{}'",
+                                        stack
+                                    );
+                                    app.push_client_logfmt(
+                                        "INFO",
+                                        Some(stack),
+                                        Some("sync_retry"),
+                                        "LXC websocket connected; retrying pending sync now",
+                                        None,
+                                    );
+                                }
+                            }
+                        }
                         let msg = if connected {
                             format!("{} WebSocket connected", source)
                         } else {
@@ -1180,6 +1211,15 @@ fn parse_live_log_line(line: &str) -> Option<(String, String)> {
 
     let message = extract_logfmt_field(line, "msg").unwrap_or_else(|| line.trim().to_string());
     Some((level, message))
+}
+
+fn is_retryable_sync_dispatch_error(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    m.contains("error sending request for url")
+        || m.contains("connection refused")
+        || m.contains("actively refused")
+        || m.contains("timed out")
+        || m.contains("failed to connect")
 }
 
 fn extract_logfmt_field(line: &str, field: &str) -> Option<String> {

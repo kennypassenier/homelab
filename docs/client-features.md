@@ -15,6 +15,7 @@ Last updated: 2026-06-12
 - Client-side provisioning dispatch debounce suppresses duplicate HOST provision requests during reconnect/key-repeat storms.
 - Logs tab ingestion suppresses identical consecutive LXC log lines within a short window to reduce repeated warning noise.
 - CLIENT control-plane actions now use websocket RPC on LXC `/api/logs/ws` for sync, restore, heartbeat, and remote command execution (with HTTP fallback kept for compatibility).
+- When initial sync dispatch fails because LXC is still bootstrapping (connection refused/transport errors), CLIENT now queues an automatic retry and re-dispatches sync immediately after that stack websocket connects.
 - CLIENT now attaches one-shot latch pull context (`PAT` / `KEY` / `REPO` / `project` / optional `env` / `sparse`) to HOST and LXC update requests and to LXC sync requests.
 - Session heartbeat pulses to LXC daemons while CLIENT is running, used to suppress unnecessary failsafe sync windows.
 - Session heartbeat pulses to HOST now use websocket RPC (`client_heartbeat`) with HTTP `POST /api/heartbeat` fallback.

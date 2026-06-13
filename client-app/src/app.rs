@@ -208,6 +208,8 @@ pub struct App {
     pub sync_pending: bool,
     /// The stack name to sync (set alongside `sync_pending = true`).
     pub sync_stack: String,
+    /// Stacks that should retry sync once their LXC websocket connects.
+    pub sync_retry_on_connect: std::collections::HashSet<String>,
     /// FIFO queue for batch stack sync actions (deploy/update all active stacks).
     pub sync_queue: VecDeque<String>,
     /// Human-readable status line shown at the bottom of the Scaffolding tab.
@@ -326,6 +328,7 @@ impl App {
             provision_pending: false,
             sync_pending: false,
             sync_stack: String::new(),
+            sync_retry_on_connect: std::collections::HashSet::new(),
             sync_queue: VecDeque::new(),
             sync_status: "Idle".to_string(),
             destroy_stack_pending: false,

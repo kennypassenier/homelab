@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use reqwest::blocking::Client;
@@ -50,14 +50,7 @@ pub fn check_and_apply_update(release_tag: Option<&str>) -> Result<String, Strin
     let (asset, fallback_used) = select_host_asset(&release, &expected_asset)?;
 
     let exe_raw = std::env::current_exe().map_err(|e| e.to_string())?;
-    // Linux appends " (deleted)" to /proc/self/exe when the file has been replaced
-    // while the process is running. Strip it so backup/tmp paths are valid.
-    let exe_str = exe_raw.to_string_lossy();
-    let exe_clean = exe_str
-        .strip_suffix(" (deleted)")
-        .unwrap_or(&exe_str)
-        .trim();
-    let exe = std::path::PathBuf::from(exe_clean);
+    let exe = resolve_update_executable_path(&exe_raw, &expected_asset);
     let tmp = tmp_path_for(&exe);
     let backup = backup_path_for(&exe);
 
@@ -128,6 +121,36 @@ pub fn check_and_apply_update(release_tag: Option<&str>) -> Result<String, Strin
         watchdog_note,
         backup.display()
     ))
+}
+
+fn resolve_update_executable_path(current_exe: &Path, expected_asset: &str) -> PathBuf {
+    let cleaned = sanitize_deleted_suffixes(current_exe);
+    if cleaned.exists() {
+        return cleaned;
+    }
+
+    // Fallback for processes started from paths that no longer exist (common after
+    // in-place binary replacement). Prefer the canonical apps/ paths.
+    let candidates = [
+        format!("/root/homelab/apps/{}", expected_asset),
+        "/root/homelab/apps/HOST-linux-x86_64-unknown-linux-gnu".to_string(),
+        "/root/homelab/apps/HOST".to_string(),
+    ];
+
+    for candidate in candidates {
+        let p = PathBuf::from(candidate);
+        if p.exists() {
+            return p;
+        }
+    }
+
+    cleaned
+}
+
+fn sanitize_deleted_suffixes(path: &Path) -> PathBuf {
+    let raw = path.to_string_lossy();
+    let sanitized = raw.replace(" (deleted)", "").trim().to_string();
+    PathBuf::from(sanitized)
 }
 
 pub fn check_and_apply_update_with_latch_pull(

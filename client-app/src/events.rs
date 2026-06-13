@@ -3,16 +3,15 @@
 //! `handle_key_event` is the single entry point called from the event loop.
 //! It returns an `EventOutcome` telling the caller what to do next.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use tui_input::Input;
-use tui_input::backend::crossterm::EventHandler;
 use crate::app::{App, Tab};
 use crate::blast_radius::{
     ActiveModal, AppConfigEditorState, AppConfigEditorStep, AppCreationStep,
-    AppCreationWizardState, OperationEntry, OperationProgressState,
-    SshAddStep, SshAddWizardState, StackConfigEditorState, StackConfigEditorStep,
-    StackCreationStep, StackCreationWizardState,
+    AppCreationWizardState, OperationEntry, OperationProgressState, SshAddStep, SshAddWizardState,
+    StackConfigEditorState, StackConfigEditorStep, StackCreationStep, StackCreationWizardState,
 };
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use tui_input::Input;
+use tui_input::backend::crossterm::EventHandler;
 
 /// What the event loop should do after processing a key.
 pub enum EventOutcome {
@@ -381,7 +380,6 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
             }
             _ => {}
         },
-
     }
 
     WizardOutcome::Continue

@@ -1523,16 +1523,16 @@ fn apply_glitch_effect(text: &str, phase: f32, glitch_rate: f32) -> String {
         .collect()
 }
 
-    fn stack_glitch_style(phase: f32) -> Style {
-        let jitter_a = ((phase * 7.0).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
-        let jitter_b = ((phase * 11.0 + 1.3).cos() * 0.5 + 0.5).clamp(0.0, 1.0);
+fn stack_glitch_style(phase: f32) -> Style {
+    let jitter_a = ((phase * 7.0).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+    let jitter_b = ((phase * 11.0 + 1.3).cos() * 0.5 + 0.5).clamp(0.0, 1.0);
 
-        let r = 18 + (jitter_b * 26.0) as u8;
-        let g = 78 + (jitter_a * 82.0) as u8;
-        let b = 96 + (jitter_b * 86.0) as u8;
+    let r = 18 + (jitter_b * 26.0) as u8;
+    let g = 78 + (jitter_a * 82.0) as u8;
+    let b = 96 + (jitter_b * 86.0) as u8;
 
-        Style::default()
+    Style::default()
         .fg(Color::White)
         .bg(Color::Rgb(r, g, b))
         .add_modifier(Modifier::BOLD)
-    }
+}

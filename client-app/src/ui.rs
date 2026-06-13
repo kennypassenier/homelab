@@ -184,9 +184,9 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
         .take(visible)
         .map(|(i, name)| {
             let is_active = stack_is_active(name);
-            let selected = i == app.selected_stack && app.column_focus == 0;
+            let selected = i == app.selected_stack;
             let style = if selected {
-                crate::theme::Theme::pulse_style(app.pulse_phase).add_modifier(Modifier::BOLD)
+                stack_glitch_style(app.pulse_phase * 4.0 + (i as f32 * 0.77))
             } else if is_active {
                 Style::default().fg(Color::Green)
             } else {
@@ -1522,3 +1522,17 @@ fn apply_glitch_effect(text: &str, phase: f32, glitch_rate: f32) -> String {
         })
         .collect()
 }
+
+    fn stack_glitch_style(phase: f32) -> Style {
+        let jitter_a = ((phase * 7.0).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+        let jitter_b = ((phase * 11.0 + 1.3).cos() * 0.5 + 0.5).clamp(0.0, 1.0);
+
+        let r = 18 + (jitter_b * 26.0) as u8;
+        let g = 78 + (jitter_a * 82.0) as u8;
+        let b = 96 + (jitter_b * 86.0) as u8;
+
+        Style::default()
+        .fg(Color::White)
+        .bg(Color::Rgb(r, g, b))
+        .add_modifier(Modifier::BOLD)
+    }

@@ -32,25 +32,16 @@ pub enum ActiveModal {
 pub struct AppCreationWizardState {
     pub stack_name: String,
     pub app_name: Option<String>,
-    pub docker_image: Option<String>,
-    pub selected_defaults: Vec<String>,
+    pub include_promtail: bool,
     pub subdomain: Option<String>,
+    pub last_created: Option<String>,
     pub step: AppCreationStep,
-    pub multiselect_cursor: usize, // for DefaultsMultiselect step
 }
 
 pub enum AppCreationStep {
     Name {
         input: Input,
         error: Option<String>,
-    },
-    DockerPrompt {
-        input: Input,
-        error: Option<String>,
-    },
-    DefaultsMultiselect {
-        options: Vec<DefaultServiceOption>,
-        selected: Vec<bool>,
     },
     SubdomainInput {
         input: Input,
@@ -60,12 +51,6 @@ pub enum AppCreationStep {
     Review {
         summary: String,
     },
-    Done,
-}
-
-pub struct DefaultServiceOption {
-    pub label: &'static str,
-    pub description: &'static str,
 }
 
 pub struct StackCreationWizardState {
@@ -76,6 +61,7 @@ pub struct StackCreationWizardState {
     pub autostart: bool,
     pub startup_order: u32,
     pub vmid: u32,
+    pub include_promtail: bool,
     pub step: StackCreationStep,
 }
 
@@ -87,6 +73,7 @@ pub enum StackCreationStep {
     AutoStartSelect,
     BootOrderSelect,
     VmidInput { input: Input, error: Option<String> },
+    PromtailSelect,
     Review { summary: String },
     Done,
 }
@@ -188,33 +175,13 @@ pub fn draw_app_creation_wizard(
                         .add_modifier(Modifier::BOLD),
                 );
             let mut text = format!(
-                "Enter new app name for stack '{}':\n> {}\n\n[Enter to continue, ESC to cancel]",
+                "Enter app name for stack '{}':\n> {}\n\nEmpty name exits wizard.\n[Enter to continue, ESC to cancel]",
                 state.stack_name,
                 input.value()
             );
-            if let Some(err) = error {
-                text.push_str(&format!("\n\n[Error: {}]", err));
+            if let Some(last) = &state.last_created {
+                text.push_str(&format!("\n\nCreated: {}", last));
             }
-            let para = Paragraph::new(text)
-                .block(block)
-                .alignment(Alignment::Left)
-                .style(Style::default().fg(Color::Cyan));
-            f.render_widget(para, popup_area);
-        }
-        AppCreationStep::DockerPrompt { input, error } => {
-            let block = Block::default()
-                .title("Docker Image")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                );
-            let mut text = format!(
-                "Enter Docker image for app:\n> {}\n\n[Enter to continue, ESC to cancel]",
-                input.value()
-            );
             if let Some(err) = error {
                 text.push_str(&format!("\n\n[Error: {}]", err));
             }
@@ -244,7 +211,7 @@ pub fn draw_app_creation_wizard(
                 format!("(will be: {}.{})", input.value(), domain)
             };
             let mut text = format!(
-                "Enter subdomain for Traefik routing:\n> {}\n{}\n\n[Enter to continue, ESC to cancel]",
+                "Optional Traefik subdomain for this app:\n> {}\n{}\n\nLeave empty to skip Traefik labels for this app.\n[Enter to continue, ESC to cancel]",
                 input.value(),
                 preview
             );
@@ -268,7 +235,7 @@ pub fn draw_app_creation_wizard(
                         .add_modifier(Modifier::BOLD),
                 );
             let text = format!(
-                "Review your new app:\n\n{}\n\n[Enter to create, ESC to cancel]",
+                "Review your new app:\n\n{}\n\nDocker image will default to nginx:latest (editable later in App Config).\n\n[Enter to create, ESC to cancel]",
                 summary
             );
             let para = Paragraph::new(text)
@@ -276,53 +243,6 @@ pub fn draw_app_creation_wizard(
                 .alignment(Alignment::Left)
                 .wrap(Wrap { trim: false })
                 .style(Style::default().fg(Color::Green));
-            f.render_widget(para, popup_area);
-        }
-        AppCreationStep::Done => {
-            let block = Block::default()
-                .title("App Created!")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                );
-            let text = "App created and docker-compose.yml written!\n\n[ESC to close]";
-            let para = Paragraph::new(text)
-                .block(block)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Green));
-            f.render_widget(para, popup_area);
-        }
-        AppCreationStep::DefaultsMultiselect { options, selected } => {
-            let block = Block::default()
-                .title("Default Services")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                );
-            let mut text = String::from("Select default containers to add:\n\n");
-            for (i, opt) in options.iter().enumerate() {
-                let mark = if selected[i] { "[x]" } else { "[ ]" };
-                let cursor = if i == state.multiselect_cursor {
-                    "⮞"
-                } else {
-                    "  "
-                };
-                text.push_str(&format!(
-                    "  {} {} {}  - {}\n",
-                    cursor, mark, opt.label, opt.description
-                ));
-            }
-            text.push_str("\n[↑/↓ to move, Space to toggle, Enter to confirm, ESC to cancel]");
-            let para = Paragraph::new(text)
-                .block(block)
-                .alignment(Alignment::Left)
-                .style(Style::default().fg(Color::Cyan));
             f.render_widget(para, popup_area);
         }
     }
@@ -497,6 +417,26 @@ pub fn draw_stack_creation_wizard(
                 .style(Style::default().fg(Color::Cyan));
             f.render_widget(para, popup_area);
         }
+        StackCreationStep::PromtailSelect => {
+            let block = Block::default()
+                .title("Stack Promtail")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+            let text = format!(
+                "Include Promtail as a stack core app:\n\n  promtail: {}\n\n[Left/Right or +/- toggle, Enter continue, ESC cancel]",
+                state.include_promtail
+            );
+            let para = Paragraph::new(text)
+                .block(block)
+                .alignment(Alignment::Left)
+                .style(Style::default().fg(Color::Cyan));
+            f.render_widget(para, popup_area);
+        }
         StackCreationStep::Review { summary } => {
             let block = Block::default()
                 .title("Review & Confirm")
@@ -527,7 +467,7 @@ pub fn draw_stack_creation_wizard(
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),
                 );
-            let text = "Stack scaffold created with core apps.\n\n[Enter or ESC to close]";
+            let text = "Stack scaffold created with selected core apps.\n\n[Enter or ESC to close]";
             let para = Paragraph::new(text)
                 .block(block)
                 .alignment(Alignment::Center)

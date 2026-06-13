@@ -44,6 +44,8 @@ Last updated: 2026-06-12
 - CLIENT now sends one-shot latch pull context (`PAT` / `KEY` / `REPO` / `project` / optional `env` / `sparse`) in update/sync requests so HOST/LXC can run `latch pull` without relying on persistent credential state inside daemons.
 - HOST and LXC both expose installed `latch` binary version and update status via API: `GET /api/version` (HOST) and `GET /api/secrets/keyring` (LXC) include `latch_version` and `latch_last_update_secs` fields for operational visibility.
 - CLIENT stack wizard sets CPU/RAM/Disk defaults in `lxc-compose.yml` and keeps deploy disabled until explicit activation.
+- CLIENT stack wizard now captures a per-stack Promtail include flag and auto-opens app creation when stack scaffold completes.
+- CLIENT app wizard now loops app creation (name + optional Traefik subdomain) until an empty app name is submitted.
 - CLIENT streams live deploy logs from the LXC daemon during sync actions.
 - CLIENT app rows include a Git-managed config editor for Docker image updates.
 - CLIENT can sync stack-owned DHCP reservations to OPNsense from `lxc-compose.yml` network intent.

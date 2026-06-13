@@ -40,6 +40,9 @@ Last updated: 2026-06-12
 - Stack creation wizard now captures provisioning defaults (CPU 1-8, memory in 512 MiB steps, root disk GiB) and writes them into stack `lxc-compose.yml`.
 - Stack creation wizard now captures boot policy defaults (autostart + boot order) and writes them into stack `lxc-compose.yml`.
 - Stack creation wizard now requires VMID `101..354` and deterministically derives reserved IPv4 as `STACK_IP_PREFIX + (vmid - 100)` (default prefix `10.10.10.`).
+- Stack creation wizard now includes a per-stack Promtail toggle before final review; stack scaffold creates watchtower + traefik always and only adds promtail when selected.
+- After stack creation, CLIENT now auto-opens the app creation wizard for that stack.
+- App creation wizard flow is now: app name -> optional Traefik subdomain (empty disables Traefik labels) -> review -> create, then loops back to app name so multiple apps can be added without leaving the modal.
 - Stack config editor allows stack-level editing of deploy state, resources, hostname, MAC address, IP mode, and reserved IPv4 from the Scaffolding tab.
 - Stack config editor allows stack-level editing of autostart and boot order policy.
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.

@@ -398,10 +398,32 @@ impl App {
 
     /// Rebuilds stacks and dropdown state from disk (called after create/delete).
     pub fn reload_stacks_and_dropdowns(&mut self) {
+        let previously_selected = self.stacks.get(self.selected_stack).cloned();
         self.stacks = App::load_stacks();
         self.stack_dropdowns = Self::build_dropdowns(&self.stacks);
-        if self.selected_stack >= self.stacks.len() && !self.stacks.is_empty() {
+
+        if self.stacks.is_empty() {
+            self.selected_stack = 0;
+            self.stack_scroll = 0;
+            self.column_focus = 0;
+            return;
+        }
+
+        if let Some(name) = previously_selected {
+            if let Some(idx) = self.stacks.iter().position(|stack| stack == &name) {
+                self.selected_stack = idx;
+            } else if self.selected_stack >= self.stacks.len() {
+                self.selected_stack = self.stacks.len() - 1;
+            }
+        } else if self.selected_stack >= self.stacks.len() {
             self.selected_stack = self.stacks.len() - 1;
+        }
+
+        let visible = self.stacks.len().min(20);
+        if self.selected_stack < self.stack_scroll {
+            self.stack_scroll = self.selected_stack;
+        } else if self.selected_stack >= self.stack_scroll + visible {
+            self.stack_scroll = self.selected_stack + 1 - visible;
         }
     }
 

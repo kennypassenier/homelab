@@ -9,7 +9,7 @@ use tui_input::backend::crossterm::EventHandler;
 use crate::app::{App, Tab};
 use crate::blast_radius::{
     ActiveModal, AppConfigEditorState, AppConfigEditorStep, AppCreationStep,
-    AppCreationWizardState, DefaultServiceOption, OperationEntry, OperationProgressState,
+    AppCreationWizardState, OperationEntry, OperationProgressState,
     SshAddStep, SshAddWizardState, StackConfigEditorState, StackConfigEditorStep,
     StackCreationStep, StackCreationWizardState,
 };
@@ -40,6 +40,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
     // returned WizardOutcome / needs_reload flag that the modal should close
     // after the borrow ends.
     let mut needs_reload = false;
+    let mut open_app_wizard_for: Option<(String, bool)> = None;
 
     match &mut app.modal {
         ActiveModal::DeleteConfirmation { app_name, input } => {
@@ -175,7 +176,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
                     app.modal = ActiveModal::None;
                 }
                 WizardOutcome::Reload => {
-                    // Modal stays open at the Done step; caller reloads stacks
+                    // Keep modal open so users can add another app immediately.
                     needs_reload = true;
                 }
             }
@@ -197,6 +198,9 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
                 app.modal = ActiveModal::None;
             }
             WizardOutcome::Reload => {
+                if let Some(stack_name) = &state.stack_name {
+                    open_app_wizard_for = Some((stack_name.clone(), state.include_promtail));
+                }
                 needs_reload = true;
             }
         },
@@ -230,6 +234,20 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> EventOutcome {
         }
     }
 
+    if let Some((stack_name, include_promtail)) = open_app_wizard_for {
+        app.modal = ActiveModal::AppCreationWizard(AppCreationWizardState {
+            stack_name,
+            app_name: None,
+            include_promtail,
+            subdomain: None,
+            last_created: None,
+            step: AppCreationStep::Name {
+                input: Input::default(),
+                error: None,
+            },
+        });
+    }
+
     if needs_reload {
         return EventOutcome::Reload;
     }
@@ -254,100 +272,24 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
             } else if key.code == KeyCode::Enter {
                 let name = input.value().trim().to_string();
                 if name.is_empty() {
-                    *error = Some("App name cannot be empty".to_string());
+                    return WizardOutcome::Close;
                 } else if std::path::Path::new(&format!("stacks/{}/{}", state.stack_name, name))
                     .exists()
                 {
                     *error = Some("App already exists in this stack".to_string());
                 } else {
                     state.app_name = Some(name);
-                    state.step = AppCreationStep::DockerPrompt {
+                    *error = None;
+                    let domain =
+                        std::env::var("DOMAIN").unwrap_or_else(|_| "example.com".to_string());
+                    state.step = AppCreationStep::SubdomainInput {
                         input: Input::default(),
                         error: None,
+                        domain,
                     };
                 }
             } else {
                 input.handle_event(&crossterm::event::Event::Key(key));
-            }
-        }
-
-        AppCreationStep::DockerPrompt { input, error } => {
-            if key.code == KeyCode::Esc {
-                return WizardOutcome::Close;
-            } else if key.code == KeyCode::Enter {
-                let image = input.value().trim().to_string();
-                if image.is_empty() {
-                    *error = Some("Docker image cannot be empty".to_string());
-                } else {
-                    state.docker_image = Some(image);
-                    let options = vec![
-                        DefaultServiceOption {
-                            label: "Promtail",
-                            description: "Log shipping",
-                        },
-                        DefaultServiceOption {
-                            label: "Traefik",
-                            description: "Reverse proxy (Docker stacks only)",
-                        },
-                    ];
-                    let selected = vec![true, true];
-                    state.step = AppCreationStep::DefaultsMultiselect { options, selected };
-                    state.multiselect_cursor = 0;
-                }
-            } else {
-                input.handle_event(&crossterm::event::Event::Key(key));
-            }
-        }
-
-        AppCreationStep::DefaultsMultiselect { options, selected } => {
-            let len = options.len();
-            let cursor = &mut state.multiselect_cursor;
-            match key.code {
-                KeyCode::Esc => return WizardOutcome::Close,
-                KeyCode::Up => {
-                    if *cursor > 0 {
-                        *cursor -= 1;
-                    }
-                }
-                KeyCode::Down => {
-                    if *cursor + 1 < len {
-                        *cursor += 1;
-                    }
-                }
-                KeyCode::Char(' ') => {
-                    selected[*cursor] = !selected[*cursor];
-                }
-                KeyCode::Enter => {
-                    state.selected_defaults.clear();
-                    for (i, opt) in options.iter().enumerate() {
-                        if selected[i] {
-                            state.selected_defaults.push(opt.label.to_string());
-                        }
-                    }
-
-                    // If Traefik is selected, ask for subdomain; otherwise, go to Review
-                    if state.selected_defaults.iter().any(|x| x == "Traefik") {
-                        let domain =
-                            std::env::var("DOMAIN").unwrap_or_else(|_| "example.com".to_string());
-                        state.step = AppCreationStep::SubdomainInput {
-                            input: Input::default(),
-                            error: None,
-                            domain,
-                        };
-                    } else {
-                        let app_name = state.app_name.as_deref().unwrap_or("");
-                        let docker_image = state.docker_image.as_deref().unwrap_or("");
-                        let mut summary = format!(
-                            "Stack: {}\nApp: {}\nDocker image: {}\n\nDefault services:\n",
-                            state.stack_name, app_name, docker_image
-                        );
-                        for default in &state.selected_defaults {
-                            summary.push_str(&format!("- {}\n", default));
-                        }
-                        state.step = AppCreationStep::Review { summary };
-                    }
-                }
-                _ => {}
             }
         }
 
@@ -359,21 +301,34 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
             if key.code == KeyCode::Esc {
                 return WizardOutcome::Close;
             } else if key.code == KeyCode::Enter {
-                let subdomain = input.value().trim();
-                if subdomain.is_empty() {
-                    *error = Some("Subdomain cannot be empty".to_string());
-                } else {
-                    state.subdomain = Some(subdomain.to_string());
-                    let app_name = state.app_name.as_deref().unwrap_or("");
-                    let docker_image = state.docker_image.as_deref().unwrap_or("");
-                    let fqdn = format!("{}.{}", subdomain, domain);
-                    let mut summary = format!(
-                        "Stack: {}\nApp: {}\nDocker image: {}\nSubdomain: {}\n\nDefault services:\n",
-                        state.stack_name, app_name, docker_image, fqdn
+                let subdomain = input.value().trim().to_string();
+                if !subdomain.is_empty()
+                    && !subdomain
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                {
+                    *error = Some(
+                        "Subdomain can only include lowercase letters, numbers, and '-'"
+                            .to_string(),
                     );
-                    for default in &state.selected_defaults {
-                        summary.push_str(&format!("- {}\n", default));
-                    }
+                } else {
+                    state.subdomain = if subdomain.is_empty() {
+                        None
+                    } else {
+                        Some(subdomain)
+                    };
+                    *error = None;
+
+                    let app_name = state.app_name.as_deref().unwrap_or("");
+                    let traefik = state
+                        .subdomain
+                        .as_ref()
+                        .map(|sub| format!("{}.{}", sub, domain))
+                        .unwrap_or_else(|| "disabled".to_string());
+                    let summary = format!(
+                        "Stack: {}\nApp: {}\nPromtail sidecar: {}\nTraefik route: {}",
+                        state.stack_name, app_name, state.include_promtail, traefik
+                    );
                     state.step = AppCreationStep::Review { summary };
                 }
             } else {
@@ -386,24 +341,27 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
             KeyCode::Enter => {
                 let stack_name = state.stack_name.clone();
                 let app_name = state.app_name.as_deref().unwrap_or("newapp").to_string();
-                let docker_image = state
-                    .docker_image
-                    .as_deref()
-                    .unwrap_or("nginx:latest")
-                    .to_string();
+                let docker_image = "nginx:latest".to_string();
 
                 let options = crate::stack_features::AddAppOptions {
-                    include_promtail: state.selected_defaults.iter().any(|x| x == "Promtail"),
-                    include_traefik: state.selected_defaults.iter().any(|x| x == "Traefik"),
+                    include_promtail: state.include_promtail,
+                    include_traefik: state.subdomain.is_some(),
                     subdomain: state.subdomain.clone(),
                 };
 
-                let _ = crate::stack_features::add_app_to_stack(
+                if let Err(e) = crate::stack_features::add_app_to_stack(
                     &stack_name,
                     &app_name,
                     &docker_image,
                     &options,
-                );
+                ) {
+                    state.step = AppCreationStep::Name {
+                        input: Input::default(),
+                        error: Some(format!("app create failed: {}", e)),
+                    };
+                    return WizardOutcome::Continue;
+                }
+
                 let _ = crate::gitops::commit_and_push(
                     ".",
                     &format!(
@@ -412,17 +370,18 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                     ),
                 );
 
-                state.step = AppCreationStep::Done;
+                state.last_created = Some(app_name);
+                state.app_name = None;
+                state.subdomain = None;
+                state.step = AppCreationStep::Name {
+                    input: Input::default(),
+                    error: None,
+                };
                 return WizardOutcome::Reload;
             }
             _ => {}
         },
 
-        AppCreationStep::Done => {
-            if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
-                return WizardOutcome::Close;
-            }
-        }
     }
 
     WizardOutcome::Continue
@@ -533,25 +492,7 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
                 match raw.parse::<u32>() {
                     Ok(v) if (101..=354).contains(&v) => {
                         state.vmid = v;
-                        let stack_name = state.stack_name.as_deref().unwrap_or("new-stack");
-                        let reserved_ip = crate::scaffold::derive_reserved_ipv4_from_vmid(v)
-                            .unwrap_or_else(|| "n/a".to_string());
-                        state.step = StackCreationStep::Review {
-                            summary: format!(
-                                "Stack: {}\nVMID: {}\nReserved IPv4: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nSwap: {} MiB (auto)\nDisk: {} GiB\nAutostart: {}\nBoot order: {}\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create setup.sh\n- create lxc-compose.yml\n- scaffold missing core apps",
-                                stack_name,
-                                v,
-                                reserved_ip,
-                                state.cpu_cores,
-                                state.memory_mb as f32 / 1024.0,
-                                state.memory_mb,
-                                crate::scaffold::calculate_swap_mb(state.memory_mb),
-                                state.disk_gb,
-                                state.autostart,
-                                state.startup_order,
-                                stack_name
-                            ),
-                        };
+                        state.step = StackCreationStep::PromtailSelect;
                     }
                     _ => {
                         *error = Some(
@@ -564,6 +505,41 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
             _ => {
                 input.handle_event(&crossterm::event::Event::Key(key));
             }
+        },
+
+        StackCreationStep::PromtailSelect => match key.code {
+            KeyCode::Esc => return WizardOutcome::Close,
+            KeyCode::Left | KeyCode::Right | KeyCode::Char('-') | KeyCode::Char('+') => {
+                state.include_promtail = !state.include_promtail;
+            }
+            KeyCode::Enter => {
+                let stack_name = state.stack_name.as_deref().unwrap_or("new-stack");
+                let reserved_ip = crate::scaffold::derive_reserved_ipv4_from_vmid(state.vmid)
+                    .unwrap_or_else(|| "n/a".to_string());
+                state.step = StackCreationStep::Review {
+                    summary: format!(
+                        "Stack: {}\nVMID: {}\nReserved IPv4: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nSwap: {} MiB (auto)\nDisk: {} GiB\nAutostart: {}\nBoot order: {}\nPromtail core app: {}\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create setup.sh\n- create lxc-compose.yml\n- scaffold core apps (watchtower + traefik{})",
+                        stack_name,
+                        state.vmid,
+                        reserved_ip,
+                        state.cpu_cores,
+                        state.memory_mb as f32 / 1024.0,
+                        state.memory_mb,
+                        crate::scaffold::calculate_swap_mb(state.memory_mb),
+                        state.disk_gb,
+                        state.autostart,
+                        state.startup_order,
+                        state.include_promtail,
+                        stack_name,
+                        if state.include_promtail {
+                            " + promtail"
+                        } else {
+                            ""
+                        }
+                    ),
+                };
+            }
+            _ => {}
         },
 
         StackCreationStep::Review { summary: _ } => match key.code {
@@ -580,7 +556,7 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
                     );
                 }
 
-                match crate::stack_features::create_stack(stack_name) {
+                match crate::stack_features::create_stack(stack_name, state.include_promtail) {
                     Ok(_) => {
                         if let Err(e) = crate::scaffold::set_stack_provisioning_defaults(
                             stack_name,
@@ -1456,6 +1432,7 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
             autostart: true,
             startup_order: 90,
             vmid: 0,
+            include_promtail: true,
             step: StackCreationStep::Name {
                 input: Input::default(),
                 error: None,
@@ -1633,7 +1610,7 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
         // Add missing core apps to selected stack.
         KeyCode::Char('c') => {
             if let Some(stack_name) = app.stacks.get(app.selected_stack) {
-                match crate::stack_features::add_missing_core_apps(stack_name) {
+                match crate::stack_features::add_missing_core_apps(stack_name, true) {
                     Ok(result) if result.added.is_empty() => {
                         app.sync_status = format!("No missing core apps in '{}'.", stack_name);
                     }
@@ -1920,14 +1897,13 @@ fn handle_scaffolding_enter(app: &mut App) -> EventOutcome {
                     app.modal = ActiveModal::AppCreationWizard(AppCreationWizardState {
                         stack_name,
                         app_name: None,
-                        docker_image: None,
-                        selected_defaults: Vec::new(),
+                        include_promtail: false,
                         subdomain: None,
+                        last_created: None,
                         step: AppCreationStep::Name {
                             input: Input::default(),
                             error: None,
                         },
-                        multiselect_cursor: 0,
                     });
                 }
                 1 => {

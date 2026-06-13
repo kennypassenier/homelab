@@ -32,7 +32,7 @@ pub fn is_core_app(app_name: &str) -> bool {
     CORE_APPS.contains(&app_name)
 }
 
-pub fn create_stack(stack_name: &str) -> io::Result<CreateStackResult> {
+pub fn create_stack(stack_name: &str, include_promtail: bool) -> io::Result<CreateStackResult> {
     if !is_valid_stack_name(stack_name) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -52,7 +52,7 @@ pub fn create_stack(stack_name: &str) -> io::Result<CreateStackResult> {
     write_stack_setup_script(stack_name)?;
 
     crate::scaffold::ensure_lxc_compose(stack_name)?;
-    let added = add_missing_core_apps(stack_name)?.added;
+    let added = add_missing_core_apps(stack_name, include_promtail)?.added;
 
     Ok(CreateStackResult {
         core_apps_added: added,
@@ -407,11 +407,11 @@ pub fn delete_core_app_from_stack(stack_name: &str, app_name: &str) -> io::Resul
     Ok(())
 }
 
-pub fn add_missing_core_apps(stack_name: &str) -> io::Result<AddCoreAppsResult> {
+pub fn add_missing_core_apps(stack_name: &str, include_promtail: bool) -> io::Result<AddCoreAppsResult> {
     let mut added = Vec::new();
     crate::scaffold::ensure_lxc_compose(stack_name)?;
 
-    if !core_app_exists(stack_name, "promtail") {
+    if include_promtail && !core_app_exists(stack_name, "promtail") {
         scaffold_promtail(stack_name)?;
         crate::scaffold::ensure_app_config_mount(stack_name, "promtail")?;
         added.push("promtail".to_string());

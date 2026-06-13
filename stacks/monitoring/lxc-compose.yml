@@ -13,8 +13,8 @@ network:
   bridge: "vmbr0"
   ip_mode: "static"
   reserved_ipv4: null
-    cidr: 24
-    gateway: "10.10.10.1"
+  cidr: 24
+  gateway: "10.10.10.1"
   vlan_tag: 10
   firewall: false
   ip_mode_v6: null

@@ -47,6 +47,7 @@ Last updated: 2026-06-12
 - Stack config editor allows stack-level editing of autostart and boot order policy.
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.
 - App rows now expose a real config editor for Git-managed app metadata, starting with Docker image updates.
+- CLIENT now auto-repairs a known legacy `lxc-compose.yml` indentation bug in `network.cidr/gateway` while loading stack config, so activation/deactivation actions (`a` / `x`) continue to work on older scaffolded stacks.
 - New stack defaults explicitly set `deploy.enabled=false` to keep manual activation as the safe default.
 - Latch clone orchestration module can perform offer/create/apply credential sync through local + LXC command execution.
 - Remote command execution now prefers websocket RPC over LXC `/api/logs/ws`, with HTTP `/api/exec` fallback for compatibility.

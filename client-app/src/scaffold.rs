@@ -120,8 +120,32 @@ fn lxc_compose_path(stack_name: &str) -> String {
 fn load_lxc_compose(stack_name: &str) -> io::Result<Value> {
     let path = lxc_compose_path(stack_name);
     let raw = fs::read_to_string(path)?;
-    serde_yaml::from_str(&raw)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+    match serde_yaml::from_str(&raw) {
+        Ok(doc) => Ok(doc),
+        Err(parse_err) => {
+            // Recover common legacy scaffold indentation bug and persist the fixed YAML.
+            let repaired = repair_legacy_lxc_compose_yaml(&raw);
+            if repaired == raw {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    parse_err.to_string(),
+                ));
+            }
+
+            let doc: Value = serde_yaml::from_str(&repaired)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+            fs::write(lxc_compose_path(stack_name), &repaired)?;
+            Ok(doc)
+        }
+    }
+}
+
+fn repair_legacy_lxc_compose_yaml(raw: &str) -> String {
+    raw.replace(
+        "\n  reserved_ipv4: null\n    cidr: 24\n    gateway: \"10.10.10.1\"\n",
+        "\n  reserved_ipv4: null\n  cidr: 24\n  gateway: \"10.10.10.1\"\n",
+    )
 }
 
 fn save_lxc_compose(stack_name: &str, doc: &Value) -> io::Result<()> {

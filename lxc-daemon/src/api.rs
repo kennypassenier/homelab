@@ -347,11 +347,26 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
                                 {
                                     let mut s = state.lock().unwrap();
                                     s.sync_requested = true;
+                                    if let Some(ref latch) = req.latch {
+                                        let pat_status = if latch.pat.as_deref().map(|v| !v.trim().is_empty()).unwrap_or(false) { "[present]" } else { "[empty]" };
+                                        let key_status = if latch.key.as_deref().map(|v| !v.trim().is_empty()).unwrap_or(false) { "[present]" } else { "[empty]" };
+                                        let repo = latch.secrets_repo.as_deref().unwrap_or("[none]");
+                                        let proj = latch.project.as_deref().unwrap_or("[none]");
+                                        let env_val = latch.env.as_deref().unwrap_or("[none]");
+                                        s.add_log(
+                                            LogLevel::Info,
+                                            format!(
+                                                "[ws-sync] Sync triggered — latch: pat={} key={} repo={} project={} env={} sparse={}",
+                                                pat_status, key_status, repo, proj, env_val, latch.sparse.map(|v| v.to_string()).unwrap_or_else(|| "false".to_string())
+                                            ),
+                                        );
+                                    } else {
+                                        s.add_log(
+                                            LogLevel::Warn,
+                                            "[ws-sync] Sync triggered via WebSocket RPC — NO latch credentials in request!".to_string(),
+                                        );
+                                    }
                                     s.pending_latch_pull = req.latch;
-                                    s.add_log(
-                                        LogLevel::Info,
-                                        "Sync triggered via WebSocket RPC".to_string(),
-                                    );
                                 }
 
                                 let _ = socket

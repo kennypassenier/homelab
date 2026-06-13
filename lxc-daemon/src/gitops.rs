@@ -403,6 +403,7 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         let mut s = state.lock().unwrap();
         s.is_syncing = true;
         s.sync_requested = false;
+        s.add_log(LogLevel::Info, "[sync] ============ Sync cycle started ============".to_string());
         s.add_log(LogLevel::Info, "Sync started".to_string());
     }
 
@@ -462,6 +463,10 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
     {
         let mut s = state.lock().unwrap();
         s.add_log(LogLevel::Ok, "git reset complete".to_string());
+        s.add_log(
+            LogLevel::Info,
+            "[sync] Step 3: about to process latch pull...".to_string(),
+        );
     }
 
     // ── Step 3: latch pull (unconditional — creates .env files from secrets) ─
@@ -476,20 +481,36 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
 
     if let Some(ref latch) = latch_creds {
         let sn = stack_name.clone();
+        {
+            let mut s = state.lock().unwrap();
+            s.add_log(
+                LogLevel::Info,
+                format!("[sync] [latch] stack={} credentials present, invoking run_latch_pull...", sn),
+            );
+        }
         match run_latch_pull(&state, GITOPS_REPO, latch) {
             Ok(msg) => {
                 let mut s = state.lock().unwrap();
+                s.add_log(LogLevel::Info, format!("[latch] stack={} command completed with exit=0", sn));
                 s.add_log(LogLevel::Ok, format!("[latch] stack={} {}", sn, msg));
             }
             Err(e) => {
                 // Log full multi-line error so every line is visible in CLIENT.
                 let mut s = state.lock().unwrap();
+                s.add_log(LogLevel::Error, format!("[latch] stack={} command FAILED", sn));
                 for line in e.lines() {
                     s.add_log(LogLevel::Error, format!("[latch] stack={} {}", sn, line));
                 }
             }
         }
     } else {
+        {
+            let mut s = state.lock().unwrap();
+            s.add_log(
+                LogLevel::Error,
+                "[sync] Step 3: no latch credentials provided — .env files will NOT be created".to_string(),
+            );
+        }
         // Tell operator exactly what is missing so they can fix the credential flow.
         let s_ref = state.lock().unwrap();
         let missing: Vec<&str> = [

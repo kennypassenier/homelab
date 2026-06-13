@@ -75,13 +75,14 @@ pub fn load_latch_pull_context() -> Option<LatchPullContext> {
     let project_root = find_project_root();
     let latch_config = read_latch_project_config(&project_root);
 
-    let pat = env_or_file("LATCH_PAT");
-    let key = env_or_file("LATCH_KEY");
-    let secrets_repo = env_or_file("LATCH_SECRETS_REPO").or_else(|| latch_config.secrets_repo);
-    let project = env_or_file("LATCH_PROJECT")
+    // Load from: config/.env (primary) → .latch/config.toml (fallback) → env vars (override)
+    let pat = load_config_value("LATCH_PAT");
+    let key = load_config_value("LATCH_KEY");
+    let secrets_repo = load_config_value("LATCH_SECRETS_REPO").or_else(|| latch_config.secrets_repo);
+    let project = load_config_value("LATCH_PROJECT")
         .or_else(|| latch_config.project)
         .or_else(|| Some(project_root.file_name()?.to_string_lossy().to_string()));
-    let env = env_or_file("LATCH_ENV").or_else(|| latch_config.default_env);
+    let env = load_config_value("LATCH_ENV").or_else(|| latch_config.default_env);
 
     if pat.as_deref().unwrap_or_default().is_empty()
         && key.as_deref().unwrap_or_default().is_empty()
@@ -100,11 +101,35 @@ pub fn load_latch_pull_context() -> Option<LatchPullContext> {
     })
 }
 
-fn env_or_file(key: &str) -> Option<String> {
-    std::env::var(key).ok().and_then(|v| {
-        let trimmed = v.trim().to_string();
-        if trimmed.is_empty() { None } else { Some(trimmed) }
-    })
+/// Load a key from: env vars (highest priority) → config/.env → return None
+fn load_config_value(key: &str) -> Option<String> {
+    // 1. Check environment variable (allows override)
+    if let Ok(val) = std::env::var(key) {
+        let trimmed = val.trim().to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+
+    // 2. Check config/.env
+    if let Ok(config_content) = std::fs::read_to_string("config/.env") {
+        for line in config_content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if let Some((line_key, line_value)) = trimmed.split_once('=') {
+                if line_key.trim() == key {
+                    let value = line_value.trim().to_string();
+                    if !value.is_empty() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 #[derive(Debug, Clone, Default)]

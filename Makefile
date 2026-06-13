@@ -20,6 +20,7 @@ GHCR_OWNER ?= kennypassenier
 GHCR_LXC_IMAGE := ghcr.io/$(GHCR_OWNER)/homelab-lxc-daemon
 LXC_BASE_IMAGE_BUILDER := rust:1.88-bookworm
 LXC_BASE_IMAGE_RUNTIME := debian:bookworm-slim
+GIT_SHA := $(shell git rev-parse --short HEAD)
 LATCH_AUTO_SYNC ?= 1
 LATCH_SYNC_REQUIRED ?= 0
 
@@ -224,7 +225,7 @@ docker-build-only: docker-warm-cache
 		-f $(LXC_SRC)/Dockerfile \
 		-t $(GHCR_LXC_IMAGE):latest \
 		-t $(GHCR_LXC_IMAGE):v$(LXC_VERSION) \
-		-t $(GHCR_LXC_IMAGE):sha-$$(git rev-parse --short HEAD) \
+		-t $(GHCR_LXC_IMAGE):sha-$(GIT_SHA) \
 		.
 	@echo "Docker image built successfully"
 
@@ -237,7 +238,7 @@ docker-push:
 	fi
 	docker push $(GHCR_LXC_IMAGE):latest
 	docker push $(GHCR_LXC_IMAGE):v$(LXC_VERSION)
-	docker push $(GHCR_LXC_IMAGE):sha-$$(git rev-parse --short HEAD)
+	docker push $(GHCR_LXC_IMAGE):sha-$(GIT_SHA)
 	@echo "Docker image pushed successfully"
 
 # HOST and CLIENT always release on push.

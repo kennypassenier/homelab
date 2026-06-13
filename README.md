@@ -10,6 +10,7 @@ Welcome to the Homelab GitOps repository. This project contains the infrastructu
 - HOST self-update now preflights downloaded binaries (`--version` + dynamic-link check), keeps a local backup, and arms a rollback watchdog after restart.
 - Local `make build-lxc` now builds the daemon inside a Debian 12 Rust container so the resulting binary stays compatible with older glibc versions inside deployed LXCs.
 - Makefile build/release targets now auto-run `latch commit` + `latch push` on desktop before Rust builds (best-effort by default; configurable via env).
+- Makefile Docker build/push now pins a single `GIT_SHA` per invocation so `sha-<commit>` image tags cannot drift between `docker build` and `docker push`.
 - HOST auto-provisioning is now opt-in via `HOST_AUTO_PROVISION_ENABLED=1`; default behavior is provision only on explicit CLIENT/API trigger.
 - Deployment order, required tokens, and env templates are documented in `docs/deployment.md`.
 - Copy/paste diagnostics and manual recovery commands are documented in `docs/debug.md`.

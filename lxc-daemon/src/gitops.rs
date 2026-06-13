@@ -9,6 +9,106 @@ const GITOPS_REPO: &str = "/opt/gitops";
 /// Lock file — prevents race conditions between cron fallback and API-triggered syncs.
 const LOCK_FILE: &str = "/tmp/gitops.lock";
 
+pub fn repo_path() -> &'static str {
+    GITOPS_REPO
+}
+
+struct CommandCapture {
+    exit_code: i32,
+    stdout: String,
+    stderr: String,
+}
+
+fn capture_command_output(command: &mut Command) -> Result<CommandCapture, String> {
+    let output = command.output().map_err(|e| e.to_string())?;
+    Ok(CommandCapture {
+        exit_code: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+fn log_sync_command_start(state: &Arc<Mutex<AppState>>, preview: impl Into<String>) {
+    let mut s = state.lock().unwrap();
+    s.add_log(LogLevel::Info, format!("[sync][run] {}", preview.into()));
+}
+
+fn log_sync_command_capture(
+    state: &Arc<Mutex<AppState>>,
+    scope: &str,
+    capture: &CommandCapture,
+    success_level: LogLevel,
+) {
+    let mut s = state.lock().unwrap();
+    s.add_log(
+        success_level,
+        format!("[sync][exit] {} exit={}", scope, capture.exit_code),
+    );
+
+    let mut emitted = false;
+    for line in capture
+        .stdout
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+    {
+        emitted = true;
+        s.add_log(LogLevel::Info, format!("[sync][stdout] {} {}", scope, line));
+    }
+
+    let stderr_level = if capture.exit_code == 0 {
+        LogLevel::Warn
+    } else {
+        LogLevel::Error
+    };
+    for line in capture
+        .stderr
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+    {
+        emitted = true;
+        s.add_log(
+            stderr_level.clone(),
+            format!("[sync][stderr] {} {}", scope, line),
+        );
+    }
+
+    if !emitted {
+        s.add_log(
+            LogLevel::Info,
+            format!("[sync][output] {} (no output)", scope),
+        );
+    }
+}
+
+fn log_sync_spawn_error(state: &Arc<Mutex<AppState>>, scope: &str, err: &str) {
+    let mut s = state.lock().unwrap();
+    for line in err.lines() {
+        s.add_log(LogLevel::Error, format!("[sync][spawn] {} {}", scope, line));
+    }
+}
+
+fn run_git_capture(repo_path: &str, args: &[&str]) -> Result<CommandCapture, String> {
+    let mut command = Command::new("git");
+    command.args(args).current_dir(repo_path);
+    capture_command_output(&mut command)
+}
+
+fn redact_latch_output(text: &str, latch: &LatchPullRequest) -> String {
+    let mut redacted = text.to_string();
+    for secret in [latch.pat.as_deref(), latch.key.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        let trimmed = secret.trim();
+        if !trimmed.is_empty() {
+            redacted = redacted.replace(trimmed, "[redacted]");
+        }
+    }
+    redacted
+}
+
 pub async fn run_checker(state: Arc<Mutex<AppState>>) {
     let mut last_failsafe_window = std::time::Instant::now();
 
@@ -276,16 +376,7 @@ fn run_latch_pull(
     }
     let command_preview = preview_parts.join(" ");
 
-    {
-        let mut s = state.lock().unwrap();
-        s.add_log(
-            LogLevel::Info,
-            format!(
-                "[sync] running command: cd {} && {}",
-                repo_path, command_preview
-            ),
-        );
-    }
+    log_sync_command_start(state, format!("cd {} && {}", repo_path, command_preview));
 
     let latch_bin = resolve_latch_binary().ok_or_else(|| "latch unavailable".to_string())?;
     let mut command = Command::new(latch_bin);
@@ -313,27 +404,28 @@ fn run_latch_pull(
         command.args(["--project", v]);
     }
 
-    let output = command
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = capture_command_output(command.current_dir(repo_path))?;
+    let sanitized = CommandCapture {
+        exit_code: output.exit_code,
+        stdout: redact_latch_output(&output.stdout, latch),
+        stderr: redact_latch_output(&output.stderr, latch),
+    };
 
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let out = stdout.trim();
+    if sanitized.exit_code == 0 {
+        log_sync_command_capture(state, "latch pull", &sanitized, LogLevel::Ok);
+        let out = sanitized.stdout.trim();
         if out.is_empty() {
             Ok("latch pull ok".to_string())
         } else {
             Ok(format!("latch pull ok: {}", out))
         }
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        log_sync_command_capture(state, "latch pull", &sanitized, LogLevel::Error);
         Err(format!(
             "latch pull failed (exit {:?}):\nstderr: {}\nstdout: {}",
-            output.status.code(),
-            stderr.trim(),
-            stdout.trim()
+            sanitized.exit_code,
+            sanitized.stderr.trim(),
+            sanitized.stdout.trim()
         ))
     }
 }
@@ -403,7 +495,10 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
         let mut s = state.lock().unwrap();
         s.is_syncing = true;
         s.sync_requested = false;
-        s.add_log(LogLevel::Info, "[sync] ============ Sync cycle started ============".to_string());
+        s.add_log(
+            LogLevel::Info,
+            "[sync] ============ Sync cycle started ============".to_string(),
+        );
         s.add_log(LogLevel::Info, "Sync started".to_string());
     }
 
@@ -414,55 +509,121 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
 
     // Enforce strict stack-scoped sparse checkout on every run to avoid drift.
     let sparse_scope = format!("stacks/{}", stack_name);
+    log_sync_command_start(
+        &state,
+        format!(
+            "cd {} && git sparse-checkout set {}",
+            GITOPS_REPO, sparse_scope
+        ),
+    );
     let sparse_result = tokio::task::spawn_blocking(move || {
-        run_git(GITOPS_REPO, &["sparse-checkout", "set", &sparse_scope])
+        run_git_capture(GITOPS_REPO, &["sparse-checkout", "set", &sparse_scope])
     })
     .await
     .unwrap_or_else(|_| Err("spawn failed".to_string()));
 
-    if let Err(e) = sparse_result {
-        finish_sync(
-            state,
-            false,
-            format!("sparse scope update failed: {}", e.replace('\n', " ")),
-        )
-        .await;
-        return;
+    match sparse_result {
+        Ok(capture) => {
+            log_sync_command_capture(&state, "git sparse-checkout set", &capture, LogLevel::Ok);
+            if capture.exit_code != 0 {
+                finish_sync(
+                    state,
+                    false,
+                    format!(
+                        "sparse scope update failed: {}",
+                        capture.stderr.replace('\n', " ")
+                    ),
+                )
+                .await;
+                return;
+            }
+        }
+        Err(e) => {
+            log_sync_spawn_error(&state, "git sparse-checkout set", &e);
+            finish_sync(
+                state,
+                false,
+                format!("sparse scope update failed: {}", e.replace('\n', " ")),
+            )
+            .await;
+            return;
+        }
     }
 
     // ── Step 1: git fetch ──────────────────────────────────────────────────
-    let fetch_result = tokio::task::spawn_blocking(|| run_git(GITOPS_REPO, &["fetch", "origin"]))
-        .await
-        .unwrap_or_else(|_| Err("spawn failed".to_string()));
-
-    if let Err(e) = fetch_result {
-        finish_sync(
-            state,
-            false,
-            format!("git fetch failed: {}", e.replace('\n', " ")),
-        )
-        .await;
-        return;
-    }
-
-    // ── Step 2: git reset --hard origin/main ─────────────────────────────
-    let reset_result =
-        tokio::task::spawn_blocking(|| run_git(GITOPS_REPO, &["reset", "--hard", "origin/main"]))
+    log_sync_command_start(&state, format!("cd {} && git fetch origin", GITOPS_REPO));
+    let fetch_result =
+        tokio::task::spawn_blocking(|| run_git_capture(GITOPS_REPO, &["fetch", "origin"]))
             .await
             .unwrap_or_else(|_| Err("spawn failed".to_string()));
 
-    if let Err(e) = reset_result {
-        finish_sync(
-            state,
-            false,
-            format!("git reset failed: {}", e.replace('\n', " ")),
-        )
-        .await;
-        return;
+    match fetch_result {
+        Ok(capture) => {
+            log_sync_command_capture(&state, "git fetch origin", &capture, LogLevel::Ok);
+            if capture.exit_code != 0 {
+                finish_sync(
+                    state,
+                    false,
+                    format!("git fetch failed: {}", capture.stderr.replace('\n', " ")),
+                )
+                .await;
+                return;
+            }
+        }
+        Err(e) => {
+            log_sync_spawn_error(&state, "git fetch origin", &e);
+            finish_sync(
+                state,
+                false,
+                format!("git fetch failed: {}", e.replace('\n', " ")),
+            )
+            .await;
+            return;
+        }
+    }
+
+    // ── Step 2: git reset --hard origin/main ─────────────────────────────
+    log_sync_command_start(
+        &state,
+        format!("cd {} && git reset --hard origin/main", GITOPS_REPO),
+    );
+    let reset_result = tokio::task::spawn_blocking(|| {
+        run_git_capture(GITOPS_REPO, &["reset", "--hard", "origin/main"])
+    })
+    .await
+    .unwrap_or_else(|_| Err("spawn failed".to_string()));
+
+    match reset_result {
+        Ok(capture) => {
+            log_sync_command_capture(
+                &state,
+                "git reset --hard origin/main",
+                &capture,
+                LogLevel::Ok,
+            );
+            if capture.exit_code != 0 {
+                finish_sync(
+                    state,
+                    false,
+                    format!("git reset failed: {}", capture.stderr.replace('\n', " ")),
+                )
+                .await;
+                return;
+            }
+        }
+        Err(e) => {
+            log_sync_spawn_error(&state, "git reset --hard origin/main", &e);
+            finish_sync(
+                state,
+                false,
+                format!("git reset failed: {}", e.replace('\n', " ")),
+            )
+            .await;
+            return;
+        }
     }
     {
         let mut s = state.lock().unwrap();
-        s.add_log(LogLevel::Ok, "git reset complete".to_string());
         s.add_log(
             LogLevel::Info,
             "[sync] Step 3: about to process latch pull...".to_string(),
@@ -485,19 +646,28 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
             let mut s = state.lock().unwrap();
             s.add_log(
                 LogLevel::Info,
-                format!("[sync] [latch] stack={} credentials present, invoking run_latch_pull...", sn),
+                format!(
+                    "[sync] [latch] stack={} credentials present, invoking run_latch_pull...",
+                    sn
+                ),
             );
         }
         match run_latch_pull(&state, GITOPS_REPO, latch) {
             Ok(msg) => {
                 let mut s = state.lock().unwrap();
-                s.add_log(LogLevel::Info, format!("[latch] stack={} command completed with exit=0", sn));
+                s.add_log(
+                    LogLevel::Info,
+                    format!("[latch] stack={} command completed with exit=0", sn),
+                );
                 s.add_log(LogLevel::Ok, format!("[latch] stack={} {}", sn, msg));
             }
             Err(e) => {
                 // Log full multi-line error so every line is visible in CLIENT.
                 let mut s = state.lock().unwrap();
-                s.add_log(LogLevel::Error, format!("[latch] stack={} command FAILED", sn));
+                s.add_log(
+                    LogLevel::Error,
+                    format!("[latch] stack={} command FAILED", sn),
+                );
                 for line in e.lines() {
                     s.add_log(LogLevel::Error, format!("[latch] stack={} {}", sn, line));
                 }
@@ -508,7 +678,8 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
             let mut s = state.lock().unwrap();
             s.add_log(
                 LogLevel::Error,
-                "[sync] Step 3: no latch credentials provided — .env files will NOT be created".to_string(),
+                "[sync] Step 3: no latch credentials provided — .env files will NOT be created"
+                    .to_string(),
             );
         }
         // Tell operator exactly what is missing so they can fix the credential flow.
@@ -572,45 +743,47 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
     if Path::new(&pre_sync_path).exists() {
         let stack_dir = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
         let sn = stack_name.clone();
+        log_sync_command_start(
+            &state,
+            format!("cd {} && bash {}", stack_dir, pre_sync_path),
+        );
         let hook_result = tokio::task::spawn_blocking(move || {
-            Command::new("bash")
-                .arg(&pre_sync_path)
-                .current_dir(&stack_dir)
-                .output()
-                .map_err(|e| e.to_string())
-                .and_then(|o| {
-                    if o.status.success() {
-                        Ok(())
-                    } else {
-                        Err(String::from_utf8_lossy(&o.stderr).to_string())
-                    }
-                })
+            let mut command = Command::new("bash");
+            command.arg(&pre_sync_path).current_dir(&stack_dir);
+            capture_command_output(&mut command)
         })
         .await
         .unwrap_or_else(|_| Err("spawn failed".to_string()));
 
-        let mut s = state.lock().unwrap();
         match hook_result {
-            Ok(_) => s.add_log(
-                LogLevel::Ok,
-                format!(
-                    "ts=now level=info stack={} hook=pre-sync.sh msg=\"hook executed\"",
-                    sn
-                ),
+            Ok(capture) => log_sync_command_capture(
+                &state,
+                &format!("pre-sync.sh stack={}", sn),
+                &capture,
+                if capture.exit_code == 0 {
+                    LogLevel::Ok
+                } else {
+                    LogLevel::Warn
+                },
             ),
-            Err(e) => s.add_log(
-                LogLevel::Warn,
-                format!(
-                    "ts=now level=warn stack={} hook=pre-sync.sh msg=\"hook failed: {}\"",
-                    sn, e
-                ),
-            ),
+            Err(e) => log_sync_spawn_error(&state, &format!("pre-sync.sh stack={}", sn), &e),
         }
     }
 
     // ── Step 5: docker compose pull + up for every app in the stack ───────
     let stack_dir = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
     let app_dirs = list_app_dirs(&stack_dir);
+    {
+        let mut s = state.lock().unwrap();
+        s.add_log(
+            LogLevel::Info,
+            format!(
+                "[sync] discovered {} app directories under {}",
+                app_dirs.len(),
+                stack_dir
+            ),
+        );
+    }
 
     for app_dir in app_dirs {
         let compose_file = format!("{}/docker-compose.yml", app_dir);
@@ -623,109 +796,66 @@ pub async fn perform_sync(state: Arc<Mutex<AppState>>) {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        {
-            let mut s = state.lock().unwrap();
-            s.add_log(
-                LogLevel::Info,
-                format!("[sync] cd {} && docker compose pull -q", app_dir),
-            );
-        }
+        log_sync_command_start(&state, format!("cd {} && docker compose pull -q", app_dir));
 
         // docker compose pull -q
         let dir_clone = app_dir.clone();
         let pull = tokio::task::spawn_blocking(move || {
-            Command::new("docker")
+            let mut command = Command::new("docker");
+            command
                 .args(["compose", "pull", "-q"])
-                .current_dir(&dir_clone)
-                .output()
-                .map_err(|e| e.to_string())
-                .and_then(|o| {
-                    let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                    let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
-                    if o.status.success() {
-                        Ok(format!("exit=0 stdout={} stderr={}", stdout, stderr))
-                    } else {
-                        Err(format!(
-                            "exit={:?} stdout={} stderr={}",
-                            o.status.code(),
-                            stdout,
-                            stderr
-                        ))
-                    }
-                })
+                .current_dir(&dir_clone);
+            capture_command_output(&mut command)
         })
         .await
         .unwrap_or_else(|_| Err("spawn failed".to_string()));
 
-        {
-            let mut s = state.lock().unwrap();
-            match &pull {
-                Ok(out) => s.add_log(
-                    LogLevel::Info,
-                    format!("[sync] docker compose pull app={} {}", app_name, out),
-                ),
-                Err(e) => {
-                    // Log every line of the error so nothing is hidden in CLIENT.
-                    for line in e.lines() {
-                        s.add_log(
-                            LogLevel::Error,
-                            format!("[sync] docker compose pull app={} {}", app_name, line),
-                        );
-                    }
-                }
+        match &pull {
+            Ok(capture) => log_sync_command_capture(
+                &state,
+                &format!("docker compose pull app={}", app_name),
+                capture,
+                if capture.exit_code == 0 {
+                    LogLevel::Ok
+                } else {
+                    LogLevel::Error
+                },
+            ),
+            Err(e) => {
+                log_sync_spawn_error(&state, &format!("docker compose pull app={}", app_name), e)
             }
         }
 
-        {
-            let mut s = state.lock().unwrap();
-            s.add_log(
-                LogLevel::Info,
-                format!(
-                    "[sync] cd {} && docker compose up -d --remove-orphans",
-                    app_dir
-                ),
-            );
-        }
+        log_sync_command_start(
+            &state,
+            format!("cd {} && docker compose up -d --remove-orphans", app_dir),
+        );
 
         // docker compose up -d --remove-orphans
         let dir_clone2 = app_dir.clone();
         let up = tokio::task::spawn_blocking(move || {
-            Command::new("docker")
+            let mut command = Command::new("docker");
+            command
                 .args(["compose", "up", "-d", "--remove-orphans"])
-                .current_dir(&dir_clone2)
-                .output()
-                .map_err(|e| e.to_string())
-                .and_then(|o| {
-                    let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                    let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
-                    if o.status.success() {
-                        Ok(format!("exit=0 stdout={} stderr={}", stdout, stderr))
-                    } else {
-                        Err(format!(
-                            "exit={:?} stdout={} stderr={}",
-                            o.status.code(),
-                            stdout,
-                            stderr
-                        ))
-                    }
-                })
+                .current_dir(&dir_clone2);
+            capture_command_output(&mut command)
         })
         .await
         .unwrap_or_else(|_| Err("spawn failed".to_string()));
 
-        let mut s = state.lock().unwrap();
         match up {
-            Ok(out) => s.add_log(
-                LogLevel::Ok,
-                format!("[sync] docker compose up app={} {}", app_name, out),
+            Ok(capture) => log_sync_command_capture(
+                &state,
+                &format!("docker compose up app={}", app_name),
+                &capture,
+                if capture.exit_code == 0 {
+                    LogLevel::Ok
+                } else {
+                    LogLevel::Error
+                },
             ),
             Err(e) => {
-                for line in e.lines() {
-                    s.add_log(
-                        LogLevel::Error,
-                        format!("[sync] docker compose up app={} {}", app_name, line),
-                    );
-                }
+                log_sync_spawn_error(&state, &format!("docker compose up app={}", app_name), &e)
             }
         }
     }

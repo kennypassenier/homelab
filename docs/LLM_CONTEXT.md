@@ -63,4 +63,5 @@ Last updated: 2026-06-12
 - HOST daemon runs headless-only in deployed operation.
 - CLIENT uses websocket RPC over LXC `/api/logs/ws` for sync, restore, heartbeat, and command execution, with HTTP endpoints retained as compatibility fallback.
 - HOST and LXC now emit startup lifecycle logs containing `daemon_version=...`; CLIENT surfaces version detection and version-change events in Logs.
+- LXC sync logging now emits an explicit request plan and per-command transcript lines (`[sync][run]`, `[sync][exit]`, `[sync][stdout]`, `[sync][stderr]`) over the websocket log stream so operators can see the exact command sequence and raw command output during reconcile.
 - Manual diagnostic and recovery commands live in `docs/debug.md`.

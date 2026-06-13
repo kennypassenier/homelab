@@ -17,6 +17,7 @@ Welcome to the Homelab GitOps repository. This project contains the infrastructu
 - CLIENT keeps persistent websocket connections to HOST and active LXC stacks with automatic reconnect behavior.
 - CLIENT/HOST/LXC websocket links now use active keepalive traffic to prevent stale idle disconnects.
 - Upgrade visibility: HOST and LXC emit `daemon_version=...` lifecycle logs; CLIENT highlights version changes and reconnect transitions in the Logs tab.
+- LXC reconcile visibility: incoming sync requests now log an explicit step plan plus exact LXC-side command transcripts (`[sync][run]`, `[sync][exit]`, `[sync][stdout]`, `[sync][stderr]`) into the shared websocket log stream.
 - HOST API quick checks (for Postman/curl): `GET /api/health`, `GET /api/version`, `GET /api/metrics` on `http://<host-ip>:8080`.
 - Update triggers: `POST /api/update` on HOST and LXC starts immediate update checks outside the periodic windows.
 - Background HOST release checker loop is opt-in (`HOST_BACKGROUND_UPDATE_ENABLED=1`), but failsafe stale-heartbeat self-update checks are enabled by default (set `HOST_FAILSAFE_UPDATE_ENABLED=0` to disable).

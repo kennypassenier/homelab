@@ -343,6 +343,12 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
                                         .await;
                                     continue;
                                 }
+                                log_sync_plan(
+                                    &state,
+                                    "WebSocket RPC",
+                                    Some(req.request_id.as_str()),
+                                    req.latch.as_ref(),
+                                );
 
                                 {
                                     let mut s = state.lock().unwrap();
@@ -694,6 +700,64 @@ fn is_ws_authorized(token: Option<&str>) -> bool {
     token.map(|t| t == expected).unwrap_or(false)
 }
 
+fn log_sync_plan(
+    state: &Arc<Mutex<AppState>>,
+    trigger: &str,
+    request_id: Option<&str>,
+    latch: Option<&LatchPullRequest>,
+) {
+    let mut s = state.lock().unwrap();
+    let stack_name = s.stack_name.clone();
+    let request_id = request_id.unwrap_or("n/a");
+
+    s.add_log(
+        LogLevel::Info,
+        format!(
+            "[sync] request received via {} request_id={} stack={} latch_payload={}",
+            trigger,
+            request_id,
+            stack_name,
+            if latch.is_some() { "present" } else { "absent" }
+        ),
+    );
+    s.add_log(
+        LogLevel::Info,
+        format!(
+            "[sync] plan 1/6: enforce sparse checkout -> stacks/{}",
+            stack_name
+        ),
+    );
+    s.add_log(
+        LogLevel::Info,
+        "[sync] plan 2/6: git fetch origin".to_string(),
+    );
+    s.add_log(
+        LogLevel::Info,
+        "[sync] plan 3/6: git reset --hard origin/main".to_string(),
+    );
+    s.add_log(
+        LogLevel::Info,
+        if latch.is_some() {
+            "[sync] plan 4/6: run latch pull with request-scoped credentials".to_string()
+        } else {
+            "[sync] plan 4/6: skip latch pull because no credentials were attached".to_string()
+        },
+    );
+    s.add_log(
+        LogLevel::Info,
+        format!(
+            "[sync] plan 5/6: run {}/stacks/{}/pre-sync.sh if present",
+            crate::gitops::repo_path(),
+            stack_name
+        ),
+    );
+    s.add_log(
+        LogLevel::Info,
+        "[sync] plan 6/6: for each app compose dir run docker compose pull -q and docker compose up -d --remove-orphans, then orphan GC"
+            .to_string(),
+    );
+}
+
 // ── Sync trigger ───────────────────────────────────────────────────────────
 
 async fn handle_sync(
@@ -701,9 +765,12 @@ async fn handle_sync(
     State(state): State<Arc<Mutex<AppState>>>,
     payload: Option<Json<SyncRequestBody>>,
 ) -> (StatusCode, Json<ApiResponse>) {
+    let latch = payload.and_then(|Json(body)| body.latch);
+    log_sync_plan(&state, "HTTP Push API", None, latch.as_ref());
+
     let mut s = state.lock().unwrap();
     s.sync_requested = true;
-    s.pending_latch_pull = payload.map(|Json(body)| body.latch).flatten();
+    s.pending_latch_pull = latch;
     s.add_log(
         LogLevel::Info,
         "Sync triggered via HTTP Push API".to_string(),

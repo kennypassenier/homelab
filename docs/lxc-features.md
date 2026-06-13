@@ -26,6 +26,7 @@ Last updated: 2026-06-12
 - heartbeat API endpoint (`POST /api/heartbeat`) for CLIENT session liveness.
 - update API endpoint (`POST /api/update`) for immediate daemon image refresh/recreate, with optional one-shot `latch` payload.
 - websocket telemetry endpoint for CLIENT modal/log views, with bounded in-memory replay history capped at 10,000 old lines, an age threshold controlled by `LOG_HISTORY_AGE_SECS`, and severity-aware eviction that removes old `DEBUG`/`INFO` lines before `WARN` or `ERROR` lines.
+- sync telemetry now emits a request preamble plus per-command transcript lines (`[sync][run]`, `[sync][exit]`, `[sync][stdout]`, `[sync][stderr]`) so CLIENT Logs shows the exact LXC-side command flow and raw command output during reconcile.
 - restore execution backend endpoint (`POST /api/restore`) with phased status events.
 - websocket update RPC (`update_request`/`update_response`) and keepalive frames for idle-stable connections.
 - websocket sync/update RPC (`sync_request`, `update_request`) accept optional one-shot `latch` payload used for request-scoped `latch pull` execution.

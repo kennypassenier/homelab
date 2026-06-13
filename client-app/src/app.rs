@@ -152,6 +152,12 @@ pub struct StackDropdown {
     pub app_dropdowns: Vec<AppDropdown>,
 }
 
+/// One queued batch deploy job.
+pub struct SyncQueueItem {
+    pub stack: String,
+    pub provision: bool,
+}
+
 /// All runtime state for the TUI application.
 pub struct App {
     pub active_tab: usize,
@@ -211,7 +217,7 @@ pub struct App {
     /// Stacks that should retry sync once their LXC websocket connects.
     pub sync_retry_on_connect: std::collections::HashSet<String>,
     /// FIFO queue for batch stack sync actions (deploy/update all active stacks).
-    pub sync_queue: VecDeque<String>,
+    pub sync_queue: VecDeque<SyncQueueItem>,
     /// Human-readable status line shown at the bottom of the Scaffolding tab.
     pub sync_status: String,
     /// When true, main loop dispatches a HOST request to destroy one stack LXC.

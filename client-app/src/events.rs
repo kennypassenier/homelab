@@ -1586,10 +1586,16 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
                     continue;
                 }
 
-                if !app.sync_queue.iter().any(|queued_stack| queued_stack == &stack)
+                if !app
+                    .sync_queue
+                    .iter()
+                    .any(|queued_stack| queued_stack.stack == stack)
                     && !(app.sync_pending && app.sync_stack == stack)
                 {
-                    app.sync_queue.push_back(stack.clone());
+                    app.sync_queue.push_back(crate::app::SyncQueueItem {
+                        stack: stack.clone(),
+                        provision: true,
+                    });
                     queued += 1;
                 }
             }
@@ -1801,10 +1807,13 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
                     continue;
                 }
 
-                if !app.sync_queue.iter().any(|queued| queued == &stack)
+                if !app.sync_queue.iter().any(|queued| queued.stack == stack)
                     && !(app.sync_pending && app.sync_stack == stack)
                 {
-                    app.sync_queue.push_back(stack);
+                    app.sync_queue.push_back(crate::app::SyncQueueItem {
+                        stack,
+                        provision: true,
+                    });
                 }
             }
 

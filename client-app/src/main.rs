@@ -614,9 +614,10 @@ async fn async_main() -> Result<()> {
 
         // Promote queued batch sync work into the single-sync execution slot.
         if !app.sync_pending && !sync_dispatch_running {
-            if let Some(next_stack) = app.sync_queue.pop_front() {
-                app.sync_stack = next_stack;
+            if let Some(next_job) = app.sync_queue.pop_front() {
+                app.sync_stack = next_job.stack;
                 app.sync_pending = true;
+                app.provision_pending = next_job.provision;
             }
         }
 

@@ -33,8 +33,8 @@ Last updated: 2026-06-12
 - Add/delete stack and add/delete app flows.
 - Core app management.
 - Deploy selected and batch deploy/update of active stacks.
-- Scaffolding shortcut `A` now activates all stacks and queues deploy across all stacks in one action.
-- Batch stack deploy queue now runs in strict serial order (next stack starts only after previous sync finished).
+- Scaffolding shortcut `A` now activates all stacks and queues provision + deploy jobs across all stacks in one action.
+- Batch stack deploy queue now runs in strict serial order (next stack starts only after the previous provision/sync job finished).
 - Fail-closed pre-sync and filesystem-layout validation gates.
 - Transaction ledger for add_stack and delete_stack phases.
 - Reusable operation progress modal used by backup/restore/patch actions.

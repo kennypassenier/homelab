@@ -1,0 +1,19 @@
+{
+  "operation": "add_stack",
+  "stack_name": "gateway",
+  "status": "failed",
+  "phases": [
+    {
+      "name": "scaffold_git_files",
+      "status": "in_progress",
+      "error": null,
+      "ts_unix": 1781343264
+    },
+    {
+      "name": "scaffold_git_files",
+      "status": "failed",
+      "error": "mapping values are not allowed in this context at line 16 column 9",
+      "ts_unix": 1781343264
+    }
+  ]
+}

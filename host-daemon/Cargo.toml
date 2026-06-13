@@ -1,6 +1,6 @@
 [package]
 name = "host-daemon"
-version = "0.1.65"
+version = "0.1.66"
 edition = "2024"
 
 [[bin]]

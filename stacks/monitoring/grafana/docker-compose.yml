@@ -1,0 +1,24 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    user: "0:0"
+    ports:
+      - "3000:3000"
+    environment:
+      - TZ=Europe/Brussels
+      - GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION=false
+    volumes:
+      - /appdata/monitoring/grafana/config:/var/lib/grafana
+      - /appdata/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"
+      - "com.homelab.tag.watchtower=enabled"
+      - "com.homelab.tag.traefik.subdomain=grafana"
+      - "com.homelab.tag.gpu=disabled"
+      - "com.homelab.tag.vpn=none"
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN:-example.com}`)"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    restart: unless-stopped

@@ -1,0 +1,16 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    user: "0:0"
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION=false
+    volumes:
+      - /appdata/monitoring/grafana/config:/var/lib/grafana
+      - /opt/gitops/stacks/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"
+    restart: unless-stopped

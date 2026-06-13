@@ -1,0 +1,69 @@
+services:
+  # Gluetun VPN container — enige internetgateway voor qBittorrent (kill switch).
+  # Alle poorten voor qbittorrent worden hier gedeclareerd omdat qbittorrent
+  # network_mode: service:gluetun gebruikt — het heeft zelf geen eigen network stack.
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - .env
+    environment:
+      - VPN_SERVICE_PROVIDER=surfshark
+      - VPN_TYPE=wireguard
+      - WIREGUARD_ADDRESSES=10.14.0.2/32
+      - SERVER_HOSTNAMES=ch-zur.prod.surfshark.com
+      # Use IP addresses for health checks to avoid DNS dependency during startup.
+      # The default targets (cloudflare.com, github.com) require gluetun's own DNS
+      # to be fully ready, creating a race condition that marks the container unhealthy.
+      - HEALTH_TARGET_ADDRESSES=1.1.1.1:443,8.8.8.8:443
+    ports:
+      # qBittorrent Web UI — geopend op gluetun omdat qbittorrent geen eigen netwerk heeft
+      - "8080:8080"
+    # Gluetun exposes an internal health server on port 9999 that confirms
+    # the VPN tunnel is active. qBittorrent waits for this before starting.
+    # Use CMD-SHELL with wget -O /dev/null (GET request) — gluetun's health server
+    # only supports GET, not HEAD. wget --spider sends HEAD and gets a 405 back,
+    # causing the healthcheck to always fail even when the VPN is working.
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:9999" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    # Verplicht in hetzelfde compose-bestand als gluetun: Docker vereist dat beide
+    # services tot hetzelfde compose-project behoren voor network_mode: service:<name>.
+    # Dit is de kill switch: als gluetun stopt, verliest qbittorrent alle connectiviteit.
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        # Wacht niet alleen op container start, maar op een gezonde VPN-verbinding
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+      - WEBUI_PORT=8080
+      # LSIO mod that installs VueTorrent as the alternative Web UI on every container start.
+      # Watchtower keeps the mod image up-to-date automatically — no manual steps needed.
+      # After first deploy: Settings → Web UI → Use alternative Web UI → /vuetorrent
+      - DOCKER_MODS=ghcr.io/vuetorrent/vuetorrent-lsio-mod:latest
+    volumes:
+      - /appdata/downloader/qbittorrent/config:/config
+      - /mnt/downloads:/downloads
+    labels:
+      # Enable automatic software updates via Watchtower
+      - "com.centurylinklabs.watchtower.enable=true"
+      # Pause container during Restic backups to prevent database corruption
+      - "com.homelab.backup.pause=true"
+    restart: unless-stopped

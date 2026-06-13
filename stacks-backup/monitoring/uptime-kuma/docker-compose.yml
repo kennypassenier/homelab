@@ -1,0 +1,12 @@
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+    container_name: uptime-kuma
+    volumes:
+      - /appdata/monitoring/uptime-kuma/config:/app/data
+    ports:
+      - "3001:3001"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"
+    restart: unless-stopped

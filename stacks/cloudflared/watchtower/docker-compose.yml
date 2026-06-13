@@ -11,4 +11,9 @@ services:
       WATCHTOWER_POLL_INTERVAL: "86400"
       WATCHTOWER_ROLLING_RESTART: "true"
     labels:
-      com.centurylinklabs.watchtower.enable: "true"
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.tag.watchtower=enabled"
+      - "com.homelab.tag.role=infra-watchtower"
+      - "com.homelab.tag.traefik.subdomain=none"
+      - "com.homelab.tag.gpu=disabled"
+      - "com.homelab.tag.vpn=none"

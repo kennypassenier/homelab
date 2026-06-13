@@ -1,0 +1,14 @@
+name: homelab/whitelists
+description: "Whitelist local networks and Tailscale"
+whitelist:
+  reason: "Local network or Tailscale VPN"
+  ip:
+    - "127.0.0.1"
+    - "::1"
+  cidr:
+    - "10.0.0.0/8"        # Local LAN
+    - "172.16.0.0/12"     # Docker / Local LAN
+    - "192.168.0.0/16"    # Local LAN
+    - "100.64.0.0/10"     # Tailscale VPN
+    - "fc00::/7"          # Unique local address (IPv6)
+    - "fe80::/10"         # Link-local address (IPv6)

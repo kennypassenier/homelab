@@ -1,0 +1,21 @@
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+    container_name: uptime-kuma
+    environment:
+      - TZ=Europe/Brussels
+    volumes:
+      - /appdata/monitoring/uptime-kuma/config:/app/data
+    ports:
+      - "3001:3001"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"
+      - "com.homelab.tag.watchtower=enabled"
+      - "com.homelab.tag.traefik.subdomain=uptime-kuma"
+      - "com.homelab.tag.gpu=disabled"
+      - "com.homelab.tag.vpn=none"
+      - "traefik.enable=true"
+      - "traefik.http.routers.uptime-kuma.rule=Host(`uptime-kuma.${DOMAIN:-example.com}`)"
+      - "traefik.http.services.uptime-kuma.loadbalancer.server.port=3001"
+    restart: unless-stopped

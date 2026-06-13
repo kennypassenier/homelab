@@ -1,0 +1,28 @@
+services:
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      - /appdata/media/bazarr/config:/config
+      - /mnt/data/18TB:/data/18TB
+      - /mnt/data/12TB:/data/12TB
+    ports:
+      - "6767:6767"
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"
+      - "com.homelab.tag.watchtower=enabled"
+      - "com.homelab.tag.traefik.subdomain=bazarr"
+      - "com.homelab.tag.gpu=disabled"
+      - "com.homelab.tag.vpn=none"
+      - "traefik.enable=true"
+      - "traefik.http.routers.bazarr.rule=Host(`bazarr.${DOMAIN:-example.com}`)"
+      - "traefik.http.services.bazarr.loadbalancer.server.port=6767"

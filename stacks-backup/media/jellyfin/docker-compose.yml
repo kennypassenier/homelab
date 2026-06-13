@@ -1,0 +1,44 @@
+networks:
+  media_network:
+    name: media_network
+    external: true
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    # Enable Hardware acceleration and custom user mappings
+    user: "1000:1000"
+    group_add:
+      - "993"
+      - "44"
+      - "104"
+      - "105"
+      - "106"
+      - "107"
+    devices:
+      - /dev/dri:/dev/dri
+    shm_size: "4gb"
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+      - JELLYFIN_LOG_DIR=/config/log
+      - JELLYFIN_TRANSCODE_DIR=/dev/shm
+      - DOTNET_SYSTEM_NET_DISABLE_IPV6=1
+    volumes:
+      - /appdata/media/jellyfin/config:/config
+      - /mnt/data/18TB:/data/18TB
+      - /mnt/data/12TB:/data/12TB
+      # Mount the pre-check script into the container
+      - ./check-streams.sh:/scripts/check-streams.sh:ro
+    ports:
+      - "8096:8096"
+    networks:
+      - media_network
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"
+      # Tell Watchtower to run this script before updating
+      - "com.centurylinklabs.watchtower.lifecycle.pre-check=/scripts/check-streams.sh"

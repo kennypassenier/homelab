@@ -1,15 +1,17 @@
 services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared
-    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
     env_file:
       - .env
     environment:
       - TZ=Europe/Brussels
-    restart: unless-stopped
+      - COLLECTIONS=crowdsecurity/nginx-proxy-manager
     volumes:
-      - /appdata/cloudflared/cloudflared/config:/config
+      - /appdata/gateway/crowdsec/config:/etc/crowdsec
+      - /appdata/gateway/crowdsec/data:/var/lib/crowdsec/data
+      - /appdata/gateway/nginx-proxy-manager/data/logs:/var/log/npm:ro
+    restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"

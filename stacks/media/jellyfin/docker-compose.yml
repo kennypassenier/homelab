@@ -1,0 +1,39 @@
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    user: "1000:1000"
+    group_add:
+      - "993"
+      - "44"
+      - "104"
+      - "105"
+      - "106"
+      - "107"
+    devices:
+      - /dev/dri:/dev/dri
+    shm_size: "4gb"
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+      - JELLYFIN_LOG_DIR=/config/log
+      - JELLYFIN_TRANSCODE_DIR=/dev/shm
+      - DOTNET_SYSTEM_NET_DISABLE_IPV6=1
+    volumes:
+      - /appdata/media/jellyfin/config:/config
+      - /mnt/data/18TB:/data/18TB
+      - /mnt/data/12TB:/data/12TB
+    ports:
+      - "8096:8096"
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"
+      - "com.homelab.tag.watchtower=enabled"
+      - "com.homelab.tag.traefik.subdomain=jellyfin"
+      - "com.homelab.tag.gpu=enabled"
+      - "com.homelab.tag.vpn=none"
+      - "traefik.enable=true"
+      - "traefik.http.routers.jellyfin.rule=Host(`jellyfin.${DOMAIN:-example.com}`)"
+      - "traefik.http.services.jellyfin.loadbalancer.server.port=8096"

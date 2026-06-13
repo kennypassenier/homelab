@@ -1,0 +1,25 @@
+services:
+  goaccess:
+    image: xavierh/goaccess-for-nginxproxymanager:latest
+    container_name: goaccess
+    environment:
+      - TZ=Europe/Brussels
+      - SKIP_ARCHIVED_LOGS=False
+      - DEBUG=False
+      - BASIC_AUTH=False
+    volumes:
+      - /appdata/gateway/nginx-proxy-manager/data/logs:/opt/log:ro
+      - /appdata/gateway/goaccess/data:/opt/custom
+    ports:
+      - "7880:7880"
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"
+      - "com.homelab.tag.watchtower=enabled"
+      - "com.homelab.tag.traefik.subdomain=goaccess"
+      - "com.homelab.tag.gpu=disabled"
+      - "com.homelab.tag.vpn=none"
+      - "traefik.enable=true"
+      - "traefik.http.routers.goaccess.rule=Host(`goaccess.${DOMAIN:-example.com}`)"
+      - "traefik.http.services.goaccess.loadbalancer.server.port=7880"

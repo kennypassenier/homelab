@@ -1,6 +1,7 @@
 *.env
-.latch/*
 *.log
+.latch/
+.latch
 
 # OS / Editor files
 .DS_Store

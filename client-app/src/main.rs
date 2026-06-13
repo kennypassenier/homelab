@@ -239,6 +239,7 @@ async fn async_main() -> Result<()> {
 
     let mut lxc_ws_tasks: HashMap<String, JoinHandle<()>> = HashMap::new();
     let mut last_provision_dispatch: HashMap<String, Instant> = HashMap::new();
+    let mut sync_dispatch_running = false;
     let mut update_dispatch_running = false;
 
     // Always keep HOST websocket connected while CLIENT is running.
@@ -307,6 +308,7 @@ async fn async_main() -> Result<()> {
                     }
                 }
                 SyncEvent::Finished { stack, ok, msg } => {
+                    sync_dispatch_running = false;
                     let level = if ok { "INFO" } else { "ERROR" };
                     app.push_client_logfmt(
                         level,
@@ -611,7 +613,7 @@ async fn async_main() -> Result<()> {
         }
 
         // Promote queued batch sync work into the single-sync execution slot.
-        if !app.sync_pending {
+        if !app.sync_pending && !sync_dispatch_running {
             if let Some(next_stack) = app.sync_queue.pop_front() {
                 app.sync_stack = next_stack;
                 app.sync_pending = true;
@@ -728,6 +730,7 @@ async fn async_main() -> Result<()> {
                     format!("Waiting for HOST readiness gate before sync - '{}'", stack);
             } else {
                 app.sync_pending = false;
+                sync_dispatch_running = true;
                 let tx = sync_tx.clone();
 
                 // Resolve LXC IP: prefer stacks/<name>/lxc-compose.yml reserved_ipv4,

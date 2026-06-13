@@ -1545,6 +1545,72 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
 
         KeyCode::Char('q') => return EventOutcome::Quit,
 
+        // Activates all stacks and queues deploy in batch order.
+        KeyCode::Char('A') => {
+            let mut activated = 0usize;
+            let mut queued = 0usize;
+            let mut failed: Vec<String> = Vec::new();
+
+            for stack in app.stacks.clone() {
+                match crate::scaffold::ensure_lxc_compose(&stack)
+                    .and_then(|_| crate::scaffold::set_stack_deploy_enabled(&stack, true))
+                {
+                    Ok(()) => {
+                        activated += 1;
+                    }
+                    Err(e) => {
+                        failed.push(format!("{} ({})", stack, e));
+                        continue;
+                    }
+                }
+
+                if let Err(e) = crate::stack_features::validate_setup_hook(&stack) {
+                    app.push_client_logfmt(
+                        "ERROR",
+                        Some(&stack),
+                        Some("pre_sync_validation"),
+                        "fail-closed batch skip",
+                        Some(&e.to_string()),
+                    );
+                    continue;
+                }
+
+                if let Err(e) = crate::stack_features::validate_stack_filesystem_layout(&stack) {
+                    app.push_client_logfmt(
+                        "ERROR",
+                        Some(&stack),
+                        Some("filesystem_layout"),
+                        "fail-closed batch skip",
+                        Some(&e.to_string()),
+                    );
+                    continue;
+                }
+
+                if !app.sync_queue.iter().any(|queued_stack| queued_stack == &stack)
+                    && !(app.sync_pending && app.sync_stack == stack)
+                {
+                    app.sync_queue.push_back(stack.clone());
+                    queued += 1;
+                }
+            }
+
+            app.sync_status = if failed.is_empty() {
+                format!(
+                    "Activated {} stack(s); queued {} deploy job(s) in strict serial order.",
+                    activated, queued
+                )
+            } else {
+                format!(
+                    "Activated {} stack(s); queued {} deploy job(s); activation failed for: {}",
+                    activated,
+                    queued,
+                    failed.join(", ")
+                )
+            };
+
+            return EventOutcome::Continue;
+        }
+
         // Marks the selected stack as deploy-enabled in lxc-compose.yml.
         // Deployment (`s`) only runs for activated stacks.
         KeyCode::Char('a') => {

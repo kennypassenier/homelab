@@ -334,7 +334,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_widget(
         Paragraph::new(
-            "  [n] new stack   [a] activate   [x] deactivate   [c] add core apps   [g/G] gpu on/off app   [s] deploy selected   [D/u] deploy/update all active",
+            "  [n] new stack   [a] activate   [x] deactivate   [A] activate+deploy all   [c] add core apps   [g/G] gpu on/off app   [s] deploy selected   [D/u] deploy/update all active",
         )
         .style(Style::default().fg(Color::DarkGray)),
         rows[1],

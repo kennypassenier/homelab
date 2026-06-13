@@ -1,28 +1,24 @@
 version: 1
-stack_name: "paperless"
+stack_name: paperless
 vmid: 0
-hostname: "0-app-paperless"
-hwaddr: "02:50:83:eb:1a:2c"
+hostname: 0-app-paperless
+hwaddr: 02:50:83:eb:1a:2c
 tags: []
-
 deploy:
   enabled: false
   activated_at: null
-
 network:
-  bridge: "vmbr0"
-  ip_mode: "static"
+  bridge: vmbr0
+  ip_mode: static
   reserved_ipv4: null
   cidr: 24
-  gateway: "10.10.10.1"
+  gateway: 10.10.10.1
   vlan_tag: 10
   firewall: false
   ip_mode_v6: null
-
 boot:
   autostart: true
   order: 90
-
 resources:
   cores: 2
   cpu_limit: null
@@ -30,24 +26,20 @@ resources:
   memory_mb: 2048
   swap_mb: 2048
   disk_gb: 32
-
 storage:
-  rootfs_pool: "local-lvm"
-  host_path: "/opt/appdata/paperless"
-  mount_point: "/appdata"
+  rootfs_pool: local-lvm
+  host_path: /opt/appdata/paperless
+  mount_point: /appdata
   appdata_backup: true
   appdata_read_only: false
-
 lxc:
-  template: "debian-12-standard 12.12-1 amd64"
+  template: debian-12-standard 12.12-1 amd64
   unprivileged: true
-  timezone: "host"
+  timezone: host
   features:
-    - "nesting=1"
-
+  - nesting=1
 hardware:
   tun_device: null
-
 host_management:
   managed: true
   protection: false

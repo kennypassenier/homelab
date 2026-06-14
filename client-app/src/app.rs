@@ -712,7 +712,12 @@ impl App {
             .collect()
     }
 
-    fn build_drift_maps(stacks: &[String]) -> (HashMap<String, bool>, HashMap<String, HashMap<String, bool>>) {
+    fn build_drift_maps(
+        stacks: &[String],
+    ) -> (
+        HashMap<String, bool>,
+        HashMap<String, HashMap<String, bool>>,
+    ) {
         let mut stack_drift = HashMap::new();
         let mut app_drift = HashMap::new();
 

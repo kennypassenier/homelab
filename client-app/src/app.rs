@@ -220,6 +220,10 @@ pub struct App {
     pub sync_queue: VecDeque<SyncQueueItem>,
     /// Human-readable status line shown at the bottom of the Scaffolding tab.
     pub sync_status: String,
+    /// Per-stack drift flag (true => local stack files differ from last applied hash).
+    pub stack_drift: HashMap<String, bool>,
+    /// Per-app drift flags nested by stack.
+    pub app_drift: HashMap<String, HashMap<String, bool>>,
     /// When true, main loop dispatches a HOST request to destroy one stack LXC.
     pub destroy_stack_pending: bool,
     /// Stack currently targeted for HOST-side container destroy.
@@ -273,6 +277,7 @@ impl App {
     pub fn new() -> Self {
         let stacks = App::load_stacks();
         let stack_dropdowns = Self::build_dropdowns(&stacks);
+        let (stack_drift, app_drift) = Self::build_drift_maps(&stacks);
         let ticker_content = Self::build_ticker_content();
         let mut rng = SmallRng::from_entropy();
 
@@ -337,6 +342,8 @@ impl App {
             sync_retry_on_connect: std::collections::HashSet::new(),
             sync_queue: VecDeque::new(),
             sync_status: "Idle".to_string(),
+            stack_drift,
+            app_drift,
             destroy_stack_pending: false,
             destroy_stack: String::new(),
             backup_schedule: BackupSchedule::load_or_default(),
@@ -407,6 +414,9 @@ impl App {
         let previously_selected = self.stacks.get(self.selected_stack).cloned();
         self.stacks = App::load_stacks();
         self.stack_dropdowns = Self::build_dropdowns(&self.stacks);
+        let (stack_drift, app_drift) = Self::build_drift_maps(&self.stacks);
+        self.stack_drift = stack_drift;
+        self.app_drift = app_drift;
 
         if self.stacks.is_empty() {
             self.selected_stack = 0;
@@ -431,6 +441,12 @@ impl App {
         } else if self.selected_stack >= self.stack_scroll + visible {
             self.stack_scroll = self.selected_stack + 1 - visible;
         }
+    }
+
+    pub fn refresh_drift_status(&mut self) {
+        let (stack_drift, app_drift) = Self::build_drift_maps(&self.stacks);
+        self.stack_drift = stack_drift;
+        self.app_drift = app_drift;
     }
 
     /// Pushes a real log entry into the ring buffer (used by background tasks).
@@ -694,5 +710,24 @@ impl App {
                 }
             })
             .collect()
+    }
+
+    fn build_drift_maps(stacks: &[String]) -> (HashMap<String, bool>, HashMap<String, HashMap<String, bool>>) {
+        let mut stack_drift = HashMap::new();
+        let mut app_drift = HashMap::new();
+
+        for stack in stacks {
+            let stack_changed = crate::scaffold::stack_has_drift(stack).unwrap_or(true);
+            stack_drift.insert(stack.clone(), stack_changed);
+
+            let mut app_map = HashMap::new();
+            for app in crate::app_list::list_apps_for_stack(stack) {
+                let changed = crate::scaffold::app_has_drift(stack, &app).unwrap_or(true);
+                app_map.insert(app, changed);
+            }
+            app_drift.insert(stack.clone(), app_map);
+        }
+
+        (stack_drift, app_drift)
     }
 }

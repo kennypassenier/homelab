@@ -1,9 +1,11 @@
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_yaml::{Mapping, Value};
+use sha2::{Digest, Sha256};
 
 pub struct StackConfig {
     pub stack_name: String,
@@ -531,6 +533,24 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
         .collect();
     root.insert(Value::String("tags".to_string()), Value::Sequence(tags_seq));
 
+    let previous_last_applied_hash = root
+        .get(Value::String("deploy".to_string()))
+        .and_then(Value::as_mapping)
+        .and_then(|m| m.get(Value::String("last_applied_hash".to_string())))
+        .and_then(Value::as_str)
+        .map(|v| v.to_string());
+    let previous_last_applied_at = root
+        .get(Value::String("deploy".to_string()))
+        .and_then(Value::as_mapping)
+        .and_then(|m| m.get(Value::String("last_applied_at".to_string())))
+        .and_then(Value::as_str)
+        .map(|v| v.to_string());
+    let previous_last_applied_apps = root
+        .get(Value::String("deploy".to_string()))
+        .and_then(Value::as_mapping)
+        .and_then(|m| m.get(Value::String("last_applied_apps".to_string())))
+        .cloned();
+
     let mut deploy = Mapping::new();
     deploy.insert(
         Value::String("enabled".to_string()),
@@ -543,6 +563,24 @@ pub fn save_stack_config(config: &StackConfig) -> io::Result<()> {
             .as_ref()
             .map(|v| Value::String(v.clone()))
             .unwrap_or(Value::Null),
+    );
+    deploy.insert(
+        Value::String("last_applied_hash".to_string()),
+        previous_last_applied_hash
+            .as_ref()
+            .map(|v| Value::String(v.clone()))
+            .unwrap_or(Value::Null),
+    );
+    deploy.insert(
+        Value::String("last_applied_at".to_string()),
+        previous_last_applied_at
+            .as_ref()
+            .map(|v| Value::String(v.clone()))
+            .unwrap_or(Value::Null),
+    );
+    deploy.insert(
+        Value::String("last_applied_apps".to_string()),
+        previous_last_applied_apps.unwrap_or(Value::Null),
     );
     root.insert(Value::String("deploy".to_string()), Value::Mapping(deploy));
 
@@ -756,6 +794,19 @@ pub fn set_stack_deploy_enabled(stack_name: &str, enabled: bool) -> io::Result<(
         .as_mapping_mut()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid lxc-compose root"))?;
 
+    if enabled {
+        let vmid = root
+            .get(Value::String("vmid".to_string()))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if vmid == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot enable deploy for stack with vmid=0; assign a VMID in stack settings first",
+            ));
+        }
+    }
+
     let deploy_key = Value::String("deploy".to_string());
     if !root.contains_key(&deploy_key) {
         root.insert(deploy_key.clone(), Value::Mapping(Mapping::new()));
@@ -879,6 +930,249 @@ pub fn remove_app_config_mount(stack_name: &str, app_name: &str) -> io::Result<(
     save_lxc_compose(stack_name, &doc)
 }
 
+/// Computes a deterministic hash for all declarative files under one stack.
+///
+/// The hash intentionally ignores deploy.last_applied_* fields in lxc-compose.yml
+/// to avoid self-referential drift.
+pub fn compute_stack_content_hash(stack_name: &str) -> io::Result<String> {
+    let stack_root = Path::new("stacks").join(stack_name);
+    if !stack_root.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("stack path missing: {}", stack_root.display()),
+        ));
+    }
+
+    let mut files = Vec::new();
+    collect_hashable_files(&stack_root, &stack_root, &mut files)?;
+    files.sort();
+
+    let mut hasher = Sha256::new();
+    for rel in files {
+        hasher.update(rel.to_string_lossy().as_bytes());
+        hasher.update(b"\n");
+
+        let abs = stack_root.join(&rel);
+        let bytes = if rel == PathBuf::from("lxc-compose.yml") {
+            normalized_lxc_compose_bytes_for_hash(&abs)?
+        } else {
+            fs::read(&abs)?
+        };
+
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Computes deterministic per-app hashes for app directories that contain docker-compose.yml.
+pub fn compute_stack_app_hashes(stack_name: &str) -> io::Result<HashMap<String, String>> {
+    let stack_root = Path::new("stacks").join(stack_name);
+    if !stack_root.exists() {
+        return Ok(HashMap::new());
+    }
+
+    let mut result = HashMap::new();
+    for entry in fs::read_dir(&stack_root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+
+        let app_name = entry.file_name().to_string_lossy().to_string();
+        let app_root = entry.path();
+        if !app_root.join("docker-compose.yml").exists() {
+            continue;
+        }
+
+        let mut files = Vec::new();
+        collect_hashable_files(&app_root, &app_root, &mut files)?;
+        files.sort();
+
+        let mut hasher = Sha256::new();
+        for rel in files {
+            hasher.update(rel.to_string_lossy().as_bytes());
+            hasher.update(b"\n");
+            let abs = app_root.join(&rel);
+            let bytes = fs::read(&abs)?;
+            hasher.update((bytes.len() as u64).to_le_bytes());
+            hasher.update(bytes);
+        }
+
+        result.insert(app_name, format!("{:x}", hasher.finalize()));
+    }
+
+    Ok(result)
+}
+
+pub fn get_stack_last_applied_hash(stack_name: &str) -> io::Result<Option<String>> {
+    let doc = load_lxc_compose(stack_name)?;
+    Ok(doc
+        .get("deploy")
+        .and_then(|d| d.get("last_applied_hash"))
+        .and_then(Value::as_str)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty()))
+}
+
+pub fn get_stack_last_applied_app_hashes(stack_name: &str) -> io::Result<HashMap<String, String>> {
+    let doc = load_lxc_compose(stack_name)?;
+    let mut out = HashMap::new();
+
+    let Some(apps) = doc
+        .get("deploy")
+        .and_then(|d| d.get("last_applied_apps"))
+        .and_then(Value::as_mapping)
+    else {
+        return Ok(out);
+    };
+
+    for (k, v) in apps {
+        let Some(key) = k.as_str() else {
+            continue;
+        };
+        let Some(val) = v.as_str() else {
+            continue;
+        };
+        if !key.trim().is_empty() && !val.trim().is_empty() {
+            out.insert(key.to_string(), val.to_string());
+        }
+    }
+
+    Ok(out)
+}
+
+pub fn set_stack_last_applied_state(
+    stack_name: &str,
+    stack_hash: &str,
+    app_hashes: &HashMap<String, String>,
+) -> io::Result<()> {
+    let mut doc = load_lxc_compose(stack_name)?;
+    if !doc.is_mapping() {
+        doc = Value::Mapping(Mapping::new());
+    }
+
+    let root = doc
+        .as_mapping_mut()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid lxc-compose root"))?;
+
+    let deploy_key = Value::String("deploy".to_string());
+    if !root.contains_key(&deploy_key) {
+        root.insert(deploy_key.clone(), Value::Mapping(Mapping::new()));
+    }
+
+    let deploy = root
+        .get_mut(&deploy_key)
+        .and_then(Value::as_mapping_mut)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid deploy block"))?;
+
+    deploy.insert(
+        Value::String("last_applied_hash".to_string()),
+        Value::String(stack_hash.trim().to_string()),
+    );
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string();
+    deploy.insert(
+        Value::String("last_applied_at".to_string()),
+        Value::String(now),
+    );
+
+    let mut sorted = BTreeMap::new();
+    for (k, v) in app_hashes {
+        if !k.trim().is_empty() && !v.trim().is_empty() {
+            sorted.insert(k.clone(), v.clone());
+        }
+    }
+
+    let mut app_map = Mapping::new();
+    for (k, v) in sorted {
+        app_map.insert(Value::String(k), Value::String(v));
+    }
+    deploy.insert(
+        Value::String("last_applied_apps".to_string()),
+        Value::Mapping(app_map),
+    );
+
+    save_lxc_compose(stack_name, &doc)
+}
+
+pub fn stack_has_drift(stack_name: &str) -> io::Result<bool> {
+    let current = compute_stack_content_hash(stack_name)?;
+    let applied = get_stack_last_applied_hash(stack_name)?;
+    Ok(applied.map(|h| h != current).unwrap_or(true))
+}
+
+pub fn app_has_drift(stack_name: &str, app_name: &str) -> io::Result<bool> {
+    let current_hashes = compute_stack_app_hashes(stack_name)?;
+    let applied_hashes = get_stack_last_applied_app_hashes(stack_name)?;
+
+    let current = current_hashes.get(app_name).cloned();
+    let applied = applied_hashes.get(app_name).cloned();
+
+    Ok(match (current, applied) {
+        (Some(c), Some(a)) => c != a,
+        (Some(_), None) => true,
+        (None, _) => false,
+    })
+}
+
+fn collect_hashable_files(root: &Path, current: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+
+        if file_name == ".git" {
+            continue;
+        }
+
+        if path.is_dir() {
+            collect_hashable_files(root, &path, out)?;
+            continue;
+        }
+
+        if file_name == ".env" || file_name.starts_with(".env.") {
+            continue;
+        }
+
+        let rel = path
+            .strip_prefix(root)
+            .map_err(|e| io::Error::other(e.to_string()))?
+            .to_path_buf();
+        out.push(rel);
+    }
+
+    Ok(())
+}
+
+fn normalized_lxc_compose_bytes_for_hash(path: &Path) -> io::Result<Vec<u8>> {
+    let raw = fs::read_to_string(path)?;
+    let mut yaml: Value = match serde_yaml::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return Ok(raw.into_bytes()),
+    };
+
+    if let Some(root) = yaml.as_mapping_mut()
+        && let Some(deploy) = root
+            .get_mut(Value::String("deploy".to_string()))
+            .and_then(Value::as_mapping_mut)
+    {
+        deploy.remove(Value::String("last_applied_hash".to_string()));
+        deploy.remove(Value::String("last_applied_at".to_string()));
+        deploy.remove(Value::String("last_applied_apps".to_string()));
+    }
+
+    serde_yaml::to_string(&yaml)
+        .map(|s| s.into_bytes())
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+}
+
 /// Returns only stacks that have deploy.enabled=true in lxc-compose.yml.
 pub fn list_deploy_enabled_stacks(stacks: &[String]) -> Vec<String> {
     stacks
@@ -887,7 +1181,12 @@ pub fn list_deploy_enabled_stacks(stacks: &[String]) -> Vec<String> {
             let enabled = ensure_lxc_compose(stack)
                 .and_then(|_| is_stack_deploy_enabled(stack))
                 .unwrap_or(false);
-            if enabled { Some(stack.clone()) } else { None }
+            let vmid_assigned = read_stack_config(stack).map(|cfg| cfg.vmid > 0).unwrap_or(false);
+            if enabled && vmid_assigned {
+                Some(stack.clone())
+            } else {
+                None
+            }
         })
         .collect()
 }

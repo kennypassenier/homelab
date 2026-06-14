@@ -1,11 +1,12 @@
 # CLIENT Features (Current)
 
-Last updated: 2026-06-12
+Last updated: 2026-06-14
 
 ## Scope
 
 - Ratatui TUI for all interactive flows.
 - Stack/app scaffolding, activation/deactivation, deploy/update queueing.
+- Drift-aware deploy metadata stored in stack `lxc-compose.yml` (`deploy.last_applied_hash`, `deploy.last_applied_apps`).
 - Backup/restore/patch orchestration surfaces.
 - Structured client logfmt-style event emission for critical operations.
 - CLIENT keeps the full session log stream because HOST and LXC now bound their own replay histories.
@@ -33,6 +34,7 @@ Last updated: 2026-06-12
 - Add/delete stack and add/delete app flows.
 - Core app management.
 - Deploy selected and batch deploy/update of active stacks.
+- Batch update shortcut `D`/`u` now queues only drifted active stacks (up-to-date stacks are skipped automatically).
 - Scaffolding shortcut `A` now activates all stacks and queues provision + deploy jobs across all stacks in one action.
 - Batch stack deploy queue now runs in strict serial order (next stack starts only after the previous provision/sync job finished).
 - Fail-closed pre-sync and filesystem-layout validation gates.
@@ -49,6 +51,7 @@ Last updated: 2026-06-12
 - Stack config editor allows stack-level editing of autostart and boot order policy.
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.
 - App rows now expose a real config editor for Git-managed app metadata, starting with Docker image updates.
+- Scaffolding stack/app lists now color-code drift (`[UPD]` / yellow) versus up-to-date active entries (`[ON]` / green).
 - CLIENT now auto-repairs a known legacy `lxc-compose.yml` indentation bug in `network.cidr/gateway` while loading stack config, so activation/deactivation actions (`a` / `x`) continue to work on older scaffolded stacks.
 - New stack defaults explicitly set `deploy.enabled=false` to keep manual activation as the safe default.
 - Latch clone orchestration module can perform offer/create/apply credential sync through local + LXC command execution.

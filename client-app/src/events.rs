@@ -1742,6 +1742,38 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
 
                 match activation_state {
                     Ok(true) => {
+                        match crate::scaffold::read_stack_config(&stack_name) {
+                            Ok(cfg) if cfg.vmid == 0 => {
+                                app.sync_status = format!(
+                                    "Deploy blocked for '{}': vmid=0. Set a VMID in stack settings first.",
+                                    stack_name
+                                );
+                                app.push_client_logfmt(
+                                    "WARN",
+                                    Some(&stack_name),
+                                    Some("deploy_gate"),
+                                    "deploy blocked: vmid=0",
+                                    None,
+                                );
+                                return EventOutcome::Continue;
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                app.sync_status = format!(
+                                    "Cannot read stack config for '{}': {}",
+                                    stack_name, e
+                                );
+                                app.push_client_logfmt(
+                                    "ERROR",
+                                    Some(&stack_name),
+                                    Some("deploy_gate"),
+                                    "deploy stack config check failed",
+                                    Some(&e.to_string()),
+                                );
+                                return EventOutcome::Continue;
+                            }
+                        }
+
                         app.provision_pending = true;
                         app.sync_stack = stack_name.clone();
                         app.sync_pending = true;
@@ -1778,13 +1810,30 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
 
         // Queue sync for all stacks that are currently deploy-enabled.
         KeyCode::Char('D') | KeyCode::Char('u') => {
+            app.refresh_drift_status();
             let active = crate::scaffold::list_deploy_enabled_stacks(&app.stacks);
             if active.is_empty() {
                 app.sync_status = "No active stacks to deploy/update.".to_string();
                 return EventOutcome::Continue;
             }
 
+            let mut skipped_up_to_date = 0usize;
+            let mut queued_now = 0usize;
+
             for stack in active {
+                let stack_has_drift = app.stack_drift.get(&stack).copied().unwrap_or(true);
+                if !stack_has_drift {
+                    skipped_up_to_date += 1;
+                    app.push_client_logfmt(
+                        "INFO",
+                        Some(&stack),
+                        Some("deploy_gate"),
+                        "batch deploy skipped: no stack drift detected",
+                        None,
+                    );
+                    continue;
+                }
+
                 if let Err(e) = crate::stack_features::validate_setup_hook(&stack) {
                     app.push_client_logfmt(
                         "ERROR",
@@ -1814,14 +1863,23 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
                         stack,
                         provision: true,
                     });
+                    queued_now += 1;
                 }
             }
 
-            let queued_count = app.sync_queue.len();
-            app.sync_status = if queued_count == 0 {
-                "No stacks queued (all failed pre-sync validation).".to_string()
+            app.sync_status = if queued_now == 0 && skipped_up_to_date > 0 {
+                format!(
+                    "No updates needed: {} active stack(s) already up-to-date.",
+                    skipped_up_to_date
+                )
+            } else if queued_now == 0 {
+                "No stacks queued (all drifted stacks failed pre-sync validation).".to_string()
             } else {
-                format!("Queued {} active stack sync job(s).", queued_count)
+                format!(
+                    "Queued {} drifted stack sync job(s); {} active stack(s) already up-to-date.",
+                    queued_now,
+                    skipped_up_to_date
+                )
             };
             return EventOutcome::Continue;
         }

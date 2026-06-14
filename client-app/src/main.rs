@@ -360,6 +360,37 @@ async fn async_main() -> Result<()> {
                                 None,
                             );
                         }
+
+                        match crate::scaffold::compute_stack_content_hash(&stack) {
+                            Ok(stack_hash) => {
+                                let app_hashes = crate::scaffold::compute_stack_app_hashes(&stack)
+                                    .unwrap_or_default();
+                                if let Err(e) = crate::scaffold::set_stack_last_applied_state(
+                                    &stack,
+                                    &stack_hash,
+                                    &app_hashes,
+                                ) {
+                                    app.push_client_logfmt(
+                                        "WARN",
+                                        Some(&stack),
+                                        Some("drift_hash"),
+                                        "failed to persist deploy hash metadata",
+                                        Some(&e.to_string()),
+                                    );
+                                } else {
+                                    app.refresh_drift_status();
+                                }
+                            }
+                            Err(e) => {
+                                app.push_client_logfmt(
+                                    "WARN",
+                                    Some(&stack),
+                                    Some("drift_hash"),
+                                    "failed to compute deploy hash metadata",
+                                    Some(&e.to_string()),
+                                );
+                            }
+                        }
                     }
                 }
             }

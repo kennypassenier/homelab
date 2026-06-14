@@ -184,15 +184,24 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
         .take(visible)
         .map(|(i, name)| {
             let is_active = stack_is_active(name);
+            let is_drifted = app.stack_drift.get(name).copied().unwrap_or(true);
             let selected = i == app.selected_stack;
             let style = if selected {
                 stack_glitch_style(app.pulse_phase * 4.0 + (i as f32 * 0.77))
+            } else if is_active && is_drifted {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else if is_active {
                 Style::default().fg(Color::Green)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            let state_tag = if is_active { "[ON ]" } else { "[OFF]" };
+            let state_tag = if is_active && is_drifted {
+                "[UPD]"
+            } else if is_active {
+                "[ON ]"
+            } else {
+                "[OFF]"
+            };
             ListItem::new(format!(" {} {}", state_tag, name)).style(style)
         })
         .collect();
@@ -281,6 +290,13 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
     let mut render_idx: usize = 2; // first two logical indices are reserved for actions
 
     for (i, app_name) in dropdown.apps.iter().enumerate() {
+        let selected_stack_name = &app.stacks[app.selected_stack];
+        let app_is_drifted = app
+            .app_drift
+            .get(selected_stack_name)
+            .and_then(|m| m.get(app_name))
+            .copied()
+            .unwrap_or(true);
         let selected = app.column_focus == 2 && dropdown.selected_option == render_idx;
         let prefix = if dropdown.app_dropdowns[i].expanded {
             "\u{25bc} "
@@ -289,6 +305,8 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
         };
         let style = if selected {
             crate::theme::Theme::pulse_style(app.pulse_phase).add_modifier(Modifier::BOLD)
+        } else if app_is_drifted {
+            Style::default().fg(Color::Yellow)
         } else {
             Style::default().fg(app.theme.text)
         };

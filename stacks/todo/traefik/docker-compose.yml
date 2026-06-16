@@ -10,6 +10,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /appdata/traefik-config:/etc/traefik
       - /appdata/traefik-config/acme:/acme
+    environment:
+      DOCKER_API_VERSION: "1.40"
     labels:
       com.centurylinklabs.watchtower.enable: "true"
       traefik.enable: "true"

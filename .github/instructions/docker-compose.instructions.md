@@ -58,6 +58,12 @@ Watchtower and Promtail containers are infrastructure — they use `com.centuryl
 - Static, non-secret configuration (e.g. `VIKUNJA_DATABASE_TYPE=sqlite`, `PUID=1000`) may live directly in `environment:`.
 - The `.env` file should contain: public URL, service secrets, API keys, IP addresses used in configs.
 
+## Docker API Compatibility
+
+- Any compose file that includes `containrrr/watchtower:latest` must inject `DOCKER_API_VERSION: "1.40"` in `environment:`.
+- Any service that mounts `/var/run/docker.sock` must also inject `DOCKER_API_VERSION: "1.40"` in `environment:`.
+- Treat this as a universal default for new scaffolds and existing compose updates to prevent Docker API mismatch crash loops.
+
 ## PUID / PGID
 
 - Only include `PUID=1000` and `PGID=1000` for **LSIO images** (`lscr.io/linuxserver/*`).

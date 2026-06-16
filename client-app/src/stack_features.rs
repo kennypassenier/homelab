@@ -578,7 +578,7 @@ fn scaffold_promtail(stack_name: &str) -> io::Result<()> {
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(
-            "services:\n  promtail:\n    image: grafana/promtail:latest\n    container_name: {}-promtail\n    environment:\n      - TZ=Europe/Brussels\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - /var/lib/docker/containers:/var/lib/docker/containers:ro\n      - /appdata/{}/promtail-config/config.yml:/etc/promtail/config.yml:ro\n    env_file:\n      - .env\n    command: -config.file=/etc/promtail/config.yml -config.expand-env=true\n    labels:\n      - \"com.centurylinklabs.watchtower.enable=true\"\n",
+            "services:\n  promtail:\n    image: grafana/promtail:latest\n    container_name: {}-promtail\n    environment:\n      - TZ=Europe/Brussels\n      - DOCKER_API_VERSION=1.40\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - /var/lib/docker/containers:/var/lib/docker/containers:ro\n      - /appdata/{}/promtail-config/config.yml:/etc/promtail/config.yml:ro\n    env_file:\n      - .env\n    command: -config.file=/etc/promtail/config.yml -config.expand-env=true\n    labels:\n      - \"com.centurylinklabs.watchtower.enable=true\"\n",
             stack_name, stack_name
         ),
     )?;
@@ -624,7 +624,7 @@ fn scaffold_watchtower(stack_name: &str) -> io::Result<()> {
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(
-            "services:\n  watchtower:\n    image: containrrr/watchtower:latest\n    container_name: {}-watchtower\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n    environment:\n      WATCHTOWER_LABEL_ENABLE: \"true\"\n      WATCHTOWER_CLEANUP: \"true\"\n      WATCHTOWER_POLL_INTERVAL: \"86400\"\n      WATCHTOWER_ROLLING_RESTART: \"true\"\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n",
+            "services:\n  watchtower:\n    image: containrrr/watchtower:latest\n    container_name: {}-watchtower\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n    environment:\n      DOCKER_API_VERSION: \"1.40\"\n      WATCHTOWER_LABEL_ENABLE: \"true\"\n      WATCHTOWER_CLEANUP: \"true\"\n      WATCHTOWER_POLL_INTERVAL: \"86400\"\n      WATCHTOWER_ROLLING_RESTART: \"true\"\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n",
             stack_name
         ),
     )
@@ -640,7 +640,7 @@ fn scaffold_traefik(stack_name: &str) -> io::Result<()> {
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(
-            "services:\n  traefik:\n    image: traefik:v3\n    container_name: {}-traefik\n    restart: unless-stopped\n    ports:\n      - \"80:80\"\n      - \"443:443\"\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - /appdata/traefik-config:/etc/traefik\n      - /appdata/traefik-config/acme:/acme\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n      traefik.enable: \"true\"\n",
+            "services:\n  traefik:\n    image: traefik:v3\n    container_name: {}-traefik\n    restart: unless-stopped\n    ports:\n      - \"80:80\"\n      - \"443:443\"\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - /appdata/traefik-config:/etc/traefik\n      - /appdata/traefik-config/acme:/acme\n    environment:\n      DOCKER_API_VERSION: \"1.40\"\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n      traefik.enable: \"true\"\n",
             stack_name
         ),
     )?;

@@ -18,8 +18,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount the active container storage logs directly from the runtime engine
       - /var/lib/docker/containers:/var/lib/docker/containers
-      # Target host path directory matched to your exact volume requirements
-      - /appdata/cloudflared/promtail/config:/etc/promtail
+      # Mount the configuration file directly from the git repository (source of truth)
+      - /opt/gitops/stacks/cloudflared/promtail-config/config.yml:/etc/promtail/config.yml:ro
     env_file:
       - .env
     command: -config.file=/etc/promtail/config.yml -config.expand-env=true

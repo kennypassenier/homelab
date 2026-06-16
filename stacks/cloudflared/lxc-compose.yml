@@ -5,13 +5,13 @@ hostname: 109-app-cloudflared
 hwaddr: 02:10:2b:c3:b8:9e
 tags: []
 deploy:
-  enabled: true
-  activated_at: '1781627351'
-  last_applied_hash: 8ebc15c49077aabb9ff6fca4d73ad1d31f103a1ed1dcbfcab88372dd81816b33
-  last_applied_at: '1781627421'
+  enabled: false
+  activated_at: null
+  last_applied_hash: c63e59f50c47d5fff227408827c3b06ec67536e4a547c3b5f20dc82eaef842bf
+  last_applied_at: '1781627906'
   last_applied_apps:
     cloudflared: d6fa8bb655d5c0a3438e6bcff04c13785c04f7aa4d68fa7cac77afdb07d842dc
-    promtail: e88ba38bde1441f265c6a5dbe95a51a6f40295ee55371ec3406a85257e3b7aa6
+    promtail: 19680a108f044251b14332c3c7cb35b6bc856c972f3183325b85898c6b8d579d
     watchtower: bcd830a76375a36846d25b8dc67a522e0bc9e094559c9bef77f7696666dd4fd4
 network:
   bridge: vmbr0

@@ -201,6 +201,8 @@ fn parse_volume_source(volume: &str) -> Option<&str> {
 }
 
 fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), String> {
+    let is_file_mount = source.extension().is_some();
+
     if source
         .to_string_lossy()
         .starts_with(&format!("/appdata/{}/", stack_name))
@@ -210,19 +212,25 @@ fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), Strin
             .map_err(|e| e.to_string())?;
         let repo_candidate = repo_stack_root(stack_name).join(suffix);
 
-        if repo_candidate.is_file() {
+        if is_file_mount {
             if let Some(parent) = source.parent() {
                 std::fs::create_dir_all(parent)
                     .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
             }
-            std::fs::copy(&repo_candidate, source).map_err(|e| {
-                format!(
-                    "copy {} -> {} failed: {}",
-                    repo_candidate.display(),
-                    source.display(),
-                    e
-                )
-            })?;
+            if repo_candidate.is_file() {
+                std::fs::copy(&repo_candidate, source).map_err(|e| {
+                    format!(
+                        "copy {} -> {} failed: {}",
+                        repo_candidate.display(),
+                        source.display(),
+                        e
+                    )
+                })?;
+            } else if !source.exists() {
+                std::fs::write(source, "").map_err(|e| {
+                    format!("create file {}: {}", source.display(), e)
+                })?;
+            }
             return Ok(());
         }
 
@@ -233,7 +241,7 @@ fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), Strin
         }
     }
 
-    if source.extension().is_some() {
+    if is_file_mount {
         if let Some(parent) = source.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;

@@ -498,46 +498,108 @@ fn app_compose_yaml(
     let mut out = String::new();
     out.push_str("services:\n");
     out.push_str(&format!("  {}:\n", app_name));
+
+    // ── Image ──────────────────────────────────────────────────────────────────
+    out.push_str("    # Use :latest — Watchtower handles rolling updates automatically.\n");
+    out.push_str("    # Pin to a specific tag (e.g. :1.2.3) only when you need to lock the version.\n");
     out.push_str(&format!("    image: {}\n", docker_image));
+
+    // ── Identity ───────────────────────────────────────────────────────────────
+    out.push_str("    # container_name is set explicitly so logs and docker ps output are readable.\n");
     out.push_str(&format!("    container_name: {}\n", app_name));
+
+    // ── Runtime user ───────────────────────────────────────────────────────────
+    // The LXC daemon sync step 5 reads this field. For every writable bind-mount
+    // directory it runs: mkdir -p <dir> && chown UID:GID <dir>
+    // This ensures the container process can write to its data directories on a
+    // fresh LXC with no pre-existing /opt/gitops/stacks data.
+    //
+    // Rules:
+    //   • Set user: "UID:GID" when the container runs as a non-root user AND
+    //     writes to bind-mounted directories (e.g. Vikunja runs as uid 1000).
+    //   • Omit user: entirely when the container runs as root (traefik, watchtower,
+    //     promtail, cloudflared). Root-owned directories are created without chown.
+    //   • Read-only mounts (:ro) are never chowned — they come from the git checkout.
+    if app_name == "vikunja" {
+        out.push_str("    # Vikunja process runs as uid 1000. The LXC daemon will chown all writable\n");
+        out.push_str("    # bind-mount directories to 1000:1000 before docker compose up.\n");
+        out.push_str("    user: \"1000:1000\"\n");
+    } else {
+        out.push_str("    # user: \"UID:GID\"\n");
+        out.push_str("    # Uncomment and set to UID:GID if this container runs as a non-root user\n");
+        out.push_str("    # and needs to write to its bind-mounted config/data directories.\n");
+        out.push_str("    # The LXC daemon will chown those directories automatically before compose up.\n");
+    }
+
+    // ── Secrets / env ──────────────────────────────────────────────────────────
+    out.push_str("    # env_file is populated at runtime by the latch secret sync step.\n");
+    out.push_str("    # Never commit real credentials here — use .env.example for documentation.\n");
     out.push_str("    env_file:\n");
     out.push_str("      - .env\n");
     out.push_str("    environment:\n");
+    out.push_str("      # TZ must match your Proxmox host timezone to avoid log timestamp skew.\n");
     out.push_str("      - TZ=Europe/Brussels\n");
+
+    // ── Restart ────────────────────────────────────────────────────────────────
+    out.push_str("    # unless-stopped: restart on crash but respect manual docker stop.\n");
     out.push_str("    restart: unless-stopped\n");
+
+    // ── Volumes ────────────────────────────────────────────────────────────────
+    // All config/data paths live under /opt/gitops/stacks/<stack>/<app>-config
+    // because that directory is already present from the git sparse checkout.
+    // The LXC daemon step 5 (compose-prep) creates any missing subdirectories
+    // and chowns them when user: is set above.
+    //
+    // Volume spec format: <host-path>:<container-path>[:<options>]
+    //   :ro  — read-only; the directory already exists in git, prep skips chown.
+    //   (no flag) — writable; prep creates the dir and chowns it if user: is set.
     out.push_str("    volumes:\n");
+    out.push_str("      # Primary config directory — created by prep if missing, chowned if user: is set.\n");
     out.push_str(&format!(
-        "      - /appdata/{}/{}-config:/config\n",
+        "      - /opt/gitops/stacks/{}/{}-config:/config\n",
         stack_name, app_name
     ));
     if app_name == "vikunja" {
+        out.push_str("      # Vikunja user-uploaded files — writable, owned by uid 1000 (see user: above).\n");
         out.push_str(&format!(
-            "      - /appdata/{}/vikunja-config/files:/app/vikunja/files\n",
+            "      - /opt/gitops/stacks/{}/vikunja-config/files:/app/vikunja/files\n",
             stack_name
         ));
+        out.push_str("      # SQLite database directory — writable, owned by uid 1000.\n");
         out.push_str(&format!(
-            "      - /appdata/{}/vikunja-config/db:/db\n",
+            "      - /opt/gitops/stacks/{}/vikunja-config/db:/db\n",
             stack_name
         ));
     }
+
+    // ── Labels ─────────────────────────────────────────────────────────────────
     out.push_str("    labels:\n");
+    out.push_str("      # Watchtower only auto-updates containers that carry this label.\n");
+    out.push_str("      # Controlled by WATCHTOWER_LABEL_ENABLE=true in the watchtower compose.\n");
     out.push_str("      - \"com.centurylinklabs.watchtower.enable=true\"\n");
+    out.push_str("      # Backup pause: the backup agent stops this container before snapshotting\n");
+    out.push_str("      # its bind-mount directories to avoid partial writes in the backup.\n");
     out.push_str("      - \"com.homelab.backup.pause=true\"\n");
 
     if options.include_traefik {
+        out.push_str("      # Traefik routing — expose this service through the stack reverse proxy.\n");
+        out.push_str("      # traefik.enable=true opts this container into dynamic route discovery.\n");
         out.push_str("      - \"traefik.enable=true\"\n");
         if let Some(subdomain) = &options.subdomain {
             let fqdn = format!("{}.{}", subdomain, domain);
+            out.push_str("      # Router rule: requests for this hostname are forwarded here.\n");
             out.push_str(&format!(
                 "      - \"traefik.http.routers.{}.rule=Host(\\\"{}\\\")\"\n",
                 app_name, fqdn
             ));
         } else {
+            out.push_str("      # Router rule: no subdomain configured — falls back to <app>.local.\n");
             out.push_str(&format!(
                 "      - \"traefik.http.routers.{}.rule=Host(\\\"{}.local\\\")\"\n",
                 app_name, app_name
             ));
         }
+        out.push_str("      # Service port: the container port Traefik forwards traffic to.\n");
         out.push_str(&format!(
             "      - \"traefik.http.services.{}.loadbalancer.server.port={}\"\n",
             app_name,
@@ -556,8 +618,40 @@ fn scaffold_promtail(stack_name: &str) -> io::Result<()> {
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(
-            "services:\n  promtail:\n    image: grafana/promtail:latest\n    container_name: {}-promtail\n    environment:\n      - TZ=Europe/Brussels\n      - DOCKER_API_VERSION=1.40\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - /var/lib/docker/containers:/var/lib/docker/containers:ro\n      - /appdata/{}/promtail-config/config.yml:/etc/promtail/config.yml:ro\n    env_file:\n      - .env\n    command: -config.file=/etc/promtail/config.yml -config.expand-env=true\n    labels:\n      - \"com.centurylinklabs.watchtower.enable=true\"\n",
-            stack_name, stack_name
+            concat!(
+                "services:\n",
+                "  promtail:\n",
+                "    # Promtail ships container logs to Loki. It runs as its own app directory\n",
+                "    # so it can be updated and managed independently of application services.\n",
+                "    image: grafana/promtail:latest\n",
+                "    container_name: {stack}-promtail\n",
+                "    # No user: field — Promtail runs as root to read /var/lib/docker/containers.\n",
+                "    # The LXC sync prep step skips chown for root-owned service directories.\n",
+                "    environment:\n",
+                "      - TZ=Europe/Brussels\n",
+                "      # Avoids version-negotiation overhead with older Docker Engine builds.\n",
+                "      - DOCKER_API_VERSION=1.40\n",
+                "    restart: unless-stopped\n",
+                "    volumes:\n",
+                "      # Docker socket — :ro because Promtail only reads container metadata.\n",
+                "      # No user: needed; Promtail already runs as root.\n",
+                "      - /var/run/docker.sock:/var/run/docker.sock:ro\n",
+                "      # Container log directory — :ro, Promtail tails JSON files written by Docker.\n",
+                "      - /var/lib/docker/containers:/var/lib/docker/containers:ro\n",
+                "      # Promtail static config — :ro because it is managed in git.\n",
+                "      # Edit stacks/{stack}/promtail-config/config.yml to change scrape rules.\n",
+                "      # :ro tells the LXC prep step to leave this file alone (already in git checkout).\n",
+                "      - /opt/gitops/stacks/{stack}/promtail-config/config.yml:/etc/promtail/config.yml:ro\n",
+                "    env_file:\n",
+                "      # .env provides LOKI_URL, populated at runtime by the latch secret sync.\n",
+                "      # See .env.example for required variables.\n",
+                "      - .env\n",
+                "    command: -config.file=/etc/promtail/config.yml -config.expand-env=true\n",
+                "    labels:\n",
+                "      # Watchtower auto-updates Promtail alongside the rest of the stack.\n",
+                "      - \"com.centurylinklabs.watchtower.enable=true\"\n",
+            ),
+            stack = stack_name
         ),
     )?;
 
@@ -598,12 +692,42 @@ fn ensure_shared_promtail_env_template() -> io::Result<()> {
 fn scaffold_watchtower(stack_name: &str) -> io::Result<()> {
     let app_dir = format!("stacks/{}/watchtower", stack_name);
     fs::create_dir_all(&app_dir)?;
-    // Watchtower is not user-selectable anymore; every new stack gets it.
+    // Watchtower is not user-selectable; every new stack gets it automatically.
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(
-            "services:\n  watchtower:\n    image: containrrr/watchtower:latest\n    container_name: {}-watchtower\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n    environment:\n      DOCKER_API_VERSION: \"1.40\"\n      WATCHTOWER_LABEL_ENABLE: \"true\"\n      WATCHTOWER_CLEANUP: \"true\"\n      WATCHTOWER_POLL_INTERVAL: \"86400\"\n      WATCHTOWER_ROLLING_RESTART: \"true\"\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n",
-            stack_name
+            concat!(
+                "services:\n",
+                "  watchtower:\n",
+                "    # Watchtower polls Docker Hub for updated images and restarts containers\n",
+                "    # that carry the watchtower label (see WATCHTOWER_LABEL_ENABLE below).\n",
+                "    # It runs as its own app directory so it updates independently.\n",
+                "    image: containrrr/watchtower:latest\n",
+                "    container_name: {stack}-watchtower\n",
+                "    # No user: field — Watchtower must run as root to control the Docker daemon\n",
+                "    # and restart other containers. The docker socket mount below requires root.\n",
+                "    restart: unless-stopped\n",
+                "    volumes:\n",
+                "      # Docker socket — read-write required so Watchtower can pull and recreate containers.\n",
+                "      # No :ro here; Watchtower needs full daemon access. No user: for the same reason.\n",
+                "      - /var/run/docker.sock:/var/run/docker.sock\n",
+                "    environment:\n",
+                "      DOCKER_API_VERSION: \"1.40\"\n",
+                "      # Only update containers that explicitly opt in via the watchtower label.\n",
+                "      # Without this, Watchtower would update every container on the daemon.\n",
+                "      WATCHTOWER_LABEL_ENABLE: \"true\"\n",
+                "      # Remove old images after pulling new ones to keep disk usage in check.\n",
+                "      WATCHTOWER_CLEANUP: \"true\"\n",
+                "      # Check for updates every 24 hours (86400 seconds).\n",
+                "      # Lower this value (e.g. 3600) if you want hourly checks.\n",
+                "      WATCHTOWER_POLL_INTERVAL: \"86400\"\n",
+                "      # Restart one container at a time to minimise service disruption.\n",
+                "      WATCHTOWER_ROLLING_RESTART: \"true\"\n",
+                "    labels:\n",
+                "      # Watchtower also updates itself — this label opts it into its own update cycle.\n",
+                "      com.centurylinklabs.watchtower.enable: \"true\"\n",
+            ),
+            stack = stack_name
         ),
     )
 }
@@ -618,8 +742,44 @@ fn scaffold_traefik(stack_name: &str) -> io::Result<()> {
     fs::write(
         format!("{}/docker-compose.yml", app_dir),
         format!(
-            "services:\n  traefik:\n    image: traefik:v3\n    container_name: {}-traefik\n    restart: unless-stopped\n    ports:\n      - \"80:80\"\n      - \"443:443\"\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - /appdata/traefik-config:/etc/traefik\n      - /appdata/traefik-config/acme:/acme\n    environment:\n      DOCKER_API_VERSION: \"1.40\"\n    labels:\n      com.centurylinklabs.watchtower.enable: \"true\"\n      traefik.enable: \"true\"\n",
-            stack_name
+            concat!(
+                "services:\n",
+                "  traefik:\n",
+                "    # Traefik is the reverse proxy for this stack. It watches Docker labels on\n",
+                "    # other containers and builds routing rules dynamically — no static config\n",
+                "    # changes are needed when you add or remove app services.\n",
+                "    image: traefik:v3\n",
+                "    container_name: {stack}-traefik\n",
+                "    # No user: field — Traefik must run as root to bind privileged ports 80/443.\n",
+                "    # The LXC prep step will create the traefik-config and acme directories\n",
+                "    # as root, which is correct since Traefik owns them.\n",
+                "    restart: unless-stopped\n",
+                "    ports:\n",
+                "      # HTTP — typically redirected to HTTPS by the entrypoint rule in traefik.yml.\n",
+                "      - \"80:80\"\n",
+                "      # HTTPS — TLS termination here; upstream services receive plain HTTP.\n",
+                "      - \"443:443\"\n",
+                "    volumes:\n",
+                "      # Docker socket — :ro because Traefik only reads container labels/events.\n",
+                "      # No user: needed; socket ownership allows root-level reads.\n",
+                "      - /var/run/docker.sock:/var/run/docker.sock:ro\n",
+                "      # Static config (traefik.yml) + dynamic config dir from the git checkout.\n",
+                "      # Edit stacks/{stack}/traefik-config/traefik.yml to change entrypoints,\n",
+                "      # certificate resolvers, etc. Writable so Traefik can write provider state.\n",
+                "      - /opt/gitops/stacks/{stack}/traefik-config:/etc/traefik\n",
+                "      # ACME certificate store — writable, persists Let's Encrypt certs across restarts.\n",
+                "      # No user: chown needed; Traefik writes as root, which is fine here.\n",
+                "      - /opt/gitops/stacks/{stack}/traefik-config/acme:/acme\n",
+                "    environment:\n",
+                "      DOCKER_API_VERSION: \"1.40\"\n",
+                "    labels:\n",
+                "      # Watchtower auto-updates Traefik when a new image is published.\n",
+                "      com.centurylinklabs.watchtower.enable: \"true\"\n",
+                "      # traefik.enable=true makes Traefik route traffic to itself if needed\n",
+                "      # (e.g. for a dashboard). Remove if you don't expose the Traefik dashboard.\n",
+                "      traefik.enable: \"true\"\n",
+            ),
+            stack = stack_name
         ),
     )?;
 

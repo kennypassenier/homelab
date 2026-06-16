@@ -110,6 +110,7 @@ pub async fn run_server(app: Arc<Mutex<App>>) {
         .route("/api/metrics", get(handle_metrics))
         .route("/api/update", post(handle_update))
         .route("/api/provision", post(handle_provision))
+        .route("/api/provision/stop", post(handle_stop_stack))
         .route("/api/provision/destroy", post(handle_destroy_stack))
         .route("/api/logs/ws", get(handle_ws))
         .with_state(app);
@@ -351,6 +352,33 @@ async fn handle_destroy_stack(
     })
 }
 
+async fn handle_stop_stack(
+    State(app): State<Arc<Mutex<App>>>,
+    Json(payload): Json<DestroyStackPayload>,
+) -> Json<ApiResponse> {
+    {
+        let mut a = app.lock().unwrap();
+        a.add_log(
+            LogLevel::Warn,
+            format!(
+                "[provision] stop requested via HTTP API stack={}",
+                payload.stack_name
+            ),
+        );
+    }
+
+    let app_clone = app.clone();
+    let stack_name = payload.stack_name;
+    tokio::task::spawn_blocking(move || {
+        run_stop_stack_cycle(&app_clone, &stack_name);
+    });
+
+    Json(ApiResponse {
+        status: "accepted".to_string(),
+        message: "Stack container stop started".to_string(),
+    })
+}
+
 async fn handle_ws(ws: WebSocketUpgrade, State(app): State<Arc<Mutex<App>>>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_ws_client(socket, app))
 }
@@ -519,6 +547,48 @@ async fn handle_ws_client(mut socket: WebSocket, app: Arc<Mutex<App>>) {
                                             "request_id": request_id,
                                             "ok": true,
                                             "message": "Stack container destroy started"
+                                        });
+                                        let _ = socket.send(Message::Text(response.to_string())).await;
+                                    }
+                                } else if kind == "stop_stack_request" {
+                                    let stack_name = req
+                                        .get("stack_name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .trim()
+                                        .to_string();
+
+                                    if stack_name.is_empty() {
+                                        let response = serde_json::json!({
+                                            "kind": "stop_stack_response",
+                                            "request_id": request_id,
+                                            "ok": false,
+                                            "message": "stack_name is required"
+                                        });
+                                        let _ = socket.send(Message::Text(response.to_string())).await;
+                                    } else {
+                                        {
+                                            let mut guard = app.lock().unwrap();
+                                            guard.add_log(
+                                                LogLevel::Warn,
+                                                format!(
+                                                    "[provision] stop requested via WebSocket RPC stack={}",
+                                                    stack_name
+                                                ),
+                                            );
+                                        }
+
+                                        let app_clone = app.clone();
+                                        let stack_for_worker = stack_name.clone();
+                                        tokio::task::spawn_blocking(move || {
+                                            run_stop_stack_cycle(&app_clone, &stack_for_worker);
+                                        });
+
+                                        let response = serde_json::json!({
+                                            "kind": "stop_stack_response",
+                                            "request_id": request_id,
+                                            "ok": true,
+                                            "message": "Stack container stop started"
                                         });
                                         let _ = socket.send(Message::Text(response.to_string())).await;
                                     }
@@ -789,6 +859,43 @@ pub fn run_destroy_stack_cycle(app: &Arc<Mutex<App>>, stack_name: &str) {
         Err(e) => app.lock().unwrap().add_log(
             LogLevel::Error,
             format!("[provision] destroy failed stack={} error={}", stack, e),
+        ),
+    }
+}
+
+/// Stop one stack container by stack name (called from HTTP and WS RPC handlers).
+pub fn run_stop_stack_cycle(app: &Arc<Mutex<App>>, stack_name: &str) {
+    use std::path::Path;
+
+    let gitops_root = std::env::var("GITOPS_REPO").unwrap_or_else(|_| {
+        std::env::var("HOME")
+            .map(|home| format!("{}/homelab", home))
+            .unwrap_or_else(|_| "/root/homelab".to_string())
+    });
+
+    let stack = stack_name.to_string();
+    let app_for_log = app.clone();
+    let log = move |level: &str, msg: &str| {
+        let log_level = match level {
+            "error" => LogLevel::Error,
+            "warn" => LogLevel::Warn,
+            "ok" => LogLevel::Ok,
+            _ => LogLevel::Info,
+        };
+        app_for_log
+            .lock()
+            .unwrap()
+            .add_log(log_level, msg.to_string());
+    };
+
+    match provision::stop_stack_container(Path::new(&gitops_root), &stack, false, &log) {
+        Ok(()) => app.lock().unwrap().add_log(
+            LogLevel::Ok,
+            format!("[provision] stop complete stack={}", stack),
+        ),
+        Err(e) => app.lock().unwrap().add_log(
+            LogLevel::Error,
+            format!("[provision] stop failed stack={} error={}", stack, e),
         ),
     }
 }

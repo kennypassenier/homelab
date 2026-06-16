@@ -1212,6 +1212,85 @@ pub fn destroy_stack_container(
     Ok(())
 }
 
+/// Stop a single stack container by stack name without destroying it.
+pub fn stop_stack_container(
+    repo_root: &Path,
+    stack_name: &str,
+    dry_run: bool,
+    log: &dyn Fn(&str, &str),
+) -> Result<(), String> {
+    let intents = scan_stack_intents(repo_root)?;
+    let Some(intent) = intents.into_iter().find(|i| i.stack_name == stack_name) else {
+        return Err(format!(
+            "stack '{}' not found in stacks/*/lxc-compose.yml",
+            stack_name
+        ));
+    };
+
+    let validation = validate_lxc(intent.vmid, &intent)?;
+    if !validation.exists {
+        log(
+            "info",
+            &format!(
+                "[provision] stop stack='{}' vmid={} skipped (container not found)",
+                stack_name, intent.vmid
+            ),
+        );
+        return Ok(());
+    }
+
+    if dry_run {
+        log(
+            "info",
+            &format!(
+                "[provision] DRY-RUN stop stack='{}' vmid={} hostname={}",
+                stack_name, intent.vmid, intent.hostname
+            ),
+        );
+        return Ok(());
+    }
+
+    let status_output = Command::new("pct")
+        .arg("status")
+        .arg(intent.vmid.to_string())
+        .output()
+        .map_err(|e| format!("Failed to execute pct status: {}", e))?;
+    let status_text = String::from_utf8_lossy(&status_output.stdout).to_ascii_lowercase();
+    if status_text.contains("stopped") {
+        log(
+            "info",
+            &format!(
+                "[provision] stop stack='{}' vmid={} skipped (already stopped)",
+                stack_name, intent.vmid
+            ),
+        );
+        return Ok(());
+    }
+
+    let output = Command::new("pct")
+        .arg("stop")
+        .arg(intent.vmid.to_string())
+        .output()
+        .map_err(|e| format!("Failed to execute pct stop: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "pct stop failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    log(
+        "ok",
+        &format!(
+            "[provision] stopped stack='{}' vmid={} hostname={}",
+            stack_name, intent.vmid, intent.hostname
+        ),
+    );
+
+    Ok(())
+}
+
 fn disable_stack_deploy(repo_root: &Path, stack_name: &str, reason: &str) -> Result<(), String> {
     let compose_path = repo_root
         .join("stacks")

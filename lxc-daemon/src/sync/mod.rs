@@ -68,12 +68,18 @@ pub async fn run(state: Arc<Mutex<AppState>>) {
         Some(creds) => {
             if let Err(e) = secrets::latch_pull(state.clone(), creds).await {
                 state.lock().unwrap().add_log(LogLevel::Error, format!("[latch] {}", e));
-                // non-fatal — continue
+                return finish(state, false, format!("latch pull validation failed: {}", e)).await;
             }
         }
         None => {
-            state.lock().unwrap().add_log(LogLevel::Error,
-                "[latch] SKIP — no credentials from CLIENT (set LATCH_PAT/KEY/REPO in config/.env)".to_string());
+            let msg =
+                "no latch credentials from CLIENT (set LATCH_PAT/KEY/REPO in config/.env)"
+                    .to_string();
+            state
+                .lock()
+                .unwrap()
+                .add_log(LogLevel::Error, format!("[latch] BLOCKED — {}", msg));
+            return finish(state, false, format!("latch pull validation failed: {}", msg)).await;
         }
     }
 
@@ -81,18 +87,22 @@ pub async fn run(state: Arc<Mutex<AppState>>) {
     let pre_sync = format!("{}/stacks/{}/pre-sync.sh", GITOPS_REPO, stack_name);
     if Path::new(&pre_sync).exists() {
         step(&state, 5, TOTAL, "Run pre-sync.sh hook", &stack_name);
-        run_hook(&state, &pre_sync, &stack_name).await;
+        if let Err(e) = run_hook(&state, &pre_sync, &stack_name).await {
+            return finish(state, false, format!("pre-sync validation failed: {}", e)).await;
+        }
     }
 
     // ── Step 6: docker compose pull + up ─────────────────────────────────
     step(&state, 6, TOTAL, "docker compose pull + up for each app", &stack_name);
-    compose::deploy_apps(state.clone(), &stack_name).await;
+    if let Err(e) = compose::deploy_apps(state.clone(), &stack_name).await {
+        return finish(state, false, format!("compose deployment failed: {}", e)).await;
+    }
     compose::garbage_collect(state.clone(), &stack_name).await;
 
     finish(state, true, "Sync complete".to_string()).await;
 }
 
-async fn run_hook(state: &Arc<Mutex<AppState>>, hook_path: &str, stack_name: &str) {
+async fn run_hook(state: &Arc<Mutex<AppState>>, hook_path: &str, stack_name: &str) -> Result<(), String> {
     let stack_dir = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
     let hook = hook_path.to_string();
     let sn = stack_name.to_string();
@@ -108,17 +118,28 @@ async fn run_hook(state: &Arc<Mutex<AppState>>, hook_path: &str, stack_name: &st
         Ok(o) => {
             let code = o.status.code().unwrap_or(-1);
             let mut s = state.lock().unwrap();
-            let lvl = if code == 0 { LogLevel::Ok } else { LogLevel::Warn };
+            let lvl = if code == 0 { LogLevel::Ok } else { LogLevel::Error };
             s.add_log(lvl, format!("[sync][exit] pre-sync.sh stack={} exit={}", sn, code));
             for line in String::from_utf8_lossy(&o.stdout).lines().filter(|l| !l.trim().is_empty()) {
                 s.add_log(LogLevel::Info, format!("[sync][stdout] pre-sync.sh {}", line));
             }
             for line in String::from_utf8_lossy(&o.stderr).lines().filter(|l| !l.trim().is_empty()) {
-                s.add_log(LogLevel::Warn, format!("[sync][stderr] pre-sync.sh {}", line));
+                s.add_log(LogLevel::Error, format!("[sync][stderr] pre-sync.sh {}", line));
+            }
+            if code != 0 {
+                return Err(format!("pre-sync.sh exit={}", code));
             }
         }
-        Err(e) => state.lock().unwrap().add_log(LogLevel::Error, format!("[sync][spawn] pre-sync.sh {}", e)),
+        Err(e) => {
+            state
+                .lock()
+                .unwrap()
+                .add_log(LogLevel::Error, format!("[sync][spawn] pre-sync.sh {}", e));
+            return Err(format!("pre-sync.sh spawn failed: {}", e));
+        }
     }
+
+    Ok(())
 }
 
 async fn finish(state: Arc<Mutex<AppState>>, ok: bool, msg: String) {

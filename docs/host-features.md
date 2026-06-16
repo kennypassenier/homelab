@@ -182,6 +182,13 @@ After manual recovery, future releases should self-update normally again.
 - Duplicate HTTP/WebSocket provisioning requests received while a cycle is already running are skipped with an informational log line.
 - This prevents concurrent `pct create` races against the same VMID and avoids false fail-close toggles caused by duplicate requests.
 
+## Stack Stop Controls
+
+- HOST now supports stopping a stack container without destroying it.
+- HTTP endpoint: `POST /api/provision/stop` with payload `{ "stack_name": "<name>" }`.
+- WebSocket RPC: `kind=stop_stack_request` -> `kind=stop_stack_response`.
+- Stop operations are logged under `[provision] stop ...` and are safe no-op when the container is already stopped.
+
 ## Provisioning Resume on Existing VMID
 
 - HOST provisioning now detects partial bootstrap state even when `vmid` already exists and base config matches intent.

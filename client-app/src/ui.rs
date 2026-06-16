@@ -243,6 +243,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
         "+ add app",
         "✗ delete stack",
         "≡ stack config",
+        "◼ stop lxc",
         "☠ destroy lxc",
     ];
     let dropdown = &app.stack_dropdowns[app.selected_stack];
@@ -252,7 +253,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
         .map(|(j, label)| {
             let selected = app.column_focus == 1 && dropdown.selected_option == j;
             let base = match j {
-                1 | 3 => Style::default()
+                1 | 3 | 4 => Style::default()
                     .fg(app.theme.warning)
                     .add_modifier(Modifier::BOLD),
                 _ => Style::default().fg(app.theme.accent_cyan),
@@ -354,7 +355,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_widget(
         Paragraph::new(
-            "  [n] new stack   [a] activate   [x] deactivate   [A] activate+deploy all   [c] add core apps   [g/G] gpu on/off app   [s] deploy selected   [D/u] deploy/update all active",
+            "  [n] new stack   [a] activate   [x] deactivate   [A] activate+deploy all   [c] add core apps   [g/G] gpu on/off app   [s] deploy selected   [D/u] deploy/update all active   [Enter on Actions] stop/destroy",
         )
         .style(Style::default().fg(Color::DarkGray)),
         rows[1],

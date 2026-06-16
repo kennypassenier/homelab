@@ -1,6 +1,6 @@
 # LLM Context (Current)
 
-Last updated: 2026-06-14
+Last updated: 2026-06-16
 
 ## Architecture Summary
 
@@ -58,6 +58,7 @@ Last updated: 2026-06-14
 - CLIENT now retries sync automatically after LXC websocket connect when an earlier dispatch failed during bootstrap-time connection refusal.
 - CLIENT/HOST/LXC websocket streams now exchange keepalive traffic so idle periods do not drop otherwise healthy connections.
 - CLIENT now debounces duplicate HOST provision dispatches and suppresses identical consecutive LXC log lines in the Logs tab to reduce reconnect-noise spam.
+- CLIENT Logs now parse websocket logfmt fields (`ts`, `level`, `msg`) and render daemon-provided timestamps/levels directly, including dedicated STEP visual styling.
 - HOST provisioning now fail-closes stack activation: when CREATE/RECREATE/UPDATE fails for a stack, HOST writes `deploy.enabled=false` and `deploy.last_failure` into that stack `lxc-compose.yml` so retries require explicit re-enable.
 - HOST provisioning now coalesces duplicate HTTP/WebSocket requests into a single in-flight reconcile cycle to avoid concurrent VMID CREATE races.
 - HOST provisioning now resumes partially bootstrapped existing LXCs (`RESUME_BOOTSTRAP`) when bootstrap artifacts are missing, instead of treating them as fully `OK`.
@@ -68,7 +69,9 @@ Last updated: 2026-06-14
 - LXC mount validation now defaults to `/appdata` in native daemon mode and supports an optional secondary path via `MOUNT_CHECK_SECONDARY`.
 - HOST now receives CLIENT heartbeats via websocket RPC (`client_heartbeat`) with HTTP `POST /api/heartbeat` fallback; HOST failsafe uses this API-level liveness signal.
 - HOST daemon runs headless-only in deployed operation.
+- HOST exposes stack stop controls via `POST /api/provision/stop` and websocket `stop_stack_request` for non-destructive operator abort/reset flows from CLIENT.
 - CLIENT uses websocket RPC over LXC `/api/logs/ws` for sync, restore, heartbeat, and command execution, with HTTP endpoints retained as compatibility fallback.
 - HOST and LXC now emit startup lifecycle logs containing `daemon_version=...`; CLIENT surfaces version detection and version-change events in Logs.
-- LXC sync logging now emits an explicit request plan and per-command transcript lines (`[sync][run]`, `[sync][exit]`, `[sync][stdout]`, `[sync][stderr]`) over the websocket log stream so operators can see the exact command sequence and raw command output during reconcile.
+- LXC sync logging now emits an explicit request plan and per-command transcript lines (`[sync][run]`, `[sync][exit]`, `[sync][stdout]`, `[sync][stderr]`) over the websocket log stream so operators can see the exact command sequence and raw command output during reconcile; failed compose commands additionally emit `docker compose logs --tail 80` and `docker compose ps --all` diagnostics.
+- LXC sync now validates each deploy step in fail-closed mode: missing latch credentials, latch pull failures, pre-sync hook failures, missing compose `env_file` targets, or failing compose pull/up abort the sync cycle before subsequent actions continue.
 - Manual diagnostic and recovery commands live in `docs/debug.md`.

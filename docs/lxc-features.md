@@ -1,6 +1,6 @@
 # LXC Features (Current)
 
-Last updated: 2026-06-12
+Last updated: 2026-06-16
 
 ## Scope
 
@@ -27,6 +27,8 @@ Last updated: 2026-06-12
 - update API endpoint (`POST /api/update`) for immediate daemon image refresh/recreate, with optional one-shot `latch` payload.
 - websocket telemetry endpoint for CLIENT modal/log views, with bounded in-memory replay history capped at 10,000 old lines, an age threshold controlled by `LOG_HISTORY_AGE_SECS`, and severity-aware eviction that removes old `DEBUG`/`INFO` lines before `WARN` or `ERROR` lines.
 - sync telemetry now emits a request preamble plus per-command transcript lines (`[sync][run]`, `[sync][exit]`, `[sync][stdout]`, `[sync][stderr]`) so CLIENT Logs shows the exact LXC-side command flow and raw command output during reconcile.
+- sync execution is now fail-closed between steps: latch pull, pre-sync hook, and compose deploy must validate successfully before the next step executes.
+- compose deploy now validates referenced `env_file` paths from each app `docker-compose.yml` before `docker compose up`; missing env files abort sync with explicit validation logs.
 - restore execution backend endpoint (`POST /api/restore`) with phased status events.
 - websocket update RPC (`update_request`/`update_response`) and keepalive frames for idle-stable connections.
 - websocket sync/update RPC (`sync_request`, `update_request`) accept optional one-shot `latch` payload used for request-scoped `latch pull` execution.

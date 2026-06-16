@@ -1479,7 +1479,7 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
             }
             1 => {
                 let d = &mut app.stack_dropdowns[app.selected_stack];
-                if d.selected_option + 1 < 4 {
+                if d.selected_option + 1 < 5 {
                     d.selected_option += 1;
                 }
             }
@@ -2086,6 +2086,12 @@ fn handle_scaffolding_enter(app: &mut App) -> EventOutcome {
                     }
                 },
                 3 => {
+                    app.stop_stack = stack_name.clone();
+                    app.stop_stack_pending = true;
+                    app.sync_status =
+                        format!("Queued stop for stack '{}' (non-destructive).", stack_name);
+                }
+                4 => {
                     app.modal = ActiveModal::DeleteLxcConfirmation {
                         stack_name,
                         input: Input::default(),

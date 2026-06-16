@@ -231,6 +231,10 @@ pub struct App {
     pub destroy_stack_pending: bool,
     /// Stack currently targeted for HOST-side container destroy.
     pub destroy_stack: String,
+    /// When true, main loop dispatches a HOST request to stop one stack LXC.
+    pub stop_stack_pending: bool,
+    /// Stack currently targeted for HOST-side container stop.
+    pub stop_stack: String,
     /// Backup schedule policy edited in Backups tab.
     pub backup_schedule: BackupSchedule,
     /// Update operation in progress (stack name or "HOST").
@@ -350,6 +354,8 @@ impl App {
             pipeline_runners: HashMap::new(),
             destroy_stack_pending: false,
             destroy_stack: String::new(),
+            stop_stack_pending: false,
+            stop_stack: String::new(),
             backup_schedule: BackupSchedule::load_or_default(),
             update_in_progress: None,
             update_status: String::new(),
@@ -458,12 +464,36 @@ impl App {
     /// HOST and LXC now cap their own replay histories, so the client can keep the
     /// full session stream without trimming older entries here.
     pub fn push_log(&mut self, source: &str, level: &str, message: &str) {
-        self.push_log_raw(source, level, message, SystemTime::now());
+        self.push_log_raw(source, level, message, None, SystemTime::now());
     }
 
-    fn push_log_raw(&mut self, source: &str, level: &str, message: &str, now: SystemTime) {
+    /// Pushes a log entry while preserving an upstream timestamp string.
+    pub fn push_log_with_time(
+        &mut self,
+        source: &str,
+        level: &str,
+        message: &str,
+        time: Option<&str>,
+    ) {
+        self.push_log_raw(
+            source,
+            level,
+            message,
+            time.map(ToString::to_string),
+            SystemTime::now(),
+        );
+    }
+
+    fn push_log_raw(
+        &mut self,
+        source: &str,
+        level: &str,
+        message: &str,
+        time: Option<String>,
+        now: SystemTime,
+    ) {
         self.logs.push(LogLine {
-            time: current_time_str(),
+            time: time.unwrap_or_else(current_time_str),
             source: source.to_string(),
             level: level.to_string(),
             message: message.to_string(),

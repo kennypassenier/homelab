@@ -1,6 +1,6 @@
 # CLIENT Features (Current)
 
-Last updated: 2026-06-14
+Last updated: 2026-06-16
 
 ## Scope
 
@@ -22,6 +22,8 @@ Last updated: 2026-06-14
 - Session heartbeat pulses to HOST now use websocket RPC (`client_heartbeat`) with HTTP `POST /api/heartbeat` fallback.
 - Live HOST connectivity polling via HOST metrics API (`GET /api/metrics`) with runtime node/LXC status in the Host Management tab.
 - Logs tab source focus mode (Shift+f) to isolate one source without dropping global log ingestion.
+- Logs tab now parses websocket logfmt fields authoritatively (`ts`, `level`, `msg`) so displayed timestamps/levels come from daemon-emitted values instead of CLIENT receive time.
+- STEP headers (`level=step`) render as distinct amber banners in Logs for clearer pipeline progress visibility.
 - CLIENT detects `daemon_version=` markers from HOST/LXC websocket logs and emits explicit version-detected/version-changed log lines.
 - Update tab cards now render per-target metadata: detected daemon version plus last manual update outcome/timestamp for HOST and each LXC stack.
 - Top tab bar keeps the glitch treatment while other sections render stable titles; selected tab uses a filled highlight style for clearer focus.
@@ -53,6 +55,7 @@ Last updated: 2026-06-14
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.
 - App rows now expose a real config editor for Git-managed app metadata, starting with Docker image updates.
 - Scaffolding stack/app lists now color-code drift (`[UPD]` / yellow) versus up-to-date active entries (`[ON]` / green).
+- Scaffolding Actions now include a non-destructive `stop lxc` operation to halt a running stack container before retrying deploy/sync flows.
 - CLIENT now auto-repairs a known legacy `lxc-compose.yml` indentation bug in `network.cidr/gateway` while loading stack config, so activation/deactivation actions (`a` / `x`) continue to work on older scaffolded stacks.
 - New stack defaults explicitly set `deploy.enabled=false` to keep manual activation as the safe default.
 - Latch clone orchestration module can perform offer/create/apply credential sync through local + LXC command execution.

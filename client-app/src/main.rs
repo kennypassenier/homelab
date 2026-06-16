@@ -353,10 +353,15 @@ async fn async_main() -> Result<()> {
                 }
 
                 SyncEvent::LiveLog { stack, line } => {
-                    if let Some((level, message)) = parse_live_log_line(&line) {
+                    if let Some(parsed) = parse_live_log_line(&line) {
                         app.mark_live_logs_seen();
                         let source = format!("lxc-{}", stack);
-                        app.push_log(&source, &level, &message);
+                        app.push_log_with_time(
+                            &source,
+                            &parsed.level,
+                            &parsed.message,
+                            parsed.time.as_deref(),
+                        );
                     }
                 }
                 SyncEvent::Finished { stack, ok, msg } => {
@@ -507,24 +512,15 @@ async fn async_main() -> Result<()> {
         while let Ok(event) = ws_rx.try_recv() {
             match event {
                 WsEvent::LogMessage { source, line } => {
-                    // Parse log level from the line (e.g., "[INFO] message" or "message")
-                    let (level, message) = if let Some(stripped) = line.strip_prefix("[INFO] ") {
-                        ("INFO".to_string(), stripped.to_string())
-                    } else if let Some(stripped) = line.strip_prefix("[ERROR] ") {
-                        ("ERROR".to_string(), stripped.to_string())
-                    } else if let Some(stripped) = line.strip_prefix("[WARN] ") {
-                        ("WARN".to_string(), stripped.to_string())
-                    } else if let Some(stripped) = line.strip_prefix("[OK] ") {
-                        ("OK".to_string(), stripped.to_string())
-                    } else {
-                        ("INFO".to_string(), line.clone())
+                    let Some(parsed) = parse_live_log_line(&line) else {
+                        continue;
                     };
 
                     // Intercept HOST lxc_ready signals BEFORE pushing to the log.
                     // add_log sends "[INFO] {json}" so we check the stripped `message`.
                     // Suppress the raw JSON from the visible log; emit a human line instead.
                     if source == "HOST" {
-                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&message) {
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&parsed.message) {
                             if v.get("kind").and_then(|k| k.as_str()) == Some("lxc_ready") {
                                 if let Some(stack) = v.get("stack").and_then(|s| s.as_str()) {
                                     app.mark_lxc_ready(stack);
@@ -538,8 +534,13 @@ async fn async_main() -> Result<()> {
                         }
                     }
 
-                    app.push_log(&source, &level, &message);
-                    track_daemon_version(&mut app, &source, &message);
+                    app.push_log_with_time(
+                        &source,
+                        &parsed.level,
+                        &parsed.message,
+                        parsed.time.as_deref(),
+                    );
+                    track_daemon_version(&mut app, &source, &parsed.message);
                 }
                 WsEvent::ConnectionStateChanged {
                     source,
@@ -797,6 +798,44 @@ async fn async_main() -> Result<()> {
                             stack: stack.clone(),
                             line: format!(
                                 "CLIENT ERROR component=client level=error stack={} phase=destroy_result msg=\"HOST destroy failed\" error=\"{}\"",
+                                stack,
+                                e.replace('"', "'")
+                            ),
+                        });
+                    }
+                }
+            });
+        }
+
+        // If a stack-stop was requested, ask HOST to stop the selected LXC.
+        if app.stop_stack_pending {
+            app.stop_stack_pending = false;
+            let stack = app.stop_stack.clone();
+            let tx = sync_tx.clone();
+            app.push_client_logfmt(
+                "WARN",
+                Some(&stack),
+                Some("stop_dispatch"),
+                "requesting HOST to stop stack LXC container",
+                None,
+            );
+            tokio::spawn(async move {
+                match trigger_host_stop_stack(&stack).await {
+                    Ok(msg) => {
+                        let _ = tx.send(SyncEvent::LiveLog {
+                            stack: stack.clone(),
+                            line: format!(
+                                "CLIENT WARN component=client level=warn stack={} phase=stop_result msg=\"{}\"",
+                                stack,
+                                msg.replace('"', "'")
+                            ),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(SyncEvent::LiveLog {
+                            stack: stack.clone(),
+                            line: format!(
+                                "CLIENT ERROR component=client level=error stack={} phase=stop_result msg=\"HOST stop failed\" error=\"{}\"",
                                 stack,
                                 e.replace('"', "'")
                             ),
@@ -1284,9 +1323,32 @@ fn compare_host_tag_versions(a: &str, b: &str) -> Ordering {
     Ordering::Equal
 }
 
-fn parse_live_log_line(line: &str) -> Option<(String, String)> {
+struct ParsedLiveLog {
+    time: Option<String>,
+    level: String,
+    message: String,
+}
+
+fn parse_live_log_line(line: &str) -> Option<ParsedLiveLog> {
     if line.contains("\"kind\":\"ws_keepalive\"") || line.contains("kind=ws_keepalive") {
         return None;
+    }
+
+    // Legacy bracket-prefixed host lines: "[INFO] ..."
+    for (prefix, level) in [
+        ("[INFO] ", "INFO"),
+        ("[WARN] ", "WARN"),
+        ("[ERROR] ", "ERROR"),
+        ("[OK] ", "OK"),
+        ("[STEP] ", "STEP"),
+    ] {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            return Some(ParsedLiveLog {
+                time: None,
+                level: level.to_string(),
+                message: rest.trim().to_string(),
+            });
+        }
     }
 
     let level = extract_logfmt_field(line, "level")
@@ -1297,13 +1359,46 @@ fn parse_live_log_line(line: &str) -> Option<(String, String)> {
     }
 
     let message = extract_logfmt_field(line, "msg").unwrap_or_else(|| line.trim().to_string());
+    let time =
+        extract_logfmt_field(line, "ts").and_then(|ts| iso_timestamp_to_hms(&ts).or(Some(ts)));
 
     // Pipeline step headers: route as STEP level so the UI renders them as amber banners.
-    if level == "STEP" {
-        return Some(("STEP".to_string(), message));
-    }
+    let normalized_level = if level == "STEP" { "STEP" } else { &level };
 
-    Some((level, message))
+    Some(ParsedLiveLog {
+        time,
+        level: normalized_level.to_string(),
+        message,
+    })
+}
+
+fn iso_timestamp_to_hms(ts: &str) -> Option<String> {
+    // Accept forms like "2026-06-16T14:40:21" and "2026-06-16T14:40:21Z".
+    let t_idx = ts.find('T')?;
+    let after_t = &ts[t_idx + 1..];
+    let mut buf = String::new();
+    for ch in after_t.chars() {
+        if ch.is_ascii_digit() || ch == ':' {
+            buf.push(ch);
+        } else {
+            break;
+        }
+    }
+    let mut parts = buf.split(':');
+    let h = parts.next()?;
+    let m = parts.next()?;
+    let s = parts.next()?;
+    if h.len() == 2
+        && m.len() == 2
+        && s.len() == 2
+        && h.chars().all(|c| c.is_ascii_digit())
+        && m.chars().all(|c| c.is_ascii_digit())
+        && s.chars().all(|c| c.is_ascii_digit())
+    {
+        Some(format!("{}:{}:{}", h, m, s))
+    } else {
+        None
+    }
 }
 
 fn is_retryable_sync_dispatch_error(msg: &str) -> bool {
@@ -1671,6 +1766,15 @@ async fn trigger_host_destroy_stack(stack_name: &str) -> Result<String, String> 
     }
 }
 
+/// Ask HOST to stop one stack container via WS RPC or HTTP fallback.
+async fn trigger_host_stop_stack(stack_name: &str) -> Result<String, String> {
+    if request_host_stop_stack_ws(stack_name).await.is_ok() {
+        Ok("HOST stack stop started via websocket".to_string())
+    } else {
+        request_host_stop_stack_http(stack_name).await
+    }
+}
+
 async fn request_host_provision_ws(stack_name: &str) -> Result<(), String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
@@ -1721,6 +1825,20 @@ async fn request_host_destroy_stack_ws(stack_name: &str) -> Result<(), String> {
     Ok(())
 }
 
+async fn request_host_stop_stack_ws(stack_name: &str) -> Result<(), String> {
+    let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
+    let request_id = ws_request_id("stop-stack");
+    let payload = serde_json::json!({
+        "kind": "stop_stack_request",
+        "request_id": &request_id,
+        "stack_name": stack_name,
+        "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
+    });
+    send_ws_rpc(&ip, payload, "stop_stack_response", &request_id).await?;
+    Ok(())
+}
+
 async fn request_host_destroy_stack_http(stack_name: &str) -> Result<String, String> {
     let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
     let url = format!("http://{}:8080/api/provision/destroy", ip);
@@ -1735,6 +1853,23 @@ async fn request_host_destroy_stack_http(stack_name: &str) -> Result<String, Str
         Ok("HOST stack destroy started".to_string())
     } else {
         Err(format!("HOST destroy HTTP {}", response.status()))
+    }
+}
+
+async fn request_host_stop_stack_http(stack_name: &str) -> Result<String, String> {
+    let ip = std::env::var("HOST_IP").unwrap_or_else(|_| "10.10.5.250".to_string());
+    let url = format!("http://{}:8080/api/provision/stop", ip);
+    let response = reqwest::Client::new()
+        .post(url)
+        .json(&serde_json::json!({ "stack_name": stack_name }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        Ok("HOST stack stop started".to_string())
+    } else {
+        Err(format!("HOST stop HTTP {}", response.status()))
     }
 }
 

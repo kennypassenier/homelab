@@ -7,12 +7,12 @@ tags: []
 deploy:
   enabled: false
   activated_at: null
-  last_applied_hash: 8f52f8b085a6bb7795a6751af61345a736653ee8ea26dbc72f02ef2f8f1b7215
-  last_applied_at: '1781629577'
+  last_applied_hash: 65728da4ceae1f1343e466c1cc3222deba7c276e7fec37df8936da9a095f5fbb
+  last_applied_at: '1781629920'
   last_applied_apps:
     promtail: 0f841453209a2174881095df6d25bc0a9a6f003f7185dcbaf2dca332c84e2bbf
-    traefik: 4090dc5cf140b9b3389d2bc4a70887bfe32e0524c2273be3f8b8b6ab58532a79
-    vikunja: 393d2a132d568bfc47e8795398a6ffdd499fde1b27d81cbbc52b51c4ea749963
+    traefik: 5a6deab212d5248d11156bedffde7874355c6bdc8f11413b98697f3191dfd1c0
+    vikunja: 3826db71ea1e1071d6ff75288f994e27c6e4b6743e7974959e9d5115b3e4c0e4
     watchtower: 965653dcbbe076bafc59779692ace7cd344d1205d42044cfa2d281f7a18da892
 network:
   bridge: vmbr0

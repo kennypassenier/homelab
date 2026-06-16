@@ -2,6 +2,7 @@ services:
   vikunja:
     image: vikunja/vikunja:latest
     container_name: vikunja
+    user: "1000:1000"
     env_file:
       - .env
     environment:

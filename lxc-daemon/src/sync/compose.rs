@@ -1,7 +1,6 @@
 // Docker compose operations and orphan garbage collection.
 
 use std::collections::HashSet;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -183,10 +182,6 @@ fn list_app_dirs(stack_dir: &str) -> Vec<String> {
     dirs
 }
 
-fn appdata_root(stack_name: &str) -> PathBuf {
-    Path::new("/appdata").join(stack_name)
-}
-
 fn repo_stack_root(stack_name: &str) -> PathBuf {
     Path::new(GITOPS_REPO).join("stacks").join(stack_name)
 }
@@ -201,76 +196,64 @@ fn parse_volume_source(volume: &str) -> Option<&str> {
     }
 }
 
-fn ensure_appdata_dir_permissions(path: &Path) -> Result<(), String> {
-    if !path.starts_with("/appdata") {
-        return Ok(());
-    }
-    if path.is_dir() {
-        let perms = std::fs::Permissions::from_mode(0o775);
-        std::fs::set_permissions(path, perms)
-            .map_err(|e| format!("chmod {}: {}", path.display(), e))?;
-    }
-    Ok(())
+/// Returns true for kernel/runtime paths that should never be touched by prep.
+fn is_system_mount(source: &str) -> bool {
+    source.starts_with("/var/")
+        || source.starts_with("/proc/")
+        || source.starts_with("/sys/")
+        || source.starts_with("/dev/")
+        || source.starts_with("/run/")
 }
 
-fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), String> {
-    let is_file_mount = source.extension().is_some();
+/// Returns true when the volume spec ends with `:ro` or `:ro,...`.
+fn volume_is_readonly(volume: &str) -> bool {
+    volume
+        .split(':')
+        .nth(2)
+        .map(|mode| mode.split(',').any(|m| m == "ro"))
+        .unwrap_or(false)
+}
 
-    if source
-        .to_string_lossy()
-        .starts_with(&format!("/appdata/{}/", stack_name))
-    {
-        let suffix = source
-            .strip_prefix(Path::new("/appdata").join(stack_name))
-            .map_err(|e| e.to_string())?;
-        let repo_candidate = repo_stack_root(stack_name).join(suffix);
+/// Parse a Docker Compose `user:` value (e.g. `"1000"` or `"1000:1000"`) into a
+/// `(uid, gid)` pair. Returns `None` for non-numeric or absent values.
+fn parse_compose_user(user_val: &str) -> Option<(u32, u32)> {
+    let parts: Vec<&str> = user_val.splitn(2, ':').collect();
+    let uid: u32 = parts[0].trim().parse().ok()?;
+    let gid: u32 = parts.get(1).and_then(|g| g.trim().parse().ok()).unwrap_or(uid);
+    Some((uid, gid))
+}
 
-        if is_file_mount {
-            if let Some(parent) = source.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
-                ensure_appdata_dir_permissions(parent)?;
-            }
-            if repo_candidate.is_file() {
-                std::fs::copy(&repo_candidate, source).map_err(|e| {
-                    format!(
-                        "copy {} -> {} failed: {}",
-                        repo_candidate.display(),
-                        source.display(),
-                        e
-                    )
-                })?;
-            } else if !source.exists() {
-                std::fs::write(source, "")
-                    .map_err(|e| format!("create file {}: {}", source.display(), e))?;
-            }
-            return Ok(());
-        }
+/// Ensure a writable directory exists. When `owner` is `Some((uid, gid))` (taken from
+/// the service `user:` field) and the directory is currently root-owned, chown it so
+/// the container process can write to it at runtime.
+fn ensure_writable_dir(path: &Path, owner: Option<(u32, u32)>) -> Result<(), String> {
+    std::fs::create_dir_all(path)
+        .map_err(|e| format!("mkdir -p {}: {}", path.display(), e))?;
 
-        if repo_candidate.is_dir() {
-            std::fs::create_dir_all(source)
-                .map_err(|e| format!("create dir {}: {}", source.display(), e))?;
-            ensure_appdata_dir_permissions(source)?;
-            return Ok(());
-        }
-    }
-
-    if is_file_mount {
-        if let Some(parent) = source.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
-            ensure_appdata_dir_permissions(parent)?;
-        }
-        if !source.exists() {
-            std::fs::write(source, "")
-                .map_err(|e| format!("create file {}: {}", source.display(), e))?;
-        }
+    let Some((uid, gid)) = owner else {
         return Ok(());
-    }
+    };
 
-    std::fs::create_dir_all(source)
-        .map_err(|e| format!("create dir {}: {}", source.display(), e))?;
-    ensure_appdata_dir_permissions(source)
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(path)
+        .map_err(|e| format!("stat {}: {}", path.display(), e))?;
+
+    if meta.uid() != uid || meta.gid() != gid {
+        let ownership = format!("{}:{}", uid, gid);
+        let out = std::process::Command::new("chown")
+            .args([&ownership, &path.to_string_lossy().into_owned()])
+            .output()
+            .map_err(|e| format!("chown exec: {}", e))?;
+        if !out.status.success() {
+            return Err(format!(
+                "chown {} {} failed: {}",
+                ownership,
+                path.display(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub async fn prepare_stack_bind_mounts(
@@ -305,6 +288,20 @@ pub async fn prepare_stack_bind_mounts(
             let Some(svc_map) = svc_val.as_mapping() else {
                 continue;
             };
+
+            // Read the optional `user:` field — drives chown for writable mounts.
+            let service_owner: Option<(u32, u32)> = svc_map
+                .get(serde_yaml::Value::String("user".to_string()))
+                .and_then(|v| v.as_str().or_else(|| v.as_u64().map(|_| v.as_str()).flatten()))
+                .and_then(|s| parse_compose_user(s))
+                .or_else(|| {
+                    // Also accept integer form: user: 1000
+                    svc_map
+                        .get(serde_yaml::Value::String("user".to_string()))
+                        .and_then(|v| v.as_u64())
+                        .map(|uid| (uid as u32, uid as u32))
+                });
+
             let Some(volumes_val) = svc_map.get(serde_yaml::Value::String("volumes".to_string()))
             else {
                 continue;
@@ -320,23 +317,55 @@ pub async fn prepare_stack_bind_mounts(
             }
 
             for volume in volume_list {
+                // Read-only mounts come from git checkout — already present, nothing to do.
+                if volume_is_readonly(&volume) {
+                    continue;
+                }
+
                 let Some(source) = parse_volume_source(&volume) else {
                     continue;
                 };
-                if !source.starts_with("/appdata/") {
+
+                // Skip kernel/runtime paths owned by the host OS.
+                if is_system_mount(source) {
+                    continue;
+                }
+
+                // Skip file mounts (have an extension) — those come from git.
+                if Path::new(source).extension().is_some() {
+                    continue;
+                }
+
+                // Only handle absolute local paths.
+                if !source.starts_with('/') {
                     continue;
                 }
 
                 let source_path = Path::new(source);
-                if let Err(e) = mirror_bind_mount_source(stack_name, source_path) {
-                    let mut s = state.lock().unwrap();
-                    s.add_log(
-                        LogLevel::Warn,
-                        format!(
-                            "[sync][prep] stack={} service={} volume={} skipped: {}",
-                            stack_name, service_name, volume, e
-                        ),
-                    );
+                match ensure_writable_dir(source_path, service_owner) {
+                    Ok(()) => {
+                        let mut s = state.lock().unwrap();
+                        let owner_tag = service_owner
+                            .map(|(u, g)| format!(" owner={}:{}", u, g))
+                            .unwrap_or_default();
+                        s.add_log(
+                            LogLevel::Info,
+                            format!(
+                                "[sync][prep] stack={} service={} dir ready: {}{}",
+                                stack_name, service_name, source, owner_tag
+                            ),
+                        );
+                    }
+                    Err(e) => {
+                        let mut s = state.lock().unwrap();
+                        s.add_log(
+                            LogLevel::Warn,
+                            format!(
+                                "[sync][prep] stack={} service={} volume={} skipped: {}",
+                                stack_name, service_name, volume, e
+                            ),
+                        );
+                    }
                 }
             }
         }

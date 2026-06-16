@@ -40,16 +40,16 @@ For each `docker-compose.yml`, document:
 - **Purpose** — what the service does within the stack.
 - **Ports** — exposed ports and their roles (web UI, API, metrics, etc.).
 - **Volumes / bind mounts** — which host paths are mounted and why.
-- **Environment variables** — each variable, its purpose, and whether it is secret (SOPS/Age encrypted).
+- **Environment variables** — each variable, its purpose, and whether it is secret (populated via latch secret sync at runtime).
 - **Dependencies** — `depends_on`, `network_mode: service:…`, health checks and what they guard.
 - **Labels** — any Docker labels and their effect (e.g. `com.homelab.backup.pause=true`).
 - **Networks** — which Docker networks are used and why (internal vs. external, created by `pre-sync.sh`).
 
 ### Documenting architecture
 - Describe the three-tier layout: client → host → containers.
-- Explain the GitOps flow (`node-sync.sh` → `pre-sync.sh` → `docker compose pull` → `docker compose up`).
-- Explain secret management (SOPS/Age, smudge/clean filters, `.env` files).
-- Explain storage layout (`/opt/appdata/<STACK>` on host → `/appdata` in LXC).
+- Explain the GitOps flow (LXC daemon sync: git pull → latch pull → compose prep → docker compose pull → docker compose up).
+- Explain secret management (latch secret sync: `.env` files are deployed at runtime by `latch pull`, never committed to git).
+- Explain storage layout (`/opt/gitops/stacks/<stack>/<app>-config/` inside the LXC via git sparse checkout).
 - Explain networking (DHCP reservations in OPNsense, SSH aliases, DNS).
 - Explain Garbage Collection (deleted app folders → automatic stop + purge).
 

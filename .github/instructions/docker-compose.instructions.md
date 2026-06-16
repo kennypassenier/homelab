@@ -17,26 +17,27 @@ applyTo: "**/docker-compose.yml"
 All persistent data **must** follow this absolute path pattern:
 
 ```
-/appdata/<STACK_NAME>/<APP_NAME>/<subfolder>
+/opt/gitops/stacks/<STACK_NAME>/<APP_NAME>-config/<subfolder>
 ```
 
-- `<STACK_NAME>` matches the folder name under `stacks/` (e.g. `media`, `vikunja`).
-- `<APP_NAME>` matches the app's folder name under the stack (e.g. `jellyfin`, `vikunja`).
-- `<subfolder>` is typically `config`, `data`, or another descriptive name.
-- **Never use relative paths** (e.g. `./files`). Always use absolute `/appdata/...` paths.
-- This ensures all data lands under `/opt/appdata/<STACK>/<APP>` on the Proxmox host and is covered by Restic backups in a single pass.
+- `<STACK_NAME>` matches the folder name under `stacks/` (e.g. `todo`, `cloudflared`).
+- `<APP_NAME>` matches the app's folder name under the stack (e.g. `vikunja`, `traefik`).
+- `<subfolder>` is typically omitted for the root config dir, or a descriptive name like `files`, `db`.
+- **Never use relative paths** (e.g. `./files`). Always use absolute `/opt/gitops/stacks/...` paths.
+- **Never use `/appdata/...` paths** — that convention has been retired.
+- This path always exists in the LXC because the git sparse checkout brings it in from the repo.
 
 Examples:
 ```yaml
 # Correct
-- /appdata/media/jellyfin/config:/config
-- /appdata/vikunja/vikunja/config:/app/vikunja/files
+- /opt/gitops/stacks/todo/vikunja-config:/config
+- /opt/gitops/stacks/todo/vikunja-config/files:/app/vikunja/files
+
+# Wrong — retired /appdata convention
+- /appdata/todo/vikunja-config:/config
 
 # Wrong — relative path
 - ./files:/app/data
-
-# Wrong — missing stack segment
-- /appdata/jellyfin/config:/config
 ```
 
 ## Labels — Required on Every App Container
@@ -54,7 +55,7 @@ Watchtower and Promtail containers are infrastructure — they use `com.centuryl
 ## Secrets and Environment Variables
 
 - **Never hardcode secrets, tokens, passwords, or URLs** directly in `environment:`.
-- Always use `env_file: .env` for any value that is instance-specific or sensitive. The `.env` file is SOPS-encrypted transparently via Git smudge/clean filters.
+- Always use `env_file: .env` for any value that is instance-specific or sensitive. The `.env` file is populated at runtime by the latch secret sync step (`latch pull` during sync step 4) — it is **not** committed to git.
 - Static, non-secret configuration (e.g. `VIKUNJA_DATABASE_TYPE=sqlite`, `PUID=1000`) may live directly in `environment:`.
 - The `.env` file should contain: public URL, service secrets, API keys, IP addresses used in configs.
 
@@ -89,7 +90,7 @@ environment:
 
 - [ ] Image exists and is correct (verify LSIO images before use)
 - [ ] No `version:` key at the top
-- [ ] All volumes use `/appdata/<stack>/<app>/<subfolder>` — no relative paths
+- [ ] All volumes use `/opt/gitops/stacks/<stack>/<app>-config/...` — no relative paths, no `/appdata/` paths
 - [ ] Both labels present on every app container
 - [ ] Secrets are in `env_file: .env`, not hardcoded
 - [ ] `PUID`/`PGID` only present on LSIO images

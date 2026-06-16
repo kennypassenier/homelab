@@ -2,18 +2,16 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
+    # Token-mode: tunnel config (ingress rules) is managed in the Cloudflare Zero Trust dashboard.
+    # To change where *.kp-soft.dev routes: dashboard → Networks → Tunnels → Configure → Public Hostname.
+    # No local config file is used — the TUNNEL_TOKEN fetches ingress config from Cloudflare servers.
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
     env_file:
       - .env
     environment:
       - TZ=Europe/Brussels
     restart: unless-stopped
-    volumes:
-      - /opt/gitops/stacks/cloudflared/cloudflared-config:/config
+    # No volumes — token-mode does not read a local config file.
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"
-      - "com.homelab.tag.watchtower=enabled"
-      - "com.homelab.tag.traefik.subdomain=none"
-      - "com.homelab.tag.gpu=disabled"
-      - "com.homelab.tag.vpn=none"

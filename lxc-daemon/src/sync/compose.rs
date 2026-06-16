@@ -219,7 +219,10 @@ fn volume_is_readonly(volume: &str) -> bool {
 fn parse_compose_user(user_val: &str) -> Option<(u32, u32)> {
     let parts: Vec<&str> = user_val.splitn(2, ':').collect();
     let uid: u32 = parts[0].trim().parse().ok()?;
-    let gid: u32 = parts.get(1).and_then(|g| g.trim().parse().ok()).unwrap_or(uid);
+    let gid: u32 = parts
+        .get(1)
+        .and_then(|g| g.trim().parse().ok())
+        .unwrap_or(uid);
     Some((uid, gid))
 }
 
@@ -227,16 +230,14 @@ fn parse_compose_user(user_val: &str) -> Option<(u32, u32)> {
 /// the service `user:` field) and the directory is currently root-owned, chown it so
 /// the container process can write to it at runtime.
 fn ensure_writable_dir(path: &Path, owner: Option<(u32, u32)>) -> Result<(), String> {
-    std::fs::create_dir_all(path)
-        .map_err(|e| format!("mkdir -p {}: {}", path.display(), e))?;
+    std::fs::create_dir_all(path).map_err(|e| format!("mkdir -p {}: {}", path.display(), e))?;
 
     let Some((uid, gid)) = owner else {
         return Ok(());
     };
 
     use std::os::unix::fs::MetadataExt;
-    let meta = std::fs::metadata(path)
-        .map_err(|e| format!("stat {}: {}", path.display(), e))?;
+    let meta = std::fs::metadata(path).map_err(|e| format!("stat {}: {}", path.display(), e))?;
 
     if meta.uid() != uid || meta.gid() != gid {
         let ownership = format!("{}:{}", uid, gid);
@@ -292,7 +293,10 @@ pub async fn prepare_stack_bind_mounts(
             // Read the optional `user:` field — drives chown for writable mounts.
             let service_owner: Option<(u32, u32)> = svc_map
                 .get(serde_yaml::Value::String("user".to_string()))
-                .and_then(|v| v.as_str().or_else(|| v.as_u64().map(|_| v.as_str()).flatten()))
+                .and_then(|v| {
+                    v.as_str()
+                        .or_else(|| v.as_u64().map(|_| v.as_str()).flatten())
+                })
                 .and_then(|s| parse_compose_user(s))
                 .or_else(|| {
                     // Also accept integer form: user: 1000

@@ -13,8 +13,8 @@ Always read `docs/LLM_CONTEXT.md` and `docs/CONTRIBUTING.md` for full context.
 - **Shared code:** `scripts/shared/` (e.g., `lib-ui.sh`) is used across environments.
 - **Stack layout:** `stacks/<stack_name>/<app_name>/docker-compose.yml`. Each stack may have a `pre-sync.sh`.
 - **GitOps sync:** `node-sync.sh` runs every 5 min in the LXC — it pulls Git, runs `pre-sync.sh`, then `docker compose pull -q` + `docker compose up -d --remove-orphans`. Deleted app folders trigger automatic GC (stop + purge).
-- **Secrets:** SOPS + Age via Git smudge/clean filters. Never hardcode credentials.
-- **Storage:** `/opt/appdata/<STACK>` on Proxmox host, bind-mounted to `/appdata` in LXC.
+- **Secrets:** Managed via latch secret sync (`latch pull` during sync step 4). Secrets live in `.env` files deployed at runtime — never committed to git. Never hardcode credentials.
+- **Storage:** `/opt/gitops/stacks/<stack>/<app>-config/` inside the LXC (git sparse checkout — no separate `/appdata` layer).
 - **Networking:** Static IPs via DHCP reservations in OPNsense. DNS/SSH via `~/.ssh/config` aliases.
 
 ---
@@ -52,7 +52,7 @@ Always read `docs/LLM_CONTEXT.md` and `docs/CONTRIBUTING.md` for full context.
 - Use `trap` in scripts that create temp files or perform multi-step critical operations, to clean up on failure or Ctrl+C.
 - Use `set -e` or explicit error checks; always exit with a non-zero code on critical failure.
 - **Destructive actions** (delete, remove, purge) require red-colored warnings and **double confirmation** (`ui_warning` + two "Are you sure?" prompts).
-- Never hardcode secrets. Use SOPS/Age or uncommitted `.env` files (`chmod 600`, protected by `.gitignore`).
+- Never hardcode secrets. Use latch for secret sync; `.env` files are deployed at runtime (not tracked in git).
 
 ### Naming & Structure
 - Scripts follow `[action]-[object].sh` convention (e.g., `sync-host.sh`, `create-new-app.sh`).

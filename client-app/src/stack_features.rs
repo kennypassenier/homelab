@@ -501,11 +501,15 @@ fn app_compose_yaml(
 
     // ── Image ──────────────────────────────────────────────────────────────────
     out.push_str("    # Use :latest — Watchtower handles rolling updates automatically.\n");
-    out.push_str("    # Pin to a specific tag (e.g. :1.2.3) only when you need to lock the version.\n");
+    out.push_str(
+        "    # Pin to a specific tag (e.g. :1.2.3) only when you need to lock the version.\n",
+    );
     out.push_str(&format!("    image: {}\n", docker_image));
 
     // ── Identity ───────────────────────────────────────────────────────────────
-    out.push_str("    # container_name is set explicitly so logs and docker ps output are readable.\n");
+    out.push_str(
+        "    # container_name is set explicitly so logs and docker ps output are readable.\n",
+    );
     out.push_str(&format!("    container_name: {}\n", app_name));
 
     // ── Runtime user ───────────────────────────────────────────────────────────
@@ -521,19 +525,27 @@ fn app_compose_yaml(
     //     promtail, cloudflared). Root-owned directories are created without chown.
     //   • Read-only mounts (:ro) are never chowned — they come from the git checkout.
     if app_name == "vikunja" {
-        out.push_str("    # Vikunja process runs as uid 1000. The LXC daemon will chown all writable\n");
+        out.push_str(
+            "    # Vikunja process runs as uid 1000. The LXC daemon will chown all writable\n",
+        );
         out.push_str("    # bind-mount directories to 1000:1000 before docker compose up.\n");
         out.push_str("    user: \"1000:1000\"\n");
     } else {
         out.push_str("    # user: \"UID:GID\"\n");
-        out.push_str("    # Uncomment and set to UID:GID if this container runs as a non-root user\n");
+        out.push_str(
+            "    # Uncomment and set to UID:GID if this container runs as a non-root user\n",
+        );
         out.push_str("    # and needs to write to its bind-mounted config/data directories.\n");
-        out.push_str("    # The LXC daemon will chown those directories automatically before compose up.\n");
+        out.push_str(
+            "    # The LXC daemon will chown those directories automatically before compose up.\n",
+        );
     }
 
     // ── Secrets / env ──────────────────────────────────────────────────────────
     out.push_str("    # env_file is populated at runtime by the latch secret sync step.\n");
-    out.push_str("    # Never commit real credentials here — use .env.example for documentation.\n");
+    out.push_str(
+        "    # Never commit real credentials here — use .env.example for documentation.\n",
+    );
     out.push_str("    env_file:\n");
     out.push_str("      - .env\n");
     out.push_str("    environment:\n");
@@ -554,7 +566,9 @@ fn app_compose_yaml(
     //   :ro  — read-only; the directory already exists in git, prep skips chown.
     //   (no flag) — writable; prep creates the dir and chowns it if user: is set.
     out.push_str("    volumes:\n");
-    out.push_str("      # Primary config directory — created by prep if missing, chowned if user: is set.\n");
+    out.push_str(
+        "      # Primary config directory — created by prep if missing, chowned if user: is set.\n",
+    );
     out.push_str(&format!(
         "      - /opt/gitops/stacks/{}/{}-config:/config\n",
         stack_name, app_name
@@ -577,13 +591,19 @@ fn app_compose_yaml(
     out.push_str("      # Watchtower only auto-updates containers that carry this label.\n");
     out.push_str("      # Controlled by WATCHTOWER_LABEL_ENABLE=true in the watchtower compose.\n");
     out.push_str("      - \"com.centurylinklabs.watchtower.enable=true\"\n");
-    out.push_str("      # Backup pause: the backup agent stops this container before snapshotting\n");
+    out.push_str(
+        "      # Backup pause: the backup agent stops this container before snapshotting\n",
+    );
     out.push_str("      # its bind-mount directories to avoid partial writes in the backup.\n");
     out.push_str("      - \"com.homelab.backup.pause=true\"\n");
 
     if options.include_traefik {
-        out.push_str("      # Traefik routing — expose this service through the stack reverse proxy.\n");
-        out.push_str("      # traefik.enable=true opts this container into dynamic route discovery.\n");
+        out.push_str(
+            "      # Traefik routing — expose this service through the stack reverse proxy.\n",
+        );
+        out.push_str(
+            "      # traefik.enable=true opts this container into dynamic route discovery.\n",
+        );
         out.push_str("      - \"traefik.enable=true\"\n");
         if let Some(subdomain) = &options.subdomain {
             let fqdn = format!("{}.{}", subdomain, domain);
@@ -593,7 +613,9 @@ fn app_compose_yaml(
                 app_name, fqdn
             ));
         } else {
-            out.push_str("      # Router rule: no subdomain configured — falls back to <app>.local.\n");
+            out.push_str(
+                "      # Router rule: no subdomain configured — falls back to <app>.local.\n",
+            );
             out.push_str(&format!(
                 "      - \"traefik.http.routers.{}.rule=Host(\\\"{}.local\\\")\"\n",
                 app_name, app_name
@@ -772,12 +794,20 @@ fn scaffold_traefik(stack_name: &str) -> io::Result<()> {
                 "      - /opt/gitops/stacks/{stack}/traefik-config/acme:/acme\n",
                 "    environment:\n",
                 "      DOCKER_API_VERSION: \"1.40\"\n",
+                "    networks:\n",
+                "      # Must be on traefik_proxy to reach app containers via container IPs.\n",
+                "      # This network is created here (it is NOT external for Traefik).\n",
+                "      - traefik_proxy\n",
                 "    labels:\n",
                 "      # Watchtower auto-updates Traefik when a new image is published.\n",
                 "      com.centurylinklabs.watchtower.enable: \"true\"\n",
-                "      # traefik.enable=true makes Traefik route traffic to itself if needed\n",
-                "      # (e.g. for a dashboard). Remove if you don't expose the Traefik dashboard.\n",
-                "      traefik.enable: \"true\"\n",
+                "\n",
+                "# Traefik owns and creates this network. App containers declare it as external.\n",
+                "# Alphabetical deploy order guarantees traefik deploys before other apps.\n",
+                "networks:\n",
+                "  traefik_proxy:\n",
+                "    name: traefik_proxy\n",
+                "    driver: bridge\n",
             ),
             stack = stack_name
         ),
@@ -785,6 +815,29 @@ fn scaffold_traefik(stack_name: &str) -> io::Result<()> {
 
     fs::write(
         format!("{}/traefik.yml", cfg_dir),
-        "providers:\n  docker:\n    exposedByDefault: false\nentryPoints:\n  web:\n    address: \":80\"\n  websecure:\n    address: \":443\"\ncertificatesResolvers:\n  letsencrypt:\n    acme:\n      email: ${ACME_EMAIL}\n      storage: /acme/acme.json\n      tlsChallenge: {}\n",
+        concat!(
+            "# Traefik v3 static configuration.\n",
+            "# See docs/docker-compose-strategy.md for the full routing explanation.\n",
+            "providers:\n",
+            "  docker:\n",
+            "    exposedByDefault: false\n",
+            "    network: traefik_proxy\n",
+            "entryPoints:\n",
+            "  web:\n",
+            "    address: \":80\"\n",
+            "  websecure:\n",
+            "    address: \":443\"\n",
+            "# ACME not required when using Cloudflare tunnel (Cloudflare handles TLS).\n",
+            "# Uncomment if you want Traefik to also manage certs for direct HTTPS access:\n",
+            "# certificatesResolvers:\n",
+            "#   letsencrypt:\n",
+            "#     acme:\n",
+            "#       email: ${ACME_EMAIL}\n",
+            "#       storage: /acme/acme.json\n",
+            "#       httpChallenge:\n",
+            "#         entryPoint: web\n",
+            "log:\n",
+            "  level: INFO\n",
+        ),
     )
 }

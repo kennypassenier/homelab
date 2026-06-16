@@ -2,16 +2,31 @@ services:
   traefik:
     image: traefik:v3
     container_name: todo-traefik
+    # No user: — Traefik must run as root to bind privileged ports 80/443.
     restart: unless-stopped
     ports:
+      # Port 80 receives HTTP traffic from cloudflared. Port 443 is available for direct access.
       - "80:80"
       - "443:443"
     volumes:
+      # Docker socket :ro — Traefik reads container labels and events, never modifies containers.
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Static config (traefik.yml lives here). Traefik also writes provider state to this dir.
       - /opt/gitops/stacks/todo/traefik-config:/etc/traefik
+      # ACME cert store — writable. Currently unused (Cloudflare handles TLS), kept for future use.
       - /opt/gitops/stacks/todo/traefik-config/acme:/acme
     environment:
       DOCKER_API_VERSION: "1.40"
+    networks:
+      # Traefik must be on traefik_proxy to reach app containers via their container IPs.
+      # This network is created here (it is NOT external for Traefik).
+      - traefik_proxy
     labels:
       com.centurylinklabs.watchtower.enable: "true"
-      traefik.enable: "true"
+
+# Traefik owns and creates this network. App containers declare it as external.
+# Alphabetical deploy order guarantees traefik deploys before vikunja/other apps.
+networks:
+  traefik_proxy:
+    name: traefik_proxy
+    driver: bridge

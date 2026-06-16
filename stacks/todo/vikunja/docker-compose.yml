@@ -2,21 +2,38 @@ services:
   vikunja:
     image: vikunja/vikunja:latest
     container_name: vikunja
+    # Vikunja runs as uid 1000. LXC prep chowns writable bind-mount dirs to 1000:1000.
     user: "1000:1000"
     env_file:
       - .env
     environment:
       - TZ=Europe/Brussels
     restart: unless-stopped
-    ports:
-      - "3456:3456"
+    # No ports: section — Traefik routes via the traefik_proxy network (container IP).
+    # Direct port exposure is not needed and would bypass the reverse proxy.
     volumes:
+      # All writable — LXC prep creates dirs and chowns to 1000:1000 before compose up.
       - /opt/gitops/stacks/todo/vikunja-config:/config
       - /opt/gitops/stacks/todo/vikunja-config/files:/app/vikunja/files
       - /opt/gitops/stacks/todo/vikunja-config/db:/db
+    networks:
+      # Must join traefik_proxy so Traefik can reach this container via its container IP.
+      # The network is created by the traefik compose (deploys first, alphabetically).
+      - traefik_proxy
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"
       - "traefik.enable=true"
-      - "traefik.http.routers.vikunja.rule=Host(\"todo.kp-soft.dev\") || Host(\"todo\") || Host(\"vikunja\")"
+      # Route on the 'web' entrypoint (port 80) — cloudflared sends HTTP traffic here.
+      - "traefik.http.routers.vikunja.entrypoints=web"
+      - "traefik.http.routers.vikunja.rule=Host(\"todo.kp-soft.dev\")"
+      # Port 3456 is vikunja's internal HTTP port — Traefik forwards here via container IP.
       - "traefik.http.services.vikunja.loadbalancer.server.port=3456"
+
+networks:
+  # Declared as external: Traefik's compose file creates this network.
+  # If vikunja deploys before traefik somehow, compose up will fail with
+  # 'network traefik_proxy declared as external, but could not be found'.
+  # Fix: deploy traefik first, or run `docker network create traefik_proxy` manually.
+  traefik_proxy:
+    external: true

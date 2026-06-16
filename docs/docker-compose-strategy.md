@@ -1,6 +1,6 @@
 # Docker Compose Strategy
 
-Last updated: 2026-06-14
+Last updated: 2026-06-16
 
 This document defines the canonical Docker Compose strategy for this repository and how to convert legacy compose files into the current format.
 
@@ -22,18 +22,17 @@ This document defines the canonical Docker Compose strategy for this repository 
 - App root: `stacks/<stack>/<app>/`
 - App compose: `stacks/<stack>/<app>/docker-compose.yml`
 
-### 2.2 Config mount strategy (`<stack>/<app-config>`)
+### 2.2 Config mount strategy (`/appdata/<stack>/<app>`)
 
-The stack-level `lxc-compose.yml` mounts host config paths into the LXC like this:
+App compose files must use stack-scoped absolute paths:
 
-- Host source: `/opt/appdata/<stack>/<app>-config`
-- LXC target: `/appdata/<app>-config`
+- `/appdata/<stack>/<app>/config:/config`
+- Additional app-specific subpaths as needed (for example Vikunja files):
+  `/appdata/<stack>/vikunja/files:/app/vikunja/files`
 
-Therefore app compose files in `stacks/<stack>/<app>/docker-compose.yml` should mount config from:
+For infra config-only paths (for example Promtail), use stack-scoped config path:
 
-- `/appdata/<app>-config:/config`
-
-This keeps host data namespaced by stack while keeping container-facing paths stable and simple.
+- `/appdata/<stack>/promtail-config/config.yml:/etc/promtail/config.yml:ro`
 
 ## 3. App compose baseline
 
@@ -50,7 +49,7 @@ services:
       - TZ=Europe/Brussels
     restart: unless-stopped
     volumes:
-      - /appdata/<app>-config:/config
+      - /appdata/<stack>/<app>/config:/config
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"
@@ -153,7 +152,7 @@ Use this checklist when converting old compose files:
    - `restart: unless-stopped`
    - `env_file: .env`
    - `TZ=Europe/Brussels`
-5. Convert config mounts to `/appdata/<app>-config:/config` (or app-specific target path).
+5. Convert config mounts to `/appdata/<stack>/<app>/config:/config` (or app-specific target path).
 6. Add required app labels:
    - `com.centurylinklabs.watchtower.enable=true`
    - `com.homelab.backup.pause=true`
@@ -177,13 +176,14 @@ services:
       - TZ=Europe/Brussels
     restart: unless-stopped
     volumes:
-      - /appdata/vikunja-config:/config
+      - /appdata/todo/vikunja/config:/config
+      - /appdata/todo/vikunja/files:/app/vikunja/files
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"
       - "traefik.enable=true"
       - "traefik.http.routers.vikunja.rule=Host(\"todo.example.com\")"
-      - "traefik.http.services.vikunja.loadbalancer.server.port=80"
+      - "traefik.http.services.vikunja.loadbalancer.server.port=3456"
 ```
 
 ### 11.2 Promtail (separate app directory)
@@ -194,15 +194,17 @@ services:
     image: grafana/promtail:latest
     container_name: <stack>-promtail
     restart: unless-stopped
+    environment:
+      - TZ=Europe/Brussels
     volumes:
-      - /var/log:/var/log:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /appdata/promtail-config:/etc/promtail
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /appdata/<stack>/promtail-config/config.yml:/etc/promtail/config.yml:ro
     env_file:
       - .env
     command: -config.file=/etc/promtail/config.yml -config.expand-env=true
     labels:
-      com.centurylinklabs.watchtower.enable: "true"
+      - "com.centurylinklabs.watchtower.enable=true"
 ```
 
 ### 11.3 Watchtower (separate app directory)

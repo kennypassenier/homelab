@@ -23,12 +23,20 @@ fn capture(cmd: &mut Command) -> (i32, String, String) {
 
 fn log_cmd(state: &Arc<Mutex<AppState>>, label: &str, code: i32, stdout: &str, stderr: &str) {
     let mut s = state.lock().unwrap();
-    let lvl = if code == 0 { LogLevel::Ok } else { LogLevel::Error };
+    let lvl = if code == 0 {
+        LogLevel::Ok
+    } else {
+        LogLevel::Error
+    };
     s.add_log(lvl, format!("[sync][exit] {} exit={}", label, code));
     for line in stdout.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
         s.add_log(LogLevel::Info, format!("[sync][stdout] {} {}", label, line));
     }
-    let elv = if code == 0 { LogLevel::Warn } else { LogLevel::Error };
+    let elv = if code == 0 {
+        LogLevel::Warn
+    } else {
+        LogLevel::Error
+    };
     for line in stderr.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
         s.add_log(elv.clone(), format!("[sync][stderr] {} {}", label, line));
     }
@@ -106,10 +114,7 @@ async fn emit_compose_failure_diagnostics(
         let mut s = state.lock().unwrap();
         s.add_log(
             LogLevel::Info,
-            format!(
-                "[sync][run] cd {} && docker compose ps -q",
-                app_dir
-            ),
+            format!("[sync][run] cd {} && docker compose ps -q", app_dir),
         );
     }
     let dir_ids = app_dir.to_string();
@@ -142,10 +147,7 @@ async fn emit_compose_failure_diagnostics(
 
             let cid = container_id.to_string();
             let (log_code, log_out, log_err) = tokio::task::spawn_blocking(move || {
-                capture(
-                    Command::new("docker")
-                        .args(["logs", "--tail", "120", &cid]),
-                )
+                capture(Command::new("docker").args(["logs", "--tail", "120", &cid]))
             })
             .await
             .unwrap_or((-1, String::new(), "spawn failed".to_string()));
@@ -162,23 +164,26 @@ async fn emit_compose_failure_diagnostics(
 }
 
 fn list_app_dirs(stack_dir: &str) -> Vec<String> {
-    let Ok(rd) = std::fs::read_dir(stack_dir) else { return vec![]; };
-    let mut dirs: Vec<String> = rd.filter_map(|e| {
-        let e = e.ok()?;
-        if e.file_type().ok()?.is_dir() { Some(e.path().to_string_lossy().to_string()) } else { None }
-    }).collect();
+    let Ok(rd) = std::fs::read_dir(stack_dir) else {
+        return vec![];
+    };
+    let mut dirs: Vec<String> = rd
+        .filter_map(|e| {
+            let e = e.ok()?;
+            if e.file_type().ok()?.is_dir() {
+                Some(e.path().to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
     dirs.sort();
     dirs
 }
 
 fn validate_app_env_files(compose_path: &Path, app_dir: &str) -> Result<(), String> {
-    let content = std::fs::read_to_string(compose_path).map_err(|e| {
-        format!(
-            "cannot read compose file {}: {}",
-            compose_path.display(),
-            e
-        )
-    })?;
+    let content = std::fs::read_to_string(compose_path)
+        .map_err(|e| format!("cannot read compose file {}: {}", compose_path.display(), e))?;
 
     let doc: serde_yaml::Value =
         serde_yaml::from_str(&content).map_err(|e| format!("invalid yaml: {}", e))?;
@@ -199,7 +204,8 @@ fn validate_app_env_files(compose_path: &Path, app_dir: &str) -> Result<(), Stri
         let Some(svc_map) = svc_val.as_mapping() else {
             continue;
         };
-        let Some(env_file_val) = svc_map.get(serde_yaml::Value::String("env_file".to_string())) else {
+        let Some(env_file_val) = svc_map.get(serde_yaml::Value::String("env_file".to_string()))
+        else {
             continue;
         };
 
@@ -239,13 +245,8 @@ fn validate_app_env_files(compose_path: &Path, app_dir: &str) -> Result<(), Stri
 }
 
 fn expected_service_names(compose_path: &Path) -> Result<Vec<String>, String> {
-    let content = std::fs::read_to_string(compose_path).map_err(|e| {
-        format!(
-            "cannot read compose file {}: {}",
-            compose_path.display(),
-            e
-        )
-    })?;
+    let content = std::fs::read_to_string(compose_path)
+        .map_err(|e| format!("cannot read compose file {}: {}", compose_path.display(), e))?;
     let doc: serde_yaml::Value =
         serde_yaml::from_str(&content).map_err(|e| format!("invalid yaml: {}", e))?;
     let Some(root) = doc.as_mapping() else {
@@ -410,17 +411,22 @@ async fn verify_compose_runtime(
 
         let cid = container_id.clone();
         let (insp_code, insp_out, insp_err) = tokio::task::spawn_blocking(move || {
-            capture(
-                Command::new("docker")
-                    .args(["inspect", "--format", "{{.State.Status}}:{{.RestartCount}}", &cid]),
-            )
+            capture(Command::new("docker").args([
+                "inspect",
+                "--format",
+                "{{.State.Status}}:{{.RestartCount}}",
+                &cid,
+            ]))
         })
         .await
         .unwrap_or((-1, String::new(), "spawn failed".to_string()));
 
         log_cmd(
             state,
-            &format!("docker inspect runtime app={} service={}", app_name, service),
+            &format!(
+                "docker inspect runtime app={} service={}",
+                app_name, service
+            ),
             insp_code,
             &insp_out,
             &insp_err,
@@ -458,7 +464,14 @@ pub async fn deploy_apps(state: Arc<Mutex<AppState>>, stack_name: &str) -> Resul
 
     {
         let mut s = state.lock().unwrap();
-        s.add_log(LogLevel::Info, format!("[sync] discovered {} app directories under {}", app_dirs.len(), stack_dir));
+        s.add_log(
+            LogLevel::Info,
+            format!(
+                "[sync] discovered {} app directories under {}",
+                app_dirs.len(),
+                stack_dir
+            ),
+        );
     }
 
     let mut deployed_apps = 0usize;
@@ -469,7 +482,8 @@ pub async fn deploy_apps(state: Arc<Mutex<AppState>>, stack_name: &str) -> Resul
             continue;
         }
 
-        let app_name = Path::new(app_dir).file_name()
+        let app_name = Path::new(app_dir)
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
@@ -484,20 +498,38 @@ pub async fn deploy_apps(state: Arc<Mutex<AppState>>, stack_name: &str) -> Resul
                     ),
                 );
             }
-            return Err(format!("env_file validation failed for app={}: {}", app_name, e));
+            return Err(format!(
+                "env_file validation failed for app={}: {}",
+                app_name, e
+            ));
         }
 
         // docker compose pull -q
         {
             let mut s = state.lock().unwrap();
-            s.add_log(LogLevel::Info, format!("[sync][run] cd {} && docker compose pull -q", app_dir));
+            s.add_log(
+                LogLevel::Info,
+                format!("[sync][run] cd {} && docker compose pull -q", app_dir),
+            );
         }
         let dir = app_dir.clone();
         let an = app_name.clone();
         let (code, out, err) = tokio::task::spawn_blocking(move || {
-            capture(Command::new("docker").args(["compose", "pull", "-q"]).current_dir(&dir))
-        }).await.unwrap_or((-1, String::new(), "spawn failed".to_string()));
-        log_cmd(&state, &format!("docker compose pull app={}", an), code, &out, &err);
+            capture(
+                Command::new("docker")
+                    .args(["compose", "pull", "-q"])
+                    .current_dir(&dir),
+            )
+        })
+        .await
+        .unwrap_or((-1, String::new(), "spawn failed".to_string()));
+        log_cmd(
+            &state,
+            &format!("docker compose pull app={}", an),
+            code,
+            &out,
+            &err,
+        );
         if code != 0 {
             emit_compose_failure_diagnostics(&state, app_dir, &app_name).await;
             return Err(format!(
@@ -511,14 +543,32 @@ pub async fn deploy_apps(state: Arc<Mutex<AppState>>, stack_name: &str) -> Resul
         // docker compose up -d --remove-orphans
         {
             let mut s = state.lock().unwrap();
-            s.add_log(LogLevel::Info, format!("[sync][run] cd {} && docker compose up -d --remove-orphans", app_dir));
+            s.add_log(
+                LogLevel::Info,
+                format!(
+                    "[sync][run] cd {} && docker compose up -d --remove-orphans",
+                    app_dir
+                ),
+            );
         }
         let dir2 = app_dir.clone();
         let an2 = app_name.clone();
         let (code2, out2, err2) = tokio::task::spawn_blocking(move || {
-            capture(Command::new("docker").args(["compose", "up", "-d", "--remove-orphans"]).current_dir(&dir2))
-        }).await.unwrap_or((-1, String::new(), "spawn failed".to_string()));
-        log_cmd(&state, &format!("docker compose up app={}", an2), code2, &out2, &err2);
+            capture(
+                Command::new("docker")
+                    .args(["compose", "up", "-d", "--remove-orphans"])
+                    .current_dir(&dir2),
+            )
+        })
+        .await
+        .unwrap_or((-1, String::new(), "spawn failed".to_string()));
+        log_cmd(
+            &state,
+            &format!("docker compose up app={}", an2),
+            code2,
+            &out2,
+            &err2,
+        );
         if code2 != 0 {
             emit_compose_failure_diagnostics(&state, app_dir, &app_name).await;
             return Err(format!(
@@ -529,7 +579,9 @@ pub async fn deploy_apps(state: Arc<Mutex<AppState>>, stack_name: &str) -> Resul
             ));
         }
 
-        if let Err(e) = verify_compose_runtime(&state, app_dir, &app_name, Path::new(&compose)).await {
+        if let Err(e) =
+            verify_compose_runtime(&state, app_dir, &app_name, Path::new(&compose)).await
+        {
             emit_compose_failure_diagnostics(&state, app_dir, &app_name).await;
             return Err(e);
         }
@@ -550,46 +602,75 @@ pub async fn deploy_apps(state: Arc<Mutex<AppState>>, stack_name: &str) -> Resul
 /// Stop and remove appdata dirs for apps that no longer exist in Git.
 pub async fn garbage_collect(state: Arc<Mutex<AppState>>, stack_name: &str) {
     let appdata = Path::new("/appdata");
-    if !appdata.exists() { return; }
+    if !appdata.exists() {
+        return;
+    }
 
     let git_stack = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
-    let git_apps: HashSet<String> = list_app_dirs(&git_stack).into_iter()
-        .filter_map(|p| Path::new(&p).file_name().map(|n| n.to_string_lossy().to_string()))
+    let git_apps: HashSet<String> = list_app_dirs(&git_stack)
+        .into_iter()
+        .filter_map(|p| {
+            Path::new(&p)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+        })
         .collect();
 
-    let Ok(entries) = std::fs::read_dir(appdata) else { return; };
+    let Ok(entries) = std::fs::read_dir(appdata) else {
+        return;
+    };
 
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if !path.is_dir() { continue; }
+        if !path.is_dir() {
+            continue;
+        }
         let app_name = match path.file_name() {
             Some(n) => n.to_string_lossy().to_string(),
             None => continue,
         };
-        if git_apps.contains(&app_name) { continue; }
+        if git_apps.contains(&app_name) {
+            continue;
+        }
 
         {
             let mut s = state.lock().unwrap();
-            s.add_log(LogLevel::Warn, format!("[sync] orphan gc: {} — no longer in git", app_name));
+            s.add_log(
+                LogLevel::Warn,
+                format!("[sync] orphan gc: {} — no longer in git", app_name),
+            );
         }
 
         let compose = path.join("docker-compose.yml");
         if compose.exists() {
             let p2 = path.clone();
             let _ = tokio::task::spawn_blocking(move || {
-                let _ = Command::new("docker").args(["compose", "down", "--remove-orphans"]).current_dir(&p2).output();
-            }).await;
+                let _ = Command::new("docker")
+                    .args(["compose", "down", "--remove-orphans"])
+                    .current_dir(&p2)
+                    .output();
+            })
+            .await;
         }
 
         let p3 = path.clone();
         let sn = stack_name.to_string();
         let an = app_name.clone();
-        let result = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&p3).map_err(|e| e.to_string()))
-            .await.unwrap_or_else(|_| Err("spawn failed".to_string()));
+        let result = tokio::task::spawn_blocking(move || {
+            std::fs::remove_dir_all(&p3).map_err(|e| e.to_string())
+        })
+        .await
+        .unwrap_or_else(|_| Err("spawn failed".to_string()));
         let mut s = state.lock().unwrap();
         match result {
-            Ok(_)  => s.add_log(LogLevel::Ok, format!("[sync] orphan gc: stack={} app={} removed", sn, an)),
-            Err(e) => s.add_log(LogLevel::Error, format!("[sync] orphan gc: stack={} app={} error: {}", sn, an, e)),
+            Ok(_) => s.add_log(
+                LogLevel::Ok,
+                format!("[sync] orphan gc: stack={} app={} removed", sn, an),
+            ),
+            Err(e) => s.add_log(
+                LogLevel::Error,
+                format!("[sync] orphan gc: stack={} app={} error: {}", sn, an, e),
+            ),
         }
     }
 }

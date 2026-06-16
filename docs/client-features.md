@@ -53,6 +53,7 @@ Last updated: 2026-06-16
 - Default add-app compose generation now creates only the app service (no embedded Promtail sidecar, no explicit `networks:` block) and applies baseline labels (`watchtower.enable` + `backup.pause`) plus optional Traefik routing labels.
 - Generated app compose mounts now follow stack-scoped appdata layout (`/appdata/<stack>/<app>/config:/config`) instead of flat per-app host paths.
 - Generated Vikunja compose defaults now include persistent files mount (`/appdata/<stack>/vikunja/files:/app/vikunja/files`) and Traefik service port `3456`.
+- Generated Promtail compose now mounts a deterministic stack-scoped config file (`/appdata/<stack>/promtail-config/config.yml:/etc/promtail/config.yml:ro`) and reads Docker JSON logs from `/var/lib/docker/containers`.
 - Stack config editor allows stack-level editing of deploy state, resources, hostname, MAC address, IP mode, and reserved IPv4 from the Scaffolding tab.
 - Stack config editor allows stack-level editing of autostart and boot order policy.
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.

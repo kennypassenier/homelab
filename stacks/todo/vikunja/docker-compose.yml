@@ -7,6 +7,8 @@ services:
     environment:
       - TZ=Europe/Brussels
     restart: unless-stopped
+    ports:
+      - "3456:3456"
     volumes:
       - /appdata/todo/vikunja-config:/config
       - /appdata/todo/vikunja-config/files:/app/vikunja/files

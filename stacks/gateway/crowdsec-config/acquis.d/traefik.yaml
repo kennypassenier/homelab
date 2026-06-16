@@ -2,6 +2,6 @@
 # This file is read at CrowdSec startup from /etc/crowdsec/acquis.d/
 
 filenames:
-  - /var/log/traefik/access.log
+  - /var/log/npm/proxy-host-*.log
 labels:
-  type: traefik
+  type: nginx-proxy-manager

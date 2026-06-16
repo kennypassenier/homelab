@@ -319,14 +319,14 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                     *error = None;
 
                     let app_name = state.app_name.as_deref().unwrap_or("");
-                    let traefik = state
+                    let proxy_route = state
                         .subdomain
                         .as_ref()
                         .map(|sub| format!("{}.{}", sub, domain))
                         .unwrap_or_else(|| "disabled".to_string());
                     let summary = format!(
-                        "Stack: {}\nApp: {}\nPromtail stack app active: {}\nTraefik route: {}",
-                        state.stack_name, app_name, state.include_promtail, traefik
+                        "Stack: {}\nApp: {}\nPromtail stack app active: {}\nNPM route: {}",
+                        state.stack_name, app_name, state.include_promtail, proxy_route
                     );
                     state.step = AppCreationStep::Review { summary };
                 }
@@ -343,7 +343,7 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                 let docker_image = "nginx:latest".to_string();
 
                 let options = crate::stack_features::AddAppOptions {
-                    include_traefik: state.subdomain.is_some(),
+                    expose_port: state.subdomain.is_some(),
                     subdomain: state.subdomain.clone(),
                 };
 
@@ -515,7 +515,7 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
                     .unwrap_or_else(|| "n/a".to_string());
                 state.step = StackCreationStep::Review {
                     summary: format!(
-                        "Stack: {}\nVMID: {}\nReserved IPv4: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nSwap: {} MiB (auto)\nDisk: {} GiB\nAutostart: {}\nBoot order: {}\nPromtail core app: {}\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create lxc-compose.yml\n- scaffold core apps (watchtower + traefik{})",
+                        "Stack: {}\nVMID: {}\nReserved IPv4: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nSwap: {} MiB (auto)\nDisk: {} GiB\nAutostart: {}\nBoot order: {}\nPromtail core app: {}\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create lxc-compose.yml\n- scaffold core apps (watchtower{})",
                         stack_name,
                         state.vmid,
                         reserved_ip,

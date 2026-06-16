@@ -4,9 +4,8 @@ services:
     container_name: gateway-crowdsec
     environment:
       - TZ=Europe/Brussels
-      # Traefik collection: parses Traefik access logs and detects common attacks.
-      # CrowdSec community blocklists are also pulled automatically.
-      - COLLECTIONS=crowdsecurity/traefik
+      # Parse Nginx Proxy Manager access logs and detect common attacks.
+      - COLLECTIONS=crowdsecurity/nginx-proxy-manager
     restart: unless-stopped
     volumes:
       # CrowdSec runtime config — writable, stores decisions and hub data.
@@ -14,8 +13,8 @@ services:
       # CrowdSec runtime data (decisions, metrics) — subfolder of crowdsec-config so
       # a single backup pass on crowdsec-config captures everything.
       - /opt/gitops/stacks/gateway/crowdsec-config/data:/var/lib/crowdsec/data
-      # Traefik access logs :ro — subfolder of traefik-config, CrowdSec only reads.
-      - /opt/gitops/stacks/gateway/traefik-config/logs:/var/log/traefik:ro
+      # NPM logs :ro — CrowdSec only reads these files.
+      - /opt/gitops/stacks/gateway/nginx-proxy-manager-config/data/logs:/var/log/npm:ro
     env_file:
       - .env
     labels:

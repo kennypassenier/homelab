@@ -6,12 +6,11 @@ use std::path::Path;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-// Traefik is not a core app for regular stacks — it lives only in the gateway stack.
 const CORE_APPS: [&str; 2] = ["promtail", "watchtower"];
 const GPU_NODES_INTEL: [&str; 2] = ["/dev/dri/renderD128", "/dev/dri/card0"];
 
 pub struct AddAppOptions {
-    pub include_traefik: bool,
+    pub expose_port: bool,
     pub subdomain: Option<String>,
 }
 
@@ -279,27 +278,11 @@ pub fn add_app_to_stack(
     crate::scaffold::ensure_lxc_compose(stack_name)?;
     crate::scaffold::ensure_app_config_mount(stack_name, app_name)?;
 
-    let domain = std::env::var("DOMAIN").unwrap_or_else(|_| "example.com".to_string());
-    let compose = app_compose_yaml(stack_name, app_name, docker_image, options, &domain);
+    let compose = app_compose_yaml(stack_name, app_name, docker_image, options);
     fs::write(
         format!("stacks/{}/{}/docker-compose.yml", stack_name, app_name),
         compose,
     )?;
-
-    // If routing was requested, write a gateway Traefik file-provider rule.
-    if options.include_traefik {
-        let container_port: u16 = if app_name == "vikunja" { 3456 } else { 80 };
-        if let Some(subdomain) = &options.subdomain {
-            let fqdn = format!("{}.{}", subdomain, domain);
-            if let Err(e) = write_gateway_route(stack_name, app_name, &fqdn, container_port) {
-                // Non-fatal: warn but don't fail app creation. The file can be created manually.
-                eprintln!(
-                    "warn: could not write gateway routing rule for {}/{}: {}",
-                    stack_name, app_name, e
-                );
-            }
-        }
-    }
 
     Ok(())
 }
@@ -437,10 +420,8 @@ pub fn add_missing_core_apps(
         scaffold_watchtower(stack_name)?;
         added.push("watchtower".to_string());
     }
-    // Traefik is NOT scaffolded per-stack. A single Traefik instance lives in the
-    // 'gateway' stack (stacks/gateway/traefik/) and routes for all stacks via file
-    // provider rules in stacks/gateway/traefik-config/dynamic/<stack>-<app>.yml.
-    // Adding an app with a subdomain writes that routing file automatically.
+    // Reverse proxy setup is managed by the dedicated gateway stack.
+    // Regular stacks only scaffold promtail + watchtower as core apps.
 
     Ok(AddCoreAppsResult { added })
 }
@@ -508,7 +489,6 @@ fn app_compose_yaml(
     app_name: &str,
     docker_image: &str,
     options: &AddAppOptions,
-    domain: &str,
 ) -> String {
     let mut out = String::new();
     out.push_str("services:\n");
@@ -536,7 +516,7 @@ fn app_compose_yaml(
     // Rules:
     //   • Set user: "UID:GID" when the container runs as a non-root user AND
     //     writes to bind-mounted directories (e.g. Vikunja runs as uid 1000).
-    //   • Omit user: entirely when the container runs as root (traefik, watchtower,
+    //   • Omit user: entirely when the container runs as root (watchtower,
     //     promtail, cloudflared). Root-owned directories are created without chown.
     //   • Read-only mounts (:ro) are never chowned — they come from the git checkout.
     if app_name == "vikunja" {
@@ -612,82 +592,18 @@ fn app_compose_yaml(
     out.push_str("      # its bind-mount directories to avoid partial writes in the backup.\n");
     out.push_str("      - \"com.homelab.backup.pause=true\"\n");
 
-    if options.include_traefik {
-        // Gateway routing model: expose the port on the LXC's static IP.
-        // The gateway Traefik (stacks/gateway) routes the subdomain to this IP:port
-        // via a file provider rule written to stacks/gateway/traefik-config/dynamic/
+    if options.expose_port {
+        // Expose the service on the LXC IP so Nginx Proxy Manager can proxy to it.
+        // This also keeps a direct IP:port fallback when the proxy/tunnel is down.
         let container_port = if app_name == "vikunja" { 3456u16 } else { 80u16 };
         out.push_str("    ports:\n");
-        out.push_str("      # Exposed on this stack's LXC IP so the gateway Traefik can reach it.\n");
-        out.push_str("      # A routing rule is written to stacks/gateway/traefik-config/dynamic/\n");
+        out.push_str("      # Exposed on this stack's LXC IP for gateway proxying and direct fallback.\n");
         out.push_str(&format!(
             "      - \"{port}:{port}\"\n",
             port = container_port
         ));
     }
     out
-}
-
-/// Write a gateway Traefik file-provider routing rule for the given app.
-/// Called from add_app_to_stack when include_traefik=true and a subdomain is provided.
-/// Reads the stack's LXC IP from its lxc-compose.yml.
-fn write_gateway_route(
-    stack_name: &str,
-    app_name: &str,
-    fqdn: &str,
-    port: u16,
-) -> io::Result<()> {
-    // Read this stack's reserved IP from lxc-compose.yml
-    let lxc_compose_path = format!("stacks/{}/lxc-compose.yml", stack_name);
-    let stack_ip = std::fs::read_to_string(&lxc_compose_path)
-        .ok()
-        .and_then(|content| {
-            // Parse reserved_ipv4 from YAML
-            content
-                .lines()
-                .find(|l| l.trim_start().starts_with("reserved_ipv4:"))
-                .and_then(|l| l.splitn(2, ':').nth(1))
-                .map(|v| v.trim().trim_matches('\'').to_string())
-        })
-        .unwrap_or_else(|| "127.0.0.1".to_string());
-
-    let dynamic_dir = "stacks/gateway/traefik-config/dynamic";
-    fs::create_dir_all(dynamic_dir)?;
-
-    let router_name = format!("{}-{}", stack_name, app_name);
-    let route_file = format!("{}/{}.yml", dynamic_dir, router_name);
-
-    let content = format!(
-        concat!(
-            "# Dynamic routing rule for stacks/{stack} — {app} app\n",
-            "# Generated by the CLIENT scaffold. Edit and push to update the route live.\n",
-            "#\n",
-            "# App LXC IP: {ip} ({stack} stack)\n",
-            "# App port: {port}\n",
-            "\n",
-            "http:\n",
-            "  routers:\n",
-            "    {router}:\n",
-            "      rule: \"Host(`{fqdn}`)\"\n",
-            "      entryPoints:\n",
-            "        - web\n",
-            "      service: {router}\n",
-            "\n",
-            "  services:\n",
-            "    {router}:\n",
-            "      loadBalancer:\n",
-            "        servers:\n",
-            "          - url: \"http://{ip}:{port}\"\n",
-        ),
-        stack = stack_name,
-        app = app_name,
-        ip = stack_ip,
-        port = port,
-        router = router_name,
-        fqdn = fqdn,
-    );
-
-    fs::write(&route_file, content)
 }
 
 fn scaffold_promtail(stack_name: &str) -> io::Result<()> {
@@ -813,90 +729,3 @@ fn scaffold_watchtower(stack_name: &str) -> io::Result<()> {
     )
 }
 
-fn scaffold_traefik(stack_name: &str) -> io::Result<()> {
-    let app_dir = format!("stacks/{}/traefik", stack_name);
-    let cfg_dir = format!("stacks/{}/traefik-config", stack_name);
-    fs::create_dir_all(&app_dir)?;
-    fs::create_dir_all(&cfg_dir)?;
-    fs::create_dir_all(format!("{}/acme", cfg_dir))?;
-
-    fs::write(
-        format!("{}/docker-compose.yml", app_dir),
-        format!(
-            concat!(
-                "services:\n",
-                "  traefik:\n",
-                "    # Traefik is the reverse proxy for this stack. It watches Docker labels on\n",
-                "    # other containers and builds routing rules dynamically — no static config\n",
-                "    # changes are needed when you add or remove app services.\n",
-                "    image: traefik:v3\n",
-                "    container_name: {stack}-traefik\n",
-                "    # No user: field — Traefik must run as root to bind privileged ports 80/443.\n",
-                "    # The LXC prep step will create the traefik-config and acme directories\n",
-                "    # as root, which is correct since Traefik owns them.\n",
-                "    restart: unless-stopped\n",
-                "    ports:\n",
-                "      # HTTP — typically redirected to HTTPS by the entrypoint rule in traefik.yml.\n",
-                "      - \"80:80\"\n",
-                "      # HTTPS — TLS termination here; upstream services receive plain HTTP.\n",
-                "      - \"443:443\"\n",
-                "    volumes:\n",
-                "      # Docker socket — :ro because Traefik only reads container labels/events.\n",
-                "      # No user: needed; socket ownership allows root-level reads.\n",
-                "      - /var/run/docker.sock:/var/run/docker.sock:ro\n",
-                "      # Static config (traefik.yml) + dynamic config dir from the git checkout.\n",
-                "      # Edit stacks/{stack}/traefik-config/traefik.yml to change entrypoints,\n",
-                "      # certificate resolvers, etc. Writable so Traefik can write provider state.\n",
-                "      - /opt/gitops/stacks/{stack}/traefik-config:/etc/traefik\n",
-                "      # ACME certificate store — writable, persists Let's Encrypt certs across restarts.\n",
-                "      # No user: chown needed; Traefik writes as root, which is fine here.\n",
-                "      - /opt/gitops/stacks/{stack}/traefik-config/acme:/acme\n",
-                "    environment:\n",
-                "      DOCKER_API_VERSION: \"1.40\"\n",
-                "    networks:\n",
-                "      # Must be on traefik_proxy to reach app containers via container IPs.\n",
-                "      # This network is created here (it is NOT external for Traefik).\n",
-                "      - traefik_proxy\n",
-                "    labels:\n",
-                "      # Watchtower auto-updates Traefik when a new image is published.\n",
-                "      com.centurylinklabs.watchtower.enable: \"true\"\n",
-                "\n",
-                "# Traefik owns and creates this network. App containers declare it as external.\n",
-                "# Alphabetical deploy order guarantees traefik deploys before other apps.\n",
-                "networks:\n",
-                "  traefik_proxy:\n",
-                "    name: traefik_proxy\n",
-                "    driver: bridge\n",
-            ),
-            stack = stack_name
-        ),
-    )?;
-
-    fs::write(
-        format!("{}/traefik.yml", cfg_dir),
-        concat!(
-            "# Traefik v3 static configuration.\n",
-            "# See docs/docker-compose-strategy.md for the full routing explanation.\n",
-            "providers:\n",
-            "  docker:\n",
-            "    exposedByDefault: false\n",
-            "    network: traefik_proxy\n",
-            "entryPoints:\n",
-            "  web:\n",
-            "    address: \":80\"\n",
-            "  websecure:\n",
-            "    address: \":443\"\n",
-            "# ACME not required when using Cloudflare tunnel (Cloudflare handles TLS).\n",
-            "# Uncomment if you want Traefik to also manage certs for direct HTTPS access:\n",
-            "# certificatesResolvers:\n",
-            "#   letsencrypt:\n",
-            "#     acme:\n",
-            "#       email: ${ACME_EMAIL}\n",
-            "#       storage: /acme/acme.json\n",
-            "#       httpChallenge:\n",
-            "#         entryPoint: web\n",
-            "log:\n",
-            "  level: INFO\n",
-        ),
-    )
-}

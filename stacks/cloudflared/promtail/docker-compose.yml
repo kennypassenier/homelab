@@ -27,6 +27,5 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.tag.watchtower=enabled"
       - "com.homelab.tag.role=infra-promtail"
-      - "com.homelab.tag.traefik.subdomain=none"
       - "com.homelab.tag.gpu=disabled"
       - "com.homelab.tag.vpn=none"

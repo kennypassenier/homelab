@@ -197,7 +197,7 @@ pub fn draw_app_creation_wizard(
             domain,
         } => {
             let block = Block::default()
-                .title("Subdomain (Traefik Routing)")
+                .title("Subdomain (NPM Routing)")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(
@@ -211,7 +211,7 @@ pub fn draw_app_creation_wizard(
                 format!("(will be: {}.{})", input.value(), domain)
             };
             let mut text = format!(
-                "Optional Traefik subdomain for this app:\n> {}\n{}\n\nLeave empty to skip Traefik labels for this app.\n[Enter to continue, ESC to cancel]",
+                "Optional Nginx Proxy Manager subdomain for this app:\n> {}\n{}\n\nLeave empty to skip proxy route setup for this app.\n[Enter to continue, ESC to cancel]",
                 input.value(),
                 preview
             );

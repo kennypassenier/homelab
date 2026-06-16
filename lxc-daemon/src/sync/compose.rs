@@ -227,9 +227,8 @@ fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), Strin
                     )
                 })?;
             } else if !source.exists() {
-                std::fs::write(source, "").map_err(|e| {
-                    format!("create file {}: {}", source.display(), e)
-                })?;
+                std::fs::write(source, "")
+                    .map_err(|e| format!("create file {}: {}", source.display(), e))?;
             }
             return Ok(());
         }
@@ -247,7 +246,8 @@ fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), Strin
                 .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
         }
         if !source.exists() {
-            std::fs::write(source, "").map_err(|e| format!("create file {}: {}", source.display(), e))?;
+            std::fs::write(source, "")
+                .map_err(|e| format!("create file {}: {}", source.display(), e))?;
         }
         return Ok(());
     }

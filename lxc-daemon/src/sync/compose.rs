@@ -268,7 +268,8 @@ fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), Strin
         return Ok(());
     }
 
-    std::fs::create_dir_all(source).map_err(|e| format!("create dir {}: {}", source.display(), e))?;
+    std::fs::create_dir_all(source)
+        .map_err(|e| format!("create dir {}: {}", source.display(), e))?;
     ensure_appdata_dir_permissions(source)
 }
 

@@ -1,0 +1,22 @@
+services:
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: gateway-crowdsec
+    environment:
+      - TZ=Europe/Brussels
+      # Traefik collection: parses Traefik access logs and detects common attacks.
+      # CrowdSec community blocklists are also pulled automatically.
+      - COLLECTIONS=crowdsecurity/traefik
+    restart: unless-stopped
+    volumes:
+      # CrowdSec runtime config — writable, stores decisions and hub data.
+      - /opt/gitops/stacks/gateway/crowdsec-config:/etc/crowdsec
+      # CrowdSec data (ban decisions, metrics) — writable, root-owned.
+      - /opt/gitops/stacks/gateway/crowdsec-data:/var/lib/crowdsec/data
+      # Traefik access logs :ro — CrowdSec reads but never writes here.
+      - /opt/gitops/stacks/gateway/traefik-logs:/var/log/traefik:ro
+    env_file:
+      - .env
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"

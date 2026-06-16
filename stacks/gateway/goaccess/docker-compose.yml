@@ -1,0 +1,28 @@
+services:
+  goaccess:
+    image: allinurl/goaccess:latest
+    container_name: gateway-goaccess
+    # No user: — GoAccess runs as root to read the shared log volume.
+    environment:
+      - TZ=Europe/Brussels
+    restart: unless-stopped
+    volumes:
+      # Traefik access logs :ro — GoAccess reads but never writes here.
+      - /opt/gitops/stacks/gateway/traefik-logs:/var/log/traefik:ro
+      # Persistent report output — GoAccess writes its HTML report here.
+      - /opt/gitops/stacks/gateway/goaccess-data:/srv/data
+    ports:
+      # Web dashboard served directly on the gateway LXC's IP.
+      # Access at http://10.10.10.8:7880 from your internal network.
+      # To expose publicly: add a dynamic route in traefik-config/dynamic/gateway-goaccess.yml
+      - "7880:7880"
+    command: >
+      /var/log/traefik/access.log
+      --log-format=TRAEFIKCLF
+      --real-time-html
+      --output=/srv/data/report.html
+      --ws-url=ws://10.10.10.8:7880
+      --port=7880
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"

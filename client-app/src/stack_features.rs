@@ -6,7 +6,8 @@ use std::path::Path;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-const CORE_APPS: [&str; 3] = ["promtail", "watchtower", "traefik"];
+// Traefik is not a core app for regular stacks — it lives only in the gateway stack.
+const CORE_APPS: [&str; 2] = ["promtail", "watchtower"];
 const GPU_NODES_INTEL: [&str; 2] = ["/dev/dri/renderD128", "/dev/dri/card0"];
 
 pub struct AddAppOptions {
@@ -285,6 +286,21 @@ pub fn add_app_to_stack(
         compose,
     )?;
 
+    // If routing was requested, write a gateway Traefik file-provider rule.
+    if options.include_traefik {
+        let container_port: u16 = if app_name == "vikunja" { 3456 } else { 80 };
+        if let Some(subdomain) = &options.subdomain {
+            let fqdn = format!("{}.{}", subdomain, domain);
+            if let Err(e) = write_gateway_route(stack_name, app_name, &fqdn, container_port) {
+                // Non-fatal: warn but don't fail app creation. The file can be created manually.
+                eprintln!(
+                    "warn: could not write gateway routing rule for {}/{}: {}",
+                    stack_name, app_name, e
+                );
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -421,11 +437,10 @@ pub fn add_missing_core_apps(
         scaffold_watchtower(stack_name)?;
         added.push("watchtower".to_string());
     }
-    if !core_app_exists(stack_name, "traefik") {
-        scaffold_traefik(stack_name)?;
-        crate::scaffold::ensure_app_config_mount(stack_name, "traefik")?;
-        added.push("traefik".to_string());
-    }
+    // Traefik is NOT scaffolded per-stack. A single Traefik instance lives in the
+    // 'gateway' stack (stacks/gateway/traefik/) and routes for all stacks via file
+    // provider rules in stacks/gateway/traefik-config/dynamic/<stack>-<app>.yml.
+    // Adding an app with a subdomain writes that routing file automatically.
 
     Ok(AddCoreAppsResult { added })
 }
@@ -598,37 +613,81 @@ fn app_compose_yaml(
     out.push_str("      - \"com.homelab.backup.pause=true\"\n");
 
     if options.include_traefik {
-        out.push_str(
-            "      # Traefik routing — expose this service through the stack reverse proxy.\n",
-        );
-        out.push_str(
-            "      # traefik.enable=true opts this container into dynamic route discovery.\n",
-        );
-        out.push_str("      - \"traefik.enable=true\"\n");
-        if let Some(subdomain) = &options.subdomain {
-            let fqdn = format!("{}.{}", subdomain, domain);
-            out.push_str("      # Router rule: requests for this hostname are forwarded here.\n");
-            out.push_str(&format!(
-                "      - \"traefik.http.routers.{}.rule=Host(\\\"{}\\\")\"\n",
-                app_name, fqdn
-            ));
-        } else {
-            out.push_str(
-                "      # Router rule: no subdomain configured — falls back to <app>.local.\n",
-            );
-            out.push_str(&format!(
-                "      - \"traefik.http.routers.{}.rule=Host(\\\"{}.local\\\")\"\n",
-                app_name, app_name
-            ));
-        }
-        out.push_str("      # Service port: the container port Traefik forwards traffic to.\n");
+        // Gateway routing model: expose the port on the LXC's static IP.
+        // The gateway Traefik (stacks/gateway) routes the subdomain to this IP:port
+        // via a file provider rule written to stacks/gateway/traefik-config/dynamic/
+        let container_port = if app_name == "vikunja" { 3456u16 } else { 80u16 };
+        out.push_str("    ports:\n");
+        out.push_str("      # Exposed on this stack's LXC IP so the gateway Traefik can reach it.\n");
+        out.push_str("      # A routing rule is written to stacks/gateway/traefik-config/dynamic/\n");
         out.push_str(&format!(
-            "      - \"traefik.http.services.{}.loadbalancer.server.port={}\"\n",
-            app_name,
-            if app_name == "vikunja" { "3456" } else { "80" }
+            "      - \"{port}:{port}\"\n",
+            port = container_port
         ));
     }
     out
+}
+
+/// Write a gateway Traefik file-provider routing rule for the given app.
+/// Called from add_app_to_stack when include_traefik=true and a subdomain is provided.
+/// Reads the stack's LXC IP from its lxc-compose.yml.
+fn write_gateway_route(
+    stack_name: &str,
+    app_name: &str,
+    fqdn: &str,
+    port: u16,
+) -> io::Result<()> {
+    // Read this stack's reserved IP from lxc-compose.yml
+    let lxc_compose_path = format!("stacks/{}/lxc-compose.yml", stack_name);
+    let stack_ip = std::fs::read_to_string(&lxc_compose_path)
+        .ok()
+        .and_then(|content| {
+            // Parse reserved_ipv4 from YAML
+            content
+                .lines()
+                .find(|l| l.trim_start().starts_with("reserved_ipv4:"))
+                .and_then(|l| l.splitn(2, ':').nth(1))
+                .map(|v| v.trim().trim_matches('\'').to_string())
+        })
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    let dynamic_dir = "stacks/gateway/traefik-config/dynamic";
+    fs::create_dir_all(dynamic_dir)?;
+
+    let router_name = format!("{}-{}", stack_name, app_name);
+    let route_file = format!("{}/{}.yml", dynamic_dir, router_name);
+
+    let content = format!(
+        concat!(
+            "# Dynamic routing rule for stacks/{stack} — {app} app\n",
+            "# Generated by the CLIENT scaffold. Edit and push to update the route live.\n",
+            "#\n",
+            "# App LXC IP: {ip} ({stack} stack)\n",
+            "# App port: {port}\n",
+            "\n",
+            "http:\n",
+            "  routers:\n",
+            "    {router}:\n",
+            "      rule: \"Host(`{fqdn}`)\"\n",
+            "      entryPoints:\n",
+            "        - web\n",
+            "      service: {router}\n",
+            "\n",
+            "  services:\n",
+            "    {router}:\n",
+            "      loadBalancer:\n",
+            "        servers:\n",
+            "          - url: \"http://{ip}:{port}\"\n",
+        ),
+        stack = stack_name,
+        app = app_name,
+        ip = stack_ip,
+        port = port,
+        router = router_name,
+        fqdn = fqdn,
+    );
+
+    fs::write(&route_file, content)
 }
 
 fn scaffold_promtail(stack_name: &str) -> io::Result<()> {

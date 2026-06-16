@@ -1,0 +1,46 @@
+version: 1
+stack_name: gateway
+vmid: 108
+hostname: 108-app-gateway
+hwaddr: 02:10:2b:c3:b8:9c
+tags: []
+deploy:
+  enabled: false
+network:
+  bridge: vmbr0
+  ip_mode: static
+  # 10.10.10.8 — this is what the cloudflared tunnel routes *.kp-soft.dev to.
+  # Do NOT change this IP without updating the Cloudflare Zero Trust tunnel config.
+  reserved_ipv4: 10.10.10.8
+  cidr: 24
+  gateway: 10.10.10.1
+  vlan_tag: 10
+  firewall: false
+  ip_mode_v6: null
+boot:
+  autostart: true
+  order: 85
+resources:
+  cores: 1
+  cpu_limit: null
+  cpu_units: 1024
+  memory_mb: 512
+  swap_mb: 512
+  disk_gb: 8
+storage:
+  rootfs_pool: local-lvm
+  host_path: /opt/appdata/gateway
+  mount_point: /appdata
+  appdata_backup: true
+  appdata_read_only: false
+lxc:
+  template: debian-12-standard 12.12-1 amd64
+  unprivileged: true
+  timezone: host
+  features:
+  - nesting=1
+hardware:
+  tun_device: null
+host_management:
+  managed: true
+  protection: false

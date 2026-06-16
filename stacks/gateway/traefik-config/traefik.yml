@@ -1,0 +1,51 @@
+# Traefik v3 static configuration — Gateway stack
+#
+# Traffic flow:
+#   Internet → Cloudflare (TLS) → cloudflared (10.10.10.9) → port 80 → Traefik (10.10.10.8)
+#     → app stacks via file provider routing rules in dynamic/<stack>-<app>.yml
+#
+# To add a new publicly accessible app:
+#   1. Ensure the app exposes its port in its stack's docker-compose.yml (ports: ["PORT:PORT"])
+#   2. Create stacks/gateway/traefik-config/dynamic/<stack>-<app>.yml with an http.routers
+#      and http.services entry pointing to http://<stack-lxc-ip>:<port>
+#   3. Push — the file provider watches the dynamic/ directory and picks up changes live.
+#
+# You NEVER need to change the Cloudflare tunnel config when adding new subdomains.
+
+providers:
+  docker:
+    # Only expose gateway-local containers that explicitly set traefik.enable=true.
+    exposedByDefault: false
+    network: traefik_proxy
+  file:
+    # Dynamic routing rules live here — one file per routed app.
+    # Traefik watches this directory and reloads routes automatically on file changes.
+    directory: /etc/traefik/dynamic
+    watch: true
+
+entryPoints:
+  # Primary entrypoint — receives all traffic from cloudflared on port 80.
+  web:
+    address: ":80"
+  # Available for direct HTTPS access, not required for cloudflared tunnel flow.
+  websecure:
+    address: ":443"
+
+# Access log — parsed by CrowdSec for threat detection and GoAccess for analytics.
+# Log files are gitignored (*.log in .gitignore); the directory is git-tracked.
+accessLog:
+  filePath: /var/log/traefik/access.log
+  bufferingSize: 100
+
+log:
+  level: INFO
+
+# ACME / Let's Encrypt — NOT needed for the cloudflared tunnel (Cloudflare handles TLS).
+# Uncomment only if you need Traefik to serve HTTPS directly on this LXC:
+# certificatesResolvers:
+#   letsencrypt:
+#     acme:
+#       email: ${ACME_EMAIL}
+#       storage: /acme/acme.json
+#       httpChallenge:
+#         entryPoint: web

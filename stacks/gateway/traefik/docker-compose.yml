@@ -1,0 +1,36 @@
+services:
+  traefik:
+    image: traefik:v3
+    container_name: gateway-traefik
+    # No user: — Traefik must run as root to bind privileged ports 80/443.
+    restart: unless-stopped
+    ports:
+      # Port 80 is the single entry point. Cloudflared tunnels *.kp-soft.dev here.
+      # All subdomain routing is handled internally by the file provider rules in
+      # stacks/gateway/traefik-config/dynamic/<stack>-<app>.yml
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Docker socket :ro — only needed for gateway-local containers (goaccess dashboard, etc.)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Static config (traefik.yml) and dynamic/ routing rules directory.
+      - /opt/gitops/stacks/gateway/traefik-config:/etc/traefik
+      # ACME cert store — writable. Currently unused (Cloudflare handles TLS for the tunnel).
+      - /opt/gitops/stacks/gateway/traefik-config/acme:/acme
+      # Shared access log directory — CrowdSec and GoAccess read from here.
+      # LXC prep creates this directory automatically (no user: so created as root).
+      - /opt/gitops/stacks/gateway/traefik-logs:/var/log/traefik
+    environment:
+      DOCKER_API_VERSION: "1.40"
+    networks:
+      # traefik_proxy is for gateway-local Docker containers (e.g. goaccess dashboard).
+      - traefik_proxy
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+# Traefik owns this network for gateway-local containers.
+# Remote stacks are reached via IP address in the file provider rules, not via this network.
+networks:
+  traefik_proxy:
+    name: traefik_proxy
+    driver: bridge

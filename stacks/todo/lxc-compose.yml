@@ -54,9 +54,6 @@ mounts:
 - name: promtail-config
   source: /opt/appdata/todo/promtail-config
   target: /appdata/promtail-config
-- name: traefik-config
-  source: /opt/appdata/todo/traefik-config
-  target: /appdata/traefik-config
 - name: vikunja-config
   source: /opt/appdata/todo/vikunja-config
   target: /appdata/vikunja-config

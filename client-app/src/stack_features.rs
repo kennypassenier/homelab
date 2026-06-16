@@ -595,9 +595,15 @@ fn app_compose_yaml(
     if options.expose_port {
         // Expose the service on the LXC IP so Nginx Proxy Manager can proxy to it.
         // This also keeps a direct IP:port fallback when the proxy/tunnel is down.
-        let container_port = if app_name == "vikunja" { 3456u16 } else { 80u16 };
+        let container_port = if app_name == "vikunja" {
+            3456u16
+        } else {
+            80u16
+        };
         out.push_str("    ports:\n");
-        out.push_str("      # Exposed on this stack's LXC IP for gateway proxying and direct fallback.\n");
+        out.push_str(
+            "      # Exposed on this stack's LXC IP for gateway proxying and direct fallback.\n",
+        );
         out.push_str(&format!(
             "      - \"{port}:{port}\"\n",
             port = container_port
@@ -728,4 +734,3 @@ fn scaffold_watchtower(stack_name: &str) -> io::Result<()> {
         ),
     )
 }
-

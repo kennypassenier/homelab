@@ -189,7 +189,9 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
             let style = if selected {
                 stack_glitch_style(app.pulse_phase * 4.0 + (i as f32 * 0.77))
             } else if is_active && is_drifted {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else if is_active {
                 Style::default().fg(Color::Green)
             } else {

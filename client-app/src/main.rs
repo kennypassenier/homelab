@@ -323,9 +323,16 @@ async fn async_main() -> Result<()> {
                 }
 
                 // Pipeline step completed — advance the runner.
-                SyncEvent::StepResult { stack, step_index, ok, output, error } => {
+                SyncEvent::StepResult {
+                    stack,
+                    step_index,
+                    ok,
+                    output,
+                    error,
+                } => {
                     if let Some(runner) = app.pipeline_runners.get_mut(&stack) {
-                        let should_continue = runner.record_step_result(step_index, ok, output, error.clone());
+                        let should_continue =
+                            runner.record_step_result(step_index, ok, output, error.clone());
                         if !should_continue {
                             let err_msg = error.unwrap_or_else(|| "unknown error".to_string());
                             app.push_client_logfmt(
@@ -335,7 +342,8 @@ async fn async_main() -> Result<()> {
                                 &format!("step {} failed — pipeline halted", step_index),
                                 Some(&err_msg),
                             );
-                            app.sync_status = format!("Deploy failed at step {} — '{}'", step_index, stack);
+                            app.sync_status =
+                                format!("Deploy failed at step {} — '{}'", step_index, stack);
                             // Leave the runner in place so the user can see the failure
                             // and retry from the failed step.
                         }

@@ -6,7 +6,7 @@ hwaddr: 02:ef:38:83:01:dd
 tags: []
 deploy:
   enabled: true
-  activated_at: '1781623673'
+  activated_at: '1781627351'
   last_applied_hash: 57f43700051e4b34f1ad266ca2fdd1dd045e8ffb9966f8c48ab2113bb0f8147a
   last_applied_at: '1781623750'
   last_applied_apps:

@@ -9,7 +9,7 @@ services:
       - TZ=Europe/Brussels
     restart: unless-stopped
     volumes:
-      - /appdata/cloudflared/cloudflared-config:/config
+      - /opt/gitops/stacks/cloudflared/cloudflared-config:/config
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"

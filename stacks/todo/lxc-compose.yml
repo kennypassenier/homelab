@@ -5,10 +5,10 @@ hostname: 111-app-todo
 hwaddr: 02:ef:38:83:01:dd
 tags: []
 deploy:
-  enabled: true
-  activated_at: '1781628570'
-  last_applied_hash: 9d1c2664830eb3720965755cd8b885763d194d3304a2c716b3795e35eb7b6783
-  last_applied_at: '1781628692'
+  enabled: false
+  activated_at: null
+  last_applied_hash: 8f52f8b085a6bb7795a6751af61345a736653ee8ea26dbc72f02ef2f8f1b7215
+  last_applied_at: '1781629577'
   last_applied_apps:
     promtail: 0f841453209a2174881095df6d25bc0a9a6f003f7185dcbaf2dca332c84e2bbf
     traefik: 4090dc5cf140b9b3389d2bc4a70887bfe32e0524c2273be3f8b8b6ab58532a79

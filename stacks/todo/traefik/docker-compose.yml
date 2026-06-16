@@ -8,8 +8,8 @@ services:
       - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /appdata/traefik-config:/etc/traefik
-      - /appdata/traefik-config/acme:/acme
+      - /opt/gitops/stacks/todo/traefik-config:/etc/traefik
+      - /opt/gitops/stacks/todo/traefik-config/acme:/acme
     environment:
       DOCKER_API_VERSION: "1.40"
     labels:

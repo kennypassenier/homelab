@@ -11,10 +11,11 @@ services:
     volumes:
       # CrowdSec runtime config — writable, stores decisions and hub data.
       - /opt/gitops/stacks/gateway/crowdsec-config:/etc/crowdsec
-      # CrowdSec data (ban decisions, metrics) — writable, root-owned.
-      - /opt/gitops/stacks/gateway/crowdsec-data:/var/lib/crowdsec/data
-      # Traefik access logs :ro — CrowdSec reads but never writes here.
-      - /opt/gitops/stacks/gateway/traefik-logs:/var/log/traefik:ro
+      # CrowdSec runtime data (decisions, metrics) — subfolder of crowdsec-config so
+      # a single backup pass on crowdsec-config captures everything.
+      - /opt/gitops/stacks/gateway/crowdsec-config/data:/var/lib/crowdsec/data
+      # Traefik access logs :ro — subfolder of traefik-config, CrowdSec only reads.
+      - /opt/gitops/stacks/gateway/traefik-config/logs:/var/log/traefik:ro
     env_file:
       - .env
     labels:

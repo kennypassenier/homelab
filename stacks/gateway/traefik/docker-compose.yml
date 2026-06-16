@@ -17,9 +17,9 @@ services:
       - /opt/gitops/stacks/gateway/traefik-config:/etc/traefik
       # ACME cert store — writable. Currently unused (Cloudflare handles TLS for the tunnel).
       - /opt/gitops/stacks/gateway/traefik-config/acme:/acme
-      # Shared access log directory — CrowdSec and GoAccess read from here.
-      # LXC prep creates this directory automatically (no user: so created as root).
-      - /opt/gitops/stacks/gateway/traefik-logs:/var/log/traefik
+      # Access log directory — subfolder of traefik-config so backup covers it.
+      # CrowdSec and GoAccess also mount this path read-only.
+      - /opt/gitops/stacks/gateway/traefik-config/logs:/var/log/traefik
     environment:
       DOCKER_API_VERSION: "1.40"
     networks:

@@ -32,7 +32,8 @@ entryPoints:
     address: ":443"
 
 # Access log — parsed by CrowdSec for threat detection and GoAccess for analytics.
-# Log files are gitignored (*.log in .gitignore); the directory is git-tracked.
+# Stored under traefik-config/logs/ so a single backup pass on traefik-config covers it.
+# Log files themselves are gitignored (*.log in .gitignore); the directory is git-tracked.
 accessLog:
   filePath: /var/log/traefik/access.log
   bufferingSize: 100

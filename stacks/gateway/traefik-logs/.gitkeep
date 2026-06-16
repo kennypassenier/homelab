@@ -1,3 +1,0 @@
-# traefik-logs/ — runtime directory for Traefik access logs.
-# Log files (*.log) are gitignored. This .gitkeep ensures the directory
-# is created by the git sparse checkout so the LXC prep step can bind-mount it.

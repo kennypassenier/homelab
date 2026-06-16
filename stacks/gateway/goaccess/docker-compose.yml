@@ -7,10 +7,10 @@ services:
       - TZ=Europe/Brussels
     restart: unless-stopped
     volumes:
-      # Traefik access logs :ro — GoAccess reads but never writes here.
-      - /opt/gitops/stacks/gateway/traefik-logs:/var/log/traefik:ro
-      # Persistent report output — GoAccess writes its HTML report here.
-      - /opt/gitops/stacks/gateway/goaccess-data:/srv/data
+      # Traefik access logs :ro — subfolder of traefik-config, GoAccess only reads.
+      - /opt/gitops/stacks/gateway/traefik-config/logs:/var/log/traefik:ro
+      # Persistent report output — subfolder of goaccess-config, covered by backup.
+      - /opt/gitops/stacks/gateway/goaccess-config:/srv/data
     ports:
       # Web dashboard served directly on the gateway LXC's IP.
       # Access at http://10.10.10.8:7880 from your internal network.

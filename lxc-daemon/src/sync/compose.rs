@@ -59,7 +59,7 @@ async fn emit_compose_failure_diagnostics(
         s.add_log(
             LogLevel::Info,
             format!(
-                "[sync][run] cd {} && docker compose logs --no-color --tail 80",
+                "[sync][run] cd {} && docker compose logs --no-color --tail 500",
                 app_dir
             ),
         );
@@ -69,7 +69,7 @@ async fn emit_compose_failure_diagnostics(
     let (logs_code, logs_out, logs_err) = tokio::task::spawn_blocking(move || {
         capture(
             Command::new("docker")
-                .args(["compose", "logs", "--no-color", "--tail", "80"])
+                .args(["compose", "logs", "--no-color", "--tail", "500"])
                 .current_dir(&dir_logs),
         )
     })
@@ -141,13 +141,13 @@ async fn emit_compose_failure_diagnostics(
                 let mut s = state.lock().unwrap();
                 s.add_log(
                     LogLevel::Info,
-                    format!("[sync][run] docker logs --tail 120 {}", container_id),
+                    format!("[sync][run] docker logs --tail 500 {}", container_id),
                 );
             }
 
             let cid = container_id.to_string();
             let (log_code, log_out, log_err) = tokio::task::spawn_blocking(move || {
-                capture(Command::new("docker").args(["logs", "--tail", "120", &cid]))
+                capture(Command::new("docker").args(["logs", "--tail", "500", &cid]))
             })
             .await
             .unwrap_or((-1, String::new(), "spawn failed".to_string()));

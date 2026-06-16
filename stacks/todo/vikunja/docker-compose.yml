@@ -8,8 +8,9 @@ services:
       - TZ=Europe/Brussels
     restart: unless-stopped
     volumes:
-      - /appdata/todo/vikunja/config:/config
-      - /appdata/todo/vikunja/files:/app/vikunja/files
+      - /appdata/todo/vikunja-config:/config
+      - /appdata/todo/vikunja-config/files:/app/vikunja/files
+      - /appdata/todo/vikunja-config/db:/db
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"

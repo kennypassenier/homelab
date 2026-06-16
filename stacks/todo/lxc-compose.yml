@@ -6,11 +6,11 @@ hwaddr: 02:ef:38:83:01:dd
 tags: []
 deploy:
   enabled: true
-  activated_at: '1781619495'
-  last_applied_hash: bce8562df617ac01b81adce3fdbd10d1ee5f31517c4639c8410b329d66a2e602
-  last_applied_at: '1781619567'
+  activated_at: '1781620479'
+  last_applied_hash: 635f5afa7366bc701ed027356f19620d31252fdbbda55ddaf5b4bb0b016e7b7e
+  last_applied_at: '1781620556'
   last_applied_apps:
-    promtail: e440fb5d225899dda7109a9fd81fe76df023c8a9ce291b9b915f306c6b5c5b01
+    promtail: 4695cbba2ba41b93ef01eca93054a3d283932f031c4074486e3a71b109ab4590
     traefik: 43c7ccc04c37028ba7b98c29a3d7ac15752c63afc3571f32b8bea575624a1cad
     vikunja: 4889caeaba7493caf60da0379c9435a0670b35efb2ff3e50bf860b682e7c6934
     watchtower: 1dedb44a320ed43d8f3f7a18aecb933b6c403f77fa0b14a1dda923fd0760d6bb

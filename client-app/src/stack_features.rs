@@ -529,13 +529,17 @@ fn app_compose_yaml(
     out.push_str("    restart: unless-stopped\n");
     out.push_str("    volumes:\n");
     out.push_str(&format!(
-        "      - /appdata/{}/{}/config:/config\n",
+        "      - /appdata/{}/{}-config:/config\n",
         stack_name, app_name
     ));
     if app_name == "vikunja" {
         out.push_str(&format!(
-            "      - /appdata/{}/{}/files:/app/vikunja/files\n",
-            stack_name, app_name
+            "      - /appdata/{}/vikunja-config/files:/app/vikunja/files\n",
+            stack_name
+        ));
+        out.push_str(&format!(
+            "      - /appdata/{}/vikunja-config/db:/db\n",
+            stack_name
         ));
     }
     out.push_str("    labels:\n");
@@ -575,15 +579,14 @@ fn scaffold_promtail(stack_name: &str) -> io::Result<()> {
         format!("{}/docker-compose.yml", app_dir),
         format!(
             "services:\n  promtail:\n    image: grafana/promtail:latest\n    container_name: {}-promtail\n    environment:\n      - TZ=Europe/Brussels\n    restart: unless-stopped\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n      - /var/lib/docker/containers:/var/lib/docker/containers:ro\n      - /appdata/{}/promtail-config/config.yml:/etc/promtail/config.yml:ro\n    env_file:\n      - .env\n    command: -config.file=/etc/promtail/config.yml -config.expand-env=true\n    labels:\n      - \"com.centurylinklabs.watchtower.enable=true\"\n",
-            stack_name,
-            stack_name
+            stack_name, stack_name
         ),
     )?;
 
     fs::write(
         format!("{}/config.yml", cfg_dir),
         format!(
-                        "server:\n  http_listen_port: 9080\n  grpc_listen_port: 0\n\npositions:\n  filename: /tmp/positions.yaml\n\nclients:\n  - url: ${{LOKI_URL}}/loki/api/v1/push\n\nscrape_configs:\n  - job_name: docker\n    static_configs:\n      - targets: [localhost]\n        labels:\n          job: docker\n          stack: {}\n          __path__: /var/lib/docker/containers/*/*-json.log\n",
+            "server:\n  http_listen_port: 9080\n  grpc_listen_port: 0\n\npositions:\n  filename: /tmp/positions.yaml\n\nclients:\n  - url: ${{LOKI_URL}}/loki/api/v1/push\n\nscrape_configs:\n  - job_name: docker\n    static_configs:\n      - targets: [localhost]\n        labels:\n          job: docker\n          stack: {}\n          __path__: /var/lib/docker/containers/*/*-json.log\n",
             stack_name
         ),
     )?;

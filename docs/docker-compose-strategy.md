@@ -22,13 +22,15 @@ This document defines the canonical Docker Compose strategy for this repository 
 - App root: `stacks/<stack>/<app>/`
 - App compose: `stacks/<stack>/<app>/docker-compose.yml`
 
-### 2.2 Config mount strategy (`/appdata/<stack>/<app>`)
+### 2.2 Config mount strategy (`/appdata/<stack>/<app>-config`)
 
 App compose files must use stack-scoped absolute paths:
 
-- `/appdata/<stack>/<app>/config:/config`
-- Additional app-specific subpaths as needed (for example Vikunja files):
-  `/appdata/<stack>/vikunja/files:/app/vikunja/files`
+- `/appdata/<stack>/<app>-config:/config`
+- Additional app-specific subpaths as needed, always under the same app-config root.
+  For Vikunja:
+  - `/appdata/<stack>/vikunja-config/files:/app/vikunja/files`
+  - `/appdata/<stack>/vikunja-config/db:/db`
 
 For infra config-only paths (for example Promtail), use stack-scoped config path:
 
@@ -49,7 +51,7 @@ services:
       - TZ=Europe/Brussels
     restart: unless-stopped
     volumes:
-      - /appdata/<stack>/<app>/config:/config
+      - /appdata/<stack>/<app>-config:/config
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"
@@ -152,7 +154,7 @@ Use this checklist when converting old compose files:
    - `restart: unless-stopped`
    - `env_file: .env`
    - `TZ=Europe/Brussels`
-5. Convert config mounts to `/appdata/<stack>/<app>/config:/config` (or app-specific target path).
+5. Convert config mounts to `/appdata/<stack>/<app>-config:/config` (or app-specific target path under the same app-config root).
 6. Add required app labels:
    - `com.centurylinklabs.watchtower.enable=true`
    - `com.homelab.backup.pause=true`
@@ -176,8 +178,9 @@ services:
       - TZ=Europe/Brussels
     restart: unless-stopped
     volumes:
-      - /appdata/todo/vikunja/config:/config
-      - /appdata/todo/vikunja/files:/app/vikunja/files
+      - /appdata/todo/vikunja-config:/config
+      - /appdata/todo/vikunja-config/files:/app/vikunja/files
+      - /appdata/todo/vikunja-config/db:/db
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.backup.pause=true"

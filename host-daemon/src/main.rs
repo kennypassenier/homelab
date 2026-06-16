@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, mpsc};
 mod api;
 mod app;
 mod backup;
-mod bootstrap;
+mod bootstrap; // re-exported sub-module tree: bootstrap/mod.rs
 mod failsafe;
 mod hardware;
 mod liveness;

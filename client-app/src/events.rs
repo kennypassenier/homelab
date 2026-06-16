@@ -1758,10 +1758,8 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
                             }
                             Ok(_) => {}
                             Err(e) => {
-                                app.sync_status = format!(
-                                    "Cannot read stack config for '{}': {}",
-                                    stack_name, e
-                                );
+                                app.sync_status =
+                                    format!("Cannot read stack config for '{}': {}", stack_name, e);
                                 app.push_client_logfmt(
                                     "ERROR",
                                     Some(&stack_name),
@@ -1876,8 +1874,7 @@ fn handle_scaffolding_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
             } else {
                 format!(
                     "Queued {} drifted stack sync job(s); {} active stack(s) already up-to-date.",
-                    queued_now,
-                    skipped_up_to_date
+                    queued_now, skipped_up_to_date
                 )
             };
             return EventOutcome::Continue;

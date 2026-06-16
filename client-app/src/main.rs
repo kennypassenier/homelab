@@ -35,6 +35,7 @@ mod events;
 mod gitops;
 mod latch;
 mod opnsense;
+mod pipeline;
 mod scaffold;
 mod shell;
 mod ssh_config;
@@ -53,6 +54,12 @@ enum SyncEvent {
     Accepted {
         stack: String,
     },
+    /// A numbered pipeline step header to display in a distinct colour.
+    StepHeader {
+        stack: String,
+        /// Pre-formatted header line, e.g. "[STEP  3/20] Create LXC — cloudflared (HOST)"
+        line: String,
+    },
     LiveLog {
         stack: String,
         line: String,
@@ -61,6 +68,14 @@ enum SyncEvent {
         stack: String,
         ok: bool,
         msg: String,
+    },
+    /// A pipeline step completed — record result and advance the runner.
+    StepResult {
+        stack: String,
+        step_index: u32,
+        ok: bool,
+        output: String,
+        error: Option<String>,
     },
 }
 
@@ -300,6 +315,35 @@ async fn async_main() -> Result<()> {
                     );
                     app.sync_status = format!("Sync accepted — '{}'", stack);
                 }
+
+                // Numbered pipeline step header — rendered with a distinct STEP level.
+                SyncEvent::StepHeader { stack, line } => {
+                    let source = format!("lxc-{}", stack);
+                    app.push_log(&source, "STEP", &line);
+                }
+
+                // Pipeline step completed — advance the runner.
+                SyncEvent::StepResult { stack, step_index, ok, output, error } => {
+                    if let Some(runner) = app.pipeline_runners.get_mut(&stack) {
+                        let should_continue = runner.record_step_result(step_index, ok, output, error.clone());
+                        if !should_continue {
+                            let err_msg = error.unwrap_or_else(|| "unknown error".to_string());
+                            app.push_client_logfmt(
+                                "ERROR",
+                                Some(&stack),
+                                Some("pipeline"),
+                                &format!("step {} failed — pipeline halted", step_index),
+                                Some(&err_msg),
+                            );
+                            app.sync_status = format!("Deploy failed at step {} — '{}'", step_index, stack);
+                            // Leave the runner in place so the user can see the failure
+                            // and retry from the failed step.
+                        }
+                        // If all steps passed, the runner's advance() at the next
+                        // loop iteration will return PipelineAction::Finished.
+                    }
+                }
+
                 SyncEvent::LiveLog { stack, line } => {
                     if let Some((level, message)) = parse_live_log_line(&line) {
                         app.mark_live_logs_seen();
@@ -1245,6 +1289,12 @@ fn parse_live_log_line(line: &str) -> Option<(String, String)> {
     }
 
     let message = extract_logfmt_field(line, "msg").unwrap_or_else(|| line.trim().to_string());
+
+    // Pipeline step headers: route as STEP level so the UI renders them as amber banners.
+    if level == "STEP" {
+        return Some(("STEP".to_string(), message));
+    }
+
     Some((level, message))
 }
 

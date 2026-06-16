@@ -406,7 +406,10 @@ pub fn delete_core_app_from_stack(stack_name: &str, app_name: &str) -> io::Resul
     Ok(())
 }
 
-pub fn add_missing_core_apps(stack_name: &str, include_promtail: bool) -> io::Result<AddCoreAppsResult> {
+pub fn add_missing_core_apps(
+    stack_name: &str,
+    include_promtail: bool,
+) -> io::Result<AddCoreAppsResult> {
     let mut added = Vec::new();
     crate::scaffold::ensure_lxc_compose(stack_name)?;
 

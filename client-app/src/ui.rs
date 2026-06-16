@@ -1394,6 +1394,17 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = filtered[start..end]
         .iter()
         .map(|line| {
+            // Pipeline step headers get a full-width amber banner treatment.
+            if line.level == "STEP" {
+                let banner = format!(" ━━━ {} ", single_line(&line.message));
+                return ListItem::new(Line::from(vec![Span::styled(
+                    banner,
+                    Style::default()
+                        .fg(Color::Rgb(255, 165, 0))
+                        .add_modifier(Modifier::BOLD),
+                )]));
+            }
+
             let src_color = log_source_color(app, &line.source);
             let level_style = log_level_style(&line.level);
             let msg = single_line(&line.message);
@@ -1485,6 +1496,9 @@ fn log_source_color(app: &App, source: &str) -> Color {
 /// Maps a log level string to a display style.
 fn log_level_style(level: &str) -> Style {
     match level {
+        "STEP" => Style::default()
+            .fg(Color::Rgb(255, 165, 0))
+            .add_modifier(Modifier::BOLD),
         "WARN" => Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),

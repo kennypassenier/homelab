@@ -4,10 +4,11 @@ use std::sync::{Arc, Mutex};
 mod api;
 mod app;
 mod docker;
-mod gitops;
+mod gitops;   // legacy checker + spare checkout init — delegates to sync/
 mod mounts;
 mod restore;
 mod self_update;
+mod sync;     // modular step-by-step sync engine
 
 use app::AppState;
 

@@ -12,16 +12,19 @@ pub enum LogLevel {
     Warn,
     Error,
     Ok,
+    /// Numbered pipeline step-header: rendered in amber in the CLIENT UI.
+    Step,
 }
 
 impl std::fmt::Display for LogLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LogLevel::Info => write!(f, "info"),
+            LogLevel::Info  => write!(f, "info"),
             LogLevel::Debug => write!(f, "debug"),
-            LogLevel::Warn => write!(f, "warn"),
+            LogLevel::Warn  => write!(f, "warn"),
             LogLevel::Error => write!(f, "error"),
-            LogLevel::Ok => write!(f, "ok"),
+            LogLevel::Ok    => write!(f, "ok"),
+            LogLevel::Step  => write!(f, "step"),
         }
     }
 }
@@ -59,8 +62,8 @@ impl From<LogLevel> for LogRetentionPriority {
     fn from(level: LogLevel) -> Self {
         match level {
             LogLevel::Debug => Self::Debug,
-            LogLevel::Info => Self::Info,
-            LogLevel::Ok => Self::Ok,
+            LogLevel::Info | LogLevel::Step => Self::Info,
+            LogLevel::Ok   => Self::Ok,
             LogLevel::Warn => Self::Warn,
             LogLevel::Error => Self::Error,
         }

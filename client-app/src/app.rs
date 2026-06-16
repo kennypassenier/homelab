@@ -224,6 +224,9 @@ pub struct App {
     pub stack_drift: HashMap<String, bool>,
     /// Per-app drift flags nested by stack.
     pub app_drift: HashMap<String, HashMap<String, bool>>,
+    /// Active pipeline runners keyed by stack name.
+    /// CLIENT holds at most one runner per stack at any time.
+    pub pipeline_runners: HashMap<String, crate::pipeline::PipelineRunner>,
     /// When true, main loop dispatches a HOST request to destroy one stack LXC.
     pub destroy_stack_pending: bool,
     /// Stack currently targeted for HOST-side container destroy.
@@ -344,6 +347,7 @@ impl App {
             sync_status: "Idle".to_string(),
             stack_drift,
             app_drift,
+            pipeline_runners: HashMap::new(),
             destroy_stack_pending: false,
             destroy_stack: String::new(),
             backup_schedule: BackupSchedule::load_or_default(),

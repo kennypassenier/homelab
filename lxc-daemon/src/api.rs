@@ -771,9 +771,7 @@ fn log_sync_plan(
     s.add_log(
         LogLevel::Info,
         format!(
-            "[sync] plan 5/6: run {}/stacks/{}/pre-sync.sh if present",
-            crate::gitops::repo_path(),
-            stack_name
+            "[sync] plan 5/6: prepare bind-mounted files from compose manifests"
         ),
     );
     s.add_log(

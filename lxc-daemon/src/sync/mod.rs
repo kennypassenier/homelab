@@ -108,13 +108,10 @@ pub async fn run(state: Arc<Mutex<AppState>>) {
         }
     }
 
-    // ── Step 5: pre-sync hook ─────────────────────────────────────────────
-    let pre_sync = format!("{}/stacks/{}/pre-sync.sh", GITOPS_REPO, stack_name);
-    if Path::new(&pre_sync).exists() {
-        step(&state, 5, TOTAL, "Run pre-sync.sh hook", &stack_name);
-        if let Err(e) = run_hook(&state, &pre_sync, &stack_name).await {
-            return finish(state, false, format!("pre-sync validation failed: {}", e)).await;
-        }
+    // ── Step 5: compose-driven filesystem prep ───────────────────────────
+    step(&state, 5, TOTAL, "Prepare bind-mounted files from compose manifests", &stack_name);
+    if let Err(e) = compose::prepare_stack_bind_mounts(state.clone(), &stack_name).await {
+        return finish(state, false, format!("compose prep failed: {}", e)).await;
     }
 
     // ── Step 6: docker compose pull + up ─────────────────────────────────
@@ -125,46 +122,6 @@ pub async fn run(state: Arc<Mutex<AppState>>) {
     compose::garbage_collect(state.clone(), &stack_name).await;
 
     finish(state, true, "Sync complete".to_string()).await;
-}
-
-async fn run_hook(state: &Arc<Mutex<AppState>>, hook_path: &str, stack_name: &str) -> Result<(), String> {
-    let stack_dir = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
-    let hook = hook_path.to_string();
-    let sn = stack_name.to_string();
-    {
-        state.lock().unwrap().add_log(LogLevel::Info, format!("[sync][run] cd {} && bash {}", stack_dir, hook));
-    }
-    let result = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("bash").arg(&hook).current_dir(&stack_dir)
-            .output().map_err(|e| e.to_string())
-    }).await.unwrap_or_else(|_| Err("spawn failed".to_string()));
-
-    match result {
-        Ok(o) => {
-            let code = o.status.code().unwrap_or(-1);
-            let mut s = state.lock().unwrap();
-            let lvl = if code == 0 { LogLevel::Ok } else { LogLevel::Error };
-            s.add_log(lvl, format!("[sync][exit] pre-sync.sh stack={} exit={}", sn, code));
-            for line in String::from_utf8_lossy(&o.stdout).lines().filter(|l| !l.trim().is_empty()) {
-                s.add_log(LogLevel::Info, format!("[sync][stdout] pre-sync.sh {}", line));
-            }
-            for line in String::from_utf8_lossy(&o.stderr).lines().filter(|l| !l.trim().is_empty()) {
-                s.add_log(LogLevel::Error, format!("[sync][stderr] pre-sync.sh {}", line));
-            }
-            if code != 0 {
-                return Err(format!("pre-sync.sh exit={}", code));
-            }
-        }
-        Err(e) => {
-            state
-                .lock()
-                .unwrap()
-                .add_log(LogLevel::Error, format!("[sync][spawn] pre-sync.sh {}", e));
-            return Err(format!("pre-sync.sh spawn failed: {}", e));
-        }
-    }
-
-    Ok(())
 }
 
 async fn finish(state: Arc<Mutex<AppState>>, ok: bool, msg: String) {

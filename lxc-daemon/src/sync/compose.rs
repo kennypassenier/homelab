@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -179,6 +180,143 @@ fn list_app_dirs(stack_dir: &str) -> Vec<String> {
         .collect();
     dirs.sort();
     dirs
+}
+
+fn appdata_root(stack_name: &str) -> PathBuf {
+    Path::new("/appdata").join(stack_name)
+}
+
+fn repo_stack_root(stack_name: &str) -> PathBuf {
+    Path::new(GITOPS_REPO).join("stacks").join(stack_name)
+}
+
+fn parse_volume_source(volume: &str) -> Option<&str> {
+    let mut parts = volume.split(':');
+    let source = parts.next()?;
+    if source.is_empty() {
+        None
+    } else {
+        Some(source)
+    }
+}
+
+fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), String> {
+    if source
+        .to_string_lossy()
+        .starts_with(&format!("/appdata/{}/", stack_name))
+    {
+        let suffix = source
+            .strip_prefix(Path::new("/appdata").join(stack_name))
+            .map_err(|e| e.to_string())?;
+        let repo_candidate = repo_stack_root(stack_name).join(suffix);
+
+        if repo_candidate.is_file() {
+            if let Some(parent) = source.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
+            }
+            std::fs::copy(&repo_candidate, source).map_err(|e| {
+                format!(
+                    "copy {} -> {} failed: {}",
+                    repo_candidate.display(),
+                    source.display(),
+                    e
+                )
+            })?;
+            return Ok(());
+        }
+
+        if repo_candidate.is_dir() {
+            std::fs::create_dir_all(source)
+                .map_err(|e| format!("create dir {}: {}", source.display(), e))?;
+            return Ok(());
+        }
+    }
+
+    if source.extension().is_some() {
+        if let Some(parent) = source.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
+        }
+        if !source.exists() {
+            std::fs::write(source, "").map_err(|e| format!("create file {}: {}", source.display(), e))?;
+        }
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(source).map_err(|e| format!("create dir {}: {}", source.display(), e))
+}
+
+pub async fn prepare_stack_bind_mounts(
+    state: Arc<Mutex<AppState>>,
+    stack_name: &str,
+) -> Result<(), String> {
+    let stack_root = Path::new(GITOPS_REPO).join("stacks").join(stack_name);
+    let apps = list_app_dirs(stack_root.to_string_lossy().as_ref());
+
+    for app_dir in apps {
+        let compose_path = Path::new(&app_dir).join("docker-compose.yml");
+        if !compose_path.exists() {
+            continue;
+        }
+
+        let raw = std::fs::read_to_string(&compose_path)
+            .map_err(|e| format!("read {}: {}", compose_path.display(), e))?;
+        let doc: serde_yaml::Value = serde_yaml::from_str(&raw)
+            .map_err(|e| format!("parse {}: {}", compose_path.display(), e))?;
+        let Some(root) = doc.as_mapping() else {
+            continue;
+        };
+        let Some(services) = root
+            .get(serde_yaml::Value::String("services".to_string()))
+            .and_then(|v| v.as_mapping())
+        else {
+            continue;
+        };
+
+        for (svc_name, svc_val) in services {
+            let service_name = svc_name.as_str().unwrap_or("unknown-service");
+            let Some(svc_map) = svc_val.as_mapping() else {
+                continue;
+            };
+            let Some(volumes_val) = svc_map.get(serde_yaml::Value::String("volumes".to_string()))
+            else {
+                continue;
+            };
+
+            let mut volume_list = Vec::new();
+            if let Some(list) = volumes_val.as_sequence() {
+                for item in list {
+                    if let Some(volume) = item.as_str() {
+                        volume_list.push(volume.to_string());
+                    }
+                }
+            }
+
+            for volume in volume_list {
+                let Some(source) = parse_volume_source(&volume) else {
+                    continue;
+                };
+                if !source.starts_with("/appdata/") {
+                    continue;
+                }
+
+                let source_path = Path::new(source);
+                if let Err(e) = mirror_bind_mount_source(stack_name, source_path) {
+                    let mut s = state.lock().unwrap();
+                    s.add_log(
+                        LogLevel::Warn,
+                        format!(
+                            "[sync][prep] stack={} service={} volume={} skipped: {}",
+                            stack_name, service_name, volume, e
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_app_env_files(compose_path: &Path, app_dir: &str) -> Result<(), String> {

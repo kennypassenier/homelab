@@ -15,4 +15,4 @@ scrape_configs:
         labels:
           job: docker
           stack: cloudflared
-          __path__: /var/log/docker/*.log
+          __path__: /var/lib/docker/containers/*/*-json.log

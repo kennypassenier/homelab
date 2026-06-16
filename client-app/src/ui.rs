@@ -465,7 +465,7 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Cell::from("PRE-SYNC").style(
+        Cell::from("CUSTOM HOOK").style(
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -480,14 +480,15 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
         .map(|(i, name)| {
             let is_active = stack_is_active(name);
             let app_count = app.stack_dropdowns[i].apps.len();
-            let has_presync =
-                std::path::Path::new(&format!("stacks/{}/pre-sync.sh", name)).exists();
+            let has_custom_hook = std::path::Path::new(&format!("stacks/{}/pre-sync.sh", name))
+                .exists()
+                || std::path::Path::new(&format!("stacks/{}/setup.sh", name)).exists();
             let state_cell = if is_active {
                 Cell::from("  ON").style(Style::default().fg(Color::Green))
             } else {
                 Cell::from(" OFF").style(Style::default().fg(Color::DarkGray))
             };
-            let presync_cell = if has_presync {
+            let hook_cell = if has_custom_hook {
                 Cell::from("  \u{2713} YES").style(Style::default().fg(Color::Green))
             } else {
                 Cell::from("  \u{2717} no").style(Style::default().fg(Color::DarkGray))
@@ -500,7 +501,7 @@ fn draw_dashboard(f: &mut Frame, area: Rect, app: &App) {
                     Color::DarkGray
                 })),
                 Cell::from(format!("  {}", app_count)).style(Style::default().fg(Color::White)),
-                presync_cell,
+                hook_cell,
             ])
         })
         .collect();

@@ -515,7 +515,7 @@ fn handle_stack_wizard(state: &mut StackCreationWizardState, key: KeyEvent) -> W
                     .unwrap_or_else(|| "n/a".to_string());
                 state.step = StackCreationStep::Review {
                     summary: format!(
-                        "Stack: {}\nVMID: {}\nReserved IPv4: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nSwap: {} MiB (auto)\nDisk: {} GiB\nAutostart: {}\nBoot order: {}\nPromtail core app: {}\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create setup.sh\n- create lxc-compose.yml\n- scaffold core apps (watchtower + traefik{})",
+                        "Stack: {}\nVMID: {}\nReserved IPv4: {}\nCPU cores: {}\nMemory: {:.1} GiB ({} MiB)\nSwap: {} MiB (auto)\nDisk: {} GiB\nAutostart: {}\nBoot order: {}\nPromtail core app: {}\nDeploy enabled: false (manual activation required)\n\nActions:\n- create stacks/{}/\n- create lxc-compose.yml\n- scaffold core apps (watchtower + traefik{})",
                         stack_name,
                         state.vmid,
                         reserved_ip,

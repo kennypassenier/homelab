@@ -48,7 +48,6 @@ pub fn create_stack(stack_name: &str, include_promtail: bool) -> io::Result<Crea
     }
 
     fs::create_dir_all(&stack_dir)?;
-    write_stack_setup_script(stack_name)?;
 
     crate::scaffold::ensure_lxc_compose(stack_name)?;
     let added = add_missing_core_apps(stack_name, include_promtail)?.added;
@@ -435,27 +434,6 @@ fn create_app_dirs(stack_name: &str, app_name: &str) -> io::Result<()> {
     fs::create_dir_all(format!("stacks/{}/{}", stack_name, app_name))
 }
 
-fn write_stack_setup_script(stack_name: &str) -> io::Result<()> {
-    let path = format!("stacks/{}/setup.sh", stack_name);
-    if Path::new(&path).exists() {
-        return Ok(());
-    }
-
-    fs::write(
-        &path,
-        "#!/usr/bin/env bash\nset -euo pipefail\n\n# Pre-sync hook scaffold for stack deployment.\n# Keep this script idempotent and fast (<30s).\n# Do not create /appdata or /opt/appdata paths here.\n\nexit 0\n",
-    )?;
-
-    #[cfg(unix)]
-    {
-        let mut perms = fs::metadata(&path)?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&path, perms)?;
-    }
-
-    Ok(())
-}
-
 pub fn validate_setup_hook(stack_name: &str) -> io::Result<()> {
     let path = format!("stacks/{}/setup.sh", stack_name);
     if !Path::new(&path).exists() {
@@ -592,7 +570,7 @@ fn scaffold_promtail(stack_name: &str) -> io::Result<()> {
     )?;
 
     // Subscribe-intent member of the latch promtail_config group.
-    // The runtime .env is written to /appdata/ by pre-sync.sh via latch sync — this file is never read by Docker.
+    // The runtime .env is written to /appdata/ by the LXC daemon's compose-driven prep step.
     fs::write(
         format!("{}/.env", app_dir),
         "# latch:group=promtail_config\nLOKI_URL=\n",

@@ -119,6 +119,7 @@ Important rules:
 - Do not embed `promtail` service in any normal app compose.
 - Promtail config lives in `stacks/<stack>/promtail-config/config.yml`.
 - Promtail runtime `.env` is sourced via stack secret flow (latch/sync strategy).
+- The LXC daemon now prepares bind-mounted config files directly from compose manifests, so stack-specific `pre-sync.sh` hooks are no longer needed for routine directory/file materialization.
 
 ## 8. Secrets and env strategy
 
@@ -162,6 +163,7 @@ Use this checklist when converting old compose files:
 8. Remove explicit `networks:` block unless there is a specific non-default network requirement.
 9. Add Traefik labels only for services that should be externally routed.
 10. Put watchtower/promtail/traefik in their own stack app directories if missing.
+11. Avoid generating `setup.sh` or `pre-sync.sh` for routine storage/bootstrap tasks; those are handled by Rust unless a stack truly needs custom shell logic.
 
 ## 11. Canonical minimal examples
 

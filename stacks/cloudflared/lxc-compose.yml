@@ -6,12 +6,12 @@ hwaddr: 02:10:2b:c3:b8:9e
 tags: []
 deploy:
   enabled: true
-  activated_at: '1781623934'
-  last_applied_hash: e7a34c23f984add878bd79367ba0c91a1dbd33fb94ac6000d1b0f8aad36f46f0
-  last_applied_at: '1781624007'
+  activated_at: '1781624810'
+  last_applied_hash: 177d28efbc73cbfe943f22aa269f505bd5fabcbf62c6ff9af345c14b4f97a0af
+  last_applied_at: '1781624879'
   last_applied_apps:
     cloudflared: 97d77d49f49ca43c6b841ea6692a4798612bcb7a436a593325b5483e2d523502
-    promtail: 153dcc6a5fcc85671e444f3ce0af2bba205a6a40106d1953b9d2e789ce95329b
+    promtail: e88ba38bde1441f265c6a5dbe95a51a6f40295ee55371ec3406a85257e3b7aa6
     watchtower: bcd830a76375a36846d25b8dc67a522e0bc9e094559c9bef77f7696666dd4fd4
 network:
   bridge: vmbr0

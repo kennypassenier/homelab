@@ -6,9 +6,9 @@ hwaddr: 02:10:2b:c3:b8:9e
 tags: []
 deploy:
   enabled: true
-  activated_at: '1781623484'
-  last_applied_hash: 5763a07aedadf223ac6c9ccf32166187730702bd98f272db21bf422ef7a58445
-  last_applied_at: '1781623532'
+  activated_at: '1781623934'
+  last_applied_hash: e7a34c23f984add878bd79367ba0c91a1dbd33fb94ac6000d1b0f8aad36f46f0
+  last_applied_at: '1781624007'
   last_applied_apps:
     cloudflared: 97d77d49f49ca43c6b841ea6692a4798612bcb7a436a593325b5483e2d523502
     promtail: 153dcc6a5fcc85671e444f3ce0af2bba205a6a40106d1953b9d2e789ce95329b

@@ -1,18 +1,34 @@
+# docker-compose.yml
+# This configuration deploys Promtail tailored for the cloudflared stack environment.
+# It aligns the volume paths and environment structure with the verified working todo-promtail setup.
+
 services:
   promtail:
+    # Utilizing the latest official Grafana Promtail image for log scraping
     image: grafana/promtail:latest
+    # Retaining the specific container identification name as requested
     container_name: cloudflared-promtail
+    environment:
+      # Aligning timezone to ensure accurate timestamp correlation in Grafana/Loki
+      - TZ=Europe/Brussels
+      # Forcing the Docker API version to guarantee runtime compatibility with the host daemon
+      - DOCKER_API_VERSION=1.40
+    # Enforcing automatic restarts unless explicitly stopped by an administrator
     restart: unless-stopped
     volumes:
-      - /var/log:/var/log:ro
+      # Mount the host Docker socket as read-only to dynamically discover container metadata
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /appdata/cloudflared/promtail/config:/etc/promtail
-    environment:
-      DOCKER_API_VERSION: "1.40"
+      # Mount the precise host directory where active container logs are managed by the Docker engine
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      # Mapping the explicit configuration file directly from the host read-only to prevent missing file panics
+      - /appdata/cloudflared/promtail-config/config.yml:/etc/promtail/config.yml:ro
     env_file:
+      # Loading localized environment parameters from the environment file
       - .env
+    # Passing execution arguments to parse the configuration file and expand embedded environment tokens
     command: -config.file=/etc/promtail/config.yml -config.expand-env=true
     labels:
+      # Preserving all requested operational tags and automation metadata parameters
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.homelab.tag.watchtower=enabled"
       - "com.homelab.tag.role=infra-promtail"

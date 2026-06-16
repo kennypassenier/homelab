@@ -1,16 +1,19 @@
 version: 1
 stack_name: todo
-vmid: 107
-hostname: 107-app-todo
+vmid: 111
+hostname: 111-app-todo
 hwaddr: 02:ef:38:83:01:dd
 tags: []
 deploy:
   enabled: false
   activated_at: null
+  last_applied_hash: null
+  last_applied_at: null
+  last_applied_apps: null
 network:
   bridge: vmbr0
   ip_mode: static
-  reserved_ipv4: 10.10.10.7
+  reserved_ipv4: 10.10.10.11
   cidr: 24
   gateway: 10.10.10.1
   vlan_tag: 10
@@ -20,12 +23,12 @@ boot:
   autostart: true
   order: 90
 resources:
-  cores: 2
+  cores: 1
   cpu_limit: null
   cpu_units: 1024
-  memory_mb: 2048
-  swap_mb: 2048
-  disk_gb: 32
+  memory_mb: 512
+  swap_mb: 512
+  disk_gb: 5
 storage:
   rootfs_pool: local-lvm
   host_path: /opt/appdata/todo
@@ -43,3 +46,13 @@ hardware:
 host_management:
   managed: true
   protection: false
+mounts:
+- name: promtail-config
+  source: /opt/appdata/todo/promtail-config
+  target: /appdata/promtail-config
+- name: traefik-config
+  source: /opt/appdata/todo/traefik-config
+  target: /appdata/traefik-config
+- name: vikunja-config
+  source: /opt/appdata/todo/vikunja-config
+  target: /appdata/vikunja-config

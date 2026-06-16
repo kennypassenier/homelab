@@ -46,6 +46,7 @@ Last updated: 2026-06-14
 - CLIENT stack wizard sets CPU/RAM/Disk defaults in `lxc-compose.yml` and keeps deploy disabled until explicit activation.
 - CLIENT now computes stack/app drift hashes from local stack files and stores last applied values in `lxc-compose.yml` under `deploy.last_applied_hash` and `deploy.last_applied_apps` after successful sync.
 - CLIENT batch update shortcut (`D` / `u`) now queues only active stacks with detected drift; up-to-date stacks are skipped.
+- Docker compose conversion and policy guidance is now centralized in `docs/docker-compose-strategy.md`, including stack/app directory layout, labels policy, Traefik/Watchtower/Promtail patterns, and migration rules for legacy compose files.
 - CLIENT stack wizard now captures a per-stack Promtail include flag and auto-opens app creation when stack scaffold completes.
 - CLIENT app wizard now loops app creation (name + optional Traefik subdomain) until an empty app name is submitted.
 - CLIENT streams live deploy logs from the LXC daemon during sync actions.

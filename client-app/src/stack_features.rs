@@ -10,7 +10,6 @@ const CORE_APPS: [&str; 3] = ["promtail", "watchtower", "traefik"];
 const GPU_NODES_INTEL: [&str; 2] = ["/dev/dri/renderD128", "/dev/dri/card0"];
 
 pub struct AddAppOptions {
-    pub include_promtail: bool,
     pub include_traefik: bool,
     pub subdomain: Option<String>,
 }
@@ -281,7 +280,7 @@ pub fn add_app_to_stack(
     crate::scaffold::ensure_app_config_mount(stack_name, app_name)?;
 
     let domain = std::env::var("DOMAIN").unwrap_or_else(|_| "example.com".to_string());
-    let compose = app_compose_yaml(stack_name, app_name, docker_image, options, &domain);
+    let compose = app_compose_yaml(app_name, docker_image, options, &domain);
     fs::write(
         format!("stacks/{}/{}/docker-compose.yml", stack_name, app_name),
         compose,
@@ -509,7 +508,6 @@ fn is_valid_stack_name(name: &str) -> bool {
 }
 
 fn app_compose_yaml(
-    stack_name: &str,
     app_name: &str,
     docker_image: &str,
     options: &AddAppOptions,
@@ -519,22 +517,25 @@ fn app_compose_yaml(
     out.push_str("services:\n");
     out.push_str(&format!("  {}:\n", app_name));
     out.push_str(&format!("    image: {}\n", docker_image));
+    out.push_str(&format!("    container_name: {}\n", app_name));
+    out.push_str("    env_file:\n");
+    out.push_str("      - .env\n");
+    out.push_str("    environment:\n");
+    out.push_str("      - TZ=Europe/Brussels\n");
     out.push_str("    restart: unless-stopped\n");
     out.push_str("    volumes:\n");
     out.push_str(&format!("      - /appdata/{}-config:/config\n", app_name));
+    out.push_str("    labels:\n");
+    out.push_str("      - \"com.centurylinklabs.watchtower.enable=true\"\n");
+    out.push_str("      - \"com.homelab.backup.pause=true\"\n");
 
     if options.include_traefik {
-        out.push_str("    labels:\n");
         out.push_str("      - \"traefik.enable=true\"\n");
         if let Some(subdomain) = &options.subdomain {
             let fqdn = format!("{}.{}", subdomain, domain);
             out.push_str(&format!(
-                "      - \"traefik.http.routers.{}.rule=Host(\\\"{}\\\") || Host(\\\"{}\\\") || Host(\\\"{}\\\") || Host(\\\"{}\\\")\"\n",
-                app_name, 
-                fqdn,
-                format!("{}.{}", subdomain, domain), // FQDN
-                subdomain,
-                app_name
+                "      - \"traefik.http.routers.{}.rule=Host(\\\"{}\\\")\"\n",
+                app_name, fqdn
             ));
         } else {
             out.push_str(&format!(
@@ -542,25 +543,11 @@ fn app_compose_yaml(
                 app_name, app_name
             ));
         }
-        out.push_str("      - \"traefik.http.services.app.loadbalancer.server.port=80\"\n");
+        out.push_str(&format!(
+            "      - \"traefik.http.services.{}.loadbalancer.server.port=80\"\n",
+            app_name
+        ));
     }
-
-    if options.include_promtail {
-        out.push_str("\n  promtail:\n");
-        out.push_str("    image: grafana/promtail:latest\n");
-        out.push_str("    restart: unless-stopped\n");
-        out.push_str("    volumes:\n");
-        out.push_str("      - /var/log:/var/log:ro\n");
-        out.push_str("      - /var/run/docker.sock:/var/run/docker.sock:ro\n");
-        out.push_str("      - /appdata/promtail-config:/etc/promtail\n");
-        out.push_str(
-            "    command: -config.file=/etc/promtail/config.yml -config.expand-env=true\n",
-        );
-    }
-
-    out.push_str("\nnetworks:\n");
-    out.push_str("  default:\n");
-    out.push_str(&format!("    name: {}_{}\n", stack_name, app_name));
     out
 }
 

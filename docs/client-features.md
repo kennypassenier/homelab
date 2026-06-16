@@ -47,6 +47,7 @@ Last updated: 2026-06-14
 - Stack creation wizard now includes a per-stack Promtail toggle before final review; stack scaffold creates watchtower + traefik always and only adds promtail when selected.
 - After stack creation, CLIENT now auto-opens the app creation wizard for that stack.
 - App creation wizard flow is now: app name -> optional Traefik subdomain (empty disables Traefik labels) -> review -> create, then loops back to app name so multiple apps can be added without leaving the modal.
+- Default add-app compose generation now creates only the app service (no embedded Promtail sidecar, no explicit `networks:` block) and applies baseline labels (`watchtower.enable` + `backup.pause`) plus optional Traefik routing labels.
 - Stack config editor allows stack-level editing of deploy state, resources, hostname, MAC address, IP mode, and reserved IPv4 from the Scaffolding tab.
 - Stack config editor allows stack-level editing of autostart and boot order policy.
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.

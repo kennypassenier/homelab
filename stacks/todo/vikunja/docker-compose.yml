@@ -1,0 +1,13 @@
+services:
+  vikunja:
+    image: vikunja/vikunja:latest
+    container_name: vikunja
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - /appdata/vikunja-config:/config
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.vikunja.rule=Host(\"todo.kp-soft.dev\") || Host(\"todo.kp-soft.dev\") || Host(\"todo\") || Host(\"vikunja\")"
+      - "traefik.http.services.app.loadbalancer.server.port=80"

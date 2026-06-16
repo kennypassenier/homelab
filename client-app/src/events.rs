@@ -325,7 +325,7 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                         .map(|sub| format!("{}.{}", sub, domain))
                         .unwrap_or_else(|| "disabled".to_string());
                     let summary = format!(
-                        "Stack: {}\nApp: {}\nPromtail sidecar: {}\nTraefik route: {}",
+                        "Stack: {}\nApp: {}\nPromtail stack app active: {}\nTraefik route: {}",
                         state.stack_name, app_name, state.include_promtail, traefik
                     );
                     state.step = AppCreationStep::Review { summary };
@@ -343,7 +343,6 @@ fn handle_wizard(state: &mut AppCreationWizardState, key: KeyEvent) -> WizardOut
                 let docker_image = "nginx:latest".to_string();
 
                 let options = crate::stack_features::AddAppOptions {
-                    include_promtail: state.include_promtail,
                     include_traefik: state.subdomain.is_some(),
                     subdomain: state.subdomain.clone(),
                 };

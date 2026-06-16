@@ -24,6 +24,23 @@ fn step(state: &Arc<Mutex<AppState>>, index: u32, total: u32, label: &str, stack
     state.lock().unwrap().add_log(LogLevel::Step, msg);
 }
 
+fn validate_stack_scope(stack_name: &str) -> Result<(), String> {
+    let trimmed = stack_name.trim();
+    if trimmed.is_empty() || trimmed == "unknown" {
+        return Err("stack identity is unknown; refusing sync to avoid sparse checkout drift".to_string());
+    }
+
+    let stack_dir = format!("{}/stacks/{}", GITOPS_REPO, trimmed);
+    if !Path::new(&stack_dir).exists() {
+        return Err(format!(
+            "stack directory missing after checkout: {}",
+            stack_dir
+        ));
+    }
+
+    Ok(())
+}
+
 /// Run the full sync cycle.
 pub async fn run(state: Arc<Mutex<AppState>>) {
     if Path::new(LOCK_FILE).exists() {
@@ -44,6 +61,10 @@ pub async fn run(state: Arc<Mutex<AppState>>) {
 
     const TOTAL: u32 = 6;
 
+    if let Err(e) = validate_stack_scope(&stack_name) {
+        return finish(state, false, format!("sync preflight failed: {}", e)).await;
+    }
+
     // ── Step 1: enforce sparse checkout ───────────────────────────────────
     step(&state, 1, TOTAL, "Enforce sparse checkout", &stack_name);
     if let Err(e) = repo::enforce_sparse_checkout(state.clone(), &stack_name).await {
@@ -60,6 +81,10 @@ pub async fn run(state: Arc<Mutex<AppState>>) {
     step(&state, 3, TOTAL, "git reset --hard origin/main", &stack_name);
     if let Err(e) = repo::git_reset(state.clone()).await {
         return finish(state, false, format!("git reset: {}", e)).await;
+    }
+
+    if let Err(e) = validate_stack_scope(&stack_name) {
+        return finish(state, false, format!("sync scope validation failed: {}", e)).await;
     }
 
     // ── Step 4: latch pull ────────────────────────────────────────────────

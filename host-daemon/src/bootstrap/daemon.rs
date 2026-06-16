@@ -47,6 +47,8 @@ fn push_daemon_binary(vmid: u32) -> Result<(), String> {
 }
 
 fn push_daemon_config(vmid: u32, stack_name: &str) -> Result<(), String> {
+    pct_exec(vmid, "mkdir -p /etc/homelab")?;
+
     let config = format!(
         "[sync]\ninterval_seconds = 1800\ngitops_repo = \"/opt/gitops\"\nstack_name = \"{}\"\n\n[git]\nremote = \"origin\"\nbranch = \"main\"\nsparse_checkout = true\n\n[api]\nlisten = \"0.0.0.0:8080\"\nauth_token_env = \"LXC_API_TOKEN\"\n",
         stack_name
@@ -61,7 +63,6 @@ fn push_daemon_config(vmid: u32, stack_name: &str) -> Result<(), String> {
     if !out.status.success() {
         return Err(format!("push config: {}", String::from_utf8_lossy(&out.stderr)));
     }
-    pct_exec(vmid, "mkdir -p /etc/homelab")?;
     Ok(())
 }
 

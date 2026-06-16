@@ -45,6 +45,7 @@ struct WsExecResponse {
 struct WsSyncRequest {
     kind: String,
     request_id: String,
+    stack_name: Option<String>,
     token: Option<String>,
     latch: Option<LatchPullRequest>,
 }
@@ -343,6 +344,30 @@ async fn handle_ws_client(mut socket: WebSocket, state: Arc<Mutex<AppState>>) {
                                         .await;
                                     continue;
                                 }
+                                {
+                                    let mut s = state.lock().unwrap();
+                                    if let Some(request_stack) = req
+                                        .stack_name
+                                        .as_deref()
+                                        .map(str::trim)
+                                        .filter(|v| !v.is_empty() && *v != "unknown")
+                                    {
+                                        if s.stack_name == "unknown" || s.stack_name != request_stack {
+                                            let previous_stack = s.stack_name.clone();
+                                            s.add_log(
+                                                LogLevel::Warn,
+                                                format!(
+                                                    "[sync] stack identity updated from request: {} -> {}",
+                                                    previous_stack, request_stack
+                                                ),
+                                            );
+                                            s.stack_name = request_stack.to_string();
+                                            s.stack_ip = crate::app::read_reserved_ip_from_lxc_compose(request_stack)
+                                                .unwrap_or_else(|| "—".to_string());
+                                        }
+                                    }
+                                }
+
                                 log_sync_plan(
                                     &state,
                                     "WebSocket RPC",

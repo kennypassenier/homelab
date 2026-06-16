@@ -333,6 +333,16 @@ fn detect_stack_name() -> String {
         return stack;
     }
 
+    if let Ok(hostname) = std::fs::read_to_string("/etc/hostname") {
+        let host = hostname.trim();
+        if let Some((_, stack)) = host.split_once("-app-") {
+            let trimmed = stack.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+
     "unknown".to_string()
 }
 
@@ -383,7 +393,7 @@ fn read_stack_name_from_daemon_config() -> Option<String> {
     None
 }
 
-fn read_reserved_ip_from_lxc_compose(stack_name: &str) -> Option<String> {
+pub fn read_reserved_ip_from_lxc_compose(stack_name: &str) -> Option<String> {
     if stack_name.is_empty() || stack_name == "unknown" {
         return None;
     }

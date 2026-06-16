@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::app::{AppState, LogLevel};
 
@@ -99,6 +100,65 @@ async fn emit_compose_failure_diagnostics(
         &ps_out,
         &ps_err,
     );
+
+    // Pull direct container logs as requested by operators (e.g. `docker logs vikunja`).
+    {
+        let mut s = state.lock().unwrap();
+        s.add_log(
+            LogLevel::Info,
+            format!(
+                "[sync][run] cd {} && docker compose ps -q",
+                app_dir
+            ),
+        );
+    }
+    let dir_ids = app_dir.to_string();
+    let (ids_code, ids_out, ids_err) = tokio::task::spawn_blocking(move || {
+        capture(
+            Command::new("docker")
+                .args(["compose", "ps", "-q"])
+                .current_dir(&dir_ids),
+        )
+    })
+    .await
+    .unwrap_or((-1, String::new(), "spawn failed".to_string()));
+    log_cmd(
+        state,
+        &format!("docker compose ps ids app={}", app_name),
+        ids_code,
+        &ids_out,
+        &ids_err,
+    );
+
+    if ids_code == 0 {
+        for container_id in ids_out.lines().map(str::trim).filter(|id| !id.is_empty()) {
+            {
+                let mut s = state.lock().unwrap();
+                s.add_log(
+                    LogLevel::Info,
+                    format!("[sync][run] docker logs --tail 120 {}", container_id),
+                );
+            }
+
+            let cid = container_id.to_string();
+            let (log_code, log_out, log_err) = tokio::task::spawn_blocking(move || {
+                capture(
+                    Command::new("docker")
+                        .args(["logs", "--tail", "120", &cid]),
+                )
+            })
+            .await
+            .unwrap_or((-1, String::new(), "spawn failed".to_string()));
+
+            log_cmd(
+                state,
+                &format!("docker logs app={} container={}", app_name, container_id),
+                log_code,
+                &log_out,
+                &log_err,
+            );
+        }
+    }
 }
 
 fn list_app_dirs(stack_dir: &str) -> Vec<String> {
@@ -178,6 +238,219 @@ fn validate_app_env_files(compose_path: &Path, app_dir: &str) -> Result<(), Stri
     }
 }
 
+fn expected_service_names(compose_path: &Path) -> Result<Vec<String>, String> {
+    let content = std::fs::read_to_string(compose_path).map_err(|e| {
+        format!(
+            "cannot read compose file {}: {}",
+            compose_path.display(),
+            e
+        )
+    })?;
+    let doc: serde_yaml::Value =
+        serde_yaml::from_str(&content).map_err(|e| format!("invalid yaml: {}", e))?;
+    let Some(root) = doc.as_mapping() else {
+        return Ok(Vec::new());
+    };
+    let Some(services) = root
+        .get(serde_yaml::Value::String("services".to_string()))
+        .and_then(|v| v.as_mapping())
+    else {
+        return Ok(Vec::new());
+    };
+
+    let mut names = Vec::new();
+    for (name, _) in services {
+        if let Some(s) = name.as_str() {
+            names.push(s.to_string());
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+async fn verify_compose_runtime(
+    state: &Arc<Mutex<AppState>>,
+    app_dir: &str,
+    app_name: &str,
+    compose_path: &Path,
+) -> Result<(), String> {
+    let expected = expected_service_names(compose_path)?;
+
+    // Allow short startup stabilization before asserting runtime state.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+
+    {
+        let mut s = state.lock().unwrap();
+        s.add_log(
+            LogLevel::Info,
+            format!(
+                "[sync][run] cd {} && docker compose ps --status running --services",
+                app_dir
+            ),
+        );
+    }
+
+    let dir = app_dir.to_string();
+    let (code, out, err) = tokio::task::spawn_blocking(move || {
+        capture(
+            Command::new("docker")
+                .args(["compose", "ps", "--status", "running", "--services"])
+                .current_dir(&dir),
+        )
+    })
+    .await
+    .unwrap_or((-1, String::new(), "spawn failed".to_string()));
+
+    log_cmd(
+        state,
+        &format!("docker compose ps running app={}", app_name),
+        code,
+        &out,
+        &err,
+    );
+
+    if code != 0 {
+        return Err(format!(
+            "docker compose ps --status running failed for app={} exit={} stderr={}",
+            app_name,
+            code,
+            err.trim()
+        ));
+    }
+
+    let running: HashSet<String> = out
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect();
+
+    if expected.is_empty() {
+        return Err(format!(
+            "no services defined in compose for app={} ({})",
+            app_name,
+            compose_path.display()
+        ));
+    }
+
+    let mut missing = Vec::new();
+    for svc in &expected {
+        if !running.contains(svc) {
+            missing.push(svc.clone());
+        }
+    }
+    if !missing.is_empty() {
+        return Err(format!(
+            "runtime verification failed for app={}: missing running services [{}]",
+            app_name,
+            missing.join(",")
+        ));
+    }
+
+    // Verify containers are not already restart-looping even if still marked running.
+    for service in &expected {
+        {
+            let mut s = state.lock().unwrap();
+            s.add_log(
+                LogLevel::Info,
+                format!(
+                    "[sync][run] cd {} && docker compose ps -q {}",
+                    app_dir, service
+                ),
+            );
+        }
+
+        let dir = app_dir.to_string();
+        let svc = service.clone();
+        let (id_code, id_out, id_err) = tokio::task::spawn_blocking(move || {
+            capture(
+                Command::new("docker")
+                    .args(["compose", "ps", "-q", &svc])
+                    .current_dir(&dir),
+            )
+        })
+        .await
+        .unwrap_or((-1, String::new(), "spawn failed".to_string()));
+
+        log_cmd(
+            state,
+            &format!("docker compose ps id app={} service={}", app_name, service),
+            id_code,
+            &id_out,
+            &id_err,
+        );
+
+        if id_code != 0 {
+            return Err(format!(
+                "failed to resolve container id for app={} service={} stderr={}",
+                app_name,
+                service,
+                id_err.trim()
+            ));
+        }
+
+        let container_id = id_out.lines().next().unwrap_or("").trim().to_string();
+        if container_id.is_empty() {
+            return Err(format!(
+                "empty container id for app={} service={}",
+                app_name, service
+            ));
+        }
+
+        {
+            let mut s = state.lock().unwrap();
+            s.add_log(
+                LogLevel::Info,
+                format!(
+                    "[sync][run] docker inspect --format {{.State.Status}}:{{.RestartCount}} {}",
+                    container_id
+                ),
+            );
+        }
+
+        let cid = container_id.clone();
+        let (insp_code, insp_out, insp_err) = tokio::task::spawn_blocking(move || {
+            capture(
+                Command::new("docker")
+                    .args(["inspect", "--format", "{{.State.Status}}:{{.RestartCount}}", &cid]),
+            )
+        })
+        .await
+        .unwrap_or((-1, String::new(), "spawn failed".to_string()));
+
+        log_cmd(
+            state,
+            &format!("docker inspect runtime app={} service={}", app_name, service),
+            insp_code,
+            &insp_out,
+            &insp_err,
+        );
+
+        if insp_code != 0 {
+            return Err(format!(
+                "docker inspect failed for app={} service={} stderr={}",
+                app_name,
+                service,
+                insp_err.trim()
+            ));
+        }
+
+        let runtime_line = insp_out.lines().next().unwrap_or("").trim().to_string();
+        let mut parts = runtime_line.split(':');
+        let status = parts.next().unwrap_or("");
+        let restart_count = parts.next().unwrap_or("0").parse::<u64>().unwrap_or(0);
+
+        if status != "running" || restart_count > 0 {
+            return Err(format!(
+                "runtime unstable for app={} service={} status={} restart_count={}",
+                app_name, service, status, restart_count
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Pull images and start all app compose dirs for a stack.
 pub async fn deploy_apps(state: Arc<Mutex<AppState>>, stack_name: &str) -> Result<(), String> {
     let stack_dir = format!("{}/stacks/{}", GITOPS_REPO, stack_name);
@@ -187,6 +460,8 @@ pub async fn deploy_apps(state: Arc<Mutex<AppState>>, stack_name: &str) -> Resul
         let mut s = state.lock().unwrap();
         s.add_log(LogLevel::Info, format!("[sync] discovered {} app directories under {}", app_dirs.len(), stack_dir));
     }
+
+    let mut deployed_apps = 0usize;
 
     for app_dir in &app_dirs {
         let compose = format!("{}/docker-compose.yml", app_dir);
@@ -253,6 +528,20 @@ pub async fn deploy_apps(state: Arc<Mutex<AppState>>, stack_name: &str) -> Resul
                 err2.trim()
             ));
         }
+
+        if let Err(e) = verify_compose_runtime(&state, app_dir, &app_name, Path::new(&compose)).await {
+            emit_compose_failure_diagnostics(&state, app_dir, &app_name).await;
+            return Err(e);
+        }
+
+        deployed_apps += 1;
+    }
+
+    if deployed_apps == 0 {
+        return Err(format!(
+            "no deployable app directories found under {}/stacks/{}",
+            GITOPS_REPO, stack_name
+        ));
     }
 
     Ok(())

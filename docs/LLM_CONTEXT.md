@@ -74,4 +74,8 @@ Last updated: 2026-06-16
 - HOST and LXC now emit startup lifecycle logs containing `daemon_version=...`; CLIENT surfaces version detection and version-change events in Logs.
 - LXC sync logging now emits an explicit request plan and per-command transcript lines (`[sync][run]`, `[sync][exit]`, `[sync][stdout]`, `[sync][stderr]`) over the websocket log stream so operators can see the exact command sequence and raw command output during reconcile; failed compose commands additionally emit `docker compose logs --tail 80` and `docker compose ps --all` diagnostics.
 - LXC sync now validates each deploy step in fail-closed mode: missing latch credentials, latch pull failures, pre-sync hook failures, missing compose `env_file` targets, or failing compose pull/up abort the sync cycle before subsequent actions continue.
+- LXC sync also validates post-up runtime health (`docker compose ps --status running --services`) and fails the cycle if expected services are not running; `Sync complete` is only emitted after this verification succeeds.
+- LXC runtime verification now detects fast crash loops via `docker inspect` restart counts and fails sync when containers restart immediately after startup.
+- Failure diagnostics now include direct per-container `docker logs --tail` output in addition to compose logs/ps so CLIENT sees the real application error stream.
+- CLIENT sync websocket RPC now carries stack identity and LXC daemon can recover stack identity from request payload when startup metadata is stale/missing, preventing sparse-checkout of `stacks/unknown`.
 - Manual diagnostic and recovery commands live in `docs/debug.md`.

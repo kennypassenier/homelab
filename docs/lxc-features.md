@@ -29,6 +29,11 @@ Last updated: 2026-06-16
 - sync telemetry now emits a request preamble plus per-command transcript lines (`[sync][run]`, `[sync][exit]`, `[sync][stdout]`, `[sync][stderr]`) so CLIENT Logs shows the exact LXC-side command flow and raw command output during reconcile.
 - sync execution is now fail-closed between steps: latch pull, pre-sync hook, and compose deploy must validate successfully before the next step executes.
 - compose deploy now validates referenced `env_file` paths from each app `docker-compose.yml` before `docker compose up`; missing env files abort sync with explicit validation logs.
+- compose deploy now verifies runtime state after each `docker compose up` using `docker compose ps --status running --services`; missing running services abort sync and prevent false `Sync complete` status.
+- compose runtime verification now includes a stabilization delay and `docker inspect` checks for restart loops (`RestartCount > 0`), so fast-crashing containers fail sync instead of being marked healthy.
+- on compose/runtime failure, LXC now streams both `docker compose logs` and direct `docker logs --tail` output for each compose container back to CLIENT.
+- sync now hard-blocks when stack identity resolves to `unknown` or when `stacks/<stack>` is missing after checkout, preventing accidental sparse-checkout to invalid scopes.
+- websocket `sync_request` accepts stack identity hints from CLIENT and can rebind daemon runtime stack identity when startup config was missing or stale.
 - restore execution backend endpoint (`POST /api/restore`) with phased status events.
 - websocket update RPC (`update_request`/`update_response`) and keepalive frames for idle-stable connections.
 - websocket sync/update RPC (`sync_request`, `update_request`) accept optional one-shot `latch` payload used for request-scoped `latch pull` execution.

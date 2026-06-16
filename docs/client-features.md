@@ -16,6 +16,7 @@ Last updated: 2026-06-16
 - Client-side provisioning dispatch debounce suppresses duplicate HOST provision requests during reconnect/key-repeat storms.
 - Logs tab ingestion suppresses identical consecutive LXC log lines within a short window to reduce repeated warning noise.
 - CLIENT control-plane actions now use websocket RPC on LXC `/api/logs/ws` for sync, restore, heartbeat, and remote command execution (with HTTP fallback kept for compatibility).
+- CLIENT websocket sync requests now include explicit stack identity so LXC can reject/repair unknown-stack runtime state before sparse checkout.
 - When initial sync dispatch fails because LXC is still bootstrapping (connection refused/transport errors), CLIENT now queues an automatic retry and re-dispatches sync immediately after that stack websocket connects.
 - CLIENT now attaches one-shot latch pull context (`PAT` / `KEY` / `REPO` / `project` / optional `env` / `sparse`) to HOST and LXC update requests and to LXC sync requests.
 - Session heartbeat pulses to LXC daemons while CLIENT is running, used to suppress unnecessary failsafe sync windows.
@@ -50,6 +51,8 @@ Last updated: 2026-06-16
 - After stack creation, CLIENT now auto-opens the app creation wizard for that stack.
 - App creation wizard flow is now: app name -> optional Traefik subdomain (empty disables Traefik labels) -> review -> create, then loops back to app name so multiple apps can be added without leaving the modal.
 - Default add-app compose generation now creates only the app service (no embedded Promtail sidecar, no explicit `networks:` block) and applies baseline labels (`watchtower.enable` + `backup.pause`) plus optional Traefik routing labels.
+- Generated app compose mounts now follow stack-scoped appdata layout (`/appdata/<stack>/<app>/config:/config`) instead of flat per-app host paths.
+- Generated Vikunja compose defaults now include persistent files mount (`/appdata/<stack>/vikunja/files:/app/vikunja/files`) and Traefik service port `3456`.
 - Stack config editor allows stack-level editing of deploy state, resources, hostname, MAC address, IP mode, and reserved IPv4 from the Scaffolding tab.
 - Stack config editor allows stack-level editing of autostart and boot order policy.
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.

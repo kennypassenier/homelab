@@ -870,7 +870,7 @@ async fn async_main() -> Result<()> {
                 );
 
                 tokio::spawn(async move {
-                    if request_lxc_sync_ws(&ip, &token).await.is_ok() {
+                    if request_lxc_sync_ws(&ip, &token, &stack).await.is_ok() {
                         let _ = tx.send(SyncEvent::Accepted {
                             stack: stack.clone(),
                         });
@@ -1489,12 +1489,13 @@ async fn send_heartbeats(stacks: Vec<String>, token: String) {
     }
 }
 
-async fn request_lxc_sync_ws(ip: &str, token: &str) -> Result<(), String> {
+async fn request_lxc_sync_ws(ip: &str, token: &str, stack_name: &str) -> Result<(), String> {
     let request_id = ws_request_id("sync");
     let latch = client_latch_pull_payload().unwrap_or(serde_json::Value::Null);
     let payload = serde_json::json!({
         "kind": "sync_request",
         "request_id": request_id,
+        "stack_name": stack_name,
         "token": if token.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(token.to_string()) },
         "latch": latch,
     });

@@ -280,7 +280,7 @@ pub fn add_app_to_stack(
     crate::scaffold::ensure_app_config_mount(stack_name, app_name)?;
 
     let domain = std::env::var("DOMAIN").unwrap_or_else(|_| "example.com".to_string());
-    let compose = app_compose_yaml(app_name, docker_image, options, &domain);
+    let compose = app_compose_yaml(stack_name, app_name, docker_image, options, &domain);
     fs::write(
         format!("stacks/{}/{}/docker-compose.yml", stack_name, app_name),
         compose,
@@ -511,6 +511,7 @@ fn is_valid_stack_name(name: &str) -> bool {
 }
 
 fn app_compose_yaml(
+    stack_name: &str,
     app_name: &str,
     docker_image: &str,
     options: &AddAppOptions,
@@ -527,7 +528,16 @@ fn app_compose_yaml(
     out.push_str("      - TZ=Europe/Brussels\n");
     out.push_str("    restart: unless-stopped\n");
     out.push_str("    volumes:\n");
-    out.push_str(&format!("      - /appdata/{}-config:/config\n", app_name));
+    out.push_str(&format!(
+        "      - /appdata/{}/{}/config:/config\n",
+        stack_name, app_name
+    ));
+    if app_name == "vikunja" {
+        out.push_str(&format!(
+            "      - /appdata/{}/{}/files:/app/vikunja/files\n",
+            stack_name, app_name
+        ));
+    }
     out.push_str("    labels:\n");
     out.push_str("      - \"com.centurylinklabs.watchtower.enable=true\"\n");
     out.push_str("      - \"com.homelab.backup.pause=true\"\n");
@@ -547,8 +557,9 @@ fn app_compose_yaml(
             ));
         }
         out.push_str(&format!(
-            "      - \"traefik.http.services.{}.loadbalancer.server.port=80\"\n",
-            app_name
+            "      - \"traefik.http.services.{}.loadbalancer.server.port={}\"\n",
+            app_name,
+            if app_name == "vikunja" { "3456" } else { "80" }
         ));
     }
     out

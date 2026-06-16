@@ -4,10 +4,15 @@ services:
     container_name: vikunja
     env_file:
       - .env
+    environment:
+      - TZ=Europe/Brussels
     restart: unless-stopped
     volumes:
-      - /appdata/vikunja-config:/config
+      - /appdata/todo/vikunja/config:/config
+      - /appdata/todo/vikunja/files:/app/vikunja/files
     labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.homelab.backup.pause=true"
       - "traefik.enable=true"
-      - "traefik.http.routers.vikunja.rule=Host(\"todo.kp-soft.dev\") || Host(\"todo.kp-soft.dev\") || Host(\"todo\") || Host(\"vikunja\")"
-      - "traefik.http.services.app.loadbalancer.server.port=80"
+      - "traefik.http.routers.vikunja.rule=Host(\"todo.kp-soft.dev\") || Host(\"todo\") || Host(\"vikunja\")"
+      - "traefik.http.services.vikunja.loadbalancer.server.port=3456"

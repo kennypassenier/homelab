@@ -40,7 +40,7 @@ pub fn bootstrap_lxc(
     log: &dyn Fn(&str, &str),
 ) -> Result<BootstrapResult, String> {
     let start = std::time::Instant::now();
-    let total: u32 = 11; // HOST bootstrap steps (after LXC already created by provision.rs)
+    let total: u32 = 13; // HOST bootstrap steps (after LXC already created by provision.rs)
     let mut step = 0u32;
 
     macro_rules! step {

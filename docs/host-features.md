@@ -195,6 +195,7 @@ After manual recovery, future releases should self-update normally again.
 - When required bootstrap artifacts are missing (LXC daemon binary/service, active daemon service, or sparse Git checkout), action is reported as `RESUME_BOOTSTRAP` instead of `OK`.
 - `RESUME_BOOTSTRAP` runs the normal bootstrap flow for that VMID to converge from partial state to a runnable stack.
 - If resume-bootstrap fails, HOST fail-closes stack activation by setting `deploy.enabled=false` and writing `deploy.last_failure`.
+- HOST bootstrap step-header numbering now reflects the full 13-step workflow, avoiding misleading `[STEP x/11]` totals during resume/create paths.
 
 ## Latch Bootstrap Reliability
 

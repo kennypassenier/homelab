@@ -1,6 +1,7 @@
 // Docker compose operations and orphan garbage collection.
 
 use std::collections::HashSet;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -200,6 +201,18 @@ fn parse_volume_source(volume: &str) -> Option<&str> {
     }
 }
 
+fn ensure_appdata_dir_permissions(path: &Path) -> Result<(), String> {
+    if !path.starts_with("/appdata") {
+        return Ok(());
+    }
+    if path.is_dir() {
+        let perms = std::fs::Permissions::from_mode(0o775);
+        std::fs::set_permissions(path, perms)
+            .map_err(|e| format!("chmod {}: {}", path.display(), e))?;
+    }
+    Ok(())
+}
+
 fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), String> {
     let is_file_mount = source.extension().is_some();
 
@@ -216,6 +229,7 @@ fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), Strin
             if let Some(parent) = source.parent() {
                 std::fs::create_dir_all(parent)
                     .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
+                ensure_appdata_dir_permissions(parent)?;
             }
             if repo_candidate.is_file() {
                 std::fs::copy(&repo_candidate, source).map_err(|e| {
@@ -236,6 +250,7 @@ fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), Strin
         if repo_candidate.is_dir() {
             std::fs::create_dir_all(source)
                 .map_err(|e| format!("create dir {}: {}", source.display(), e))?;
+            ensure_appdata_dir_permissions(source)?;
             return Ok(());
         }
     }
@@ -244,6 +259,7 @@ fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), Strin
         if let Some(parent) = source.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
+            ensure_appdata_dir_permissions(parent)?;
         }
         if !source.exists() {
             std::fs::write(source, "")
@@ -252,7 +268,8 @@ fn mirror_bind_mount_source(stack_name: &str, source: &Path) -> Result<(), Strin
         return Ok(());
     }
 
-    std::fs::create_dir_all(source).map_err(|e| format!("create dir {}: {}", source.display(), e))
+    std::fs::create_dir_all(source).map_err(|e| format!("create dir {}: {}", source.display(), e))?;
+    ensure_appdata_dir_permissions(source)
 }
 
 pub async fn prepare_stack_bind_mounts(

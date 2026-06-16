@@ -184,11 +184,12 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
         .take(visible)
         .map(|(i, name)| {
             let is_active = stack_is_active(name);
+            let is_live = app.is_lxc_ws_connected(name);
             let is_drifted = app.stack_drift.get(name).copied().unwrap_or(true);
             let selected = i == app.selected_stack;
             let style = if selected {
                 stack_glitch_style(app.pulse_phase * 4.0 + (i as f32 * 0.77))
-            } else if is_active && is_drifted {
+            } else if is_active && is_live && is_drifted {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
@@ -197,7 +198,7 @@ fn draw_scaffolding(f: &mut Frame, area: Rect, app: &App) {
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            let state_tag = if is_active && is_drifted {
+            let state_tag = if is_active && is_live && is_drifted {
                 "[UPD]"
             } else if is_active {
                 "[ON ]"
@@ -1023,7 +1024,8 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
     ];
     f.render_widget(Paragraph::new(instructions).block(header), layout[0]);
 
-    let total_targets = (app.stacks.len() + 1).max(1);
+    let update_targets = app.live_lxc_update_targets();
+    let total_targets = (update_targets.len() + 1).max(1);
     let button_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(vec![
@@ -1114,7 +1116,7 @@ fn draw_update(f: &mut Frame, area: Rect, app: &App) {
         col_idx += 1;
     }
 
-    for (stack_idx, stack) in app.stacks.iter().enumerate() {
+    for (stack_idx, stack) in update_targets.iter().enumerate() {
         if col_idx >= button_cols.len() {
             break;
         }

@@ -602,6 +602,18 @@ impl App {
         self.log_source_scroll = self.log_source_scroll.min(self.log_source_selected);
     }
 
+    pub fn is_lxc_ws_connected(&self, stack: &str) -> bool {
+        self.connected_lxc_stacks.iter().any(|s| s == stack)
+    }
+
+    pub fn live_lxc_update_targets(&self) -> Vec<String> {
+        self.stacks
+            .iter()
+            .filter(|stack| self.is_lxc_ws_connected(stack))
+            .cloned()
+            .collect()
+    }
+
     /// Dynamic log source list: connected LXC workers, HOST only before any LXC is active, then CLIENT.
     pub fn log_sources(&self) -> Vec<(String, ratatui::style::Color)> {
         let mut sources: Vec<(String, ratatui::style::Color)> = self

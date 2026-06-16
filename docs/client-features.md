@@ -27,6 +27,7 @@ Last updated: 2026-06-16
 - STEP headers (`level=step`) render as distinct amber banners in Logs for clearer pipeline progress visibility.
 - CLIENT detects `daemon_version=` markers from HOST/LXC websocket logs and emits explicit version-detected/version-changed log lines.
 - Update tab cards now render per-target metadata: detected daemon version plus last manual update outcome/timestamp for HOST and each LXC stack.
+- Update tab LXC targets now include only stacks with an active LXC websocket connection; offline or destroyed stacks are excluded from per-stack update actions and from Update All fan-out.
 - Top tab bar keeps the glitch treatment while other sections render stable titles; selected tab uses a filled highlight style for clearer focus.
 - Update tab cards include richer action context (trigger key/target and live state `idle|updating`) alongside version and last-result telemetry.
 - Update tab now shows latest available HOST release tag (GitHub `host-daemon-v*`) with refresh timestamp, plus LXC update channel visibility (image/tag target used by self-update).
@@ -58,7 +59,7 @@ Last updated: 2026-06-16
 - Stack config editor allows stack-level editing of autostart and boot order policy.
 - Stack config editor can sync stack-owned DHCP reservations to OPNsense Kea using the stack's deterministic MAC address and reserved IPv4 intent.
 - App rows now expose a real config editor for Git-managed app metadata, starting with Docker image updates.
-- Scaffolding stack/app lists now color-code drift (`[UPD]` / yellow) versus up-to-date active entries (`[ON]` / green).
+- Scaffolding stack/app lists now color-code drift (`[UPD]` / yellow) only when a stack is both active and live-connected; active-but-offline stacks remain `[ON]`.
 - Scaffolding Actions now include a non-destructive `stop lxc` operation to halt a running stack container before retrying deploy/sync flows.
 - CLIENT now auto-repairs a known legacy `lxc-compose.yml` indentation bug in `network.cidr/gateway` while loading stack config, so activation/deactivation actions (`a` / `x`) continue to work on older scaffolded stacks.
 - New stack defaults explicitly set `deploy.enabled=false` to keep manual activation as the safe default.

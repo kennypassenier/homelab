@@ -21,6 +21,7 @@ Last updated: 2026-06-16
 - native `latch` release binary install during bootstrap with guarded daily update checks.
 - one-shot request-scoped secrets workflow: CLIENT can pass latch pull context (`PAT` / `KEY` / `REPO` / `project` / optional `env` / `sparse`) in sync/update RPC or HTTP requests.
 - compose pull/up execution per stack app folder.
+- compose bind-mount preparation now enforces writable directory permissions (`0775`) on `/appdata` paths it materializes so unprivileged container users can write runtime data.
 - lock-file based sync exclusion.
 - failsafe sync windows (default hourly) with heartbeat-aware suppression when CLIENT is active.
 - heartbeat API endpoint (`POST /api/heartbeat`) for CLIENT session liveness.

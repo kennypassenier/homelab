@@ -1029,7 +1029,7 @@ async fn async_main() -> Result<()> {
             if let Some(target) = app.update_in_progress.clone() {
                 update_dispatch_running = true;
                 let tx = update_tx.clone();
-                let stacks = app.stacks.clone();
+                let stacks = app.live_lxc_update_targets();
                 let token = std::env::var("LXC_API_TOKEN").unwrap_or_default();
 
                 let host_release_tag = if app.host_latest_release.starts_with("host-daemon-v") {

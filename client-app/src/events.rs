@@ -1378,6 +1378,8 @@ fn handle_update_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
         return EventOutcome::Continue;
     }
 
+    let update_targets = app.live_lxc_update_targets();
+
     match key.code {
         KeyCode::Char('1') | KeyCode::Char('h') | KeyCode::Char('H') => {
             app.update_in_progress = Some("HOST".to_string());
@@ -1387,8 +1389,8 @@ fn handle_update_nav(app: &mut App, key: KeyEvent) -> EventOutcome {
         KeyCode::Char(c) if c.is_numeric() => {
             // Keys 2-9 map to stacks (if they exist)
             let idx = (c.to_digit(10).unwrap_or(0) as usize).saturating_sub(2);
-            if idx < app.stacks.len() {
-                let stack = app.stacks[idx].clone();
+            if idx < update_targets.len() {
+                let stack = update_targets[idx].clone();
                 app.update_in_progress = Some(stack.clone());
                 app.update_status = format!("Initiating {} update...", stack);
             }

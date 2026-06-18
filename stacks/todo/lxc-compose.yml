@@ -5,13 +5,13 @@ hostname: 111-app-todo
 hwaddr: 02:ef:38:83:01:dd
 tags: []
 deploy:
-  enabled: false
-  activated_at: null
-  last_applied_hash: 2266843ef7399a80cfbe8a7e9169b29bbc600df183e08be54a9107ea25374a1c
-  last_applied_at: '1781636235'
+  enabled: true
+  activated_at: '1781637832'
+  last_applied_hash: 1924af14ccbfd9949e23e50d566f632c70ae760c87128ae0d7ae04152b38c359
+  last_applied_at: '1781638288'
   last_applied_apps:
     promtail: 0f841453209a2174881095df6d25bc0a9a6f003f7185dcbaf2dca332c84e2bbf
-    vikunja: 3b0ecb2be0a20d2b2ef1704126c19f6b9ebcc1e2c295d376d8e7a23fc249881f
+    vikunja: 259edce8a730df7a79e055ab61301f85095a18d66fe159e9026bd9f2ca511bcb
     watchtower: 965653dcbbe076bafc59779692ace7cd344d1205d42044cfa2d281f7a18da892
 network:
   bridge: vmbr0

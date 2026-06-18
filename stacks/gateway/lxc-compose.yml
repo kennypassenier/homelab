@@ -7,12 +7,12 @@ tags: []
 deploy:
   enabled: false
   activated_at: null
-  last_applied_hash: 0bb0d2be0e3f48bcd0169d0290ab5e1bffa8fc30fbbe55096ec5ca45961bb974
-  last_applied_at: '1781636189'
+  last_applied_hash: 7d2816a14f22ffc7377305b39e03f4da9f2ae8910db3ca694453e53de4f2ce4e
+  last_applied_at: '1781638059'
   last_applied_apps:
-    crowdsec: a13bea9029724328d5102ae66daace17fe8725e5712fb70bdea8df2641001c8b
-    goaccess: deec78c211c6c1edae7ad4211ab00854dc912ed9046a22772ce93a086b22468b
-    nginx-proxy-manager: ""
+    crowdsec: 70bf01770c82c7d6d35c6cc1df6a5c8183efbad7a03da320b358f80763923592
+    goaccess: cf89b65dce6a0c24e1692acd48094e18152aef6182d4eb0f5b0ed68906fec2ba
+    nginx-proxy-manager: ae8b0066bbee453ba25a329aca63dcf0044207d9035e0e3719dcb7f0b380b272
     promtail: c170f1de3e66c70a5e02989483272c70ce1b0ecf58bc252f1728a8c12546802f
     watchtower: 3cc01d75d1e31a51be5633de6f43646970bc5a3ccd6305aad66bc75198809263
 network:

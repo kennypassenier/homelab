@@ -9,3 +9,6 @@
 .vscode/
 *.swp
 *.swo
+
+# Rust build artifacts
+target/

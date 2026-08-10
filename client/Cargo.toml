@@ -1,0 +1,18 @@
+[package]
+name = "homelab-client"
+version.workspace = true
+edition.workspace = true
+description = "Homelab CLIENT CLI: drives the HOST daemon over the authenticated WS line"
+
+[[bin]]
+name = "homelab"
+path = "src/main.rs"
+
+[dependencies]
+homelab-proto = { path = "../proto" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+futures-util.workspace = true
+tokio-tungstenite = "0.21"

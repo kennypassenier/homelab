@@ -1,0 +1,9 @@
+[package]
+name = "homelab-proto"
+version.workspace = true
+edition.workspace = true
+description = "Shared message types for the CLIENT <-> HOST protocol"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

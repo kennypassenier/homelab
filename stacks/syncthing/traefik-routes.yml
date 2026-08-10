@@ -1,0 +1,17 @@
+# Traefik route fragment for the syncthing stack.
+# Pushed by HOST to the gateway LXC's watched routes directory
+# (/opt/traefik-config/routes/) — the file provider reloads automatically.
+# Only the web GUI is routed; sync traffic (22000/21027) stays LAN-only.
+
+http:
+  routers:
+    syncthing:
+      rule: "Host(`sync.kp-soft.dev`)"
+      entryPoints: [web]
+      service: syncthing
+
+  services:
+    syncthing:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.10:8384"

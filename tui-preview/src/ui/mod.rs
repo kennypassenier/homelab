@@ -129,19 +129,73 @@ fn draw_tab_bar(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_ticker(f: &mut Frame, app: &App, area: Rect) {
+    // Everything on the strip is real world-state: active operations, the last
+    // alert, drift, bans, backup countdown and live host telemetry.
     let w = &app.world;
-    let segments: Vec<String> = vec![
-        format!("0x{:04X}", (app.tick / 7) & 0xFFFF),
-        format!("{} uptime={}", w.host.name, w.host.uptime),
-        format!("cpu={:02}% ram={:02}%", w.host.cpu.last(), w.host.ram.last()),
-        format!("temp={:.0}°C", w.host.temp),
-        format!("disk={}%", w.host.disk_pct),
-        format!("stacks {}/{} online", w.stacks.iter().filter(|s| s.enabled).count(), w.stacks.len()),
-        format!("git {}@{}", w.git.branch, w.git.commit),
-        "TLS PINNED".into(),
-        "SYNC_OK".into(),
-        "CRC_OK".into(),
-    ];
+    let mut segments: Vec<String> = Vec::new();
+
+    if let Some(d) = &w.deploy {
+        if !d.finished {
+            segments.push(format!(
+                "▶ DEPLOY {} step {}/{}",
+                w.stacks[d.stack_idx].name,
+                d.current + 1,
+                d.steps.len()
+            ));
+        }
+    }
+    if let Some(b) = &w.backup {
+        if !b.finished {
+            segments.push(format!(
+                "▶ BACKUP {} {:.0}%",
+                w.stacks[b.stack_idx].name,
+                b.ratio() * 100.0
+            ));
+        }
+    }
+    if let Some(alert) = &w.last_alert {
+        segments.push(format!("⚠ {}", alert));
+    }
+    let drifted: Vec<&str> = w
+        .stacks
+        .iter()
+        .filter(|s| s.drift)
+        .map(|s| s.name.as_str())
+        .collect();
+    if !drifted.is_empty() {
+        segments.push(format!("UPD pending: {}", drifted.join(",")));
+    }
+    for s in w.stacks.iter().filter(|s| !s.sealed) {
+        segments.push(format!("NOENV {}", s.name));
+    }
+    segments.push(format!(
+        "{} cpu={:02}% ram={:02}% {:.0}°C disk={}%",
+        w.host.name,
+        w.host.cpu.last(),
+        w.host.ram.last(),
+        w.host.temp,
+        w.host.disk_pct
+    ));
+    segments.push(format!(
+        "stacks {}/{} online",
+        w.stacks
+            .iter()
+            .filter(|s| s.status == crate::sim::StackStatus::Online)
+            .count(),
+        w.stacks.len()
+    ));
+    segments.push(format!("crowdsec bans today={}", w.bans_today));
+    segments.push(format!(
+        "next backup in {}h{:02}m",
+        (w.next_backup_min / 60.0) as u32,
+        (w.next_backup_min % 60.0) as u32
+    ));
+    segments.push(format!(
+        "git {}@{} ({} commits today)",
+        w.git.branch, w.git.commit, w.git.commits_today
+    ));
+    segments.push(format!("link {:.1}ms · TLS PINNED", w.link_latency_ms));
+
     let text = fx::ticker_text(&segments, area.width, app.tick);
     let ticker = Paragraph::new(Line::from(Span::styled(
         text,

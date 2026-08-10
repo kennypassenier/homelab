@@ -51,6 +51,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             draw_diff(f, app, idx, sc);
         }
         Modal::Deploy => draw_deploy(f, app),
+        Modal::Backup => draw_backup(f, app),
         Modal::ConfirmDelete { stack_idx, input } => {
             let (idx, text) = (*stack_idx, input.clone());
             draw_delete(f, app, idx, &text);
@@ -180,21 +181,46 @@ fn draw_wizard(f: &mut Frame, app: &mut App) {
             f.render_widget(Paragraph::new(lines), rows[1]);
         }
         WizardStep::Resources => {
+            let cursor = if (app.tick / 15) % 2 == 0 { "█" } else { " " };
+            let field = |idx: usize, label: &str, value: String, hint: &str| -> Line<'static> {
+                let selected = w.res_field == idx;
+                let marker = if selected { "▶ " } else { "  " };
+                let row_style = if selected {
+                    Style::new().bg(fx::pulse_bg(app.tick, app.fx))
+                } else {
+                    Style::new()
+                };
+                let value_span = if selected {
+                    Span::styled(
+                        format!("‹ {} ›", value),
+                        Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled(format!("  {}  ", value), Style::new().fg(THEME.text))
+                };
+                Line::from(vec![
+                    Span::styled(marker.to_string(), Style::new().fg(THEME.cyan)),
+                    Span::styled(format!("{:<7}", label), THEME.muted_style()),
+                    value_span,
+                    Span::styled(format!("   {}", hint), THEME.hint()),
+                ])
+                .style(row_style)
+            };
+            let disk_value = if w.res_field == 2 && w.disk_typing {
+                format!("{}{} GB", w.disk, cursor)
+            } else {
+                format!("{} GB", w.disk)
+            };
             let lines = vec![
+                field(0, "RAM", format!("{} MB", w.ram), ""),
+                field(1, "CORES", format!("{}", w.cores), ""),
+                field(2, "DISK", disk_value, "or type a custom size"),
+                Line::default(),
                 Line::from(vec![
-                    Span::styled("  RAM   ", THEME.muted_style()),
-                    Span::styled(format!("{:>5} MB", w.ram), Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD)),
-                    Span::styled("   [+/-] adjust", THEME.hint()),
-                ]),
-                Line::from(vec![
-                    Span::styled("  CORES ", THEME.muted_style()),
-                    Span::styled(format!("{:>5}", w.cores), Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD)),
-                    Span::styled("      [c] cycle", THEME.hint()),
-                ]),
-                Line::from(vec![
-                    Span::styled("  DISK  ", THEME.muted_style()),
-                    Span::styled(format!("{:>4} GB", w.disk), Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD)),
-                    Span::styled("     [s] cycle", THEME.hint()),
+                    Span::styled("  [↑/↓]", THEME.hint()),
+                    Span::styled(" select field   ", THEME.muted_style()),
+                    Span::styled("[←/→]", THEME.hint()),
+                    Span::styled(" adjust value", THEME.muted_style()),
                 ]),
                 Line::default(),
                 Line::from(Span::styled(
@@ -478,6 +504,176 @@ fn draw_deploy(f: &mut Frame, app: &App) {
             Span::styled(" tail  ", THEME.muted_style()),
             Span::styled("[esc]", THEME.hint()),
             Span::styled(" background (deploy keeps running)", THEME.muted_style()),
+        ])
+    };
+    f.render_widget(Paragraph::new(footer), rows[2]);
+}
+
+fn draw_backup(f: &mut Frame, app: &App) {
+    let Some(b) = &app.world.backup else { return };
+    let stack = &app.world.stacks[b.stack_idx];
+    let color = THEME.stack_color(&stack.name);
+
+    // Focus mode: near-fullscreen takeover, mirroring the deploy window.
+    let area = f.area();
+    let rect = Rect {
+        x: area.width / 12,
+        y: 1,
+        width: area.width - area.width / 6,
+        height: area.height.saturating_sub(3),
+    };
+    f.render_widget(Clear, rect);
+
+    let title = if b.finished {
+        format!("FOCUS :: BACKUP {} :: COMPLETE", stack.hostname())
+    } else {
+        format!("FOCUS :: BACKUP {} :: LIVE", stack.hostname())
+    };
+    let block = modal_block(&title, false, app).title(
+        Line::from(vec![
+            if b.finished {
+                Span::styled("● SNAPSHOT VERIFIED ", THEME.ok().add_modifier(Modifier::BOLD))
+            } else {
+                Span::styled(
+                    format!("{} {:.0} MB READ ", fx::spinner(app.tick), b.bytes_done),
+                    Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+                )
+            },
+        ])
+        .right_aligned(),
+    );
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+
+    let rows = Layout::vertical([
+        Constraint::Min(6),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+    let cols = Layout::horizontal([Constraint::Length(30), Constraint::Min(30)]).split(rows[0]);
+
+    // Left: cycle pipeline.
+    let steps_block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(color))
+        .title(Line::from(Span::styled(
+            " [ CYCLE ] ",
+            Style::new().fg(color).add_modifier(Modifier::BOLD),
+        )))
+        .style(Style::new().bg(THEME.elevated));
+    let steps_inner = steps_block.inner(cols[0]);
+    f.render_widget(steps_block, cols[0]);
+
+    let mut step_lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::styled("target ", THEME.muted_style()),
+            Span::styled(stack.hostname(), Style::new().fg(color).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("repo   ", THEME.muted_style()),
+            Span::styled("rclone:gdrive:homelab", Style::new().fg(THEME.faint)),
+        ]),
+        Line::default(),
+    ];
+    for (name, state) in &b.steps {
+        let (icon, style) = match state {
+            StepState::Pending => ("○".to_string(), THEME.muted_style()),
+            StepState::Running => (
+                fx::spinner(app.tick).to_string(),
+                Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+            ),
+            StepState::Done => ("✓".to_string(), THEME.ok()),
+        };
+        step_lines.push(Line::from(vec![
+            Span::styled(format!(" {} ", icon), style),
+            Span::styled(
+                name.to_string(),
+                match state {
+                    StepState::Running => Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
+                    StepState::Done => Style::new().fg(THEME.text),
+                    StepState::Pending => THEME.muted_style(),
+                },
+            ),
+        ]));
+    }
+    f.render_widget(Paragraph::new(step_lines), steps_inner);
+
+    // Right: dedicated task feed.
+    let feed_title = if app.backup_scroll > 0 {
+        format!(" [ TASK_FEED :: SCROLL -{} ] ", app.backup_scroll)
+    } else {
+        " [ TASK_FEED :: LIVE ] ".to_string()
+    };
+    let feed_block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(if app.backup_scroll > 0 {
+            THEME.border_inactive()
+        } else {
+            THEME.border_active()
+        })
+        .title(Line::from(Span::styled(feed_title, THEME.title_active())))
+        .style(Style::new().bg(THEME.elevated));
+    let feed_inner = feed_block.inner(cols[1]);
+    f.render_widget(feed_block, cols[1]);
+
+    let capacity = feed_inner.height as usize;
+    let scroll = app.backup_scroll.min(b.log.len().saturating_sub(capacity));
+    let end = b.log.len() - scroll;
+    let start = end.saturating_sub(capacity);
+    let feed_lines: Vec<Line> = b.log[start..end]
+        .iter()
+        .map(|(lvl, l)| {
+            let style = if l.starts_with("[bkup][run ]") {
+                Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD)
+            } else if l.starts_with("[bkup][exit]") {
+                THEME.ok()
+            } else if l.starts_with("[bkup] Cycle complete") {
+                THEME.ok().add_modifier(Modifier::BOLD)
+            } else {
+                match lvl {
+                    crate::sim::Level::Error => THEME.err(),
+                    crate::sim::Level::Warn => THEME.warn(),
+                    _ => Style::new().fg(THEME.muted),
+                }
+            };
+            Line::from(Span::styled(l.clone(), style))
+        })
+        .collect();
+    f.render_widget(Paragraph::new(feed_lines), feed_inner);
+
+    let gauge = Gauge::default()
+        .ratio(b.ratio())
+        .gauge_style(
+            Style::new()
+                .fg(if b.finished { THEME.green } else { THEME.cyan })
+                .bg(THEME.panel),
+        )
+        .label(Span::styled(
+            format!(
+                "{}/{} phases",
+                b.steps.iter().filter(|(_, s)| *s == StepState::Done).count(),
+                b.steps.len()
+            ),
+            Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
+        ));
+    f.render_widget(gauge, rows[1]);
+
+    let footer = if b.finished {
+        Line::from(vec![
+            Span::styled("[↵]", THEME.hint()),
+            Span::styled(" close  ", THEME.muted_style()),
+            Span::styled("[↑/↓]", THEME.hint()),
+            Span::styled(" review transcript", THEME.muted_style()),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("[↑/↓]", THEME.hint()),
+            Span::styled(" scroll  ", THEME.muted_style()),
+            Span::styled("[G]", THEME.hint()),
+            Span::styled(" tail  ", THEME.muted_style()),
+            Span::styled("[esc]", THEME.hint()),
+            Span::styled(" background (cycle keeps running)", THEME.muted_style()),
         ])
     };
     f.render_widget(Paragraph::new(footer), rows[2]);

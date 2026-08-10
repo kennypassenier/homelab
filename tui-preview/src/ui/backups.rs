@@ -152,18 +152,19 @@ fn draw_policy(f: &mut Frame, app: &App, area: Rect) {
             areas[0],
         );
         let gauge = Gauge::default()
-            .ratio(b.progress.min(1.0))
+            .ratio(b.ratio())
             .gauge_style(Style::new().fg(THEME.cyan).bg(THEME.elevated))
             .label(Span::styled(
-                format!("{:>3.0}%", b.progress * 100.0),
+                format!("{:>3.0}%", b.ratio() * 100.0),
                 Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
             ));
         f.render_widget(gauge, areas[1]);
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "pause labels honored · retention applies on success",
-                Style::new().fg(THEME.faint),
-            ))),
+            Paragraph::new(Line::from(vec![
+                Span::styled("press ", THEME.muted_style()),
+                Span::styled("[b]", THEME.hint()),
+                Span::styled(" for the focus window", THEME.muted_style()),
+            ])),
             areas[2],
         );
     } else {

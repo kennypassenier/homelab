@@ -124,6 +124,10 @@ pub struct WizardState {
     pub ram: u32,
     pub cores: u16,
     pub disk: u16,
+    /// Selected row on the resources form: 0 = RAM, 1 = CORES, 2 = DISK.
+    pub res_field: usize,
+    /// True while the user is typing a custom disk size.
+    pub disk_typing: bool,
 }
 
 impl WizardState {
@@ -135,6 +139,8 @@ impl WizardState {
             ram: PRESETS[0].ram,
             cores: 2,
             disk: 8,
+            res_field: 0,
+            disk_typing: false,
         }
     }
 }
@@ -147,6 +153,7 @@ pub enum Modal {
     Wizard(WizardState),
     Diff { stack_idx: usize, scroll: u16 },
     Deploy,
+    Backup,
     ConfirmDelete { stack_idx: usize, input: String },
 }
 
@@ -216,6 +223,10 @@ pub struct App {
     pub deploy_scroll: usize,
     /// Last observed deploy-log length, used to anchor a scrolled-back view.
     pub deploy_log_seen: usize,
+    /// Scroll offset within the backup focus window (0 = live tail).
+    pub backup_scroll: usize,
+    /// Last observed backup-log length, used to anchor a scrolled-back view.
+    pub backup_log_seen: usize,
     pub should_quit: bool,
     pub status_line: String,
 }
@@ -244,6 +255,8 @@ impl App {
             log_scroll: 0,
             deploy_scroll: 0,
             deploy_log_seen: 0,
+            backup_scroll: 0,
+            backup_log_seen: 0,
             should_quit: false,
             status_line: "boot sequence complete — all systems nominal".into(),
         }
@@ -302,6 +315,15 @@ impl App {
             self.deploy_log_seen = len;
         } else {
             self.deploy_log_seen = 0;
+        }
+        if let Some(b) = &self.world.backup {
+            let len = b.log.len();
+            if self.backup_scroll > 0 {
+                self.backup_scroll += len.saturating_sub(self.backup_log_seen);
+            }
+            self.backup_log_seen = len;
+        } else {
+            self.backup_log_seen = 0;
         }
         // Auto-leave splash after the boot sequence has fully played (~4.5s).
         if self.screen == Screen::Splash && self.tick > 135 {
@@ -398,9 +420,14 @@ impl App {
                     }
                 }
                 KeyCode::Char('b') => {
-                    let idx = self.selected_stack();
-                    self.world.start_backup(idx);
-                    self.switch_tab(Tab::Backups);
+                    if self.world.backup.as_ref().map(|b| !b.finished).unwrap_or(false) {
+                        // A live cycle reopens its focus window.
+                        self.modal = Modal::Backup;
+                    } else {
+                        let idx = self.selected_stack();
+                        self.world.start_backup(idx);
+                        self.modal = Modal::Backup;
+                    }
                 }
                 KeyCode::Char('a') => {
                     let idx = self.selected_stack();
@@ -435,8 +462,13 @@ impl App {
                     Self::move_sel(&mut self.snap_table, self.world.snapshots.len(), -1)
                 }
                 KeyCode::Char('b') => {
-                    let idx = self.selected_stack();
-                    self.world.start_backup(idx);
+                    if self.world.backup.as_ref().map(|b| !b.finished).unwrap_or(false) {
+                        self.modal = Modal::Backup;
+                    } else {
+                        let idx = self.selected_stack();
+                        self.world.start_backup(idx);
+                        self.modal = Modal::Backup;
+                    }
                 }
                 _ => {}
             },
@@ -556,6 +588,37 @@ impl App {
                     _ => {}
                 }
             }
+            Modal::Backup => {
+                let finished = self.world.backup.as_ref().map(|b| b.finished).unwrap_or(true);
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        self.backup_scroll = self.backup_scroll.saturating_add(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        self.backup_scroll = self.backup_scroll.saturating_sub(1);
+                    }
+                    KeyCode::PageUp => {
+                        self.backup_scroll = self.backup_scroll.saturating_add(10);
+                    }
+                    KeyCode::PageDown => {
+                        self.backup_scroll = self.backup_scroll.saturating_sub(10);
+                    }
+                    KeyCode::Char('G') | KeyCode::End => self.backup_scroll = 0,
+                    KeyCode::Esc => {
+                        self.modal = Modal::None;
+                        self.backup_scroll = 0;
+                        if finished {
+                            self.world.backup = None;
+                        }
+                    }
+                    KeyCode::Enter if finished => {
+                        self.modal = Modal::None;
+                        self.backup_scroll = 0;
+                        self.world.backup = None;
+                    }
+                    _ => {}
+                }
+            }
             Modal::ConfirmDelete { stack_idx, input } => match key.code {
                 KeyCode::Esc => self.modal = Modal::None,
                 KeyCode::Char(c) => input.push(c),
@@ -600,17 +663,45 @@ impl App {
                 KeyCode::Backspace if w.step == WizardStep::Name => {
                     w.name.pop();
                 }
-                KeyCode::Char('+') | KeyCode::Char('=') if w.step == WizardStep::Resources => {
-                    w.ram = (w.ram + 512).min(16384);
+                KeyCode::Down if w.step == WizardStep::Resources => {
+                    w.res_field = (w.res_field + 1) % 3;
+                    w.disk_typing = false;
                 }
-                KeyCode::Char('-') if w.step == WizardStep::Resources => {
-                    w.ram = w.ram.saturating_sub(512).max(256);
+                KeyCode::Up if w.step == WizardStep::Resources => {
+                    w.res_field = (w.res_field + 2) % 3;
+                    w.disk_typing = false;
                 }
-                KeyCode::Char('c') if w.step == WizardStep::Resources => {
-                    w.cores = if w.cores >= 8 { 1 } else { w.cores + 1 };
+                KeyCode::Right if w.step == WizardStep::Resources => {
+                    w.disk_typing = false;
+                    match w.res_field {
+                        0 => w.ram = (w.ram + 512).min(16384),
+                        1 => w.cores = (w.cores + 1).min(8),
+                        _ => w.disk = (w.disk + 4).min(512),
+                    }
                 }
-                KeyCode::Char('s') if w.step == WizardStep::Resources => {
-                    w.disk = if w.disk >= 64 { 4 } else { w.disk * 2 };
+                KeyCode::Left if w.step == WizardStep::Resources => {
+                    w.disk_typing = false;
+                    match w.res_field {
+                        0 => w.ram = w.ram.saturating_sub(512).max(256),
+                        1 => w.cores = w.cores.saturating_sub(1).max(1),
+                        _ => w.disk = w.disk.saturating_sub(4).max(4),
+                    }
+                }
+                // Custom disk size: just type a number on the DISK row.
+                KeyCode::Char(c)
+                    if w.step == WizardStep::Resources
+                        && w.res_field == 2
+                        && c.is_ascii_digit() =>
+                {
+                    if !w.disk_typing {
+                        w.disk = 0;
+                        w.disk_typing = true;
+                    }
+                    w.disk = (w.disk * 10 + c.to_digit(10).unwrap() as u16).min(999);
+                }
+                KeyCode::Backspace if w.step == WizardStep::Resources && w.res_field == 2 => {
+                    w.disk_typing = true;
+                    w.disk /= 10;
                 }
                 KeyCode::Enter => match w.step {
                     WizardStep::Preset => {
@@ -627,7 +718,13 @@ impl App {
                             w.step = WizardStep::Resources;
                         }
                     }
-                    WizardStep::Resources => w.step = WizardStep::Review,
+                    WizardStep::Resources => {
+                        if w.disk < 4 {
+                            w.disk = 4; // typed value below the sane floor
+                        }
+                        w.disk_typing = false;
+                        w.step = WizardStep::Review;
+                    }
                     WizardStep::Review => {
                         let preset = &PRESETS[w.preset_idx];
                         let name = w.name.clone();

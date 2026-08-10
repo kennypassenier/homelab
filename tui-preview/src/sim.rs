@@ -155,8 +155,21 @@ pub struct DeployRun {
 
 pub struct BackupRun {
     pub stack_idx: usize,
-    pub progress: f64,
+    pub steps: Vec<(&'static str, StepState)>,
+    pub current: usize,
+    pub timer_ms: i64,
+    pub finished: bool,
+    pub log: Vec<(Level, String)>,
     pub bytes_done: f64,
+    sub_timer_ms: i64,
+    sub_count: u32,
+}
+
+impl BackupRun {
+    pub fn ratio(&self) -> f64 {
+        let done = self.steps.iter().filter(|(_, s)| *s == StepState::Done).count();
+        done as f64 / self.steps.len().max(1) as f64
+    }
 }
 
 pub struct Snapshot {
@@ -195,6 +208,10 @@ pub struct World {
     pub clock: chrono::NaiveTime,
     log_cooldown_ms: i64,
     pub link_latency_ms: f64,
+    /// Real telemetry for the ticker strip.
+    pub bans_today: u32,
+    pub last_alert: Option<String>,
+    pub next_backup_min: f64,
 }
 
 const DEPLOY_STEPS: &[&str] = &[
@@ -205,6 +222,15 @@ const DEPLOY_STEPS: &[&str] = &[
     "pct exec :: docker compose pull",
     "pct exec :: docker compose up -d",
     "verify :: compose ps + restart counters",
+];
+
+const BACKUP_STEPS: &[&str] = &[
+    "policy check :: single-cycle lock",
+    "quiesce :: stop labeled containers",
+    "restic snapshot :: /appdata/<stack>",
+    "retention :: forget --prune",
+    "resume :: restart containers",
+    "verify :: snapshot integrity",
 ];
 
 impl World {
@@ -318,6 +344,9 @@ impl World {
             clock: chrono::Local::now().time(),
             log_cooldown_ms: 0,
             link_latency_ms: 0.8,
+            bans_today: 4,
+            last_alert: None,
+            next_backup_min: 372.0,
         }
     }
 
@@ -333,6 +362,7 @@ impl World {
         self.host.ram.walk(55.0, 85.0, 1.0);
         self.host.temp = (self.host.temp + rng.gen_range(-0.4..0.4)).clamp(44.0, 62.0);
         self.link_latency_ms = (self.link_latency_ms + rng.gen_range(-0.15..0.15)).clamp(0.3, 4.0);
+        self.next_backup_min = (self.next_backup_min - dt_ms as f64 / 60_000.0).max(0.0);
 
         for s in self.stacks.iter_mut() {
             let vol = if s.name == "media" { 6.0 } else { 3.0 };
@@ -376,7 +406,7 @@ impl World {
         }
 
         self.advance_deploy(dt_ms);
-        self.advance_backup();
+        self.advance_backup(dt_ms);
 
         self.log_cooldown_ms -= dt_ms;
         if self.log_cooldown_ms <= 0 {
@@ -533,17 +563,100 @@ impl World {
         }
     }
 
-    fn advance_backup(&mut self) {
-        let mut done: Option<usize> = None;
+    /// A plausible transcript line for the currently-running backup step.
+    fn backup_sub_line(step: usize, stack: &Stack, count: u32, bytes: f64) -> (Level, String) {
+        let mut rng = rand::thread_rng();
+        let app = stack
+            .apps
+            .get(count as usize % stack.apps.len().max(1))
+            .map(|a| a.name)
+            .unwrap_or("app");
+        match step {
+            0 => (
+                Level::Debug,
+                [
+                    String::from("policy :: schedule loaded (7d/4w/3m, prune on)"),
+                    String::from("lock :: single-cycle guard acquired"),
+                    String::from("repo :: rclone:gdrive:homelab reachable"),
+                ][count as usize % 3]
+                    .clone(),
+            ),
+            1 => (
+                Level::Info,
+                format!("quiesce :: docker stop {} (com.homelab.backup.pause=true)", app),
+            ),
+            2 => (
+                Level::Debug,
+                [
+                    format!("restic :: scanning /appdata/{}/{}-config", stack.name, app),
+                    format!("restic :: added {:.1} MB to the repo", rng.gen_range(0.4..18.0)),
+                    format!("restic :: {:.0} MB processed, dedup active", bytes),
+                ][count as usize % 3]
+                    .clone(),
+            ),
+            3 => (
+                Level::Debug,
+                [
+                    "retention :: keep-daily=7 keep-weekly=4 keep-monthly=3".into(),
+                    format!("retention :: removed {} stale snapshot(s)", rng.gen_range(0..3)),
+                    "prune :: repacking, freed space reported".into(),
+                ][count as usize % 3]
+                    .clone(),
+            ),
+            4 => (Level::Info, format!("resume :: docker start {}", app)),
+            _ => (
+                Level::Info,
+                [
+                    String::from("verify :: restic check — no errors"),
+                    String::from("verify :: snapshot readable, index consistent"),
+                ][count as usize % 2]
+                    .clone(),
+            ),
+        }
+    }
+
+    fn advance_backup(&mut self, dt_ms: i64) {
+        let mut emitted: Vec<(String, Level, String)> = Vec::new();
+        let mut completed: Option<usize> = None;
+
         if let Some(b) = self.backup.as_mut() {
+            if b.finished {
+                return;
+            }
             let mut rng = rand::thread_rng();
-            b.progress += rng.gen_range(0.01..0.05);
-            b.bytes_done += rng.gen_range(0.5..4.0);
-            if b.progress >= 1.0 {
-                done = Some(b.stack_idx);
+            b.bytes_done += rng.gen_range(0.2..2.5);
+
+            b.sub_timer_ms -= dt_ms;
+            if b.sub_timer_ms <= 0 && b.current < b.steps.len() {
+                let stack = &self.stacks[b.stack_idx];
+                let (lvl, line) = Self::backup_sub_line(b.current, stack, b.sub_count, b.bytes_done);
+                b.log.push((lvl, format!("  {}", line)));
+                b.sub_count += 1;
+                b.sub_timer_ms = rng.gen_range(240..560);
+            }
+
+            b.timer_ms -= dt_ms;
+            if b.timer_ms <= 0 && b.current < b.steps.len() {
+                b.steps[b.current].1 = StepState::Done;
+                let step_name = b.steps[b.current].0;
+                b.log.push((Level::Info, format!("[bkup][exit] {} :: ok", step_name)));
+                b.current += 1;
+                b.sub_count = 0;
+                if b.current < b.steps.len() {
+                    b.steps[b.current].1 = StepState::Running;
+                    b.log
+                        .push((Level::Info, format!("[bkup][run ] {}", b.steps[b.current].0)));
+                    b.timer_ms = rng.gen_range(800..2000);
+                } else {
+                    b.finished = true;
+                    b.log
+                        .push((Level::Info, "[bkup] Cycle complete — snapshot verified".into()));
+                    completed = Some(b.stack_idx);
+                }
             }
         }
-        if let Some(idx) = done {
+
+        if let Some(idx) = completed {
             let name = self.stacks[idx].name.clone();
             let now = self.clock.format("%H:%M").to_string();
             self.stacks[idx].last_backup = now.clone();
@@ -557,12 +670,15 @@ impl World {
                     size: format!("{} MB", rng.gen_range(9..220)),
                 },
             );
-            self.backup = None;
-            self.push_log(
-                "HOST",
+            emitted.push((
+                "HOST".into(),
                 Level::Info,
                 format!("restic :: snapshot for {} complete, retention applied", name),
-            );
+            ));
+            self.next_backup_min = 1440.0;
+        }
+        for (src, lvl, msg) in emitted {
+            self.push_log(&src, lvl, msg);
         }
     }
 
@@ -589,15 +705,24 @@ impl World {
     }
 
     pub fn start_backup(&mut self, stack_idx: usize) {
-        if self.backup.is_some() {
+        if self.backup.as_ref().map(|b| !b.finished).unwrap_or(false) {
             return;
         }
+        let mut steps: Vec<(&'static str, StepState)> =
+            BACKUP_STEPS.iter().map(|s| (*s, StepState::Pending)).collect();
+        steps[0].1 = StepState::Running;
         let name = self.stacks[stack_idx].name.clone();
         self.push_log("HOST", Level::Info, format!("restic :: backup cycle start :: {}", name));
         self.backup = Some(BackupRun {
             stack_idx,
-            progress: 0.0,
+            steps,
+            current: 0,
+            timer_ms: 1200,
+            finished: false,
+            log: vec![(Level::Info, format!("[bkup][run ] {}", BACKUP_STEPS[0]))],
             bytes_done: 0.0,
+            sub_timer_ms: 250,
+            sub_count: 0,
         });
     }
 
@@ -647,6 +772,14 @@ impl World {
     }
 
     pub fn push_log(&mut self, source: &str, level: Level, msg: String) {
+        if matches!(level, Level::Warn | Level::Error) {
+            let mut short = msg.clone();
+            short.truncate(48);
+            self.last_alert = Some(format!("{} {} {}", level.label(), source, short));
+        }
+        if msg.contains("banned") {
+            self.bans_today += 1;
+        }
         if self.logs.len() > 500 {
             self.logs.pop_front();
         }

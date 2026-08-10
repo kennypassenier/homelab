@@ -212,6 +212,10 @@ pub struct App {
     pub log_source: usize,
     /// Offset from the tail; 0 means following the live end.
     pub log_scroll: usize,
+    /// Scroll offset within the deploy focus window (0 = live tail).
+    pub deploy_scroll: usize,
+    /// Last observed deploy-log length, used to anchor a scrolled-back view.
+    pub deploy_log_seen: usize,
     pub should_quit: bool,
     pub status_line: String,
 }
@@ -238,6 +242,8 @@ impl App {
             log_filter: None,
             log_source: 0,
             log_scroll: 0,
+            deploy_scroll: 0,
+            deploy_log_seen: 0,
             should_quit: false,
             status_line: "boot sequence complete — all systems nominal".into(),
         }
@@ -285,6 +291,17 @@ impl App {
         self.tick += 1;
         if self.flicker > 0 {
             self.flicker -= 1;
+        }
+        // Anchor the deploy focus window while scrolled back: new transcript
+        // lines must not shift what the user is reading.
+        if let Some(d) = &self.world.deploy {
+            let len = d.log.len();
+            if self.deploy_scroll > 0 {
+                self.deploy_scroll += len.saturating_sub(self.deploy_log_seen);
+            }
+            self.deploy_log_seen = len;
+        } else {
+            self.deploy_log_seen = 0;
         }
         // Auto-leave splash after the boot sequence has fully played (~4.5s).
         if self.screen == Screen::Splash && self.tick > 135 {
@@ -371,8 +388,14 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up => Self::move_sel(&mut self.stack_table, nstacks, -1),
                 KeyCode::Char('n') => self.modal = Modal::Wizard(WizardState::new()),
                 KeyCode::Char('D') => {
-                    let idx = self.selected_stack();
-                    self.modal = Modal::Diff { stack_idx: idx, scroll: 0 };
+                    // A live deploy reopens its focus window; otherwise start
+                    // with the change-plan preview.
+                    if self.world.deploy.as_ref().map(|d| !d.finished).unwrap_or(false) {
+                        self.modal = Modal::Deploy;
+                    } else {
+                        let idx = self.selected_stack();
+                        self.modal = Modal::Diff { stack_idx: idx, scroll: 0 };
+                    }
                 }
                 KeyCode::Char('b') => {
                     let idx = self.selected_stack();
@@ -504,11 +527,33 @@ impl App {
             },
             Modal::Deploy => {
                 let finished = self.world.deploy.as_ref().map(|d| d.finished).unwrap_or(true);
-                if matches!(key.code, KeyCode::Esc) || (finished && matches!(key.code, KeyCode::Enter)) {
-                    self.modal = Modal::None;
-                    if finished {
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        self.deploy_scroll = self.deploy_scroll.saturating_add(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        self.deploy_scroll = self.deploy_scroll.saturating_sub(1);
+                    }
+                    KeyCode::PageUp => {
+                        self.deploy_scroll = self.deploy_scroll.saturating_add(10);
+                    }
+                    KeyCode::PageDown => {
+                        self.deploy_scroll = self.deploy_scroll.saturating_sub(10);
+                    }
+                    KeyCode::Char('G') | KeyCode::End => self.deploy_scroll = 0,
+                    KeyCode::Esc => {
+                        self.modal = Modal::None;
+                        self.deploy_scroll = 0;
+                        if finished {
+                            self.world.deploy = None;
+                        }
+                    }
+                    KeyCode::Enter if finished => {
+                        self.modal = Modal::None;
+                        self.deploy_scroll = 0;
                         self.world.deploy = None;
                     }
+                    _ => {}
                 }
             }
             Modal::ConfirmDelete { stack_idx, input } => match key.code {

@@ -321,78 +321,166 @@ fn draw_diff(f: &mut Frame, app: &App, stack_idx: usize, scroll: u16) {
 fn draw_deploy(f: &mut Frame, app: &App) {
     let Some(d) = &app.world.deploy else { return };
     let stack = &app.world.stacks[d.stack_idx];
-    let rect = modal_rect(f, 70, 19);
-    f.render_widget(Clear, rect);
-    let title = if d.finished {
-        format!("DEPLOY :: {} :: COMPLETE", stack.hostname())
-    } else {
-        format!("DEPLOY :: {} :: LIVE", stack.hostname())
+    let color = THEME.stack_color(&stack.name);
+
+    // Focus mode: near-fullscreen takeover.
+    let area = f.area();
+    let rect = Rect {
+        x: area.width / 12,
+        y: 1,
+        width: area.width - area.width / 6,
+        height: area.height.saturating_sub(3),
     };
-    let block = modal_block(&title, false, app);
+    f.render_widget(Clear, rect);
+
+    let title = if d.finished {
+        format!("FOCUS :: DEPLOY {} :: COMPLETE", stack.hostname())
+    } else {
+        format!("FOCUS :: DEPLOY {} :: LIVE", stack.hostname())
+    };
+    let block = modal_block(&title, false, app).title(
+        Line::from(vec![
+            if d.finished {
+                Span::styled("● ALL GATES PASSED ", THEME.ok().add_modifier(Modifier::BOLD))
+            } else {
+                Span::styled(
+                    format!("{} EXECUTING ", fx::spinner(app.tick)),
+                    Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+                )
+            },
+        ])
+        .right_aligned(),
+    );
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
     let rows = Layout::vertical([
-        Constraint::Length(d.steps.len() as u16),
-        Constraint::Length(1),
-        Constraint::Min(3),
-        Constraint::Length(1),
+        Constraint::Min(6),    // body: steps | task feed
+        Constraint::Length(1), // progress gauge
+        Constraint::Length(1), // footer hints
     ])
     .split(inner);
+    let cols = Layout::horizontal([Constraint::Length(30), Constraint::Min(30)]).split(rows[0]);
 
-    let step_lines: Vec<Line> = d
-        .steps
+    // Left: step pipeline.
+    let steps_block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(color))
+        .title(Line::from(Span::styled(
+            " [ PIPELINE ] ",
+            Style::new().fg(color).add_modifier(Modifier::BOLD),
+        )))
+        .style(Style::new().bg(THEME.elevated));
+    let steps_inner = steps_block.inner(cols[0]);
+    f.render_widget(steps_block, cols[0]);
+
+    let mut step_lines: Vec<Line> = vec![Line::from(vec![
+        Span::styled("target ", THEME.muted_style()),
+        Span::styled(stack.hostname(), Style::new().fg(color).add_modifier(Modifier::BOLD)),
+    ])];
+    step_lines.push(Line::default());
+    for (name, state) in &d.steps {
+        let (icon, style) = match state {
+            StepState::Pending => ("○".to_string(), THEME.muted_style()),
+            StepState::Running => (
+                fx::spinner(app.tick).to_string(),
+                Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+            ),
+            StepState::Done => ("✓".to_string(), THEME.ok()),
+        };
+        step_lines.push(Line::from(vec![
+            Span::styled(format!(" {} ", icon), style),
+            Span::styled(
+                name.to_string(),
+                match state {
+                    StepState::Running => Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
+                    StepState::Done => Style::new().fg(THEME.text),
+                    StepState::Pending => THEME.muted_style(),
+                },
+            ),
+        ]));
+    }
+    f.render_widget(Paragraph::new(step_lines), steps_inner);
+
+    // Right: dedicated task feed — only this deploy's transcript.
+    let feed_title = if app.deploy_scroll > 0 {
+        format!(" [ TASK_FEED :: SCROLL -{} ] ", app.deploy_scroll)
+    } else {
+        " [ TASK_FEED :: LIVE ] ".to_string()
+    };
+    let feed_block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(if app.deploy_scroll > 0 {
+            THEME.border_inactive()
+        } else {
+            THEME.border_active()
+        })
+        .title(Line::from(Span::styled(
+            feed_title,
+            THEME.title_active(),
+        )))
+        .style(Style::new().bg(THEME.elevated));
+    let feed_inner = feed_block.inner(cols[1]);
+    f.render_widget(feed_block, cols[1]);
+
+    let capacity = feed_inner.height as usize;
+    let scroll = app.deploy_scroll.min(d.log.len().saturating_sub(capacity));
+    let end = d.log.len() - scroll;
+    let start = end.saturating_sub(capacity);
+    let feed_lines: Vec<Line> = d.log[start..end]
         .iter()
-        .map(|(name, state)| {
-            let (icon, style) = match state {
-                StepState::Pending => ("○".to_string(), THEME.muted_style()),
-                StepState::Running => (fx::spinner(app.tick).to_string(), Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD)),
-                StepState::Done => ("✓".to_string(), THEME.ok()),
+        .map(|(lvl, l)| {
+            let style = if l.starts_with("[sync][run ]") {
+                Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD)
+            } else if l.starts_with("[sync][exit]") {
+                THEME.ok()
+            } else if l.starts_with("[sync] Sync complete") {
+                THEME.ok().add_modifier(Modifier::BOLD)
+            } else {
+                match lvl {
+                    crate::sim::Level::Error => THEME.err(),
+                    crate::sim::Level::Warn => THEME.warn(),
+                    _ => Style::new().fg(THEME.muted),
+                }
             };
-            Line::from(vec![
-                Span::styled(format!("  {} ", icon), style),
-                Span::styled(
-                    name.to_string(),
-                    if *state == StepState::Running {
-                        Style::new().fg(THEME.text).add_modifier(Modifier::BOLD)
-                    } else if *state == StepState::Done {
-                        Style::new().fg(THEME.text)
-                    } else {
-                        THEME.muted_style()
-                    },
-                ),
-            ])
+            Line::from(Span::styled(l.clone(), style))
         })
         .collect();
-    f.render_widget(Paragraph::new(step_lines), rows[0]);
+    f.render_widget(Paragraph::new(feed_lines), feed_inner);
 
+    // Progress gauge across the bottom.
     let done = d.steps.iter().filter(|(_, s)| *s == StepState::Done).count();
     let gauge = Gauge::default()
         .ratio(done as f64 / d.steps.len() as f64)
-        .gauge_style(Style::new().fg(if d.finished { THEME.green } else { THEME.cyan }).bg(THEME.panel))
+        .gauge_style(
+            Style::new()
+                .fg(if d.finished { THEME.green } else { THEME.cyan })
+                .bg(THEME.panel),
+        )
         .label(Span::styled(
-            format!("{}/{}", done, d.steps.len()),
+            format!("{}/{} steps", done, d.steps.len()),
             Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
         ));
     f.render_widget(gauge, rows[1]);
 
-    let visible = rows[2].height as usize;
-    let start = d.log.len().saturating_sub(visible);
-    let log_lines: Vec<Line> = d.log[start..]
-        .iter()
-        .map(|l| Line::from(Span::styled(format!("  {}", l), Style::new().fg(THEME.faint))))
-        .collect();
-    f.render_widget(Paragraph::new(log_lines), rows[2]);
-
     let footer = if d.finished {
         Line::from(vec![
-            Span::styled("● ALL GATES PASSED ", THEME.ok().add_modifier(Modifier::BOLD)),
-            Span::styled("— [↵] close", THEME.muted_style()),
+            Span::styled("[↵]", THEME.hint()),
+            Span::styled(" close  ", THEME.muted_style()),
+            Span::styled("[↑/↓]", THEME.hint()),
+            Span::styled(" review transcript", THEME.muted_style()),
         ])
     } else {
-        Line::from(Span::styled("  streaming from HOST over TLS…", Style::new().fg(THEME.faint)))
+        Line::from(vec![
+            Span::styled("[↑/↓]", THEME.hint()),
+            Span::styled(" scroll  ", THEME.muted_style()),
+            Span::styled("[G]", THEME.hint()),
+            Span::styled(" tail  ", THEME.muted_style()),
+            Span::styled("[esc]", THEME.hint()),
+            Span::styled(" background (deploy keeps running)", THEME.muted_style()),
+        ])
     };
-    f.render_widget(Paragraph::new(footer), rows[3]);
+    f.render_widget(Paragraph::new(footer), rows[2]);
 }
 
 fn draw_delete(f: &mut Frame, app: &App, stack_idx: usize, input: &str) {

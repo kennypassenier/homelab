@@ -148,7 +148,9 @@ pub struct DeployRun {
     pub current: usize,
     pub timer_ms: i64,
     pub finished: bool,
-    pub log: Vec<String>,
+    pub log: Vec<(Level, String)>,
+    sub_timer_ms: i64,
+    sub_count: u32,
 }
 
 pub struct BackupRun {
@@ -383,6 +385,82 @@ impl World {
         }
     }
 
+    /// A plausible transcript line for the currently-running deploy step.
+    fn deploy_sub_line(step: usize, stack: &Stack, count: u32) -> (Level, String) {
+        let mut rng = rand::thread_rng();
+        let app = stack
+            .apps
+            .get(count as usize % stack.apps.len().max(1))
+            .map(|a| a.name)
+            .unwrap_or("app");
+        let image = stack
+            .apps
+            .get(count as usize % stack.apps.len().max(1))
+            .map(|a| a.image.clone())
+            .unwrap_or_default();
+        match step {
+            0 => (
+                Level::Debug,
+                [
+                    format!("render :: lxc-compose.yml intent parsed ({} apps)", stack.apps.len()),
+                    format!("render :: {}/docker-compose.yml validated", app),
+                    "render :: env template resolved from vault (values redacted)".into(),
+                ][count as usize % 3]
+                    .clone(),
+            ),
+            1 => (
+                Level::Debug,
+                [
+                    "tls :: session resumed · cipher TLS_AES_256_GCM_SHA384".into(),
+                    format!("tls :: payload {:.1} KB → HOST · seq {}", rng.gen_range(4.0..40.0), count + 1),
+                    "tls :: ack — payload integrity verified".into(),
+                ][count as usize % 3]
+                    .clone(),
+            ),
+            2 => (
+                Level::Debug,
+                [
+                    format!("git :: stacks/{} staged", stack.name),
+                    format!("git :: commit {:07x} \"deploy {}\"", rng.gen::<u32>() & 0xFFFFFFF, stack.name),
+                    "git :: mirror push queued (github, non-blocking)".into(),
+                ][count as usize % 3]
+                    .clone(),
+            ),
+            3 => (
+                Level::Debug,
+                format!(
+                    "pct push {} :: {}/docker-compose.yml + .env → /opt/{}/{}/",
+                    stack.vmid, app, stack.name, app
+                ),
+            ),
+            4 => (
+                Level::Debug,
+                [
+                    format!("pull :: {} … digest sha256:{:012x}", image, rng.gen::<u64>()),
+                    format!("pull :: {} :: layer cached, skipping", app),
+                ][count as usize % 2]
+                    .clone(),
+            ),
+            5 => (
+                Level::Info,
+                format!("up :: container {} started · network {}_net attached", app, stack.name),
+            ),
+            _ => (
+                Level::Info,
+                [
+                    format!(
+                        "verify :: compose ps → {}/{} running",
+                        stack.apps.len(),
+                        stack.apps.len()
+                    ),
+                    format!("verify :: restart counters clean for {}", app),
+                    "verify :: gate PASS — no crash loops detected".into(),
+                ][count as usize % 3]
+                    .clone(),
+            ),
+        }
+    }
+
     fn advance_deploy(&mut self, dt_ms: i64) {
         // Collect log lines to push after releasing the &mut borrow on deploy.
         let mut emitted: Vec<(String, Level, String)> = Vec::new();
@@ -392,6 +470,18 @@ impl World {
             if d.finished {
                 return;
             }
+
+            // Sub-transcript: the running step chatters while it works.
+            d.sub_timer_ms -= dt_ms;
+            if d.sub_timer_ms <= 0 && d.current < d.steps.len() {
+                let mut rng = rand::thread_rng();
+                let stack = &self.stacks[d.stack_idx];
+                let (lvl, line) = Self::deploy_sub_line(d.current, stack, d.sub_count);
+                d.log.push((lvl, format!("  {}", line)));
+                d.sub_count += 1;
+                d.sub_timer_ms = rng.gen_range(220..520);
+            }
+
             d.timer_ms -= dt_ms;
             if d.timer_ms <= 0 {
                 let mut rng = rand::thread_rng();
@@ -399,21 +489,26 @@ impl World {
                     d.steps[d.current].1 = StepState::Done;
                     let stack = &self.stacks[d.stack_idx];
                     let step_name = d.steps[d.current].0;
-                    d.log.push(format!("[sync][exit] {} :: ok", step_name));
+                    d.log
+                        .push((Level::Info, format!("[sync][exit] {} :: ok", step_name)));
                     emitted.push((
                         "HOST".into(),
                         Level::Info,
                         format!("deploy {} :: {} ✓", stack.name, step_name),
                     ));
                     d.current += 1;
+                    d.sub_count = 0;
                     if d.current < d.steps.len() {
                         d.steps[d.current].1 = StepState::Running;
                         d.log
-                            .push(format!("[sync][run ] {}", d.steps[d.current].0));
-                        d.timer_ms = rng.gen_range(500..1600);
+                            .push((Level::Info, format!("[sync][run ] {}", d.steps[d.current].0)));
+                        d.timer_ms = rng.gen_range(900..2200);
                     } else {
                         d.finished = true;
-                        d.log.push("[sync] Sync complete — all gates passed".into());
+                        d.log.push((
+                            Level::Info,
+                            "[sync] Sync complete — all gates passed".into(),
+                        ));
                         clear_drift = Some(d.stack_idx);
                         emitted.push((
                             "HOST".into(),
@@ -485,9 +580,11 @@ impl World {
             stack_idx,
             steps,
             current: 0,
-            timer_ms: 900,
+            timer_ms: 1400,
             finished: false,
-            log: vec![format!("[sync][run ] {}", DEPLOY_STEPS[0])],
+            log: vec![(Level::Info, format!("[sync][run ] {}", DEPLOY_STEPS[0]))],
+            sub_timer_ms: 250,
+            sub_count: 0,
         });
     }
 

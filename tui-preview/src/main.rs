@@ -65,7 +65,13 @@ fn main() -> std::io::Result<()> {
         }
         if last_data.elapsed() >= DATA_TICK {
             let dt = last_data.elapsed().as_millis() as i64;
+            let logs_before = app.world.logs.len();
             app.world.tick(dt);
+            // While scrolled back, anchor the view: new arrivals must not
+            // shift what the user is reading.
+            if !app.logs_follow {
+                app.log_scroll += app.world.logs.len().saturating_sub(logs_before);
+            }
             last_data = Instant::now();
         }
     }

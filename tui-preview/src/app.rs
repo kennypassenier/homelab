@@ -208,6 +208,10 @@ pub struct App {
 
     pub logs_follow: bool,
     pub log_filter: Option<Level>,
+    /// 0 = ALL, 1 = HOST, 2 = CLIENT, 3.. = stack index + 3.
+    pub log_source: usize,
+    /// Offset from the tail; 0 means following the live end.
+    pub log_scroll: usize,
     pub should_quit: bool,
     pub status_line: String,
 }
@@ -232,6 +236,8 @@ impl App {
             modal: Modal::None,
             logs_follow: true,
             log_filter: None,
+            log_source: 0,
+            log_scroll: 0,
             should_quit: false,
             status_line: "boot sequence complete — all systems nominal".into(),
         }
@@ -239,6 +245,40 @@ impl App {
 
     pub fn selected_stack(&self) -> usize {
         self.stack_table.selected().unwrap_or(0).min(self.world.stacks.len().saturating_sub(1))
+    }
+
+    /// Number of log-source slots: ALL + HOST + CLIENT + one per stack.
+    pub fn log_source_count(&self) -> usize {
+        3 + self.world.stacks.len()
+    }
+
+    pub fn log_source_name(&self, idx: usize) -> String {
+        match idx {
+            0 => "ALL".into(),
+            1 => "HOST".into(),
+            2 => "CLIENT".into(),
+            i => self
+                .world
+                .stacks
+                .get(i - 3)
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| "?".into()),
+        }
+    }
+
+    /// Does a log line pass the current source selection?
+    pub fn log_source_matches(&self, source: &str) -> bool {
+        match self.log_source {
+            0 => true,
+            1 => source == "HOST",
+            2 => source == "CLIENT",
+            i => self
+                .world
+                .stacks
+                .get(i - 3)
+                .map(|s| s.name == source)
+                .unwrap_or(false),
+        }
     }
 
     pub fn tick_anim(&mut self) {
@@ -380,6 +420,9 @@ impl App {
             Tab::Logs => match key.code {
                 KeyCode::Char(' ') => {
                     self.logs_follow = !self.logs_follow;
+                    if self.logs_follow {
+                        self.log_scroll = 0;
+                    }
                     self.status_line = if self.logs_follow {
                         "logs :: follow ON".into()
                     } else {
@@ -398,6 +441,43 @@ impl App {
                         "logs :: filter {}",
                         self.log_filter.map(|l| l.label()).unwrap_or("OFF")
                     );
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    let n = self.log_source_count();
+                    self.log_source = (self.log_source + 1) % n;
+                    self.log_scroll = 0;
+                    self.status_line = format!("logs :: source {}", self.log_source_name(self.log_source));
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    let n = self.log_source_count();
+                    self.log_source = (self.log_source + n - 1) % n;
+                    self.log_scroll = 0;
+                    self.status_line = format!("logs :: source {}", self.log_source_name(self.log_source));
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.log_scroll = self.log_scroll.saturating_add(1);
+                    self.logs_follow = false;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.log_scroll = self.log_scroll.saturating_sub(1);
+                    if self.log_scroll == 0 {
+                        self.logs_follow = true;
+                    }
+                }
+                KeyCode::PageUp => {
+                    self.log_scroll = self.log_scroll.saturating_add(15);
+                    self.logs_follow = false;
+                }
+                KeyCode::PageDown => {
+                    self.log_scroll = self.log_scroll.saturating_sub(15);
+                    if self.log_scroll == 0 {
+                        self.logs_follow = true;
+                    }
+                }
+                KeyCode::Char('G') | KeyCode::End => {
+                    self.log_scroll = 0;
+                    self.logs_follow = true;
+                    self.status_line = "logs :: jumped to tail, follow ON".into();
                 }
                 _ => {}
             },

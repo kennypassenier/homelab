@@ -174,7 +174,16 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             ("q", "quit"),
         ],
         Tab::Backups => &[("j/k", "select"), ("b", "backup now"), ("^k", "palette"), ("q", "quit")],
-        Tab::Logs => &[("space", "follow"), ("f", "filter"), ("^k", "palette"), ("q", "quit")],
+        Tab::Logs => &[
+            ("←/→", "source"),
+            ("↑/↓", "scroll"),
+            ("PgUp/Dn", "page"),
+            ("G", "tail"),
+            ("space", "follow"),
+            ("f", "level"),
+            ("^k", "palette"),
+            ("q", "quit"),
+        ],
     };
     let mut spans: Vec<Span> = Vec::new();
     for (k, desc) in keys {

@@ -1,7 +1,11 @@
 //! Logs tab: the multiplexed live stream from HOST, colored per source stack.
+//! ←/→ walks the source selector (ALL → HOST → CLIENT → each stack), j/k and
+//! PgUp/PgDn scroll history, G/End snaps back to the live tail.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Paragraph};
+use ratatui::widgets::{
+    Block, BorderType, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+};
 
 use crate::app::App;
 use crate::fx;
@@ -18,7 +22,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(" [ ", Style::new().fg(THEME.faint)),
             Span::styled(title, THEME.title_active()),
             Span::styled(
-                format!(" :: {} ", filter_label),
+                format!(" :: LVL {} ", filter_label),
                 Style::new().fg(THEME.yellow),
             ),
             Span::styled("] ", Style::new().fg(THEME.faint)),
@@ -28,7 +32,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
                 if app.logs_follow {
                     Span::styled("▶ FOLLOW ", THEME.ok())
                 } else {
-                    Span::styled("⏸ PAUSED ", THEME.warn())
+                    Span::styled(format!("⏸ SCROLL -{} ", app.log_scroll), THEME.warn())
                 },
                 Span::styled(
                     format!("{} lines ", app.world.logs.len()),
@@ -41,18 +45,80 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let capacity = inner.height as usize;
+    let rows = Layout::vertical([
+        Constraint::Length(1), // source selector
+        Constraint::Length(1), // divider
+        Constraint::Min(1),    // stream
+    ])
+    .split(inner);
+
+    draw_source_bar(f, app, rows[0]);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "─".repeat(rows[1].width as usize),
+            Style::new().fg(THEME.faint),
+        ))),
+        rows[1],
+    );
+    draw_stream(f, app, rows[2]);
+}
+
+fn draw_source_bar(f: &mut Frame, app: &App, area: Rect) {
+    let mut spans: Vec<Span> = vec![Span::styled("◀ ", Style::new().fg(THEME.faint))];
+    let n = app.log_source_count();
+    for i in 0..n {
+        let name = app.log_source_name(i);
+        let active = i == app.log_source;
+        let base_color = match i {
+            0 => THEME.text,
+            1 => THEME.text,
+            2 => THEME.cyan,
+            _ => THEME.stack_color(&name),
+        };
+        let style = if active {
+            Style::new()
+                .fg(THEME.bg)
+                .bg(base_color)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(base_color)
+        };
+        let label = if active {
+            format!(" ▣ {} ", name.to_uppercase())
+        } else {
+            format!(" {} ", name.to_uppercase())
+        };
+        spans.push(Span::styled(label, style));
+        if i < n - 1 {
+            spans.push(Span::styled("│", Style::new().fg(THEME.faint)));
+        }
+    }
+    spans.push(Span::styled(" ▶", Style::new().fg(THEME.faint)));
+    spans.push(Span::styled("  [←/→] source", THEME.hint()));
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn draw_stream(f: &mut Frame, app: &mut App, area: Rect) {
+    let capacity = area.height as usize;
     let filtered: Vec<&crate::sim::LogLine> = app
         .world
         .logs
         .iter()
         .filter(|l| app.log_filter.map(|f| l.level == f).unwrap_or(true))
+        .filter(|l| app.log_source_matches(&l.source))
         .collect();
-    let start = filtered.len().saturating_sub(capacity);
 
-    let scan = fx::scanline(inner.height, app.tick, 0x5CA9, app.fx);
+    // Clamp scroll so we can't run off the top of the buffer.
+    let max_scroll = filtered.len().saturating_sub(capacity);
+    if app.log_scroll > max_scroll {
+        app.log_scroll = max_scroll;
+    }
+    let end = filtered.len() - app.log_scroll.min(filtered.len());
+    let start = end.saturating_sub(capacity);
 
-    let lines: Vec<Line> = filtered[start..]
+    let scan = fx::scanline(area.height, app.tick, 0x5CA9, app.fx);
+
+    let lines: Vec<Line> = filtered[start..end]
         .iter()
         .enumerate()
         .map(|(i, l)| {
@@ -89,5 +155,18 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
-    f.render_widget(Paragraph::new(lines), inner);
+    f.render_widget(Paragraph::new(lines), area);
+
+    // Scrollbar reflecting the window position within the filtered history.
+    if filtered.len() > capacity {
+        let mut sb_state = ScrollbarState::new(filtered.len().saturating_sub(capacity))
+            .position(start)
+            .viewport_content_length(capacity);
+        let sb = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_style(Style::new().fg(THEME.cyan))
+            .track_style(Style::new().fg(THEME.faint))
+            .begin_symbol(None)
+            .end_symbol(None);
+        f.render_stateful_widget(sb, area, &mut sb_state);
+    }
 }

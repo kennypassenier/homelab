@@ -118,10 +118,15 @@ generated. H6 fleet patching. A6 exec endpoint (built, default off). F6 doctor
 **Live on Proxmox as of 2026-08-11** (vmid 108): daemon installed :8443,
 deploy/idempotency/no-touch-refusal/gated-destroy/recreate all proven end to
 end. Rollback net: LVM snapshot `pve/root-v2-preinstall`.
-**Remaining M4**: arm E4 scheduler + F3 webhook in host.toml (scheduler can
-go live now that backups work; F3 needs an HA webhook automation), A6 exec
-endpoint, B8 golden template, D5 mirror, decommission of CT 107/111 + zombie
-daemon (explicit go). H6 fleet patching DONE + live-proven. Migration prep:
+**FEATURE-COMPLETE 2026-08-11 (v2.5.0)**: every Must, Should AND Could
+feature is built and tested — the full registry in FEATURES.md is
+implemented except E6 (explicitly tracked outside this codebase) and the
+five Won'ts. Live-proven on the real host: deploy/destroy/clone/backup/
+restore/update/rollback/self-update/patch/resize/exec/settings/webhooks/
+golden-template. Awaiting Kenny: D5 mirror remote+key, H2 OPNsense API
+creds, F4 PVE token, CT 107/111 decommission go, his own test pass
+(TEST_PLAN Part A/B). Next: M6 comprehensive documentation, then M5
+migration after the demo. H6 fleet patching DONE + live-proven. Migration prep:
 docs/MIGRATION_INVENTORY.md complete (every mount MIGRATE/RECREATE).
 Presets are DATA now (presets/ dir + docs/PRESET_GUIDE.md, 2026-08-11) —
 adding an app to the catalog is mkdir + two files, no recompile; the

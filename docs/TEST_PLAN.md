@@ -368,3 +368,30 @@ homelab import <bundle.yml> <new-name> <vmid>
   a .env exists); import substitutes the full identity (name, vmid, derived
   ip/hostname, /appdata paths, network) and validates with the deploy
   validator.
+
+### A18 · Remote shell tab (G4) — offline + live
+1. `homelab tui` → press `6` (AZERTY: `§`). Typing goes to the prompt
+   (digits don't switch tabs); `LEFT/RIGHT` with an empty input picks the
+   target stack; `ENTER` runs; `UP` recalls the last command.
+- **Pass (live):** with `exec_enabled = true` in host.toml a command like
+  `uptime -p` returns inline with a colored exit status; with it off, the
+  SAFETY ABORT explanation appears in the pane; a no-touch target is always
+  refused. Every command lands in /var/lib/homelab/audit.log.
+
+### B24 · Kea DHCP reservation (H2) — needs OPNsense API creds
+1. Create an API key on OPNsense (System → Access → Users → API keys) and
+   put `key:secret` in /var/lib/homelab/secrets/opnsense (0600); add to
+   host.toml: `opnsense_url = "https://10.10.10.1"` and
+   `opnsense_cred_file = "/var/lib/homelab/secrets/opnsense"`; restart.
+2. Deploy a NEW container (e.g. rebuild 108).
+- **Pass:** transcript shows "[kea] reserved <ip> for <mac>"; the
+  reservation appears in OPNsense → Services → Kea DHCP → Reservations.
+  With OPNsense unreachable the deploy still succeeds with a loud warning.
+
+### A19 · Metrics preset (F4)
+1. `homelab presets` shows `metrics` (prometheus + cadvisor + pve-exporter).
+2. Scaffold + deploy it to a test vmid; create
+   `stacks/<name>/pve-exporter/.env` with PVE_USER/PVE_TOKEN_NAME/
+   PVE_TOKEN_VALUE (PVEAuditor token) before deploying.
+- **Pass:** Prometheus on :9090 shows all three targets UP; add it as a
+  Grafana datasource on the platform stack.

@@ -155,6 +155,13 @@ Disk presets always take precedence — if you see a generic compose where you
 expected your template, the client's working directory is wrong (run
 `homelab` from the repo root).
 
+## Converting a vendor docker-compose.yml
+
+Apps usually ship a ready-made `docker-compose.yml` in their docs. Don't
+convert it by hand: paste **docs/LLM_COMPOSE_CONVERSION.md** into any LLM,
+followed by the vendor file — it produces a rule-conformant preset plus a
+change list to review. That document is self-contained on purpose.
+
 ## Checklist for a new preset
 
 1. `preset.yml` with description + `ram_mb`.

@@ -20,16 +20,24 @@ pub enum Tab {
     Stacks,
     Logs,
     Doctor,
+    Settings,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::Dashboard, Tab::Stacks, Tab::Logs, Tab::Doctor];
+    pub const ALL: [Tab; 5] = [
+        Tab::Dashboard,
+        Tab::Stacks,
+        Tab::Logs,
+        Tab::Doctor,
+        Tab::Settings,
+    ];
     pub fn title(self) -> &'static str {
         match self {
             Tab::Dashboard => "DASHBOARD",
             Tab::Stacks => "STACKS",
             Tab::Logs => "LOG_STREAM",
             Tab::Doctor => "DOCTOR",
+            Tab::Settings => "SETTINGS",
         }
     }
     pub fn index(self) -> usize {
@@ -210,6 +218,13 @@ pub struct Model {
     pub plan: Option<Plan>,
     pub wizard: Option<Wizard>,
 
+    /// G8 settings tab: last received host config, edit cursor, dirty flag,
+    /// and the webhook text-edit buffer (None = not editing).
+    pub settings: Option<homelab_proto::HostConfigView>,
+    pub settings_row: usize,
+    pub settings_dirty: bool,
+    pub settings_editing_webhook: Option<String>,
+
     pub should_quit: bool,
     /// Commands the update fn wants sent to the backend this cycle.
     pub outbox: Vec<Command>,
@@ -250,6 +265,10 @@ impl Model {
             focus: None,
             plan: None,
             wizard: None,
+            settings: None,
+            settings_row: 0,
+            settings_dirty: false,
+            settings_editing_webhook: None,
             should_quit: false,
             outbox: Vec::new(),
         }
@@ -273,6 +292,9 @@ impl Model {
             self.flicker = 4;
             if tab == Tab::Doctor {
                 self.outbox.push(Command::Doctor);
+            }
+            if tab == Tab::Settings && self.settings.is_none() {
+                self.outbox.push(Command::GetConfig);
             }
         }
     }
@@ -372,6 +394,11 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                     model.selected_stack = n - 1;
                 }
             }
+            ServerMsg::Config(view) => {
+                model.settings = Some(*view);
+                model.settings_dirty = false;
+                model.settings_row = 0;
+            }
             ServerMsg::RpcDone(resp) => {
                 if let Some(focus) = model.focus.as_mut() {
                     if !focus.done {
@@ -456,6 +483,12 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         return;
     }
 
+    // G8: webhook text-edit swallows every key (digits would switch tabs).
+    if model.tab == Tab::Settings && model.settings_editing_webhook.is_some() {
+        settings_webhook_edit_key(model, key);
+        return;
+    }
+
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match (key.code, ctrl) {
         (KeyCode::Char('q'), _) => model.should_quit = true,
@@ -501,6 +534,7 @@ pub fn azerty_tab_index(c: char) -> Option<usize> {
         '2' | 'é' => Some(1),
         '3' | '"' => Some(2),
         '4' | '\'' => Some(3),
+        '5' | '(' => Some(4),
         _ => None,
     }
 }
@@ -578,6 +612,129 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 model.outbox.push(Command::Doctor);
             }
         }
+        Tab::Settings => settings_key(model, key),
+    }
+}
+
+// ── G8 settings tab logic ───────────────────────────────────────────────────
+
+/// Row layout: 0 = backup hour; 1 + 2i / 2 + 2i = tier i every/span;
+/// last = webhook. Total rows = 2 + tiers*2.
+fn settings_rows(cfg: &homelab_proto::HostConfigView) -> usize {
+    2 + cfg.retention.len() * 2
+}
+
+const EVERY_PRESETS: &[u32] = &[1, 2, 3, 7, 14, 21, 30, 45, 60, 90, 120, 180];
+const SPAN_PRESETS: &[u32] = &[7, 14, 21, 30, 60, 90, 120, 180, 365, 730];
+
+fn step_preset(presets: &[u32], current: u32, dir: i32) -> u32 {
+    let pos = presets.iter().position(|p| *p >= current).unwrap_or(0);
+    let next = (pos as i32 + dir).clamp(0, presets.len() as i32 - 1) as usize;
+    presets[next]
+}
+
+fn settings_key(model: &mut Model, key: crossterm::event::KeyEvent) {
+    use crossterm::event::KeyCode;
+    let Some(cfg) = model.settings.as_mut() else {
+        if matches!(key.code, KeyCode::Char('r') | KeyCode::Enter) {
+            model.outbox.push(Command::GetConfig);
+        }
+        return;
+    };
+    let rows = settings_rows(cfg);
+    let webhook_row = rows - 1;
+    let row = model.settings_row;
+    match key.code {
+        KeyCode::Up => model.settings_row = row.saturating_sub(1),
+        KeyCode::Down => model.settings_row = (row + 1).min(rows - 1),
+        KeyCode::Left | KeyCode::Right => {
+            let dir: i32 = if key.code == KeyCode::Left { -1 } else { 1 };
+            if row == 0 {
+                // off, 0..23 cycle.
+                cfg.backup_hour = match (cfg.backup_hour, dir) {
+                    (None, 1) => Some(0),
+                    (None, _) => Some(23),
+                    (Some(0), -1) => None,
+                    (Some(23), 1) => None,
+                    (Some(h), 1) => Some(h + 1),
+                    (Some(h), _) => Some(h - 1),
+                };
+            } else if row < webhook_row {
+                let tier_idx = (row - 1) / 2;
+                let is_every = (row - 1).is_multiple_of(2);
+                if let Some(t) = cfg.retention.get_mut(tier_idx) {
+                    if is_every {
+                        t.every_days = step_preset(EVERY_PRESETS, t.every_days, dir);
+                    } else {
+                        // span cycles presets and 'forever' (None) at the top end.
+                        t.span_days = match (t.span_days, dir) {
+                            (None, -1) => Some(*SPAN_PRESETS.last().unwrap()),
+                            (None, _) => None,
+                            (Some(v), 1) if v >= *SPAN_PRESETS.last().unwrap() => None,
+                            (Some(v), d) => Some(step_preset(SPAN_PRESETS, v, d)),
+                        };
+                    }
+                }
+            }
+            model.settings_dirty = true;
+        }
+        KeyCode::Char('a') => {
+            // Add a tier before any unbounded tail tier.
+            let insert_at = cfg
+                .retention
+                .iter()
+                .position(|t| t.span_days.is_none())
+                .unwrap_or(cfg.retention.len());
+            cfg.retention.insert(
+                insert_at,
+                homelab_proto::RetentionTier {
+                    every_days: 30,
+                    span_days: Some(90),
+                },
+            );
+            model.settings_dirty = true;
+        }
+        KeyCode::Char('d') => {
+            if row >= 1 && row < webhook_row && cfg.retention.len() > 1 {
+                let tier_idx = (row - 1) / 2;
+                cfg.retention.remove(tier_idx);
+                model.settings_row = model.settings_row.min(settings_rows(cfg) - 1);
+                model.settings_dirty = true;
+            }
+        }
+        KeyCode::Enter if row == webhook_row => {
+            model.settings_editing_webhook = Some(cfg.notify_webhook.clone().unwrap_or_default());
+        }
+        KeyCode::Char('S') => {
+            model.outbox.push(Command::SetConfig(Box::new(cfg.clone())));
+            model.settings_dirty = false;
+            model.status_line = "settings sent to host".into();
+        }
+        KeyCode::Char('r') => model.outbox.push(Command::GetConfig),
+        _ => {}
+    }
+}
+
+fn settings_webhook_edit_key(model: &mut Model, key: crossterm::event::KeyEvent) {
+    use crossterm::event::KeyCode;
+    let Some(buf) = model.settings_editing_webhook.as_mut() else {
+        return;
+    };
+    match key.code {
+        KeyCode::Esc => model.settings_editing_webhook = None,
+        KeyCode::Enter => {
+            let text = buf.trim().to_string();
+            if let Some(cfg) = model.settings.as_mut() {
+                cfg.notify_webhook = if text.is_empty() { None } else { Some(text) };
+                model.settings_dirty = true;
+            }
+            model.settings_editing_webhook = None;
+        }
+        KeyCode::Backspace => {
+            buf.pop();
+        }
+        KeyCode::Char(c) => buf.push(c),
+        _ => {}
     }
 }
 

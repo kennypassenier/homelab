@@ -12,6 +12,7 @@ pub use homelab_core::manifest::{
     BootSpec, DeploySpec, FileBlob, GatewayRoute, LxcSpec, MountSpec, NetworkSpec, ResourceSpec,
     StackManifest,
 };
+pub use homelab_core::retention::RetentionTier;
 
 pub const PROTO_VERSION: u32 = 1;
 
@@ -53,6 +54,22 @@ pub enum Command {
     /// H6: apt dist-upgrade every managed stack (from host state),
     /// sequentially.
     PatchFleet,
+    /// G8: read the host's runtime settings.
+    GetConfig,
+    /// G8: replace the host's runtime settings (persisted to host.toml).
+    SetConfig(Box<HostConfigView>),
+}
+
+/// G8: the host settings the TUI may inspect and edit. Token/listen/state_dir
+/// are deliberately NOT here — those change over ssh only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostConfigView {
+    /// Hour (0-23, host local) for the nightly backup+update run; None = off.
+    pub backup_hour: Option<u8>,
+    /// Webhook POSTed once per completed operation; None = off.
+    pub notify_webhook: Option<String>,
+    /// Tiered snapshot retention.
+    pub retention: Vec<RetentionTier>,
 }
 
 /// A stack as the TUI sees it — structured, not free text.
@@ -219,5 +236,7 @@ pub enum ServerMsg {
     },
     /// Structured fleet snapshot (reply to GetState).
     State(Box<FleetState>),
+    /// G8: host settings (reply to GetConfig).
+    Config(Box<HostConfigView>),
     RpcDone(RpcResponse),
 }

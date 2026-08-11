@@ -218,6 +218,18 @@ impl Backend for DemoBackend {
                             Some(Command::DeployStack(spec)) => {
                                 play_demo_deploy(&evt_tx, &spec.manifest.stack_name).await;
                             }
+                            Some(Command::GetConfig) => {
+                                let _ = evt_tx
+                                    .send(BackendEvent::Server(ServerMsg::Config(Box::new(
+                                        homelab_proto::HostConfigView {
+                                            backup_hour: Some(4),
+                                            notify_webhook: None,
+                                            retention:
+                                                homelab_core::retention::default_tiers(),
+                                        },
+                                    ))))
+                                    .await;
+                            }
                             Some(_) => {
                                 let _ = evt_tx.send(BackendEvent::Server(ServerMsg::RpcDone(
                                     homelab_proto::RpcResponse { id: 0, ok: true, message: "ok (demo)".into() },

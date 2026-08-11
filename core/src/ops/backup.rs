@@ -43,10 +43,8 @@ pub struct BackupCfg {
     pub restic_base: String,
     /// Path to the restic password file on the host (from the secret store).
     pub password_file: String,
-    /// keep-daily / keep-weekly / keep-monthly.
-    pub keep_daily: u32,
-    pub keep_weekly: u32,
-    pub keep_monthly: u32,
+    /// Tiered retention (G8) — computed by us, not restic's --keep-* flags.
+    pub tiers: Vec<crate::retention::RetentionTier>,
 }
 
 impl Default for BackupCfg {
@@ -54,9 +52,7 @@ impl Default for BackupCfg {
         Self {
             restic_base: "rclone:gdrive:homelab-backups".into(),
             password_file: "/var/lib/homelab/secrets/restic.pw".into(),
-            keep_daily: 7,
-            keep_weekly: 4,
-            keep_monthly: 3,
+            tiers: crate::retention::default_tiers(),
         }
     }
 }
@@ -127,21 +123,27 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     });
 
     step!(runner, "retention", {
-        let (d, w, mo) = (
-            cfg.keep_daily.to_string(),
-            cfg.keep_weekly.to_string(),
-            cfg.keep_monthly.to_string(),
-        );
-        let args = vec![
-            "forget",
-            "--keep-daily",
-            &d,
-            "--keep-weekly",
-            &w,
-            "--keep-monthly",
-            &mo,
-            "--prune",
-        ];
+        // G8 tiered retention: list snapshots, compute the forget-set with
+        // our own engine, forget by explicit id.
+        let out = run_ok(
+            exec,
+            &restic(
+                &cfg.restic_base,
+                &m.stack_name,
+                &cfg.password_file,
+                &["snapshots", "--json"],
+                300,
+            ),
+        )
+        .await?;
+        let snapshots = parse_snapshots_json(&out.stdout);
+        let doomed = crate::retention::forget_list(&snapshots, &cfg.tiers, ctx.now_unix);
+        if doomed.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let mut args: Vec<&str> = vec!["forget"];
+        args.extend(doomed.iter().map(|s| s.as_str()));
+        args.push("--prune");
         run_ok(
             exec,
             &restic(
@@ -149,7 +151,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
                 &m.stack_name,
                 &cfg.password_file,
                 &args,
-                600,
+                900,
             ),
         )
         .await?;
@@ -161,6 +163,62 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         format!("[backup] {} snapshot complete", m.stack_name),
     );
     runner.finish_ok()
+}
+
+/// Parse `restic snapshots --json` into `(short_id, unix_time)` pairs.
+/// Tolerant of extra fields; returns empty on malformed input (retention
+/// then keeps everything — fail-safe direction).
+fn parse_snapshots_json(raw: &str) -> Vec<(String, u64)> {
+    #[derive(serde::Deserialize)]
+    struct Snap {
+        short_id: String,
+        time: String,
+    }
+    let Ok(snaps) = serde_json::from_str::<Vec<Snap>>(raw.trim()) else {
+        return Vec::new();
+    };
+    snaps
+        .into_iter()
+        .filter_map(|s| {
+            // RFC3339 → unix without pulling in chrono: date parsing via the
+            // subset restic emits (e.g. 2026-08-11T04:00:12.123+02:00).
+            humantime_to_unix(&s.time).map(|t| (s.short_id, t))
+        })
+        .collect()
+}
+
+/// Minimal RFC3339 → unix seconds (UTC), no external crates. Handles the
+/// forms restic emits; returns None on anything unexpected.
+fn humantime_to_unix(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() < 19 {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (h, mi, sec) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    // Timezone offset: trailing Z or ±HH:MM after the (optional) fraction.
+    let rest = &s[19..];
+    let offset_secs: i64 = if rest.ends_with('Z') || rest.is_empty() {
+        0
+    } else if let Some(pos) = rest.rfind(['+', '-']) {
+        let sign = if rest.as_bytes()[pos] == b'+' { 1 } else { -1 };
+        let tz = &rest[pos + 1..];
+        let th = tz.get(0..2)?.parse::<i64>().ok()?;
+        let tm = tz.get(3..5)?.parse::<i64>().ok()?;
+        sign * (th * 3600 + tm * 60)
+    } else {
+        0
+    };
+    // Days since epoch (civil-from-days algorithm, Howard Hinnant).
+    let (y, mo) = if mo <= 2 { (y - 1, mo + 12) } else { (y, mo) };
+    let era = y / 400;
+    let yoe = y - era * 400;
+    let doy = (153 * (mo - 3) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let unix = days * 86_400 + h * 3600 + mi * 60 + sec - offset_secs;
+    u64::try_from(unix).ok()
 }
 
 /// E2: restore a stack's /appdata from a snapshot (default: latest).

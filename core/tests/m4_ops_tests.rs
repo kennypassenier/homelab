@@ -143,16 +143,17 @@ async fn e1_backup_runs_init_quiesce_snapshot_resume_retention() {
         "quiesce before snapshot"
     );
     assert!(
-        pos("restic backup") < pos("restic forget"),
-        "snapshot before retention"
+        pos("restic backup") < pos("snapshots --json"),
+        "snapshot before retention listing"
     );
     // Snapshot targets the /appdata path.
     assert!(exec
         .calls_containing("/appdata/test/test-config")
         .iter()
         .any(|c| c.contains("restic backup")));
-    // Retention uses the configured policy.
-    assert!(exec.calls_containing("--keep-daily 7").len() == 1);
+    // Tiered retention: with no snapshots listed, nothing is forgotten
+    // (fail-safe: malformed/empty listing keeps everything).
+    assert!(exec.calls_containing("restic forget").is_empty());
 }
 
 #[tokio::test]
@@ -390,4 +391,32 @@ async fn h6_patch_fails_closed_on_apt_error() {
     assert!(report.error.unwrap().why.contains("apt failed in alpha"));
     // beta was never attempted (sequential, fail-closed).
     assert!(exec.calls_containing("pct exec 109").is_empty());
+}
+
+#[tokio::test]
+async fn g8_tiered_retention_forgets_by_explicit_id() {
+    let exec = MockExecutor::new();
+    // Two snapshots on the same old day (age ~100d) → older one forgotten.
+    exec.respond_always(
+        "snapshots --json",
+        CmdOutput::ok(
+            r#"[{"short_id":"old1","time":"2026-05-03T04:00:00Z"},
+                {"short_id":"old2","time":"2026-05-03T09:00:00Z"},
+                {"short_id":"new1","time":"2026-08-11T04:00:00Z"}]"#,
+        ),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut c = ctx(&exec, &sink, &j);
+    c.now_unix = 1_786_428_000; // 2026-08-11
+    let report = backup(&c, &manifest(108, "test"), &BackupCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let forgets = exec.calls_containing("restic forget");
+    assert_eq!(forgets.len(), 1);
+    assert!(
+        forgets[0].contains("old1"),
+        "older same-bucket snapshot forgotten"
+    );
+    assert!(!forgets[0].contains("new1"), "newest never forgotten");
+    assert!(forgets[0].contains("--prune"));
 }

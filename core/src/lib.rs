@@ -12,6 +12,7 @@ pub mod executor;
 pub mod incidents;
 pub mod manifest;
 pub mod ops;
+pub mod retention;
 pub mod runner;
 pub mod safety;
 pub mod sink;

@@ -44,6 +44,7 @@ struct FileConfig {
     state_dir: Option<String>,
     backup_hour: Option<u8>,
     notify_webhook: Option<String>,
+    retention: Option<Vec<homelab_proto::RetentionTier>>,
 }
 
 #[derive(Clone)]
@@ -51,11 +52,10 @@ struct Config {
     token: String,
     listen: SocketAddr,
     state_dir: String,
-    /// E4: hour of day (0-23, host local time) for scheduled backups + auto
-    /// updates. None disables the scheduler.
-    backup_hour: Option<u8>,
-    /// F3: webhook POSTed after each mutating operation (Home Assistant).
-    notify_webhook: Option<String>,
+    /// Path of the toml we loaded — SetConfig persists back to it.
+    config_path: String,
+    /// Initial mutable settings (live copy lives in AppState.settings).
+    initial_settings: homelab_proto::HostConfigView,
 }
 
 fn load_config() -> Config {
@@ -90,9 +90,50 @@ fn load_config() -> Config {
         token,
         listen,
         state_dir,
-        backup_hour: file.backup_hour,
-        notify_webhook: file.notify_webhook,
+        config_path: path,
+        initial_settings: homelab_proto::HostConfigView {
+            backup_hour: file.backup_hour,
+            notify_webhook: file.notify_webhook,
+            retention: file
+                .retention
+                .unwrap_or_else(homelab_core::retention::default_tiers),
+        },
     }
+}
+
+/// G8: persist the mutable settings back to host.toml, atomically, keeping
+/// the immutable fields (token/listen/state_dir) intact.
+fn persist_settings(
+    config: &Config,
+    settings: &homelab_proto::HostConfigView,
+) -> Result<(), String> {
+    #[derive(serde::Serialize)]
+    struct Out<'a> {
+        token: &'a str,
+        listen: String,
+        state_dir: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        backup_hour: Option<u8>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notify_webhook: Option<&'a String>,
+        retention: &'a [homelab_proto::RetentionTier],
+    }
+    let out = Out {
+        token: &config.token,
+        listen: config.listen.to_string(),
+        state_dir: &config.state_dir,
+        backup_hour: settings.backup_hour,
+        notify_webhook: settings.notify_webhook.as_ref(),
+        retention: &settings.retention,
+    };
+    let raw = toml::to_string_pretty(&out).map_err(|e| e.to_string())?;
+    let tmp = format!("{}.tmp", config.config_path);
+    std::fs::write(&tmp, &raw).map_err(|e| e.to_string())?;
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &config.config_path).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ── Real executor (AR2) ─────────────────────────────────────────────────────
@@ -245,6 +286,8 @@ struct AppState {
     config: Config,
     log_tx: broadcast::Sender<ServerMsg>,
     op_lock: Arc<Mutex<()>>, // AR12: mutations strictly serial
+    /// G8: live mutable settings (scheduler hour, webhook, retention).
+    settings: Arc<std::sync::RwLock<homelab_proto::HostConfigView>>,
 }
 
 /// B7: minimal sd_notify — tell systemd we're alive without pulling in a
@@ -284,6 +327,7 @@ async fn main() {
         config: config.clone(),
         log_tx,
         op_lock: Arc::new(Mutex::new(())),
+        settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
     };
 
     // AR13: surface any operation the previous run left mid-flight.
@@ -298,14 +342,18 @@ async fn main() {
     }
 
     // E4: nightly scheduler — backups for every managed stack + auto-policy
-    // updates, driven from state.json manifests (no client needed).
-    if let Some(hour) = config.backup_hour {
+    // updates, driven from state.json manifests (no client needed). Reads the
+    // live settings each tick, so G8 edits apply without a restart.
+    {
         let sched_state = state.clone();
-        tokio::spawn(async move { scheduler_loop(sched_state, hour).await });
-        info!(
-            "scheduler armed: daily backup + auto-updates at {:02}:00",
-            hour
-        );
+        tokio::spawn(async move { scheduler_loop(sched_state).await });
+        match config.initial_settings.backup_hour {
+            Some(hour) => info!(
+                "scheduler armed: daily backup + auto-updates at {:02}:00",
+                hour
+            ),
+            None => info!("scheduler idle (backup_hour not set)"),
+        }
     }
 
     let app = Router::new()
@@ -358,10 +406,17 @@ async fn main() {
 /// stack's last backup is >20h old, run backup (E1) then auto-updates (D9)
 /// for that stack. Uses the same op machinery as RPCs (op-lock, incidents,
 /// notifications), so a client-triggered deploy never overlaps.
-async fn scheduler_loop(state: AppState, hour: u8) {
+async fn scheduler_loop(state: AppState) {
     let exec = RealExecutor;
     loop {
         tokio::time::sleep(Duration::from_secs(20 * 60)).await;
+        let (hour, tiers) = {
+            let s = state.settings.read().unwrap();
+            match s.backup_hour {
+                Some(h) => (h, s.retention.clone()),
+                None => continue, // scheduler disabled
+            }
+        };
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -386,15 +441,12 @@ async fn scheduler_loop(state: AppState, hour: u8) {
             };
             info!("scheduler: nightly run for {}", name);
             let m1 = manifest.clone();
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers: tiers.clone(),
+                ..Default::default()
+            };
             let backup_report = run_mutating_op(&state, &exec, 0, "scheduled-backup", |ctx| {
-                Box::pin(async move {
-                    homelab_core::ops::backup::backup(
-                        ctx,
-                        &m1,
-                        &homelab_core::ops::backup::BackupCfg::default(),
-                    )
-                    .await
-                })
+                Box::pin(async move { homelab_core::ops::backup::backup(ctx, &m1, &cfg).await })
             })
             .await;
             if backup_report.ok {
@@ -478,8 +530,9 @@ async fn notify(
     label: &str,
     report: &homelab_core::runner::OperationReport,
 ) {
-    let Some(url) = state.config.notify_webhook.as_deref() else {
-        return;
+    let url = match state.settings.read().unwrap().notify_webhook.clone() {
+        Some(u) => u,
+        None => return,
     };
     let payload = serde_json::json!({
         "source": "homelab-host",
@@ -504,7 +557,7 @@ async fn notify(
                 "Content-Type: application/json",
                 "-d",
                 &payload,
-                url,
+                &url,
             ],
             10,
         ))
@@ -638,15 +691,14 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             .await
         }
         Rpc::BackupStack(manifest) => {
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers: state.settings.read().unwrap().retention.clone(),
+                ..Default::default()
+            };
             run_mutating_op(state, &exec, req.id, "backup", |ctx| {
-                Box::pin(async move {
-                    homelab_core::ops::backup::backup(
-                        ctx,
-                        &manifest,
-                        &homelab_core::ops::backup::BackupCfg::default(),
-                    )
-                    .await
-                })
+                Box::pin(
+                    async move { homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await },
+                )
             })
             .await
         }
@@ -686,6 +738,50 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 Box::pin(async move { homelab_core::ops::patch::patch_fleet(ctx, &targets).await })
             })
             .await
+        }
+        Rpc::GetConfig => {
+            let view = state.settings.read().unwrap().clone();
+            let _ = state.log_tx.send(ServerMsg::Config(Box::new(view)));
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: "config".into(),
+            }
+        }
+        Rpc::SetConfig(view) => {
+            // Validate before persisting.
+            if let Some(h) = view.backup_hour {
+                if h > 23 {
+                    return RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: "backup_hour must be 0-23".into(),
+                    };
+                }
+            }
+            if view.retention.is_empty() {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: "retention needs at least one tier".into(),
+                };
+            }
+            match persist_settings(&state.config, &view) {
+                Ok(()) => {
+                    *state.settings.write().unwrap() = *view;
+                    info!("settings updated via G8");
+                    RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: "settings saved and applied".into(),
+                    }
+                }
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("persist settings: {}", e),
+                },
+            }
         }
         Rpc::SelfUpdateHost { binary_b64 } => {
             use base64::Engine as _;

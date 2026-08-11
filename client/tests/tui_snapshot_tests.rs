@@ -389,3 +389,59 @@ fn palette_fuzzy_matches() {
     // "run doctor" and "go: doctor" both contain "doct".
     assert!(m.len() >= 2);
 }
+
+#[test]
+fn settings_tab_renders_config_and_edits() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use homelab_proto::{Command, HostConfigView, ServerMsg};
+
+    let mut m = ready_model();
+    // Switching to SETTINGS requests the config from the host.
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE)),
+    );
+    assert!(matches!(m.tab, Tab::Settings));
+    assert!(m.outbox.iter().any(|c| matches!(c, Command::GetConfig)));
+
+    // Config arrives → rendered with all fields + self-contained explanations.
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Backend(homelab_client::tui::backend::BackendEvent::Server(
+            ServerMsg::Config(Box::new(HostConfigView {
+                backup_hour: Some(4),
+                notify_webhook: None,
+                retention: homelab_core::retention::default_tiers(),
+            })),
+        )),
+    );
+    let out = render(&m);
+    assert!(out.contains("HOST_SETTINGS"));
+    assert!(out.contains("04:00"));
+    assert!(out.contains("every"), "tier rows visible");
+    assert!(out.contains("forever"), "unbounded tier visible");
+    assert!(out.contains("in sync with host"));
+
+    // LEFT on the hour row edits the value and marks dirty; SHIFT+S saves.
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+    );
+    assert!(m.settings_dirty);
+    let out = render(&m);
+    assert!(out.contains("03:00"));
+    assert!(out.contains("unsaved changes"));
+    m.outbox.clear();
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT)),
+    );
+    assert!(m.outbox.iter().any(|c| matches!(c, Command::SetConfig(_))));
+    assert!(!m.settings_dirty);
+}
+
+#[test]
+fn settings_azerty_fifth_tab_key() {
+    assert_eq!(azerty_tab_index('('), Some(4));
+    assert_eq!(azerty_tab_index('5'), Some(4));
+}

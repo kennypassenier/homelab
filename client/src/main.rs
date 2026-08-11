@@ -65,6 +65,7 @@ async fn main() {
         }
         "ping" => rpc(&host, &token, Command::Ping).await,
         "patch" => rpc(&host, &token, Command::PatchFleet).await,
+        "config" => rpc(&host, &token, Command::GetConfig).await,
         "status" => rpc(&host, &token, Command::Status).await,
         "doctor" => rpc(&host, &token, Command::Doctor).await,
         "incidents" => rpc(&host, &token, Command::Incidents).await,
@@ -314,6 +315,25 @@ async fn rpc(host: &str, token: &str, command: Command) {
                     "{}⇅ {} {}{} bytes{}",
                     C_DIM, label, done, total_str, C_RESET
                 );
+            }
+            ServerMsg::Config(view) => {
+                // G8: plain-text dump for the CLI (`homelab config`).
+                let hour = view
+                    .backup_hour
+                    .map(|h| format!("{:02}:00", h))
+                    .unwrap_or_else(|| "off".into());
+                println!("nightly run : {}", hour);
+                println!(
+                    "webhook     : {}",
+                    view.notify_webhook.as_deref().unwrap_or("off")
+                );
+                for (i, t) in view.retention.iter().enumerate() {
+                    let span = t
+                        .span_days
+                        .map(|d| format!("for {} days", d))
+                        .unwrap_or_else(|| "forever".into());
+                    println!("retention {} : every {} days {}", i + 1, t.every_days, span);
+                }
             }
             ServerMsg::State(fleet) => {
                 println!(

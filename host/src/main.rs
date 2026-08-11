@@ -114,6 +114,137 @@ impl Ctx {
         self.run("pct", &["exec", &vm, "--", "sh", "-c", script], timeout_s)
             .await
     }
+
+    /// Push literal file content into the container. Returns true when the
+    /// destination changed (used to trigger conditional service restarts).
+    async fn push_content(
+        &self,
+        vmid: u16,
+        dest: &str,
+        content: &str,
+        perms: &str,
+    ) -> Result<bool, String> {
+        let current = self
+            .pct_sh(vmid, &format!("cat '{}' 2>/dev/null || true", dest), 30)
+            .await
+            .unwrap_or_default();
+        if current == content {
+            return Ok(false);
+        }
+        if let Some(parent) = std::path::Path::new(dest).parent() {
+            self.pct_sh(vmid, &format!("mkdir -p '{}'", parent.display()), 30)
+                .await?;
+        }
+        let tmp = format!("/tmp/homelab-content-{}", std::process::id());
+        tokio::fs::write(&tmp, content).await.map_err(|e| e.to_string())?;
+        let res = self
+            .run(
+                "pct",
+                &["push", &vmid.to_string(), &tmp, dest, "--perms", perms],
+                60,
+            )
+            .await;
+        let _ = tokio::fs::remove_file(&tmp).await;
+        res.map(|_| true)
+    }
+}
+
+// ── Runaway guards ───────────────────────────────────────────────────────────
+// Every managed container gets hard caps on everything that grows unattended:
+// Docker json logs, the systemd journal, syslog, stale Docker images, and the
+// apt cache. Idempotent — re-applied (and only then acted upon) each deploy.
+
+const DOCKER_DAEMON_JSON: &str = r#"{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+"#;
+
+const JOURNALD_LIMITS: &str = "[Journal]\nSystemMaxUse=100M\nRuntimeMaxUse=50M\nMaxRetentionSec=1month\n";
+
+const LOGROTATE_POLICY: &str = r#"/var/log/syslog /var/log/messages /var/log/auth.log {
+    daily
+    rotate 7
+    maxsize 50M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    sharedscripts
+    postrotate
+        /usr/lib/rsyslog/rsyslog-rotate 2>/dev/null || true
+    endscript
+}
+"#;
+
+const APT_AUTOCLEAN: &str =
+    "APT::Periodic::AutocleanInterval \"7\";\nAPT::Periodic::CleanInterval \"7\";\n";
+
+const PRUNE_SERVICE: &str = "[Unit]\nDescription=Prune stale Docker data (homelab runaway guard)\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/docker system prune -f --filter until=168h\n";
+
+const PRUNE_TIMER: &str = "[Unit]\nDescription=Weekly Docker prune (homelab runaway guard)\n\n[Timer]\nOnCalendar=weekly\nRandomizedDelaySec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n";
+
+async fn apply_runaway_guards(ctx: &Ctx, vmid: u16) -> Result<(), String> {
+    ctx.log(LogLevel::Info, "HOST", "[sync][run ] runaway guards (logs, journal, prune, apt)");
+
+    // 1. Docker container logs: bounded json-file driver. Must land before
+    //    app containers are (re)created so they inherit the caps.
+    let docker_changed = ctx
+        .push_content(vmid, "/etc/docker/daemon.json", DOCKER_DAEMON_JSON, "644")
+        .await?;
+    if docker_changed {
+        ctx.pct_sh(vmid, "systemctl restart docker", 120).await?;
+        ctx.log(LogLevel::Info, "HOST", "[guard] docker log caps applied (10m x 3)");
+    }
+
+    // 2. systemd journal: hard size + retention limits.
+    let journal_changed = ctx
+        .push_content(
+            vmid,
+            "/etc/systemd/journald.conf.d/homelab-limits.conf",
+            JOURNALD_LIMITS,
+            "644",
+        )
+        .await?;
+    if journal_changed {
+        ctx.pct_sh(vmid, "systemctl restart systemd-journald", 60).await?;
+        ctx.log(LogLevel::Info, "HOST", "[guard] journald capped at 100M / 1 month");
+    }
+
+    // 3. Classic syslog files: logrotate policy (logrotate ships with Debian;
+    //    install is a no-op when present).
+    ctx.pct_sh(
+        vmid,
+        "command -v logrotate >/dev/null || (export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq logrotate)",
+        300,
+    )
+    .await?;
+    ctx.push_content(vmid, "/etc/logrotate.d/homelab", LOGROTATE_POLICY, "644")
+        .await?;
+
+    // 4. Stale Docker data: weekly prune timer (watchtower-style :latest
+    //    updates otherwise accumulate old image layers forever).
+    ctx.push_content(vmid, "/etc/systemd/system/docker-prune.service", PRUNE_SERVICE, "644")
+        .await?;
+    let timer_changed = ctx
+        .push_content(vmid, "/etc/systemd/system/docker-prune.timer", PRUNE_TIMER, "644")
+        .await?;
+    if timer_changed {
+        ctx.pct_sh(vmid, "systemctl daemon-reload && systemctl enable --now docker-prune.timer", 60)
+            .await?;
+        ctx.log(LogLevel::Info, "HOST", "[guard] weekly docker prune timer armed");
+    }
+
+    // 5. apt cache: periodic autoclean + clean up after our own bootstrap.
+    ctx.push_content(vmid, "/etc/apt/apt.conf.d/60homelab-clean", APT_AUTOCLEAN, "644")
+        .await?;
+    ctx.pct_sh(vmid, "apt-get clean", 60).await?;
+
+    ctx.log(LogLevel::Info, "HOST", "[guard] runaway guards in place ✓");
+    Ok(())
 }
 
 #[tokio::main]
@@ -263,6 +394,7 @@ async fn deploy(ctx: &Ctx, spec: &DeploySpec) -> Result<String, String> {
     let created = ensure_container(ctx, m).await?;
     wait_ready(ctx, m.vmid).await?;
     bootstrap_docker(ctx, m.vmid).await?;
+    apply_runaway_guards(ctx, m.vmid).await?;
     commit_to_repo(ctx, spec).await?;
     push_files(ctx, spec).await?;
     start_apps(ctx, m).await?;

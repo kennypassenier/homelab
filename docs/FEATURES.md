@@ -38,7 +38,14 @@ re-enabled; missing `.env` → abort before compose.
   stack ends disabled and no later stage ran.
 - **Auto**: deploy spec with app requiring env but no vault entry → abort.
 
-### A4 · TLS with pinned certificate on the client-host line — **Pending (round 2)**
+### A4 · TLS with pinned certificate on the client-host line — **Must** *(upgraded by Kenny, round 2)*
+rustls + install-time self-signed cert; CLIENT pins the fingerprint on first
+connect (TOFU, like SSH). Decisive argument: without TLS the bearer token
+itself is sniffable on the LAN → full API control for any eavesdropper.
+- **Auto**: integration test — connection with wrong/changed cert fingerprint
+  is refused by the client; plain-HTTP connection attempt is refused by HOST.
+- **Auto**: packet-capture test in CI harness — no plaintext token or env
+  content on the wire during a deploy against a local HOST instance.
 
 ### A5 · Secrets vault on HOST — **Must**
 `.env` content lives only in `/var/lib/homelab/secrets/` (0600) and inside the
@@ -110,9 +117,23 @@ requirement: it covers *all* dangerous paths or it ships disabled.
   kill the pipeline mid-way in a test and assert the journal shows the exact
   incomplete phase.
 
-### B6 · Rollback guard — **Pending (round 2)**
+### B6 · Rollback guard — **Should** *(round 2)*
+Per-app digest history (previous/current + timestamps); rollback = compose
+pinned to the previous digest. Pairs with D9 (pre-update snapshot) so "really
+back" = old image + old data; image rollback alone does not revert DB
+migrations — documented limitation.
+- **Auto**: unit test — update records digest pair; rollback renders compose
+  override with the exact previous digest.
+- **Manual (pilot)**: update syncthing, roll back, verify the old digest runs.
 
-### B7 · Heartbeat failsafe — **Pending (round 2)**
+### B7 · Systemd watchdog integration — **Should** *(renamed from heartbeat failsafe, round 2)*
+The old client-heartbeat protocol is retired. Instead: `WatchdogSec=60` in the
+unit + `sd_notify` pings from the daemon's main loop — a hung-but-alive HOST is
+hard-restarted by systemd. ~20 lines instead of a protocol.
+- **Auto**: unit test — main loop emits watchdog pings at the required cadence
+  under load.
+- **Manual**: SIGSTOP the daemon; systemd restarts it within the window;
+  F3 notification fires.
 
 ### B8 · Golden template as bootstrap cache — **Should**
 `template build` RPC produces `debian-12-homelab-vN` with docker + guards baked
@@ -182,7 +203,13 @@ Every deploy commits intent locally; revert + redeploy = config rollback.
 - **Auto**: unit test — two deploys → two commits; secrets never in tree (A5
   test shares this); revert produces previous file content.
 
-### D5 · GitHub mirror — **Pending (round 2)**
+### D5 · GitHub mirror — **Should** *(round 2)*
+Background push of the HOST intent repo (never secrets) after each commit,
+with retry queue; never blocks a deploy.
+- **Auto**: unit test — push failure lands in the retry queue and the deploy
+  RPC still succeeds; queue drains on next success.
+- **Manual**: clone the mirror on another machine; verify full history, zero
+  secret content.
 
 ### D6 · Change-plan / diff preview before apply — **Should**
 Terraform-style: changed lines, affected containers (UPDATE/SKIP), active
@@ -205,7 +232,15 @@ removable.
 - **Auto**: scaffold test — new stack spec contains promtail app with correct
   loki endpoint and labels.
 
-### D9 · Managed updates instead of watchtower — **Pending (round 2)**
+### D9 · Managed updates with per-app policy — **Should** *(round 2)*
+HOST periodically checks registries for newer digests; TUI shows update
+badges; update flow = E1 snapshot → pull → restart → B3 gates → B6 digest
+recorded. Per-app policy field: `manual` (default for stateful apps), `auto`,
+or `auto-after-N-days`. Watchtower is not part of the new system.
+- **Auto**: unit test — policy engine: auto app updates on detection, manual
+  app only flags; N-days app updates only after threshold.
+- **Auto**: update pipeline ordering test — snapshot strictly precedes pull.
+- **Manual (pilot)**: update-badge → button → verified update → rollback.
 
 ## E · Backup and recovery
 
@@ -305,7 +340,7 @@ Depends on A6; spec exists in the old project.
 ### G5 · Maintenance window mode — **Won't**
 Hidden global state; individual pause switches already cover the need.
 
-### G6 · Visual data transfers — **Should** *(new, Kenny 2026-08-10; confirm in round 2)*
+### G6 · Visual data transfers — **Should** *(confirmed round 2)*
 File/byte movement rendered as animated cyberpunk transfer streams: pct push,
 backup/restore bytes, image pulls — progress with particle/flow effects in the
 focus windows and a transfers panel. Real numbers drive the animation (no fake
@@ -326,7 +361,10 @@ One YAML fragment per stack, pushed to the gateway's watched dir; no restarts.
 ### H2 · OPNsense Kea DHCP reservations — **Could**
 Static IPs in manifests suffice; old project has reference code.
 
-### H3 · Cloudflare DNS automation — **Pending (round 2)**
+### H3 · Cloudflare DNS automation — **Won't** *(round 2)*
+Resolved without software: the wildcard record `*.kp-soft.dev → tunnel` is
+**already configured** (confirmed by Kenny) — every future hostname exists the
+moment its traefik fragment (H1) lands. No API token, no code, no maintenance.
 
 ### H4 · Hardware passthrough at migration (GPU, TUN, NAS mounts) — **Must**
 Manifest flags (`gpu: true`, `vpn: true`, NAS mounts) drive udev/cgroup/mount
@@ -355,6 +393,7 @@ result + reboot indicator.
 
 ---
 
-## Round 2 (pending deeper discussion)
-A4 (TLS) · B6 (rollback guard) · B7 (heartbeat failsafe) · D5 (GitHub mirror)
-· D9 (managed updates vs watchtower) · H3 (Cloudflare DNS) · G6 (confirm)
+## Round 3 — Claude's proposed additions (pending Kenny's verdict)
+IDs reserved: C6 (capacity view) · D10 (pre-flight validation) · D11 (stack
+export/import) · E7 (DR-runbook generator) · F6 (doctor self-diagnosis) ·
+G7 (demo mode). Descriptions follow after the round-3 review.

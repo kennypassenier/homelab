@@ -340,3 +340,31 @@ homelab template-build
   now defaults new stacks to clone:999.
 - **Rebuild:** bump the version (`homelab template-build 999 2`) after
   destroying the old template (999 is refused while it exists — by design).
+
+### B22 · Hot-apply resources (C4) — LIVE-PROVEN 2026-08-11
+```bash
+homelab resize stacks/<name>
+```
+- **Pass (proven):** raise memory_mb/cores/disk_gb in the manifest → applied
+  live to the running container (108: 512→1024 MiB, 1→2 cores, no restart).
+  A shrink attempt while running is refused with a clear remedy; RAM/cores
+  shrink is allowed stopped; disk shrink never.
+
+### B23 · Template discovery (C5) — LIVE-PROVEN 2026-08-11
+```bash
+homelab templates
+```
+- **Pass (proven):** lists clonable golden templates (`clone:999
+  debian-12-homelab-v1`) and the OS tarballs from pveam.
+
+### A17 · Stack bundles (D11) — offline, LIVE-PROVEN 2026-08-11
+```bash
+homelab export stacks/<name>
+```
+```bash
+homelab import <bundle.yml> <new-name> <vmid>
+```
+- **Pass (proven):** export writes a single YAML (secrets excluded even when
+  a .env exists); import substitutes the full identity (name, vmid, derived
+  ip/hostname, /appdata paths, network) and validates with the deploy
+  validator.

@@ -118,10 +118,11 @@ generated. H6 fleet patching. A6 exec endpoint (built, default off). F6 doctor
 **Live on Proxmox as of 2026-08-11** (vmid 108): daemon installed :8443,
 deploy/idempotency/no-touch-refusal/gated-destroy/recreate all proven end to
 end. Rollback net: LVM snapshot `pve/root-v2-preinstall`.
-**Remaining M4**: arm E4 scheduler + F3 webhook in host.toml (needs rclone
-token + an HA webhook automation), H6 fleet patching, A6 exec endpoint, B8
-golden template, D5 mirror, restore drill (E2 live once backups exist),
-decommission of CT 107/111 + zombie daemon (explicit go).
+**Remaining M4**: arm E4 scheduler + F3 webhook in host.toml (scheduler can
+go live now that backups work; F3 needs an HA webhook automation), A6 exec
+endpoint, B8 golden template, D5 mirror, decommission of CT 107/111 + zombie
+daemon (explicit go). H6 fleet patching DONE + live-proven. Migration prep:
+docs/MIGRATION_INVENTORY.md complete (every mount MIGRATE/RECREATE).
 Known edge: container mounts set only at create, not reconciled on update.
 **Done when**: every Must feature outside migration is live with its
 FEATURES.md test scenario passing; a deliberate broken release proves the H5

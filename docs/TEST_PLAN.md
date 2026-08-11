@@ -236,3 +236,24 @@ homelab self-update target-debian/release/homelab-host
   version, marker cleared. (Proven — full automatic recovery.)
 - B7: `systemctl show homelab-host -p Type,WatchdogUSec` → notify / 30s;
   a hung (not crashed) daemon is killed and restarted by systemd.
+
+### B15 · Backup→restore round-trip (E1/E2) — LIVE-PROVEN 2026-08-11
+```bash
+homelab backup stacks/synctest-108
+```
+```bash
+homelab restore stacks/synctest-108
+```
+- **Pass:** backup: init → quiesce → "snapshot <id> saved" → resume →
+  retention; the repo appears in Drive under `homelab-backups/<stack>-config`.
+  Restore: validate → quiesce → restore → resume → verify health, all green.
+  (Proven: snapshot 36a7361d, full drill.) NOTE: currently on the legacy
+  shared rclone client + a TEMP restic password — swap both before real
+  migrations (see host `/var/lib/homelab/secrets/restic.pw`).
+
+### B16 · Fleet patch (H6) — LIVE-PROVEN 2026-08-11
+```bash
+homelab patch
+```
+- **Pass:** one "patch <stack>" step per managed stack, sequential,
+  fail-closed; no-touch vmids never appear.

@@ -1,13 +1,26 @@
 //! Operations: step lists executed through the shared runner (AR3).
 
+pub mod backup;
 pub mod deploy;
+pub mod destroy;
 pub mod guards;
 pub mod util;
 
-use crate::executor::Executor;
+use crate::error::CoreError;
+use crate::executor::{pct_sh, CmdOutput, Executor};
 use crate::runner::Journal;
 use crate::safety::SafetyConfig;
 use crate::sink::Sink;
+
+/// Shared helper: run a shell script inside an LXC (re-exported for ops).
+pub(crate) async fn util_pct_sh(
+    exec: &dyn Executor,
+    vmid: u16,
+    script: &str,
+    timeout_s: u64,
+) -> Result<CmdOutput, CoreError> {
+    pct_sh(exec, vmid, script, timeout_s).await
+}
 
 /// Everything an operation needs from the outside world. Constructed by the
 /// host per request; constructed from mocks in tests.

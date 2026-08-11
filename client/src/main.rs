@@ -106,11 +106,70 @@ async fn main() {
             );
             rpc(&host, &token, Command::DeployStack(Box::new(spec))).await;
         }
+        "backup" => {
+            let dir = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab backup stacks/<name>"));
+            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            rpc(&host, &token, Command::BackupStack(Box::new(spec.manifest))).await;
+        }
+        "restore" => {
+            let dir = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab restore stacks/<name> [snapshot]"));
+            let snapshot = args.get(3).cloned().unwrap_or_else(|| "latest".into());
+            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            println!(
+                "{}▶ restore {} from '{}'{}",
+                C_YELLOW, spec.manifest.stack_name, snapshot, C_RESET
+            );
+            rpc(
+                &host,
+                &token,
+                Command::RestoreStack {
+                    manifest: Box::new(spec.manifest),
+                    snapshot,
+                },
+            )
+            .await;
+        }
+        "destroy" => {
+            let dir = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab destroy stacks/<name>"));
+            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            let stack = &spec.manifest.stack_name;
+            // C2: typed-name confirmation, exactly like the TUI.
+            eprint!(
+                "{}Type the stack name '{}' to confirm destroy: {}",
+                C_RED, stack, C_RESET
+            );
+            use std::io::Write as _;
+            std::io::stderr().flush().ok();
+            let mut typed = String::new();
+            std::io::stdin().read_line(&mut typed).ok();
+            let confirm = typed.trim().to_string();
+            if &confirm != stack {
+                die("name mismatch — aborted");
+            }
+            rpc(
+                &host,
+                &token,
+                Command::DestroyStack {
+                    manifest: Box::new(spec.manifest),
+                    confirm,
+                },
+            )
+            .await;
+        }
         _ => {
             println!("homelab v{} — usage:", env!("CARGO_PKG_VERSION"));
             println!("  homelab ping|status|doctor|incidents");
-            println!("  homelab plan stacks/<name>     validate locally (no network)");
+            println!("  homelab plan stacks/<name>          validate locally (no network)");
             println!("  homelab deploy stacks/<name>");
+            println!("  homelab backup stacks/<name>        restic snapshot (E1)");
+            println!("  homelab restore stacks/<name> [snap]  restore from snapshot (E2)");
+            println!("  homelab destroy stacks/<name>       gated destroy (C2)");
             println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");
             println!("cert pin: ~/.config/homelab/pin (auto on first connect)");
         }

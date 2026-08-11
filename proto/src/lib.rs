@@ -27,6 +27,18 @@ pub enum Command {
     Incidents,
     /// Structured fleet snapshot for the TUI dashboard.
     GetState,
+    /// C2: gated destroy. `confirm` must equal the stack name.
+    DestroyStack {
+        manifest: Box<StackManifest>,
+        confirm: String,
+    },
+    /// E1: back up a stack's /appdata.
+    BackupStack(Box<StackManifest>),
+    /// E2: restore a stack from a snapshot (default "latest").
+    RestoreStack {
+        manifest: Box<StackManifest>,
+        snapshot: String,
+    },
 }
 
 /// A stack as the TUI sees it — structured, not free text.

@@ -343,6 +343,90 @@ async fn ws_session(socket: WebSocket, state: AppState) {
     forward.abort();
 }
 
+/// Run any mutating operation under the op-lock (AR12) with uniform incident
+/// bundling on failure (AR14). The closure receives the OpCtx and returns the
+/// OperationReport.
+async fn run_mutating_op<F>(
+    state: &AppState,
+    exec: &RealExecutor,
+    req_id: u64,
+    label: &str,
+    op: F,
+) -> RpcResponse
+where
+    F: for<'a> FnOnce(
+        &'a OpCtx<'a>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = homelab_core::runner::OperationReport> + Send + 'a>,
+    >,
+{
+    let _guard = state.op_lock.lock().await;
+    let broadcast = BroadcastSink {
+        log_tx: state.log_tx.clone(),
+    };
+    let sink = homelab_core::incidents::RecordingSink::new(&broadcast);
+    let journal = FileJournal {
+        path: format!("{}/journal.jsonl", state.config.state_dir),
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let ctx = OpCtx {
+        exec,
+        sink: &sink,
+        journal: &journal,
+        safety: SafetyConfig::default(),
+        state_dir: state.config.state_dir.clone(),
+        now_unix: now,
+    };
+    let report = op(&ctx).await;
+    if report.ok {
+        RpcResponse {
+            id: req_id,
+            ok: true,
+            message: format!(
+                "{} complete — {} step(s), {} changed",
+                label,
+                report.steps.len(),
+                report.steps.iter().filter(|s| s.changed).count()
+            ),
+        }
+    } else {
+        let err = report
+            .error
+            .clone()
+            .unwrap_or(homelab_core::error::OperatorError {
+                what: format!("{} failed", label),
+                why: "unknown".into(),
+                remedy: "see transcript".into(),
+            });
+        error!("{} failed: {} — {}", label, err.what, err.why);
+        let versions = format!("host={}\nproto={}\n", VERSION, homelab_proto::PROTO_VERSION);
+        let bundle = homelab_core::incidents::write_bundle(
+            exec,
+            &state.config.state_dir,
+            now,
+            &report,
+            &sink.events(),
+            &versions,
+        )
+        .await;
+        let bundle_note = match bundle {
+            Ok(dir) => format!(" :: incident bundle {}", dir),
+            Err(e) => format!(" :: (bundle write failed: {})", e),
+        };
+        RpcResponse {
+            id: req_id,
+            ok: false,
+            message: format!(
+                "{} :: {} :: remedy: {}{}",
+                err.what, err.why, err.remedy, bundle_note
+            ),
+        }
+    }
+}
+
 async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
     let exec = RealExecutor;
     match req.command {
@@ -365,73 +449,51 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
         }
         Rpc::DeployStack(spec) => {
-            let _guard = state.op_lock.lock().await; // AR12
-            let broadcast = BroadcastSink {
-                log_tx: state.log_tx.clone(),
-            };
-            // AR14: tee every event so a failure can be bundled.
-            let sink = homelab_core::incidents::RecordingSink::new(&broadcast);
-            let journal = FileJournal {
-                path: format!("{}/journal.jsonl", state.config.state_dir),
-            };
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let ctx = OpCtx {
-                exec: &exec,
-                sink: &sink,
-                journal: &journal,
-                safety: SafetyConfig::default(),
-                state_dir: state.config.state_dir.clone(),
-                now_unix: now,
-            };
-            let report = deploy(&ctx, &spec).await;
-            if report.ok {
-                RpcResponse {
-                    id: req.id,
-                    ok: true,
-                    message: format!(
-                        "Sync complete — {} step(s), {} changed",
-                        report.steps.len(),
-                        report.steps.iter().filter(|s| s.changed).count()
-                    ),
-                }
-            } else {
-                let err = report
-                    .error
-                    .clone()
-                    .unwrap_or(homelab_core::error::OperatorError {
-                        what: "deploy failed".into(),
-                        why: "unknown".into(),
-                        remedy: "see transcript".into(),
-                    });
-                error!("deploy failed: {} — {}", err.what, err.why);
-                // AR14: capture the incident bundle.
-                let versions =
-                    format!("host={}\nproto={}\n", VERSION, homelab_proto::PROTO_VERSION);
-                let bundle = homelab_core::incidents::write_bundle(
-                    &exec,
-                    &state.config.state_dir,
-                    now,
-                    &report,
-                    &sink.events(),
-                    &versions,
-                )
-                .await;
-                let bundle_note = match bundle {
-                    Ok(dir) => format!(" :: incident bundle {}", dir),
-                    Err(e) => format!(" :: (bundle write failed: {})", e),
-                };
-                RpcResponse {
-                    id: req.id,
-                    ok: false,
-                    message: format!(
-                        "{} :: {} :: remedy: {}{}",
-                        err.what, err.why, err.remedy, bundle_note
-                    ),
-                }
-            }
+            run_mutating_op(state, &exec, req.id, "deploy", |ctx| {
+                Box::pin(async move { deploy(ctx, &spec).await })
+            })
+            .await
+        }
+        Rpc::DestroyStack { manifest, confirm } => {
+            run_mutating_op(state, &exec, req.id, "destroy", |ctx| {
+                Box::pin(async move {
+                    homelab_core::ops::destroy::destroy(
+                        ctx,
+                        &manifest.stack_name,
+                        manifest.vmid,
+                        &confirm,
+                    )
+                    .await
+                })
+            })
+            .await
+        }
+        Rpc::BackupStack(manifest) => {
+            run_mutating_op(state, &exec, req.id, "backup", |ctx| {
+                Box::pin(async move {
+                    homelab_core::ops::backup::backup(
+                        ctx,
+                        &manifest,
+                        &homelab_core::ops::backup::BackupCfg::default(),
+                    )
+                    .await
+                })
+            })
+            .await
+        }
+        Rpc::RestoreStack { manifest, snapshot } => {
+            run_mutating_op(state, &exec, req.id, "restore", |ctx| {
+                Box::pin(async move {
+                    homelab_core::ops::backup::restore(
+                        ctx,
+                        &manifest,
+                        &homelab_core::ops::backup::BackupCfg::default(),
+                        &snapshot,
+                    )
+                    .await
+                })
+            })
+            .await
         }
         Rpc::Doctor => {
             let probes = gather_probes(&exec, &state.config.state_dir).await;

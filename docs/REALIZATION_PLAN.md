@@ -123,6 +123,10 @@ go live now that backups work; F3 needs an HA webhook automation), A6 exec
 endpoint, B8 golden template, D5 mirror, decommission of CT 107/111 + zombie
 daemon (explicit go). H6 fleet patching DONE + live-proven. Migration prep:
 docs/MIGRATION_INVENTORY.md complete (every mount MIGRATE/RECREATE).
+Presets are DATA now (presets/ dir + docs/PRESET_GUIDE.md, 2026-08-11) —
+adding an app to the catalog is mkdir + two files, no recompile; the
+manifest apps-list bug (stack name vs app dir name) is fixed with a
+regression test. G8 settings tab + F3 webhook receiver (HA side) live.
 Known edge: container mounts set only at create, not reconciled on update.
 **Done when**: every Must feature outside migration is live with its
 FEATURES.md test scenario passing; a deliberate broken release proves the H5

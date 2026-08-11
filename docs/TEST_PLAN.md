@@ -309,3 +309,19 @@ through `script.notification_dispatch` as a warning ONLY when
   webhook trigger.
 - **Kenny's test:** flip the toggle on, break something deliberately (e.g.
   deploy with a bad image), expect a warning push with ACK; flip back off.
+
+### A16 · Data-driven presets (G2) — offline
+```bash
+homelab presets
+```
+- **Pass:** lists the catalog from `presets/` (6 entries, custom last), no
+  "(built-in fallback)" markers.
+1. Add a throwaway preset: `mkdir -p presets/test-x/hello`, write a
+   `preset.yml` (description + ram_mb) and a `hello/docker-compose.yml`
+   using `__STACK__` placeholders (copy from an existing preset).
+2. `homelab tui --offline` → `N` → "test-x" appears in the wizard; finish
+   the wizard with a test name.
+3. Inspect `stacks/<name>/`: placeholders substituted, promtail injected,
+   manifest apps list = app dir names. `homelab plan stacks/<name>` → valid.
+4. Delete the stack dir + `presets/test-x`.
+- Full recipe: docs/PRESET_GUIDE.md.

@@ -241,6 +241,11 @@ async fn main() {
 }
 
 async fn rpc(host: &str, token: &str, command: Command) {
+    // Commands whose real payload arrives as a separate broadcast frame
+    // (Config) may see RpcDone first — wait for the payload before exiting.
+    let awaits_payload = matches!(command, Command::GetConfig);
+    let mut payload_seen = false;
+    let mut done: Option<bool> = None;
     let url = format!("wss://{}/api/ws", host);
     let mut request = url
         .clone()
@@ -317,6 +322,7 @@ async fn rpc(host: &str, token: &str, command: Command) {
                 );
             }
             ServerMsg::Config(view) => {
+                payload_seen = true;
                 // G8: plain-text dump for the CLI (`homelab config`).
                 let hour = view
                     .backup_hour
@@ -344,14 +350,20 @@ async fn rpc(host: &str, token: &str, command: Command) {
                 );
             }
             ServerMsg::RpcDone(resp) => {
-                if resp.ok {
-                    println!("{}✓ {}{}", C_GREEN, resp.message, C_RESET);
-                    std::process::exit(0);
-                } else {
+                if !resp.ok {
                     println!("{}✗ {}{}", C_RED, resp.message, C_RESET);
                     std::process::exit(1);
                 }
+                if !awaits_payload || payload_seen {
+                    println!("{}✓ {}{}", C_GREEN, resp.message, C_RESET);
+                    std::process::exit(0);
+                }
+                done = Some(true);
             }
+        }
+        if done.is_some() && payload_seen {
+            println!("{}✓ ok{}", C_GREEN, C_RESET);
+            std::process::exit(0);
         }
     }
     die("connection closed before RPC completed");

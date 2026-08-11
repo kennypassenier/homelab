@@ -82,13 +82,16 @@ to the transfer topic; C6 capacity panel.
 **Done when**: TUI snapshot tests green for every screen; full deploy flow
 runs against a scripted TestBackend including failure + incident display;
 mockup parity checklist signed off by Kenny.
-**Status**: `homelab tui` runs the Elm client over the real wss+pinned
-protocol. Tabs (dashboard/stacks/logs/doctor), splash, command palette (G3),
-help, all fx, live DATA_TRANSFERS (G6), and the deploy focus window (SHIFT+D
-→ live task feed + transfer flow + incident-on-failure) are in. AZERTY-safe
-throughout. 25 tests (9 TUI snapshots). **Remaining**: stack/app creation
-wizard (G2) + D6 standalone plan modal + C6 capacity panel; mockup parity
-sign-off by Kenny.
+**Status**: build surface COMPLETE. `homelab tui` runs the Elm client over
+the real wss+pinned protocol; `homelab tui --offline` runs a self-contained
+DemoBackend for testing without infra. In: tabs (dashboard/stacks/logs/
+doctor), splash, palette (G3), help, all fx, capacity panel (C6), live
+DATA_TRANSFERS (G6), deploy focus window (SHIFT+D → task feed + flow +
+incident-on-failure), change-plan preview (D6, [P]), new-stack wizard (G2,
+[N]) that scaffolds a real deployable stacks/<name>/ tree. AZERTY-safe
+throughout; modifiers spelled out. 27 tests (12 TUI snapshots + scaffold
+roundtrip). **Remaining**: mockup parity sign-off by Kenny (run
+`homelab tui --offline` in a real terminal).
 
 ### M3 · First contact — the syncthing pilot *(AFTER the gridsim demo, per-step go)*
 Install HOST on Proxmox (unit from the handoff, TLS + token). Deploy

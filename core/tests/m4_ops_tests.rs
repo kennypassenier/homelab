@@ -296,3 +296,49 @@ async fn d9_update_unknown_app_refused() {
     assert!(!report.ok);
     assert!(report.error.unwrap().why.contains("not part of stack"));
 }
+
+// ── H5: host self-update ────────────────────────────────────────────────────
+
+use homelab_core::ops::selfupdate::{self_update, SelfUpdateCfg};
+
+#[tokio::test]
+async fn h5_selfupdate_verifies_before_touching_current() {
+    let exec = MockExecutor::new();
+    // Candidate fails selfcheck (wrong arch / truncated upload).
+    exec.respond_always("--selfcheck", CmdOutput::failed(1, "exec format error"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = self_update(&ctx(&exec, &sink, &j), &SelfUpdateCfg::default()).await;
+    assert!(!report.ok);
+    assert!(report.error.unwrap().why.contains("failed selfcheck"));
+    // The running binary was never backed up, replaced, or restarted.
+    assert!(exec.calls_containing("cp -a").is_empty());
+    assert!(exec.calls_containing("install").is_empty());
+    assert!(exec.calls_containing("systemctl").is_empty());
+}
+
+#[tokio::test]
+async fn h5_selfupdate_happy_path_arms_marker_before_restart() {
+    let exec = MockExecutor::new();
+    exec.respond_always("--selfcheck", CmdOutput::ok("2.1.0\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = self_update(&ctx(&exec, &sink, &j), &SelfUpdateCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let calls = exec.calls();
+    let pos = |n: &str| calls.iter().position(|c| c.contains(n)).unwrap();
+    assert!(pos("--selfcheck") < pos("cp -a"), "verify before backup");
+    assert!(
+        pos("cp -a") < pos("install -m 755"),
+        "backup before install"
+    );
+    assert!(
+        pos("install -m 755") < pos("systemd-run"),
+        "install before restart"
+    );
+    // Marker exists and records the new version before the restart fires.
+    let marker = exec.file("/var/lib/homelab/selfupdate.pending").unwrap();
+    assert!(marker.contains("2.1.0"));
+    // Restart is delayed so the RPC reply can flush.
+    assert!(exec.calls_containing("--on-active=2").len() == 1);
+}

@@ -44,6 +44,12 @@ pub enum Command {
         manifest: Box<StackManifest>,
         app: Option<String>,
     },
+    /// H5: replace the HOST binary. `binary_b64` is the new executable,
+    /// base64-encoded; the host stages, selfchecks, installs with an armed
+    /// rollback, and restarts itself.
+    SelfUpdateHost {
+        binary_b64: String,
+    },
 }
 
 /// A stack as the TUI sees it — structured, not free text.

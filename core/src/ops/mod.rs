@@ -4,6 +4,7 @@ pub mod backup;
 pub mod deploy;
 pub mod destroy;
 pub mod guards;
+pub mod selfupdate;
 pub mod update;
 pub mod util;
 

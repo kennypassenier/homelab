@@ -156,6 +156,24 @@ async fn main() {
             )
             .await;
         }
+        "self-update" => {
+            // H5: ship a new HOST binary over the line; the host selfchecks,
+            // installs with an armed rollback, and restarts itself.
+            let path = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab self-update <path-to-homelab-host-binary>"));
+            let bytes = std::fs::read(path).unwrap_or_else(|e| die(&format!("{}: {}", path, e)));
+            use base64::Engine as _;
+            let binary_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            println!(
+                "{}▶ self-update :: shipping {} ({} KiB){}",
+                C_YELLOW,
+                path,
+                bytes.len() / 1024,
+                C_RESET
+            );
+            rpc(&host, &token, Command::SelfUpdateHost { binary_b64 }).await;
+        }
         "runbook" => {
             // E7: generate the disaster-recovery runbook from the local stacks
             // directory — a document that works when everything else is down.
@@ -210,6 +228,7 @@ async fn main() {
             println!("  homelab update stacks/<name> [app]  pull+up with rollback (D9/B6)");
             println!("  homelab destroy stacks/<name>       gated destroy (C2)");
             println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
+            println!("  homelab self-update <binary>        replace HOST binary w/ rollback (H5)");
             println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");
             println!("cert pin: ~/.config/homelab/pin (auto on first connect)");
         }

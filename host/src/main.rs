@@ -247,8 +247,30 @@ struct AppState {
     op_lock: Arc<Mutex<()>>, // AR12: mutations strictly serial
 }
 
+/// B7: minimal sd_notify — tell systemd we're alive without pulling in a
+/// crate. No-op when NOTIFY_SOCKET is unset (dev runs).
+fn sd_notify(msg: &str) {
+    if let Ok(sock) = std::env::var("NOTIFY_SOCKET") {
+        let addr = if let Some(stripped) = sock.strip_prefix('@') {
+            format!("\0{}", stripped)
+        } else {
+            sock
+        };
+        if let Ok(s) = std::os::unix::net::UnixDatagram::unbound() {
+            let _ = s.send_to(msg.as_bytes(), addr);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
+    // H5: the self-update gate runs `staged --selfcheck` before installing.
+    // Prove we can execute at all and report our version, then exit.
+    if std::env::args().any(|a| a == "--selfcheck") {
+        println!("{}", VERSION);
+        std::process::exit(0);
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
@@ -304,6 +326,28 @@ async fn main() {
         axum_server::tls_rustls::RustlsConfig::from_pem_file(&certs.cert_pem, &certs.key_pem)
             .await
             .expect("load tls");
+
+    // H5: accept the self-update only after surviving 5s of real serving —
+    // a binary that binds and then dies must leave the marker for OnFailure.
+    let marker = format!("{}/selfupdate.pending", config.state_dir);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        if std::path::Path::new(&marker).exists() {
+            let _ = std::fs::remove_file(&marker);
+            info!("self-update accepted — now running v{}", VERSION);
+        }
+    });
+
+    // B7: tell systemd we're ready, then feed its watchdog. If this loop
+    // ever stops (deadlock/hang), systemd kills and restarts the daemon.
+    sd_notify("READY=1");
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            sd_notify("WATCHDOG=1");
+        }
+    });
+
     axum_server::bind_rustls(config.listen, tls_config)
         .serve(app.into_make_service())
         .await
@@ -625,6 +669,37 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 Box::pin(async move {
                     homelab_core::ops::update::update(ctx, &manifest, app.as_deref(), false).await
                 })
+            })
+            .await
+        }
+        Rpc::SelfUpdateHost { binary_b64 } => {
+            use base64::Engine as _;
+            let bytes = match base64::engine::general_purpose::STANDARD.decode(&binary_b64) {
+                Ok(b) => b,
+                Err(e) => {
+                    return RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: format!("bad binary payload: {}", e),
+                    }
+                }
+            };
+            let cfg = homelab_core::ops::selfupdate::SelfUpdateCfg::default();
+            // Stage outside the op so the (large) write is done before the
+            // op-lock is taken. Raw bytes, not write_file (which is text).
+            if let Err(e) = std::fs::write(&cfg.staged, &bytes).and_then(|()| {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&cfg.staged, std::fs::Permissions::from_mode(0o755))
+            }) {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("stage binary: {}", e),
+                };
+            }
+            info!("self-update requested: staged {} bytes", bytes.len());
+            run_mutating_op(state, &exec, req.id, "self-update", |ctx| {
+                Box::pin(async move { homelab_core::ops::selfupdate::self_update(ctx, &cfg).await })
             })
             .await
         }

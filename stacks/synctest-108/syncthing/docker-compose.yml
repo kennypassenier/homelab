@@ -18,9 +18,9 @@ services:
       - com.homelab.backup.pause=true
       - com.centurylinklabs.watchtower.enable=true
     networks:
-      - syncthing_net
+      - synctest_net
 
 networks:
-  syncthing_net:
+  synctest_net:
     external: true
-    name: syncthing_net
+    name: synctest_net

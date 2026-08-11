@@ -32,8 +32,8 @@ boot:
 storage:
   # Vault data lives on the Proxmox host → survives container recreation.
   # Owner 101000 = uid 1000 inside the unprivileged LXC (syncthing's PUID).
-  - host_path: /appdata/syncthing/syncthing-config
-    mount_point: /appdata/syncthing/syncthing-config
+  - host_path: /appdata/synctest/synctest-config
+    mount_point: /appdata/synctest/synctest-config
     host_owner_uid: 101000
 
 apps:

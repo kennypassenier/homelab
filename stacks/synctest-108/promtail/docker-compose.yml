@@ -13,9 +13,9 @@ services:
       - ./data:/tmp/positions
     restart: unless-stopped
     networks:
-      - syncthing_net
+      - synctest_net
 
 networks:
-  syncthing_net:
+  synctest_net:
     external: true
-    name: syncthing_net
+    name: synctest_net

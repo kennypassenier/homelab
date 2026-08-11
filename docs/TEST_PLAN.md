@@ -283,3 +283,16 @@ homelab config
   host. In the TUI: edit a value, SHIFT+S → "settings saved and applied";
   `ssh root@10.10.5.250 cat /etc/homelab/host.toml` shows the change +
   `[[retention]]` tables; the scheduler uses the new hour without a restart.
+
+### B19 · Failure-path webhooks (F3) — LIVE-PROVEN 2026-08-11
+Three events beyond per-op notifications, all captured live against a local
+webhook catcher:
+- `host-online` — 3s after daemon start: `{op, ok, version}`; `ok:false` +
+  an `interrupted:` error text when AR13 found mid-flight operations. This
+  is the power-cut answer: HA hears the homelab came back.
+- `self-update-rollback` — sent by the OnFailure script when a bad release
+  is automatically rolled back (the daemon can't report its own death).
+- `daemon-failed` — sent when the daemon crash-loops and systemd gives up
+  (proven with a 6×SIGKILL drill; daemon recovered with reset-failed+start).
+To arm for real: set the webhook URL in the SETTINGS tab (or host.toml) to
+an HA webhook automation.

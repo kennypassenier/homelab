@@ -103,13 +103,21 @@ V2_PILOT_HANDOFF.md (incl. runaway-guard checks and the Loki label query).
 auto-restore round-trip proven; `homelab doctor` all green; pilot runs 2 weeks
 unattended with zero manual interventions.
 
-### M4 · Full operations — everything that makes it professional
-C2 gated destroy (then, with explicit go: decommission CT 107 + 111 and the
-zombie host-daemon). E2 restore flow + first drill. E4 scheduler. D4 host git
-+ D5 mirror. F3 HA notifications. B6+D9 managed updates with per-app policy.
-B7 systemd watchdog. H5 self-update live (first real release-to-host cycle).
-B8 golden template. E7 DR-runbook generated. H6 fleet patching. A6 exec
-endpoint (built, default off). F6 doctor complete.
+### M4 · Full operations — everything that makes it professional ◑ in progress
+C2 gated destroy [DONE, live-proven on 108] (then, with explicit go:
+decommission CT 107 + 111 and the zombie host-daemon). E1 backup + E2 restore
+[DONE, unit-tested; live needs E5 rclone token] + first drill. E4 scheduler.
+D4 host git [DONE — /var/lib/homelab/repo] + D5 mirror. F3 HA notifications.
+B6+D9 managed updates with per-app policy. B7 systemd watchdog. H5 self-update
+live (first real release-to-host cycle). B8 golden template. E7 DR-runbook
+generated. H6 fleet patching. A6 exec endpoint (built, default off). F6 doctor
+[DONE, live].
+**Live on Proxmox as of 2026-08-11** (vmid 108): daemon installed :8443,
+deploy/idempotency/no-touch-refusal/gated-destroy/recreate all proven end to
+end. Rollback net: LVM snapshot `pve/root-v2-preinstall`.
+**Remaining M4**: E4 scheduler, D9/B6 managed updates + rollback, H5
+self-update, E7 DR-runbook, F3 notifications, H6 fleet patching, A6 exec.
+Known edge: container mounts set only at create, not reconciled on update.
 **Done when**: every Must feature outside migration is live with its
 FEATURES.md test scenario passing; a deliberate broken release proves the H5
 watchdog; a restore drill and a DR-runbook tabletop review are logged.

@@ -57,7 +57,7 @@ impl Default for StackDefaults {
             gateway: "10.10.10.1".into(),
             bridge: "vmbr0".into(),
             vlan: 10,
-            template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst".into(),
+            template: "clone:999".into(),
             storage: "local-lvm".into(),
             features: "nesting=1,keyctl=1".into(),
             unprivileged: true,

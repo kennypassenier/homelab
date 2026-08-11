@@ -7,7 +7,7 @@ services:
       - PUID=1000
       - PGID=1000
     volumes:
-      - /appdata/syncthing/syncthing-config:/var/syncthing
+      - /appdata/synctest/synctest-config:/var/syncthing
     ports:
       - "8384:8384"       # web GUI (via traefik / LAN only)
       - "22000:22000/tcp" # sync protocol

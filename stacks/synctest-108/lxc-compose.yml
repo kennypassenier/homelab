@@ -21,7 +21,7 @@ resources:
   storage: local-lvm
 
 lxc:
-  template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
+  template: "clone:999"
   unprivileged: true
   features: "nesting=1,keyctl=1"
 

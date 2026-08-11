@@ -325,3 +325,18 @@ homelab presets
    manifest apps list = app dir names. `homelab plan stacks/<name>` → valid.
 4. Delete the stack dir + `presets/test-x`.
 - Full recipe: docs/PRESET_GUIDE.md.
+
+### B21 · Golden template + clone provisioning (B8) — LIVE-PROVEN 2026-08-11
+```bash
+homelab template-build
+```
+- **Pass (proven):** 7-step build on temp vmid 999 (claim → create → bake
+  docker → bake guards → generalize → convert); `pct config 999` shows
+  `template: 1`, named debian-12-homelab-v1.
+- **Clone deploy (proven):** with `template: "clone:999"` in the manifest,
+  destroy + full redeploy of synctest-108 took **52 seconds** end to end;
+  transcript shows `pct clone 999 108` and "bootstrap docker :: ok
+  (no change)" — nothing installed, everything was baked in. StackDefaults
+  now defaults new stacks to clone:999.
+- **Rebuild:** bump the version (`homelab template-build 999 2`) after
+  destroying the old template (999 is refused while it exists — by design).

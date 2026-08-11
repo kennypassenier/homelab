@@ -1,101 +1,66 @@
-# Homelab GitOps Architecture
+# homelab v2
 
-Welcome to the Homelab GitOps repository. This project contains the infrastructure as code (IaC) and configuration for managing a homelab environment using Proxmox, LXC containers, and Docker.
+A two-binary Rust system that manages Kenny's homelab: a **CLIENT**
+(CLI + cyberpunk TUI) on the workstation and a **HOST** daemon on the
+Proxmox box, talking over a single TLS-pinned WebSocket line. Containers
+run zero agent code; the host reaches in with `pct`. Stacks and presets are
+plain files in this repo; every operation is idempotent, journaled,
+fail-closed, and unit-tested against a mocked executor.
 
-## Release Automation
-
-- HOST daemon updates are release-driven (GitHub Releases) rather than push-triggered.
-- LXC daemon image is built and published to GHCR via change-aware GitHub Actions.
-- Local `make build-host` now builds the daemon inside a Debian 12 Rust container so release assets remain compatible with Proxmox host glibc.
-- HOST self-update now preflights downloaded binaries (`--version` + dynamic-link check), keeps a local backup, and arms a rollback watchdog after restart.
-- Local `make build-lxc` now builds the daemon inside a Debian 12 Rust container so the resulting binary stays compatible with older glibc versions inside deployed LXCs.
-- Makefile build/release targets now auto-run `latch commit` + `latch push` on desktop before Rust builds (best-effort by default; configurable via env).
-- Makefile Docker build/push now pins a single `GIT_SHA` per invocation so `sha-<commit>` image tags cannot drift between `docker build` and `docker push`.
-- HOST auto-provisioning is now opt-in via `HOST_AUTO_PROVISION_ENABLED=1`; default behavior is provision only on explicit CLIENT/API trigger.
-- Deployment order, required tokens, and env templates are documented in `docs/deployment.md`.
-- Copy/paste diagnostics and manual recovery commands are documented in `docs/debug.md`.
-- HOST runs headless-only in deployed mode.
-- CLIENT keeps persistent websocket connections to HOST and active LXC stacks with automatic reconnect behavior.
-- CLIENT/HOST/LXC websocket links now use active keepalive traffic to prevent stale idle disconnects.
-- Upgrade visibility: HOST and LXC emit `daemon_version=...` lifecycle logs; CLIENT highlights version changes and reconnect transitions in the Logs tab.
-- LXC reconcile visibility: incoming sync requests now log an explicit step plan plus exact LXC-side command transcripts (`[sync][run]`, `[sync][exit]`, `[sync][stdout]`, `[sync][stderr]`) into the shared websocket log stream.
-- HOST API quick checks (for Postman/curl): `GET /api/health`, `GET /api/version`, `GET /api/metrics` on `http://<host-ip>:8080`.
-- Update triggers: `POST /api/update` on HOST and LXC starts immediate update checks outside the periodic windows.
-- Background HOST release checker loop is opt-in (`HOST_BACKGROUND_UPDATE_ENABLED=1`), but failsafe stale-heartbeat self-update checks are enabled by default (set `HOST_FAILSAFE_UPDATE_ENABLED=0` to disable).
-- CLIENT attaches one-shot latch pull context to HOST/LXC update requests (and LXC sync RPC) so `latch pull` can run without persistent daemon credential state.
-- Provisioning fail-close: if HOST provisioning fails for a stack, that stack is automatically set to `deploy.enabled=false` in its `stacks/<stack>/lxc-compose.yml` until you explicitly re-enable it.
-- LXC bootstrap strategy: HOST pushes a Debian-12-compatible prebuilt latch binary (`latch-linux-x86_64-lxc.tar.gz` release path or local `make build-lxc` output), then runs the lightweight wrapper installer inside the LXC.
-
-## 🚀 Quick Start: Central Managers
-
-For ease of use, all operations have been bundled into three central interactive manager scripts located in the root of this repository. Instead of remembering individual script paths, simply run the manager for your current environment:
-
-- **`./client.sh`**: Run this on your local workstation (e.g., Linux desktop) to create/remove stacks and stacks, add SSH aliases, or initialize encryption.
-- **`./host.sh`**: Run this on the Proxmox server to bootstrap new LXC containers, manage backups, enable GPU passthrough, or sync the host configuration.
-- **`./container.sh`**: Run this inside an LXC container (usually in `/opt/gitops`) to manually trigger the GitOps sync.
-
-## 📚 Documentation (Wiki)
-
-To keep the root of this repository clean and maintainable, all detailed documentation has been moved to the `docs/` directory. Please refer to the following files for in-depth information:
-
-- **[Part 1: Architecture](docs/01-architecture.md)**: High-level overview of GitOps, LXC, Storage, Secrets, and the sync loop.
-- **[Part 2: Ground Zero](docs/02-ground-zero.md)**: (Deprecated) Initializing secrets management on your local workstation.
-- **[Part 3: Bootstrapping & Networking](docs/03-bootstrapping-and-networking.md)**: Creating LXCs, static IPs, and SSH config.
-- **[Part 4: GitOps & Lifecycle](docs/04-gitops-and-lifecycle.md)**: The 5-minute sync loop, app updates, and GC.
-- **[Part 5: Backups & Host](docs/05-backups-and-host-management.md)**: Restic backups, GPU passthrough, and host sync.
-- **[Part 6: User Guide & Responsibilities](docs/06-user-guide-and-responsibilities.md)**: Clear mapping of manual user actions vs. automated system processes.
-- **[Part 7: Troubleshooting & Debugging](docs/07-troubleshooting-and-debugging.md)**: Common sync errors and permission fixes.
-- **[Part 8: Centralized Monitoring](docs/08-centralized-monitoring.md)**: Viewing container logs via Loki, Promtail, and Grafana.
-- **[Contributing Guidelines](docs/CONTRIBUTING.md)**: Core design principles, coding standards, and best practices (DRY, shared UI libraries, idempotency, safety, etc.). **Must read** before contributing.
-- **[LLM Context](docs/LLM_CONTEXT.md)**: Essential context and rules for LLMs (like Claude, ChatGPT, Gemini) assisting with this project.
-
-## 📂 Repository Structure & Storage Layout
-
-```text
-homelab/
-├── stacks/                   # GitOps-managed: docker-compose.yml, scripts, etc. (per app)
-│   ├── media/
-│   │   ├── jellyfin/         # GitOps: docker-compose.yml, scripts, etc.
-│   │   └── ...
-│   └── ...
-├── docs/                     # Detailed documentation and guidelines (Wiki)
-├── scripts/                  # Individual script modules (client, host, container, linux, shared)
-├── secrets/                  # (Legacy) Encrypted secrets (no longer used)
-├── client.sh                 # Central manager for local workstation actions
-├── host.sh                   # Central manager for Proxmox host actions
-└── container.sh              # Central manager for container actions
+```bash
+homelab tui              # the control deck (or: tui --offline to explore safely)
+homelab deploy stacks/<name>
+homelab --help-ish       # run with no args for the full verb list
 ```
 
-## Linux Requirements Bootstrap
+**Status (2026-08-11): feature-complete at v2.5.0.** Every Must/Should/Could
+feature from the registry is built and tested; the deploy → backup →
+restore → update → rollback → self-update loop is live-proven on the real
+host. Migration of the legacy stacks (M5) happens after the school demo.
 
-To install build/release dependencies on a Linux workstation (including Docker, Rust, GH CLI, and cross-target tooling), use:
+## Documentation
 
-- `./scripts/linux/install-requirements.sh` (auto-detect distro family)
-- `./scripts/linux/install-requirements-arch.sh` (Arch/Garuda/EndeavourOS)
-- `./scripts/linux/install-requirements-debian.sh` (Debian/Ubuntu)
+Start here:
 
-### New Storage & Config Layout (Inside Container)
+| Doc | What it answers |
+|---|---|
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | how do I use every feature? |
+| [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md) | what's the recurring work? |
+| [docs/DEBUGGING_GUIDE.md](docs/DEBUGGING_GUIDE.md) | something failed — now what? |
+| [docs/DR_RUNBOOK.md](docs/DR_RUNBOOK.md) | everything is down — now what? (regenerate: `homelab runbook`) |
+| [docs/PRESET_GUIDE.md](docs/PRESET_GUIDE.md) | add an app to the catalog (two files, no code) |
+| [docs/LLM_COMPOSE_CONVERSION.md](docs/LLM_COMPOSE_CONVERSION.md) | paste-into-an-LLM converter for vendor compose files |
+| [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | structured per-feature test steps (offline + live) |
+| [docs/ARCHITECTURE_REFERENCE.md](docs/ARCHITECTURE_REFERENCE.md) | how it's built, for the future maintainer |
 
-For each app, the directory structure inside the container is:
+Design history: [docs/FEATURES.md](docs/FEATURES.md) (the feature registry,
+IDs A1–H6), [docs/ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md)
+(AR1–16), [docs/REALIZATION_PLAN.md](docs/REALIZATION_PLAN.md) (milestones),
+[docs/MIGRATION_INVENTORY.md](docs/MIGRATION_INVENTORY.md) (the M5 plan).
+Pre-rewrite documentation is archived under [docs/legacy/](docs/legacy/).
 
-```text
-/$stackname/
-	$appname/           # GitOps-managed: docker-compose.yml, scripts, etc.
-	$appname-config/    # Persistent config/data (bind mount from Proxmox host)
+## Repository layout
+
+```
+core/     all domain logic, zero ambient I/O (Executor trait, 78 tests)
+proto/    wire types for the one CLIENT↔HOST line
+host/     the Proxmox daemon (systemd, TLS, scheduler, watchdog)
+client/   CLI verbs + the TUI (Elm-style, snapshot-tested)
+presets/  the app catalog — data, not code
+stacks/   deployable stack definitions (secrets gitignored)
+docs/     see above
 ```
 
-**Example:**
+## Development
 
-```text
-/media/
-	jellyfin/           # GitOps: docker-compose.yml, scripts, etc.
-	jellyfin-config/    # Persistent config/data
-	sonarr/
-	sonarr-config/
-	...
+```bash
+cargo test --workspace && cargo clippy --workspace --all-targets && cargo fmt --all --check
+# host binary for the Proxmox box (Debian 12 glibc):
+docker run --rm -v "$PWD":/w -w /w -e CARGO_TARGET_DIR=/w/target-debian \
+  rust:1-bookworm cargo build --release -p homelab-host
+# ship it (the host selfchecks, installs with an armed rollback, restarts):
+homelab self-update target-debian/release/homelab-host
 ```
 
-**Rationale:**
-- All persistent config/data is now in `$stackname/$appname-config` (bind mount from host)
-- All GitOps-managed files (compose, scripts) are in `$stackname/$appname`
-- This makes navigation and management much more logical and user-friendly
+Standing rules: red CI blocks merge; every live bug becomes a MockExecutor
+test before the fix; the no-touch list in `core/src/safety.rs` is law.

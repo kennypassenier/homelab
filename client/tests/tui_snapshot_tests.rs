@@ -251,6 +251,52 @@ fn plan_modal_previews_changes() {
 }
 
 #[test]
+fn wizard_renders_preset_step() {
+    use homelab_client::tui::model::{WizStep, Wizard};
+    let mut m = ready_model();
+    m.wizard = Some(Wizard {
+        step: WizStep::Preset,
+        preset_idx: 0,
+        name: String::new(),
+    });
+    let out = render(&m);
+    assert!(out.contains("STACK_FORGE :: STEP 1/3"));
+    assert!(out.contains("syncthing"));
+    assert!(out.contains("jellyfin"));
+}
+
+#[test]
+fn scaffold_writes_a_deployable_stack() {
+    use homelab_client::scaffold::scaffold_stack;
+    let tmp = std::env::temp_dir().join(format!("homelab-scaffold-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let s = scaffold_stack(
+        &tmp,
+        "demo",
+        120,
+        512,
+        Some(("syncthing", "syncthing/syncthing:latest")),
+    )
+    .expect("scaffold");
+    // Manifest + app compose + promtail compose + promtail config.
+    assert!(s.files.iter().any(|f| f.ends_with("lxc-compose.yml")));
+    assert!(s
+        .files
+        .iter()
+        .any(|f| f.ends_with("syncthing/docker-compose.yml")));
+    assert!(s
+        .files
+        .iter()
+        .any(|f| f.ends_with("promtail/docker-compose.yml")));
+    // The scaffolded manifest passes the same validator the host uses (D10).
+    let spec = homelab_client::spec::build_spec(&tmp.join("demo")).expect("build spec");
+    homelab_core::manifest::validate(&spec).expect("scaffolded stack must be valid");
+    assert_eq!(spec.manifest.hostname, "120-app-demo");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn palette_fuzzy_matches() {
     let m = palette_matches("doct");
     assert!(!m.is_empty());

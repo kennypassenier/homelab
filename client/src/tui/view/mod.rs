@@ -80,6 +80,9 @@ pub fn draw(f: &mut Frame, model: &Model) {
     if let Some(plan) = &model.plan {
         draw_plan(f, model, plan);
     }
+    if let Some(wiz) = &model.wizard {
+        draw_wizard(f, model, wiz);
+    }
     if model.help_open {
         draw_help(f);
     }
@@ -142,6 +145,180 @@ fn draw_plan(f: &mut Frame, model: &Model, plan: &crate::tui::model::Plan) {
             Span::styled(" cancel", THEME.muted_style()),
         ])),
         rows[1],
+    );
+}
+
+fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
+    use crate::tui::model::{WizStep, PRESETS};
+    let area = f.area();
+    let w = 64u16.min(area.width - 4);
+    let h = 18u16.min(area.height - 4);
+    let rect = Rect {
+        x: (area.width - w) / 2,
+        y: area.height / 6,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, rect);
+    let step_no = match wiz.step {
+        WizStep::Preset => 1,
+        WizStep::Name => 2,
+        WizStep::Review => 3,
+    };
+    let block = Block::bordered()
+        .border_type(BorderType::Double)
+        .border_style(THEME.border_modal())
+        .title(Line::from(Span::styled(
+            format!(" >> STACK_FORGE :: STEP {}/3 << ", step_no),
+            Style::new().fg(THEME.magenta).add_modifier(Modifier::BOLD),
+        )))
+        .style(Style::new().bg(THEME.elevated).fg(THEME.text));
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(4),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+
+    // Breadcrumb.
+    let crumbs = ["PRESET", "NAME", "REVIEW"];
+    let mut spans: Vec<Span> = vec![Span::raw(" ")];
+    for (i, c) in crumbs.iter().enumerate() {
+        let active = i + 1 == step_no;
+        spans.push(Span::styled(
+            format!(" {} ", c),
+            if active {
+                Style::new()
+                    .fg(THEME.bg)
+                    .bg(THEME.cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else if i + 1 < step_no {
+                THEME.ok()
+            } else {
+                THEME.muted_style()
+            },
+        ));
+        if i < crumbs.len() - 1 {
+            spans.push(Span::styled(" ▶ ", Style::new().fg(THEME.faint)));
+        }
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), rows[0]);
+
+    match wiz.step {
+        WizStep::Preset => {
+            let lines: Vec<Line> = PRESETS
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let sel = i == wiz.preset_idx;
+                    let style = if sel {
+                        Style::new()
+                            .fg(THEME.cyan)
+                            .bg(fx::pulse_bg(model.tick, model.fx))
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::new().fg(THEME.text)
+                    };
+                    Line::from(vec![
+                        Span::styled(if sel { "▶ " } else { "  " }, style),
+                        Span::styled(format!("{:<14}", p.name), style),
+                        Span::styled(p.desc, THEME.muted_style()),
+                    ])
+                })
+                .collect();
+            f.render_widget(Paragraph::new(lines), rows[1]);
+        }
+        WizStep::Name => {
+            let cursor = if (model.tick / 15).is_multiple_of(2) {
+                "█"
+            } else {
+                " "
+            };
+            let vmid = crate::tui::model::next_free_vmid(model);
+            let lines = vec![
+                Line::from(Span::styled(
+                    "stack name (lowercase, single word):",
+                    THEME.muted_style(),
+                )),
+                Line::default(),
+                Line::from(vec![
+                    Span::styled("  λ ", Style::new().fg(THEME.cyan)),
+                    Span::styled(
+                        wiz.name.clone(),
+                        Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(cursor, Style::new().fg(THEME.cyan)),
+                ]),
+                Line::default(),
+                Line::from(vec![
+                    Span::styled("  hostname → ", THEME.muted_style()),
+                    Span::styled(
+                        format!("{}-app-{}", vmid, wiz.name),
+                        Style::new().fg(THEME.green),
+                    ),
+                ]),
+            ];
+            f.render_widget(Paragraph::new(lines), rows[1]);
+        }
+        WizStep::Review => {
+            let p = &PRESETS[wiz.preset_idx];
+            let vmid = crate::tui::model::next_free_vmid(model);
+            let app = p.app.map(|(a, _)| a).unwrap_or("(none)");
+            let lines = vec![
+                Line::from(vec![
+                    Span::styled("  name     ", THEME.muted_style()),
+                    Span::styled(
+                        wiz.name.clone(),
+                        Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("  hostname ", THEME.muted_style()),
+                    Span::styled(
+                        format!("{}-app-{}", vmid, wiz.name),
+                        Style::new().fg(THEME.text),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("  ip       ", THEME.muted_style()),
+                    Span::styled(
+                        format!("10.10.10.{}", vmid - 100),
+                        Style::new().fg(THEME.text),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("  ram      ", THEME.muted_style()),
+                    Span::styled(format!("{} MB", p.ram), Style::new().fg(THEME.text)),
+                ]),
+                Line::from(vec![
+                    Span::styled("  apps     ", THEME.muted_style()),
+                    Span::styled(format!("{}, promtail", app), Style::new().fg(THEME.text)),
+                ]),
+                Line::default(),
+                Line::from(Span::styled(
+                    "  writes a real stacks/<name>/ tree; nothing deploys yet",
+                    Style::new().fg(THEME.faint),
+                )),
+                Line::from(vec![
+                    Span::styled("  ENTER ", THEME.hint()),
+                    Span::styled("scaffold  (reversible: just delete the dir)", THEME.ok()),
+                ]),
+            ];
+            f.render_widget(Paragraph::new(lines), rows[1]);
+        }
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("[ENTER]", THEME.hint()),
+            Span::styled(" next  ", THEME.muted_style()),
+            Span::styled("[ESC]", THEME.hint()),
+            Span::styled(" back/cancel  ", THEME.muted_style()),
+            Span::styled("[UP/DOWN]", THEME.hint()),
+            Span::styled(" select", THEME.muted_style()),
+        ])),
+        rows[2],
     );
 }
 
@@ -235,7 +412,7 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
     let keys: &[(&str, &str)] = match model.tab {
         Tab::Dashboard | Tab::Stacks => &[
             ("1-4/TAB", "tabs"),
-            ("UP/DOWN", "select"),
+            ("N", "new stack"),
             ("P", "plan"),
             ("SHIFT+D", "deploy"),
             ("R", "refresh"),

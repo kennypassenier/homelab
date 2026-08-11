@@ -83,6 +83,66 @@ pub struct Plan {
     pub spec: Box<homelab_proto::DeploySpec>,
 }
 
+/// G2 new-stack wizard.
+pub struct Preset {
+    pub name: &'static str,
+    pub desc: &'static str,
+    pub app: Option<(&'static str, &'static str)>, // (app, image)
+    pub ram: u32,
+}
+
+pub const PRESETS: &[Preset] = &[
+    Preset {
+        name: "syncthing",
+        desc: "Obsidian vault peer",
+        app: Some(("syncthing", "syncthing/syncthing:latest")),
+        ram: 512,
+    },
+    Preset {
+        name: "jellyfin",
+        desc: "Media server (VAAPI)",
+        app: Some(("jellyfin", "jellyfin/jellyfin:latest")),
+        ram: 4096,
+    },
+    Preset {
+        name: "mealie",
+        desc: "Recipes + meal planning",
+        app: Some(("mealie", "ghcr.io/mealie-recipes/mealie:latest")),
+        ram: 512,
+    },
+    Preset {
+        name: "actual",
+        desc: "Envelope budgeting",
+        app: Some(("actual", "actualbudget/actual-server:latest")),
+        ram: 512,
+    },
+    Preset {
+        name: "uptime-kuma",
+        desc: "Uptime monitoring",
+        app: Some(("uptime-kuma", "louislam/uptime-kuma:1")),
+        ram: 512,
+    },
+    Preset {
+        name: "custom",
+        desc: "Empty stack — add apps later",
+        app: None,
+        ram: 1024,
+    },
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum WizStep {
+    Preset,
+    Name,
+    Review,
+}
+
+pub struct Wizard {
+    pub step: WizStep,
+    pub preset_idx: usize,
+    pub name: String,
+}
+
 pub struct Model {
     pub screen: Screen,
     pub tab: Tab,
@@ -111,6 +171,7 @@ pub struct Model {
     pub local_stacks: Vec<(String, std::path::PathBuf)>,
     pub focus: Option<Focus>,
     pub plan: Option<Plan>,
+    pub wizard: Option<Wizard>,
 
     pub should_quit: bool,
     /// Commands the update fn wants sent to the backend this cycle.
@@ -151,6 +212,7 @@ impl Model {
             local_stacks: Vec::new(),
             focus: None,
             plan: None,
+            wizard: None,
             should_quit: false,
             outbox: Vec::new(),
         }
@@ -331,6 +393,10 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         }
         return;
     }
+    if model.wizard.is_some() {
+        wizard_key(model, key);
+        return;
+    }
     if model.plan.is_some() {
         match key.code {
             KeyCode::Esc => model.plan = None,
@@ -421,6 +487,13 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             KeyCode::Char('r') => model.outbox.push(Command::GetState),
             KeyCode::Char('D') => start_deploy(model),
             KeyCode::Char('p') => open_plan(model),
+            KeyCode::Char('n') => {
+                model.wizard = Some(Wizard {
+                    step: WizStep::Preset,
+                    preset_idx: 0,
+                    name: String::new(),
+                });
+            }
             _ => {}
         },
         Tab::Logs => match key.code {
@@ -667,4 +740,77 @@ fn open_plan(model: &mut Model) {
         lines,
         spec: Box::new(spec),
     });
+}
+
+/// Lowest free vmid in 108..=354 not used by a known stack.
+pub fn next_free_vmid(model: &Model) -> u16 {
+    let used: Vec<u16> = model
+        .fleet
+        .as_ref()
+        .map(|f| f.stacks.iter().map(|s| s.vmid).collect())
+        .unwrap_or_default();
+    (108..=354).find(|v| !used.contains(v)).unwrap_or(354)
+}
+
+fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
+    use crossterm::event::KeyCode;
+    let vmid = next_free_vmid(model);
+    let Some(w) = model.wizard.as_mut() else {
+        return;
+    };
+    match w.step {
+        WizStep::Preset => match key.code {
+            KeyCode::Esc => model.wizard = None,
+            KeyCode::Up => w.preset_idx = (w.preset_idx + PRESETS.len() - 1) % PRESETS.len(),
+            KeyCode::Down => w.preset_idx = (w.preset_idx + 1) % PRESETS.len(),
+            KeyCode::Enter => {
+                if w.name.is_empty() {
+                    w.name = PRESETS[w.preset_idx].name.to_string();
+                }
+                w.step = WizStep::Name;
+            }
+            _ => {}
+        },
+        WizStep::Name => match key.code {
+            KeyCode::Esc => w.step = WizStep::Preset,
+            KeyCode::Char(c) if c.is_ascii_alphanumeric() || c == '-' => {
+                w.name.push(c.to_ascii_lowercase());
+            }
+            KeyCode::Backspace => {
+                w.name.pop();
+            }
+            KeyCode::Enter if !w.name.is_empty() => w.step = WizStep::Review,
+            _ => {}
+        },
+        WizStep::Review => match key.code {
+            KeyCode::Esc => w.step = WizStep::Name,
+            KeyCode::Enter => {
+                let preset = &PRESETS[w.preset_idx];
+                let name = w.name.clone();
+                let ram = preset.ram;
+                let app = preset.app;
+                match crate::scaffold::scaffold_stack(
+                    std::path::Path::new("stacks"),
+                    &name,
+                    vmid,
+                    ram,
+                    app,
+                ) {
+                    Ok(s) => {
+                        model.status_line = format!(
+                            "scaffolded stacks/{} ({} files) — press SHIFT+D to deploy",
+                            name,
+                            s.files.len()
+                        );
+                        // Make it immediately deployable and refresh.
+                        model.local_stacks.push((name, s.dir));
+                        model.local_stacks.sort();
+                    }
+                    Err(e) => model.status_line = format!("scaffold failed: {}", e),
+                }
+                model.wizard = None;
+            }
+            _ => {}
+        },
+    }
 }

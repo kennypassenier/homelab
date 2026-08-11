@@ -183,6 +183,13 @@ const LOGROTATE_POLICY: &str = r#"/var/log/syslog /var/log/messages /var/log/aut
 const APT_AUTOCLEAN: &str =
     "APT::Periodic::AutocleanInterval \"7\";\nAPT::Periodic::CleanInterval \"7\";\n";
 
+const UNATTENDED_UPGRADES: &str = r#"Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+};
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+"#;
+
 const PRUNE_SERVICE: &str = "[Unit]\nDescription=Prune stale Docker data (homelab runaway guard)\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/docker system prune -f --filter until=168h\n";
 
 const PRUNE_TIMER: &str = "[Unit]\nDescription=Weekly Docker prune (homelab runaway guard)\n\n[Timer]\nOnCalendar=weekly\nRandomizedDelaySec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n";
@@ -241,9 +248,27 @@ async fn apply_runaway_guards(ctx: &Ctx, vmid: u16) -> Result<(), String> {
     // 5. apt cache: periodic autoclean + clean up after our own bootstrap.
     ctx.push_content(vmid, "/etc/apt/apt.conf.d/60homelab-clean", APT_AUTOCLEAN, "644")
         .await?;
+
+    // 6. Security patches: unattended-upgrades, security-only, no auto-reboot
+    //    (same policy the ansible generation applied).
+    ctx.pct_sh(
+        vmid,
+        "command -v unattended-upgrade >/dev/null || (export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq unattended-upgrades)",
+        300,
+    )
+    .await?;
+    ctx.push_content(
+        vmid,
+        "/etc/apt/apt.conf.d/50unattended-upgrades",
+        UNATTENDED_UPGRADES,
+        "644",
+    )
+    .await?;
+    ctx.pct_sh(vmid, "systemctl enable --now unattended-upgrades 2>/dev/null || true", 60)
+        .await?;
     ctx.pct_sh(vmid, "apt-get clean", 60).await?;
 
-    ctx.log(LogLevel::Info, "HOST", "[guard] runaway guards in place ✓");
+    ctx.log(LogLevel::Info, "HOST", "[guard] runaway guards + security patching in place ✓");
     Ok(())
 }
 

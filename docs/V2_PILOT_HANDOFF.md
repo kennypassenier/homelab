@@ -88,6 +88,20 @@ Every step below touches the Proxmox host. In order:
   old versions automatically; the vault itself is ~10 MB so bounded.
 - Old `stacks/` entries (cloudflared, gateway, todo) are legacy-format and
   ignored by the new code; migrate or archive them in Phase 4b.
+- **Planned feature — golden template builder** (post-pilot, decided
+  2026-08-10). Design: hybrid — the idempotent bootstrap in `host/src/main.rs`
+  stays the single source of truth; a custom template is only a cache of its
+  slow steps. `homelab template build` (new RPC) will: create a temp CT from
+  the base Debian template → run bootstrap + runaway guards → shut down →
+  `pct template` / vzdump export as `debian-12-homelab-vN.tar.zst` → clean up
+  the temp CT (the ONLY destroy the system will ever do, gated to its own
+  temp vmid + hostname marker). Stacks opt in by changing one manifest line
+  (`lxc.template`). Extending later = add a bootstrap step in code; existing
+  containers converge on next deploy, template rebuild is optional. Rationale:
+  fresh-image bootstrap costs ~3-4 min and depends on get.docker.com; the
+  template cuts that to seconds without creating a second source of truth.
+- Bootstrap now also installs **unattended-upgrades** (security-only, no
+  auto-reboot) — parity with the ansible generation; was missing in the MVP.
 - Full plan (feature verdicts, phases, no-touch list) lives in the planning doc
   from this session; the authoritative no-touch list is enforced in
   `host/src/main.rs` (`NO_TOUCH`).

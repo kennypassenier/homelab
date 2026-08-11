@@ -583,3 +583,92 @@ async fn d5_mirror_push_failure_is_an_error_not_a_panic() {
     let err = mirror_push(&exec, "/r", "git@x:y.git").await.unwrap_err();
     assert!(format!("{}", err).contains("could not resolve host"));
 }
+
+// ── B8: golden template ─────────────────────────────────────────────────────
+
+use homelab_core::ops::template::{build_template, TemplateCfg};
+
+#[tokio::test]
+async fn b8_template_build_owns_only_its_temp_vmid() {
+    let exec = MockExecutor::new();
+    exec.enqueue("pct config 999", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = build_template(&ctx(&exec, &sink, &j), &TemplateCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    // Every mutating pct call targets vmid 999 and nothing else.
+    for call in exec.calls_containing("pct ") {
+        if call.contains("create")
+            || call.contains("stop")
+            || call.contains("template")
+            || call.contains("start")
+            || call.contains("set")
+        {
+            assert!(call.contains("999"), "stray vmid in: {}", call);
+        }
+    }
+    assert_eq!(exec.calls_containing("pct template 999").len(), 1);
+    // Machine identity is scrubbed before conversion.
+    assert!(!exec.calls_containing("rm -f /etc/machine-id").is_empty());
+}
+
+#[tokio::test]
+async fn b8_template_build_refuses_no_touch_and_existing_vmids() {
+    let sink = VecSink::new();
+    let j = NullJournal;
+    // No-touch vmid refused before anything runs.
+    let exec = MockExecutor::new();
+    let cfg = TemplateCfg {
+        temp_vmid: 104,
+        ..Default::default()
+    };
+    let report = build_template(&ctx(&exec, &sink, &j), &cfg).await;
+    assert!(!report.ok);
+    assert!(report.error.unwrap().why.contains("no-touch"));
+    assert!(exec.calls_containing("pct create").is_empty());
+    // Existing vmid refused (would destroy someone's container).
+    let exec = MockExecutor::new();
+    exec.respond_always("pct config 999", CmdOutput::ok("hostname: something\n"));
+    let report = build_template(&ctx(&exec, &sink, &j), &TemplateCfg::default()).await;
+    assert!(!report.ok);
+    assert!(report.error.unwrap().why.contains("already exists"));
+}
+
+#[tokio::test]
+async fn b8_clone_template_provisions_via_pct_clone() {
+    use homelab_core::manifest::{DeploySpec, FileBlob};
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.enqueue("pct config", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    let mut m = manifest(108, "test");
+    m.lxc.template = "clone:999".into();
+    m.resources.disk_gb = 8;
+    let spec = DeploySpec {
+        manifest: m,
+        files: vec![FileBlob {
+            path: "app/docker-compose.yml".into(),
+            content: "services: {}".into(),
+            mode: None,
+        }],
+        env: Default::default(),
+        gateway_route: None,
+    };
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(exec.calls_containing("pct clone 999 108").len(), 1);
+    assert!(
+        exec.calls_containing("pct create").is_empty(),
+        "no full create on clone path"
+    );
+    assert_eq!(exec.calls_containing("pct resize 108 rootfs 8G").len(), 1);
+    // Docker probe succeeded → bootstrap skipped the install.
+    assert!(exec.calls_containing("get.docker.com").is_empty());
+}

@@ -803,6 +803,19 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             })
             .await
         }
+        Rpc::BuildTemplate { temp_vmid, version } => {
+            run_mutating_op(state, &exec, req.id, "template-build", |ctx| {
+                Box::pin(async move {
+                    let cfg = homelab_core::ops::template::TemplateCfg {
+                        temp_vmid,
+                        version,
+                        ..Default::default()
+                    };
+                    homelab_core::ops::template::build_template(ctx, &cfg).await
+                })
+            })
+            .await
+        }
         Rpc::ExecIn { vmid, command } => {
             if let Err(e) = homelab_core::safety::exec_guard(
                 state.config.exec_enabled,

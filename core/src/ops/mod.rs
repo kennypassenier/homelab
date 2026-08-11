@@ -7,6 +7,7 @@ pub mod guards;
 pub mod mirror;
 pub mod patch;
 pub mod selfupdate;
+pub mod template;
 pub mod update;
 pub mod util;
 

@@ -5,7 +5,7 @@ members = ["core", "proto", "host", "client", "tui-preview"]
 exclude = ["client-app", "host-daemon", "lxc-daemon"]
 
 [workspace.package]
-version = "2.3.0"
+version = "2.3.1"
 edition = "2021"
 
 [workspace.dependencies]

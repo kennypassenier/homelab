@@ -79,7 +79,6 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // ── C1: create or reuse the container; C3 boot policy at create. ─────
     step!(runner, "provision container", {
         if !exists {
-            let rootfs = format!("{}:{}", m.resources.storage, m.resources.disk_gb);
             let mut net = format!(
                 "name=eth0,bridge={},firewall=0,ip={},gw={}",
                 m.network.bridge, m.network.ip, m.network.gateway
@@ -87,6 +86,111 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             if let Some(tag) = m.network.vlan {
                 net.push_str(&format!(",tag={}", tag));
             }
+            // B8: template "clone:<vmid>" provisions by cloning the golden
+            // template container instead of a full create — seconds, not
+            // minutes, because docker + guards are already baked in. The
+            // bootstrap steps below still run and simply skip everything.
+            if let Some(tpl_vmid) = m.lxc.template.strip_prefix("clone:") {
+                run_ok(
+                    exec,
+                    &Cmd::new(
+                        "pct",
+                        &[
+                            "clone",
+                            tpl_vmid,
+                            &vm,
+                            "--hostname",
+                            &m.hostname,
+                            "--full",
+                            "1",
+                            "--storage",
+                            &m.resources.storage,
+                        ],
+                        600,
+                    ),
+                )
+                .await?;
+                // Clones inherit the template's config — apply this stack's.
+                let mem = m.resources.memory_mb.to_string();
+                let swap = m.resources.swap_mb.to_string();
+                let cores = m.resources.cores.to_string();
+                let desc = format!("managed by homelab v2 :: stack {}", m.stack_name);
+                let mut set_args: Vec<String> = vec![
+                    "set".into(),
+                    vm.clone(),
+                    "--net0".into(),
+                    net.clone(),
+                    "--memory".into(),
+                    mem,
+                    "--swap".into(),
+                    swap,
+                    "--cores".into(),
+                    cores,
+                    "--onboot".into(),
+                    if m.boot.onboot { "1" } else { "0" }.into(),
+                    "--description".into(),
+                    desc,
+                    "--tags".into(),
+                    "homelab".into(),
+                    "--timezone".into(),
+                    "host".into(),
+                ];
+                if m.lxc.protection {
+                    set_args.push("--protection".into());
+                    set_args.push("1".into());
+                }
+                if let Some(order) = m.boot.order {
+                    set_args.push("--startup".into());
+                    set_args.push(format!("order={}", order));
+                }
+                let refs: Vec<&str> = set_args.iter().map(|s| s.as_str()).collect();
+                run_ok(exec, &Cmd::new("pct", &refs, 60)).await?;
+                // Grow the rootfs to the requested size (template base is 4G).
+                if m.resources.disk_gb > 4 {
+                    let size = format!("{}G", m.resources.disk_gb);
+                    run_ok(
+                        exec,
+                        &Cmd::new("pct", &["resize", &vm, "rootfs", &size], 120),
+                    )
+                    .await?;
+                }
+                for (i, mount) in m.storage.iter().enumerate() {
+                    let mp = format!("-mp{}", i);
+                    let val = format!("{},mp={}", mount.host_path, mount.mount_point);
+                    run_ok(exec, &Cmd::new("pct", &["set", &vm, &mp, &val], 60)).await?;
+                }
+                if m.lxc.gpu {
+                    run_ok(
+                        exec,
+                        &Cmd::new(
+                            "pct",
+                            &[
+                                "set",
+                                &vm,
+                                "--dev0",
+                                "/dev/dri/card0,gid=44",
+                                "--dev1",
+                                "/dev/dri/renderD128,gid=104",
+                            ],
+                            60,
+                        ),
+                    )
+                    .await?;
+                }
+                if m.lxc.vpn {
+                    let conf_path = format!("/etc/pve/lxc/{}.conf", m.vmid);
+                    let conf = exec.read_file(&conf_path).await?;
+                    if !conf.contains("dev/net/tun") {
+                        let extra = "lxc.cgroup2.devices.allow: c 10:200 rwm\nlxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file\n";
+                        exec.write_file(&conf_path, &format!("{}{}", conf, extra), 0o640)
+                            .await?;
+                    }
+                }
+                run_ok(exec, &Cmd::new("pct", &["start", &vm], 120)).await?;
+                created = true;
+                return Ok(StepOutcome::Changed);
+            }
+            let rootfs = format!("{}:{}", m.resources.storage, m.resources.disk_gb);
             let mut args: Vec<String> = vec![
                 "create".into(),
                 vm.clone(),

@@ -61,6 +61,12 @@ pub enum Command {
         vmid: u16,
         command: String,
     },
+    /// B8: build the golden template container (docker + guards baked in)
+    /// on a dedicated temp vmid, then convert it to a Proxmox template.
+    BuildTemplate {
+        temp_vmid: u16,
+        version: u32,
+    },
     /// G8: read the host's runtime settings.
     GetConfig,
     /// G8: replace the host's runtime settings (persisted to host.toml).

@@ -67,6 +67,16 @@ async fn main() {
         "ping" => rpc(&host, &token, Command::Ping).await,
         "patch" => rpc(&host, &token, Command::PatchFleet).await,
         "config" => rpc(&host, &token, Command::GetConfig).await,
+        "template-build" => {
+            // B8: bake the golden template. Temp vmid defaults to 999.
+            let temp_vmid: u16 = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(999);
+            let version: u32 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
+            println!(
+                "{}▶ template build :: debian-12-homelab-v{} on temp vmid {}{}",
+                C_CYAN, version, temp_vmid, C_RESET
+            );
+            rpc(&host, &token, Command::BuildTemplate { temp_vmid, version }).await;
+        }
         "exec" => {
             // A6: requires exec_enabled = true in the host config.
             let vmid: u16 = args

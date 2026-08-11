@@ -30,6 +30,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst".into(),
             unprivileged: true,
             features: "nesting=1,keyctl=1".into(),
+            protection: false,
         },
         boot: BootSpec {
             onboot: true,

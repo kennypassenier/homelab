@@ -270,8 +270,6 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
             } else {
                 " "
             };
-            let defaults = crate::scaffold::StackDefaults::default();
-            let swap = defaults.swap_for(wiz.ram);
             let field = |sel: bool, label: &str, value: String, hint: &str| -> Line<'static> {
                 let row_style = if sel {
                     Style::new().bg(fx::pulse_bg(model.tick, model.fx))
@@ -319,6 +317,20 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
                     "or type a size",
                 ),
                 field(
+                    wiz.res_field == ResField::Swap,
+                    "SWAP",
+                    if wiz.swap == 0 {
+                        "off".into()
+                    } else {
+                        format!("{} MiB", wiz.swap)
+                    },
+                    if wiz.swap_touched {
+                        ""
+                    } else {
+                        "(auto from RAM)"
+                    },
+                ),
+                field(
                     wiz.res_field == ResField::Vmid,
                     "VMID",
                     format!("{}", wiz.vmid),
@@ -327,8 +339,7 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
                 Line::default(),
                 Line::from(Span::styled(
                     format!(
-                        "  swap {} MiB (auto)   ip 10.10.10.{}   order 99",
-                        swap,
+                        "  ip 10.10.10.{}   order 99   protection on",
                         wiz.vmid.saturating_sub(100)
                     ),
                     Style::new().fg(THEME.faint),

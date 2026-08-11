@@ -65,6 +65,9 @@ pub struct LxcSpec {
     pub unprivileged: bool,
     #[serde(default = "default_features")]
     pub features: String,
+    /// Proxmox protection flag: hypervisor refuses destroy while set.
+    #[serde(default)]
+    pub protection: bool,
 }
 
 fn yes() -> bool {

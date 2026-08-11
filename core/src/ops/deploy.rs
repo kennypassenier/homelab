@@ -109,7 +109,21 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 m.lxc.features.clone(),
                 "--onboot".into(),
                 if m.boot.onboot { "1" } else { "0" }.into(),
+                // Managed containers are recognizable in the Proxmox UI and
+                // inherit the host timezone.
+                "--description".into(),
+                format!("managed by homelab v2 :: stack {}", m.stack_name),
+                "--tags".into(),
+                "homelab".into(),
+                "--timezone".into(),
+                "host".into(),
             ];
+            if m.lxc.protection {
+                // Hypervisor-level destroy refusal; gated destroy (C2) lifts
+                // it deliberately before removal.
+                args.push("--protection".into());
+                args.push("1".into());
+            }
             if let Some(order) = m.boot.order {
                 args.push("--startup".into());
                 args.push(format!("order={}", order));

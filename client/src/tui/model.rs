@@ -144,6 +144,7 @@ pub enum ResField {
     Ram,
     Cores,
     Disk,
+    Swap,
     Vmid,
 }
 
@@ -154,6 +155,9 @@ pub struct Wizard {
     pub ram: u32,
     pub cores: u16,
     pub disk: u16,
+    /// Auto-derived from RAM until the user touches it; 0 = no swap.
+    pub swap: u32,
+    pub swap_touched: bool,
     pub vmid: u16,
     pub res_field: ResField,
     /// True while typing a custom disk size digit-by-digit.
@@ -529,6 +533,8 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                     ram: PRESETS[0].ram,
                     cores: 2,
                     disk: 8,
+                    swap: crate::scaffold::StackDefaults::default().swap_for(PRESETS[0].ram),
+                    swap_touched: false,
                     vmid,
                     res_field: ResField::Ram,
                     disk_typing: false,
@@ -729,6 +735,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
             template: d.template.clone(),
             unprivileged: d.unprivileged,
             features: d.features.clone(),
+            protection: d.protection,
         },
         boot: homelab_proto::BootSpec {
             onboot: true,
@@ -876,7 +883,8 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                     ResField::Ram => ResField::Vmid,
                     ResField::Cores => ResField::Ram,
                     ResField::Disk => ResField::Cores,
-                    ResField::Vmid => ResField::Disk,
+                    ResField::Swap => ResField::Disk,
+                    ResField::Vmid => ResField::Swap,
                 };
                 w.disk_typing = false;
             }
@@ -884,7 +892,8 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 w.res_field = match w.res_field {
                     ResField::Ram => ResField::Cores,
                     ResField::Cores => ResField::Disk,
-                    ResField::Disk => ResField::Vmid,
+                    ResField::Disk => ResField::Swap,
+                    ResField::Swap => ResField::Vmid,
                     ResField::Vmid => ResField::Ram,
                 };
                 w.disk_typing = false;
@@ -892,18 +901,36 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             KeyCode::Right => {
                 w.disk_typing = false;
                 match w.res_field {
-                    ResField::Ram => w.ram = ram_step(w.ram, true),
+                    ResField::Ram => {
+                        w.ram = ram_step(w.ram, true);
+                        if !w.swap_touched {
+                            w.swap = crate::scaffold::StackDefaults::default().swap_for(w.ram);
+                        }
+                    }
                     ResField::Cores => w.cores = (w.cores + 1).min(16),
                     ResField::Disk => w.disk = (w.disk + 2).min(999),
+                    ResField::Swap => {
+                        w.swap = (w.swap + 256).min(4096);
+                        w.swap_touched = true;
+                    }
                     ResField::Vmid => w.vmid = (w.vmid + 1).min(354),
                 }
             }
             KeyCode::Left => {
                 w.disk_typing = false;
                 match w.res_field {
-                    ResField::Ram => w.ram = ram_step(w.ram, false),
+                    ResField::Ram => {
+                        w.ram = ram_step(w.ram, false);
+                        if !w.swap_touched {
+                            w.swap = crate::scaffold::StackDefaults::default().swap_for(w.ram);
+                        }
+                    }
                     ResField::Cores => w.cores = w.cores.saturating_sub(1).max(1),
                     ResField::Disk => w.disk = w.disk.saturating_sub(2).max(2),
+                    ResField::Swap => {
+                        w.swap = w.swap.saturating_sub(256);
+                        w.swap_touched = true;
+                    }
                     ResField::Vmid => w.vmid = w.vmid.saturating_sub(1).max(108),
                 }
             }
@@ -933,7 +960,7 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             KeyCode::Enter => {
                 let preset = &PRESETS[w.preset_idx];
                 let name = w.name.clone();
-                let (ram, cores, disk, vmid) = (w.ram, w.cores, w.disk, w.vmid);
+                let (ram, cores, disk, swap, vmid) = (w.ram, w.cores, w.disk, w.swap, w.vmid);
                 let app = preset.app;
                 match crate::scaffold::scaffold_stack(
                     std::path::Path::new("stacks"),
@@ -943,6 +970,7 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                         ram_mb: ram,
                         cores,
                         disk_gb: disk,
+                        swap_mb: Some(swap),
                         app,
                     },
                 ) {

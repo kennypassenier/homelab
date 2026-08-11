@@ -220,6 +220,7 @@ fn plan_modal_previews_changes() {
             template: "debian-12".into(),
             unprivileged: true,
             features: "nesting=1".into(),
+            protection: false,
         },
         boot: BootSpec {
             onboot: true,
@@ -262,6 +263,8 @@ fn wizard_renders_preset_step() {
         ram: 512,
         cores: 2,
         disk: 8,
+        swap: 512,
+        swap_touched: false,
         vmid: 108,
         res_field: ResField::Ram,
         disk_typing: false,
@@ -283,6 +286,8 @@ fn wizard_resources_step_shows_all_fields() {
         ram: 2048,
         cores: 4,
         disk: 16,
+        swap: 512,
+        swap_touched: false,
         vmid: 108,
         res_field: ResField::Disk,
         disk_typing: false,
@@ -293,18 +298,21 @@ fn wizard_resources_step_shows_all_fields() {
     assert!(out.contains("CPU"));
     assert!(out.contains("DISK"));
     assert!(out.contains("VMID"));
-    assert!(out.contains("swap")); // auto swap shown
+    assert!(out.contains("SWAP")); // swap is its own editable field now
+    assert!(out.contains("protection on")); // proxmox destroy-protection noted
 }
 
 #[test]
 fn swap_formula_matches_legacy_tiers() {
     use homelab_client::scaffold::StackDefaults;
     let d = StackDefaults::default();
-    assert_eq!(d.swap_for(512), 512); // < 2048 → 1:1
-    assert_eq!(d.swap_for(1024), 1024);
-    assert_eq!(d.swap_for(2048), 2048); // tier mid
-    assert_eq!(d.swap_for(8192), 2048);
-    assert_eq!(d.swap_for(16384), 4096); // > 8192 → 4096
+    // clamp(RAM/4, 512, 2048): container-appropriate, matches production.
+    assert_eq!(d.swap_for(512), 512); // floor
+    assert_eq!(d.swap_for(1024), 512);
+    assert_eq!(d.swap_for(2048), 512);
+    assert_eq!(d.swap_for(5120), 1280);
+    assert_eq!(d.swap_for(8192), 2048); // ceiling
+    assert_eq!(d.swap_for(16384), 2048); // never the old 4096
 }
 
 #[test]
@@ -321,6 +329,7 @@ fn scaffold_has_no_watchtower_and_manual_update_policy() {
             ram_mb: 512,
             cores: 2,
             disk_gb: 8,
+            swap_mb: None,
             app: Some(("app", "img:latest")),
         },
     )
@@ -351,6 +360,7 @@ fn scaffold_writes_a_deployable_stack() {
             ram_mb: 512,
             cores: 2,
             disk_gb: 8,
+            swap_mb: None,
             app: Some(("syncthing", "syncthing/syncthing:latest")),
         },
     )

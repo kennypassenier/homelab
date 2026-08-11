@@ -33,12 +33,17 @@ pub struct StackDefaults {
     /// is deliberately dropped (D9 — replaced by managed updates with a
     /// per-app update.policy label); traefik was never auto-injected.
     pub core_apps: Vec<String>,
-    /// Swap tiers: (ram_below_mb, swap_mb). The last matching tier wins; RAM
-    /// under the first threshold gets 1:1 swap.
-    pub swap_low_ratio_below_mb: u32,
-    pub swap_mid_mb: u32,
-    pub swap_mid_ceiling_mb: u32,
-    pub swap_high_mb: u32,
+    /// Swap auto-formula: clamp(RAM / divisor, min, max). For LXC, swap is a
+    /// cap on shared HOST swap — keep it small so a runaway container OOMs
+    /// fast instead of grinding the whole host. Matches Kenny's hand-tuned
+    /// production values (mostly 512, media 2048). Editable per stack; 0 is
+    /// valid for database-heavy stacks.
+    pub swap_divisor: u32,
+    pub swap_min_mb: u32,
+    pub swap_max_mb: u32,
+    /// Proxmox-level protection flag: refuses destroy at the hypervisor even
+    /// outside this tool. Gated destroy (C2) lifts it deliberately first.
+    pub protection: bool,
 }
 
 impl Default for StackDefaults {
@@ -57,25 +62,19 @@ impl Default for StackDefaults {
             default_cores: 2,
             default_disk_gb: 32,
             core_apps: vec!["promtail".into()],
-            swap_low_ratio_below_mb: 2048,
-            swap_mid_mb: 2048,
-            swap_mid_ceiling_mb: 8192,
-            swap_high_mb: 4096,
+            swap_divisor: 4,
+            swap_min_mb: 512,
+            swap_max_mb: 2048,
+            protection: true,
         }
     }
 }
 
 impl StackDefaults {
-    /// Tiered swap (legacy-TUI formula): RAM<2048 → 1:1, 2048..=8192 → 2048,
-    /// >8192 → 4096.
+    /// Auto swap: clamp(RAM/4, 512, 2048) by default — container-appropriate
+    /// sizing, unlike machine-style 1:1 rules.
     pub fn swap_for(&self, ram_mb: u32) -> u32 {
-        if ram_mb < self.swap_low_ratio_below_mb {
-            ram_mb
-        } else if ram_mb <= self.swap_mid_ceiling_mb {
-            self.swap_mid_mb
-        } else {
-            self.swap_high_mb
-        }
+        (ram_mb / self.swap_divisor.max(1)).clamp(self.swap_min_mb, self.swap_max_mb)
     }
 }
 
@@ -90,6 +89,8 @@ pub struct StackParams<'a> {
     pub ram_mb: u32,
     pub cores: u16,
     pub disk_gb: u16,
+    /// None = auto via the swap formula; Some(0) is valid (no swap).
+    pub swap_mb: Option<u32>,
     pub app: Option<(&'a str, &'a str)>, // (app name, image)
 }
 
@@ -112,6 +113,7 @@ pub fn scaffold_stack_with(
         ram_mb,
         cores,
         disk_gb,
+        swap_mb,
         app: preset_app,
     } = *p;
     let dir = base.join(name);
@@ -119,7 +121,7 @@ pub fn scaffold_stack_with(
         return Err(format!("stacks/{} already exists", name));
     }
     let ip_suffix = vmid.saturating_sub(100);
-    let swap_mb = d.swap_for(ram_mb);
+    let swap_mb = swap_mb.unwrap_or_else(|| d.swap_for(ram_mb));
     let mut files = Vec::new();
 
     // lxc-compose.yml (schema v2, intent only).
@@ -142,7 +144,7 @@ pub fn scaffold_stack_with(
          hostname: {vmid}-app-{name}\n\n\
          network:\n  ip: {ip_prefix}{ip_suffix}/{cidr}\n  gateway: {gateway}\n  bridge: {bridge}\n  vlan: {vlan}\n\n\
          resources:\n  cores: {cores}\n  memory_mb: {ram_mb}\n  swap_mb: {swap_mb}\n  disk_gb: {disk_gb}\n  storage: {storage}\n\n\
-         lxc:\n  template: \"{template}\"\n  unprivileged: {unprivileged}\n  features: \"{features}\"\n\n\
+         lxc:\n  template: \"{template}\"\n  unprivileged: {unprivileged}\n  features: \"{features}\"\n  protection: {protection}\n\n\
          boot:\n  onboot: true\n  order: {order}\n\n\
          apps:\n{apps_yaml}\n",
         ip_prefix = d.ip_prefix,
@@ -154,6 +156,7 @@ pub fn scaffold_stack_with(
         template = d.template,
         unprivileged = d.unprivileged,
         features = d.features,
+        protection = d.protection,
         order = d.boot_order,
     );
     write_file(&dir.join("lxc-compose.yml"), &manifest, &mut files)?;

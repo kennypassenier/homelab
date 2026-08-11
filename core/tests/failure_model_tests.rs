@@ -32,6 +32,7 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
                 template: "local:vztmpl/debian-12.tar.zst".into(),
                 unprivileged: true,
                 features: "nesting=1".into(),
+                protection: false,
             },
             boot: BootSpec {
                 onboot: true,

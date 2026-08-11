@@ -125,6 +125,21 @@ becomes ordinary D7 work afterwards.
 state for 2 weeks; ansible repo is archived; FEATURES.md shows every Must
 shipped.
 
+### M6 · Comprehensive documentation (Kenny's explicit final ask)
+A full documentation set once features are implemented — every aspect, with
+use cases and debugging guides:
+- **User guide** per feature (keyed to FEATURES.md IDs) — what it does, how to use it.
+- **Preset guide**: add/edit presets + their compose templates so new apps take
+  a few keystrokes with no code change (goal: presets become editable data, not
+  a recompiled const).
+- **Debugging guide**: incident bundles, `commands.sh` replay, doctor, tracing
+  levels, frame capture, common failures → fixes.
+- **Operations runbook**: deploy/update/backup/restore/destroy day-to-day + the
+  generated DR-runbook (E7).
+- **Architecture reference**: the AR decisions distilled for a future maintainer.
+- `docs/TEST_PLAN.md` (structured per-feature test steps, offline + live) —
+  already written, kept current as features land.
+
 ## Standing quality rules (from M0, forever)
 
 1. **Red CI blocks merge** (AR9) — no exceptions, including for me.

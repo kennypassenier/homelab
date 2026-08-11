@@ -41,8 +41,10 @@ async fn main() {
     let host = std::env::var("HOMELAB_HOST").unwrap_or_else(|_| "10.10.5.250:8443".into());
     let token = std::env::var("HOMELAB_TOKEN").unwrap_or_default();
     let offline = args.iter().any(|a| a == "--offline" || a == "--demo");
-    // The offline demo TUI needs neither host nor token.
-    if token.is_empty() && cmd != "help" && !(cmd == "tui" && offline) {
+    // Commands that never touch the network need no token: help, offline TUI,
+    // and `plan` (local validation only, D10).
+    let needs_token = !matches!(cmd, "help" | "plan") && !(cmd == "tui" && offline);
+    if token.is_empty() && needs_token {
         die("HOMELAB_TOKEN is not set");
     }
 

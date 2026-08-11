@@ -1,0 +1,26 @@
+services:
+  syncthing:
+    image: syncthing/syncthing:latest
+    container_name: syncthing
+    hostname: syncthing-hub
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - /appdata/syncthing/syncthing-config:/var/syncthing
+    ports:
+      - "8384:8384"       # web GUI (via traefik / LAN only)
+      - "22000:22000/tcp" # sync protocol
+      - "22000:22000/udp" # sync protocol (QUIC)
+      - "21027:21027/udp" # local discovery
+    restart: unless-stopped
+    labels:
+      - com.homelab.backup.pause=true
+      - com.centurylinklabs.watchtower.enable=true
+    networks:
+      - syncthing_net
+
+networks:
+  syncthing_net:
+    external: true
+    name: syncthing_net

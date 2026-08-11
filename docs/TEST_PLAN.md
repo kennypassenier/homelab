@@ -266,3 +266,20 @@ drill via the new credentials; the OLD pre-v2 restic repos in the Drive root
 (e.g. `downloader-config`, 2 snapshots) open with the same password — they
 remain the last-resort recovery layer during migration. Scheduler armed:
 `backup_hour = 4` in host.toml ("scheduler armed" in the journal).
+
+### A15 · SETTINGS tab (G8) — offline
+1. `homelab tui --offline` → press `5` (AZERTY: `(`).
+- **Pass:** HOST_SETTINGS renders: NIGHTLY RUN hour (◂ 04:00 ▸), retention
+  tiers ("every Xd for Y days / forever"), WEBHOOK row, sync indicator.
+  `UP/DOWN` moves fields, `LEFT/RIGHT` edits values, `A`/`D` adds/removes a
+  tier, `ENTER` on WEBHOOK opens a text editor (keys are swallowed while
+  editing), `SHIFT+S` saves (demo acks).
+
+### B18 · Settings round-trip (G8) — live
+```bash
+homelab config
+```
+- **Pass:** prints nightly run / webhook / retention tiers as stored on the
+  host. In the TUI: edit a value, SHIFT+S → "settings saved and applied";
+  `ssh root@10.10.5.250 cat /etc/homelab/host.toml` shows the change +
+  `[[retention]]` tables; the scheduler uses the new hour without a restart.

@@ -148,9 +148,9 @@ becomes ordinary D7 work afterwards.
 state for 2 weeks; ansible repo is archived; FEATURES.md shows every Must
 shipped.
 
-### M6 · Comprehensive documentation (Kenny's explicit final ask)
+### M6 · Comprehensive documentation (Kenny's explicit final ask) — ✅ DONE 2026-08-11
 A full documentation set once features are implemented — every aspect, with
-use cases and debugging guides:
+use cases and debugging guides. All delivered:
 - **User guide** per feature (keyed to FEATURES.md IDs) — what it does, how to use it.
 - **Preset guide**: add/edit presets + their compose templates so new apps take
   a few keystrokes with no code change (goal: presets become editable data, not

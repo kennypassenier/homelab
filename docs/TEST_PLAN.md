@@ -257,3 +257,12 @@ homelab patch
 ```
 - **Pass:** one "patch <stack>" step per managed stack, sequential,
   fail-closed; no-touch vmids never appear.
+
+### B17 · Definitive backup credentials — LIVE-PROVEN 2026-08-11
+Host rclone remote `gdrive` now uses **Kenny's own OAuth client** (fresh
+token via `rclone authorize`), and `/var/lib/homelab/secrets/restic.pw` holds
+the **real** restic password. Proven: fresh snapshot f9bc71f8 + green restore
+drill via the new credentials; the OLD pre-v2 restic repos in the Drive root
+(e.g. `downloader-config`, 2 snapshots) open with the same password — they
+remain the last-resort recovery layer during migration. Scheduler armed:
+`backup_hour = 4` in host.toml ("scheduler armed" in the journal).

@@ -50,6 +50,9 @@ pub enum Command {
     SelfUpdateHost {
         binary_b64: String,
     },
+    /// H6: apt dist-upgrade every managed stack (from host state),
+    /// sequentially.
+    PatchFleet,
 }
 
 /// A stack as the TUI sees it — structured, not free text.

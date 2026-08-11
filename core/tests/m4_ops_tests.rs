@@ -342,3 +342,52 @@ async fn h5_selfupdate_happy_path_arms_marker_before_restart() {
     // Restart is delayed so the RPC reply can flush.
     assert!(exec.calls_containing("--on-active=2").len() == 1);
 }
+
+// ── H6: fleet patching ──────────────────────────────────────────────────────
+
+use homelab_core::ops::patch::patch_fleet;
+
+#[tokio::test]
+async fn h6_patch_runs_apt_in_each_managed_stack_sequentially() {
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let targets = vec![("alpha".to_string(), 108u16), ("beta".to_string(), 109u16)];
+    let report = patch_fleet(&ctx(&exec, &sink, &j), &targets).await;
+    assert!(report.ok, "{:?}", report.error);
+    let apt = exec.calls_containing("dist-upgrade");
+    assert_eq!(apt.len(), 2);
+    assert!(apt[0].contains("pct exec 108"));
+    assert!(apt[1].contains("pct exec 109"));
+}
+
+#[tokio::test]
+async fn h6_patch_never_touches_no_touch_vmids() {
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    // Poisoned state: a no-touch vmid somehow ended up in the target list.
+    let targets = vec![("evil".to_string(), 101u16), ("ok".to_string(), 108u16)];
+    let report = patch_fleet(&ctx(&exec, &sink, &j), &targets).await;
+    assert!(report.ok);
+    let apt = exec.calls_containing("dist-upgrade");
+    assert_eq!(apt.len(), 1, "only the managed vmid gets patched");
+    assert!(apt[0].contains("pct exec 108"));
+}
+
+#[tokio::test]
+async fn h6_patch_fails_closed_on_apt_error() {
+    let exec = MockExecutor::new();
+    exec.enqueue(
+        "dist-upgrade",
+        CmdOutput::failed(100, "Could not get lock /var/lib/dpkg/lock"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let targets = vec![("alpha".to_string(), 108u16), ("beta".to_string(), 109u16)];
+    let report = patch_fleet(&ctx(&exec, &sink, &j), &targets).await;
+    assert!(!report.ok);
+    assert!(report.error.unwrap().why.contains("apt failed in alpha"));
+    // beta was never attempted (sequential, fail-closed).
+    assert!(exec.calls_containing("pct exec 109").is_empty());
+}

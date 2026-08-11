@@ -64,6 +64,7 @@ async fn main() {
             }
         }
         "ping" => rpc(&host, &token, Command::Ping).await,
+        "patch" => rpc(&host, &token, Command::PatchFleet).await,
         "status" => rpc(&host, &token, Command::Status).await,
         "doctor" => rpc(&host, &token, Command::Doctor).await,
         "incidents" => rpc(&host, &token, Command::Incidents).await,
@@ -226,6 +227,9 @@ async fn main() {
             println!("  homelab backup stacks/<name>        restic snapshot (E1)");
             println!("  homelab restore stacks/<name> [snap]  restore from snapshot (E2)");
             println!("  homelab update stacks/<name> [app]  pull+up with rollback (D9/B6)");
+            println!(
+                "  homelab patch                       apt dist-upgrade all managed stacks (H6)"
+            );
             println!("  homelab destroy stacks/<name>       gated destroy (C2)");
             println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
             println!("  homelab self-update <binary>        replace HOST binary w/ rollback (H5)");

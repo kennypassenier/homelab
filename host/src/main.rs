@@ -672,6 +672,21 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             })
             .await
         }
+        Rpc::PatchFleet => {
+            // Targets come from state.json — only stacks we deployed.
+            let store =
+                homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+            let snapshot = store.load().await;
+            let targets: Vec<(String, u16)> = snapshot
+                .stacks
+                .iter()
+                .map(|(name, st)| (name.clone(), st.vmid))
+                .collect();
+            run_mutating_op(state, &exec, req.id, "patch", |ctx| {
+                Box::pin(async move { homelab_core::ops::patch::patch_fleet(ctx, &targets).await })
+            })
+            .await
+        }
         Rpc::SelfUpdateHost { binary_b64 } => {
             use base64::Engine as _;
             let bytes = match base64::engine::general_purpose::STANDARD.decode(&binary_b64) {

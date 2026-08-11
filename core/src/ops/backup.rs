@@ -25,8 +25,9 @@ macro_rules! step {
 fn restic(base: &str, stack: &str, password_ref: &str, args: &[&str], timeout: u64) -> Cmd {
     // The host wraps this so RESTIC_PASSWORD comes from its secret store; here
     // we pass a reference the host resolves. In tests the MockExecutor just
-    // records the argv.
-    let repo = format!("{}:{}-config", base, stack);
+    // records the argv. Path join uses "/" — everything lives under one
+    // gdrive folder (homelab-backups), not loose dirs in the drive root.
+    let repo = format!("{}/{}-config", base, stack);
     let mut full = vec![
         "env".to_string(),
         format!("RESTIC_REPOSITORY={}", repo),
@@ -51,7 +52,7 @@ pub struct BackupCfg {
 impl Default for BackupCfg {
     fn default() -> Self {
         Self {
-            restic_base: "rclone:gdrive:homelab".into(),
+            restic_base: "rclone:gdrive:homelab-backups".into(),
             password_file: "/var/lib/homelab/secrets/restic.pw".into(),
             keep_daily: 7,
             keep_weekly: 4,

@@ -163,11 +163,11 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          ```\n\
          The exact files the daemon deployed are in git: `/var/lib/homelab/repo`.\n\n\
          ## Layer 3 — Restore data from backup\n\n\
-         Restic repos per stack: `rclone:gdrive:homelab:<stack>-config`, password\n\
+         Restic repos per stack: `rclone:gdrive:homelab-backups/<stack>-config`, password\n\
          file `/var/lib/homelab/secrets/restic.pw` (keep an offline copy of this\n\
          password — without it backups are unreadable!).\n\
          ```sh\n\
-         export RESTIC_REPOSITORY=rclone:gdrive:homelab:<stack>-config\n\
+         export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<stack>-config\n\
          export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw\n\
          restic snapshots\n\
          restic restore latest --target /\n\

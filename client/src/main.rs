@@ -23,7 +23,7 @@ use homelab_proto::{
     Command, DeploySpec, FileBlob, GatewayRoute, LogLevel, RpcRequest, ServerMsg, StackManifest,
 };
 
-mod tls;
+use homelab_client::{load_pin, save_pin, tui};
 
 const C_RESET: &str = "\x1b[0m";
 const C_CYAN: &str = "\x1b[36m";
@@ -68,6 +68,16 @@ async fn main() {
     }
 
     match cmd {
+        // `homelab tui` launches the control deck.
+        "tui" => {
+            let backend = Box::new(tui::backend::RemoteBackend {
+                host: host.clone(),
+                token: token.clone(),
+            });
+            if let Err(e) = tui::run(backend).await {
+                die(&format!("tui: {}", e));
+            }
+        }
         "ping" => rpc(&host, &token, Command::Ping).await,
         "status" => rpc(&host, &token, Command::Status).await,
         "doctor" => rpc(&host, &token, Command::Doctor).await,
@@ -120,27 +130,6 @@ async fn main() {
             println!("cert pin: ~/.config/homelab/pin (auto on first connect)");
         }
     }
-}
-
-/// Path where the pinned TLS fingerprint is stored (A4, TOFU).
-fn pin_path() -> PathBuf {
-    let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(base).join(".config/homelab/pin")
-}
-
-fn load_pin() -> Option<String> {
-    std::fs::read_to_string(pin_path())
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-fn save_pin(fp: &str) {
-    let path = pin_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(&path, fp);
 }
 
 fn build_spec(dir: &Path) -> DeploySpec {
@@ -234,7 +223,7 @@ async fn rpc(host: &str, token: &str, command: Command) {
     // A4: pin the host certificate (TOFU on first connect).
     let pin = load_pin();
     let first_connect = pin.is_none();
-    let verifier = tls::PinnedVerifier::new(pin);
+    let verifier = homelab_client::tls::PinnedVerifier::new(pin);
     let tls_config = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(verifier.clone())
@@ -294,6 +283,14 @@ async fn rpc(host: &str, token: &str, command: Command) {
                 println!(
                     "{}⇅ {} {}{} bytes{}",
                     C_DIM, label, done, total_str, C_RESET
+                );
+            }
+            ServerMsg::State(fleet) => {
+                println!(
+                    "{}fleet: {} stack(s) managed{}",
+                    C_DIM,
+                    fleet.stacks.len(),
+                    C_RESET
                 );
             }
             ServerMsg::RpcDone(resp) => {

@@ -450,6 +450,77 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 message: msg,
             }
         }
+        Rpc::GetState => {
+            // For M2 this reads recorded state; live per-app health arrives
+            // when the verify step persists it (wired in M4).
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            let hs = store.load().await;
+            let df = exec
+                .run(&Cmd::new(
+                    "df",
+                    &["--output=pcent", &state.config.state_dir],
+                    20,
+                ))
+                .await
+                .ok()
+                .and_then(|o| {
+                    o.stdout
+                        .lines()
+                        .nth(1)
+                        .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
+                })
+                .unwrap_or(0);
+            let (_, fingerprint) = tls::ensure_cert(&state.config.state_dir, "homelab-host")
+                .unwrap_or((
+                    tls::CertPaths {
+                        cert_pem: String::new(),
+                        key_pem: String::new(),
+                    },
+                    "unknown".into(),
+                ));
+            let stacks = hs
+                .stacks
+                .values()
+                .map(|s| homelab_proto::StackView {
+                    name: s
+                        .hostname
+                        .rsplit("-app-")
+                        .next()
+                        .unwrap_or(&s.hostname)
+                        .to_string(),
+                    vmid: s.vmid,
+                    hostname: s.hostname.clone(),
+                    apps: s
+                        .apps
+                        .iter()
+                        .map(|a| homelab_proto::AppView {
+                            name: a.clone(),
+                            running: true,
+                            restarts: 0,
+                        })
+                        .collect(),
+                    drift: false,
+                    env_sealed: true,
+                    online: true,
+                })
+                .collect();
+            let fleet = homelab_proto::FleetState {
+                host: homelab_proto::HostView {
+                    name: "pve-01".into(),
+                    cpu_pct: 0,
+                    ram_pct: 0,
+                    disk_pct: df,
+                    tls_fingerprint: fingerprint,
+                },
+                stacks,
+            };
+            let _ = state.log_tx.send(ServerMsg::State(Box::new(fleet)));
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: "state".into(),
+            }
+        }
         Rpc::Incidents => {
             let dir = format!("{}/incidents", state.config.state_dir);
             let list = std::fs::read_dir(&dir)

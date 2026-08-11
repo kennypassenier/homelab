@@ -25,6 +25,43 @@ pub enum Command {
     Doctor,
     /// AR14: list captured incident bundles.
     Incidents,
+    /// Structured fleet snapshot for the TUI dashboard.
+    GetState,
+}
+
+/// A stack as the TUI sees it — structured, not free text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StackView {
+    pub name: String,
+    pub vmid: u16,
+    pub hostname: String,
+    pub apps: Vec<AppView>,
+    /// intent hash differs from applied → true (B4).
+    pub drift: bool,
+    pub env_sealed: bool,
+    pub online: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppView {
+    pub name: String,
+    pub running: bool,
+    pub restarts: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostView {
+    pub name: String,
+    pub cpu_pct: u64,
+    pub ram_pct: u64,
+    pub disk_pct: u64,
+    pub tls_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetState {
+    pub host: HostView,
+    pub stacks: Vec<StackView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,5 +175,7 @@ pub enum ServerMsg {
         done: u64,
         total: Option<u64>,
     },
+    /// Structured fleet snapshot (reply to GetState).
+    State(Box<FleetState>),
     RpcDone(RpcResponse),
 }

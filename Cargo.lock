@@ -302,6 +302,7 @@ checksum = "829d955a0bb380ef178a640b91779e3987da38c9aea133b20614cfed8cdea9c6"
 dependencies = [
  "bitflags",
  "crossterm_winapi",
+ "futures-core",
  "mio",
  "parking_lot",
  "rustix",
@@ -597,9 +598,11 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "homelab-client"
 version = "2.0.0"
 dependencies = [
+ "crossterm",
  "futures-util",
  "homelab-core",
  "homelab-proto",
+ "ratatui",
  "rustls 0.22.4",
  "serde",
  "serde_json",

@@ -44,6 +44,9 @@ pub struct StackDefaults {
     /// Proxmox-level protection flag: refuses destroy at the hypervisor even
     /// outside this tool. Gated destroy (C2) lifts it deliberately first.
     pub protection: bool,
+    /// Owner for /appdata dirs: the unprivileged-LXC root mapping (100000)
+    /// plus the in-container uid most images run as (1000).
+    pub appdata_owner_uid: u32,
 }
 
 impl Default for StackDefaults {
@@ -66,6 +69,7 @@ impl Default for StackDefaults {
             swap_min_mb: 512,
             swap_max_mb: 2048,
             protection: true,
+            appdata_owner_uid: 101000,
         }
     }
 }
@@ -315,7 +319,7 @@ pub fn scaffold_stack_with(
         .map(|a| format!("  - {}", a))
         .collect::<Vec<_>>()
         .join("\n");
-    let manifest = format!(
+    let manifest_head = format!(
         "# Scaffolded by the homelab wizard (G2). Intent only — no state.\n\
          stack_name: {name}\n\
          vmid: {vmid}\n\
@@ -323,8 +327,7 @@ pub fn scaffold_stack_with(
          network:\n  ip: {ip_prefix}{ip_suffix}/{cidr}\n  gateway: {gateway}\n  bridge: {bridge}\n  vlan: {vlan}\n\n\
          resources:\n  cores: {cores}\n  memory_mb: {ram_mb}\n  swap_mb: {swap_mb}\n  disk_gb: {disk_gb}\n  storage: {storage}\n\n\
          lxc:\n  template: \"{template}\"\n  unprivileged: {unprivileged}\n  features: \"{features}\"\n  protection: {protection}\n\n\
-         boot:\n  onboot: true\n  order: {order}\n\n\
-         apps:\n{apps_yaml}\n",
+         boot:\n  onboot: true\n  order: {order}\n",
         ip_prefix = d.ip_prefix,
         cidr = d.cidr,
         gateway = d.gateway,
@@ -337,7 +340,6 @@ pub fn scaffold_stack_with(
         protection = d.protection,
         order = d.boot_order,
     );
-    write_file(&dir.join("lxc-compose.yml"), &manifest, &mut files)?;
 
     // Preset apps: copy the preset's template files with substitution, or
     // generate a generic compose for synthetic presets.
@@ -380,7 +382,57 @@ pub fn scaffold_stack_with(
         }
     }
 
+    // Storage intent is DERIVED from the compose files (single source of
+    // truth): every host bind under /appdata/ becomes a manifest storage
+    // entry, so the deploy creates + chowns the host dir and mounts it into
+    // the LXC. Nothing to keep in sync by hand.
+    let appdata = appdata_mounts(&files);
+    let storage_yaml = if appdata.is_empty() {
+        String::new()
+    } else {
+        let entries = appdata
+            .iter()
+            .map(|path| {
+                format!(
+                    "  - host_path: {p}\n    mount_point: {p}\n    host_owner_uid: {uid}",
+                    p = path,
+                    uid = d.appdata_owner_uid
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("\nstorage:\n{}\n", entries)
+    };
+    let manifest = format!("{manifest_head}{storage_yaml}\napps:\n{apps_yaml}\n");
+    write_file(&dir.join("lxc-compose.yml"), &manifest, &mut files)?;
+
     Ok(Scaffolded { dir, files })
+}
+
+/// Scan written compose files for `- /appdata/...:<container path>` host
+/// binds. Returns the unique host paths, sorted.
+fn appdata_mounts(files: &[String]) -> Vec<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for f in files {
+        if !f.ends_with("docker-compose.yml") {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(f) else {
+            continue;
+        };
+        for line in raw.lines() {
+            let t = line
+                .trim()
+                .trim_start_matches("- ")
+                .trim_matches(['"', '\'']);
+            if let Some(host) = t.split(':').next() {
+                if host.starts_with("/appdata/") {
+                    out.insert(host.to_string());
+                }
+            }
+        }
+    }
+    out.into_iter().collect()
 }
 
 /// Copy every file in `src` to `dst` with placeholder substitution.

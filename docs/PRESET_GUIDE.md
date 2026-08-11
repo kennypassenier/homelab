@@ -110,6 +110,10 @@ is left untouched — only these four exact tokens are substituted.
 - **Config under `/appdata/__STACK__/<app>-config`** — that's the host bind
   mount that survives container recreation and is what restic backs up.
   A named docker volume would silently miss the backups.
+  **You only write it here** — the scaffolder scans the compose files for
+  `/appdata/` binds and generates the manifest `storage:` entries from them
+  (host dir creation, ownership, LXC mount). One source of truth; nothing
+  to keep in sync.
 - **Labels**:
   - `com.homelab.backup.pause=true` — stop this container during the
     snapshot (only needed for apps whose data must be quiesced).

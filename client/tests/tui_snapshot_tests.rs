@@ -530,3 +530,45 @@ fn wizard_preset_step_lists_disk_presets() {
     assert!(out.contains("jellyfin"));
     assert!(out.contains("Media server"));
 }
+
+#[test]
+fn manifest_storage_is_derived_from_compose_appdata_binds() {
+    // Single source of truth: the /appdata/ bind in the preset's compose
+    // must appear as a manifest storage entry (host dir created + chowned +
+    // LXC-mounted at deploy). Without this, scaffolded stacks would write
+    // config to the container rootfs — unbacked-up and lost on destroy.
+    use homelab_client::scaffold::{scaffold_stack, scan_presets, StackParams};
+    let tmp = std::env::temp_dir().join(format!("homelab-storage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = scan_presets(&presets_dir);
+    let syncthing = presets.iter().find(|p| p.name == "syncthing").unwrap();
+    scaffold_stack(
+        &tmp,
+        &presets_dir,
+        &StackParams {
+            name: "vault",
+            vmid: 131,
+            ram_mb: 512,
+            cores: 1,
+            disk_gb: 4,
+            swap_mb: None,
+            preset: Some(syncthing),
+        },
+    )
+    .unwrap();
+    let manifest = std::fs::read_to_string(tmp.join("vault/lxc-compose.yml")).unwrap();
+    assert!(manifest.contains("storage:"), "storage section generated");
+    assert!(manifest.contains("host_path: /appdata/vault/syncthing-config"));
+    assert!(manifest.contains("host_owner_uid: 101000"));
+    // And the whole thing still validates as a deployable spec.
+    let spec = homelab_client::spec::build_spec(&tmp.join("vault")).expect("build spec");
+    homelab_core::manifest::validate(&spec).expect("valid");
+    assert_eq!(spec.manifest.storage.len(), 1);
+    assert_eq!(
+        spec.manifest.storage[0].mount_point,
+        "/appdata/vault/syncthing-config"
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}

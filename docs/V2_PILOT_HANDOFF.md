@@ -73,6 +73,12 @@ Every step below touches the Proxmox host. In order:
   backend trait (SimBackend | RemoteBackend over `proto`), so the mockup
   becomes the real CLIENT.
 - `homelab status` output is raw text; format it later.
+- **Wanted feature — log rotation, fleet-wide** (also flagged in the vault note
+  "Homelab Open Issues" §2): make the HOST bootstrap write
+  `/etc/docker/daemon.json` with `{"log-driver":"json-file","log-opts":
+  {"max-size":"10m","max-file":"3"}}` before starting Docker, and install a
+  logrotate policy for `/var/log` inside every managed LXC. Applies to the
+  syncthing pilot on first deploy and to every stack after migration.
 - Old `stacks/` entries (cloudflared, gateway, todo) are legacy-format and
   ignored by the new code; migrate or archive them in Phase 4b.
 - Full plan (feature verdicts, phases, no-touch list) lives in the planning doc

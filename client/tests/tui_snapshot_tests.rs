@@ -17,9 +17,10 @@ fn fleet() -> FleetState {
             disk_pct: 42,
             tls_fingerprint: "9F:2A:C4:1E:AB:CD".into(),
             ram_total_mb: 31744,
-            ram_committed_mb: 21504,
+            ram_used_mb: 12680,
+            ram_committed_mb: 38400,
             cores_total: 12,
-            cores_committed: 11,
+            load1_x100: 285,
         },
         stacks: vec![
             StackView {
@@ -252,17 +253,88 @@ fn plan_modal_previews_changes() {
 
 #[test]
 fn wizard_renders_preset_step() {
-    use homelab_client::tui::model::{WizStep, Wizard};
+    use homelab_client::tui::model::{ResField, WizStep, Wizard};
     let mut m = ready_model();
     m.wizard = Some(Wizard {
         step: WizStep::Preset,
         preset_idx: 0,
         name: String::new(),
+        ram: 512,
+        cores: 2,
+        disk: 8,
+        vmid: 108,
+        res_field: ResField::Ram,
+        disk_typing: false,
     });
     let out = render(&m);
-    assert!(out.contains("STACK_FORGE :: STEP 1/3"));
+    assert!(out.contains("STACK_FORGE :: STEP 1/4"));
     assert!(out.contains("syncthing"));
     assert!(out.contains("jellyfin"));
+}
+
+#[test]
+fn wizard_resources_step_shows_all_fields() {
+    use homelab_client::tui::model::{ResField, WizStep, Wizard};
+    let mut m = ready_model();
+    m.wizard = Some(Wizard {
+        step: WizStep::Resources,
+        preset_idx: 0,
+        name: "test".into(),
+        ram: 2048,
+        cores: 4,
+        disk: 16,
+        vmid: 108,
+        res_field: ResField::Disk,
+        disk_typing: false,
+    });
+    let out = render(&m);
+    assert!(out.contains("STEP 3/4"));
+    assert!(out.contains("RAM"));
+    assert!(out.contains("CPU"));
+    assert!(out.contains("DISK"));
+    assert!(out.contains("VMID"));
+    assert!(out.contains("swap")); // auto swap shown
+}
+
+#[test]
+fn swap_formula_matches_legacy_tiers() {
+    use homelab_client::scaffold::StackDefaults;
+    let d = StackDefaults::default();
+    assert_eq!(d.swap_for(512), 512); // < 2048 → 1:1
+    assert_eq!(d.swap_for(1024), 1024);
+    assert_eq!(d.swap_for(2048), 2048); // tier mid
+    assert_eq!(d.swap_for(8192), 2048);
+    assert_eq!(d.swap_for(16384), 4096); // > 8192 → 4096
+}
+
+#[test]
+fn scaffold_has_no_watchtower_and_manual_update_policy() {
+    use homelab_client::scaffold::{scaffold_stack, StackParams};
+    let tmp = std::env::temp_dir().join(format!("homelab-nowatch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    scaffold_stack(
+        &tmp,
+        &StackParams {
+            name: "x",
+            vmid: 121,
+            ram_mb: 512,
+            cores: 2,
+            disk_gb: 8,
+            app: Some(("app", "img:latest")),
+        },
+    )
+    .unwrap();
+    let compose = std::fs::read_to_string(tmp.join("x/app/docker-compose.yml")).unwrap();
+    assert!(
+        !compose.contains("watchtower"),
+        "watchtower must be gone (D9)"
+    );
+    assert!(compose.contains("com.homelab.update.policy=manual"));
+    let manifest = std::fs::read_to_string(tmp.join("x/lxc-compose.yml")).unwrap();
+    assert!(!manifest.contains("watchtower"));
+    assert!(manifest.contains("swap_mb: 512")); // 1:1 for 512
+    let _ = std::fs::remove_dir_all(&tmp);
 }
 
 #[test]
@@ -273,10 +345,14 @@ fn scaffold_writes_a_deployable_stack() {
     std::fs::create_dir_all(&tmp).unwrap();
     let s = scaffold_stack(
         &tmp,
-        "demo",
-        120,
-        512,
-        Some(("syncthing", "syncthing/syncthing:latest")),
+        &homelab_client::scaffold::StackParams {
+            name: "demo",
+            vmid: 120,
+            ram_mb: 512,
+            cores: 2,
+            disk_gb: 8,
+            app: Some(("syncthing", "syncthing/syncthing:latest")),
+        },
     )
     .expect("scaffold");
     // Manifest + app compose + promtail compose + promtail config.

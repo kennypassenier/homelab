@@ -41,8 +41,6 @@ fn draw_capacity(f: &mut Frame, model: &Model, area: Rect) {
         );
         return;
     }
-    let ram_free = h.ram_total_mb.saturating_sub(h.ram_committed_mb);
-    let ram_pct = (h.ram_committed_mb as f64 / h.ram_total_mb as f64 * 100.0) as u64;
     let bar = |pct: u64, w: usize| -> String {
         let filled = (pct as usize * w) / 100;
         format!(
@@ -51,39 +49,61 @@ fn draw_capacity(f: &mut Frame, model: &Model, area: Rect) {
             "░".repeat(w.saturating_sub(filled))
         )
     };
-    let ram_color = if ram_pct > 90 {
+    // Primary: ACTUAL RAM in use vs physical — the real constraint for LXC.
+    let used_pct = (h.ram_used_mb as f64 / h.ram_total_mb as f64 * 100.0) as u64;
+    let free_mb = h.ram_total_mb.saturating_sub(h.ram_used_mb);
+    let used_color = if used_pct > 90 {
         THEME.red
-    } else if ram_pct > 75 {
+    } else if used_pct > 75 {
+        THEME.yellow
+    } else {
+        THEME.green
+    };
+    // Context: committed ceilings routinely exceed 100% — normal for LXC.
+    let overcommit = h.ram_committed_mb as f64 / h.ram_total_mb as f64;
+    let load = h.load1_x100 as f64 / 100.0;
+    let load_color = if load > h.cores_total as f64 {
+        THEME.red
+    } else if load > h.cores_total as f64 * 0.75 {
         THEME.yellow
     } else {
         THEME.green
     };
     let lines = vec![
         Line::from(vec![
-            Span::styled("RAM  ", THEME.muted_style()),
-            Span::styled(bar(ram_pct, 16), Style::new().fg(ram_color)),
-            Span::styled(format!(" {}%", ram_pct), THEME.muted_style()),
-        ]),
-        Line::from(Span::styled(
-            format!(
-                "     {} / {} MB committed",
-                h.ram_committed_mb, h.ram_total_mb
-            ),
-            Style::new().fg(THEME.text),
-        )),
-        Line::from(vec![
-            Span::styled("     free ", THEME.muted_style()),
-            Span::styled(
-                format!("{} MB", ram_free),
-                Style::new().fg(ram_color).add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("RAM used ", THEME.muted_style()),
+            Span::styled(bar(used_pct, 12), Style::new().fg(used_color)),
+            Span::styled(format!(" {}%", used_pct), THEME.muted_style()),
         ]),
         Line::from(vec![
-            Span::styled("CORE ", THEME.muted_style()),
+            Span::styled("  ", THEME.muted_style()),
             Span::styled(
-                format!("{} / {} committed", h.cores_committed, h.cores_total),
+                format!("{} / {} MB", h.ram_used_mb, h.ram_total_mb),
                 Style::new().fg(THEME.text),
             ),
+            Span::styled(
+                format!("  free {} MB", free_mb),
+                Style::new().fg(used_color),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("alloc ", THEME.muted_style()),
+            Span::styled(
+                format!("{} MB ceilings", h.ram_committed_mb),
+                Style::new().fg(THEME.faint),
+            ),
+            Span::styled(
+                format!(" {:.1}× (LXC ok)", overcommit),
+                Style::new().fg(THEME.faint),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("load  ", THEME.muted_style()),
+            Span::styled(
+                format!("{:.2}", load),
+                Style::new().fg(load_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!(" / {} cores", h.cores_total), THEME.muted_style()),
         ]),
     ];
     f.render_widget(Paragraph::new(lines), inner);

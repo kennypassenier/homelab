@@ -163,13 +163,14 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
     let step_no = match wiz.step {
         WizStep::Preset => 1,
         WizStep::Name => 2,
-        WizStep::Review => 3,
+        WizStep::Resources => 3,
+        WizStep::Review => 4,
     };
     let block = Block::bordered()
         .border_type(BorderType::Double)
         .border_style(THEME.border_modal())
         .title(Line::from(Span::styled(
-            format!(" >> STACK_FORGE :: STEP {}/3 << ", step_no),
+            format!(" >> STACK_FORGE :: STEP {}/4 << ", step_no),
             Style::new().fg(THEME.magenta).add_modifier(Modifier::BOLD),
         )))
         .style(Style::new().bg(THEME.elevated).fg(THEME.text));
@@ -183,7 +184,7 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
     .split(inner);
 
     // Breadcrumb.
-    let crumbs = ["PRESET", "NAME", "REVIEW"];
+    let crumbs = ["PRESET", "NAME", "RESOURCES", "REVIEW"];
     let mut spans: Vec<Span> = vec![Span::raw(" ")];
     for (i, c) in crumbs.iter().enumerate() {
         let active = i + 1 == step_no;
@@ -262,10 +263,96 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
             ];
             f.render_widget(Paragraph::new(lines), rows[1]);
         }
+        WizStep::Resources => {
+            use crate::tui::model::ResField;
+            let cursor = if (model.tick / 15).is_multiple_of(2) {
+                "█"
+            } else {
+                " "
+            };
+            let defaults = crate::scaffold::StackDefaults::default();
+            let swap = defaults.swap_for(wiz.ram);
+            let field = |sel: bool, label: &str, value: String, hint: &str| -> Line<'static> {
+                let row_style = if sel {
+                    Style::new().bg(fx::pulse_bg(model.tick, model.fx))
+                } else {
+                    Style::new()
+                };
+                let value_span = if sel {
+                    Span::styled(
+                        format!("‹ {} ›", value),
+                        Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled(format!("  {}  ", value), Style::new().fg(THEME.text))
+                };
+                Line::from(vec![
+                    Span::styled(if sel { "▶ " } else { "  " }, Style::new().fg(THEME.cyan)),
+                    Span::styled(format!("{:<6}", label), THEME.muted_style()),
+                    value_span,
+                    Span::styled(format!("   {}", hint), THEME.hint()),
+                ])
+                .style(row_style)
+            };
+            let ram_str = if wiz.ram >= 1024 {
+                format!("{} GiB", wiz.ram / 1024)
+            } else {
+                format!("{} MiB", wiz.ram)
+            };
+            let disk_str = if wiz.res_field == ResField::Disk && wiz.disk_typing {
+                format!("{}{} GiB", wiz.disk, cursor)
+            } else {
+                format!("{} GiB", wiz.disk)
+            };
+            let lines = vec![
+                field(wiz.res_field == ResField::Ram, "RAM", ram_str, ""),
+                field(
+                    wiz.res_field == ResField::Cores,
+                    "CPU",
+                    format!("{} cores", wiz.cores),
+                    "",
+                ),
+                field(
+                    wiz.res_field == ResField::Disk,
+                    "DISK",
+                    disk_str,
+                    "or type a size",
+                ),
+                field(
+                    wiz.res_field == ResField::Vmid,
+                    "VMID",
+                    format!("{}", wiz.vmid),
+                    &format!("→ ip .{}", wiz.vmid.saturating_sub(100)),
+                ),
+                Line::default(),
+                Line::from(Span::styled(
+                    format!(
+                        "  swap {} MiB (auto)   ip 10.10.10.{}   order 99",
+                        swap,
+                        wiz.vmid.saturating_sub(100)
+                    ),
+                    Style::new().fg(THEME.faint),
+                )),
+                Line::from(vec![
+                    Span::styled("  [UP/DOWN]", THEME.hint()),
+                    Span::styled(" field   ", THEME.muted_style()),
+                    Span::styled("[LEFT/RIGHT]", THEME.hint()),
+                    Span::styled(" adjust", THEME.muted_style()),
+                ]),
+            ];
+            f.render_widget(Paragraph::new(lines), rows[1]);
+        }
         WizStep::Review => {
             let p = &PRESETS[wiz.preset_idx];
-            let vmid = crate::tui::model::next_free_vmid(model);
+            let vmid = wiz.vmid;
             let app = p.app.map(|(a, _)| a).unwrap_or("(none)");
+            let defaults = crate::scaffold::StackDefaults::default();
+            let kv = |k: &str, v: String| -> Line<'static> {
+                Line::from(vec![
+                    Span::styled(format!("  {:<9}", k), THEME.muted_style()),
+                    Span::styled(v, Style::new().fg(THEME.text)),
+                ])
+            };
             let lines = vec![
                 Line::from(vec![
                     Span::styled("  name     ", THEME.muted_style()),
@@ -274,28 +361,27 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
                         Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
                     ),
                 ]),
-                Line::from(vec![
-                    Span::styled("  hostname ", THEME.muted_style()),
-                    Span::styled(
-                        format!("{}-app-{}", vmid, wiz.name),
-                        Style::new().fg(THEME.text),
+                kv("hostname", format!("{}-app-{}", vmid, wiz.name)),
+                kv(
+                    "ip",
+                    format!(
+                        "{}{}/{}",
+                        defaults.ip_prefix,
+                        vmid.saturating_sub(100),
+                        defaults.cidr
                     ),
-                ]),
-                Line::from(vec![
-                    Span::styled("  ip       ", THEME.muted_style()),
-                    Span::styled(
-                        format!("10.10.10.{}", vmid - 100),
-                        Style::new().fg(THEME.text),
+                ),
+                kv(
+                    "resources",
+                    format!(
+                        "{} MiB · {} cores · {} GiB · swap {} MiB",
+                        wiz.ram,
+                        wiz.cores,
+                        wiz.disk,
+                        defaults.swap_for(wiz.ram)
                     ),
-                ]),
-                Line::from(vec![
-                    Span::styled("  ram      ", THEME.muted_style()),
-                    Span::styled(format!("{} MB", p.ram), Style::new().fg(THEME.text)),
-                ]),
-                Line::from(vec![
-                    Span::styled("  apps     ", THEME.muted_style()),
-                    Span::styled(format!("{}, promtail", app), Style::new().fg(THEME.text)),
-                ]),
+                ),
+                kv("apps", format!("{}, promtail", app)),
                 Line::default(),
                 Line::from(Span::styled(
                     "  writes a real stacks/<name>/ tree; nothing deploys yet",
@@ -374,37 +460,77 @@ fn draw_tab_bar(f: &mut Frame, model: &Model, area: Rect) {
     f.render_widget(tabs, inner);
 }
 
+/// Attention-first status strip: surfaces only things that need action, then
+/// falls back to calm live telemetry when everything is nominal. Every glimpse
+/// is meaningful — no filler.
 fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
-    let mut segs: Vec<String> = vec![format!("0x{:04X}", (model.tick / 7) & 0xFFFF)];
+    let mut attn: Vec<String> = Vec::new();
+    let mut calm: Vec<String> = Vec::new();
+
+    if model.conn == Conn::Down {
+        attn.push("⚠ LINK DOWN — reconnecting".into());
+    }
     if let Some(fleet) = &model.fleet {
-        segs.push(format!("{} disk={}%", fleet.host.name, fleet.host.disk_pct));
-        segs.push(format!("stacks {}", fleet.stacks.len()));
-        segs.push(format!("TLS {}", short_fp(&fleet.host.tls_fingerprint)));
-    }
-    segs.push(match model.conn {
-        Conn::Up => "LINK_OK".into(),
-        Conn::Connecting => "LINKING".into(),
-        Conn::Down => "LINK_DOWN".into(),
-    });
-    for t in &model.transfers {
-        segs.push(format!(
-            "⇅ {} {}B",
-            t.label.rsplit('/').next().unwrap_or(&t.label),
-            t.done
+        let drifted: Vec<&str> = fleet
+            .stacks
+            .iter()
+            .filter(|s| s.drift)
+            .map(|s| s.name.as_str())
+            .collect();
+        if !drifted.is_empty() {
+            attn.push(format!("⚠ UPD pending: {}", drifted.join(",")));
+        }
+        for s in fleet.stacks.iter().filter(|s| !s.env_sealed) {
+            attn.push(format!("⚠ NOENV {} (deploy fails closed)", s.name));
+        }
+        for s in &fleet.stacks {
+            let down: Vec<&str> = s
+                .apps
+                .iter()
+                .filter(|a| !a.running)
+                .map(|a| a.name.as_str())
+                .collect();
+            if !down.is_empty() {
+                attn.push(format!("⚠ {} down in {}", down.join(","), s.name));
+            }
+        }
+        // Active transfers are "in progress", worth surfacing.
+        for t in &model.transfers {
+            attn.push(format!(
+                "⇅ {} {}B",
+                t.label.rsplit('/').next().unwrap_or(&t.label),
+                t.done
+            ));
+        }
+        // Calm telemetry.
+        let h = &fleet.host;
+        calm.push(format!("{} up", h.name));
+        calm.push(format!(
+            "ram {}% used",
+            (h.ram_used_mb as f64 / h.ram_total_mb.max(1) as f64 * 100.0) as u64
         ));
+        calm.push(format!("load {:.2}", h.load1_x100 as f64 / 100.0));
+        calm.push(format!("disk {}%", h.disk_pct));
+        calm.push(format!("{} stacks", fleet.stacks.len()));
+        calm.push("TLS pinned".into());
     }
+
+    // If anything needs attention, show that (yellow); else calm (faint).
+    let (segs, color) = if !attn.is_empty() {
+        (attn, THEME.yellow)
+    } else {
+        let mut c = vec!["● ALL SYSTEMS NOMINAL".to_string()];
+        c.extend(calm);
+        (c, THEME.faint)
+    };
     let text = fx::ticker_text(&segs, area.width, model.tick);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             text,
-            Style::new().fg(THEME.faint).bg(THEME.bg),
+            Style::new().fg(color).bg(THEME.bg),
         ))),
         area,
     );
-}
-
-fn short_fp(fp: &str) -> String {
-    fp.chars().take(11).collect()
 }
 
 fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {

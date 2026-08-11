@@ -248,9 +248,10 @@ fn demo_fleet() -> ServerMsg {
             disk_pct: 42,
             tls_fingerprint: "9F:2A:C4:1E:AB:CD:EF:01".into(),
             ram_total_mb: 31744,
-            ram_committed_mb: 21504,
+            ram_used_mb: 12680,      // actual usage — the real headroom
+            ram_committed_mb: 38400, // sum of ceilings > total (normal for LXC)
             cores_total: 12,
-            cores_committed: 11,
+            load1_x100: 285, // load average 2.85
         },
         stacks: vec![
             StackView {

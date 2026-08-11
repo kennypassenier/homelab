@@ -134,13 +134,46 @@ pub const PRESETS: &[Preset] = &[
 pub enum WizStep {
     Preset,
     Name,
+    Resources,
     Review,
+}
+
+/// Which resources-form row is focused.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ResField {
+    Ram,
+    Cores,
+    Disk,
+    Vmid,
 }
 
 pub struct Wizard {
     pub step: WizStep,
     pub preset_idx: usize,
     pub name: String,
+    pub ram: u32,
+    pub cores: u16,
+    pub disk: u16,
+    pub vmid: u16,
+    pub res_field: ResField,
+    /// True while typing a custom disk size digit-by-digit.
+    pub disk_typing: bool,
+}
+
+/// RAM ladder: 256, 512, 1024, 2048, then +1024 up to 32768.
+pub fn ram_step(current: u32, up: bool) -> u32 {
+    const LOW: &[u32] = &[256, 512, 1024, 2048];
+    if up {
+        if current < 2048 {
+            *LOW.iter().find(|&&v| v > current).unwrap_or(&2048)
+        } else {
+            (current + 1024).min(32768)
+        }
+    } else if current > 2048 {
+        current - 1024
+    } else {
+        *LOW.iter().rev().find(|&&v| v < current).unwrap_or(&256)
+    }
 }
 
 pub struct Model {
@@ -488,10 +521,17 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             KeyCode::Char('D') => start_deploy(model),
             KeyCode::Char('p') => open_plan(model),
             KeyCode::Char('n') => {
+                let vmid = next_free_vmid(model);
                 model.wizard = Some(Wizard {
                     step: WizStep::Preset,
                     preset_idx: 0,
                     name: String::new(),
+                    ram: PRESETS[0].ram,
+                    cores: 2,
+                    disk: 8,
+                    vmid,
+                    res_field: ResField::Ram,
+                    disk_typing: false,
                 });
             }
             _ => {}
@@ -643,26 +683,75 @@ fn run_action(model: &mut Model, id: &str) {
     }
 }
 
-/// SHIFT+D: deploy the selected fleet stack from its local directory.
+/// Resolve a deployable spec for the selected fleet stack: prefer a local
+/// stacks/<name>/ directory; fall back to a synthetic spec derived from the
+/// fleet state (used in the offline demo and for already-provisioned stacks
+/// with no local dir). Returns (spec, is_synthetic).
+fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), String> {
+    let fleet = model
+        .fleet
+        .as_ref()
+        .ok_or("no fleet state yet — press R first")?;
+    let stack = fleet
+        .stacks
+        .get(model.selected_stack)
+        .ok_or("no stack selected")?;
+    if let Some((_, dir)) = model.local_stacks.iter().find(|(n, _)| *n == stack.name) {
+        let spec = crate::spec::build_spec(dir)?;
+        homelab_core::manifest::validate(&spec).map_err(|e| format!("validation failed: {}", e))?;
+        return Ok((spec, false));
+    }
+    // Synthetic spec from the fleet view — enough to preview/demo.
+    let d = crate::scaffold::StackDefaults::default();
+    let manifest = homelab_proto::StackManifest {
+        stack_name: stack.name.clone(),
+        vmid: stack.vmid,
+        hostname: stack.hostname.clone(),
+        network: homelab_proto::NetworkSpec {
+            ip: format!(
+                "{}{}/{}",
+                d.ip_prefix,
+                stack.vmid.saturating_sub(100),
+                d.cidr
+            ),
+            gateway: d.gateway.clone(),
+            bridge: d.bridge.clone(),
+            vlan: Some(d.vlan),
+        },
+        resources: homelab_proto::ResourceSpec {
+            cores: d.default_cores,
+            memory_mb: 1024,
+            swap_mb: d.swap_for(1024),
+            disk_gb: d.default_disk_gb as u32,
+            storage: d.storage.clone(),
+        },
+        lxc: homelab_proto::LxcSpec {
+            template: d.template.clone(),
+            unprivileged: d.unprivileged,
+            features: d.features.clone(),
+        },
+        boot: homelab_proto::BootSpec {
+            onboot: true,
+            order: Some(d.boot_order),
+        },
+        storage: vec![],
+        apps: stack.apps.iter().map(|a| a.name.clone()).collect(),
+    };
+    Ok((
+        homelab_proto::DeploySpec {
+            manifest,
+            files: vec![],
+            env: Default::default(),
+            gateway_route: None,
+        },
+        true,
+    ))
+}
+
+/// SHIFT+D: deploy the selected fleet stack.
 fn start_deploy(model: &mut Model) {
-    let Some(fleet) = &model.fleet else {
-        model.status_line = "no fleet state yet — press R first".into();
-        return;
-    };
-    let Some(stack) = fleet.stacks.get(model.selected_stack) else {
-        return;
-    };
-    let Some((_, dir)) = model.local_stacks.iter().find(|(n, _)| *n == stack.name) else {
-        model.status_line = format!("no local stacks/{} directory to deploy from", stack.name);
-        return;
-    };
-    match crate::spec::build_spec(dir) {
-        Ok(spec) => {
-            // D10: fail fast client-side.
-            if let Err(e) = homelab_core::manifest::validate(&spec) {
-                model.status_line = format!("validation failed: {}", e);
-                return;
-            }
+    match resolve_spec(model) {
+        Ok((spec, _synthetic)) => {
             model.focus = Some(Focus {
                 title: format!(
                     "DEPLOY {} :: vmid {}",
@@ -680,35 +769,31 @@ fn start_deploy(model: &mut Model) {
     }
 }
 
-/// P: build the D6 change-plan for the selected stack and show it. The plan is
-/// computed locally from the spec vs the known runtime state.
+/// P: build the D6 change-plan for the selected stack and show it. Resolved
+/// locally from the spec (real or synthetic) vs the known runtime state.
 fn open_plan(model: &mut Model) {
-    let Some(fleet) = &model.fleet else {
-        model.status_line = "no fleet state yet — press R first".into();
-        return;
-    };
-    let Some(stack) = fleet.stacks.get(model.selected_stack) else {
-        return;
-    };
-    let known = stack.online; // already provisioned in the fleet
-    let Some((_, dir)) = model.local_stacks.iter().find(|(n, _)| *n == stack.name) else {
-        model.status_line = format!("no local stacks/{} directory to plan from", stack.name);
-        return;
-    };
-    let spec = match crate::spec::build_spec(dir) {
-        Ok(s) => s,
+    let known = model
+        .fleet
+        .as_ref()
+        .and_then(|f| f.stacks.get(model.selected_stack))
+        .map(|s| s.online)
+        .unwrap_or(false);
+    let (spec, synthetic) = match resolve_spec(model) {
+        Ok(v) => v,
         Err(e) => {
             model.status_line = e;
             return;
         }
     };
-    if let Err(e) = homelab_core::manifest::validate(&spec) {
-        model.status_line = format!("validation failed: {}", e);
-        return;
-    }
     let m = &spec.manifest;
     let mut lines: Vec<(char, String)> = Vec::new();
     lines.push((' ', "dry-run — nothing runs until you confirm".into()));
+    if synthetic {
+        lines.push((
+            ' ',
+            "(no local stacks/ dir — plan derived from live state)".into(),
+        ));
+    }
     lines.push((' ', String::new()));
     lines.push((' ', "plan:".into()));
     if known {
@@ -754,7 +839,6 @@ pub fn next_free_vmid(model: &Model) -> u16 {
 
 fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
     use crossterm::event::KeyCode;
-    let vmid = next_free_vmid(model);
     let Some(w) = model.wizard.as_mut() else {
         return;
     };
@@ -779,22 +863,88 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             KeyCode::Backspace => {
                 w.name.pop();
             }
-            KeyCode::Enter if !w.name.is_empty() => w.step = WizStep::Review,
+            KeyCode::Enter if !w.name.is_empty() => {
+                w.ram = PRESETS[w.preset_idx].ram;
+                w.step = WizStep::Resources;
+            }
+            _ => {}
+        },
+        WizStep::Resources => match key.code {
+            KeyCode::Esc => w.step = WizStep::Name,
+            KeyCode::Up => {
+                w.res_field = match w.res_field {
+                    ResField::Ram => ResField::Vmid,
+                    ResField::Cores => ResField::Ram,
+                    ResField::Disk => ResField::Cores,
+                    ResField::Vmid => ResField::Disk,
+                };
+                w.disk_typing = false;
+            }
+            KeyCode::Down => {
+                w.res_field = match w.res_field {
+                    ResField::Ram => ResField::Cores,
+                    ResField::Cores => ResField::Disk,
+                    ResField::Disk => ResField::Vmid,
+                    ResField::Vmid => ResField::Ram,
+                };
+                w.disk_typing = false;
+            }
+            KeyCode::Right => {
+                w.disk_typing = false;
+                match w.res_field {
+                    ResField::Ram => w.ram = ram_step(w.ram, true),
+                    ResField::Cores => w.cores = (w.cores + 1).min(16),
+                    ResField::Disk => w.disk = (w.disk + 2).min(999),
+                    ResField::Vmid => w.vmid = (w.vmid + 1).min(354),
+                }
+            }
+            KeyCode::Left => {
+                w.disk_typing = false;
+                match w.res_field {
+                    ResField::Ram => w.ram = ram_step(w.ram, false),
+                    ResField::Cores => w.cores = w.cores.saturating_sub(1).max(1),
+                    ResField::Disk => w.disk = w.disk.saturating_sub(2).max(2),
+                    ResField::Vmid => w.vmid = w.vmid.saturating_sub(1).max(108),
+                }
+            }
+            // Typed custom disk size.
+            KeyCode::Char(c) if w.res_field == ResField::Disk && c.is_ascii_digit() => {
+                if !w.disk_typing {
+                    w.disk = 0;
+                    w.disk_typing = true;
+                }
+                w.disk = (w.disk * 10 + c.to_digit(10).unwrap() as u16).min(999);
+            }
+            KeyCode::Backspace if w.res_field == ResField::Disk => {
+                w.disk_typing = true;
+                w.disk /= 10;
+            }
+            KeyCode::Enter => {
+                if w.disk < 2 {
+                    w.disk = 2;
+                }
+                w.disk_typing = false;
+                w.step = WizStep::Review;
+            }
             _ => {}
         },
         WizStep::Review => match key.code {
-            KeyCode::Esc => w.step = WizStep::Name,
+            KeyCode::Esc => w.step = WizStep::Resources,
             KeyCode::Enter => {
                 let preset = &PRESETS[w.preset_idx];
                 let name = w.name.clone();
-                let ram = preset.ram;
+                let (ram, cores, disk, vmid) = (w.ram, w.cores, w.disk, w.vmid);
                 let app = preset.app;
                 match crate::scaffold::scaffold_stack(
                     std::path::Path::new("stacks"),
-                    &name,
-                    vmid,
-                    ram,
-                    app,
+                    &crate::scaffold::StackParams {
+                        name: &name,
+                        vmid,
+                        ram_mb: ram,
+                        cores,
+                        disk_gb: disk,
+                        app,
+                    },
                 ) {
                     Ok(s) => {
                         model.status_line = format!(
@@ -802,7 +952,6 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                             name,
                             s.files.len()
                         );
-                        // Make it immediately deployable and refresh.
                         model.local_stacks.push((name, s.dir));
                         model.local_stacks.sort();
                     }

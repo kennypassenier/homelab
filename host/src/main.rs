@@ -511,11 +511,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     ram_pct: 0,
                     disk_pct: df,
                     tls_fingerprint: fingerprint,
-                    // Capacity totals are wired when state carries resources (M4).
+                    // Capacity totals wired when state carries resources (M4).
                     ram_total_mb: 0,
+                    ram_used_mb: 0,
                     ram_committed_mb: 0,
                     cores_total: 0,
-                    cores_committed: 0,
+                    load1_x100: 0,
                 },
                 stacks,
             };

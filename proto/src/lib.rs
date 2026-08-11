@@ -56,15 +56,22 @@ pub struct HostView {
     pub ram_pct: u64,
     pub disk_pct: u64,
     pub tls_fingerprint: String,
-    /// C6 capacity: total physical vs committed by managed stacks.
+    /// C6 capacity. For LXC the honest constraint is ACTUAL usage vs physical
+    /// total — committed limits routinely exceed 100% (overcommit is normal),
+    /// so committed is shown only as context, not as the primary gauge.
     #[serde(default)]
     pub ram_total_mb: u32,
+    /// Real RAM in use across the host (sum of actual, not limits).
+    #[serde(default)]
+    pub ram_used_mb: u32,
+    /// Sum of per-stack RAM ceilings (informational; may exceed total).
     #[serde(default)]
     pub ram_committed_mb: u32,
     #[serde(default)]
     pub cores_total: u16,
+    /// 1-minute load average ×100 (so 250 = 2.50), avoids f64 on the wire.
     #[serde(default)]
-    pub cores_committed: u16,
+    pub load1_x100: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

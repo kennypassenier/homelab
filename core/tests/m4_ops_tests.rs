@@ -212,3 +212,87 @@ async fn e2_restore_fails_when_app_not_running_after() {
         .why
         .contains("not running after restore"));
 }
+
+// ── D9/B6: managed updates with rollback ────────────────────────────────────
+
+use homelab_core::ops::update::update;
+
+#[tokio::test]
+async fn d9_update_capture_pull_verify_order() {
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "docker inspect --format",
+        CmdOutput::ok("sha256:aaa myimg:latest\n"),
+    );
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, false).await;
+    assert!(report.ok, "{:?}", report.error);
+    let calls = exec.calls();
+    let pos = |n: &str| calls.iter().position(|c| c.contains(n)).unwrap();
+    assert!(
+        pos("docker inspect --format") < pos("compose pull"),
+        "capture before pull"
+    );
+    assert!(
+        pos("compose pull") < pos("ps --status running"),
+        "pull before verify"
+    );
+    // No rollback happened on the happy path.
+    assert!(exec.calls_containing("docker tag").is_empty());
+}
+
+#[tokio::test]
+async fn d9_auto_update_skips_non_auto_policy() {
+    let exec = MockExecutor::new();
+    // Policy label query returns "manual".
+    exec.respond_always("com.homelab.update.policy", CmdOutput::ok("manual\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, true).await;
+    assert!(report.ok);
+    assert!(
+        exec.calls_containing("compose pull").is_empty(),
+        "manual-policy app must not be pulled on a scheduled run"
+    );
+}
+
+#[tokio::test]
+async fn b6_failed_update_rolls_back_to_captured_image() {
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "docker inspect --format",
+        CmdOutput::ok("sha256:oldimg myimg:latest\n"),
+    );
+    // First verify after update: not running. Second verify (post-rollback): running.
+    exec.enqueue("ps --status running --services", CmdOutput::ok(""));
+    exec.enqueue("ps --status running --services", CmdOutput::ok("app\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, false).await;
+    // The op FAILS (the new image is bad) but the system is healthy again.
+    assert!(!report.ok);
+    let why = report.error.unwrap().why;
+    assert!(why.contains("ROLLED BACK"), "got: {}", why);
+    // The rollback re-tagged the captured image and force-recreated.
+    let tag_calls = exec.calls_containing("docker tag sha256:oldimg myimg:latest");
+    assert_eq!(tag_calls.len(), 1);
+    assert!(tag_calls[0].contains("--force-recreate"));
+}
+
+#[tokio::test]
+async fn d9_update_unknown_app_refused() {
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        Some("nope"),
+        false,
+    )
+    .await;
+    assert!(!report.ok);
+    assert!(report.error.unwrap().why.contains("not part of stack"));
+}

@@ -42,6 +42,8 @@ struct FileConfig {
     token: Option<String>,
     listen: Option<String>,
     state_dir: Option<String>,
+    backup_hour: Option<u8>,
+    notify_webhook: Option<String>,
 }
 
 #[derive(Clone)]
@@ -49,6 +51,11 @@ struct Config {
     token: String,
     listen: SocketAddr,
     state_dir: String,
+    /// E4: hour of day (0-23, host local time) for scheduled backups + auto
+    /// updates. None disables the scheduler.
+    backup_hour: Option<u8>,
+    /// F3: webhook POSTed after each mutating operation (Home Assistant).
+    notify_webhook: Option<String>,
 }
 
 fn load_config() -> Config {
@@ -83,6 +90,8 @@ fn load_config() -> Config {
         token,
         listen,
         state_dir,
+        backup_hour: file.backup_hour,
+        notify_webhook: file.notify_webhook,
     }
 }
 
@@ -266,6 +275,17 @@ async fn main() {
         }
     }
 
+    // E4: nightly scheduler — backups for every managed stack + auto-policy
+    // updates, driven from state.json manifests (no client needed).
+    if let Some(hour) = config.backup_hour {
+        let sched_state = state.clone();
+        tokio::spawn(async move { scheduler_loop(sched_state, hour).await });
+        info!(
+            "scheduler armed: daily backup + auto-updates at {:02}:00",
+            hour
+        );
+    }
+
     let app = Router::new()
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/version", get(|| async { VERSION }))
@@ -288,6 +308,68 @@ async fn main() {
         .serve(app.into_make_service())
         .await
         .expect("serve");
+}
+
+/// E4: check every 20 minutes; when the local hour matches `hour` and a
+/// stack's last backup is >20h old, run backup (E1) then auto-updates (D9)
+/// for that stack. Uses the same op machinery as RPCs (op-lock, incidents,
+/// notifications), so a client-triggered deploy never overlaps.
+async fn scheduler_loop(state: AppState, hour: u8) {
+    let exec = RealExecutor;
+    loop {
+        tokio::time::sleep(Duration::from_secs(20 * 60)).await;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        // Host-local hour without pulling in chrono: read from `date`.
+        let local_hour = match exec.run(&Cmd::new("date", &["+%H"], 10)).await {
+            Ok(out) => out.stdout.trim().parse::<u8>().unwrap_or(255),
+            Err(_) => 255,
+        };
+        if local_hour != hour {
+            continue;
+        }
+        let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+        let snapshot = store.load().await;
+        for (name, st) in snapshot.stacks {
+            if now.saturating_sub(st.last_backup) < 20 * 3600 {
+                continue; // already done today
+            }
+            let Some(manifest) = st.manifest else {
+                tracing::warn!("scheduler: stack {} has no stored manifest — skipped", name);
+                continue;
+            };
+            info!("scheduler: nightly run for {}", name);
+            let m1 = manifest.clone();
+            let backup_report = run_mutating_op(&state, &exec, 0, "scheduled-backup", |ctx| {
+                Box::pin(async move {
+                    homelab_core::ops::backup::backup(
+                        ctx,
+                        &m1,
+                        &homelab_core::ops::backup::BackupCfg::default(),
+                    )
+                    .await
+                })
+            })
+            .await;
+            if backup_report.ok {
+                // Record last_backup so tomorrow's check is accurate.
+                let mut s = store.load().await;
+                if let Some(rec) = s.stacks.get_mut(&name) {
+                    rec.last_backup = now;
+                }
+                let _ = store.save(s).await;
+            }
+            let m2 = manifest.clone();
+            let _ = run_mutating_op(&state, &exec, 0, "scheduled-update", |ctx| {
+                Box::pin(
+                    async move { homelab_core::ops::update::update(ctx, &m2, None, true).await },
+                )
+            })
+            .await;
+        }
+    }
 }
 
 async fn ws_upgrade(
@@ -343,6 +425,48 @@ async fn ws_session(socket: WebSocket, state: AppState) {
     forward.abort();
 }
 
+/// F3: best-effort webhook to Home Assistant after every mutating operation.
+/// Runs through the executor (curl) so it is visible in traces and never
+/// blocks or fails the operation itself.
+async fn notify(
+    state: &AppState,
+    exec: &RealExecutor,
+    label: &str,
+    report: &homelab_core::runner::OperationReport,
+) {
+    let Some(url) = state.config.notify_webhook.as_deref() else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "source": "homelab-host",
+        "op": report.op,
+        "label": label,
+        "ok": report.ok,
+        "error": report.error.as_ref().map(|e| format!("{} :: {}", e.what, e.why)),
+    })
+    .to_string();
+    let _ = exec
+        .run(&Cmd::new(
+            "curl",
+            &[
+                "-m",
+                "5",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-X",
+                "POST",
+                "-H",
+                "Content-Type: application/json",
+                "-d",
+                &payload,
+                url,
+            ],
+            10,
+        ))
+        .await;
+}
+
 /// Run any mutating operation under the op-lock (AR12) with uniform incident
 /// bundling on failure (AR14). The closure receives the OpCtx and returns the
 /// OperationReport.
@@ -381,6 +505,7 @@ where
         now_unix: now,
     };
     let report = op(&ctx).await;
+    notify(state, exec, label, &report).await; // F3, best-effort
     if report.ok {
         RpcResponse {
             id: req_id,
@@ -491,6 +616,14 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         &snapshot,
                     )
                     .await
+                })
+            })
+            .await
+        }
+        Rpc::UpdateStack { manifest, app } => {
+            run_mutating_op(state, &exec, req.id, "update", |ctx| {
+                Box::pin(async move {
+                    homelab_core::ops::update::update(ctx, &manifest, app.as_deref(), false).await
                 })
             })
             .await

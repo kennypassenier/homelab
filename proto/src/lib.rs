@@ -39,6 +39,11 @@ pub enum Command {
         manifest: Box<StackManifest>,
         snapshot: String,
     },
+    /// D9/B6: managed update with rollback. `app: None` = whole stack.
+    UpdateStack {
+        manifest: Box<StackManifest>,
+        app: Option<String>,
+    },
 }
 
 /// A stack as the TUI sees it — structured, not free text.

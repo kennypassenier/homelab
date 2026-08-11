@@ -385,6 +385,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     step!(runner, "record state", {
         let store = StateStore::new(exec, &ctx.state_dir);
         let mut state = store.load().await;
+        // Preserve last_backup across redeploys; refresh everything else.
+        let last_backup = state
+            .stacks
+            .get(&m.stack_name)
+            .map(|s| s.last_backup)
+            .unwrap_or(0);
         state.stacks.insert(
             m.stack_name.clone(),
             StackState {
@@ -392,6 +398,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 hostname: m.hostname.clone(),
                 apps: m.apps.clone(),
                 applied_at: ctx.now_unix,
+                last_backup,
+                manifest: Some(m.clone()),
             },
         );
         store.save(state).await?;

@@ -194,3 +194,29 @@ homelab destroy stacks/synctest-108    # typed-name confirmation
 Everything in Part B is confined to **vmid 108** until Kenny takes over. The
 no-touch list (100-107, 111, 201-203) is enforced in code and blocks anything
 else regardless of manifest content.
+
+### B11 · Managed update + rollback (D9/B6)
+```bash
+homelab update stacks/synctest-108 syncthing
+```
+- **Pass:** steps policy → capture → pull+up → verify stream by; "update
+  complete". Break it deliberately (edit the compose image to a bad tag,
+  deploy, then update): verify fails → the op re-tags the captured image,
+  force-recreates, reports "ROLLED BACK … now healthy" — the container is
+  running the previous image. (Live-proven happy path 2026-08-11.)
+
+### B12 · DR runbook (E7)
+```bash
+homelab runbook
+```
+- **Pass:** `docs/DR_RUNBOOK.md` regenerates: layer 0-3 recovery (incl. the
+  12/18TB disks living on the host, shared via CT 103/samba), one section per
+  v2 stack, legacy stacks marked LEGACY.
+
+### B13 · Scheduler (E4) + notifications (F3) — after config
+1. Add to `/etc/homelab/host.toml`: `backup_hour = 4` and
+   `notify_webhook = "http://<ha>/api/webhook/homelab_ops"`; restart the
+   daemon. (Requires the restic/rclone token for backups to succeed, and an
+   HA webhook automation to receive F3.)
+- **Pass:** journal shows "scheduler armed"; next morning state.json
+  `last_backup` is fresh; HA receives a JSON payload per operation.

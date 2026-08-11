@@ -43,7 +43,7 @@ async fn main() {
     let offline = args.iter().any(|a| a == "--offline" || a == "--demo");
     // Commands that never touch the network need no token: help, offline TUI,
     // and `plan` (local validation only, D10).
-    let needs_token = !matches!(cmd, "help" | "plan") && !(cmd == "tui" && offline);
+    let needs_token = !matches!(cmd, "help" | "plan" | "runbook") && !(cmd == "tui" && offline);
     if token.is_empty() && needs_token {
         die("HOMELAB_TOKEN is not set");
     }
@@ -133,6 +133,44 @@ async fn main() {
             )
             .await;
         }
+        "update" => {
+            let dir = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab update stacks/<name> [app]"));
+            let app = args.get(3).cloned();
+            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            println!(
+                "{}▶ update {} :: {}{}",
+                C_CYAN,
+                spec.manifest.stack_name,
+                app.as_deref().unwrap_or("all apps"),
+                C_RESET
+            );
+            rpc(
+                &host,
+                &token,
+                Command::UpdateStack {
+                    manifest: Box::new(spec.manifest),
+                    app,
+                },
+            )
+            .await;
+        }
+        "runbook" => {
+            // E7: generate the disaster-recovery runbook from the local stacks
+            // directory — a document that works when everything else is down.
+            let out = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| "docs/DR_RUNBOOK.md".into());
+            match spec::generate_runbook(Path::new("stacks"), &out) {
+                Ok(n) => println!(
+                    "{}✓ runbook written{} — {} ({} stack(s))",
+                    C_GREEN, C_RESET, out, n
+                ),
+                Err(e) => die(&format!("runbook: {}", e)),
+            }
+        }
         "destroy" => {
             let dir = args
                 .get(2)
@@ -169,7 +207,9 @@ async fn main() {
             println!("  homelab deploy stacks/<name>");
             println!("  homelab backup stacks/<name>        restic snapshot (E1)");
             println!("  homelab restore stacks/<name> [snap]  restore from snapshot (E2)");
+            println!("  homelab update stacks/<name> [app]  pull+up with rollback (D9/B6)");
             println!("  homelab destroy stacks/<name>       gated destroy (C2)");
+            println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
             println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");
             println!("cert pin: ~/.config/homelab/pin (auto on first connect)");
         }

@@ -18,6 +18,13 @@ pub struct StackState {
     pub apps: Vec<String>,
     /// Set by the caller (host) — core never reads clocks.
     pub applied_at: u64,
+    /// Unix time of the last successful backup (E4 scheduler input).
+    #[serde(default)]
+    pub last_backup: u64,
+    /// Full manifest as last applied, so host-side operations (scheduled
+    /// backup, fleet update) can run without the client being connected.
+    #[serde(default)]
+    pub manifest: Option<crate::manifest::StackManifest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

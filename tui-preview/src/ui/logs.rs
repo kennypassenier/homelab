@@ -14,7 +14,8 @@ use crate::theme::THEME;
 
 pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     let filter_label = app.log_filter.map(|l| l.label()).unwrap_or("ALL");
-    let title = fx::glitch("LOG_STREAM", 0x106, app.tick, app.fx).unwrap_or_else(|| "LOG_STREAM".into());
+    let title =
+        fx::glitch("LOG_STREAM", 0x106, app.tick, app.fx).unwrap_or_else(|| "LOG_STREAM".into());
     let block = Block::bordered()
         .border_type(BorderType::Double)
         .border_style(THEME.border_active())

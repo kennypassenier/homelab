@@ -1,0 +1,40 @@
+# Release engineering (AR10): a version tag builds Debian-12-compatible
+# binaries, attaches them (plus sha256 checksums) to a GitHub Release, and
+# H5 self-update consumes them from there. No binaries in git, ever.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: rust:1-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test gate (AR9 — releases are never exempt)
+        run: |
+          rustup component add rustfmt clippy
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Build release binaries
+        run: cargo build --release -p homelab-host -p homelab-client
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/release/homelab-host dist/homelab-host
+          cp target/release/homelab dist/homelab
+          cd dist && sha256sum homelab-host homelab > SHA256SUMS
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/homelab-host
+            dist/homelab
+            dist/SHA256SUMS
+          generate_release_notes: true

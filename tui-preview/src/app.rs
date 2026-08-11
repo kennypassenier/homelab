@@ -165,16 +165,46 @@ pub struct PaletteAction {
 }
 
 pub const PALETTE_ACTIONS: &[PaletteAction] = &[
-    PaletteAction { label: "go: dashboard", id: "tab.dashboard" },
-    PaletteAction { label: "go: stacks", id: "tab.stacks" },
-    PaletteAction { label: "go: backups", id: "tab.backups" },
-    PaletteAction { label: "go: logs", id: "tab.logs" },
-    PaletteAction { label: "stack: new (wizard)", id: "stack.new" },
-    PaletteAction { label: "stack: deploy selected", id: "stack.deploy" },
-    PaletteAction { label: "backup: run for selected stack", id: "backup.run" },
-    PaletteAction { label: "fx: cycle effect intensity", id: "fx.cycle" },
-    PaletteAction { label: "help: show keymap", id: "help" },
-    PaletteAction { label: "quit", id: "quit" },
+    PaletteAction {
+        label: "go: dashboard",
+        id: "tab.dashboard",
+    },
+    PaletteAction {
+        label: "go: stacks",
+        id: "tab.stacks",
+    },
+    PaletteAction {
+        label: "go: backups",
+        id: "tab.backups",
+    },
+    PaletteAction {
+        label: "go: logs",
+        id: "tab.logs",
+    },
+    PaletteAction {
+        label: "stack: new (wizard)",
+        id: "stack.new",
+    },
+    PaletteAction {
+        label: "stack: deploy selected",
+        id: "stack.deploy",
+    },
+    PaletteAction {
+        label: "backup: run for selected stack",
+        id: "backup.run",
+    },
+    PaletteAction {
+        label: "fx: cycle effect intensity",
+        id: "fx.cycle",
+    },
+    PaletteAction {
+        label: "help: show keymap",
+        id: "help",
+    },
+    PaletteAction {
+        label: "quit",
+        id: "quit",
+    },
 ];
 
 pub struct PaletteState {
@@ -202,9 +232,9 @@ pub struct App {
     pub screen: Screen,
     pub tab: Tab,
     pub fx: FxLevel,
-    pub tick: u64,        // anim ticks (~30/s)
+    pub tick: u64,         // anim ticks (~30/s)
     pub reveal_start: u64, // decrypt-reveal anchor for current screen/tab
-    pub flicker: u8,      // power-cycle countdown on tab switch
+    pub flicker: u8,       // power-cycle countdown on tab switch
     pub boot_skipped: bool,
 
     pub stack_table: TableState,
@@ -247,7 +277,11 @@ impl App {
             stack_table,
             app_table: TableState::default(),
             snap_table: TableState::default(),
-            palette: PaletteState { open: false, input: String::new(), selected: 0 },
+            palette: PaletteState {
+                open: false,
+                input: String::new(),
+                selected: 0,
+            },
             modal: Modal::None,
             logs_follow: true,
             log_filter: None,
@@ -263,7 +297,10 @@ impl App {
     }
 
     pub fn selected_stack(&self) -> usize {
-        self.stack_table.selected().unwrap_or(0).min(self.world.stacks.len().saturating_sub(1))
+        self.stack_table
+            .selected()
+            .unwrap_or(0)
+            .min(self.world.stacks.len().saturating_sub(1))
     }
 
     /// Number of log-source slots: ALL + HOST + CLIENT + one per stack.
@@ -369,8 +406,13 @@ impl App {
 
         match (key.code, key.modifiers) {
             (KeyCode::Char('q'), _) => self.should_quit = true,
-            (KeyCode::Char('k'), KeyModifiers::CONTROL) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                self.palette = PaletteState { open: true, input: String::new(), selected: 0 };
+            (KeyCode::Char('k'), KeyModifiers::CONTROL)
+            | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                self.palette = PaletteState {
+                    open: true,
+                    input: String::new(),
+                    selected: 0,
+                };
             }
             (KeyCode::F(2), _) => {
                 self.fx = self.fx.cycle();
@@ -406,21 +448,40 @@ impl App {
         let nstacks = self.world.stacks.len();
         match self.tab {
             Tab::Dashboard | Tab::Stacks => match key.code {
-                KeyCode::Char('j') | KeyCode::Down => Self::move_sel(&mut self.stack_table, nstacks, 1),
-                KeyCode::Char('k') | KeyCode::Up => Self::move_sel(&mut self.stack_table, nstacks, -1),
+                KeyCode::Char('j') | KeyCode::Down => {
+                    Self::move_sel(&mut self.stack_table, nstacks, 1)
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    Self::move_sel(&mut self.stack_table, nstacks, -1)
+                }
                 KeyCode::Char('n') => self.modal = Modal::Wizard(WizardState::new()),
                 KeyCode::Char('D') => {
                     // A live deploy reopens its focus window; otherwise start
                     // with the change-plan preview.
-                    if self.world.deploy.as_ref().map(|d| !d.finished).unwrap_or(false) {
+                    if self
+                        .world
+                        .deploy
+                        .as_ref()
+                        .map(|d| !d.finished)
+                        .unwrap_or(false)
+                    {
                         self.modal = Modal::Deploy;
                     } else {
                         let idx = self.selected_stack();
-                        self.modal = Modal::Diff { stack_idx: idx, scroll: 0 };
+                        self.modal = Modal::Diff {
+                            stack_idx: idx,
+                            scroll: 0,
+                        };
                     }
                 }
                 KeyCode::Char('b') => {
-                    if self.world.backup.as_ref().map(|b| !b.finished).unwrap_or(false) {
+                    if self
+                        .world
+                        .backup
+                        .as_ref()
+                        .map(|b| !b.finished)
+                        .unwrap_or(false)
+                    {
                         // A live cycle reopens its focus window.
                         self.modal = Modal::Backup;
                     } else {
@@ -445,12 +506,13 @@ impl App {
                 }
                 KeyCode::Char('d') | KeyCode::Delete => {
                     let idx = self.selected_stack();
-                    self.modal = Modal::ConfirmDelete { stack_idx: idx, input: String::new() };
+                    self.modal = Modal::ConfirmDelete {
+                        stack_idx: idx,
+                        input: String::new(),
+                    };
                 }
-                KeyCode::Enter => {
-                    if self.tab == Tab::Dashboard {
-                        self.switch_tab(Tab::Stacks);
-                    }
+                KeyCode::Enter if self.tab == Tab::Dashboard => {
+                    self.switch_tab(Tab::Stacks);
                 }
                 _ => {}
             },
@@ -462,7 +524,13 @@ impl App {
                     Self::move_sel(&mut self.snap_table, self.world.snapshots.len(), -1)
                 }
                 KeyCode::Char('b') => {
-                    if self.world.backup.as_ref().map(|b| !b.finished).unwrap_or(false) {
+                    if self
+                        .world
+                        .backup
+                        .as_ref()
+                        .map(|b| !b.finished)
+                        .unwrap_or(false)
+                    {
                         self.modal = Modal::Backup;
                     } else {
                         let idx = self.selected_stack();
@@ -501,13 +569,15 @@ impl App {
                     let n = self.log_source_count();
                     self.log_source = (self.log_source + 1) % n;
                     self.log_scroll = 0;
-                    self.status_line = format!("logs :: source {}", self.log_source_name(self.log_source));
+                    self.status_line =
+                        format!("logs :: source {}", self.log_source_name(self.log_source));
                 }
                 KeyCode::Left | KeyCode::Char('h') => {
                     let n = self.log_source_count();
                     self.log_source = (self.log_source + n - 1) % n;
                     self.log_scroll = 0;
-                    self.status_line = format!("logs :: source {}", self.log_source_name(self.log_source));
+                    self.status_line =
+                        format!("logs :: source {}", self.log_source_name(self.log_source));
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.log_scroll = self.log_scroll.saturating_add(1);
@@ -542,7 +612,10 @@ impl App {
     fn modal_key(&mut self, key: KeyEvent) {
         match &mut self.modal {
             Modal::Help => {
-                if matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::Enter) {
+                if matches!(
+                    key.code,
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::Enter
+                ) {
                     self.modal = Modal::None;
                 }
             }
@@ -558,7 +631,12 @@ impl App {
                 _ => {}
             },
             Modal::Deploy => {
-                let finished = self.world.deploy.as_ref().map(|d| d.finished).unwrap_or(true);
+                let finished = self
+                    .world
+                    .deploy
+                    .as_ref()
+                    .map(|d| d.finished)
+                    .unwrap_or(true);
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => {
                         self.deploy_scroll = self.deploy_scroll.saturating_add(1);
@@ -589,7 +667,12 @@ impl App {
                 }
             }
             Modal::Backup => {
-                let finished = self.world.backup.as_ref().map(|b| b.finished).unwrap_or(true);
+                let finished = self
+                    .world
+                    .backup
+                    .as_ref()
+                    .map(|b| b.finished)
+                    .unwrap_or(true);
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => {
                         self.backup_scroll = self.backup_scroll.saturating_add(1);
@@ -627,7 +710,12 @@ impl App {
                 }
                 KeyCode::Enter => {
                     let idx = *stack_idx;
-                    let expected = self.world.stacks.get(idx).map(|s| s.name.clone()).unwrap_or_default();
+                    let expected = self
+                        .world
+                        .stacks
+                        .get(idx)
+                        .map(|s| s.name.clone())
+                        .unwrap_or_default();
                     if *input == expected {
                         self.world.remove_stack(idx);
                         let len = self.world.stacks.len();
@@ -733,8 +821,10 @@ impl App {
                         self.modal = Modal::None;
                         self.switch_tab(Tab::Stacks);
                         self.stack_table.select(Some(self.world.stacks.len() - 1));
-                        self.status_line =
-                            format!("stack {} scaffolded — activate with [a], deploy with [D]", name);
+                        self.status_line = format!(
+                            "stack {} scaffolded — activate with [a], deploy with [D]",
+                            name
+                        );
                     }
                 },
                 _ => {}
@@ -787,7 +877,10 @@ impl App {
             "stack.new" => self.modal = Modal::Wizard(WizardState::new()),
             "stack.deploy" => {
                 let idx = self.selected_stack();
-                self.modal = Modal::Diff { stack_idx: idx, scroll: 0 };
+                self.modal = Modal::Diff {
+                    stack_idx: idx,
+                    scroll: 0,
+                };
             }
             "backup.run" => {
                 let idx = self.selected_stack();

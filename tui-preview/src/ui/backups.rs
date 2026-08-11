@@ -47,7 +47,9 @@ fn draw_snapshots(f: &mut Frame, app: &mut App, area: Rect) {
                 Cell::from(Span::styled(s.id.clone(), Style::new().fg(THEME.faint))),
                 Cell::from(Span::styled(
                     s.stack.clone(),
-                    Style::new().fg(THEME.stack_color(&s.stack)).add_modifier(Modifier::BOLD),
+                    Style::new()
+                        .fg(THEME.stack_color(&s.stack))
+                        .add_modifier(Modifier::BOLD),
                 )),
                 Cell::from(Span::styled(s.time.clone(), Style::new().fg(THEME.text))),
                 Cell::from(Span::styled(s.size.clone(), Style::new().fg(THEME.cyan))),
@@ -75,8 +77,12 @@ fn draw_snapshots(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_policy(f: &mut Frame, app: &App, area: Rect) {
-    let rows = Layout::vertical([Constraint::Length(8), Constraint::Length(6), Constraint::Min(4)])
-        .split(area);
+    let rows = Layout::vertical([
+        Constraint::Length(8),
+        Constraint::Length(6),
+        Constraint::Min(4),
+    ])
+    .split(area);
 
     // Schedule policy.
     let block = Block::bordered()
@@ -107,7 +113,10 @@ fn draw_policy(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("quiesce   ", THEME.muted_style()),
-            Span::styled("com.homelab.backup.pause=true", Style::new().fg(THEME.faint)),
+            Span::styled(
+                "com.homelab.backup.pause=true",
+                Style::new().fg(THEME.faint),
+            ),
         ]),
         Line::from(vec![
             Span::styled("notify    ", THEME.muted_style()),
@@ -138,16 +147,26 @@ fn draw_policy(f: &mut Frame, app: &App, area: Rect) {
 
     if let Some(b) = &app.world.backup {
         let stack = &app.world.stacks[b.stack_idx];
-        let areas = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
-            .split(inner);
+        let areas = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
         f.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(fx::spinner(app.tick).to_string(), Style::new().fg(THEME.cyan)),
+                Span::styled(
+                    fx::spinner(app.tick).to_string(),
+                    Style::new().fg(THEME.cyan),
+                ),
                 Span::styled(
                     format!(" snapshotting {} ", stack.name),
                     Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("({:.0} MB read)", b.bytes_done), THEME.muted_style()),
+                Span::styled(
+                    format!("({:.0} MB read)", b.bytes_done),
+                    THEME.muted_style(),
+                ),
             ])),
             areas[0],
         );

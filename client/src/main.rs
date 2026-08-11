@@ -104,8 +104,13 @@ fn build_spec(dir: &Path) -> DeploySpec {
 
     let gateway_route = stack_file.gateway_route.as_ref().map(|g| {
         let route_path = dir.join("traefik-routes.yml");
-        let content = std::fs::read_to_string(&route_path)
-            .unwrap_or_else(|e| die(&format!("gateway_route set but {}: {}", route_path.display(), e)));
+        let content = std::fs::read_to_string(&route_path).unwrap_or_else(|e| {
+            die(&format!(
+                "gateway_route set but {}: {}",
+                route_path.display(),
+                e
+            ))
+        });
         GatewayRoute {
             gateway_vmid: g.gateway_vmid,
             filename: g.filename.clone(),
@@ -133,7 +138,11 @@ fn collect(root: &Path, dir: &Path, files: &mut Vec<FileBlob>, env: &mut BTreeMa
             collect(root, &path, files, env);
             continue;
         }
-        let rel = path.strip_prefix(root).unwrap().to_string_lossy().to_string();
+        let rel = path
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         // Top-level control files are not payload.
         if rel == "lxc-compose.yml" || rel == "traefik-routes.yml" {
             continue;
@@ -187,7 +196,10 @@ async fn rpc(host: &str, token: &str, command: Command) {
         };
         match server_msg {
             ServerMsg::Hello { version, proto } => {
-                println!("{}● HOST v{} (proto {}) — link up{}", C_GREEN, version, proto, C_RESET);
+                println!(
+                    "{}● HOST v{} (proto {}) — link up{}",
+                    C_GREEN, version, proto, C_RESET
+                );
             }
             ServerMsg::Log { level, source, msg } => {
                 let color = match level {
@@ -197,6 +209,15 @@ async fn rpc(host: &str, token: &str, command: Command) {
                     LogLevel::Error => C_RED,
                 };
                 println!("{}{:<5}{} {}", color, source, C_RESET, msg);
+            }
+            ServerMsg::Transfer {
+                label, done, total, ..
+            } => {
+                let total_str = total.map(|t| format!("/{}", t)).unwrap_or_default();
+                println!(
+                    "{}⇅ {} {}{} bytes{}",
+                    C_DIM, label, done, total_str, C_RESET
+                );
             }
             ServerMsg::RpcDone(resp) => {
                 if resp.ok {

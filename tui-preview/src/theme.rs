@@ -19,9 +19,9 @@ pub struct Theme {
     pub blue: Color,    // info accents
 
     // Text
-    pub text: Color,   // primary text
-    pub muted: Color,  // secondary text
-    pub faint: Color,  // barely-there text (ticker, ghost rows)
+    pub text: Color,  // primary text
+    pub muted: Color, // secondary text
+    pub faint: Color, // barely-there text (ticker, ghost rows)
 }
 
 pub const THEME: Theme = Theme {

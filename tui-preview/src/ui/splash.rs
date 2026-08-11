@@ -20,7 +20,10 @@ const LOGO: &[&str] = &[
 const BOOT_LINES: &[(&str, &str)] = &[
     ("SYS_CORE", "init sequence engaged"),
     ("CONFIG", "control deck profile loaded"),
-    ("HOST_MESH", "link 10.10.5.250:8443 · TLS SHA256:9f2a…c41e [PINNED]"),
+    (
+        "HOST_MESH",
+        "link 10.10.5.250:8443 · TLS SHA256:9f2a…c41e [PINNED]",
+    ),
     ("AUTH", "bearer token accepted · session opened"),
     ("GITOPS_ENGINE", "repo clean @ a3f9c21 · mirror ok"),
     ("SECRETS_VAULT", "4 stacks · all sealed · 0600"),
@@ -43,14 +46,24 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             let r = (0x00 as f32 + t * 0xFF as f32) as u8;
             let b = 0xFF;
             let g = (0xFF as f32 * (1.0 - t)) as u8;
-            Span::styled(text, Style::new().fg(Color::Rgb(r, g, b)).add_modifier(Modifier::BOLD))
+            Span::styled(
+                text,
+                Style::new()
+                    .fg(Color::Rgb(r, g, b))
+                    .add_modifier(Modifier::BOLD),
+            )
         } else {
             Span::styled(text, Style::new().fg(THEME.cyan))
         };
         let p = Paragraph::new(Line::from(colored)).alignment(Alignment::Center);
         f.render_widget(
             p,
-            Rect { x: area.x, y: top + i as u16, width: area.width, height: 1 },
+            Rect {
+                x: area.x,
+                y: top + i as u16,
+                width: area.width,
+                height: 1,
+            },
         );
     }
 
@@ -80,14 +93,29 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("  ▸ ", Style::new().fg(THEME.magenta)),
             Span::styled(format!("{:<14}", tag), tag_style),
             Span::styled(":: ", Style::new().fg(THEME.faint)),
-            Span::styled(text, if is_last { THEME.ok() } else { Style::new().fg(THEME.text) }),
+            Span::styled(
+                text,
+                if is_last {
+                    THEME.ok()
+                } else {
+                    Style::new().fg(THEME.text)
+                },
+            ),
         ]);
         let p = Paragraph::new(line).alignment(Alignment::Center);
-        f.render_widget(p, Rect { x: area.x, y, width: area.width, height: 1 });
+        f.render_widget(
+            p,
+            Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: 1,
+            },
+        );
     }
 
     // Blinking skip hint at the very bottom.
-    if (app.tick / 12) % 2 == 0 {
+    if (app.tick / 12).is_multiple_of(2) {
         let hint = Paragraph::new(Line::from(Span::styled(
             ">> INITIALIZING CONTROL_DECK — any key to skip <<",
             Style::new().fg(THEME.faint),
@@ -95,7 +123,12 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         .alignment(Alignment::Center);
         f.render_widget(
             hint,
-            Rect { x: area.x, y: area.height.saturating_sub(2), width: area.width, height: 1 },
+            Rect {
+                x: area.x,
+                y: area.height.saturating_sub(2),
+                width: area.width,
+                height: 1,
+            },
         );
     }
 }

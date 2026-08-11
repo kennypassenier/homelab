@@ -167,7 +167,11 @@ pub struct BackupRun {
 
 impl BackupRun {
     pub fn ratio(&self) -> f64 {
-        let done = self.steps.iter().filter(|(_, s)| *s == StepState::Done).count();
+        let done = self
+            .steps
+            .iter()
+            .filter(|(_, s)| *s == StepState::Done)
+            .count();
         done as f64 / self.steps.len().max(1) as f64
     }
 }
@@ -432,7 +436,10 @@ impl World {
             0 => (
                 Level::Debug,
                 [
-                    format!("render :: lxc-compose.yml intent parsed ({} apps)", stack.apps.len()),
+                    format!(
+                        "render :: lxc-compose.yml intent parsed ({} apps)",
+                        stack.apps.len()
+                    ),
                     format!("render :: {}/docker-compose.yml validated", app),
                     "render :: env template resolved from vault (values redacted)".into(),
                 ][count as usize % 3]
@@ -442,7 +449,11 @@ impl World {
                 Level::Debug,
                 [
                     "tls :: session resumed · cipher TLS_AES_256_GCM_SHA384".into(),
-                    format!("tls :: payload {:.1} KB → HOST · seq {}", rng.gen_range(4.0..40.0), count + 1),
+                    format!(
+                        "tls :: payload {:.1} KB → HOST · seq {}",
+                        rng.gen_range(4.0..40.0),
+                        count + 1
+                    ),
                     "tls :: ack — payload integrity verified".into(),
                 ][count as usize % 3]
                     .clone(),
@@ -451,7 +462,11 @@ impl World {
                 Level::Debug,
                 [
                     format!("git :: stacks/{} staged", stack.name),
-                    format!("git :: commit {:07x} \"deploy {}\"", rng.gen::<u32>() & 0xFFFFFFF, stack.name),
+                    format!(
+                        "git :: commit {:07x} \"deploy {}\"",
+                        rng.gen::<u32>() & 0xFFFFFFF,
+                        stack.name
+                    ),
                     "git :: mirror push queued (github, non-blocking)".into(),
                 ][count as usize % 3]
                     .clone(),
@@ -466,14 +481,21 @@ impl World {
             4 => (
                 Level::Debug,
                 [
-                    format!("pull :: {} … digest sha256:{:012x}", image, rng.gen::<u64>()),
+                    format!(
+                        "pull :: {} … digest sha256:{:012x}",
+                        image,
+                        rng.gen::<u64>()
+                    ),
                     format!("pull :: {} :: layer cached, skipping", app),
                 ][count as usize % 2]
                     .clone(),
             ),
             5 => (
                 Level::Info,
-                format!("up :: container {} started · network {}_net attached", app, stack.name),
+                format!(
+                    "up :: container {} started · network {}_net attached",
+                    app, stack.name
+                ),
             ),
             _ => (
                 Level::Info,
@@ -530,8 +552,10 @@ impl World {
                     d.sub_count = 0;
                     if d.current < d.steps.len() {
                         d.steps[d.current].1 = StepState::Running;
-                        d.log
-                            .push((Level::Info, format!("[sync][run ] {}", d.steps[d.current].0)));
+                        d.log.push((
+                            Level::Info,
+                            format!("[sync][run ] {}", d.steps[d.current].0),
+                        ));
                         d.timer_ms = rng.gen_range(900..2200);
                     } else {
                         d.finished = true;
@@ -583,13 +607,19 @@ impl World {
             ),
             1 => (
                 Level::Info,
-                format!("quiesce :: docker stop {} (com.homelab.backup.pause=true)", app),
+                format!(
+                    "quiesce :: docker stop {} (com.homelab.backup.pause=true)",
+                    app
+                ),
             ),
             2 => (
                 Level::Debug,
                 [
                     format!("restic :: scanning /appdata/{}/{}-config", stack.name, app),
-                    format!("restic :: added {:.1} MB to the repo", rng.gen_range(0.4..18.0)),
+                    format!(
+                        "restic :: added {:.1} MB to the repo",
+                        rng.gen_range(0.4..18.0)
+                    ),
                     format!("restic :: {:.0} MB processed, dedup active", bytes),
                 ][count as usize % 3]
                     .clone(),
@@ -598,7 +628,10 @@ impl World {
                 Level::Debug,
                 [
                     "retention :: keep-daily=7 keep-weekly=4 keep-monthly=3".into(),
-                    format!("retention :: removed {} stale snapshot(s)", rng.gen_range(0..3)),
+                    format!(
+                        "retention :: removed {} stale snapshot(s)",
+                        rng.gen_range(0..3)
+                    ),
                     "prune :: repacking, freed space reported".into(),
                 ][count as usize % 3]
                     .clone(),
@@ -629,7 +662,8 @@ impl World {
             b.sub_timer_ms -= dt_ms;
             if b.sub_timer_ms <= 0 && b.current < b.steps.len() {
                 let stack = &self.stacks[b.stack_idx];
-                let (lvl, line) = Self::backup_sub_line(b.current, stack, b.sub_count, b.bytes_done);
+                let (lvl, line) =
+                    Self::backup_sub_line(b.current, stack, b.sub_count, b.bytes_done);
                 b.log.push((lvl, format!("  {}", line)));
                 b.sub_count += 1;
                 b.sub_timer_ms = rng.gen_range(240..560);
@@ -639,18 +673,23 @@ impl World {
             if b.timer_ms <= 0 && b.current < b.steps.len() {
                 b.steps[b.current].1 = StepState::Done;
                 let step_name = b.steps[b.current].0;
-                b.log.push((Level::Info, format!("[bkup][exit] {} :: ok", step_name)));
+                b.log
+                    .push((Level::Info, format!("[bkup][exit] {} :: ok", step_name)));
                 b.current += 1;
                 b.sub_count = 0;
                 if b.current < b.steps.len() {
                     b.steps[b.current].1 = StepState::Running;
-                    b.log
-                        .push((Level::Info, format!("[bkup][run ] {}", b.steps[b.current].0)));
+                    b.log.push((
+                        Level::Info,
+                        format!("[bkup][run ] {}", b.steps[b.current].0),
+                    ));
                     b.timer_ms = rng.gen_range(800..2000);
                 } else {
                     b.finished = true;
-                    b.log
-                        .push((Level::Info, "[bkup] Cycle complete — snapshot verified".into()));
+                    b.log.push((
+                        Level::Info,
+                        "[bkup] Cycle complete — snapshot verified".into(),
+                    ));
                     completed = Some(b.stack_idx);
                 }
             }
@@ -673,7 +712,10 @@ impl World {
             emitted.push((
                 "HOST".into(),
                 Level::Info,
-                format!("restic :: snapshot for {} complete, retention applied", name),
+                format!(
+                    "restic :: snapshot for {} complete, retention applied",
+                    name
+                ),
             ));
             self.next_backup_min = 1440.0;
         }
@@ -686,12 +728,18 @@ impl World {
         if self.deploy.as_ref().map(|d| !d.finished).unwrap_or(false) {
             return;
         }
-        let mut steps: Vec<(&'static str, StepState)> =
-            DEPLOY_STEPS.iter().map(|s| (*s, StepState::Pending)).collect();
+        let mut steps: Vec<(&'static str, StepState)> = DEPLOY_STEPS
+            .iter()
+            .map(|s| (*s, StepState::Pending))
+            .collect();
         steps[0].1 = StepState::Running;
         self.stacks[stack_idx].status = StackStatus::Syncing;
         let name = self.stacks[stack_idx].name.clone();
-        self.push_log("CLIENT", Level::Info, format!("deploy requested :: {}", name));
+        self.push_log(
+            "CLIENT",
+            Level::Info,
+            format!("deploy requested :: {}", name),
+        );
         self.deploy = Some(DeployRun {
             stack_idx,
             steps,
@@ -708,11 +756,17 @@ impl World {
         if self.backup.as_ref().map(|b| !b.finished).unwrap_or(false) {
             return;
         }
-        let mut steps: Vec<(&'static str, StepState)> =
-            BACKUP_STEPS.iter().map(|s| (*s, StepState::Pending)).collect();
+        let mut steps: Vec<(&'static str, StepState)> = BACKUP_STEPS
+            .iter()
+            .map(|s| (*s, StepState::Pending))
+            .collect();
         steps[0].1 = StepState::Running;
         let name = self.stacks[stack_idx].name.clone();
-        self.push_log("HOST", Level::Info, format!("restic :: backup cycle start :: {}", name));
+        self.push_log(
+            "HOST",
+            Level::Info,
+            format!("restic :: backup cycle start :: {}", name),
+        );
         self.backup = Some(BackupRun {
             stack_idx,
             steps,
@@ -751,7 +805,10 @@ impl World {
         self.push_log(
             "CLIENT",
             Level::Info,
-            format!("scaffold :: stack {} created (vmid {}, deploy.enabled=false)", name, vmid),
+            format!(
+                "scaffold :: stack {} created (vmid {}, deploy.enabled=false)",
+                name, vmid
+            ),
         );
         self.git.commit = format!("{:07x}", rand::thread_rng().gen::<u32>() & 0xFFFFFFF);
         self.git.last_msg = format!("stacks/{}: initial scaffold", name);
@@ -766,7 +823,10 @@ impl World {
             self.push_log(
                 "CLIENT",
                 Level::Warn,
-                format!("stack {} removed from repo (LXC untouched — destroy is separate)", name),
+                format!(
+                    "stack {} removed from repo (LXC untouched — destroy is separate)",
+                    name
+                ),
             );
         }
     }
@@ -813,7 +873,7 @@ impl World {
                     "radarr :: import: Movie.2026.1080p → /mnt/data/18TB",
                     "bazarr :: subtitles fetched (nl) for 1 episode",
                 ][rng.gen_range(0..4)]
-                    .to_string(),
+                .to_string(),
             )
         } else if pick < 44 {
             (
@@ -837,7 +897,7 @@ impl World {
                     "syncthing :: versioning: pruned 3 old versions",
                     "syncthing :: connected to phone (QUIC)",
                 ][rng.gen_range(0..4)]
-                    .to_string(),
+                .to_string(),
             )
         } else if pick < 70 {
             (

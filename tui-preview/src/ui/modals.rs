@@ -25,7 +25,11 @@ fn modal_block(title: &str, danger: bool, app: &App) -> Block<'static> {
     let t = fx::glitch(title, 0x30DA1, app.tick, app.fx).unwrap_or_else(|| title.to_string());
     Block::bordered()
         .border_type(BorderType::Double)
-        .border_style(if danger { THEME.border_danger() } else { THEME.border_modal() })
+        .border_style(if danger {
+            THEME.border_danger()
+        } else {
+            THEME.border_modal()
+        })
         .title(Line::from(vec![
             Span::styled(" >> ", Style::new().fg(THEME.faint)),
             Span::styled(
@@ -107,8 +111,12 @@ fn draw_wizard(f: &mut Frame, app: &mut App) {
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
-    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(4), Constraint::Length(1)])
-        .split(inner);
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(4),
+        Constraint::Length(1),
+    ])
+    .split(inner);
 
     // Step breadcrumb.
     let crumbs = ["PRESET", "NAME", "RESOURCES", "REVIEW"];
@@ -118,7 +126,10 @@ fn draw_wizard(f: &mut Frame, app: &mut App) {
         spans.push(Span::styled(
             format!(" {} ", c),
             if active {
-                Style::new().fg(THEME.bg).bg(THEME.cyan).add_modifier(Modifier::BOLD)
+                Style::new()
+                    .fg(THEME.bg)
+                    .bg(THEME.cyan)
+                    .add_modifier(Modifier::BOLD)
             } else if i + 1 < step_no {
                 THEME.ok()
             } else {
@@ -157,9 +168,16 @@ fn draw_wizard(f: &mut Frame, app: &mut App) {
             f.render_widget(Paragraph::new(lines), rows[1]);
         }
         WizardStep::Name => {
-            let cursor = if (app.tick / 15) % 2 == 0 { "█" } else { " " };
+            let cursor = if (app.tick / 15).is_multiple_of(2) {
+                "█"
+            } else {
+                " "
+            };
             let lines = vec![
-                Line::from(Span::styled("stack name (lowercase, single word):", THEME.muted_style())),
+                Line::from(Span::styled(
+                    "stack name (lowercase, single word):",
+                    THEME.muted_style(),
+                )),
                 Line::default(),
                 Line::from(vec![
                     Span::styled("  λ ", Style::new().fg(THEME.cyan)),
@@ -181,7 +199,11 @@ fn draw_wizard(f: &mut Frame, app: &mut App) {
             f.render_widget(Paragraph::new(lines), rows[1]);
         }
         WizardStep::Resources => {
-            let cursor = if (app.tick / 15) % 2 == 0 { "█" } else { " " };
+            let cursor = if (app.tick / 15).is_multiple_of(2) {
+                "█"
+            } else {
+                " "
+            };
             let field = |idx: usize, label: &str, value: String, hint: &str| -> Line<'static> {
                 let selected = w.res_field == idx;
                 let marker = if selected { "▶ " } else { "  " };
@@ -237,11 +259,17 @@ fn draw_wizard(f: &mut Frame, app: &mut App) {
             let lines = vec![
                 Line::from(vec![
                     Span::styled("  stack     ", THEME.muted_style()),
-                    Span::styled(w.name.clone(), Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        w.name.clone(),
+                        Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("  hostname  ", THEME.muted_style()),
-                    Span::styled(format!("{}-app-{}", vmid, w.name), Style::new().fg(THEME.text)),
+                    Span::styled(
+                        format!("{}-app-{}", vmid, w.name),
+                        Style::new().fg(THEME.text),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("  network   ", THEME.muted_style()),
@@ -260,13 +288,20 @@ fn draw_wizard(f: &mut Frame, app: &mut App) {
                 Line::from(vec![
                     Span::styled("  apps      ", THEME.muted_style()),
                     Span::styled(
-                        if apps.is_empty() { "(none yet)".into() } else { apps.join(", ") },
+                        if apps.is_empty() {
+                            "(none yet)".into()
+                        } else {
+                            apps.join(", ")
+                        },
                         Style::new().fg(THEME.text),
                     ),
                 ]),
                 Line::from(vec![
                     Span::styled("  deploy    ", THEME.muted_style()),
-                    Span::styled("enabled=false — nothing runs until you activate", THEME.warn()),
+                    Span::styled(
+                        "enabled=false — nothing runs until you activate",
+                        THEME.warn(),
+                    ),
                 ]),
                 Line::default(),
                 Line::from(vec![
@@ -288,7 +323,9 @@ fn draw_wizard(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_diff(f: &mut Frame, app: &App, stack_idx: usize, scroll: u16) {
-    let Some(stack) = app.world.stacks.get(stack_idx) else { return };
+    let Some(stack) = app.world.stacks.get(stack_idx) else {
+        return;
+    };
     let rect = modal_rect(f, 72, 20);
     f.render_widget(Clear, rect);
     let block = modal_block(&format!("CHANGE_PLAN :: {}", stack.hostname()), false, app);
@@ -307,18 +344,37 @@ fn draw_diff(f: &mut Frame, app: &App, stack_idx: usize, scroll: u16) {
         (' ', "  resources:".into()),
         ('-', format!("    memory_mb: {}", stack.ram_limit_mb)),
         ('+', format!("    memory_mb: {}", stack.ram_limit_mb)),
-        (' ', format!("stacks/{}/{}/docker-compose.yml", stack.name, stack.apps.first().map(|a| a.name).unwrap_or("app"))),
+        (
+            ' ',
+            format!(
+                "stacks/{}/{}/docker-compose.yml",
+                stack.name,
+                stack.apps.first().map(|a| a.name).unwrap_or("app")
+            ),
+        ),
         ('-', "    image: pinned@old-digest".into()),
         ('+', "    image: pinned@new-digest".into()),
         (' ', "".into()),
         (' ', "plan:".into()),
-        ('~', format!("  UPDATE   {} (config changed, in-place)", stack.hostname())),
+        (
+            '~',
+            format!("  UPDATE   {} (config changed, in-place)", stack.hostname()),
+        ),
         (' ', "  SKIP     everything else (no drift)".into()),
         (' ', "".into()),
         (' ', "safety:".into()),
-        (' ', "  ✓ hostname guard will verify before any change".into()),
-        (' ', "  ✓ fail-closed: errors set deploy.enabled=false".into()),
-        (' ', "  ✓ no-touch list: 100,101,102,103,201-203 invisible".into()),
+        (
+            ' ',
+            "  ✓ hostname guard will verify before any change".into(),
+        ),
+        (
+            ' ',
+            "  ✓ fail-closed: errors set deploy.enabled=false".into(),
+        ),
+        (
+            ' ',
+            "  ✓ no-touch list: 100,101,102,103,201-203 invisible".into(),
+        ),
     ];
     for (sign, text) in diff.into_iter().skip(scroll as usize) {
         let (prefix, style) = match sign {
@@ -365,16 +421,17 @@ fn draw_deploy(f: &mut Frame, app: &App) {
         format!("FOCUS :: DEPLOY {} :: LIVE", stack.hostname())
     };
     let block = modal_block(&title, false, app).title(
-        Line::from(vec![
-            if d.finished {
-                Span::styled("● ALL GATES PASSED ", THEME.ok().add_modifier(Modifier::BOLD))
-            } else {
-                Span::styled(
-                    format!("{} EXECUTING ", fx::spinner(app.tick)),
-                    Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
-                )
-            },
-        ])
+        Line::from(vec![if d.finished {
+            Span::styled(
+                "● ALL GATES PASSED ",
+                THEME.ok().add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(
+                format!("{} EXECUTING ", fx::spinner(app.tick)),
+                Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+            )
+        }])
         .right_aligned(),
     );
     let inner = block.inner(rect);
@@ -402,7 +459,10 @@ fn draw_deploy(f: &mut Frame, app: &App) {
 
     let mut step_lines: Vec<Line> = vec![Line::from(vec![
         Span::styled("target ", THEME.muted_style()),
-        Span::styled(stack.hostname(), Style::new().fg(color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            stack.hostname(),
+            Style::new().fg(color).add_modifier(Modifier::BOLD),
+        ),
     ])];
     step_lines.push(Line::default());
     for (name, state) in &d.steps {
@@ -441,10 +501,7 @@ fn draw_deploy(f: &mut Frame, app: &App) {
         } else {
             THEME.border_active()
         })
-        .title(Line::from(Span::styled(
-            feed_title,
-            THEME.title_active(),
-        )))
+        .title(Line::from(Span::styled(feed_title, THEME.title_active())))
         .style(Style::new().bg(THEME.elevated));
     let feed_inner = feed_block.inner(cols[1]);
     f.render_widget(feed_block, cols[1]);
@@ -475,7 +532,11 @@ fn draw_deploy(f: &mut Frame, app: &App) {
     f.render_widget(Paragraph::new(feed_lines), feed_inner);
 
     // Progress gauge across the bottom.
-    let done = d.steps.iter().filter(|(_, s)| *s == StepState::Done).count();
+    let done = d
+        .steps
+        .iter()
+        .filter(|(_, s)| *s == StepState::Done)
+        .count();
     let gauge = Gauge::default()
         .ratio(done as f64 / d.steps.len() as f64)
         .gauge_style(
@@ -530,16 +591,17 @@ fn draw_backup(f: &mut Frame, app: &App) {
         format!("FOCUS :: BACKUP {} :: LIVE", stack.hostname())
     };
     let block = modal_block(&title, false, app).title(
-        Line::from(vec![
-            if b.finished {
-                Span::styled("● SNAPSHOT VERIFIED ", THEME.ok().add_modifier(Modifier::BOLD))
-            } else {
-                Span::styled(
-                    format!("{} {:.0} MB READ ", fx::spinner(app.tick), b.bytes_done),
-                    Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
-                )
-            },
-        ])
+        Line::from(vec![if b.finished {
+            Span::styled(
+                "● SNAPSHOT VERIFIED ",
+                THEME.ok().add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(
+                format!("{} {:.0} MB READ ", fx::spinner(app.tick), b.bytes_done),
+                Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+            )
+        }])
         .right_aligned(),
     );
     let inner = block.inner(rect);
@@ -568,7 +630,10 @@ fn draw_backup(f: &mut Frame, app: &App) {
     let mut step_lines: Vec<Line> = vec![
         Line::from(vec![
             Span::styled("target ", THEME.muted_style()),
-            Span::styled(stack.hostname(), Style::new().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                stack.hostname(),
+                Style::new().fg(color).add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(vec![
             Span::styled("repo   ", THEME.muted_style()),
@@ -652,7 +717,10 @@ fn draw_backup(f: &mut Frame, app: &App) {
         .label(Span::styled(
             format!(
                 "{}/{} phases",
-                b.steps.iter().filter(|(_, s)| *s == StepState::Done).count(),
+                b.steps
+                    .iter()
+                    .filter(|(_, s)| *s == StepState::Done)
+                    .count(),
                 b.steps.len()
             ),
             Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
@@ -680,7 +748,9 @@ fn draw_backup(f: &mut Frame, app: &App) {
 }
 
 fn draw_delete(f: &mut Frame, app: &App, stack_idx: usize, input: &str) {
-    let Some(stack) = app.world.stacks.get(stack_idx) else { return };
+    let Some(stack) = app.world.stacks.get(stack_idx) else {
+        return;
+    };
     let rect = modal_rect(f, 60, 11);
     f.render_widget(Clear, rect);
     let block = modal_block("DANGER :: REMOVE_STACK", true, app);
@@ -688,7 +758,11 @@ fn draw_delete(f: &mut Frame, app: &App, stack_idx: usize, input: &str) {
     f.render_widget(block, rect);
 
     let ok = input == stack.name;
-    let cursor = if (app.tick / 15) % 2 == 0 { "█" } else { " " };
+    let cursor = if (app.tick / 15).is_multiple_of(2) {
+        "█"
+    } else {
+        " "
+    };
     let lines = vec![
         Line::from(vec![
             Span::styled("This removes ", Style::new().fg(THEME.text)),
@@ -700,21 +774,40 @@ fn draw_delete(f: &mut Frame, app: &App, stack_idx: usize, input: &str) {
             THEME.warn(),
         )),
         Line::default(),
-        Line::from(vec![
-            Span::styled("type the stack name to confirm: ", THEME.muted_style()),
-        ]),
+        Line::from(vec![Span::styled(
+            "type the stack name to confirm: ",
+            THEME.muted_style(),
+        )]),
         Line::from(vec![
             Span::styled("  λ ", Style::new().fg(THEME.red)),
             Span::styled(
                 input.to_string(),
-                if ok { THEME.ok().add_modifier(Modifier::BOLD) } else { Style::new().fg(THEME.text) },
+                if ok {
+                    THEME.ok().add_modifier(Modifier::BOLD)
+                } else {
+                    Style::new().fg(THEME.text)
+                },
             ),
             Span::styled(cursor, Style::new().fg(THEME.red)),
         ]),
         Line::default(),
         Line::from(vec![
-            Span::styled("[↵]", if ok { THEME.hint() } else { THEME.muted_style() }),
-            Span::styled(if ok { " confirmed — execute  " } else { " (name mismatch)  " }, THEME.muted_style()),
+            Span::styled(
+                "[↵]",
+                if ok {
+                    THEME.hint()
+                } else {
+                    THEME.muted_style()
+                },
+            ),
+            Span::styled(
+                if ok {
+                    " confirmed — execute  "
+                } else {
+                    " (name mismatch)  "
+                },
+                THEME.muted_style(),
+            ),
             Span::styled("[esc]", THEME.hint()),
             Span::styled(" abort", THEME.muted_style()),
         ]),

@@ -32,7 +32,11 @@ fn draw_host(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(THEME.border_active())
-        .title(panel_title(&format!("HOST_MESH :: {}", w.host.name), 0x4057, app))
+        .title(panel_title(
+            &format!("HOST_MESH :: {}", w.host.name),
+            0x4057,
+            app,
+        ))
         .title(
             Line::from(vec![
                 Span::styled("● ", THEME.ok()),
@@ -45,8 +49,13 @@ fn draw_host(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
-        .split(inner);
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
 
     let cpu = w.host.cpu.last();
     let ram = w.host.ram.last();
@@ -55,13 +64,26 @@ fn draw_host(f: &mut Frame, app: &App, area: Rect) {
 
     let line1 = Line::from(vec![
         Span::styled("CPU ", THEME.muted_style()),
-        Span::styled(format!("{:>3}% ", cpu), Style::new().fg(fx::load_color(cpu)).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{:>3}% ", cpu),
+            Style::new()
+                .fg(fx::load_color(cpu))
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(spark_cpu, Style::new().fg(THEME.cyan)),
-        Span::styled(format!("   TEMP {:>2.0}°C", w.host.temp), THEME.muted_style()),
+        Span::styled(
+            format!("   TEMP {:>2.0}°C", w.host.temp),
+            THEME.muted_style(),
+        ),
     ]);
     let line2 = Line::from(vec![
         Span::styled("RAM ", THEME.muted_style()),
-        Span::styled(format!("{:>3}% ", ram), Style::new().fg(fx::load_color(ram)).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{:>3}% ", ram),
+            Style::new()
+                .fg(fx::load_color(ram))
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(spark_ram, Style::new().fg(THEME.magenta)),
         Span::styled(format!("   DISK {}%", w.host.disk_pct), THEME.muted_style()),
     ]);
@@ -72,7 +94,10 @@ fn draw_host(f: &mut Frame, app: &App, area: Rect) {
     let line3 = Line::from(vec![
         Span::styled("SSD ", THEME.muted_style()),
         Span::styled(disk_bar, Style::new().fg(THEME.blue)),
-        Span::styled(format!("  TLS {}", w.host.tls_fingerprint), Style::new().fg(THEME.green)),
+        Span::styled(
+            format!("  TLS {}", w.host.tls_fingerprint),
+            Style::new().fg(THEME.green),
+        ),
     ]);
     let line4 = Line::from(vec![
         Span::styled("LNK ", THEME.muted_style()),
@@ -81,7 +106,10 @@ fn draw_host(f: &mut Frame, app: &App, area: Rect) {
             Style::new().fg(THEME.text),
         ),
         Span::styled("keepalive ", THEME.muted_style()),
-        Span::styled(fx::spinner(app.tick).to_string(), Style::new().fg(THEME.cyan)),
+        Span::styled(
+            fx::spinner(app.tick).to_string(),
+            Style::new().fg(THEME.cyan),
+        ),
     ]);
 
     f.render_widget(Paragraph::new(line1), rows[0]);
@@ -92,7 +120,11 @@ fn draw_host(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_fleet(f: &mut Frame, app: &mut App, area: Rect) {
     let w = &app.world;
-    let n_online = w.stacks.iter().filter(|s| s.status == StackStatus::Online).count();
+    let n_online = w
+        .stacks
+        .iter()
+        .filter(|s| s.status == StackStatus::Online)
+        .count();
     let block = Block::bordered()
         .border_type(BorderType::Double)
         .border_style(THEME.border_active())
@@ -131,7 +163,11 @@ fn draw_fleet(f: &mut Frame, app: &mut App, area: Rect) {
                 StackStatus::Degraded => ("◐", THEME.warn()),
                 StackStatus::Offline => ("○", THEME.muted_style()),
             };
-            let running = s.apps.iter().filter(|a| a.state == AppState::Running).count();
+            let running = s
+                .apps
+                .iter()
+                .filter(|a| a.state == AppState::Running)
+                .count();
             let cpu = s.cpu.last();
             let ram = s.ram.last();
             let mut flags = String::new();
@@ -147,7 +183,10 @@ fn draw_fleet(f: &mut Frame, app: &mut App, area: Rect) {
             let mut row = Row::new(vec![
                 Cell::from(Line::from(vec![
                     Span::styled("▎", Style::new().fg(color)),
-                    Span::styled(s.hostname(), Style::new().fg(color).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        s.hostname(),
+                        Style::new().fg(color).add_modifier(Modifier::BOLD),
+                    ),
                 ])),
                 Cell::from(Line::from(vec![
                     Span::styled(format!("{} ", dot), status_style),
@@ -171,7 +210,11 @@ fn draw_fleet(f: &mut Frame, app: &mut App, area: Rect) {
                 )),
                 Cell::from(Span::styled(
                     format!("{}/{}", running, s.apps.len()),
-                    if running == s.apps.len() { THEME.ok() } else { THEME.warn() },
+                    if running == s.apps.len() {
+                        THEME.ok()
+                    } else {
+                        THEME.warn()
+                    },
                 )),
                 Cell::from(Span::styled(flags, THEME.warn())),
             ]);
@@ -229,7 +272,11 @@ fn draw_side(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("● ARMED", THEME.ok().add_modifier(Modifier::BOLD)),
         Span::styled(" (10s)", THEME.muted_style()),
     ])];
-    for a in stack.apps.iter().take((inner.height as usize).saturating_sub(1)) {
+    for a in stack
+        .apps
+        .iter()
+        .take((inner.height as usize).saturating_sub(1))
+    {
         lines.push(Line::from(vec![
             Span::styled(format!("{:<12}", a.name), Style::new().fg(THEME.text)),
             Span::styled(format!("sha:{}", a.digest), Style::new().fg(THEME.faint)),
@@ -253,7 +300,10 @@ fn draw_side(f: &mut Frame, app: &App, area: Rect) {
             ("○ missing", THEME.err())
         };
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<12}", s.name), Style::new().fg(THEME.stack_color(&s.name))),
+            Span::styled(
+                format!("{:<12}", s.name),
+                Style::new().fg(THEME.stack_color(&s.name)),
+            ),
             Span::styled(icon, style),
             Span::styled("  0600", THEME.muted_style()),
         ]));
@@ -300,7 +350,10 @@ fn draw_side(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("commits today ", THEME.muted_style()),
             Span::styled(format!("{}", g.commits_today), Style::new().fg(THEME.text)),
         ]),
-        Line::from(Span::styled(format!("» {}", g.last_msg), Style::new().fg(THEME.faint))),
+        Line::from(Span::styled(
+            format!("» {}", g.last_msg),
+            Style::new().fg(THEME.faint),
+        )),
     ];
     f.render_widget(Paragraph::new(lines), inner);
 }

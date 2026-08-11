@@ -50,7 +50,10 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
             };
             let name = fx::decrypt(&s.hostname(), reveal, 0x100 + i as u64, app.tick);
             let mut spans = vec![
-                Span::styled(if selected { "▶" } else { " " }, Style::new().fg(THEME.cyan)),
+                Span::styled(
+                    if selected { "▶" } else { " " },
+                    Style::new().fg(THEME.cyan),
+                ),
                 dot,
                 Span::styled(name, Style::new().fg(color).add_modifier(Modifier::BOLD)),
             ];
@@ -129,7 +132,10 @@ fn draw_detail(f: &mut Frame, app: &mut App, area: Rect) {
         Line::from(vec![
             Span::styled("storage ", THEME.muted_style()),
             Span::styled(
-                format!("/appdata/{}/<app>-config  →  /opt/{}/<app>-config", s.name, s.name),
+                format!(
+                    "/appdata/{}/<app>-config  →  /opt/{}/<app>-config",
+                    s.name, s.name
+                ),
                 Style::new().fg(THEME.faint),
             ),
         ]),
@@ -171,13 +177,23 @@ fn draw_detail(f: &mut Frame, app: &mut App, area: Rect) {
                 AppState::Stopped => ("STOP ✗", THEME.err()),
             };
             let mut row = Row::new(vec![
-                Cell::from(Span::styled(a.name, Style::new().fg(THEME.text).add_modifier(Modifier::BOLD))),
+                Cell::from(Span::styled(
+                    a.name,
+                    Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
+                )),
                 Cell::from(Span::styled(a.image.clone(), THEME.muted_style())),
                 Cell::from(Span::styled(label, style)),
-                Cell::from(Span::styled(format!("{:>4.1}%", a.cpu), Style::new().fg(THEME.cyan))),
+                Cell::from(Span::styled(
+                    format!("{:>4.1}%", a.cpu),
+                    Style::new().fg(THEME.cyan),
+                )),
                 Cell::from(Span::styled(
                     format!("{}", a.restarts),
-                    if a.restarts > 0 { THEME.warn() } else { THEME.muted_style() },
+                    if a.restarts > 0 {
+                        THEME.warn()
+                    } else {
+                        THEME.muted_style()
+                    },
                 )),
                 Cell::from(Span::styled(a.digest.clone(), Style::new().fg(THEME.faint))),
             ]);

@@ -22,11 +22,21 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     if area.width < 80 || area.height < 24 {
         let msg = Paragraph::new(Line::from(Span::styled(
-            format!("TERMINAL TOO SMALL — need 80x24, got {}x{}", area.width, area.height),
+            format!(
+                "TERMINAL TOO SMALL — need 80x24, got {}x{}",
+                area.width, area.height
+            ),
             THEME.err().add_modifier(Modifier::BOLD),
         )))
         .alignment(Alignment::Center);
-        f.render_widget(msg, Rect { y: area.height / 2, height: 1, ..area });
+        f.render_widget(
+            msg,
+            Rect {
+                y: area.height / 2,
+                height: 1,
+                ..area
+            },
+        );
         return;
     }
 
@@ -53,14 +63,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         FlickerPhase::Flash if app.fx != FxLevel::Off => {
             f.render_widget(Block::new().style(Style::new().bg(THEME.elevated)), rows[1]);
         }
-        _ => {
-            match app.tab {
-                Tab::Dashboard => dashboard::draw(f, app, rows[1]),
-                Tab::Stacks => stacks::draw(f, app, rows[1]),
-                Tab::Backups => backups::draw(f, app, rows[1]),
-                Tab::Logs => logs::draw(f, app, rows[1]),
-            }
-        }
+        _ => match app.tab {
+            Tab::Dashboard => dashboard::draw(f, app, rows[1]),
+            Tab::Stacks => stacks::draw(f, app, rows[1]),
+            Tab::Backups => backups::draw(f, app, rows[1]),
+            Tab::Logs => logs::draw(f, app, rows[1]),
+        },
     }
 
     draw_ticker(f, app, rows[2]);
@@ -227,7 +235,12 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             ("^k", "palette"),
             ("q", "quit"),
         ],
-        Tab::Backups => &[("j/k", "select"), ("b", "backup now"), ("^k", "palette"), ("q", "quit")],
+        Tab::Backups => &[
+            ("j/k", "select"),
+            ("b", "backup now"),
+            ("^k", "palette"),
+            ("q", "quit"),
+        ],
         Tab::Logs => &[
             ("←/→", "source"),
             ("↑/↓", "scroll"),
@@ -276,12 +289,23 @@ fn draw_palette(f: &mut Frame, app: &App) {
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
-    let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)])
-        .split(inner);
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .split(inner);
     let prompt = Line::from(vec![
         Span::styled("λ ", Style::new().fg(THEME.cyan)),
         Span::styled(app.palette.input.clone(), Style::new().fg(THEME.text)),
-        Span::styled("█", Style::new().fg(if (app.tick / 15) % 2 == 0 { THEME.cyan } else { THEME.elevated })),
+        Span::styled(
+            "█",
+            Style::new().fg(if (app.tick / 15).is_multiple_of(2) {
+                THEME.cyan
+            } else {
+                THEME.elevated
+            }),
+        ),
     ]);
     f.render_widget(Paragraph::new(prompt), rows[0]);
     f.render_widget(
@@ -299,12 +323,22 @@ fn draw_palette(f: &mut Frame, app: &App) {
         .map(|(i, &ai)| {
             let a = &crate::app::PALETTE_ACTIONS[ai];
             let style = if i == app.palette.selected {
-                Style::new().fg(THEME.cyan).bg(fx::pulse_bg(app.tick, app.fx)).add_modifier(Modifier::BOLD)
+                Style::new()
+                    .fg(THEME.cyan)
+                    .bg(fx::pulse_bg(app.tick, app.fx))
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::new().fg(THEME.text)
             };
             ListItem::new(Line::from(vec![
-                Span::styled(if i == app.palette.selected { "▶ " } else { "  " }, style),
+                Span::styled(
+                    if i == app.palette.selected {
+                        "▶ "
+                    } else {
+                        "  "
+                    },
+                    style,
+                ),
                 Span::styled(a.label, style),
             ]))
         })

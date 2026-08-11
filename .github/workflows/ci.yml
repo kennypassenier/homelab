@@ -1,0 +1,32 @@
+# Hard CI gates (AR9): red blocks merge. fmt, clippy -D warnings, all tests.
+name: ci
+
+on:
+  push:
+    branches: [main, v2-merge]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container: rust:1-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Format
+        run: |
+          rustup component add rustfmt clippy
+          cargo fmt --all --check
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace

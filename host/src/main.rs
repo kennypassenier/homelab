@@ -31,6 +31,8 @@ use homelab_core::sink::{PipelineEvent, Sink};
 
 use homelab_proto::{Command as Rpc, RpcRequest, RpcResponse, ServerMsg};
 
+mod tls;
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // ── Config (AR11) ────────────────────────────────────────────────────────────
@@ -86,26 +88,15 @@ fn load_config() -> Config {
 
 // ── Real executor (AR2) ─────────────────────────────────────────────────────
 
-struct RealExecutor {
-    log_tx: broadcast::Sender<ServerMsg>,
-}
-
-impl RealExecutor {
-    fn debug(&self, msg: String) {
-        tracing::debug!("{}", msg);
-        let _ = self.log_tx.send(ServerMsg::Log {
-            level: homelab_proto::LogLevel::Debug,
-            source: "HOST".into(),
-            msg,
-        });
-    }
-}
+struct RealExecutor;
 
 #[async_trait]
 impl Executor for RealExecutor {
     async fn run(&self, cmd: &Cmd) -> Result<CmdOutput, CoreError> {
+        // Transcript emission is handled by core's TracingExecutor inside the
+        // pipeline; here we only trace at the log level for non-pipeline calls.
         let rendered = cmd.rendered();
-        self.debug(format!("[run ] {}", rendered));
+        tracing::trace!("run {}", rendered);
         let fut = Command::new(&cmd.program)
             .args(&cmd.args)
             .stdin(Stdio::null())
@@ -119,11 +110,6 @@ impl Executor for RealExecutor {
             .map_err(|e| CoreError::Other(format!("spawn {}: {}", rendered, e)))?;
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-        for line in stdout.lines().chain(stderr.lines()).take(40) {
-            if !line.trim().is_empty() {
-                self.debug(format!("  {}", line));
-            }
-        }
         Ok(CmdOutput {
             stdout,
             stderr,
@@ -269,17 +255,39 @@ async fn main() {
         op_lock: Arc::new(Mutex::new(())),
     };
 
+    // AR13: surface any operation the previous run left mid-flight.
+    if let Ok(journal) = std::fs::read_to_string(format!("{}/journal.jsonl", config.state_dir)) {
+        for (op, step) in homelab_core::incidents::interrupted_ops(&journal) {
+            tracing::warn!(
+                "interrupted operation '{}' at step '{}' — re-running it is safe (idempotent)",
+                op,
+                step
+            );
+        }
+    }
+
     let app = Router::new()
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/version", get(|| async { VERSION }))
         .route("/api/ws", get(ws_upgrade))
         .with_state(state);
 
-    info!("homelab-host v{} listening on {}", VERSION, config.listen);
-    let listener = tokio::net::TcpListener::bind(config.listen)
+    // A4: TLS with a self-signed cert; the client pins this fingerprint.
+    let (certs, fingerprint) =
+        tls::ensure_cert(&config.state_dir, "homelab-host").expect("tls cert");
+    info!(
+        "homelab-host v{} listening on {} (TLS)",
+        VERSION, config.listen
+    );
+    info!("TLS fingerprint SHA256:{}", fingerprint);
+    let tls_config =
+        axum_server::tls_rustls::RustlsConfig::from_pem_file(&certs.cert_pem, &certs.key_pem)
+            .await
+            .expect("load tls");
+    axum_server::bind_rustls(config.listen, tls_config)
+        .serve(app.into_make_service())
         .await
-        .expect("bind");
-    axum::serve(listener, app).await.expect("serve");
+        .expect("serve");
 }
 
 async fn ws_upgrade(
@@ -336,9 +344,7 @@ async fn ws_session(socket: WebSocket, state: AppState) {
 }
 
 async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
-    let exec = RealExecutor {
-        log_tx: state.log_tx.clone(),
-    };
+    let exec = RealExecutor;
     match req.command {
         Rpc::Ping => RpcResponse {
             id: req.id,
@@ -360,9 +366,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         }
         Rpc::DeployStack(spec) => {
             let _guard = state.op_lock.lock().await; // AR12
-            let sink = BroadcastSink {
+            let broadcast = BroadcastSink {
                 log_tx: state.log_tx.clone(),
             };
+            // AR14: tee every event so a failure can be bundled.
+            let sink = homelab_core::incidents::RecordingSink::new(&broadcast);
             let journal = FileJournal {
                 path: format!("{}/journal.jsonl", state.config.state_dir),
             };
@@ -390,18 +398,118 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     ),
                 }
             } else {
-                let err = report.error.unwrap_or(homelab_core::error::OperatorError {
-                    what: "deploy failed".into(),
-                    why: "unknown".into(),
-                    remedy: "see transcript".into(),
-                });
+                let err = report
+                    .error
+                    .clone()
+                    .unwrap_or(homelab_core::error::OperatorError {
+                        what: "deploy failed".into(),
+                        why: "unknown".into(),
+                        remedy: "see transcript".into(),
+                    });
                 error!("deploy failed: {} — {}", err.what, err.why);
+                // AR14: capture the incident bundle.
+                let versions =
+                    format!("host={}\nproto={}\n", VERSION, homelab_proto::PROTO_VERSION);
+                let bundle = homelab_core::incidents::write_bundle(
+                    &exec,
+                    &state.config.state_dir,
+                    now,
+                    &report,
+                    &sink.events(),
+                    &versions,
+                )
+                .await;
+                let bundle_note = match bundle {
+                    Ok(dir) => format!(" :: incident bundle {}", dir),
+                    Err(e) => format!(" :: (bundle write failed: {})", e),
+                };
                 RpcResponse {
                     id: req.id,
                     ok: false,
-                    message: format!("{} :: {} :: remedy: {}", err.what, err.why, err.remedy),
+                    message: format!(
+                        "{} :: {} :: remedy: {}{}",
+                        err.what, err.why, err.remedy, bundle_note
+                    ),
                 }
             }
         }
+        Rpc::Doctor => {
+            let probes = gather_probes(&exec, &state.config.state_dir).await;
+            let checks = homelab_core::doctor::diagnose(&probes);
+            let overall = homelab_core::doctor::overall(&checks);
+            let mut msg = format!("doctor: {:?}\n", overall);
+            for c in &checks {
+                msg.push_str(&format!("  [{:?}] {} — {}\n", c.health, c.name, c.detail));
+                if let Some(r) = &c.remedy {
+                    msg.push_str(&format!("        ↳ {}\n", r));
+                }
+            }
+            RpcResponse {
+                id: req.id,
+                ok: overall != homelab_core::doctor::Health::Fail,
+                message: msg,
+            }
+        }
+        Rpc::Incidents => {
+            let dir = format!("{}/incidents", state.config.state_dir);
+            let list = std::fs::read_dir(&dir)
+                .map(|rd| {
+                    let mut names: Vec<String> = rd
+                        .flatten()
+                        .map(|e| e.file_name().to_string_lossy().to_string())
+                        .collect();
+                    names.sort();
+                    names
+                })
+                .unwrap_or_default();
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: if list.is_empty() {
+                    "no incidents recorded".into()
+                } else {
+                    format!("incidents:\n  {}", list.join("\n  "))
+                },
+            }
+        }
+    }
+}
+
+/// Gather doctor probes (F6). I/O stays here; the verdict logic is in core.
+async fn gather_probes(exec: &RealExecutor, state_dir: &str) -> homelab_core::doctor::Probes {
+    use homelab_core::doctor::Probes;
+    let state_raw = exec.read_file(&format!("{}/state.json", state_dir)).await;
+    let state_parses = state_raw
+        .as_ref()
+        .map(|s| serde_json::from_str::<serde_json::Value>(s).is_ok())
+        .unwrap_or(true);
+    let interrupted = std::fs::read_to_string(format!("{}/journal.jsonl", state_dir))
+        .map(|j| {
+            homelab_core::incidents::interrupted_ops(&j)
+                .into_iter()
+                .map(|(op, _)| op)
+                .collect()
+        })
+        .unwrap_or_default();
+    // Host disk free % via df on the state dir.
+    let disk = exec
+        .run(&Cmd::new("df", &["--output=pcent", state_dir], 20))
+        .await
+        .ok()
+        .and_then(|o| {
+            o.stdout
+                .lines()
+                .nth(1)
+                .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
+                .map(|used| 100u64.saturating_sub(used))
+        });
+    Probes {
+        host_disk_free_pct: disk,
+        state_parses,
+        managed_stacks: Vec::new(), // populated once state carries backup ages
+        offsite_configured: false,
+        offsite_token_valid: false,
+        mirror_behind: None,
+        interrupted_ops: interrupted,
     }
 }

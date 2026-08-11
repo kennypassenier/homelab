@@ -21,6 +21,10 @@ pub enum Command {
     Ping,
     Status,
     DeployStack(Box<DeploySpec>),
+    /// F6: self-diagnosis checks.
+    Doctor,
+    /// AR14: list captured incident bundles.
+    Incidents,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +58,63 @@ impl From<homelab_core::sink::Level> for LogLevel {
             L::Info => LogLevel::Info,
             L::Warn => LogLevel::Warn,
             L::Error => LogLevel::Error,
+        }
+    }
+}
+
+// ── Envelope (AR5) ──────────────────────────────────────────────────────────
+// Every frame on the wire is wrapped: `{v, topic, id, payload}`. The version
+// field lets a freshly self-updated HOST tell an older CLIENT to upgrade
+// instead of failing on an unknown field.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Topic {
+    Rpc,
+    Log,
+    Telemetry,
+    Transfer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Envelope {
+    pub v: u32,
+    pub topic: Topic,
+    #[serde(default)]
+    pub id: u64,
+    pub payload: serde_json::Value,
+}
+
+impl Envelope {
+    pub fn wrap_server(msg: &ServerMsg) -> Self {
+        let topic = match msg {
+            ServerMsg::Log { .. } => Topic::Log,
+            ServerMsg::Transfer { .. } => Topic::Transfer,
+            _ => Topic::Rpc,
+        };
+        Self {
+            v: PROTO_VERSION,
+            topic,
+            id: 0,
+            payload: serde_json::to_value(msg).expect("serializable"),
+        }
+    }
+
+    pub fn wrap_request(req: &RpcRequest) -> Self {
+        Self {
+            v: PROTO_VERSION,
+            topic: Topic::Rpc,
+            id: req.id,
+            payload: serde_json::to_value(req).expect("serializable"),
+        }
+    }
+
+    /// Err(version) when the peer speaks a different protocol version.
+    pub fn check_version(&self) -> Result<(), u32> {
+        if self.v == PROTO_VERSION {
+            Ok(())
+        } else {
+            Err(self.v)
         }
     }
 }

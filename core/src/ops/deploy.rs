@@ -31,7 +31,10 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         format!("[sync][run ] deploy {} (vmid {})", m.stack_name, m.vmid),
     );
 
-    let exec = ctx.exec;
+    // Every command flows through the tracing decorator, so transcripts are
+    // both streamed (F2) and captured for incident replay (AR16).
+    let texec = crate::executor::TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn crate::executor::Executor = &texec;
     let vm = m.vmid.to_string();
     let mut exists = false;
     let mut created = false;

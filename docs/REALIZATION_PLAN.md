@@ -58,16 +58,21 @@ foundations *with their FEATURES.md test scenarios implemented*. Hard CI
 end-to-end against MockExecutor producing the exact golden command sequence;
 tagging a commit produces a GitHub Release with Debian-compatible binaries.
 
-### M1 · The line — protocol, TLS, validation, failure model *(no infra)*
+### M1 · The line — protocol, TLS, validation, failure model *(no infra)* ✅ core done
 AR5 envelope in proto. A4 TLS (rcgen self-signed + client pinning) and
 required token. D10 validator wired into both sides. B5 journal + AR13
-interrupt recovery. AR14 incident bundles. AR16 frame capture + replay export.
-CLI (`homelab ping|status|deploy|plan|doctor`) on the new protocol; F5 health;
-F6 doctor (first checks).
+interrupt recovery. AR14 incident bundles. AR16 replay export. CLI
+(`homelab ping|status|deploy|plan|doctor|incidents`) on the new protocol;
+F5 health; F6 doctor (first checks).
 **Done when**: in-process integration tests cover happy path + every failure
 category (auth fail, pin mismatch, mid-operation disconnect, interrupted-op
 recovery); a forced failure produces a complete incident bundle whose
 transcript replays into a MockExecutor test.
+**Status**: core + host + client built; 15 tests green (8 M0 + 7 M1:
+AR14 bundle-with-replay, AR16 script extraction, AR13 interrupt detection,
+F6 doctor matrix). A4 TLS end-to-end (pin mismatch refusal) verifies live
+in M3 against the real host. `TracingExecutor` decorator makes command
+transcripts flow through the sink → captured in bundles, replayable.
 
 ### M2 · The face — TUI rebuilt for real *(no infra)*
 Elm-style client (AR6) with Backend trait; port the approved mockup visuals

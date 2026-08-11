@@ -6,8 +6,10 @@
 //! [`executor::Executor`] trait (AR2), so every path in this crate is fully
 //! testable with [`executor::MockExecutor`] — no Proxmox required.
 
+pub mod doctor;
 pub mod error;
 pub mod executor;
+pub mod incidents;
 pub mod manifest;
 pub mod ops;
 pub mod runner;

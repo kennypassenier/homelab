@@ -72,6 +72,51 @@ pub trait Executor: Send + Sync {
     async fn sleep_ms(&self, ms: u64);
 }
 
+/// Decorator that emits every command as a `[run ]` transcript line through a
+/// sink, so transcripts are streamed live (F2) AND captured for incident
+/// replay (AR16) from one place. Wrap the real/mock executor with this in any
+/// path that should produce a transcript.
+pub struct TracingExecutor<'a> {
+    inner: &'a dyn Executor,
+    sink: &'a dyn crate::sink::Sink,
+}
+
+impl<'a> TracingExecutor<'a> {
+    pub fn new(inner: &'a dyn Executor, sink: &'a dyn crate::sink::Sink) -> Self {
+        Self { inner, sink }
+    }
+    fn line(&self, msg: String) {
+        self.sink.emit(crate::sink::PipelineEvent::Line {
+            level: crate::sink::Level::Debug,
+            source: "HOST".into(),
+            msg,
+        });
+    }
+}
+
+#[async_trait]
+impl Executor for TracingExecutor<'_> {
+    async fn run(&self, cmd: &Cmd) -> Result<CmdOutput, CoreError> {
+        self.line(format!("[run ] {}", cmd.rendered()));
+        let out = self.inner.run(cmd).await?;
+        for l in out.stdout.lines().chain(out.stderr.lines()).take(20) {
+            if !l.trim().is_empty() {
+                self.line(format!("  {}", l));
+            }
+        }
+        Ok(out)
+    }
+    async fn write_file(&self, path: &str, content: &str, mode: u32) -> Result<(), CoreError> {
+        self.inner.write_file(path, content, mode).await
+    }
+    async fn read_file(&self, path: &str) -> Result<String, CoreError> {
+        self.inner.read_file(path).await
+    }
+    async fn sleep_ms(&self, ms: u64) {
+        self.inner.sleep_ms(ms).await
+    }
+}
+
 /// Convenience: run and require success.
 pub async fn run_ok(exec: &dyn Executor, cmd: &Cmd) -> Result<CmdOutput, CoreError> {
     let out = exec.run(cmd).await?;

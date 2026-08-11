@@ -11,15 +11,19 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::Connector;
 
 use homelab_proto::{
     Command, DeploySpec, FileBlob, GatewayRoute, LogLevel, RpcRequest, ServerMsg, StackManifest,
 };
+
+mod tls;
 
 const C_RESET: &str = "\x1b[0m";
 const C_CYAN: &str = "\x1b[36m";
@@ -66,11 +70,36 @@ async fn main() {
     match cmd {
         "ping" => rpc(&host, &token, Command::Ping).await,
         "status" => rpc(&host, &token, Command::Status).await,
+        "doctor" => rpc(&host, &token, Command::Doctor).await,
+        "incidents" => rpc(&host, &token, Command::Incidents).await,
+        "plan" => {
+            // D6/D10: validate locally and show what would be sent — no network.
+            let dir = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab plan stacks/<name>"));
+            let spec = build_spec(Path::new(dir));
+            match homelab_core::manifest::validate(&spec) {
+                Ok(()) => println!(
+                    "{}✓ valid{} — {} would deploy vmid {}: {} file(s), {} env(s)",
+                    C_GREEN,
+                    C_RESET,
+                    spec.manifest.stack_name,
+                    spec.manifest.vmid,
+                    spec.files.len(),
+                    spec.env.len()
+                ),
+                Err(e) => die(&format!("validation failed: {}", e)),
+            }
+        }
         "deploy" => {
             let dir = args
                 .get(2)
                 .unwrap_or_else(|| die("usage: homelab deploy stacks/<name>"));
             let spec = build_spec(Path::new(dir));
+            // D10: fail fast client-side before opening a connection.
+            if let Err(e) = homelab_core::manifest::validate(&spec) {
+                die(&format!("validation failed: {}", e));
+            }
             println!(
                 "{}▶ deploy {} :: vmid {} :: {} file(s), {} env(s){}",
                 C_CYAN,
@@ -84,11 +113,34 @@ async fn main() {
         }
         _ => {
             println!("homelab v{} — usage:", env!("CARGO_PKG_VERSION"));
-            println!("  homelab ping|status");
+            println!("  homelab ping|status|doctor|incidents");
+            println!("  homelab plan stacks/<name>     validate locally (no network)");
             println!("  homelab deploy stacks/<name>");
             println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");
+            println!("cert pin: ~/.config/homelab/pin (auto on first connect)");
         }
     }
+}
+
+/// Path where the pinned TLS fingerprint is stored (A4, TOFU).
+fn pin_path() -> PathBuf {
+    let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    PathBuf::from(base).join(".config/homelab/pin")
+}
+
+fn load_pin() -> Option<String> {
+    std::fs::read_to_string(pin_path())
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn save_pin(fp: &str) {
+    let path = pin_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, fp);
 }
 
 fn build_spec(dir: &Path) -> DeploySpec {
@@ -169,7 +221,7 @@ fn collect(root: &Path, dir: &Path, files: &mut Vec<FileBlob>, env: &mut BTreeMa
 }
 
 async fn rpc(host: &str, token: &str, command: Command) {
-    let url = format!("ws://{}/api/ws", host);
+    let url = format!("wss://{}/api/ws", host);
     let mut request = url
         .clone()
         .into_client_request()
@@ -179,9 +231,34 @@ async fn rpc(host: &str, token: &str, command: Command) {
         format!("Bearer {}", token).parse().unwrap(),
     );
 
-    let (ws, _) = tokio_tungstenite::connect_async(request)
-        .await
-        .unwrap_or_else(|e| die(&format!("connect {}: {}", url, e)));
+    // A4: pin the host certificate (TOFU on first connect).
+    let pin = load_pin();
+    let first_connect = pin.is_none();
+    let verifier = tls::PinnedVerifier::new(pin);
+    let tls_config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(verifier.clone())
+        .with_no_client_auth();
+    let connector = Connector::Rustls(Arc::new(tls_config));
+
+    let (ws, _) =
+        tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
+            .await
+            .unwrap_or_else(|e| die(&format!("connect {}: {}", url, e)));
+
+    if first_connect {
+        if let Some(fp) = verifier.observed() {
+            save_pin(&fp);
+            eprintln!(
+                "{}● pinned host certificate SHA256:{}{}",
+                C_YELLOW, fp, C_RESET
+            );
+            eprintln!(
+                "{}  verify this matches the fingerprint the host printed at boot{}",
+                C_DIM, C_RESET
+            );
+        }
+    }
     let (mut tx, mut rx) = ws.split();
 
     let req = RpcRequest { id: 1, command };

@@ -1,0 +1,22 @@
+services:
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:latest
+    container_name: mealie
+    restart: unless-stopped
+    environment:
+      - ALLOW_SIGNUP=false
+      - TZ=Europe/Brussels
+    volumes:
+      - /appdata/__STACK__/mealie-config:/app/data
+    ports:
+      - "9000:9000"
+    labels:
+      - com.homelab.backup.pause=true
+      - com.homelab.update.policy=manual
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

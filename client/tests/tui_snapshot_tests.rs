@@ -317,12 +317,16 @@ fn swap_formula_matches_legacy_tiers() {
 
 #[test]
 fn scaffold_has_no_watchtower_and_manual_update_policy() {
-    use homelab_client::scaffold::{scaffold_stack, StackParams};
+    use homelab_client::scaffold::{scaffold_stack, synthetic_presets, StackParams};
     let tmp = std::env::temp_dir().join(format!("homelab-nowatch-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
+    // Synthetic preset (no presets dir) -> generic compose generation path.
+    let presets = synthetic_presets();
+    let synth = presets.iter().find(|p| p.name == "syncthing").unwrap();
     scaffold_stack(
         &tmp,
+        &tmp.join("no-presets-here"),
         &StackParams {
             name: "x",
             vmid: 121,
@@ -330,11 +334,11 @@ fn scaffold_has_no_watchtower_and_manual_update_policy() {
             cores: 2,
             disk_gb: 8,
             swap_mb: None,
-            app: Some(("app", "img:latest")),
+            preset: Some(synth),
         },
     )
     .unwrap();
-    let compose = std::fs::read_to_string(tmp.join("x/app/docker-compose.yml")).unwrap();
+    let compose = std::fs::read_to_string(tmp.join("x/syncthing/docker-compose.yml")).unwrap();
     assert!(
         !compose.contains("watchtower"),
         "watchtower must be gone (D9)"
@@ -352,8 +356,20 @@ fn scaffold_writes_a_deployable_stack() {
     let tmp = std::env::temp_dir().join(format!("homelab-scaffold-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
+    // Real data-driven path: load the repo's presets/ directory.
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = homelab_client::scaffold::scan_presets(&presets_dir);
+    let syncthing = presets
+        .iter()
+        .find(|p| p.name == "syncthing")
+        .expect("syncthing preset on disk");
+    assert!(
+        syncthing.dir.is_some(),
+        "must load from disk, not synthetic"
+    );
     let s = scaffold_stack(
         &tmp,
+        &presets_dir,
         &homelab_client::scaffold::StackParams {
             name: "demo",
             vmid: 120,
@@ -361,7 +377,7 @@ fn scaffold_writes_a_deployable_stack() {
             cores: 2,
             disk_gb: 8,
             swap_mb: None,
-            app: Some(("syncthing", "syncthing/syncthing:latest")),
+            preset: Some(syncthing),
         },
     )
     .expect("scaffold");
@@ -444,4 +460,73 @@ fn settings_tab_renders_config_and_edits() {
 fn settings_azerty_fifth_tab_key() {
     assert_eq!(azerty_tab_index('('), Some(4));
     assert_eq!(azerty_tab_index('5'), Some(4));
+}
+
+#[test]
+fn preset_templates_substitute_and_apps_list_matches_dirs() {
+    // The scaffolded stack from a disk preset must: substitute __STACK__/
+    // __HOSTNAME__ everywhere, list the APP dir names in the manifest (a
+    // stack named differently from its app must still start the right
+    // /opt/<stack>/<app> dirs), and inject the _core promtail from disk.
+    use homelab_client::scaffold::{scaffold_stack, scan_presets, StackParams};
+    let tmp = std::env::temp_dir().join(format!("homelab-presetsub-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = scan_presets(&presets_dir);
+    let syncthing = presets.iter().find(|p| p.name == "syncthing").unwrap();
+    // Stack name deliberately different from the app name.
+    scaffold_stack(
+        &tmp,
+        &presets_dir,
+        &StackParams {
+            name: "vault-sync",
+            vmid: 130,
+            ram_mb: 512,
+            cores: 1,
+            disk_gb: 4,
+            swap_mb: None,
+            preset: Some(syncthing),
+        },
+    )
+    .unwrap();
+    let manifest = std::fs::read_to_string(tmp.join("vault-sync/lxc-compose.yml")).unwrap();
+    // Apps list uses APP dir names, not the stack name (the old latent bug).
+    assert!(manifest.contains("- syncthing"));
+    assert!(manifest.contains("- promtail"));
+    assert!(!manifest.contains("- vault-sync"));
+    let compose =
+        std::fs::read_to_string(tmp.join("vault-sync/syncthing/docker-compose.yml")).unwrap();
+    assert!(compose.contains("vault-sync_net"), "network substituted");
+    assert!(compose.contains("hostname: 130-app-vault-sync"));
+    assert!(!compose.contains("__STACK__"), "no leftover placeholders");
+    let ptcfg =
+        std::fs::read_to_string(tmp.join("vault-sync/promtail/promtail-config.yml")).unwrap();
+    assert!(ptcfg.contains("stack: vault-sync"));
+    assert!(ptcfg.contains("host: 130-app-vault-sync"));
+    // __path__ is a real promtail key, NOT a placeholder — must survive.
+    assert!(ptcfg.contains("__path__"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn wizard_preset_step_lists_disk_presets() {
+    let mut m = ready_model();
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    m.presets = homelab_client::scaffold::scan_presets(&presets_dir);
+    assert!(m.presets.len() >= 6);
+    assert_eq!(
+        m.presets.last().unwrap().name,
+        "custom",
+        "custom sorts last"
+    );
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)),
+    );
+    let out = render(&m);
+    assert!(out.contains("syncthing"));
+    assert!(out.contains("jellyfin"));
+    assert!(out.contains("Media server"));
 }

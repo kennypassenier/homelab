@@ -151,7 +151,8 @@ fn draw_plan(f: &mut Frame, model: &Model, plan: &crate::tui::model::Plan) {
 }
 
 fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
-    use crate::tui::model::{WizStep, PRESETS};
+    use crate::tui::model::WizStep;
+    let presets = &model.presets;
     let area = f.area();
     let w = 64u16.min(area.width - 4);
     let h = 18u16.min(area.height - 4);
@@ -211,7 +212,7 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
 
     match wiz.step {
         WizStep::Preset => {
-            let lines: Vec<Line> = PRESETS
+            let lines: Vec<Line> = presets
                 .iter()
                 .enumerate()
                 .map(|(i, p)| {
@@ -227,7 +228,7 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
                     Line::from(vec![
                         Span::styled(if sel { "▶ " } else { "  " }, style),
                         Span::styled(format!("{:<14}", p.name), style),
-                        Span::styled(p.desc, THEME.muted_style()),
+                        Span::styled(p.meta.description.clone(), THEME.muted_style()),
                     ])
                 })
                 .collect();
@@ -356,9 +357,13 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
             f.render_widget(Paragraph::new(lines), rows[1]);
         }
         WizStep::Review => {
-            let p = &PRESETS[wiz.preset_idx];
+            let p = &presets[wiz.preset_idx];
             let vmid = wiz.vmid;
-            let app = p.app.map(|(a, _)| a).unwrap_or("(none)");
+            let app = if p.apps.is_empty() {
+                "(none)".to_string()
+            } else {
+                p.apps.join(", ")
+            };
             let defaults = crate::scaffold::StackDefaults::default();
             let kv = |k: &str, v: String| -> Line<'static> {
                 Line::from(vec![

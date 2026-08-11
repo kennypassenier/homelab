@@ -43,7 +43,8 @@ async fn main() {
     let offline = args.iter().any(|a| a == "--offline" || a == "--demo");
     // Commands that never touch the network need no token: help, offline TUI,
     // and `plan` (local validation only, D10).
-    let needs_token = !matches!(cmd, "help" | "plan" | "runbook") && !(cmd == "tui" && offline);
+    let needs_token =
+        !matches!(cmd, "help" | "plan" | "runbook" | "presets") && !(cmd == "tui" && offline);
     if token.is_empty() && needs_token {
         die("HOMELAB_TOKEN is not set");
     }
@@ -66,6 +67,28 @@ async fn main() {
         "ping" => rpc(&host, &token, Command::Ping).await,
         "patch" => rpc(&host, &token, Command::PatchFleet).await,
         "config" => rpc(&host, &token, Command::GetConfig).await,
+        "presets" => {
+            // G2: list the data-driven preset catalog (local, no network).
+            for pr in homelab_client::scaffold::scan_presets(Path::new("presets")) {
+                let src = if pr.dir.is_some() {
+                    ""
+                } else {
+                    " (built-in fallback)"
+                };
+                println!(
+                    "{:<14} {:>5} MiB  {}  [{}]{}",
+                    pr.name,
+                    pr.meta.ram_mb,
+                    pr.meta.description,
+                    if pr.apps.is_empty() {
+                        "no apps".to_string()
+                    } else {
+                        pr.apps.join(", ")
+                    },
+                    src
+                );
+            }
+        }
         "status" => rpc(&host, &token, Command::Status).await,
         "doctor" => rpc(&host, &token, Command::Doctor).await,
         "incidents" => rpc(&host, &token, Command::Incidents).await,
@@ -233,6 +256,7 @@ async fn main() {
             );
             println!("  homelab destroy stacks/<name>       gated destroy (C2)");
             println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
+            println!("  homelab presets                     list the preset catalog (local)");
             println!("  homelab self-update <binary>        replace HOST binary w/ rollback (H5)");
             println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");
             println!("cert pin: ~/.config/homelab/pin (auto on first connect)");

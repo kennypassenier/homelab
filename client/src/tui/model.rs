@@ -91,53 +91,6 @@ pub struct Plan {
     pub spec: Box<homelab_proto::DeploySpec>,
 }
 
-/// G2 new-stack wizard.
-pub struct Preset {
-    pub name: &'static str,
-    pub desc: &'static str,
-    pub app: Option<(&'static str, &'static str)>, // (app, image)
-    pub ram: u32,
-}
-
-pub const PRESETS: &[Preset] = &[
-    Preset {
-        name: "syncthing",
-        desc: "Obsidian vault peer",
-        app: Some(("syncthing", "syncthing/syncthing:latest")),
-        ram: 512,
-    },
-    Preset {
-        name: "jellyfin",
-        desc: "Media server (VAAPI)",
-        app: Some(("jellyfin", "jellyfin/jellyfin:latest")),
-        ram: 4096,
-    },
-    Preset {
-        name: "mealie",
-        desc: "Recipes + meal planning",
-        app: Some(("mealie", "ghcr.io/mealie-recipes/mealie:latest")),
-        ram: 512,
-    },
-    Preset {
-        name: "actual",
-        desc: "Envelope budgeting",
-        app: Some(("actual", "actualbudget/actual-server:latest")),
-        ram: 512,
-    },
-    Preset {
-        name: "uptime-kuma",
-        desc: "Uptime monitoring",
-        app: Some(("uptime-kuma", "louislam/uptime-kuma:1")),
-        ram: 512,
-    },
-    Preset {
-        name: "custom",
-        desc: "Empty stack — add apps later",
-        app: None,
-        ram: 1024,
-    },
-];
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WizStep {
     Preset,
@@ -217,6 +170,9 @@ pub struct Model {
     pub focus: Option<Focus>,
     pub plan: Option<Plan>,
     pub wizard: Option<Wizard>,
+    /// G2: presets loaded from the presets/ directory (data, not code);
+    /// falls back to the synthetic built-ins for tests and bare checkouts.
+    pub presets: Vec<crate::scaffold::LoadedPreset>,
 
     /// G8 settings tab: last received host config, edit cursor, dirty flag,
     /// and the webhook text-edit buffer (None = not editing).
@@ -265,6 +221,7 @@ impl Model {
             focus: None,
             plan: None,
             wizard: None,
+            presets: crate::scaffold::synthetic_presets(),
             settings: None,
             settings_row: 0,
             settings_dirty: false,
@@ -560,14 +517,15 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             KeyCode::Char('p') => open_plan(model),
             KeyCode::Char('n') => {
                 let vmid = next_free_vmid(model);
+                let first_ram = model.presets.first().map(|p| p.meta.ram_mb).unwrap_or(1024);
                 model.wizard = Some(Wizard {
                     step: WizStep::Preset,
                     preset_idx: 0,
                     name: String::new(),
-                    ram: PRESETS[0].ram,
+                    ram: first_ram,
                     cores: 2,
                     disk: 8,
-                    swap: crate::scaffold::StackDefaults::default().swap_for(PRESETS[0].ram),
+                    swap: crate::scaffold::StackDefaults::default().swap_for(first_ram),
                     swap_touched: false,
                     vmid,
                     res_field: ResField::Ram,
@@ -1003,17 +961,19 @@ pub fn next_free_vmid(model: &Model) -> u16 {
 
 fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
     use crossterm::event::KeyCode;
+    let presets = model.presets.clone();
+    let n_presets = presets.len().max(1);
     let Some(w) = model.wizard.as_mut() else {
         return;
     };
     match w.step {
         WizStep::Preset => match key.code {
             KeyCode::Esc => model.wizard = None,
-            KeyCode::Up => w.preset_idx = (w.preset_idx + PRESETS.len() - 1) % PRESETS.len(),
-            KeyCode::Down => w.preset_idx = (w.preset_idx + 1) % PRESETS.len(),
+            KeyCode::Up => w.preset_idx = (w.preset_idx + n_presets - 1) % n_presets,
+            KeyCode::Down => w.preset_idx = (w.preset_idx + 1) % n_presets,
             KeyCode::Enter => {
                 if w.name.is_empty() {
-                    w.name = PRESETS[w.preset_idx].name.to_string();
+                    w.name = presets[w.preset_idx].name.clone();
                 }
                 w.step = WizStep::Name;
             }
@@ -1028,7 +988,14 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 w.name.pop();
             }
             KeyCode::Enter if !w.name.is_empty() => {
-                w.ram = PRESETS[w.preset_idx].ram;
+                let pr = &presets[w.preset_idx];
+                w.ram = pr.meta.ram_mb;
+                if let Some(c) = pr.meta.cores {
+                    w.cores = c;
+                }
+                if let Some(dg) = pr.meta.disk_gb {
+                    w.disk = dg;
+                }
                 w.step = WizStep::Resources;
             }
             _ => {}
@@ -1115,12 +1082,12 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         WizStep::Review => match key.code {
             KeyCode::Esc => w.step = WizStep::Resources,
             KeyCode::Enter => {
-                let preset = &PRESETS[w.preset_idx];
+                let preset = &presets[w.preset_idx];
                 let name = w.name.clone();
                 let (ram, cores, disk, swap, vmid) = (w.ram, w.cores, w.disk, w.swap, w.vmid);
-                let app = preset.app;
                 match crate::scaffold::scaffold_stack(
                     std::path::Path::new("stacks"),
+                    std::path::Path::new("presets"),
                     &crate::scaffold::StackParams {
                         name: &name,
                         vmid,
@@ -1128,7 +1095,7 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                         cores,
                         disk_gb: disk,
                         swap_mb: Some(swap),
-                        app,
+                        preset: Some(preset),
                     },
                 ) {
                     Ok(s) => {

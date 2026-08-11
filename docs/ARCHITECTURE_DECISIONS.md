@@ -7,18 +7,22 @@ review session (2026-08-10) and the vault decision note.
 
 | ID | Decision | Status |
 |---|---|---|
-| AR1 | Crate layout | **Pending** (deep-dive) |
+| AR1 | Crates: `proto` (wire types) + `core` (all domain logic, zero I/O) + `host` + `client`; validator lives in core, imported by both sides (D10) | **Decided** |
 | AR2 | All system interaction through an `Executor` trait; `MockExecutor` for tests | **Decided** |
 | AR3 | Operations are step pipelines under one runner (transcript, gates, journal, fail-closed, byte counters for free) | **Decided** |
 | AR4 | State = typed JSON files, `schema_version`, atomic tmp+rename writes | **Decided** |
-| AR5 | Protocol | **Pending** (deep-dive) |
-| AR6 | TUI architecture | **Pending** (deep-dive) |
+| AR5 | WS + JSON envelope `{v, topic, id, payload}`; topics rpc/log/telemetry/transfer; version field enables graceful client/host skew after self-updates | **Decided** |
+| AR6 | TUI = Elm-style (Model, Msg enum, pure `update`, side-effect-free `view`) over a `Backend` trait; fx engine stays a separate stateless layer | **Decided** |
 | AR7 | `thiserror` typed errors per layer; boundary `OperatorError` always carries what/why/what-you-can-do | **Decided** |
 | AR8 | Templates via minijinja; defaults embedded in the binary, user override dir | **Decided** |
 | AR9 | Five test layers, hard CI gates (fmt, clippy -D warnings, tests, `compose config` on templates, D10 divergence test) — red blocks merge | **Decided** |
-| AR10 | Release engineering | **Pending** (deep-dive) |
+| AR10 | Tag → GH Actions builds Debian-compatible binaries + sha256 in a Release; H5 self-update consumes with preflight + rollback watchdog; local build+scp stays documented as emergency path | **Decided** |
 | AR11 | Program config = TOML (+ env overrides); stack manifests stay YAML (content, not config) | **Decided** |
 | AR12 | Mutating operations strictly serial behind one op-lock; reads/streams parallel; TUI shows a queue | **Decided** |
+| AR13 | Failure model: crash/interrupt recovery | **Pending** (review) |
+| AR14 | Failure model: incident bundles + bug-to-test pipeline | **Pending** (review) |
+| AR15 | Failure model: structured logging/tracing on HOST | **Pending** (review) |
+| AR16 | Failure model: protocol frame capture + transcript replay | **Pending** (review) |
 
 ## Decided — brief rationale
 

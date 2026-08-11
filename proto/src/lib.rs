@@ -56,6 +56,15 @@ pub struct HostView {
     pub ram_pct: u64,
     pub disk_pct: u64,
     pub tls_fingerprint: String,
+    /// C6 capacity: total physical vs committed by managed stacks.
+    #[serde(default)]
+    pub ram_total_mb: u32,
+    #[serde(default)]
+    pub ram_committed_mb: u32,
+    #[serde(default)]
+    pub cores_total: u16,
+    #[serde(default)]
+    pub cores_committed: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

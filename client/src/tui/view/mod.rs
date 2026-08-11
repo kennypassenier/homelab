@@ -77,12 +77,72 @@ pub fn draw(f: &mut Frame, model: &Model) {
     if let Some(fc) = &model.focus {
         focus::draw(f, model, fc);
     }
+    if let Some(plan) = &model.plan {
+        draw_plan(f, model, plan);
+    }
     if model.help_open {
         draw_help(f);
     }
     if model.palette_open {
         draw_palette(f, model);
     }
+}
+
+fn draw_plan(f: &mut Frame, model: &Model, plan: &crate::tui::model::Plan) {
+    let area = f.area();
+    let w = 72u16.min(area.width - 4);
+    let h = (plan.lines.len() as u16 + 5).min(area.height - 4);
+    let rect = Rect {
+        x: (area.width - w) / 2,
+        y: area.height / 6,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, rect);
+    let title = fx::glitch(
+        &format!("CHANGE_PLAN :: {}", plan.stack),
+        0xB1A5,
+        model.tick,
+        model.fx,
+    )
+    .unwrap_or_else(|| format!("CHANGE_PLAN :: {}", plan.stack));
+    let block = Block::bordered()
+        .border_type(BorderType::Double)
+        .border_style(THEME.border_modal())
+        .title(Line::from(Span::styled(
+            format!(" >> {} << ", title),
+            Style::new().fg(THEME.magenta).add_modifier(Modifier::BOLD),
+        )))
+        .style(Style::new().bg(THEME.elevated).fg(THEME.text));
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let rows = Layout::vertical([Constraint::Min(2), Constraint::Length(1)]).split(inner);
+    let lines: Vec<Line> = plan
+        .lines
+        .iter()
+        .map(|(sign, text)| {
+            let (prefix, style) = match sign {
+                '+' => ("+ ", THEME.ok()),
+                '-' => ("- ", THEME.err()),
+                '~' => ("~ ", THEME.warn()),
+                _ => ("  ", Style::new().fg(THEME.text)),
+            };
+            Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(text.clone(), style),
+            ])
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), rows[0]);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("[ENTER]", THEME.hint()),
+            Span::styled(" execute deploy   ", THEME.muted_style()),
+            Span::styled("[ESC]", THEME.hint()),
+            Span::styled(" cancel", THEME.muted_style()),
+        ])),
+        rows[1],
+    );
 }
 
 fn draw_tab_bar(f: &mut Frame, model: &Model, area: Rect) {
@@ -176,10 +236,10 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
         Tab::Dashboard | Tab::Stacks => &[
             ("1-4/TAB", "tabs"),
             ("UP/DOWN", "select"),
+            ("P", "plan"),
             ("SHIFT+D", "deploy"),
             ("R", "refresh"),
             ("CTRL+K", "palette"),
-            ("F2", "fx"),
             ("H", "help"),
             ("Q", "quit"),
         ],

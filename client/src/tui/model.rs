@@ -75,6 +75,14 @@ pub struct Focus {
     pub result: String,
 }
 
+/// D6 change-plan preview: what a deploy would do, shown before it runs.
+/// ENTER executes, ESC cancels.
+pub struct Plan {
+    pub stack: String,
+    pub lines: Vec<(char, String)>, // sign +/-/~/space, text
+    pub spec: Box<homelab_proto::DeploySpec>,
+}
+
 pub struct Model {
     pub screen: Screen,
     pub tab: Tab,
@@ -102,6 +110,7 @@ pub struct Model {
     /// Deployable stack dirs found locally (name, path).
     pub local_stacks: Vec<(String, std::path::PathBuf)>,
     pub focus: Option<Focus>,
+    pub plan: Option<Plan>,
 
     pub should_quit: bool,
     /// Commands the update fn wants sent to the backend this cycle.
@@ -141,6 +150,7 @@ impl Model {
             doctor_text: Vec::new(),
             local_stacks: Vec::new(),
             focus: None,
+            plan: None,
             should_quit: false,
             outbox: Vec::new(),
         }
@@ -321,6 +331,27 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         }
         return;
     }
+    if model.plan.is_some() {
+        match key.code {
+            KeyCode::Esc => model.plan = None,
+            KeyCode::Enter => {
+                // Execute the previewed deploy.
+                if let Some(plan) = model.plan.take() {
+                    model.focus = Some(Focus {
+                        title: format!("DEPLOY {}", plan.stack),
+                        feed: Vec::new(),
+                        scroll: 0,
+                        done: false,
+                        ok: false,
+                        result: String::new(),
+                    });
+                    model.outbox.push(Command::DeployStack(plan.spec));
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
 
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match (key.code, ctrl) {
@@ -389,6 +420,7 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             }
             KeyCode::Char('r') => model.outbox.push(Command::GetState),
             KeyCode::Char('D') => start_deploy(model),
+            KeyCode::Char('p') => open_plan(model),
             _ => {}
         },
         Tab::Logs => match key.code {
@@ -573,4 +605,66 @@ fn start_deploy(model: &mut Model) {
         }
         Err(e) => model.status_line = e,
     }
+}
+
+/// P: build the D6 change-plan for the selected stack and show it. The plan is
+/// computed locally from the spec vs the known runtime state.
+fn open_plan(model: &mut Model) {
+    let Some(fleet) = &model.fleet else {
+        model.status_line = "no fleet state yet — press R first".into();
+        return;
+    };
+    let Some(stack) = fleet.stacks.get(model.selected_stack) else {
+        return;
+    };
+    let known = stack.online; // already provisioned in the fleet
+    let Some((_, dir)) = model.local_stacks.iter().find(|(n, _)| *n == stack.name) else {
+        model.status_line = format!("no local stacks/{} directory to plan from", stack.name);
+        return;
+    };
+    let spec = match crate::spec::build_spec(dir) {
+        Ok(s) => s,
+        Err(e) => {
+            model.status_line = e;
+            return;
+        }
+    };
+    if let Err(e) = homelab_core::manifest::validate(&spec) {
+        model.status_line = format!("validation failed: {}", e);
+        return;
+    }
+    let m = &spec.manifest;
+    let mut lines: Vec<(char, String)> = Vec::new();
+    lines.push((' ', "dry-run — nothing runs until you confirm".into()));
+    lines.push((' ', String::new()));
+    lines.push((' ', "plan:".into()));
+    if known {
+        lines.push((
+            '~',
+            format!("  UPDATE   {} (already provisioned)", m.hostname),
+        ));
+    } else {
+        lines.push(('+', format!("  CREATE   {} (vmid {})", m.hostname, m.vmid)));
+    }
+    for app in &m.apps {
+        lines.push(('~', format!("  SYNC     {}/{}", m.stack_name, app)));
+    }
+    lines.push((' ', String::new()));
+    lines.push((
+        ' ',
+        format!(
+            "payload: {} file(s), {} env(s)",
+            spec.files.len(),
+            spec.env.len()
+        ),
+    ));
+    lines.push((' ', "safety:".into()));
+    lines.push((' ', "  ✓ hostname guard verifies before any change".into()));
+    lines.push((' ', "  ✓ fail-closed: errors disable the stack".into()));
+    lines.push((' ', "  ✓ no-touch list protects 100-107,111,201-203".into()));
+    model.plan = Some(Plan {
+        stack: m.stack_name.clone(),
+        lines,
+        spec: Box::new(spec),
+    });
 }

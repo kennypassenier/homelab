@@ -40,17 +40,23 @@ async fn main() {
 
     let host = std::env::var("HOMELAB_HOST").unwrap_or_else(|_| "10.10.5.250:8443".into());
     let token = std::env::var("HOMELAB_TOKEN").unwrap_or_default();
-    if token.is_empty() && cmd != "help" {
+    let offline = args.iter().any(|a| a == "--offline" || a == "--demo");
+    // The offline demo TUI needs neither host nor token.
+    if token.is_empty() && cmd != "help" && !(cmd == "tui" && offline) {
         die("HOMELAB_TOKEN is not set");
     }
 
     match cmd {
-        // `homelab tui` launches the control deck.
+        // `homelab tui` launches the control deck; `--offline` uses a fake host.
         "tui" => {
-            let backend = Box::new(tui::backend::RemoteBackend {
-                host: host.clone(),
-                token: token.clone(),
-            });
+            let backend: Box<dyn tui::backend::Backend> = if offline {
+                Box::new(tui::backend::DemoBackend)
+            } else {
+                Box::new(tui::backend::RemoteBackend {
+                    host: host.clone(),
+                    token: token.clone(),
+                })
+            };
             if let Err(e) = tui::run(backend).await {
                 die(&format!("tui: {}", e));
             }

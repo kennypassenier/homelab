@@ -12,9 +12,81 @@ use crate::tui::theme::THEME;
 pub fn draw(f: &mut Frame, model: &Model, area: Rect) {
     let cols = Layout::horizontal([Constraint::Min(50), Constraint::Length(34)]).split(area);
     let left = Layout::vertical([Constraint::Length(5), Constraint::Min(6)]).split(cols[0]);
+    let right = Layout::vertical([Constraint::Length(7), Constraint::Min(4)]).split(cols[1]);
     draw_host(f, model, left[0]);
     draw_fleet(f, model, left[1]);
-    draw_transfers(f, model, cols[1]);
+    draw_capacity(f, model, right[0]);
+    draw_transfers(f, model, right[1]);
+}
+
+/// C6 capacity: committed vs available host resources.
+fn draw_capacity(f: &mut Frame, model: &Model, area: Rect) {
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(THEME.border_modal())
+        .title(panel_title("CAPACITY", 0xCA9A, model))
+        .style(THEME.panel_style());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let Some(fleet) = &model.fleet else { return };
+    let h = &fleet.host;
+    if h.ram_total_mb == 0 {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "totals available after migration",
+                Style::new().fg(THEME.faint),
+            ))),
+            inner,
+        );
+        return;
+    }
+    let ram_free = h.ram_total_mb.saturating_sub(h.ram_committed_mb);
+    let ram_pct = (h.ram_committed_mb as f64 / h.ram_total_mb as f64 * 100.0) as u64;
+    let bar = |pct: u64, w: usize| -> String {
+        let filled = (pct as usize * w) / 100;
+        format!(
+            "{}{}",
+            "█".repeat(filled.min(w)),
+            "░".repeat(w.saturating_sub(filled))
+        )
+    };
+    let ram_color = if ram_pct > 90 {
+        THEME.red
+    } else if ram_pct > 75 {
+        THEME.yellow
+    } else {
+        THEME.green
+    };
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("RAM  ", THEME.muted_style()),
+            Span::styled(bar(ram_pct, 16), Style::new().fg(ram_color)),
+            Span::styled(format!(" {}%", ram_pct), THEME.muted_style()),
+        ]),
+        Line::from(Span::styled(
+            format!(
+                "     {} / {} MB committed",
+                h.ram_committed_mb, h.ram_total_mb
+            ),
+            Style::new().fg(THEME.text),
+        )),
+        Line::from(vec![
+            Span::styled("     free ", THEME.muted_style()),
+            Span::styled(
+                format!("{} MB", ram_free),
+                Style::new().fg(ram_color).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("CORE ", THEME.muted_style()),
+            Span::styled(
+                format!("{} / {} committed", h.cores_committed, h.cores_total),
+                Style::new().fg(THEME.text),
+            ),
+        ]),
+    ];
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn stack_color(name: &str) -> Color {

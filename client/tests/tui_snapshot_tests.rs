@@ -16,6 +16,10 @@ fn fleet() -> FleetState {
             ram_pct: 66,
             disk_pct: 42,
             tls_fingerprint: "9F:2A:C4:1E:AB:CD".into(),
+            ram_total_mb: 31744,
+            ram_committed_mb: 21504,
+            cores_total: 12,
+            cores_committed: 11,
         },
         stacks: vec![
             StackView {
@@ -187,6 +191,63 @@ fn deploy_focus_window_renders_feed() {
     assert!(out.contains("FOCUS :: DEPLOY syncthing"));
     assert!(out.contains("provision container"));
     assert!(out.contains("EXECUTING"));
+}
+
+#[test]
+fn plan_modal_previews_changes() {
+    use homelab_client::tui::model::Plan;
+    use homelab_proto::{BootSpec, DeploySpec, LxcSpec, NetworkSpec, ResourceSpec, StackManifest};
+    let mut m = ready_model();
+    let manifest = StackManifest {
+        stack_name: "syncthing".into(),
+        vmid: 110,
+        hostname: "110-app-syncthing".into(),
+        network: NetworkSpec {
+            ip: "10.10.10.10/24".into(),
+            gateway: "10.10.10.1".into(),
+            bridge: "vmbr0".into(),
+            vlan: Some(10),
+        },
+        resources: ResourceSpec {
+            cores: 1,
+            memory_mb: 512,
+            swap_mb: 256,
+            disk_gb: 4,
+            storage: "local-lvm".into(),
+        },
+        lxc: LxcSpec {
+            template: "debian-12".into(),
+            unprivileged: true,
+            features: "nesting=1".into(),
+        },
+        boot: BootSpec {
+            onboot: true,
+            order: Some(50),
+        },
+        storage: vec![],
+        apps: vec!["syncthing".into()],
+    };
+    m.plan = Some(Plan {
+        stack: "syncthing".into(),
+        lines: vec![
+            (' ', "plan:".into()),
+            (
+                '~',
+                "  UPDATE   110-app-syncthing (already provisioned)".into(),
+            ),
+            (' ', "  ✓ no-touch list protects 100-107,111,201-203".into()),
+        ],
+        spec: Box::new(DeploySpec {
+            manifest,
+            files: vec![],
+            env: Default::default(),
+            gateway_route: None,
+        }),
+    });
+    let out = render(&m);
+    assert!(out.contains("CHANGE_PLAN :: syncthing"));
+    assert!(out.contains("UPDATE"));
+    assert!(out.contains("execute deploy"));
 }
 
 #[test]

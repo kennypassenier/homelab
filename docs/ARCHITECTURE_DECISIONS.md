@@ -1,9 +1,11 @@
 # Architecture decisions
 
-Decision log for homelab v2, reviewed by Kenny per decision (IDs AR1..AR12 are
-stable, like the feature IDs). Status: **Decided** or **Pending** (deep-dive
-round in progress). Rationale summaries here; the full discussion lives in the
-review session (2026-08-10) and the vault decision note.
+Decision log for homelab v2, reviewed by Kenny per decision (IDs AR1..AR16 are
+stable, like the feature IDs). **Architecture phase closed 2026-08-10 — all 16
+decided, every one per Claude's advice after deep-dive rounds.** Rationale
+summaries here; the full discussion lives in the review session and the vault
+decision note. New architecture decisions get the next AR id and an entry here
+before implementation.
 
 | ID | Decision | Status |
 |---|---|---|
@@ -19,10 +21,10 @@ review session (2026-08-10) and the vault decision note.
 | AR10 | Tag → GH Actions builds Debian-compatible binaries + sha256 in a Release; H5 self-update consumes with preflight + rollback watchdog; local build+scp stays documented as emergency path | **Decided** |
 | AR11 | Program config = TOML (+ env overrides); stack manifests stay YAML (content, not config) | **Decided** |
 | AR12 | Mutating operations strictly serial behind one op-lock; reads/streams parallel; TUI shows a queue | **Decided** |
-| AR13 | Failure model: crash/interrupt recovery | **Pending** (review) |
-| AR14 | Failure model: incident bundles + bug-to-test pipeline | **Pending** (review) |
-| AR15 | Failure model: structured logging/tracing on HOST | **Pending** (review) |
-| AR16 | Failure model: protocol frame capture + transcript replay | **Pending** (review) |
+| AR13 | Interrupted operations: journal detects, stack goes fail-closed, TUI/F3 report "interrupted at step N — redeploy is safe"; explicit manual rerun, no auto-resume (idempotency B1 makes rerun safe) | **Decided** |
+| AR14 | Every failed operation auto-captures an incident bundle (transcript, journal, state slice, daemon logs, container diagnostics, versions) under `/var/lib/homelab/incidents/`; standing process: every bug becomes a MockExecutor test scripted from the bundle → CI keeps it fixed forever | **Decided** |
+| AR15 | `tracing` with spans (op-id, step, stack on every line); sinks: journald + JSONL ring under `/var/lib/homelab/logs/`; debug level toggleable at runtime without restart | **Decided** |
+| AR16 | Protocol frame capture (toggle, human-readable AR5 JSON) + transcript replay export ("this operation as a shell script") from incident bundles | **Decided** |
 
 ## Decided — brief rationale
 

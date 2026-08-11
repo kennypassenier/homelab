@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+  - job_name: pve
+    metrics_path: /pve
+    params:
+      target: ["10.10.5.250"]
+    static_configs:
+      - targets: ["pve-exporter:9221"]

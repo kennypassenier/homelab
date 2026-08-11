@@ -75,6 +75,7 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
         safety: Default::default(),
         state_dir: "/var/lib/homelab".into(),
         now_unix: 1_760_000_000,
+        kea: None,
     };
     let report = deploy(&ctx, &spec(110, "syncthing")).await;
     assert!(!report.ok);

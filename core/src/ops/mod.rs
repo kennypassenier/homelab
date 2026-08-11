@@ -4,6 +4,7 @@ pub mod backup;
 pub mod deploy;
 pub mod destroy;
 pub mod guards;
+pub mod kea;
 pub mod mirror;
 pub mod patch;
 pub mod resize;
@@ -39,4 +40,6 @@ pub struct OpCtx<'a> {
     pub state_dir: String,
     /// Unix timestamp supplied by the caller — core never reads clocks.
     pub now_unix: u64,
+    /// H2: OPNsense Kea reservation config; None = feature off.
+    pub kea: Option<kea::KeaCfg>,
 }

@@ -56,6 +56,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         safety: SafetyConfig::default(),
         state_dir: "/var/lib/homelab".into(),
         now_unix: 1_760_000_000,
+        kea: None,
     }
 }
 
@@ -768,4 +769,128 @@ async fn c4_no_touch_and_hostname_guarded() {
     );
     let report = hot_apply(&ctx(&exec, &sink, &j), &manifest(108, "test")).await;
     assert!(!report.ok);
+}
+
+// ── H2: Kea DHCP reservations ───────────────────────────────────────────────
+
+fn ctx_with_kea<'a>(
+    exec: &'a MockExecutor,
+    sink: &'a VecSink,
+    journal: &'a NullJournal,
+) -> OpCtx<'a> {
+    let mut c = ctx(exec, sink, journal);
+    c.kea = Some(homelab_core::ops::kea::KeaCfg {
+        base_url: "https://10.10.10.1".into(),
+        cred_file: "/var/lib/homelab/secrets/opnsense".into(),
+    });
+    c
+}
+
+#[tokio::test]
+async fn h2_deploy_registers_kea_reservation_on_create() {
+    use homelab_core::manifest::{DeploySpec, FileBlob};
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.enqueue("pct config", CmdOutput::failed(2, "does not exist")); // safety gate
+    exec.respond_always(
+        "pct config 108",
+        CmdOutput::ok(
+            "hostname: 108-app-test\nnet0: name=eth0,hwaddr=BC:24:11:AA:BB:CC,ip=10.10.10.8/24\n",
+        ),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "search_subnet",
+        CmdOutput::ok(r#"{"rows":[{"uuid":"sub-1","subnet":"10.10.10.0/24"}]}"#),
+    );
+    exec.respond_always("search_reservation", CmdOutput::ok(r#"{"rows":[]}"#));
+    exec.respond_always("add_reservation", CmdOutput::ok(r#"{"result":"saved"}"#));
+    exec.respond_always("reconfigure", CmdOutput::ok(r#"{"status":"ok"}"#));
+    let spec = DeploySpec {
+        manifest: manifest(108, "test"),
+        files: vec![FileBlob {
+            path: "app/docker-compose.yml".into(),
+            content: "services: {}".into(),
+            mode: None,
+        }],
+        env: Default::default(),
+        gateway_route: None,
+    };
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx_with_kea(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    let adds = exec.calls_containing("add_reservation");
+    assert_eq!(adds.len(), 1);
+    assert!(adds[0].contains("10.10.10.8"));
+    assert!(adds[0].contains("BC:24:11:AA:BB:CC"));
+    assert!(adds[0].contains("sub-1"));
+    assert_eq!(exec.calls_containing("service/reconfigure").len(), 1);
+    // The secret is read inside the shell, never in argv.
+    assert!(adds[0].contains("$(cat /var/lib/homelab/secrets/opnsense)"));
+}
+
+#[tokio::test]
+async fn h2_kea_failure_never_blocks_deploy() {
+    use homelab_core::manifest::{DeploySpec, FileBlob};
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.enqueue("pct config", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config 108",
+        CmdOutput::ok("hostname: 108-app-test\nnet0: name=eth0,hwaddr=BC:24:11:AA:BB:CC\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    // OPNsense down.
+    exec.respond_always("search_subnet", CmdOutput::failed(7, "connection refused"));
+    let spec = DeploySpec {
+        manifest: manifest(108, "test"),
+        files: vec![FileBlob {
+            path: "app/docker-compose.yml".into(),
+            content: "services: {}".into(),
+            mode: None,
+        }],
+        env: Default::default(),
+        gateway_route: None,
+    };
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx_with_kea(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "kea failure must not block: {:?}", report.error);
+}
+
+#[tokio::test]
+async fn h2_no_kea_config_no_api_calls() {
+    use homelab_core::manifest::{DeploySpec, FileBlob};
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.enqueue("pct config", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    let spec = DeploySpec {
+        manifest: manifest(108, "test"),
+        files: vec![FileBlob {
+            path: "app/docker-compose.yml".into(),
+            content: "services: {}".into(),
+            mode: None,
+        }],
+        env: Default::default(),
+        gateway_route: None,
+    };
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok);
+    assert!(exec.calls_containing("api/kea").is_empty());
 }

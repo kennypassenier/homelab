@@ -47,6 +47,8 @@ struct FileConfig {
     retention: Option<Vec<homelab_proto::RetentionTier>>,
     exec_enabled: Option<bool>,
     mirror_remote: Option<String>,
+    opnsense_url: Option<String>,
+    opnsense_cred_file: Option<String>,
 }
 
 #[derive(Clone)]
@@ -61,6 +63,8 @@ struct Config {
     exec_enabled: bool,
     /// D5: git remote URL for the offsite intent mirror; None = off.
     mirror_remote: Option<String>,
+    /// H2: OPNsense base url + credential file for Kea reservations.
+    kea: Option<homelab_core::ops::kea::KeaCfg>,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
 }
@@ -100,6 +104,13 @@ fn load_config() -> Config {
         config_path: path,
         exec_enabled: file.exec_enabled.unwrap_or(false),
         mirror_remote: file.mirror_remote,
+        kea: match (file.opnsense_url, file.opnsense_cred_file) {
+            (Some(base_url), Some(cred_file)) => Some(homelab_core::ops::kea::KeaCfg {
+                base_url,
+                cred_file,
+            }),
+            _ => None,
+        },
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -661,6 +672,7 @@ where
         safety: SafetyConfig::default(),
         state_dir: state.config.state_dir.clone(),
         now_unix: now,
+        kea: state.config.kea.clone(),
     };
     let report = op(&ctx).await;
     notify(state, exec, label, &report).await; // F3, best-effort

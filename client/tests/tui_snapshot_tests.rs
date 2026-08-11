@@ -696,3 +696,54 @@ fn d11_bundle_round_trip_excludes_secrets_and_substitutes() {
     assert!(spec.env.is_empty(), "no secrets came along");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn g4_shell_tab_sends_exec_and_shows_output() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use homelab_client::tui::backend::BackendEvent;
+    use homelab_proto::{Command, RpcResponse, ServerMsg};
+
+    let mut m = ready_model();
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('6'), KeyModifiers::NONE)),
+    );
+    assert!(matches!(m.tab, Tab::Shell));
+    // Typing digits must NOT switch tabs while in the shell.
+    for c in "uptime -p".chars() {
+        homelab_client::tui::model::update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)),
+        );
+    }
+    assert!(matches!(m.tab, Tab::Shell));
+    assert_eq!(m.shell_input, "uptime -p");
+    m.outbox.clear();
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+    );
+    // ExecIn queued for the selected stack's vmid.
+    assert!(m
+        .outbox
+        .iter()
+        .any(|c| matches!(c, Command::ExecIn { vmid: 110, .. })));
+    assert!(m.shell_waiting);
+    // Host reply lands in the scrollback.
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Backend(BackendEvent::Server(ServerMsg::RpcDone(RpcResponse {
+            id: 9,
+            ok: true,
+            message: "exit 0\nup 4 hours".into(),
+        }))),
+    );
+    assert!(!m.shell_waiting);
+    let out = render(&m);
+    assert!(out.contains("REMOTE_SHELL"));
+    assert!(out.contains("up 4 hours"));
+    assert!(
+        out.contains("exec_enabled"),
+        "self-contained explanation visible"
+    );
+}

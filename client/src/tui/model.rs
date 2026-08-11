@@ -21,15 +21,17 @@ pub enum Tab {
     Logs,
     Doctor,
     Settings,
+    Shell,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 5] = [
+    pub const ALL: [Tab; 6] = [
         Tab::Dashboard,
         Tab::Stacks,
         Tab::Logs,
         Tab::Doctor,
         Tab::Settings,
+        Tab::Shell,
     ];
     pub fn title(self) -> &'static str {
         match self {
@@ -38,6 +40,7 @@ impl Tab {
             Tab::Logs => "LOG_STREAM",
             Tab::Doctor => "DOCTOR",
             Tab::Settings => "SETTINGS",
+            Tab::Shell => "SHELL",
         }
     }
     pub fn index(self) -> usize {
@@ -174,6 +177,12 @@ pub struct Model {
     /// falls back to the synthetic built-ins for tests and bare checkouts.
     pub presets: Vec<crate::scaffold::LoadedPreset>,
 
+    /// G4 shell tab (REPL over the audit-logged A6 exec — not a full PTY).
+    pub shell_target: usize,
+    pub shell_input: String,
+    pub shell_lines: Vec<String>,
+    pub shell_waiting: bool,
+
     /// G8 settings tab: last received host config, edit cursor, dirty flag,
     /// and the webhook text-edit buffer (None = not editing).
     pub settings: Option<homelab_proto::HostConfigView>,
@@ -222,6 +231,10 @@ impl Model {
             plan: None,
             wizard: None,
             presets: crate::scaffold::synthetic_presets(),
+            shell_target: 0,
+            shell_input: String::new(),
+            shell_lines: Vec::new(),
+            shell_waiting: false,
             settings: None,
             settings_row: 0,
             settings_dirty: false,
@@ -376,6 +389,16 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 model.settings_row = 0;
             }
             ServerMsg::RpcDone(resp) => {
+                if model.shell_waiting {
+                    model.shell_waiting = false;
+                    for line in resp.message.lines() {
+                        model.shell_lines.push(line.to_string());
+                    }
+                    if !resp.ok && resp.message.is_empty() {
+                        model.shell_lines.push("(command failed)".into());
+                    }
+                    return;
+                }
                 if let Some(focus) = model.focus.as_mut() {
                     if !focus.done {
                         focus.done = true;
@@ -465,6 +488,21 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         return;
     }
 
+    // G4: the shell tab owns most keys (typing digits must not switch tabs);
+    // TAB/CTRL+K/F2 still work via the global handler below.
+    if model.tab == Tab::Shell {
+        use crossterm::event::KeyCode;
+        let ctrl = key
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL);
+        let pass_through = matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::F(2))
+            || (ctrl && matches!(key.code, KeyCode::Char('k') | KeyCode::Char('p')));
+        if !pass_through {
+            shell_key(model, key);
+            return;
+        }
+    }
+
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match (key.code, ctrl) {
         (KeyCode::Char('q'), _) => model.should_quit = true,
@@ -511,6 +549,7 @@ pub fn azerty_tab_index(c: char) -> Option<usize> {
         '3' | '"' => Some(2),
         '4' | '\'' => Some(3),
         '5' | '(' => Some(4),
+        '6' | '§' => Some(5),
         _ => None,
     }
 }
@@ -590,6 +629,8 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             }
         }
         Tab::Settings => settings_key(model, key),
+        // Shell keys are fully handled before tab_key is reached.
+        Tab::Shell => {}
     }
 }
 
@@ -688,6 +729,66 @@ fn settings_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             model.status_line = "settings sent to host".into();
         }
         KeyCode::Char('r') => model.outbox.push(Command::GetConfig),
+        _ => {}
+    }
+}
+
+/// G4 shell tab. Line-based REPL, not a PTY: every ENTER is one audited
+/// ExecIn round-trip. LEFT/RIGHT picks the target stack while the input is
+/// empty; UP clears to the previous command.
+fn shell_key(model: &mut Model, key: crossterm::event::KeyEvent) {
+    use crossterm::event::KeyCode;
+    match key.code {
+        KeyCode::Char(c) => model.shell_input.push(c),
+        KeyCode::Backspace => {
+            model.shell_input.pop();
+        }
+        KeyCode::Left if model.shell_input.is_empty() => {
+            let n = model.stack_count().max(1);
+            model.shell_target = (model.shell_target + n - 1) % n;
+        }
+        KeyCode::Right if model.shell_input.is_empty() => {
+            let n = model.stack_count().max(1);
+            model.shell_target = (model.shell_target + 1) % n;
+        }
+        KeyCode::Up => {
+            // Recall the last command.
+            if let Some(prev) = model
+                .shell_lines
+                .iter()
+                .rev()
+                .find(|l| l.starts_with("▸ "))
+                .map(|l| l.trim_start_matches("▸ ").to_string())
+            {
+                model.shell_input = prev;
+            }
+        }
+        KeyCode::Esc => model.shell_input.clear(),
+        KeyCode::Enter => {
+            let cmd = model.shell_input.trim().to_string();
+            if cmd.is_empty() || model.shell_waiting {
+                return;
+            }
+            let Some(fleet) = model.fleet.as_ref() else {
+                model.shell_lines.push("(no fleet state yet)".into());
+                return;
+            };
+            let Some(stack) = fleet.stacks.get(model.shell_target) else {
+                model.shell_lines.push("(no stack selected)".into());
+                return;
+            };
+            model.shell_lines.push(format!("▸ {}", cmd));
+            model.outbox.push(Command::ExecIn {
+                vmid: stack.vmid,
+                command: cmd,
+            });
+            model.shell_input.clear();
+            model.shell_waiting = true;
+            if model.shell_lines.len() > 500 {
+                let drop = model.shell_lines.len() - 500;
+                model.shell_lines.drain(0..drop);
+            }
+        }
         _ => {}
     }
 }

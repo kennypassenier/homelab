@@ -7,6 +7,7 @@ mod doctor;
 mod focus;
 mod logs;
 mod settings;
+mod shell;
 mod splash;
 mod stacks;
 
@@ -69,6 +70,7 @@ pub fn draw(f: &mut Frame, model: &Model) {
             Tab::Logs => logs::draw(f, model, rows[1]),
             Tab::Doctor => doctor::draw(f, model, rows[1]),
             Tab::Settings => settings::draw(f, model, rows[1]),
+            Tab::Shell => shell::draw(f, model, rows[1]),
         },
     }
 
@@ -555,7 +557,7 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
     // AZERTY: modifier names spelled out, digit-row hints shown as "1-4".
     let keys: &[(&str, &str)] = match model.tab {
         Tab::Dashboard | Tab::Stacks => &[
-            ("1-5/TAB", "tabs"),
+            ("1-6/TAB", "tabs"),
             ("N", "new stack"),
             ("P", "plan"),
             ("SHIFT+D", "deploy"),
@@ -574,9 +576,16 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
         ],
         Tab::Doctor => &[
             ("R/ENTER", "re-run"),
-            ("1-5/TAB", "tabs"),
+            ("1-6/TAB", "tabs"),
             ("CTRL+K", "palette"),
             ("Q", "quit"),
+        ],
+        Tab::Shell => &[
+            ("type+ENTER", "run"),
+            ("LEFT/RIGHT", "target (empty input)"),
+            ("UP", "recall"),
+            ("TAB", "tabs"),
+            ("CTRL+K", "palette"),
         ],
         Tab::Settings => &[
             ("UP/DOWN", "field"),

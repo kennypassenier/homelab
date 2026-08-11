@@ -296,3 +296,16 @@ webhook catcher:
   (proven with a 6×SIGKILL drill; daemon recovered with reset-failed+start).
 To arm for real: set the webhook URL in the SETTINGS tab (or host.toml) to
 an HA webhook automation.
+
+### B20 · HA webhook receiver (F3, HA side) — LIVE-PROVEN 2026-08-11
+Host `notify_webhook` points at `automation.homelab_ops_webhook`
+(`/api/webhook/homelab-ops-c4d81f26`, local-only, POST). Every event is
+appended to `/media/homelab_events.log` on HA (Media browser → local);
+**no notifications by default**. Failures (`ok:false`) additionally route
+through `script.notification_dispatch` as a warning ONLY when
+`input_boolean.homelab_event_notifications` is on (default off).
+- **Pass (proven):** daemon restart → `host-online` line in the log;
+  `homelab patch` → `patch-fleet` line. Notify entity timestamp matches each
+  webhook trigger.
+- **Kenny's test:** flip the toggle on, break something deliberately (e.g.
+  deploy with a bad image), expect a warning push with ACK; flip back off.

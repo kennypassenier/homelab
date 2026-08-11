@@ -391,9 +391,55 @@ result + reboot indicator.
   serial, aborts the sequence on first failure (fail-closed).
 - **Manual**: run against pilot + one scrap stack; verify serial order.
 
+## I · Round-3 additions (proposed by Claude, rated by Kenny 2026-08-10)
+
+### C6 · Capacity overview — **Should**
+Committed vs available host resources computed from manifests + live host
+data; wizard warns when a new stack would overcommit (the "9 GB headroom"
+concern from the vault, live).
+- **Auto**: unit test — commitment sum over a manifest set matches golden
+  value; wizard warning triggers at the threshold.
+
+### D10 · Pre-flight validation — **Must** *(upgraded by Kenny)*
+Formal schema validation of manifests and compose files, client-side (instant
+wizard feedback) AND host-side (never trust the client), with
+`docker compose config` as the compose gatekeeper before anything runs.
+- **Auto**: fixture suite of invalid manifests/compose files → each rejected
+  with the expected, human-readable error (golden messages).
+- **Auto**: client and host share the same validator crate — a divergence test
+  ensures one implementation, two call sites.
+
+### D11 · Stack export/import bundles — **Could**
+Share a stack (manifest + compose + presets, never secrets) as a single file;
+import runs through the wizard with per-VM substitution (D7 mechanics).
+- **Auto**: round-trip test — export → import produces an equivalent stack;
+  secret-exclusion test on the bundle content.
+
+### E7 · DR-runbook generator — **Must** *(upgraded by Kenny)*
+Generated, always-current total-loss rebuild document: hardware, step order,
+backup/mirror locations, required secrets and where they come from. Refreshed
+automatically after every change; cannot go stale because it renders from real
+state.
+- **Auto**: generator snapshot test against a fixture state; CI fails if a new
+  feature adds state the runbook template doesn't cover (coverage check).
+- **Manual (standing)**: yearly tabletop drill — follow the generated runbook
+  on paper and log every gap found.
+
+### F6 · Doctor / self-diagnosis — **Should**
+`homelab doctor` + TUI panel: link/TLS/token health, daemon version, host disk,
+state-vs-reality consistency, orphaned containers, backup freshness per stack,
+offsite token validity, mirror lag — all green or an actionable hint.
+- **Auto**: each check is a pure function over injected probes → unit-test
+  matrix of healthy/broken permutations.
+- **Manual**: break one thing on purpose (expire token) and verify doctor
+  pinpoints it.
+
+### G7 · Demo mode — **Won't**
+No user-facing `--demo` flag. The simulator lives on only as an internal test
+fixture for G1's TUI snapshot tests — implementation detail, not a feature.
+
 ---
 
-## Round 3 — Claude's proposed additions (pending Kenny's verdict)
-IDs reserved: C6 (capacity view) · D10 (pre-flight validation) · D11 (stack
-export/import) · E7 (DR-runbook generator) · F6 (doctor self-diagnosis) ·
-G7 (demo mode). Descriptions follow after the round-3 review.
+**Feature phase closed 2026-08-10.** Final tally: 27 Must · 23 Should ·
+7 Could · 5 Won't. Any future feature gets the next free ID in its domain and
+a registry entry here before implementation.

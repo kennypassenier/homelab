@@ -45,6 +45,8 @@ struct FileConfig {
     backup_hour: Option<u8>,
     notify_webhook: Option<String>,
     retention: Option<Vec<homelab_proto::RetentionTier>>,
+    exec_enabled: Option<bool>,
+    mirror_remote: Option<String>,
 }
 
 #[derive(Clone)]
@@ -54,6 +56,11 @@ struct Config {
     state_dir: String,
     /// Path of the toml we loaded — SetConfig persists back to it.
     config_path: String,
+    /// A6: remote exec endpoint switch. Deny-by-default; ssh-edited only
+    /// (deliberately NOT in the G8 settings tab).
+    exec_enabled: bool,
+    /// D5: git remote URL for the offsite intent mirror; None = off.
+    mirror_remote: Option<String>,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
 }
@@ -91,6 +98,8 @@ fn load_config() -> Config {
         listen,
         state_dir,
         config_path: path,
+        exec_enabled: file.exec_enabled.unwrap_or(false),
+        mirror_remote: file.mirror_remote,
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -117,6 +126,10 @@ fn persist_settings(
         #[serde(skip_serializing_if = "Option::is_none")]
         notify_webhook: Option<&'a String>,
         retention: &'a [homelab_proto::RetentionTier],
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        exec_enabled: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mirror_remote: Option<&'a String>,
     }
     let out = Out {
         token: &config.token,
@@ -125,6 +138,8 @@ fn persist_settings(
         backup_hour: settings.backup_hour,
         notify_webhook: settings.notify_webhook.as_ref(),
         retention: &settings.retention,
+        exec_enabled: config.exec_enabled,
+        mirror_remote: config.mirror_remote.as_ref(),
     };
     let raw = toml::to_string_pretty(&out).map_err(|e| e.to_string())?;
     let tmp = format!("{}.tmp", config.config_path);
@@ -434,6 +449,7 @@ async fn scheduler_loop(state: AppState) {
     let exec = RealExecutor;
     loop {
         tokio::time::sleep(Duration::from_secs(20 * 60)).await;
+        spawn_mirror_push(&state); // D5 retry queue: try again every tick
         let (hour, tiers) = {
             let s = state.settings.read().unwrap();
             match s.backup_hour {
@@ -545,6 +561,22 @@ async fn ws_session(socket: WebSocket, state: AppState) {
     forward.abort();
 }
 
+/// D5: push the intent repo to the offsite mirror, detached — a failing
+/// push logs and is retried after the next operation (and by the periodic
+/// tick), never blocking the operation that triggered it.
+fn spawn_mirror_push(state: &AppState) {
+    let Some(remote) = state.config.mirror_remote.clone() else {
+        return;
+    };
+    let repo = format!("{}/repo", state.config.state_dir);
+    tokio::spawn(async move {
+        if let Err(e) = homelab_core::ops::mirror::mirror_push(&RealExecutor, &repo, &remote).await
+        {
+            tracing::warn!("mirror push failed (will retry): {}", e);
+        }
+    });
+}
+
 /// F3: best-effort webhook to Home Assistant after every mutating operation.
 /// Runs through the executor (curl) so it is visible in traces and never
 /// blocks or fails the operation itself.
@@ -632,6 +664,9 @@ where
     };
     let report = op(&ctx).await;
     notify(state, exec, label, &report).await; // F3, best-effort
+    if report.ok {
+        spawn_mirror_push(state); // D5, best-effort + detached
+    }
     if report.ok {
         RpcResponse {
             id: req_id,
@@ -767,6 +802,56 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 Box::pin(async move { homelab_core::ops::patch::patch_fleet(ctx, &targets).await })
             })
             .await
+        }
+        Rpc::ExecIn { vmid, command } => {
+            if let Err(e) = homelab_core::safety::exec_guard(
+                state.config.exec_enabled,
+                &SafetyConfig::default(),
+                vmid,
+            ) {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("{}", e),
+                };
+            }
+            // A6: audit every invocation before running it.
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let audit = format!("{} exec vmid={} cmd={:?}\n", ts, vmid, command);
+            let audit_path = format!("{}/audit.log", state.config.state_dir);
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&audit_path)
+                .and_then(|mut f| {
+                    use std::io::Write as _;
+                    f.write_all(audit.as_bytes())
+                });
+            info!("A6 exec vmid={} cmd={:?}", vmid, command);
+            match homelab_core::executor::pct_sh(&exec, vmid, &command, 120).await {
+                Ok(out) => RpcResponse {
+                    id: req.id,
+                    ok: out.success(),
+                    message: format!(
+                        "exit {}\n{}{}",
+                        out.code,
+                        out.stdout,
+                        if out.stderr.is_empty() {
+                            String::new()
+                        } else {
+                            format!("--- stderr ---\n{}", out.stderr)
+                        }
+                    ),
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("{}", e),
+                },
+            }
         }
         Rpc::GetConfig => {
             let view = state.settings.read().unwrap().clone();
@@ -909,7 +994,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                             restarts: 0,
                         })
                         .collect(),
-                    drift: false,
+                    drift: false, // computed client-side from applied_hash
+                    applied_hash: s.applied_hash.clone(),
                     env_sealed: true,
                     online: true,
                 })

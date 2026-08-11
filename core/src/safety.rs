@@ -98,3 +98,24 @@ pub fn check_gateway_route(
     }
     Ok(format!("{}/{}", cfg.gateway_routes_dir, filename))
 }
+
+/// A6: gate for the remote-exec endpoint. Deny-by-default: the config flag
+/// must be explicitly on, and no-touch vmids are refused regardless of it.
+pub fn exec_guard(
+    enabled: bool,
+    cfg: &SafetyConfig,
+    vmid: u16,
+) -> Result<(), crate::error::CoreError> {
+    if !enabled {
+        return Err(crate::error::CoreError::SafetyAbort(
+            "remote exec is disabled (set exec_enabled = true in host.toml to allow it)".into(),
+        ));
+    }
+    if cfg.no_touch.contains(&vmid) {
+        return Err(crate::error::CoreError::SafetyAbort(format!(
+            "vmid {} is on the no-touch list — exec refused regardless of config",
+            vmid
+        )));
+    }
+    Ok(())
+}

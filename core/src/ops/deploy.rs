@@ -136,6 +136,37 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 let val = format!("{},mp={}", mount.host_path, mount.mount_point);
                 run_ok(exec, &Cmd::new("pct", &["set", &vm, &mp, &val], 60)).await?;
             }
+            // H4: hardware passthrough flags. GPU via pct dev entries
+            // (targeted gids — render/video — NOT the old ansible
+            // chmod-0777-recurse). TUN needs raw lxc config lines that pct
+            // has no flag for, appended to the container config.
+            if m.lxc.gpu {
+                run_ok(
+                    exec,
+                    &Cmd::new(
+                        "pct",
+                        &[
+                            "set",
+                            &vm,
+                            "--dev0",
+                            "/dev/dri/card0,gid=44",
+                            "--dev1",
+                            "/dev/dri/renderD128,gid=104",
+                        ],
+                        60,
+                    ),
+                )
+                .await?;
+            }
+            if m.lxc.vpn {
+                let conf_path = format!("/etc/pve/lxc/{}.conf", m.vmid);
+                let conf = exec.read_file(&conf_path).await?;
+                if !conf.contains("dev/net/tun") {
+                    let extra = "lxc.cgroup2.devices.allow: c 10:200 rwm\nlxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file\n";
+                    exec.write_file(&conf_path, &format!("{}{}", conf, extra), 0o640)
+                        .await?;
+                }
+            }
             created = true;
         }
         let status = run_ok(exec, &Cmd::new("pct", &["status", &vm], 30)).await?;
@@ -399,6 +430,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 apps: m.apps.clone(),
                 applied_at: ctx.now_unix,
                 last_backup,
+                applied_hash: manifest::intent_hash(spec),
                 manifest: Some(m.clone()),
             },
         );

@@ -33,6 +33,7 @@ fn fleet() -> FleetState {
                     restarts: 0,
                 }],
                 drift: false,
+                applied_hash: String::new(),
                 env_sealed: true,
                 online: true,
             },
@@ -46,6 +47,7 @@ fn fleet() -> FleetState {
                     restarts: 3,
                 }],
                 drift: true,
+                applied_hash: String::new(),
                 env_sealed: false,
                 online: true,
             },
@@ -221,6 +223,8 @@ fn plan_modal_previews_changes() {
             unprivileged: true,
             features: "nesting=1".into(),
             protection: false,
+            gpu: false,
+            vpn: false,
         },
         boot: BootSpec {
             onboot: true,
@@ -570,5 +574,65 @@ fn manifest_storage_is_derived_from_compose_appdata_binds() {
         spec.manifest.storage[0].mount_point,
         "/appdata/vault/syncthing-config"
     );
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn b4_drift_flag_computed_from_applied_hash() {
+    use homelab_client::tui::backend::BackendEvent;
+    use homelab_proto::ServerMsg;
+    // Local stack dir whose intent hash we know.
+    let tmp = std::env::temp_dir().join(format!("homelab-drift-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = homelab_client::scaffold::scan_presets(&presets_dir);
+    let syncthing = presets.iter().find(|p| p.name == "syncthing").unwrap();
+    std::fs::create_dir_all(&tmp).unwrap();
+    homelab_client::scaffold::scaffold_stack(
+        &tmp,
+        &presets_dir,
+        &homelab_client::scaffold::StackParams {
+            name: "driftcase",
+            vmid: 140,
+            ram_mb: 512,
+            cores: 1,
+            disk_gb: 4,
+            swap_mb: None,
+            preset: Some(syncthing),
+        },
+    )
+    .unwrap();
+    let spec = homelab_client::spec::build_spec(&tmp.join("driftcase")).unwrap();
+    let real_hash = homelab_core::manifest::intent_hash(&spec);
+
+    let mut m = ready_model();
+    m.local_stacks = vec![("driftcase".into(), tmp.join("driftcase"))];
+    let mk_fleet = |hash: &str| {
+        ServerMsg::State(Box::new(FleetState {
+            host: fleet().host,
+            stacks: vec![StackView {
+                name: "driftcase".into(),
+                vmid: 140,
+                hostname: "140-app-driftcase".into(),
+                apps: vec![],
+                drift: false,
+                applied_hash: hash.to_string(),
+                env_sealed: true,
+                online: true,
+            }],
+        }))
+    };
+    // Applied hash matches the local dir → no drift.
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Backend(BackendEvent::Server(mk_fleet(&real_hash))),
+    );
+    assert!(!m.fleet.as_ref().unwrap().stacks[0].drift);
+    // Host applied something else → drift.
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Backend(BackendEvent::Server(mk_fleet("deadbeef00112233"))),
+    );
+    assert!(m.fleet.as_ref().unwrap().stacks[0].drift);
     let _ = std::fs::remove_dir_all(&tmp);
 }

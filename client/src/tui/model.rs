@@ -344,7 +344,26 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                     });
                 }
             }
-            ServerMsg::State(fleet) => {
+            ServerMsg::State(mut fleet) => {
+                // B4: drift = the host's applied intent hash differs from the
+                // hash of the local stack directory. Only computable for
+                // stacks we have locally.
+                for stack in fleet.stacks.iter_mut() {
+                    if stack.applied_hash.is_empty() {
+                        continue;
+                    }
+                    let local = model
+                        .local_stacks
+                        .iter()
+                        .find(|(n, _)| *n == stack.name)
+                        .map(|(_, dir)| dir.clone());
+                    if let Some(dir) = local {
+                        if let Ok(spec) = crate::spec::build_spec(&dir) {
+                            let local_hash = homelab_core::manifest::intent_hash(&spec);
+                            stack.drift = local_hash != stack.applied_hash;
+                        }
+                    }
+                }
                 model.fleet = Some(*fleet);
                 let n = model.stack_count();
                 if n > 0 && model.selected_stack >= n {
@@ -851,6 +870,8 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
             unprivileged: d.unprivileged,
             features: d.features.clone(),
             protection: d.protection,
+            gpu: false,
+            vpn: false,
         },
         boot: homelab_proto::BootSpec {
             onboot: true,

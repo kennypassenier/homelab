@@ -54,6 +54,13 @@ pub enum Command {
     /// H6: apt dist-upgrade every managed stack (from host state),
     /// sequentially.
     PatchFleet,
+    /// A6: run a shell command inside a managed LXC. Deny-by-default —
+    /// requires exec_enabled in host config; no-touch vmids always refused;
+    /// every invocation is audit-logged.
+    ExecIn {
+        vmid: u16,
+        command: String,
+    },
     /// G8: read the host's runtime settings.
     GetConfig,
     /// G8: replace the host's runtime settings (persisted to host.toml).
@@ -79,8 +86,12 @@ pub struct StackView {
     pub vmid: u16,
     pub hostname: String,
     pub apps: Vec<AppView>,
-    /// intent hash differs from applied → true (B4).
+    /// intent hash differs from applied → true (B4). Computed client-side
+    /// by comparing `applied_hash` with the local stack directory's hash.
     pub drift: bool,
+    /// B4: fingerprint the host recorded at the last successful deploy.
+    #[serde(default)]
+    pub applied_hash: String,
     pub env_sealed: bool,
     pub online: bool,
 }

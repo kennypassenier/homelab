@@ -31,6 +31,8 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             unprivileged: true,
             features: "nesting=1,keyctl=1".into(),
             protection: false,
+            gpu: false,
+            vpn: false,
         },
         boot: BootSpec {
             onboot: true,

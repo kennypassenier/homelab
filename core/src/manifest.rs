@@ -68,6 +68,12 @@ pub struct LxcSpec {
     /// Proxmox protection flag: hypervisor refuses destroy while set.
     #[serde(default)]
     pub protection: bool,
+    /// H4: pass the host GPU (/dev/dri) into the container (VAAPI).
+    #[serde(default)]
+    pub gpu: bool,
+    /// H4: give the container a /dev/net/tun device (VPN clients).
+    #[serde(default)]
+    pub vpn: bool,
 }
 
 fn yes() -> bool {
@@ -218,4 +224,32 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
     } else {
         Err(CoreError::Validation(problems.join("; ")))
     }
+}
+
+/// B4: deterministic fingerprint of a deploy's full intent — manifest,
+/// files, env — so the client can compare its local stack directory against
+/// what the host last applied. Any byte of difference flips the hash.
+pub fn intent_hash(spec: &DeploySpec) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    // Manifest via canonical JSON (BTreeMap-backed serde keeps field order).
+    if let Ok(m) = serde_json::to_vec(&spec.manifest) {
+        h.update(&m);
+    }
+    let mut files: Vec<_> = spec.files.iter().collect();
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    for f in files {
+        h.update(f.path.as_bytes());
+        h.update([0]);
+        h.update(f.content.as_bytes());
+        h.update([0]);
+    }
+    for (app, env) in &spec.env {
+        h.update(app.as_bytes());
+        h.update([0]);
+        h.update(env.as_bytes());
+        h.update([0]);
+    }
+    let out = h.finalize();
+    out.iter().take(8).map(|b| format!("{:02x}", b)).collect()
 }

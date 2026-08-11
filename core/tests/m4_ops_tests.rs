@@ -32,6 +32,8 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             unprivileged: true,
             features: "nesting=1".into(),
             protection: true,
+            gpu: false,
+            vpn: false,
         },
         boot: BootSpec {
             onboot: true,
@@ -419,4 +421,165 @@ async fn g8_tiered_retention_forgets_by_explicit_id() {
     );
     assert!(!forgets[0].contains("new1"), "newest never forgotten");
     assert!(forgets[0].contains("--prune"));
+}
+
+// ── B4: drift detection building blocks ─────────────────────────────────────
+
+#[test]
+fn b4_intent_hash_changes_with_any_file_edit() {
+    use homelab_core::manifest::{intent_hash, DeploySpec, FileBlob};
+    let base = DeploySpec {
+        manifest: manifest(108, "test"),
+        files: vec![FileBlob {
+            path: "app/docker-compose.yml".into(),
+            content: "services: {}".into(),
+            mode: None,
+        }],
+        env: Default::default(),
+        gateway_route: None,
+    };
+    let h1 = intent_hash(&base);
+    assert_eq!(h1, intent_hash(&base), "deterministic");
+    let mut edited = base.clone();
+    edited.files[0].content.push('\n');
+    assert_ne!(h1, intent_hash(&edited), "one byte flips the hash");
+    let mut env_changed = base.clone();
+    env_changed.env.insert("app".into(), "SECRET=x".into());
+    assert_ne!(h1, intent_hash(&env_changed), "env is part of intent");
+}
+
+// ── H4: hardware passthrough flags ──────────────────────────────────────────
+
+#[tokio::test]
+async fn h4_gpu_and_vpn_flags_produce_device_config() {
+    use homelab_core::manifest::{DeploySpec, FileBlob};
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    // qm status must fail (vmid is not a VM), pct config fails (not existing) → create path.
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.enqueue("pct config", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.seed_file(
+        "/etc/pve/lxc/108.conf",
+        "arch: amd64\nhostname: 108-app-test\n",
+    );
+    let mut m = manifest(108, "test");
+    m.lxc.gpu = true;
+    m.lxc.vpn = true;
+    let spec = DeploySpec {
+        manifest: m,
+        files: vec![FileBlob {
+            path: "app/docker-compose.yml".into(),
+            content: "services: {}".into(),
+            mode: None,
+        }],
+        env: Default::default(),
+        gateway_route: None,
+    };
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    // GPU: exact targeted dev entries with render/video gids — never chmod.
+    let dev = exec.calls_containing("--dev0 /dev/dri/card0,gid=44");
+    assert_eq!(dev.len(), 1);
+    assert!(dev[0].contains("--dev1 /dev/dri/renderD128,gid=104"));
+    assert!(
+        exec.calls_containing("chmod").is_empty(),
+        "no ansible chmod-recurse bug"
+    );
+    // VPN: raw lxc lines appended to the container config.
+    let conf = exec.file("/etc/pve/lxc/108.conf").unwrap();
+    assert!(conf.contains("lxc.cgroup2.devices.allow: c 10:200 rwm"));
+    assert!(conf.contains("lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file"));
+}
+
+#[tokio::test]
+async fn h4_no_flags_no_device_config() {
+    use homelab_core::manifest::{DeploySpec, FileBlob};
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.enqueue("pct config", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    let spec = DeploySpec {
+        manifest: manifest(108, "test"),
+        files: vec![FileBlob {
+            path: "app/docker-compose.yml".into(),
+            content: "services: {}".into(),
+            mode: None,
+        }],
+        env: Default::default(),
+        gateway_route: None,
+    };
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(exec.calls_containing("--dev0").is_empty());
+}
+
+// ── A6: exec guard ──────────────────────────────────────────────────────────
+
+#[test]
+fn a6_exec_guard_deny_by_default_and_no_touch_always() {
+    use homelab_core::safety::exec_guard;
+    let cfg = SafetyConfig::default();
+    // Disabled (the default): refused even for a managed vmid.
+    assert!(exec_guard(false, &cfg, 108).is_err());
+    // Enabled: managed vmid allowed.
+    assert!(exec_guard(true, &cfg, 108).is_ok());
+    // Enabled: no-touch vmids refused regardless.
+    for vmid in [101u16, 104, 106] {
+        let err = exec_guard(true, &cfg, vmid).unwrap_err();
+        assert!(format!("{}", err).contains("no-touch"));
+    }
+}
+
+// ── D5: mirror push ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn d5_mirror_adds_remote_once_and_pushes() {
+    use homelab_core::ops::mirror::mirror_push;
+    let exec = MockExecutor::new();
+    exec.enqueue(
+        "remote get-url mirror",
+        CmdOutput::failed(2, "no such remote"),
+    );
+    mirror_push(&exec, "/var/lib/homelab/repo", "git@github.com:k/m.git")
+        .await
+        .unwrap();
+    assert_eq!(
+        exec.calls_containing("remote add mirror git@github.com:k/m.git")
+            .len(),
+        1
+    );
+    assert_eq!(exec.calls_containing("push --quiet mirror --all").len(), 1);
+    // Second run: remote exists, no re-add.
+    mirror_push(&exec, "/var/lib/homelab/repo", "git@github.com:k/m.git")
+        .await
+        .unwrap();
+    assert_eq!(
+        exec.calls_containing("remote add").len(),
+        1,
+        "remote added once"
+    );
+}
+
+#[tokio::test]
+async fn d5_mirror_push_failure_is_an_error_not_a_panic() {
+    use homelab_core::ops::mirror::mirror_push;
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "push --quiet mirror",
+        CmdOutput::failed(128, "could not resolve host"),
+    );
+    let err = mirror_push(&exec, "/r", "git@x:y.git").await.unwrap_err();
+    assert!(format!("{}", err).contains("could not resolve host"));
 }

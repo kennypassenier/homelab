@@ -106,6 +106,10 @@ pub struct PresetMeta {
     /// LXC features override (e.g. a future GPU/TUN preset).
     pub features: Option<String>,
     pub unprivileged: Option<bool>,
+    /// H4: pass the host GPU into the container (VAAPI transcoding).
+    pub gpu: bool,
+    /// H4: give the container a /dev/net/tun device (VPN clients).
+    pub vpn: bool,
 }
 
 impl Default for PresetMeta {
@@ -117,6 +121,8 @@ impl Default for PresetMeta {
             disk_gb: None,
             features: None,
             unprivileged: None,
+            gpu: false,
+            vpn: false,
         }
     }
 }
@@ -326,7 +332,7 @@ pub fn scaffold_stack_with(
          hostname: {vmid}-app-{name}\n\n\
          network:\n  ip: {ip_prefix}{ip_suffix}/{cidr}\n  gateway: {gateway}\n  bridge: {bridge}\n  vlan: {vlan}\n\n\
          resources:\n  cores: {cores}\n  memory_mb: {ram_mb}\n  swap_mb: {swap_mb}\n  disk_gb: {disk_gb}\n  storage: {storage}\n\n\
-         lxc:\n  template: \"{template}\"\n  unprivileged: {unprivileged}\n  features: \"{features}\"\n  protection: {protection}\n\n\
+         lxc:\n  template: \"{template}\"\n  unprivileged: {unprivileged}\n  features: \"{features}\"\n  protection: {protection}{hw}\n\n\
          boot:\n  onboot: true\n  order: {order}\n",
         ip_prefix = d.ip_prefix,
         cidr = d.cidr,
@@ -338,6 +344,16 @@ pub fn scaffold_stack_with(
         unprivileged = unprivileged,
         features = features,
         protection = d.protection,
+        hw = {
+            let mut hw = String::new();
+            if preset.map(|pr| pr.meta.gpu).unwrap_or(false) {
+                hw.push_str("\n  gpu: true");
+            }
+            if preset.map(|pr| pr.meta.vpn).unwrap_or(false) {
+                hw.push_str("\n  vpn: true");
+            }
+            hw
+        },
         order = d.boot_order,
     );
 

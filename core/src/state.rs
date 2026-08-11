@@ -21,6 +21,10 @@ pub struct StackState {
     /// Unix time of the last successful backup (E4 scheduler input).
     #[serde(default)]
     pub last_backup: u64,
+    /// B4: fingerprint of the intent that was last applied (see
+    /// `manifest::intent_hash`); the client compares its local dir to this.
+    #[serde(default)]
+    pub applied_hash: String,
     /// Full manifest as last applied, so host-side operations (scheduled
     /// backup, fleet update) can run without the client being connected.
     #[serde(default)]

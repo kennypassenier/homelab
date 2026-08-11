@@ -43,6 +43,8 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
     let cmd_tx = channels.cmd_tx;
 
     let mut model = Model::new();
+    // Discover locally-deployable stacks (a ./stacks dir next to the cwd).
+    model.local_stacks = crate::spec::scan_local_stacks(std::path::Path::new("stacks"));
     let mut events = EventStream::new();
     let mut anim = tokio::time::interval(Duration::from_millis(33));
     anim.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

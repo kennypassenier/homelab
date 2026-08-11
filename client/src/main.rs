@@ -9,21 +9,17 @@
 //!
 //! Config via env: HOMELAB_HOST (host:port), HOMELAB_TOKEN.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::Connector;
 
-use homelab_proto::{
-    Command, DeploySpec, FileBlob, GatewayRoute, LogLevel, RpcRequest, ServerMsg, StackManifest,
-};
+use homelab_proto::{Command, LogLevel, RpcRequest, ServerMsg};
 
-use homelab_client::{load_pin, save_pin, tui};
+use homelab_client::{load_pin, save_pin, spec, tui};
 
 const C_RESET: &str = "\x1b[0m";
 const C_CYAN: &str = "\x1b[36m";
@@ -31,25 +27,6 @@ const C_GREEN: &str = "\x1b[32m";
 const C_YELLOW: &str = "\x1b[33m";
 const C_RED: &str = "\x1b[31m";
 const C_DIM: &str = "\x1b[2m";
-
-#[derive(Deserialize)]
-struct StackFile {
-    #[serde(flatten)]
-    manifest: StackManifest,
-    #[serde(default)]
-    gateway_route: Option<GatewayRouteFile>,
-}
-
-#[derive(Deserialize)]
-struct GatewayRouteFile {
-    filename: String,
-    #[serde(default = "default_gw")]
-    gateway_vmid: u16,
-}
-
-fn default_gw() -> u16 {
-    104
-}
 
 fn die(msg: &str) -> ! {
     eprintln!("{}error:{} {}", C_RED, C_RESET, msg);
@@ -87,7 +64,7 @@ async fn main() {
             let dir = args
                 .get(2)
                 .unwrap_or_else(|| die("usage: homelab plan stacks/<name>"));
-            let spec = build_spec(Path::new(dir));
+            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             match homelab_core::manifest::validate(&spec) {
                 Ok(()) => println!(
                     "{}✓ valid{} — {} would deploy vmid {}: {} file(s), {} env(s)",
@@ -105,7 +82,7 @@ async fn main() {
             let dir = args
                 .get(2)
                 .unwrap_or_else(|| die("usage: homelab deploy stacks/<name>"));
-            let spec = build_spec(Path::new(dir));
+            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             // D10: fail fast client-side before opening a connection.
             if let Err(e) = homelab_core::manifest::validate(&spec) {
                 die(&format!("validation failed: {}", e));
@@ -128,83 +105,6 @@ async fn main() {
             println!("  homelab deploy stacks/<name>");
             println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");
             println!("cert pin: ~/.config/homelab/pin (auto on first connect)");
-        }
-    }
-}
-
-fn build_spec(dir: &Path) -> DeploySpec {
-    let manifest_path = dir.join("lxc-compose.yml");
-    let raw = std::fs::read_to_string(&manifest_path)
-        .unwrap_or_else(|e| die(&format!("cannot read {}: {}", manifest_path.display(), e)));
-    let stack_file: StackFile =
-        serde_yaml::from_str(&raw).unwrap_or_else(|e| die(&format!("manifest parse: {}", e)));
-
-    let mut files: Vec<FileBlob> = Vec::new();
-    let mut env: BTreeMap<String, String> = BTreeMap::new();
-    collect(dir, dir, &mut files, &mut env);
-
-    let gateway_route = stack_file.gateway_route.as_ref().map(|g| {
-        let route_path = dir.join("traefik-routes.yml");
-        let content = std::fs::read_to_string(&route_path).unwrap_or_else(|e| {
-            die(&format!(
-                "gateway_route set but {}: {}",
-                route_path.display(),
-                e
-            ))
-        });
-        GatewayRoute {
-            gateway_vmid: g.gateway_vmid,
-            filename: g.filename.clone(),
-            content,
-        }
-    });
-
-    DeploySpec {
-        manifest: stack_file.manifest,
-        files,
-        env,
-        gateway_route,
-    }
-}
-
-fn collect(root: &Path, dir: &Path, files: &mut Vec<FileBlob>, env: &mut BTreeMap<String, String>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path: PathBuf = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if path.is_dir() {
-            collect(root, &path, files, env);
-            continue;
-        }
-        let rel = path
-            .strip_prefix(root)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        // Top-level control files are not payload.
-        if rel == "lxc-compose.yml" || rel == "traefik-routes.yml" {
-            continue;
-        }
-        let Ok(content) = std::fs::read_to_string(&path) else {
-            die(&format!("non-utf8 file not supported: {}", rel))
-        };
-        if name == ".env" {
-            // stacks/<name>/<app>/.env → secrets channel, never a repo file.
-            let app = path
-                .parent()
-                .and_then(|p| p.file_name())
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-            env.insert(app, content);
-        } else {
-            files.push(FileBlob {
-                path: rel,
-                content,
-                mode: None,
-            });
         }
     }
 }

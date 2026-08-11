@@ -4,6 +4,7 @@
 
 mod dashboard;
 mod doctor;
+mod focus;
 mod logs;
 mod splash;
 mod stacks;
@@ -72,6 +73,10 @@ pub fn draw(f: &mut Frame, model: &Model) {
     draw_ticker(f, model, rows[2]);
     draw_footer(f, model, rows[3]);
 
+    // Focus window (deploy) overlays everything.
+    if let Some(fc) = &model.focus {
+        focus::draw(f, model, fc);
+    }
     if model.help_open {
         draw_help(f);
     }
@@ -171,6 +176,7 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
         Tab::Dashboard | Tab::Stacks => &[
             ("1-4/TAB", "tabs"),
             ("UP/DOWN", "select"),
+            ("SHIFT+D", "deploy"),
             ("R", "refresh"),
             ("CTRL+K", "palette"),
             ("F2", "fx"),

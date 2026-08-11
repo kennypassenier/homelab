@@ -155,6 +155,41 @@ fn azerty_e_acute_switches_to_stacks_tab() {
 }
 
 #[test]
+fn deploy_focus_window_renders_feed() {
+    use homelab_client::tui::model::{Focus, LogRow};
+    use homelab_proto::LogLevel;
+    let mut m = ready_model();
+    m.focus = Some(Focus {
+        title: "DEPLOY syncthing :: vmid 110".into(),
+        feed: vec![
+            LogRow {
+                level: LogLevel::Info,
+                source: "HOST".into(),
+                msg: "[sync][run ] provision container".into(),
+            },
+            LogRow {
+                level: LogLevel::Debug,
+                source: "HOST".into(),
+                msg: "  pct create 110 …".into(),
+            },
+            LogRow {
+                level: LogLevel::Info,
+                source: "HOST".into(),
+                msg: "[gate] syncthing :: running".into(),
+            },
+        ],
+        scroll: 0,
+        done: false,
+        ok: false,
+        result: String::new(),
+    });
+    let out = render(&m);
+    assert!(out.contains("FOCUS :: DEPLOY syncthing"));
+    assert!(out.contains("provision container"));
+    assert!(out.contains("EXECUTING"));
+}
+
+#[test]
 fn palette_fuzzy_matches() {
     let m = palette_matches("doct");
     assert!(!m.is_empty());

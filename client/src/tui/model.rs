@@ -64,6 +64,17 @@ pub enum Msg {
     Backend(BackendEvent),
 }
 
+/// Focus mode (mockup-approved): a near-fullscreen task window showing only
+/// this operation's feed while it runs.
+pub struct Focus {
+    pub title: String,
+    pub feed: Vec<LogRow>,
+    pub scroll: usize,
+    pub done: bool,
+    pub ok: bool,
+    pub result: String,
+}
+
 pub struct Model {
     pub screen: Screen,
     pub tab: Tab,
@@ -88,6 +99,9 @@ pub struct Model {
     pub palette_sel: usize,
     pub help_open: bool,
     pub doctor_text: Vec<String>,
+    /// Deployable stack dirs found locally (name, path).
+    pub local_stacks: Vec<(String, std::path::PathBuf)>,
+    pub focus: Option<Focus>,
 
     pub should_quit: bool,
     /// Commands the update fn wants sent to the backend this cycle.
@@ -125,6 +139,8 @@ impl Model {
             palette_sel: 0,
             help_open: false,
             doctor_text: Vec::new(),
+            local_stacks: Vec::new(),
+            focus: None,
             should_quit: false,
             outbox: Vec::new(),
         }
@@ -212,7 +228,18 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 model.host_version = version;
                 model.conn = Conn::Up;
             }
-            ServerMsg::Log { level, source, msg } => model.push_log(level, source, msg),
+            ServerMsg::Log { level, source, msg } => {
+                if let Some(focus) = model.focus.as_mut() {
+                    if !focus.done {
+                        focus.feed.push(LogRow {
+                            level,
+                            source: source.clone(),
+                            msg: msg.clone(),
+                        });
+                    }
+                }
+                model.push_log(level, source, msg);
+            }
             ServerMsg::Transfer {
                 label, done, total, ..
             } => {
@@ -237,6 +264,19 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 }
             }
             ServerMsg::RpcDone(resp) => {
+                if let Some(focus) = model.focus.as_mut() {
+                    if !focus.done {
+                        focus.done = true;
+                        focus.ok = resp.ok;
+                        focus.result = resp.message.clone();
+                        model.status_line = if resp.ok {
+                            "deploy complete".into()
+                        } else {
+                            "deploy FAILED — see focus feed".into()
+                        };
+                        return;
+                    }
+                }
                 if model.tab == Tab::Doctor {
                     model.doctor_text = resp.message.lines().map(|s| s.to_string()).collect();
                 }
@@ -255,6 +295,24 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
     }
     if model.palette_open {
         palette_key(model, key);
+        return;
+    }
+    if let Some(focus) = model.focus.as_mut() {
+        match key.code {
+            KeyCode::Up => focus.scroll = focus.scroll.saturating_add(1),
+            KeyCode::Down => focus.scroll = focus.scroll.saturating_sub(1),
+            KeyCode::Esc => {
+                // Background the window; a running deploy keeps running.
+                if focus.done {
+                    model.focus = None;
+                } else {
+                    model.status_line = "deploy keeps running — feed in LOG_STREAM".into();
+                    model.focus = None;
+                }
+            }
+            KeyCode::Enter if focus.done => model.focus = None,
+            _ => {}
+        }
         return;
     }
     if model.help_open {
@@ -330,6 +388,7 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 }
             }
             KeyCode::Char('r') => model.outbox.push(Command::GetState),
+            KeyCode::Char('D') => start_deploy(model),
             _ => {}
         },
         Tab::Logs => match key.code {
@@ -476,5 +535,42 @@ fn run_action(model: &mut Model, id: &str) {
         "help" => model.help_open = true,
         "quit" => model.should_quit = true,
         _ => {}
+    }
+}
+
+/// SHIFT+D: deploy the selected fleet stack from its local directory.
+fn start_deploy(model: &mut Model) {
+    let Some(fleet) = &model.fleet else {
+        model.status_line = "no fleet state yet — press R first".into();
+        return;
+    };
+    let Some(stack) = fleet.stacks.get(model.selected_stack) else {
+        return;
+    };
+    let Some((_, dir)) = model.local_stacks.iter().find(|(n, _)| *n == stack.name) else {
+        model.status_line = format!("no local stacks/{} directory to deploy from", stack.name);
+        return;
+    };
+    match crate::spec::build_spec(dir) {
+        Ok(spec) => {
+            // D10: fail fast client-side.
+            if let Err(e) = homelab_core::manifest::validate(&spec) {
+                model.status_line = format!("validation failed: {}", e);
+                return;
+            }
+            model.focus = Some(Focus {
+                title: format!(
+                    "DEPLOY {} :: vmid {}",
+                    spec.manifest.stack_name, spec.manifest.vmid
+                ),
+                feed: Vec::new(),
+                scroll: 0,
+                done: false,
+                ok: false,
+                result: String::new(),
+            });
+            model.outbox.push(Command::DeployStack(Box::new(spec)));
+        }
+        Err(e) => model.status_line = e,
     }
 }

@@ -224,3 +224,99 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
     std::fs::write(out_path, &doc).map_err(|e| e.to_string())?;
     Ok(included)
 }
+
+// ── D11: stack export/import bundles ────────────────────────────────────────
+
+/// A shareable single-file stack bundle: manifest + files, NEVER secrets.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Bundle {
+    pub bundle_version: u32,
+    pub exported_from: String,
+    pub manifest: StackManifest,
+    pub files: Vec<FileBlob>,
+}
+
+/// Export a stack directory to a single YAML bundle. `.env` files are
+/// excluded by construction (build_spec routes them into `env`, which is
+/// deliberately not part of the bundle).
+pub fn export_bundle(dir: &Path, out_path: &str) -> Result<usize, String> {
+    let spec = build_spec(dir)?;
+    let bundle = Bundle {
+        bundle_version: 1,
+        exported_from: spec.manifest.stack_name.clone(),
+        manifest: spec.manifest,
+        files: spec.files,
+    };
+    let raw = serde_yaml::to_string(&bundle).map_err(|e| e.to_string())?;
+    std::fs::write(out_path, &raw).map_err(|e| e.to_string())?;
+    Ok(bundle.files.len())
+}
+
+/// Import a bundle as a NEW stack: substitute the old stack identity (name,
+/// vmid, hostname, ip, /appdata paths, _net network) for the new one, then
+/// write a normal stack directory. Secrets must be added afterwards as
+/// stacks/<name>/<app>/.env — they are never in a bundle.
+pub fn import_bundle(
+    bundle_path: &Path,
+    stacks_dir: &Path,
+    new_name: &str,
+    new_vmid: u16,
+) -> Result<PathBuf, String> {
+    let raw = std::fs::read_to_string(bundle_path).map_err(|e| e.to_string())?;
+    let bundle: Bundle = serde_yaml::from_str(&raw).map_err(|e| format!("bundle parse: {}", e))?;
+    if bundle.bundle_version != 1 {
+        return Err(format!(
+            "unsupported bundle version {}",
+            bundle.bundle_version
+        ));
+    }
+    let dest = stacks_dir.join(new_name);
+    if dest.exists() {
+        return Err(format!("stacks/{} already exists", new_name));
+    }
+    let old = &bundle.exported_from;
+    let old_vmid = bundle.manifest.vmid;
+    let defaults = crate::scaffold::StackDefaults::default();
+    let new_ip_host = format!("{}{}", defaults.ip_prefix, new_vmid.saturating_sub(100));
+
+    // Manifest: identity fields + derived values + path renames.
+    let mut m = bundle.manifest.clone();
+    m.stack_name = new_name.to_string();
+    m.vmid = new_vmid;
+    m.hostname = format!("{}-app-{}", new_vmid, new_name);
+    // Keep the CIDR suffix from the original ip.
+    let cidr = m.network.ip.split('/').nth(1).unwrap_or("24").to_string();
+    m.network.ip = format!("{}/{}", new_ip_host, cidr);
+    for mount in m.storage.iter_mut() {
+        mount.host_path = mount.host_path.replace(
+            &format!("/appdata/{}/", old),
+            &format!("/appdata/{}/", new_name),
+        );
+        mount.mount_point = mount.mount_point.replace(
+            &format!("/appdata/{}/", old),
+            &format!("/appdata/{}/", new_name),
+        );
+    }
+    let manifest_yaml = serde_yaml::to_string(&m).map_err(|e| format!("manifest render: {}", e))?;
+    std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+    std::fs::write(dest.join("lxc-compose.yml"), manifest_yaml).map_err(|e| e.to_string())?;
+
+    // Files: same substitutions inside content (D7 mechanics).
+    let old_host = format!("{}-app-{}", old_vmid, old);
+    for f in &bundle.files {
+        let content = f
+            .content
+            .replace(&format!("{}_net", old), &format!("{}_net", new_name))
+            .replace(
+                &format!("/appdata/{}/", old),
+                &format!("/appdata/{}/", new_name),
+            )
+            .replace(&old_host, &m.hostname);
+        let path = dest.join(&f.path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    }
+    Ok(dest)
+}

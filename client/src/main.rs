@@ -43,8 +43,10 @@ async fn main() {
     let offline = args.iter().any(|a| a == "--offline" || a == "--demo");
     // Commands that never touch the network need no token: help, offline TUI,
     // and `plan` (local validation only, D10).
-    let needs_token =
-        !matches!(cmd, "help" | "plan" | "runbook" | "presets") && !(cmd == "tui" && offline);
+    let needs_token = !matches!(
+        cmd,
+        "help" | "plan" | "runbook" | "presets" | "export" | "import"
+    ) && !(cmd == "tui" && offline);
     if token.is_empty() && needs_token {
         die("HOMELAB_TOKEN is not set");
     }
@@ -67,6 +69,74 @@ async fn main() {
         "ping" => rpc(&host, &token, Command::Ping).await,
         "patch" => rpc(&host, &token, Command::PatchFleet).await,
         "config" => rpc(&host, &token, Command::GetConfig).await,
+        "export" => {
+            // D11: single-file bundle, never secrets.
+            let dir = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab export stacks/<name> [out.yml]"));
+            let name = Path::new(dir)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "stack".into());
+            let out = args
+                .get(3)
+                .cloned()
+                .unwrap_or_else(|| format!("{}-bundle.yml", name));
+            match spec::export_bundle(Path::new(dir), &out) {
+                Ok(n) => println!(
+                    "{}✓ exported{} — {} ({} file(s), no secrets)",
+                    C_GREEN, C_RESET, out, n
+                ),
+                Err(e) => die(&format!("export: {}", e)),
+            }
+        }
+        "import" => {
+            let usage = "usage: homelab import <bundle.yml> <new-name> <vmid>";
+            let bundle = args.get(2).unwrap_or_else(|| die(usage));
+            let name = args.get(3).unwrap_or_else(|| die(usage));
+            let vmid: u16 = args
+                .get(4)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| die(usage));
+            match spec::import_bundle(Path::new(bundle), Path::new("stacks"), name, vmid) {
+                Ok(dest) => {
+                    // Validate what we just wrote with the same validator as deploy.
+                    match spec::build_spec(&dest).and_then(|s| {
+                        homelab_core::manifest::validate(&s).map_err(|e| e.to_string())
+                    }) {
+                        Ok(()) => println!(
+                            "{}✓ imported{} — {} (vmid {}) :: add .env files if the apps need secrets, then deploy",
+                            C_GREEN, C_RESET, dest.display(), vmid
+                        ),
+                        Err(e) => die(&format!("imported but invalid: {}", e)),
+                    }
+                }
+                Err(e) => die(&format!("import: {}", e)),
+            }
+        }
+        "resize" => {
+            // C4: apply the manifest's resources to the live container.
+            let dir = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab resize stacks/<name>"));
+            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            println!(
+                "{}▶ resize {} :: {} MiB / {} cores / {}G{}",
+                C_CYAN,
+                spec.manifest.stack_name,
+                spec.manifest.resources.memory_mb,
+                spec.manifest.resources.cores,
+                spec.manifest.resources.disk_gb,
+                C_RESET
+            );
+            rpc(
+                &host,
+                &token,
+                Command::ApplyResources(Box::new(spec.manifest)),
+            )
+            .await;
+        }
+        "templates" => rpc(&host, &token, Command::ListTemplates).await,
         "template-build" => {
             // B8: bake the golden template. Temp vmid defaults to 999.
             let temp_vmid: u16 = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(999);

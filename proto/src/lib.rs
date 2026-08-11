@@ -67,6 +67,10 @@ pub enum Command {
         temp_vmid: u16,
         version: u32,
     },
+    /// C4: hot-apply manifest resources to the running container (grow only).
+    ApplyResources(Box<StackManifest>),
+    /// C5: list available OS templates + clonable golden templates.
+    ListTemplates,
     /// G8: read the host's runtime settings.
     GetConfig,
     /// G8: replace the host's runtime settings (persisted to host.toml).

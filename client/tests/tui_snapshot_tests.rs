@@ -636,3 +636,63 @@ fn b4_drift_flag_computed_from_applied_hash() {
     assert!(m.fleet.as_ref().unwrap().stacks[0].drift);
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn d11_bundle_round_trip_excludes_secrets_and_substitutes() {
+    let tmp = std::env::temp_dir().join(format!("homelab-bundle-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let stacks = tmp.join("stacks");
+    std::fs::create_dir_all(&stacks).unwrap();
+    // Scaffold a source stack, then add a SECRET .env that must never travel.
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = homelab_client::scaffold::scan_presets(&presets_dir);
+    let syncthing = presets.iter().find(|p| p.name == "syncthing").unwrap();
+    homelab_client::scaffold::scaffold_stack(
+        &stacks,
+        &presets_dir,
+        &homelab_client::scaffold::StackParams {
+            name: "source",
+            vmid: 150,
+            ram_mb: 512,
+            cores: 1,
+            disk_gb: 4,
+            swap_mb: None,
+            preset: Some(syncthing),
+        },
+    )
+    .unwrap();
+    std::fs::write(
+        stacks.join("source/syncthing/.env"),
+        "API_KEY=supersecret123\n",
+    )
+    .unwrap();
+
+    // Export → the bundle must not contain the secret.
+    let bundle_path = tmp.join("source-bundle.yml");
+    homelab_client::spec::export_bundle(&stacks.join("source"), bundle_path.to_str().unwrap())
+        .unwrap();
+    let bundle_raw = std::fs::read_to_string(&bundle_path).unwrap();
+    assert!(
+        !bundle_raw.contains("supersecret123"),
+        "secrets never in a bundle"
+    );
+    assert!(bundle_raw.contains("bundle_version"));
+
+    // Import as a different stack → identity fully substituted + valid.
+    let dest = homelab_client::spec::import_bundle(&bundle_path, &stacks, "copy", 151).unwrap();
+    let spec = homelab_client::spec::build_spec(&dest).unwrap();
+    homelab_core::manifest::validate(&spec).unwrap();
+    assert_eq!(spec.manifest.stack_name, "copy");
+    assert_eq!(spec.manifest.vmid, 151);
+    assert_eq!(spec.manifest.hostname, "151-app-copy");
+    assert!(spec.manifest.network.ip.starts_with("10.10.10.51/"));
+    assert_eq!(
+        spec.manifest.storage[0].host_path,
+        "/appdata/copy/syncthing-config"
+    );
+    let compose = std::fs::read_to_string(dest.join("syncthing/docker-compose.yml")).unwrap();
+    assert!(compose.contains("copy_net"));
+    assert!(!compose.contains("source_net"));
+    assert!(spec.env.is_empty(), "no secrets came along");
+    let _ = std::fs::remove_dir_all(&tmp);
+}

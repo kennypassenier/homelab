@@ -803,6 +803,47 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             })
             .await
         }
+        Rpc::ApplyResources(manifest) => {
+            run_mutating_op(state, &exec, req.id, "resize", |ctx| {
+                Box::pin(async move { homelab_core::ops::resize::hot_apply(ctx, &manifest).await })
+            })
+            .await
+        }
+        Rpc::ListTemplates => {
+            // C5: discovery instead of hardcoded strings. Two sources: OS
+            // tarballs (pveam) and clonable golden template containers.
+            let tarballs = exec
+                .run(&Cmd::new("pveam", &["list", "local"], 60))
+                .await
+                .map(|o| o.stdout)
+                .unwrap_or_default();
+            let clones = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &["-c", "grep -l '^template: 1' /etc/pve/lxc/*.conf 2>/dev/null | while read f; do v=$(basename $f .conf); h=$(grep '^hostname:' $f | cut -d' ' -f2); echo \"clone:$v  $h\"; done"],
+                    30,
+                ))
+                .await
+                .map(|o| o.stdout)
+                .unwrap_or_default();
+            let mut msg = String::from("clonable golden templates (fast):\n");
+            msg.push_str(if clones.trim().is_empty() {
+                "  (none — run 'homelab template-build')\n"
+            } else {
+                &clones
+            });
+            msg.push_str("\nOS templates (full bootstrap):\n");
+            for line in tarballs.lines().skip(1) {
+                if let Some(name) = line.split_whitespace().next() {
+                    msg.push_str(&format!("  {}\n", name));
+                }
+            }
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: msg,
+            }
+        }
         Rpc::BuildTemplate { temp_vmid, version } => {
             run_mutating_op(state, &exec, req.id, "template-build", |ctx| {
                 Box::pin(async move {

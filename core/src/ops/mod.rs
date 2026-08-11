@@ -6,6 +6,7 @@ pub mod destroy;
 pub mod guards;
 pub mod mirror;
 pub mod patch;
+pub mod resize;
 pub mod selfupdate;
 pub mod template;
 pub mod update;

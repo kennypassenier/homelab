@@ -672,3 +672,100 @@ async fn b8_clone_template_provisions_via_pct_clone() {
     // Docker probe succeeded → bootstrap skipped the install.
     assert!(exec.calls_containing("get.docker.com").is_empty());
 }
+
+// ── C4: hot-apply resources ─────────────────────────────────────────────────
+
+use homelab_core::ops::resize::hot_apply;
+
+fn resize_exec(mem: u32, cores: u32, disk: u32, running: bool) -> MockExecutor {
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok(&format!(
+            "hostname: 108-app-test\nmemory: {}\ncores: {}\nrootfs: local-lvm:vm-108-disk-0,size={}G\n",
+            mem, cores, disk
+        )),
+    );
+    exec.respond_always(
+        "pct status",
+        CmdOutput::ok(if running {
+            "status: running"
+        } else {
+            "status: stopped"
+        }),
+    );
+    exec
+}
+
+#[tokio::test]
+async fn c4_grow_applies_live() {
+    let exec = resize_exec(512, 1, 4, true);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut m = manifest(108, "test");
+    m.resources.memory_mb = 1024;
+    m.resources.cores = 2;
+    m.resources.disk_gb = 8;
+    let report = hot_apply(&ctx(&exec, &sink, &j), &m).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(exec.calls_containing("--memory 1024 --cores 2").len(), 1);
+    assert_eq!(exec.calls_containing("pct resize 108 rootfs 8G").len(), 1);
+}
+
+#[tokio::test]
+async fn c4_shrink_refused_while_running() {
+    let exec = resize_exec(2048, 4, 8, true);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut m = manifest(108, "test");
+    m.resources.memory_mb = 512;
+    m.resources.cores = 1;
+    let report = hot_apply(&ctx(&exec, &sink, &j), &m).await;
+    assert!(!report.ok);
+    assert!(report
+        .error
+        .unwrap()
+        .why
+        .contains("shrink refused while running"));
+    assert!(exec.calls_containing("pct set 108 --memory").is_empty());
+}
+
+#[tokio::test]
+async fn c4_ram_shrink_allowed_when_stopped_but_disk_never() {
+    // Stopped: RAM/cores may shrink…
+    let exec = resize_exec(2048, 4, 8, false);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut m = manifest(108, "test");
+    m.resources.memory_mb = 512;
+    m.resources.cores = 1;
+    m.resources.disk_gb = 8;
+    let report = hot_apply(&ctx(&exec, &sink, &j), &m).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(exec.calls_containing("--memory 512").len(), 1);
+    // …but a disk shrink is refused even stopped.
+    let exec = resize_exec(512, 1, 8, false);
+    let mut m = manifest(108, "test");
+    m.resources.disk_gb = 4;
+    let report = hot_apply(&ctx(&exec, &sink, &j), &m).await;
+    assert!(!report.ok);
+    assert!(report.error.unwrap().why.contains("disk shrink refused"));
+}
+
+#[tokio::test]
+async fn c4_no_touch_and_hostname_guarded() {
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let exec = resize_exec(512, 1, 4, true);
+    let report = hot_apply(&ctx(&exec, &sink, &j), &manifest(104, "evil")).await;
+    assert!(!report.ok);
+    assert!(report.error.unwrap().why.contains("no-touch"));
+    // Wrong hostname refused too.
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 108-app-other\nmemory: 512\ncores: 1\n"),
+    );
+    let report = hot_apply(&ctx(&exec, &sink, &j), &manifest(108, "test")).await;
+    assert!(!report.ok);
+}

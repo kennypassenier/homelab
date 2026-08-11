@@ -220,3 +220,19 @@ homelab runbook
    HA webhook automation to receive F3.)
 - **Pass:** journal shows "scheduler armed"; next morning state.json
   `last_backup` is fresh; HA receives a JSON payload per operation.
+
+### B14 · Host self-update + rollback drill (H5/B7) — LIVE-PROVEN 2026-08-11
+```bash
+homelab self-update target-debian/release/homelab-host
+```
+- **Pass (happy path):** selfcheck → backup → install → arm marker →
+  restart; ~8s later `/api/version` reports the new version and the journal
+  says "self-update accepted". (Proven: 2.1.0 → 2.1.1 over the TLS line.)
+- **Pass (garbage binary):** shipping a non-executable is refused at the
+  selfcheck gate with "Exec format error"; nothing touched. (Proven.)
+- **Pass (crash-on-start release):** a binary that passes selfcheck but dies
+  on start crash-loops; systemd StartLimit → OnFailure → rollback script
+  restores the previous binary and restarts. Daemon returns on the old
+  version, marker cleared. (Proven — full automatic recovery.)
+- B7: `systemctl show homelab-host -p Type,WatchdogUSec` → notify / 30s;
+  a hung (not crashed) daemon is killed and restarted by systemd.

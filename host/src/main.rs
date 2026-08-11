@@ -331,6 +331,7 @@ async fn main() {
     };
 
     // AR13: surface any operation the previous run left mid-flight.
+    let mut interrupted: Vec<String> = Vec::new();
     if let Ok(journal) = std::fs::read_to_string(format!("{}/journal.jsonl", config.state_dir)) {
         for (op, step) in homelab_core::incidents::interrupted_ops(&journal) {
             tracing::warn!(
@@ -338,7 +339,30 @@ async fn main() {
                 op,
                 step
             );
+            interrupted.push(format!("{} @ {}", op, step));
         }
+    }
+
+    // F3: boot notification — after a power cut or crash-restart, Home
+    // Assistant hears that the daemon is back, which version runs, and
+    // whether anything was left mid-flight. Delayed so the network is up.
+    {
+        let boot_state = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            let payload = serde_json::json!({
+                "source": "homelab-host",
+                "op": "host-online",
+                "label": "boot",
+                "ok": interrupted.is_empty(),
+                "error": if interrupted.is_empty() { None } else {
+                    Some(format!("interrupted: {}", interrupted.join("; ")))
+                },
+                "version": VERSION,
+            })
+            .to_string();
+            notify_raw(&boot_state, &RealExecutor, payload).await;
+        });
     }
 
     // E4: nightly scheduler — backups for every managed stack + auto-policy
@@ -530,10 +554,6 @@ async fn notify(
     label: &str,
     report: &homelab_core::runner::OperationReport,
 ) {
-    let url = match state.settings.read().unwrap().notify_webhook.clone() {
-        Some(u) => u,
-        None => return,
-    };
     let payload = serde_json::json!({
         "source": "homelab-host",
         "op": report.op,
@@ -542,6 +562,15 @@ async fn notify(
         "error": report.error.as_ref().map(|e| format!("{} :: {}", e.what, e.why)),
     })
     .to_string();
+    notify_raw(state, exec, payload).await;
+}
+
+/// Lower-level webhook POST used by notify() and the boot notification.
+async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
+    let url = match state.settings.read().unwrap().notify_webhook.clone() {
+        Some(u) => u,
+        None => return,
+    };
     let _ = exec
         .run(&Cmd::new(
             "curl",

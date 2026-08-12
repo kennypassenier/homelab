@@ -68,6 +68,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     // A1/A2: same gate as every mutating op (quiesce/resume reach into the
     // container).
     step!(runner, "safety gates", {
+        crate::manifest::validate_manifest(m)?;
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
         Ok(StepOutcome::Unchanged)
     });
@@ -122,7 +123,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         let dir_cmds = m
             .apps
             .iter()
-            .map(|a| format!("cd /opt/{}/{} && docker compose up -d", m.stack_name, a))
+            .map(|a| format!("cd '/opt/{}/{}' && docker compose up -d", m.stack_name, a))
             .collect::<Vec<_>>()
             .join("; ");
         let _ = super::util_pct_sh(exec, m.vmid, &format!("{}; true", dir_cmds), 300).await?;
@@ -248,6 +249,7 @@ pub async fn restore(
 
     // A1/A2: restore composes down and writes over the target — full gate.
     step!(runner, "safety gates", {
+        crate::manifest::validate_manifest(m)?;
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
         Ok(StepOutcome::Unchanged)
     });
@@ -274,7 +276,7 @@ pub async fn restore(
             let _ = super::util_pct_sh(
                 exec,
                 m.vmid,
-                &format!("cd /opt/{}/{} && docker compose down", m.stack_name, a),
+                &format!("cd '/opt/{}/{}' && docker compose down", m.stack_name, a),
                 120,
             )
             .await?;
@@ -302,7 +304,7 @@ pub async fn restore(
             super::util_pct_sh(
                 exec,
                 m.vmid,
-                &format!("cd /opt/{}/{} && docker compose up -d", m.stack_name, a),
+                &format!("cd '/opt/{}/{}' && docker compose up -d", m.stack_name, a),
                 300,
             )
             .await?;
@@ -316,7 +318,7 @@ pub async fn restore(
                 exec,
                 m.vmid,
                 &format!(
-                    "cd /opt/{}/{} && docker compose ps --status running --services",
+                    "cd '/opt/{}/{}' && docker compose ps --status running --services",
                     m.stack_name, a
                 ),
                 60,

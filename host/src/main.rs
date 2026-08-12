@@ -127,7 +127,10 @@ fn load_config() -> Config {
 /// of persist_settings so the parse→render→parse round-trip is testable
 /// (gap: an early version silently dropped the OPNsense fields on every
 /// settings save).
-fn render_settings_toml(config: &Config, settings: &homelab_proto::HostConfigView) -> Result<String, String> {
+fn render_settings_toml(
+    config: &Config,
+    settings: &homelab_proto::HostConfigView,
+) -> Result<String, String> {
     #[derive(serde::Serialize)]
     struct Out<'a> {
         token: &'a str,
@@ -203,14 +206,19 @@ mod tests {
                 retention: homelab_core::retention::default_tiers(),
             },
         };
-        let rendered =
-            render_settings_toml(&config, &config.initial_settings).expect("render");
+        let rendered = render_settings_toml(&config, &config.initial_settings).expect("render");
         let parsed: FileConfig = toml::from_str(&rendered).expect("parse back");
         assert_eq!(parsed.token.as_deref(), Some("0123456789abcdef0123"));
         assert_eq!(parsed.backup_hour, Some(4));
-        assert_eq!(parsed.notify_webhook.as_deref(), Some("http://ha/webhook/x"));
+        assert_eq!(
+            parsed.notify_webhook.as_deref(),
+            Some("http://ha/webhook/x")
+        );
         assert_eq!(parsed.exec_enabled, Some(true));
-        assert_eq!(parsed.mirror_remote.as_deref(), Some("git@github.com:k/m.git"));
+        assert_eq!(
+            parsed.mirror_remote.as_deref(),
+            Some("git@github.com:k/m.git")
+        );
         assert_eq!(parsed.opnsense_url.as_deref(), Some("https://10.10.10.1"));
         assert_eq!(
             parsed.opnsense_cred_file.as_deref(),

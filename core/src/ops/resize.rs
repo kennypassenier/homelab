@@ -49,6 +49,7 @@ pub async fn hot_apply(ctx: &OpCtx<'_>, m: &StackManifest) -> OperationReport {
     let mut cur_disk = 0u32;
 
     step!(runner, "read live config", {
+        crate::manifest::validate_manifest(m)?;
         if ctx.safety.no_touch.contains(&m.vmid) {
             return Err(CoreError::SafetyAbort(format!(
                 "vmid {} is on the no-touch list",

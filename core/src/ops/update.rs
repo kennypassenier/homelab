@@ -36,7 +36,7 @@ async fn capture_app(
     app: &str,
 ) -> Result<Vec<CapturedImage>, CoreError> {
     let script = format!(
-        "cd /opt/{}/{} && docker compose ps -q | xargs -r docker inspect --format '{{{{.Image}}}} {{{{.Config.Image}}}}'",
+        "cd '/opt/{}/{}' && docker compose ps -q | xargs -r docker inspect --format '{{{{.Image}}}} {{{{.Config.Image}}}}'",
         stack, app
     );
     let out = super::util_pct_sh(exec, vmid, &script, 60).await?;
@@ -60,7 +60,7 @@ async fn app_policy(
     app: &str,
 ) -> Result<String, CoreError> {
     let script = format!(
-        "cd /opt/{}/{} && docker compose ps -q | head -1 | xargs -r docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.policy\"}}}}'",
+        "cd '/opt/{}/{}' && docker compose ps -q | head -1 | xargs -r docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.policy\"}}}}'",
         stack, app
     );
     let out = super::util_pct_sh(exec, vmid, &script, 60).await?;
@@ -74,7 +74,7 @@ async fn verify_app(
     app: &str,
 ) -> Result<bool, CoreError> {
     let script = format!(
-        "cd /opt/{}/{} && docker compose ps --status running --services",
+        "cd '/opt/{}/{}' && docker compose ps --status running --services",
         stack, app
     );
     let out = super::util_pct_sh(exec, vmid, &script, 60).await?;
@@ -113,6 +113,7 @@ pub async fn update(
 
     // A1/A2: updates pull and recreate containers inside the target.
     step!(runner, "safety gates", {
+        crate::manifest::validate_manifest(m)?;
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
         Ok(StepOutcome::Unchanged)
     });
@@ -155,7 +156,7 @@ pub async fn update(
                 exec,
                 vmid,
                 &format!(
-                    "cd /opt/{}/{} && docker compose pull -q && docker compose up -d --remove-orphans",
+                    "cd '/opt/{}/{}' && docker compose pull -q && docker compose up -d --remove-orphans",
                     stack, app
                 ),
                 600,
@@ -184,7 +185,7 @@ pub async fn update(
                 exec,
                 vmid,
                 &format!(
-                    "cd /opt/{}/{} && {}docker compose up -d --force-recreate",
+                    "cd '/opt/{}/{}' && {}docker compose up -d --force-recreate",
                     stack, app, retags
                 ),
                 300,

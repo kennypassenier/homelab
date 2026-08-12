@@ -36,7 +36,11 @@ pub(crate) async fn guard_target(
         )));
     }
     let cfg = exec
-        .run(&crate::executor::Cmd::new("pct", &["config", &vmid.to_string()], 30))
+        .run(&crate::executor::Cmd::new(
+            "pct",
+            &["config", &vmid.to_string()],
+            30,
+        ))
         .await?;
     if !cfg.success() {
         return Err(CoreError::Other(format!("vmid {} does not exist", vmid)));

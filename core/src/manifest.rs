@@ -134,9 +134,40 @@ pub struct DeploySpec {
 
 /// Validate a full deploy spec. Returns every problem found (not just the
 /// first) so the wizard can show them all at once.
+/// Manifest-only validation (D10): the checks every manifest-bearing RPC
+/// must pass — deploy adds file/env checks on top. Security review 2026-08-11:
+/// app names reach `sh -c` strings inside containers, so they are constrained
+/// to the same [a-z0-9-] alphabet as stack names, and this validator now runs
+/// for backup/restore/update/resize too, not just deploy.
+pub fn validate_manifest(m: &StackManifest) -> Result<(), CoreError> {
+    let mut problems: Vec<String> = Vec::new();
+    collect_manifest_problems(m, &mut problems);
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(CoreError::Validation(problems.join("; ")))
+    }
+}
+
+fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
+    for app in &m.apps {
+        if app.is_empty()
+            || !app
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            problems.push(format!(
+                "app name '{}' must be non-empty lowercase [a-z0-9-] (it is used in shell paths)",
+                app
+            ));
+        }
+    }
+}
+
 pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
     let mut problems: Vec<String> = Vec::new();
     let m = &spec.manifest;
+    collect_manifest_problems(m, &mut problems);
 
     if m.stack_name.is_empty()
         || !m

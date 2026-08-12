@@ -60,7 +60,6 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
     }
 }
 
-
 fn mock_hostname(exec: &MockExecutor, vmid: u16, stack: &str) {
     exec.respond_always(
         &format!("pct config {}", vmid),

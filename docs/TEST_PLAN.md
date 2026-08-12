@@ -297,6 +297,21 @@ webhook catcher:
 To arm for real: set the webhook URL in the SETTINGS tab (or host.toml) to
 an HA webhook automation.
 
+### B21 · Release-driven host update (H7) — LIVE-PROVEN 2026-08-12
+First official release v3.0.0: `make release VERSION=3.0.0` → CI gate →
+GitHub Release with SHA256SUMS → `homelab release-update` downloaded,
+checksum-verified and shipped the binary over the line; host went
+2.6.0 → 3.0.0 through the H5 pipeline (backup, armed rollback, restart,
+marker cleared healthy). The TUI badge + U key run the identical code path
+and will surface at the next release.
+
+### B22 · Enabled flag, light variant (H8) — LIVE-PROVEN 2026-08-12
+`homelab disable synctest` → `onboot: 0` in 108.conf + `"enabled": false`
+in state.json, container stayed running (the flag never touches run state).
+`homelab enable synctest` → `onboot: 1` + `"enabled": true`. Scheduler-skip
+and auto-disable-on-failed-nightly are unit-tested; the next failed nightly
+run is the live proof of the auto-park path.
+
 ### B20 · HA webhook receiver (F3, HA side) — LIVE-PROVEN 2026-08-11
 Host `notify_webhook` points at `automation.homelab_ops_webhook`
 (`/api/webhook/homelab-ops-c4d81f26`, local-only, POST). Every event is

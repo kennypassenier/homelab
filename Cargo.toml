@@ -5,7 +5,7 @@ members = ["core", "proto", "host", "client", "tui-preview"]
 exclude = ["client-app", "host-daemon", "lxc-daemon"]
 
 [workspace.package]
-version = "2.7.0"
+version = "3.0.0"
 rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 edition = "2021"

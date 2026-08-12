@@ -73,6 +73,8 @@ pub enum Msg {
     Key(crossterm::event::KeyEvent),
     Tick,
     Backend(BackendEvent),
+    /// B6: result of the startup release check (side channel).
+    ReleaseTag(Option<String>),
 }
 
 /// Focus mode (mockup-approved): a near-fullscreen task window showing only
@@ -174,6 +176,11 @@ pub struct Model {
     pub plan: Option<Plan>,
     /// D6: spec awaiting the host's applied files for a real diff plan.
     pub plan_pending: Option<Box<homelab_proto::DeploySpec>>,
+    /// B6: newest GitHub release tag (checked at startup via gh).
+    pub latest_release: Option<String>,
+    /// B6: set by the U key; the run loop picks it up, downloads+verifies
+    /// the release off-thread and ships it over the line.
+    pub release_update_requested: Option<String>,
     pub wizard: Option<Wizard>,
     /// G2: presets loaded from the presets/ directory (data, not code);
     /// falls back to the synthetic built-ins for tests and bare checkouts.
@@ -232,6 +239,8 @@ impl Model {
             focus: None,
             plan: None,
             plan_pending: None,
+            latest_release: None,
+            release_update_requested: None,
             wizard: None,
             presets: crate::scaffold::synthetic_presets(),
             shell_target: 0,
@@ -252,6 +261,14 @@ impl Model {
             return 1.0; // no reveal animation when effects are off
         }
         ((self.tick.saturating_sub(self.reveal_start)) as f32 / 9.0).min(1.0)
+    }
+
+    /// B6: a host update is available when the newest release outruns the
+    /// connected host's version.
+    pub fn host_update_available(&self) -> Option<&str> {
+        let latest = self.latest_release.as_deref()?;
+        (!self.host_version.is_empty() && crate::release::version_newer(latest, &self.host_version))
+            .then_some(latest)
     }
 
     pub fn stack_count(&self) -> usize {
@@ -286,6 +303,10 @@ impl Model {
 /// The pure update. Mutates the model and queues commands in `model.outbox`.
 pub fn update(model: &mut Model, msg: Msg) {
     match msg {
+        Msg::ReleaseTag(tag) => {
+            model.latest_release = tag;
+            return;
+        }
         Msg::Tick => {
             model.tick += 1;
             if model.flicker > 0 {
@@ -586,6 +607,19 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 }
             }
             KeyCode::Char('r') => model.outbox.push(Command::GetState),
+            KeyCode::Char('u') => {
+                if let Some(tag) = model.host_update_available().map(String::from) {
+                    model.focus = Some(Focus {
+                        title: format!("UPDATE HOST → {}", tag),
+                        feed: Vec::new(),
+                        scroll: 0,
+                        done: false,
+                        ok: false,
+                        result: String::new(),
+                    });
+                    model.release_update_requested = Some(tag);
+                }
+            }
             KeyCode::Char('D') => start_deploy(model),
             KeyCode::Char('p') => open_plan(model),
             KeyCode::Char('n') => {

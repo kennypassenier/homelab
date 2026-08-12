@@ -46,6 +46,16 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
     // Discover locally-deployable stacks (a ./stacks dir next to the cwd).
     model.local_stacks = crate::spec::scan_local_stacks(std::path::Path::new("stacks"));
     model.presets = crate::scaffold::scan_presets(std::path::Path::new("presets"));
+
+    // B6: release check off-thread; the loop below folds the answer in.
+    let (side_tx, mut side_rx) = tokio::sync::mpsc::channel::<Msg>(8);
+    {
+        let tx = side_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let tag = crate::release::latest_release_tag();
+            let _ = tx.blocking_send(Msg::ReleaseTag(tag));
+        });
+    }
     let mut events = EventStream::new();
     let mut anim = tokio::time::interval(Duration::from_millis(33));
     anim.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -64,9 +74,59 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
             Some(bev) = evt_rx.recv() => {
                 update(&mut model, Msg::Backend(bev));
             }
+            Some(side) = side_rx.recv() => {
+                update(&mut model, side);
+            }
             _ = anim.tick() => {
                 update(&mut model, Msg::Tick);
             }
+        }
+
+        // B6: the U key requested a release update — stage it off-thread and
+        // ship it through the normal command channel; progress lines arrive
+        // as synthesized log events in the open focus window.
+        if let Some(tag) = model.release_update_requested.take() {
+            let tx = side_tx.clone();
+            let ctx = cmd_tx.clone();
+            tokio::spawn(async move {
+                let log = |m: &str| {
+                    Msg::Backend(backend::BackendEvent::Server(
+                        homelab_proto::ServerMsg::Log {
+                            level: homelab_proto::LogLevel::Info,
+                            source: "LOCAL".into(),
+                            msg: m.to_string(),
+                        },
+                    ))
+                };
+                let _ = tx
+                    .send(log(&format!("[release] downloading {} via gh…", tag)))
+                    .await;
+                let staged =
+                    tokio::task::spawn_blocking(move || crate::release::stage_release(&tag))
+                        .await
+                        .unwrap_or_else(|e| Err(e.to_string()));
+                match staged {
+                    Ok(binary_b64) => {
+                        let _ = tx
+                            .send(log("[release] checksum verified — shipping over the line"))
+                            .await;
+                        let _ = ctx
+                            .send(homelab_proto::Command::SelfUpdateHost { binary_b64 })
+                            .await;
+                    }
+                    Err(e) => {
+                        let _ = tx
+                            .send(Msg::Backend(backend::BackendEvent::Server(
+                                homelab_proto::ServerMsg::RpcDone(homelab_proto::RpcResponse {
+                                    id: 0,
+                                    ok: false,
+                                    message: format!("release staging failed: {}", e),
+                                }),
+                            )))
+                            .await;
+                    }
+                }
+            });
         }
 
         // Flush queued commands from the pure update to the backend.

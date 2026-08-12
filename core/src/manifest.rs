@@ -308,3 +308,11 @@ pub fn intent_hash(spec: &DeploySpec) -> String {
     let out = h.finalize();
     out.iter().take(8).map(|b| format!("{:02x}", b)).collect()
 }
+
+/// Hex sha256 of arbitrary bytes (shared by push staging + release verify).
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(bytes);
+    h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+}

@@ -946,3 +946,36 @@ fn h19_every_palette_action_reaches_a_real_handler() {
         );
     }
 }
+
+#[test]
+fn b6_update_badge_and_u_key_flow() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut m = ready_model();
+    m.host_version = "2.6.0".into();
+    // No release known → no badge, U does nothing.
+    let out = render(&m);
+    assert!(!out.contains("HOST UPDATE"));
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)),
+    );
+    assert!(m.release_update_requested.is_none());
+    // Newer release arrives via the side channel → badge shows.
+    homelab_client::tui::model::update(&mut m, Msg::ReleaseTag(Some("v9.9.9".into())));
+    let out = render(&m);
+    assert!(out.contains("HOST UPDATE v9.9.9"), "badge must appear");
+    // U opens the focus window and requests staging.
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)),
+    );
+    assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
+    assert!(m.focus.is_some());
+    let out = render(&m);
+    assert!(out.contains("UPDATE HOST"), "focus window title");
+    // Same-version release → no badge (never prompt for a sidegrade).
+    let mut m2 = ready_model();
+    m2.host_version = "2.6.0".into();
+    homelab_client::tui::model::update(&mut m2, Msg::ReleaseTag(Some("v2.6.0".into())));
+    assert!(m2.host_update_available().is_none());
+}

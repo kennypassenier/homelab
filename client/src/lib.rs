@@ -1,6 +1,7 @@
 //! homelab-client library: the TUI (AR6) and TLS pinning, shared by the
 //! `homelab` binary and the test suite.
 
+pub mod release;
 pub mod scaffold;
 pub mod spec;
 pub mod tls;

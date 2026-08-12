@@ -490,6 +490,12 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
     if model.conn == Conn::Down {
         attn.push("⚠ LINK DOWN — reconnecting".into());
     }
+    if let Some(tag) = model.host_update_available() {
+        attn.push(format!(
+            "⬆ HOST UPDATE {} beschikbaar — press U (checksum-verified, auto-rollback armed)",
+            tag
+        ));
+    }
     if let Some(fleet) = &model.fleet {
         let drifted: Vec<&str> = fleet
             .stacks

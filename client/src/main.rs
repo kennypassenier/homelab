@@ -273,6 +273,30 @@ async fn main() {
             )
             .await;
         }
+        "release-update" => {
+            // B6: fetch the newest GitHub release, verify its checksum, and
+            // ship it over the line — the host's selfcheck/rollback pipeline
+            // takes it from there.
+            let tag = match args.get(2).cloned() {
+                Some(t) => t,
+                None => homelab_client::release::latest_release_tag()
+                    .unwrap_or_else(|| die("no release found (gh authenticated? release exists?)")),
+            };
+            println!(
+                "{}▶ release update :: staging {} from GitHub{}",
+                C_CYAN, tag, C_RESET
+            );
+            match homelab_client::release::stage_release(&tag) {
+                Ok(binary_b64) => {
+                    println!(
+                        "{}✓ checksum verified — shipping over the line{}",
+                        C_GREEN, C_RESET
+                    );
+                    rpc(&host, &token, Command::SelfUpdateHost { binary_b64 }).await;
+                }
+                Err(e) => die(&e),
+            }
+        }
         "self-update" => {
             // H5: ship a new HOST binary over the line; the host selfchecks,
             // installs with an armed rollback, and restarts itself.

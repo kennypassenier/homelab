@@ -13,7 +13,7 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
 |---|---|
 | Current phase | 7 · Hardening COMPLETE (H1–H22 closed per Kenny's form; H9 later, H22 accepted) |
 | Last completed gate | Procedure-evaluation form (2026-08-11): V1–V10 close, V11 later, V12 retro |
-| Next gate | OPEN: deep-dive 2 (B6 update-flow + B8 enabled-flag). Then: V12 retrospective; V11 release tag (post-hardening, now unblocked) |
+| Next gate | OPEN: deep-dive 2 (B6 update-flow + B8 enabled-flag). V12 retro DONE (dev-procedure updated, L1-L8). V11 release tag ready when Kenny says go |
 | AFK mode | on for build work (Kenny: "keep going"), off for gates |
 
 ## Project state (resume here)

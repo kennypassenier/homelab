@@ -41,8 +41,41 @@ anything `ok:false` you missed.
 | App automatically | label `com.homelab.update.policy=auto` | nightly |
 | Container OS (security) | unattended-upgrades | automatic daily |
 | Container OS (full) | `homelab patch` | monthly-ish |
-| The daemon itself | build + `homelab self-update target-debian/release/homelab-host` | when we ship changes |
+| The daemon itself | `make release VERSION=x.y.z` then `homelab release-update` — see below | when we ship changes |
 | Golden template | destroy CT 999 → `homelab template-build 999 <v+1>` | after major Debian updates |
+
+## Making a release (H7 flow)
+
+The normal path for shipping daemon changes, end to end:
+
+1. Land your changes on `v2-merge` with the gates green (`make gate`).
+2. `make release VERSION=x.y.z` — runs the full gate locally, stamps the
+   workspace version, commits, tags `vx.y.z` and pushes. Refuses on a dirty
+   tree or an existing tag. Version rule: breaking/architectural = major,
+   feature = minor, fix = patch.
+3. GitHub CI re-runs the gate (a red gate blocks the release) and publishes
+   `homelab-host`, `homelab` and `SHA256SUMS` as a GitHub Release.
+   Watch with `gh run watch`.
+4. Publishing changes nothing on the host. Roll out deliberately:
+   the TUI shows "⬆ HOST UPDATE vx.y.z" — press `U`; or run
+   `homelab release-update`. The client downloads the release, verifies the
+   checksum, and ships it over the line into the existing self-update
+   pipeline (selfcheck → backup → armed rollback → restart).
+5. If the new daemon crashes on start, systemd rolls back to the previous
+   binary automatically — nothing to do but read the incident.
+
+Emergency path without GitHub: `make host-binary` +
+`homelab self-update target-debian/release/homelab-host`.
+
+## Parking a service (H8)
+
+`homelab disable <stack>` (or `E` on the stack in the TUI) parks a stack:
+nightly backup+update runs skip it and onboot is cleared, so it stays down
+across host reboots. Containers are NOT stopped — do that manually if you
+want it down now (`pct stop` in Proxmox is always respected; the flag never
+fights you). `homelab enable <stack>` reverses both. A failed nightly run
+auto-parks the stack after one loud message so it cannot fail every night;
+investigate, then re-enable.
 
 ## Backup verification (quarterly drill)
 

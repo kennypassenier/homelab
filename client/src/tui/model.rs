@@ -73,7 +73,7 @@ pub enum Msg {
     Key(crossterm::event::KeyEvent),
     Tick,
     Backend(BackendEvent),
-    /// B6: result of the startup release check (side channel).
+    /// H7: result of the startup release check (side channel).
     ReleaseTag(Option<String>),
 }
 
@@ -176,9 +176,9 @@ pub struct Model {
     pub plan: Option<Plan>,
     /// D6: spec awaiting the host's applied files for a real diff plan.
     pub plan_pending: Option<Box<homelab_proto::DeploySpec>>,
-    /// B6: newest GitHub release tag (checked at startup via gh).
+    /// H7: newest GitHub release tag (checked at startup via gh).
     pub latest_release: Option<String>,
-    /// B6: set by the U key; the run loop picks it up, downloads+verifies
+    /// H7: set by the U key; the run loop picks it up, downloads+verifies
     /// the release off-thread and ships it over the line.
     pub release_update_requested: Option<String>,
     pub wizard: Option<Wizard>,
@@ -263,7 +263,7 @@ impl Model {
         ((self.tick.saturating_sub(self.reveal_start)) as f32 / 9.0).min(1.0)
     }
 
-    /// B6: a host update is available when the newest release outruns the
+    /// H7: a host update is available when the newest release outruns the
     /// connected host's version.
     pub fn host_update_available(&self) -> Option<&str> {
         let latest = self.latest_release.as_deref()?;
@@ -620,6 +620,20 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 }
             }
             KeyCode::Char('D') => start_deploy(model),
+            KeyCode::Char('e') => {
+                // H8 (light): toggle the selected stack's enabled flag. The
+                // GetState refresh rides behind the op — the host handles
+                // RPCs in order, so it sees the new flag.
+                if let Some(fleet) = &model.fleet {
+                    if let Some(s) = fleet.stacks.get(model.selected_stack) {
+                        model.outbox.push(Command::SetStackEnabled {
+                            stack: s.name.clone(),
+                            enabled: !s.enabled,
+                        });
+                        model.outbox.push(Command::GetState);
+                    }
+                }
+            }
             KeyCode::Char('p') => open_plan(model),
             KeyCode::Char('n') => {
                 let vmid = next_free_vmid(model);

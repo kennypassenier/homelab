@@ -205,6 +205,9 @@ fn draw_fleet(f: &mut Frame, model: &Model, area: Rect) {
             };
             let running = s.apps.iter().filter(|a| a.running).count();
             let mut flags = String::new();
+            if !s.enabled {
+                flags.push_str("[OFF] ");
+            }
             if s.drift {
                 flags.push_str("[UPD] ");
             }

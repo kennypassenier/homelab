@@ -3,6 +3,7 @@
 pub mod backup;
 pub mod deploy;
 pub mod destroy;
+pub mod enable;
 pub mod guards;
 pub mod kea;
 pub mod mirror;

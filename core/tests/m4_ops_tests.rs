@@ -1417,3 +1417,82 @@ async fn h19_kea_updates_existing_reservation_via_set_branch() {
     assert_eq!(exec.calls_containing("set_reservation/res-9").len(), 1);
     assert!(exec.calls_containing("add_reservation").is_empty());
 }
+
+// ── H8 (light): enabled flag ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn b8_disable_parks_stack_and_clears_onboot() {
+    use homelab_core::ops::enable::set_enabled;
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{"test":{"vmid":108,"hostname":"108-app-test","apps":["app"],"applied_at":1}}}"#,
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = set_enabled(&ctx(&exec, &sink, &j), "test", false).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        !exec.calls_containing("pct set 108 --onboot 0").is_empty(),
+        "disable must clear onboot so parking survives a host reboot"
+    );
+    let state = exec.file("/var/lib/homelab/state.json").unwrap();
+    assert!(state.contains("\"enabled\": false"), "{}", state);
+}
+
+#[tokio::test]
+async fn b8_enable_restores_onboot_and_flag() {
+    use homelab_core::ops::enable::set_enabled;
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{"test":{"vmid":108,"hostname":"108-app-test","apps":["app"],"applied_at":1,"enabled":false}}}"#,
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = set_enabled(&ctx(&exec, &sink, &j), "test", true).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        !exec.calls_containing("pct set 108 --onboot 1").is_empty(),
+        "enable must restore onboot (manifest default when none stored)"
+    );
+    let state = exec.file("/var/lib/homelab/state.json").unwrap();
+    assert!(state.contains("\"enabled\": true"), "{}", state);
+}
+
+#[tokio::test]
+async fn b8_no_touch_vmid_refused() {
+    use homelab_core::ops::enable::set_enabled;
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{"evil":{"vmid":104,"hostname":"104-app-evil","apps":["app"],"applied_at":1}}}"#,
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = set_enabled(&ctx(&exec, &sink, &j), "evil", false).await;
+    assert!(!report.ok, "no-touch vmid must be refused");
+    assert!(
+        exec.calls_containing("pct set 104").is_empty(),
+        "no pct mutation may reach a no-touch vmid"
+    );
+}
+
+#[tokio::test]
+async fn b8_old_state_json_defaults_to_enabled() {
+    use homelab_core::state::StateStore;
+    let exec = MockExecutor::new();
+    // Pre-B8 state file: no `enabled` key anywhere.
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{"test":{"vmid":108,"hostname":"108-app-test","apps":["app"],"applied_at":1}}}"#,
+    );
+    let store = StateStore::new(&exec, "/var/lib/homelab");
+    let state = store.load().await.unwrap();
+    assert!(
+        state.stacks["test"].enabled,
+        "stacks from before the flag existed must stay in the nightly rotation"
+    );
+}

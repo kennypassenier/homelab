@@ -396,6 +396,7 @@ mod tests {
                 last_backup: 0,
                 applied_hash: String::new(),
                 manifest: Some(mk(1024)),
+                enabled: true,
             },
         );
         hs.stacks.insert(
@@ -408,6 +409,7 @@ mod tests {
                 last_backup: 0,
                 applied_hash: String::new(),
                 manifest: Some(mk(4096)),
+                enabled: true,
             },
         );
         let (total, used, committed, cores, load1) =
@@ -811,6 +813,12 @@ async fn scheduler_loop(state: AppState) {
             }
         };
         for (name, st) in snapshot.stacks {
+            if !st.enabled {
+                // H8: parked stack — no nightly backup, no auto-update. One
+                // info line per tick that would have run it, nothing louder.
+                info!("scheduler: stack {} is disabled — skipped", name);
+                continue;
+            }
             if !backup_due(hour, local_hour, st.last_backup, now) {
                 continue; // already done today
             }
@@ -838,12 +846,30 @@ async fn scheduler_loop(state: AppState) {
                 }
             }
             let m2 = manifest.clone();
-            let _ = run_mutating_op(&state, &exec, 0, "scheduled-update", |ctx| {
+            let update_report = run_mutating_op(&state, &exec, 0, "scheduled-update", |ctx| {
                 Box::pin(
                     async move { homelab_core::ops::update::update(ctx, &m2, None, true).await },
                 )
             })
             .await;
+            // H8: a failed nightly run flips the flag off — one loud message,
+            // then silence instead of a fresh failure every night. State-only:
+            // onboot and the running containers are untouched, so a transient
+            // failure can never keep a stack from surviving a host reboot.
+            if !backup_report.ok || !update_report.ok {
+                if let Ok(mut s) = store.load().await {
+                    if let Some(rec) = s.stacks.get_mut(&name) {
+                        if rec.enabled {
+                            rec.enabled = false;
+                            tracing::warn!(
+                                "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
+                                name, name
+                            );
+                        }
+                    }
+                    let _ = store.save(s).await;
+                }
+            }
         }
     }
 }
@@ -1159,6 +1185,14 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             })
             .await
         }
+        Rpc::SetStackEnabled { stack, enabled } => {
+            run_mutating_op(state, &exec, req.id, "set-enabled", |ctx| {
+                Box::pin(async move {
+                    homelab_core::ops::enable::set_enabled(ctx, &stack, enabled).await
+                })
+            })
+            .await
+        }
         Rpc::ListTemplates => {
             // C5: discovery instead of hardcoded strings. Two sources: OS
             // tarballs (pveam) and clonable golden template containers.
@@ -1471,6 +1505,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     applied_hash: s.applied_hash.clone(),
                     env_sealed: true,
                     online: true,
+                    enabled: s.enabled,
                 })
                 .collect();
             let fleet = homelab_proto::FleetState {

@@ -650,6 +650,7 @@ fn draw_help(f: &mut Frame) {
         ("LEFT / RIGHT", "log source (Logs tab)"),
         ("SPACE", "follow logs"),
         ("R", "refresh fleet state"),
+        ("E", "park/unpark stack for nightly runs (H8)"),
         ("CTRL+K", "command palette"),
         ("F2", "cycle effect intensity"),
         ("H", "this help"),

@@ -279,6 +279,7 @@ fn demo_fleet() -> ServerMsg {
                 drift: false,
                 applied_hash: String::new(),
                 env_sealed: true,
+                enabled: true,
                 online: true,
             },
             StackView {
@@ -293,6 +294,7 @@ fn demo_fleet() -> ServerMsg {
                 drift: true,
                 applied_hash: String::new(),
                 env_sealed: true,
+                enabled: true,
                 online: true,
             },
             StackView {
@@ -303,6 +305,7 @@ fn demo_fleet() -> ServerMsg {
                 drift: false,
                 applied_hash: String::new(),
                 env_sealed: true,
+                enabled: true,
                 online: true,
             },
         ],

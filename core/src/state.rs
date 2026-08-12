@@ -29,6 +29,16 @@ pub struct StackState {
     /// backup, fleet update) can run without the client being connected.
     #[serde(default)]
     pub manifest: Option<crate::manifest::StackManifest>,
+    /// H8 (light variant): gates the nightly scheduler for this stack and is
+    /// flipped off automatically when a nightly run fails (one loud message,
+    /// then silence until the operator looks). Never touches the container's
+    /// run state — manual `pct stop` and this flag are independent worlds.
+    #[serde(default = "enabled_default")]
+    pub enabled: bool,
+}
+
+fn enabled_default() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

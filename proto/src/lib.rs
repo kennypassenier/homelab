@@ -80,6 +80,13 @@ pub enum Command {
     GetConfig,
     /// G8: replace the host's runtime settings (persisted to host.toml).
     SetConfig(Box<HostConfigView>),
+    /// H8 (light): flip a stack's enabled flag. Disabled = nightly scheduler
+    /// skips it + onboot cleared; enabled = back in rotation + onboot per
+    /// manifest. Never starts or stops containers.
+    SetStackEnabled {
+        stack: String,
+        enabled: bool,
+    },
 }
 
 /// G8: the host settings the TUI may inspect and edit. Token/listen/state_dir
@@ -109,6 +116,13 @@ pub struct StackView {
     pub applied_hash: String,
     pub env_sealed: bool,
     pub online: bool,
+    /// H8 (light): false = parked — nightly scheduler skips it, onboot off.
+    #[serde(default = "enabled_default")]
+    pub enabled: bool,
+}
+
+fn enabled_default() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -702,12 +702,13 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     step!(runner, "record state", {
         let store = StateStore::new(exec, &ctx.state_dir);
         let mut state = store.load().await?;
-        // Preserve last_backup across redeploys; refresh everything else.
-        let last_backup = state
+        // Preserve last_backup and the H8 enabled flag across redeploys —
+        // parking is an explicit operator choice; refresh everything else.
+        let (last_backup, enabled) = state
             .stacks
             .get(&m.stack_name)
-            .map(|s| s.last_backup)
-            .unwrap_or(0);
+            .map(|s| (s.last_backup, s.enabled))
+            .unwrap_or((0, true));
         state.stacks.insert(
             m.stack_name.clone(),
             StackState {
@@ -718,6 +719,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 last_backup,
                 applied_hash: manifest::intent_hash(spec),
                 manifest: Some(m.clone()),
+                enabled,
             },
         );
         store.save(state).await?;

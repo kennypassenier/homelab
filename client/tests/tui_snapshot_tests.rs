@@ -36,6 +36,7 @@ fn fleet() -> FleetState {
                 applied_hash: String::new(),
                 env_sealed: true,
                 online: true,
+                enabled: true,
             },
             StackView {
                 name: "media".into(),
@@ -50,6 +51,7 @@ fn fleet() -> FleetState {
                 applied_hash: String::new(),
                 env_sealed: false,
                 online: true,
+                enabled: true,
             },
         ],
     }
@@ -619,6 +621,7 @@ fn b4_drift_flag_computed_from_applied_hash() {
                 applied_hash: hash.to_string(),
                 env_sealed: true,
                 online: true,
+                enabled: true,
             }],
         }))
     };

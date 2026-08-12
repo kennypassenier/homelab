@@ -438,6 +438,31 @@ offsite token validity, mirror lag — all green or an actionable hint.
 No user-facing `--demo` flag. The simulator lives on only as an internal test
 fixture for G1's TUI snapshot tests — implementation detail, not a feature.
 
+### H7 · Release-driven host updates — **Should** *(added 2026-08-12, evaluation form B6)*
+The client checks GitHub for the newest release at TUI startup; a ticker badge
+announces a newer host version, `U` opens a progress window that downloads the
+release via authenticated `gh`, verifies the SHA256SUMS entry, and feeds the
+binary into the existing H5 self-update pipeline (selfcheck, armed rollback,
+watchdog). CLI: `homelab release-update [tag]`. Publishing a release never
+touches the host — rollout is always a deliberate client action.
+- **Auto**: version-compare + checksum-listing unit tests (fail-safe: malformed
+  versions are never "newer"); badge + U-key snapshot test.
+- **Manual**: publish a release, watch the badge appear, update, watch the
+  failsafes.
+
+### H8 · Per-stack enabled flag, light variant — **Should** *(added 2026-08-12, evaluation form B8)*
+`homelab enable|disable <stack>` (TUI: `E`, `[OFF]` badge). Disabled = the
+nightly scheduler skips the stack AND onboot is cleared (parking survives a
+host reboot — the one thing a manual `pct stop` can't give). The flag NEVER
+starts or stops containers: manual Proxmox actions are always respected, and
+the two mechanisms are deliberately independent. A failed nightly run
+auto-disables the stack — one loud message instead of a failure every night;
+auto-disable is state-only (onboot untouched) so a transient failure can never
+keep a stack from surviving a reboot. The flag persists across redeploys.
+- **Auto**: op tests (disable clears onboot, enable restores it, no-touch
+  refused), old-state compatibility test (missing flag = enabled).
+- **Manual**: disable, verify the nightly skip line + onboot 0, re-enable.
+
 ---
 
 **Feature phase closed 2026-08-10.** Final tally: 27 Must · 23 Should ·

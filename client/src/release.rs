@@ -1,4 +1,4 @@
-//! B6 (Kenny's design, deep-dive 2): release-driven host updates. The
+//! H7 (Kenny's design, evaluation deep-dive): release-driven host updates. The
 //! CLIENT — with Kenny's authenticated `gh` — detects, downloads and
 //! verifies a GitHub release, then ships the binary over the proven TLS
 //! line (SelfUpdateHost). The host keeps its full selfcheck/backup/armed-

@@ -78,6 +78,15 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   (nightly run updates it unattended).
 - **H6 · Fleet patching** — `homelab patch`: serial apt dist-upgrade across
   every managed stack, fail-closed on the first error.
+- **H7 · Release-driven update** — the TUI checks GitHub at startup; when a
+  newer release exists a ticker badge appears — press `U` for a progress
+  window (download → checksum verify → ship over the line → rollback-armed
+  install). CLI: `homelab release-update [tag]`. Same failsafes as H5.
+- **H8 · Enabled flag** — `homelab enable|disable <stack>` (TUI: `E` on the
+  selected stack, `[OFF]` badge when parked). Disabled = nightly runs skip
+  the stack + onboot off; containers are never started or stopped by the
+  flag. A failed nightly run auto-disables the stack (one loud message
+  instead of nightly noise).
 - **H5 · Host self-update** — `homelab self-update <new-binary>`: selfcheck
   gate → backup → install → armed rollback marker → restart. A release that
   crashes on start is rolled back automatically by systemd (proven with a

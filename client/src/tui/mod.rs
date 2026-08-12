@@ -47,7 +47,7 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
     model.local_stacks = crate::spec::scan_local_stacks(std::path::Path::new("stacks"));
     model.presets = crate::scaffold::scan_presets(std::path::Path::new("presets"));
 
-    // B6: release check off-thread; the loop below folds the answer in.
+    // H7: release check off-thread; the loop below folds the answer in.
     let (side_tx, mut side_rx) = tokio::sync::mpsc::channel::<Msg>(8);
     {
         let tx = side_tx.clone();
@@ -82,7 +82,7 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
             }
         }
 
-        // B6: the U key requested a release update — stage it off-thread and
+        // H7: the U key requested a release update — stage it off-thread and
         // ship it through the normal command channel; progress lines arrive
         // as synthesized log events in the open focus window.
         if let Some(tag) = model.release_update_requested.take() {

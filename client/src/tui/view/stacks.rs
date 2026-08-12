@@ -59,6 +59,9 @@ fn draw_list(f: &mut Frame, model: &Model, area: Rect) {
             if s.drift {
                 spans.push(Span::styled(" [UPD]", THEME.warn()));
             }
+            if !s.enabled {
+                spans.push(Span::styled(" [OFF]", THEME.muted_style()));
+            }
             let style = if selected {
                 Style::new().bg(fx::pulse_bg(model.tick, model.fx))
             } else {
@@ -109,6 +112,12 @@ fn draw_detail(f: &mut Frame, model: &Model, area: Rect) {
                 Span::styled("[UPD] intent differs from applied", THEME.warn())
             } else {
                 Span::styled("none — intent == runtime", THEME.ok())
+            },
+            Span::styled("   nightly ", THEME.muted_style()),
+            if s.enabled {
+                Span::styled("● enabled", THEME.ok())
+            } else {
+                Span::styled("○ parked [e] to re-enable", THEME.warn())
             },
         ]),
         Line::from(vec![

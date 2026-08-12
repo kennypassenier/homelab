@@ -69,6 +69,21 @@ async fn main() {
         "ping" => rpc(&host, &token, Command::Ping).await,
         "patch" => rpc(&host, &token, Command::PatchFleet).await,
         "config" => rpc(&host, &token, Command::GetConfig).await,
+        // H8 (light): park / unpark a stack for the nightly scheduler.
+        "enable" | "disable" => {
+            let stack = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab enable|disable <stack-name>"));
+            rpc(
+                &host,
+                &token,
+                Command::SetStackEnabled {
+                    stack: stack.clone(),
+                    enabled: cmd == "enable",
+                },
+            )
+            .await;
+        }
         "export" => {
             // D11: single-file bundle, never secrets.
             let dir = args
@@ -274,7 +289,7 @@ async fn main() {
             .await;
         }
         "release-update" => {
-            // B6: fetch the newest GitHub release, verify its checksum, and
+            // H7: fetch the newest GitHub release, verify its checksum, and
             // ship it over the line — the host's selfcheck/rollback pipeline
             // takes it from there.
             let tag = match args.get(2).cloned() {
@@ -371,6 +386,9 @@ async fn main() {
                 "  homelab patch                       apt dist-upgrade all managed stacks (H6)"
             );
             println!("  homelab destroy stacks/<name>       gated destroy (C2)");
+            println!(
+                "  homelab enable|disable <stack>      (un)park for the nightly scheduler (H8)"
+            );
             println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
             println!("  homelab presets                     list the preset catalog (local)");
             println!(

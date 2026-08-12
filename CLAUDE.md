@@ -11,15 +11,19 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
 
 | Field | Value |
 |---|---|
-| Current phase | 7 · Hardening (retro-fit; build phases 0–6 complete) |
+| Current phase | 7 · Hardening COMPLETE (H1–H22 closed per Kenny's form; H9 later, H22 accepted) |
 | Last completed gate | Procedure-evaluation form (2026-08-11): V1–V10 close, V11 later, V12 retro |
-| Next gate | OPEN: deep-dive form (A2 license + B1–B9 milestone report) AND phase-7 hardening form (H1–H22). Docs (V10) approved; A1/A3 decided (AR17/AR18) |
+| Next gate | OPEN: deep-dive 2 (B6 update-flow + B8 enabled-flag). Then: V12 retrospective; V11 release tag (post-hardening, now unblocked) |
 | AFK mode | on for build work (Kenny: "keep going"), off for gates |
 
 ## Project state (resume here)
 
-- **Feature-complete at v2.5.0** (2026-08-11): every Must/Should/Could in
-  docs/FEATURES.md built; 83 tests; CI green on `v2-merge`.
+- **Feature-complete + HARDENED at v2.6.0** (2026-08-12): all features +
+  phase-7 hardening (3 audits; 20 gaps closed incl. E3 auto-restore, D3
+  GC, real diff plans, real-git E2E, configurable safety list, fail-loud
+  state, real doctor probes, host-meta backup); 117 tests; CI green.
+  First autonomous nightly run succeeded 2026-08-12 04:04 (snapshot
+  ecf42ecf + tiered retention prune).
 - **Host daemon LIVE** on Proxmox as `homelab-host.service` (:8443, TLS
   fp SHA256:85:00:F8:84…); ships via `homelab self-update` (H5, armed
   rollback proven). Golden template = CT 999 (`clone:999` default).

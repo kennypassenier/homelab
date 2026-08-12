@@ -61,5 +61,14 @@ V4 mini-round.
 by every crate) with a dedicated CI job compiling on exactly that toolchain.
 Chosen because the code already uses 1.82 APIs (`Option::is_none_or`, 1.82; `u64::is_multiple_of`, 1.87 — the clippy MSRV lint caught the higher floor immediately after pinning).
 
-**AR19 · License: pending deep-dive.** Kenny leans MIT/Apache-2.0 dual but
-asked for a fuller explanation first; to be settled in the follow-up form.
+**AR19 · License: MIT OR Apache-2.0 (dual), decided 2026-08-11** after the
+deep-dive explanation — the Rust-ecosystem convention: patent grant for who
+wants it, MIT compatibility for who needs it. LICENSE-MIT + LICENSE-APACHE
+in the repo root, `license` field in the workspace.
+
+## Milestone report (V6) — signed off 2026-08-11
+
+Kenny approved B1–B5 (M0–M6 exit criteria with evidence) and ratified the
+E1→G8 retention deviation (B7) and the E4-nightly-hour + G4-REPL deviations
+(B9). Open: B6 (H5 update flow — redesign under discussion) and B8 (D2
+enabled flag — decision pending a deeper trade-off round).

@@ -290,7 +290,7 @@ async fn b1_second_run_is_quiet() {
     // Intent repo already committed → git commit exits non-zero (nothing to do).
     exec.respond_always(
         "git -C /var/lib/homelab/repo commit",
-        CmdOutput::failed(1, ""),
+        CmdOutput::failed(1, "nothing to commit, working tree clean"),
     );
 
     let sink = VecSink::new();

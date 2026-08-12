@@ -318,6 +318,106 @@ mod tests {
             .iter()
             .any(|c| c.health != homelab_core::doctor::Health::Ok));
     }
+
+    #[test]
+    fn h12_scheduler_clock_logic() {
+        // Weird `date` output never silently disables the scheduler.
+        assert_eq!(parse_local_hour("04\n"), Some(4));
+        assert_eq!(parse_local_hour("garbage"), None);
+        assert_eq!(parse_local_hour("99"), None);
+        let now = 1_800_000_000u64;
+        assert!(backup_due(4, 4, now - 25 * 3600, now));
+        assert!(!backup_due(4, 5, now - 25 * 3600, now), "wrong hour");
+        assert!(!backup_due(4, 4, now - 3600, now), "backed up an hour ago");
+        assert!(backup_due(4, 4, 0, now), "never backed up");
+    }
+
+    #[test]
+    fn h12_bearer_check() {
+        assert!(bearer_ok(
+            Some("Bearer secret-token-123"),
+            "secret-token-123"
+        ));
+        assert!(!bearer_ok(Some("Bearer wrong"), "secret-token-123"));
+        assert!(
+            !bearer_ok(Some("secret-token-123"), "secret-token-123"),
+            "scheme required"
+        );
+        assert!(!bearer_ok(None, "secret-token-123"));
+    }
+
+    #[test]
+    fn h16_capacity_numbers_parse_and_sum() {
+        let free = "               total        used        free\nMem:           15908        9911        1268\nSwap:           8191         512        7679\n";
+        let mut hs = homelab_core::state::HostState::default();
+        let mk = |mem: u32| {
+            let mut m = homelab_core::manifest::StackManifest {
+                stack_name: "x".into(),
+                vmid: 108,
+                hostname: "108-app-x".into(),
+                network: homelab_core::manifest::NetworkSpec {
+                    ip: "10.10.10.8/24".into(),
+                    gateway: "g".into(),
+                    bridge: "b".into(),
+                    vlan: None,
+                },
+                resources: homelab_core::manifest::ResourceSpec {
+                    cores: 2,
+                    memory_mb: mem,
+                    swap_mb: 0,
+                    disk_gb: 4,
+                    storage: "s".into(),
+                },
+                lxc: homelab_core::manifest::LxcSpec {
+                    template: "t".into(),
+                    unprivileged: true,
+                    features: String::new(),
+                    protection: false,
+                    gpu: false,
+                    vpn: false,
+                },
+                boot: homelab_core::manifest::BootSpec {
+                    onboot: true,
+                    order: None,
+                },
+                storage: vec![],
+                apps: vec![],
+            };
+            m.hostname = m.canonical_hostname();
+            m
+        };
+        hs.stacks.insert(
+            "a".into(),
+            homelab_core::state::StackState {
+                vmid: 108,
+                hostname: "108-app-a".into(),
+                apps: vec![],
+                applied_at: 0,
+                last_backup: 0,
+                applied_hash: String::new(),
+                manifest: Some(mk(1024)),
+            },
+        );
+        hs.stacks.insert(
+            "b".into(),
+            homelab_core::state::StackState {
+                vmid: 109,
+                hostname: "109-app-b".into(),
+                apps: vec![],
+                applied_at: 0,
+                last_backup: 0,
+                applied_hash: String::new(),
+                manifest: Some(mk(4096)),
+            },
+        );
+        let (total, used, committed, cores, load1) =
+            capacity_numbers(free, "12\n", "2.53 1.80 1.20 2/500 12345", &hs);
+        assert_eq!(total, 15908);
+        assert_eq!(used, 9911);
+        assert_eq!(committed, 5120, "sum of manifest RAM ceilings");
+        assert_eq!(cores, 12);
+        assert_eq!(load1, 253);
+    }
 }
 
 // ── Real executor (AR2) ─────────────────────────────────────────────────────
@@ -616,6 +716,60 @@ async fn main() {
         .expect("serve");
 }
 
+/// H16: parse capacity numbers (C6) from `free -m`, `nproc` and
+/// /proc/loadavg + committed RAM from the stored manifests. Pure, testable.
+fn capacity_numbers(
+    free_out: &str,
+    nproc_out: &str,
+    loadavg: &str,
+    hs: &homelab_core::state::HostState,
+) -> (u32, u32, u32, u16, u32) {
+    let mem_line: Vec<u64> = free_out
+        .lines()
+        .find(|l| l.starts_with("Mem:"))
+        .map(|l| {
+            l.split_whitespace()
+                .skip(1)
+                .filter_map(|v| v.parse().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let total = mem_line.first().copied().unwrap_or(0) as u32;
+    let used = mem_line.get(1).copied().unwrap_or(0) as u32;
+    let committed: u32 = hs
+        .stacks
+        .values()
+        .filter_map(|s| s.manifest.as_ref())
+        .map(|m| m.resources.memory_mb)
+        .sum();
+    let cores = nproc_out.trim().parse::<u16>().unwrap_or(0);
+    let load1 = loadavg
+        .split_whitespace()
+        .next()
+        .and_then(|v| v.parse::<f64>().ok())
+        .map(|v| (v * 100.0).round() as u32)
+        .unwrap_or(0);
+    (total, used, committed, cores, load1)
+}
+
+/// H12: pure scheduler decisions, extracted so the clock logic is testable.
+/// `local_hour: None` (a failed/weird `date`) skips LOUDLY via the caller —
+/// the old code folded it into 255 and silently never fired.
+fn parse_local_hour(date_stdout: &str) -> Option<u8> {
+    date_stdout.trim().parse::<u8>().ok().filter(|h| *h < 24)
+}
+
+fn backup_due(cfg_hour: u8, local_hour: u8, last_backup: u64, now: u64) -> bool {
+    local_hour == cfg_hour && now.saturating_sub(last_backup) >= 20 * 3600
+}
+
+/// H12: bearer check, extracted for testing.
+fn bearer_ok(header: Option<&str>, token: &str) -> bool {
+    header
+        .map(|v| v == format!("Bearer {}", token))
+        .unwrap_or(false)
+}
+
 /// E4: check every 20 minutes; when the local hour matches `hour` and a
 /// stack's last backup is >20h old, run backup (E1) then auto-updates (D9)
 /// for that stack. Uses the same op machinery as RPCs (op-lock, incidents,
@@ -638,8 +792,12 @@ async fn scheduler_loop(state: AppState) {
             .unwrap_or(0);
         // Host-local hour without pulling in chrono: read from `date`.
         let local_hour = match exec.run(&Cmd::new("date", &["+%H"], 10)).await {
-            Ok(out) => out.stdout.trim().parse::<u8>().unwrap_or(255),
-            Err(_) => 255,
+            Ok(out) => parse_local_hour(&out.stdout),
+            Err(_) => None,
+        };
+        let Some(local_hour) = local_hour else {
+            tracing::error!("scheduler: cannot determine local hour ('date' failed) — nightly run skipped THIS TICK; investigate");
+            continue;
         };
         if local_hour != hour {
             continue;
@@ -653,7 +811,7 @@ async fn scheduler_loop(state: AppState) {
             }
         };
         for (name, st) in snapshot.stacks {
-            if now.saturating_sub(st.last_backup) < 20 * 3600 {
+            if !backup_due(hour, local_hour, st.last_backup, now) {
                 continue; // already done today
             }
             let Some(manifest) = st.manifest else {
@@ -695,11 +853,10 @@ async fn ws_upgrade(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let authed = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v == format!("Bearer {}", state.config.token))
-        .unwrap_or(false);
+    let authed = bearer_ok(
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+        &state.config.token,
+    );
     if !authed {
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
     }
@@ -1203,10 +1360,22 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
         }
         Rpc::GetState => {
-            // For M2 this reads recorded state; live per-app health arrives
-            // when the verify step persists it (wired in M4).
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let hs = store.load().await.unwrap_or_default();
+            // H16: real capacity numbers (C6) — free -m, nproc, loadavg,
+            // and committed RAM summed from the stored manifests.
+            let free_out = exec
+                .run(&Cmd::new("free", &["-m"], 15))
+                .await
+                .map(|o| o.stdout)
+                .unwrap_or_default();
+            let nproc_out = exec
+                .run(&Cmd::new("nproc", &[], 15))
+                .await
+                .map(|o| o.stdout)
+                .unwrap_or_default();
+            let loadavg = exec.read_file("/proc/loadavg").await.unwrap_or_default();
+            let cap = capacity_numbers(&free_out, &nproc_out, &loadavg, &hs);
             let df = exec
                 .run(&Cmd::new(
                     "df",
@@ -1264,12 +1433,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     ram_pct: 0,
                     disk_pct: df,
                     tls_fingerprint: fingerprint,
-                    // Capacity totals wired when state carries resources (M4).
-                    ram_total_mb: 0,
-                    ram_used_mb: 0,
-                    ram_committed_mb: 0,
-                    cores_total: 0,
-                    load1_x100: 0,
+                    ram_total_mb: cap.0,
+                    ram_used_mb: cap.1,
+                    ram_committed_mb: cap.2,
+                    cores_total: cap.3,
+                    load1_x100: cap.4,
                 },
                 stacks,
             };

@@ -13,4 +13,5 @@ async-trait.workspace = true
 sha2 = "0.10"
 
 [dev-dependencies]
+tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt"] }

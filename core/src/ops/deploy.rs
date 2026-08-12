@@ -492,7 +492,6 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         }
         run_ok(exec, &Cmd::new("git", &["-C", &repo, "add", "-A"], 30)).await?;
         let msg = format!("deploy {}", m.stack_name);
-        // No-op commits are fine — that IS the unchanged case.
         let commit = exec
             .run(&Cmd::new(
                 "git",
@@ -500,11 +499,28 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 30,
             ))
             .await?;
-        Ok(if commit.success() {
-            StepOutcome::Changed
+        if commit.success() {
+            return Ok(StepOutcome::Changed);
+        }
+        // Hardening H15: ONLY the benign no-op case may pass silently. Any
+        // other commit failure (dubious ownership, index lock, missing
+        // identity) previously made every deploy green while the intent
+        // history — the whole rollback + mirror story — stayed empty.
+        let noise = format!("{}{}", commit.stdout, commit.stderr);
+        if noise.contains("nothing to commit")
+            || noise.contains("nothing added to commit")
+            || noise.contains("no changes added")
+        {
+            Ok(StepOutcome::Unchanged)
         } else {
-            StepOutcome::Unchanged
-        })
+            Err(CoreError::Command {
+                rendered: "git commit (intent history)".into(),
+                detail: format!(
+                    "intent commit failed — history/rollback/mirror would silently stop: {}",
+                    noise.trim()
+                ),
+            })
+        }
     });
 
     // ── D1: push files; env over the secrets channel (A5). ───────────────

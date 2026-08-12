@@ -42,7 +42,7 @@ Pre-rewrite documentation is archived under [docs/legacy/](docs/legacy/).
 ## Repository layout
 
 ```
-core/     all domain logic, zero ambient I/O (Executor trait, 78 tests)
+core/     all domain logic, zero ambient I/O (Executor trait, 83 tests)
 proto/    wire types for the one CLIENT↔HOST line
 host/     the Proxmox daemon (systemd, TLS, scheduler, watchdog)
 client/   CLI verbs + the TUI (Elm-style, snapshot-tested)

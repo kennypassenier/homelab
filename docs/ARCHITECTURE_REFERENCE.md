@@ -33,7 +33,7 @@ reaches in with `pct exec`/`pct push`.
 - **Executor (AR2)** — one trait for run/read/write/sleep. `RealExecutor`
   in the host; `MockExecutor` in tests (scripted responses, recorded
   calls, in-memory files); `TracingExecutor` decorates any of them to emit
-  `[run ]` transcript lines. This is why 78 tests cover destructive
+  `[run ]` transcript lines. This is why 83 tests cover destructive
   operations without a hypervisor.
 - **Runner + step! (AR3)** — every operation is a list of named steps.
   Uniformly provides: transcripts, journal records before each step

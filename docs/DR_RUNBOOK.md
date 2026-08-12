@@ -44,11 +44,11 @@ The exact files the daemon deployed are in git: `/var/lib/homelab/repo`.
 
 ## Layer 3 — Restore data from backup
 
-Restic repos per stack: `rclone:gdrive:homelab:<stack>-config`, password
+Restic repos per stack: `rclone:gdrive:homelab-backups/<stack>-config`, password
 file `/var/lib/homelab/secrets/restic.pw` (keep an offline copy of this
 password — without it backups are unreadable!).
 ```sh
-export RESTIC_REPOSITORY=rclone:gdrive:homelab:<stack>-config
+export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<stack>-config
 export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
 restic snapshots
 restic restore latest --target /
@@ -67,7 +67,7 @@ Recover by hand per Layer 2, or migrate it to a v2 stack first.
 ### synctest (vmid 108)
 
 - hostname `108-app-synctest`, ip `10.10.10.8/24`
-- resources: 1 core(s), 512 MiB RAM, 256 MiB swap, 4 GiB disk
+- resources: 2 core(s), 1024 MiB RAM, 256 MiB swap, 4 GiB disk
 - apps: syncthing, promtail
 - recreate from scratch: `homelab deploy stacks/synctest-108` (or by hand per Layer 2)
 - data restore: restic repo `…:synctest-config`, then redeploy

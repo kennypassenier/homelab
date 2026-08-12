@@ -19,7 +19,7 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
 ## Project state (resume here)
 
 - **Feature-complete at v2.5.0** (2026-08-11): every Must/Should/Could in
-  docs/FEATURES.md built; 78 tests; CI green on `v2-merge`.
+  docs/FEATURES.md built; 83 tests; CI green on `v2-merge`.
 - **Host daemon LIVE** on Proxmox as `homelab-host.service` (:8443, TLS
   fp SHA256:85:00:F8:84…); ships via `homelab self-update` (H5, armed
   rollback proven). Golden template = CT 999 (`clone:999` default).
@@ -59,7 +59,7 @@ re-runs the same gates on every push; red blocks merge.
 ## Build & ship
 
 ```bash
-cargo test --workspace                       # 78 tests
+cargo test --workspace                       # 83 tests
 docker run --rm -v "$PWD":/w -w /w -e CARGO_TARGET_DIR=/w/target-debian \
   rust:1-bookworm cargo build --release -p homelab-host
 homelab self-update target-debian/release/homelab-host   # never scp

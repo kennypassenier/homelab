@@ -1,0 +1,27 @@
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    # RabbitMQ stores its data keyed by hostname — pin it so the queue data
+    # survives container recreation.
+    hostname: __STACK__-rabbitmq
+    environment:
+      # Same values as in myservice's .env — the default guest user only
+      # works from localhost, so a real user is required.
+      - RABBITMQ_DEFAULT_USER=${RABBIT_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBIT_PASS}
+    volumes:
+      - /appdata/__STACK__/rabbitmq-config:/var/lib/rabbitmq
+    ports:
+      - "15672:15672" # management UI
+    labels:
+      - com.homelab.backup.pause=true
+      - com.homelab.update.policy=manual
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

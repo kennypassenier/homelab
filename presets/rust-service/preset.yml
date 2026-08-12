@@ -1,0 +1,2 @@
+description: "Your own Rust service + RabbitMQ (template — edit the image first)"
+ram_mb: 1024

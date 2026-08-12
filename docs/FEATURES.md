@@ -438,6 +438,16 @@ offsite token validity, mirror lag — all green or an actionable hint.
 No user-facing `--demo` flag. The simulator lives on only as an internal test
 fixture for G1's TUI snapshot tests — implementation detail, not a feature.
 
+### G9 · Own Rust services via GHCR images — **Should** *(added 2026-08-12)*
+Pattern + tooling, zero orchestrator code: `templates/rust-service/`
+(Dockerfile + release-image.yml) makes any Rust repo publish a GHCR image
+next to each GitHub release; `presets/rust-service/` is a copyable example
+stack (own service + RabbitMQ). The service then rides every existing
+mechanism: deploy, nightly auto-update with rollback, backups, parking.
+- **Auto**: preset loads via the existing scan_presets path (data, not code).
+- **Manual**: first real service (e.g. RabbitDispatcher) end-to-end: tag →
+  image → wizard → deploy → auto-update.
+
 ### H7 · Release-driven host updates — **Should** *(added 2026-08-12, evaluation form B6)*
 The client checks GitHub for the newest release at TUI startup; a ticker badge
 announces a newer host version, `U` opens a progress window that downloads the

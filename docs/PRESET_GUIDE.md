@@ -131,6 +131,29 @@ deploy sends it over the TLS line into the host vault
 (`/var/lib/homelab/secrets/`), outside git. Presets are committed to git;
 stacks' `.env` files are gitignored.
 
+## Your own Rust services (G9)
+
+Your Rust repos and the homelab meet at one interface: a Docker image on
+GHCR. The bridge lives in `templates/rust-service/`:
+
+1. Copy `Dockerfile` (swap in your binary name) and `release-image.yml`
+   into your Rust repo. Every `vX.Y.Z` tag then publishes
+   `ghcr.io/<user>/<repo>:<version>` and `:latest` next to the release.
+   One-time gotcha: the first push creates the GHCR package PRIVATE even on
+   a public repo — flip it to public once (repo → Packages → settings) or
+   the host cannot pull it.
+2. Copy `presets/rust-service/` to `presets/<yourname>/`, point the
+   `myservice` compose at your image, keep or drop the bundled RabbitMQ.
+   `RABBIT_USER`/`RABBIT_PASS` go in BOTH apps' `.env` via the secrets
+   vault (RabbitMQ's built-in guest user is localhost-only).
+3. Wizard → deploy. From then on: tag a release in the app repo → CI
+   builds the image → the nightly run updates it with automatic rollback
+   (`com.homelab.update.policy=auto`), or `homelab update stacks/<name>`
+   immediately.
+
+The example preset deploys as-is only after you edit the image line — it
+points at a placeholder on purpose.
+
 ## Changing an existing preset
 
 Edit the files; the next wizard run uses them. Already-scaffolded stacks are

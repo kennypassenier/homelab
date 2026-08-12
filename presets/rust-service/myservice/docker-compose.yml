@@ -1,0 +1,23 @@
+services:
+  myservice:
+    # EDIT ME: your own image, built by templates/rust-service/release-image.yml
+    image: ghcr.io/kennypassenier/myservice:latest
+    container_name: myservice
+    restart: unless-stopped
+    environment:
+      # RABBIT_USER / RABBIT_PASS live in this app's .env (pushed from the
+      # client secrets vault, never in git).
+      - AMQP_URL=amqp://${RABBIT_USER}:${RABBIT_PASS}@rabbitmq:5672
+    volumes:
+      - /appdata/__STACK__/myservice-config:/config
+    labels:
+      # auto: a new release in your app repo goes live at the next nightly
+      # run, with automatic rollback if it fails verification.
+      - com.homelab.update.policy=auto
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

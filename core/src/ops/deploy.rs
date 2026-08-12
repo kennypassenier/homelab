@@ -651,7 +651,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // compose project and /opt dir; /appdata config dirs are kept.
     step!(runner, "garbage collect", {
         let store = StateStore::new(exec, &ctx.state_dir);
-        let state = store.load().await;
+        let state = store.load().await?;
         let removed: Vec<String> = state
             .stacks
             .get(&m.stack_name)
@@ -685,7 +685,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
 
     step!(runner, "record state", {
         let store = StateStore::new(exec, &ctx.state_dir);
-        let mut state = store.load().await;
+        let mut state = store.load().await?;
         // Preserve last_backup across redeploys; refresh everything else.
         let last_backup = state
             .stacks

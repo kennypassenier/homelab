@@ -371,3 +371,50 @@ pub async fn restore(
     );
     runner.finish_ok()
 }
+
+/// H10 hardening: snapshot the host's own critical metadata — the secrets
+/// vault, state.json, and TLS material — into a dedicated `host-meta` repo.
+/// Without this, losing the host disk loses the keys needed for recovery.
+pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationReport {
+    let mut runner = Runner::new("host-meta-backup", ctx.sink, ctx.journal);
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+    let secrets = format!("{}/secrets", ctx.state_dir);
+    let state_file = format!("{}/state.json", ctx.state_dir);
+    let tls_cert = format!("{}/tls-cert.pem", ctx.state_dir);
+    let tls_key = format!("{}/tls-key.pem", ctx.state_dir);
+
+    step!(runner, "init repo", {
+        let _ = exec
+            .run(&restic(
+                &cfg.restic_base,
+                "host-meta",
+                &cfg.password_file,
+                &["init"],
+                120,
+            ))
+            .await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    step!(runner, "snapshot", {
+        run_ok(
+            exec,
+            &restic(
+                &cfg.restic_base,
+                "host-meta",
+                &cfg.password_file,
+                &["backup", &secrets, &state_file, &tls_cert, &tls_key],
+                600,
+            ),
+        )
+        .await?;
+        Ok(StepOutcome::Changed)
+    });
+
+    runner.log(
+        Level::Info,
+        "[host-meta] vault/state/tls snapshot complete".to_string(),
+    );
+    runner.finish_ok()
+}

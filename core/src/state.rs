@@ -52,10 +52,30 @@ impl<'a> StateStore<'a> {
         }
     }
 
-    pub async fn load(&self) -> HostState {
-        match self.exec.read_file(&self.path).await {
-            Ok(raw) => serde_json::from_str(&raw).unwrap_or_default(),
-            Err(_) => HostState::default(),
+    /// Load state. A MISSING file is a fresh install (empty state); an
+    /// UNPARSEABLE file is an error — silently continuing with an empty
+    /// fleet would stop all scheduled work and the next save would erase
+    /// every other stack permanently (hardening H7). The corrupt content is
+    /// preserved next to the original before failing.
+    pub async fn load(&self) -> Result<HostState, CoreError> {
+        let raw = match self.exec.read_file(&self.path).await {
+            Ok(raw) => raw,
+            Err(_) => return Ok(HostState::default()),
+        };
+        match serde_json::from_str::<HostState>(&raw) {
+            Ok(state) if state.schema_version <= STATE_SCHEMA_VERSION => Ok(state),
+            Ok(state) => Err(CoreError::State(format!(
+                "state.json schema v{} is newer than this binary understands (v{}) — refusing to touch it; update the host binary. File: {}",
+                state.schema_version, STATE_SCHEMA_VERSION, self.path
+            ))),
+            Err(e) => {
+                let quarantine = format!("{}.corrupt", self.path);
+                let _ = self.exec.write_file(&quarantine, &raw, 0o600).await;
+                Err(CoreError::State(format!(
+                    "state.json does not parse ({}) — copy preserved at {}; fix or remove the original before running mutating operations",
+                    e, quarantine
+                )))
+            }
         }
     }
 

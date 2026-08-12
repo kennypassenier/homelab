@@ -270,6 +270,45 @@ mod tests {
             Some("/appdata/platform/traefik-config/routes")
         );
     }
+
+    /// H8: the probe layer feeds real data — stale backups and a dead
+    /// offsite remote must surface, healthy state must not.
+    #[tokio::test]
+    async fn doctor_probes_surface_stale_backup_and_dead_offsite() {
+        use homelab_core::executor::{CmdOutput, MockExecutor};
+        let now = 1_800_000_000u64;
+        let exec = MockExecutor::new();
+        exec.seed_file(
+            "/var/lib/homelab/state.json",
+            &format!(
+                r#"{{"schema_version":1,"stacks":{{"synctest":{{"vmid":108,"hostname":"108-app-synctest","apps":["syncthing"],"applied_at":1,"last_backup":{}}}}}}}"#,
+                now - 80 * 3600
+            ),
+        );
+        exec.respond_always("pct status 108", CmdOutput::ok("status: running"));
+        exec.respond_always(
+            "listremotes",
+            CmdOutput::ok(
+                "gdrive:
+",
+            ),
+        );
+        exec.respond_always(
+            "lsd gdrive:homelab-backups",
+            CmdOutput::failed(3, "token expired"),
+        );
+        let probes = gather_probes(&exec, "/var/lib/homelab", None, now).await;
+        assert_eq!(probes.managed_stacks.len(), 1);
+        assert_eq!(probes.managed_stacks[0].backup_age_h, Some(80));
+        assert!(probes.managed_stacks[0].container_present);
+        assert!(probes.offsite_configured);
+        assert!(!probes.offsite_token_valid, "expired token must show");
+        // And the diagnosis flags both problems.
+        let checks = homelab_core::doctor::diagnose(&probes);
+        assert!(checks
+            .iter()
+            .any(|c| c.health != homelab_core::doctor::Health::Ok));
+    }
 }
 
 // ── Real executor (AR2) ─────────────────────────────────────────────────────
@@ -592,7 +631,13 @@ async fn scheduler_loop(state: AppState) {
             continue;
         }
         let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
-        let snapshot = store.load().await;
+        let snapshot = match store.load().await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("scheduler: state unreadable — skipping this tick: {}", e);
+                continue;
+            }
+        };
         for (name, st) in snapshot.stacks {
             if now.saturating_sub(st.last_backup) < 20 * 3600 {
                 continue; // already done today
@@ -613,11 +658,12 @@ async fn scheduler_loop(state: AppState) {
             .await;
             if backup_report.ok {
                 // Record last_backup so tomorrow's check is accurate.
-                let mut s = store.load().await;
-                if let Some(rec) = s.stacks.get_mut(&name) {
-                    rec.last_backup = now;
+                if let Ok(mut s) = store.load().await {
+                    if let Some(rec) = s.stacks.get_mut(&name) {
+                        rec.last_backup = now;
+                    }
+                    let _ = store.save(s).await;
                 }
-                let _ = store.save(s).await;
             }
             let m2 = manifest.clone();
             let _ = run_mutating_op(&state, &exec, 0, "scheduled-update", |ctx| {
@@ -915,7 +961,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             // Targets come from state.json — only stacks we deployed.
             let store =
                 homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
-            let snapshot = store.load().await;
+            let snapshot = store.load().await.unwrap_or_default();
             let targets: Vec<(String, u16)> = snapshot
                 .stacks
                 .iter()
@@ -1106,7 +1152,17 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             .await
         }
         Rpc::Doctor => {
-            let probes = gather_probes(&exec, &state.config.state_dir).await;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let probes = gather_probes(
+                &exec,
+                &state.config.state_dir,
+                state.config.mirror_remote.as_deref(),
+                now,
+            )
+            .await;
             let checks = homelab_core::doctor::diagnose(&probes);
             let overall = homelab_core::doctor::overall(&checks);
             let mut msg = format!("doctor: {:?}\n", overall);
@@ -1126,7 +1182,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             // For M2 this reads recorded state; live per-app health arrives
             // when the verify step persists it (wired in M4).
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
-            let hs = store.load().await;
+            let hs = store.load().await.unwrap_or_default();
             let df = exec
                 .run(&Cmd::new(
                     "df",
@@ -1226,13 +1282,91 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
 }
 
 /// Gather doctor probes (F6). I/O stays here; the verdict logic is in core.
-async fn gather_probes(exec: &RealExecutor, state_dir: &str) -> homelab_core::doctor::Probes {
-    use homelab_core::doctor::Probes;
+/// H8 hardening: the probe layer now feeds REAL data — backup freshness per
+/// stack from state.json, offsite reachability via a quick rclone listing,
+/// mirror lag via unpushed-commit count. Generic over the executor so the
+/// healthy/broken matrix is testable with MockExecutor.
+async fn gather_probes(
+    exec: &dyn Executor,
+    state_dir: &str,
+    mirror_remote: Option<&str>,
+    now_unix: u64,
+) -> homelab_core::doctor::Probes {
+    use homelab_core::doctor::{Probes, StackProbe};
     let state_raw = exec.read_file(&format!("{}/state.json", state_dir)).await;
     let state_parses = state_raw
         .as_ref()
         .map(|s| serde_json::from_str::<serde_json::Value>(s).is_ok())
         .unwrap_or(true);
+
+    // Per-stack backup freshness + container presence from state.json.
+    let mut managed_stacks = Vec::new();
+    if let Ok(raw) = state_raw.as_ref() {
+        if let Ok(hs) = serde_json::from_str::<homelab_core::state::HostState>(raw) {
+            for (name, st) in &hs.stacks {
+                let present = exec
+                    .run(&Cmd::new("pct", &["status", &st.vmid.to_string()], 20))
+                    .await
+                    .map(|o| o.success())
+                    .unwrap_or(false);
+                managed_stacks.push(StackProbe {
+                    name: name.clone(),
+                    backup_age_h: (st.last_backup > 0)
+                        .then(|| now_unix.saturating_sub(st.last_backup) / 3600),
+                    container_present: present,
+                    env_sealed: true,
+                });
+            }
+        }
+    }
+
+    // Offsite: is the gdrive remote configured, and does a cheap listing work?
+    let remotes = exec
+        .run(&Cmd::new("rclone", &["listremotes"], 20))
+        .await
+        .map(|o| o.stdout)
+        .unwrap_or_default();
+    let offsite_configured = remotes.lines().any(|l| l.trim() == "gdrive:");
+    let offsite_token_valid = offsite_configured
+        && exec
+            .run(&Cmd::new(
+                "rclone",
+                &[
+                    "lsd",
+                    "gdrive:homelab-backups",
+                    "--max-depth",
+                    "1",
+                    "--contimeout",
+                    "10s",
+                ],
+                30,
+            ))
+            .await
+            .map(|o| o.success())
+            .unwrap_or(false);
+
+    // Mirror lag: commits not yet on the mirror remote.
+    let repo = format!("{}/repo", state_dir);
+    let mirror_behind = match mirror_remote {
+        None => None,
+        Some(_) => exec
+            .run(&Cmd::new(
+                "git",
+                &[
+                    "-C",
+                    &repo,
+                    "rev-list",
+                    "--count",
+                    "--branches",
+                    "--not",
+                    "--remotes=mirror",
+                ],
+                30,
+            ))
+            .await
+            .ok()
+            .and_then(|o| o.stdout.trim().parse::<u32>().ok()),
+    };
     let interrupted = std::fs::read_to_string(format!("{}/journal.jsonl", state_dir))
         .map(|j| {
             homelab_core::incidents::interrupted_ops(&j)
@@ -1256,10 +1390,10 @@ async fn gather_probes(exec: &RealExecutor, state_dir: &str) -> homelab_core::do
     Probes {
         host_disk_free_pct: disk,
         state_parses,
-        managed_stacks: Vec::new(), // populated once state carries backup ages
-        offsite_configured: false,
-        offsite_token_valid: false,
-        mirror_behind: None,
+        managed_stacks,
+        offsite_configured,
+        offsite_token_valid,
+        mirror_behind,
         interrupted_ops: interrupted,
     }
 }

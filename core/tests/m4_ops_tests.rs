@@ -1177,3 +1177,63 @@ async fn h6_appdata_routes_dir_written_host_side() {
         .is_some());
     assert!(exec.calls_containing("pct push 104").is_empty());
 }
+
+// ── H7 state fail-loud, H10 host-meta backup ────────────────────────────────
+
+#[tokio::test]
+async fn h7_corrupt_state_fails_loud_and_quarantines() {
+    use homelab_core::state::StateStore;
+    let exec = MockExecutor::new();
+    exec.seed_file("/var/lib/homelab/state.json", "{ this is not json !!");
+    let store = StateStore::new(&exec, "/var/lib/homelab");
+    let err = store.load().await.unwrap_err();
+    assert!(format!("{}", err).contains("does not parse"));
+    // The corrupt content was preserved for forensics.
+    assert!(exec.file("/var/lib/homelab/state.json.corrupt").is_some());
+    // A deploy over corrupt state must fail, not silently erase the fleet.
+    use homelab_core::ops::deploy::deploy;
+    deploy_mocks(&exec);
+    exec.respond_always("ls -A", CmdOutput::ok("config\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
+    assert!(!report.ok, "deploy must refuse to run over corrupt state");
+}
+
+#[tokio::test]
+async fn h7_newer_schema_refused_missing_file_is_fresh() {
+    use homelab_core::state::StateStore;
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":99,"stacks":{}}"#,
+    );
+    let store = StateStore::new(&exec, "/var/lib/homelab");
+    assert!(format!("{}", store.load().await.unwrap_err()).contains("newer"));
+    let exec = MockExecutor::new();
+    let store = StateStore::new(&exec, "/var/lib/homelab");
+    assert!(
+        store.load().await.unwrap().stacks.is_empty(),
+        "missing file = fresh"
+    );
+}
+
+#[tokio::test]
+async fn h10_host_meta_backup_snapshots_vault_state_tls() {
+    use homelab_core::ops::backup::backup_host_meta;
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup_host_meta(&ctx(&exec, &sink, &j), &BackupCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let snap = exec.calls_containing("restic backup");
+    assert_eq!(snap.len(), 1);
+    for path in ["/var/lib/homelab/secrets", "state.json", "tls-key.pem"] {
+        assert!(
+            snap[0].contains(path),
+            "missing {} in host-meta snapshot",
+            path
+        );
+    }
+    assert!(snap[0].contains("host-meta"), "dedicated repo");
+}

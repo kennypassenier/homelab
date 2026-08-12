@@ -138,7 +138,7 @@ pub async fn destroy(
     // kept so a redeploy can auto-restore (E3).
     step!(runner, "update state", {
         let store = crate::state::StateStore::new(exec, &ctx.state_dir);
-        let mut state = store.load().await;
+        let mut state = store.load().await?;
         state.stacks.remove(stack_name);
         store.save(state).await?;
         Ok(StepOutcome::Changed)

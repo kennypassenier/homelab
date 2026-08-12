@@ -604,6 +604,7 @@ dependencies = [
  "homelab-core",
  "homelab-proto",
  "ratatui",
+ "rcgen",
  "rustls 0.22.4",
  "serde",
  "serde_json",

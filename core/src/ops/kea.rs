@@ -44,6 +44,34 @@ fn ip_in_cidr(ip: &str, cidr: &str) -> bool {
     (ip & mask) == (net & mask)
 }
 
+/// Strict input validation (H20): these values are interpolated into a
+/// root shell on the HOST; only provably-inert characters pass.
+fn valid_ipv4(s: &str) -> bool {
+    let mut parts = 0;
+    for p in s.split('.') {
+        if p.is_empty() || p.len() > 3 || !p.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+        if p.parse::<u32>().map(|v| v > 255).unwrap_or(true) {
+            return false;
+        }
+        parts += 1;
+    }
+    parts == 4
+}
+
+fn valid_mac(s: &str) -> bool {
+    s.len() == 17
+        && s.split(':').count() == 6
+        && s.chars().all(|c| c.is_ascii_hexdigit() || c == ':')
+}
+
+fn valid_hostname(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 async fn api(
     exec: &dyn Executor,
     cfg: &KeaCfg,
@@ -80,6 +108,28 @@ pub async fn reserve(
     mac: &str,
     hostname: &str,
 ) -> Result<(), CoreError> {
+    // H20: refuse anything that is not provably shell-inert BEFORE any
+    // string reaches the host-root shell. Deploy-step ordering happens to
+    // constrain these today; this makes it true by construction.
+    if !valid_ipv4(ip) {
+        return Err(CoreError::Validation(format!(
+            "kea: '{}' is not an IPv4 address",
+            ip
+        )));
+    }
+    if !valid_mac(mac) {
+        return Err(CoreError::Validation(format!(
+            "kea: '{}' is not a MAC address",
+            mac
+        )));
+    }
+    if !valid_hostname(hostname) {
+        return Err(CoreError::Validation(format!(
+            "kea: hostname '{}' contains non-inert characters",
+            hostname
+        )));
+    }
+
     // 1. Which Kea subnet holds this IP?
     let subnets = api(exec, cfg, "GET", "/api/kea/dhcpv4/search_subnet", None).await?;
     let subnet_uuid = subnets["rows"]
@@ -154,6 +204,18 @@ pub async fn reserve(
 #[cfg(test)]
 mod tests {
     use super::ip_in_cidr;
+
+    #[test]
+    fn h20_input_validation_is_strict() {
+        use super::{valid_hostname, valid_ipv4, valid_mac};
+        assert!(valid_ipv4("10.10.10.8"));
+        assert!(!valid_ipv4("10.10.10.8'; rm -rf / #"));
+        assert!(!valid_ipv4("999.1.1.1"));
+        assert!(valid_mac("BC:24:11:AA:BB:CC"));
+        assert!(!valid_mac("BC:24:11:AA:BB:CC'x"));
+        assert!(valid_hostname("108-app-synctest"));
+        assert!(!valid_hostname("host$(reboot)"));
+    }
 
     #[test]
     fn cidr_matching() {

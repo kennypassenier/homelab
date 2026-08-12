@@ -17,6 +17,27 @@ pub async fn push_content(
     content: &str,
     perms: &str,
 ) -> Result<bool, CoreError> {
+    push_content_staged(
+        exec,
+        vmid,
+        dest,
+        content,
+        perms,
+        "/var/lib/homelab/push-staging",
+    )
+    .await
+}
+
+/// H21 hardening: the staging file lives under the root-only state dir, not
+/// a predictable world-writable /tmp path (symlink-planting classic).
+pub async fn push_content_staged(
+    exec: &dyn Executor,
+    vmid: u16,
+    dest: &str,
+    content: &str,
+    perms: &str,
+    staging: &str,
+) -> Result<bool, CoreError> {
     let remote = pct_sh(
         exec,
         vmid,
@@ -55,7 +76,7 @@ pub async fn push_content(
         )
         .await?;
     }
-    let tmp = "/tmp/homelab-push";
+    let tmp = staging;
     exec.write_file(tmp, content, 0o600).await?;
     run_ok(
         exec,

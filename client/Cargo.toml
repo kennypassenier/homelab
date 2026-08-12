@@ -25,3 +25,6 @@ toml.workspace = true
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 base64 = "0.22"
+
+[dev-dependencies]
+rcgen = "0.13"

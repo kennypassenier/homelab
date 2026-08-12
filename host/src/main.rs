@@ -204,10 +204,19 @@ fn persist_settings(
 ) -> Result<(), String> {
     let raw = render_settings_toml(config, settings)?;
     let tmp = format!("{}.tmp", config.config_path);
-    std::fs::write(&tmp, &raw).map_err(|e| e.to_string())?;
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))
-        .map_err(|e| e.to_string())?;
+    // 0600 from the first byte — the file carries the bearer token (H21).
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt;
+        let _ = std::fs::remove_file(&tmp);
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)
+            .map_err(|e| e.to_string())?;
+        f.write_all(raw.as_bytes()).map_err(|e| e.to_string())?;
+    }
     std::fs::rename(&tmp, &config.config_path).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -464,6 +473,8 @@ struct AppState {
     op_lock: Arc<Mutex<()>>, // AR12: mutations strictly serial
     /// G8: live mutable settings (scheduler hour, webhook, retention).
     settings: Arc<std::sync::RwLock<homelab_proto::HostConfigView>>,
+    /// H13: failure-repeat damping for F3 notifications.
+    damper: Arc<std::sync::Mutex<homelab_core::notify::NotifyDamper>>,
 }
 
 /// B7: minimal sd_notify — tell systemd we're alive without pulling in a
@@ -504,6 +515,9 @@ async fn main() {
         log_tx,
         op_lock: Arc::new(Mutex::new(())),
         settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
+        damper: Arc::new(std::sync::Mutex::new(
+            homelab_core::notify::NotifyDamper::new(20 * 3600),
+        )),
     };
 
     // AR13: surface any operation the previous run left mid-flight.
@@ -754,14 +768,24 @@ async fn notify(
     label: &str,
     report: &homelab_core::runner::OperationReport,
 ) {
-    let payload = serde_json::json!({
-        "source": "homelab-host",
-        "op": report.op,
-        "label": label,
-        "ok": report.ok,
-        "error": report.error.as_ref().map(|e| format!("{} :: {}", e.what, e.why)),
-    })
-    .to_string();
+    let error = report
+        .error
+        .as_ref()
+        .map(|e| format!("{} :: {}", e.what, e.why));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // H13: identical repeat failures inside the window are damped.
+    if !state
+        .damper
+        .lock()
+        .unwrap()
+        .should_send(&report.op, report.ok, error.as_deref(), now)
+    {
+        return;
+    }
+    let payload = homelab_core::notify::op_payload(&report.op, label, report.ok, error.as_deref());
     notify_raw(state, exec, payload).await;
 }
 

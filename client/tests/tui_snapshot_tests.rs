@@ -761,3 +761,55 @@ fn v8_config_race_regression_rpc_exit_rule() {
     assert!(rpc_can_exit(false, false, true), "plain RPCs exit on done");
     assert!(!rpc_can_exit(false, false, false));
 }
+
+#[test]
+fn h17_runbook_generator_structural_snapshot() {
+    // E7: the total-loss document must regenerate correctly from a fixture
+    // stacks dir — a format change that garbles it should fail HERE, not on
+    // the worst day.
+    let tmp = std::env::temp_dir().join(format!("homelab-runbook-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let stacks = tmp.join("stacks");
+    std::fs::create_dir_all(&stacks).unwrap();
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = homelab_client::scaffold::scan_presets(&presets_dir);
+    let syncthing = presets.iter().find(|p| p.name == "syncthing").unwrap();
+    for (name, vmid) in [("alpha", 150u16), ("beta", 151u16)] {
+        homelab_client::scaffold::scaffold_stack(
+            &stacks,
+            &presets_dir,
+            &homelab_client::scaffold::StackParams {
+                name,
+                vmid,
+                ram_mb: 512,
+                cores: 1,
+                disk_gb: 4,
+                swap_mb: None,
+                preset: Some(syncthing),
+            },
+        )
+        .unwrap();
+    }
+    // One legacy (unparseable) stack dir must be listed, not crash the doc.
+    std::fs::create_dir_all(stacks.join("old-v1")).unwrap();
+    std::fs::write(stacks.join("old-v1/lxc-compose.yml"), "not: [valid v2").unwrap();
+
+    let out = tmp.join("DR.md");
+    let n = homelab_client::spec::generate_runbook(&stacks, out.to_str().unwrap()).unwrap();
+    assert_eq!(n, 2);
+    let doc = std::fs::read_to_string(&out).unwrap();
+    for needle in [
+        "## Layer 0",
+        "## Layer 1",
+        "## Layer 3",
+        "### alpha (vmid 150)",
+        "### beta (vmid 151)",
+        "hostname `150-app-alpha`",
+        "LEGACY",
+        "homelab-backups/<stack>-config",
+        "## Full-host rebuild order",
+    ] {
+        assert!(doc.contains(needle), "runbook lost section: {}", needle);
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+}

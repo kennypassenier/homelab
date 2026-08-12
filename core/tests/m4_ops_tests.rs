@@ -1110,7 +1110,7 @@ async fn e3_env_restored_from_vault_when_client_sends_none() {
     // The vault env was pushed to the container (via the staged tmp file).
     assert!(
         !exec
-            .calls_containing("pct push 108 /tmp/homelab-push /opt/test/app/.env")
+            .calls_containing("pct push 108 /var/lib/homelab/push-staging /opt/test/app/.env")
             .is_empty(),
         "vault fallback must push the .env"
     );
@@ -1236,4 +1236,88 @@ async fn h10_host_meta_backup_snapshots_vault_state_tls() {
         );
     }
     assert!(snap[0].contains("host-meta"), "dedicated repo");
+}
+
+// ── H14: journal wiring actually asserted ───────────────────────────────────
+
+use std::sync::Mutex as StdMutex;
+
+struct RecJournal(StdMutex<Vec<(String, String, String)>>);
+impl homelab_core::runner::Journal for RecJournal {
+    fn record(&self, op: &str, step: &str, status: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .push((op.into(), step.into(), status.into()));
+    }
+}
+
+#[tokio::test]
+async fn h14_every_destroy_step_is_journaled_running_then_done() {
+    let exec = MockExecutor::new();
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
+    let sink = VecSink::new();
+    let j = RecJournal(StdMutex::new(Vec::new()));
+    let report = destroy(
+        &OpCtx {
+            exec: &exec,
+            sink: &sink,
+            journal: &j,
+            safety: SafetyConfig::default(),
+            state_dir: "/var/lib/homelab".into(),
+            now_unix: 1_760_000_000,
+            kea: None,
+        },
+        "test",
+        108,
+        "test",
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let records = j.0.lock().unwrap();
+    assert!(!records.is_empty(), "destroy must journal its steps");
+    // Every step appears as running BEFORE done, per step, in order.
+    for pair in records.windows(2) {
+        if pair[0].1 == pair[1].1 {
+            assert_eq!(pair[0].2, "running");
+            assert!(pair[1].2 == "done" || pair[1].2 == "failed");
+        }
+    }
+    assert!(records
+        .iter()
+        .any(|r| r.1 == "destroy container" && r.2 == "done"));
+}
+
+#[tokio::test]
+async fn h14_failed_step_leaves_running_then_failed_trail() {
+    let exec = MockExecutor::new();
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
+    exec.respond_always("pct destroy", CmdOutput::failed(1, "device busy"));
+    let sink = VecSink::new();
+    let j = RecJournal(StdMutex::new(Vec::new()));
+    let report = destroy(
+        &OpCtx {
+            exec: &exec,
+            sink: &sink,
+            journal: &j,
+            safety: SafetyConfig::default(),
+            state_dir: "/var/lib/homelab".into(),
+            now_unix: 1_760_000_000,
+            kea: None,
+        },
+        "test",
+        108,
+        "test",
+    )
+    .await;
+    assert!(!report.ok);
+    let records = j.0.lock().unwrap();
+    let destroy_records: Vec<_> = records
+        .iter()
+        .filter(|r| r.1 == "destroy container")
+        .collect();
+    assert_eq!(destroy_records.len(), 2);
+    assert_eq!(destroy_records[0].2, "running");
+    assert_eq!(destroy_records[1].2, "failed");
+    // AR13 parses exactly this trail after a crash: running without done.
 }

@@ -29,12 +29,17 @@ pub fn ensure_cert(dir: &str, hostname: &str) -> std::io::Result<(CertPaths, Str
         let key = rcgen::KeyPair::generate().map_err(std::io::Error::other)?;
         let cert = params.self_signed(&key).map_err(std::io::Error::other)?;
         std::fs::write(&cert_path, cert.pem())?;
-        std::fs::write(&key_path, key.serialize_pem())?;
-        // Key is private material — lock it down.
-        #[cfg(unix)]
+        // Key is private material — create it 0600 from the first byte
+        // (write-then-chmod leaves a world-readable window; hardening H21).
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))?;
+            use std::io::Write as _;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&key_path)?;
+            f.write_all(key.serialize_pem().as_bytes())?;
         }
     }
 

@@ -57,9 +57,9 @@ during the build: sha2, base64); anything with C bindings, network stacks,
 or a heavy transitive tree requires a mini-round. Decided by Kenny in the
 V4 mini-round.
 
-**AR18 · MSRV: pinned at 1.82** (`rust-version` in the workspace, inherited
+**AR18 · MSRV: pinned at 1.87** (`rust-version` in the workspace, inherited
 by every crate) with a dedicated CI job compiling on exactly that toolchain.
-Chosen because the code already uses 1.82 APIs (`Option::is_none_or`).
+Chosen because the code already uses 1.82 APIs (`Option::is_none_or`, 1.82; `u64::is_multiple_of`, 1.87 — the clippy MSRV lint caught the higher floor immediately after pinning).
 
 **AR19 · License: pending deep-dive.** Kenny leans MIT/Apache-2.0 dual but
 asked for a fuller explanation first; to be settled in the follow-up form.

@@ -981,6 +981,6 @@ async fn a2_hostname_mismatch_refused_in_backup_restore_update() {
             _ => update(&ctx(&exec, &sink, &j), &m, None, false).await,
         };
         assert!(!r.ok, "{} must refuse a hostname mismatch", op);
-        assert!(format!("{}", r.error.unwrap().why).contains("refusing"));
+        assert!(r.error.unwrap().why.contains("refusing"));
     }
 }

@@ -747,3 +747,17 @@ fn g4_shell_tab_sends_exec_and_shows_output() {
         "self-contained explanation visible"
     );
 }
+
+#[test]
+fn v8_config_race_regression_rpc_exit_rule() {
+    use homelab_client::rpc_can_exit;
+    // The bug: exiting on RpcDone while the Config payload frame was still
+    // in flight. The rule: a payload-carrying RPC may only exit after BOTH.
+    assert!(
+        !rpc_can_exit(true, false, true),
+        "must wait for the payload"
+    );
+    assert!(rpc_can_exit(true, true, true));
+    assert!(rpc_can_exit(false, false, true), "plain RPCs exit on done");
+    assert!(!rpc_can_exit(false, false, false));
+}

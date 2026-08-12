@@ -5,6 +5,11 @@ use crate::executor::{pct_sh, run_ok, Cmd, Executor};
 
 /// Push literal content to a path inside an LXC. Returns true when the
 /// destination changed (drives conditional restarts — B1).
+///
+/// The idempotency compare uses sha256, not `cat`: pushed files include
+/// `.env` secrets, and the tracing executor echoes command output into the
+/// transcript/incident stream — a hash may appear there, plaintext never
+/// (standing rule 10; regression-guarded by `secrets_tests.rs`).
 pub async fn push_content(
     exec: &dyn Executor,
     vmid: u16,
@@ -12,15 +17,24 @@ pub async fn push_content(
     content: &str,
     perms: &str,
 ) -> Result<bool, CoreError> {
-    let current = pct_sh(
+    let remote = pct_sh(
         exec,
         vmid,
-        &format!("cat '{}' 2>/dev/null || true", dest),
+        &format!("sha256sum '{}' 2>/dev/null | cut -d' ' -f1 || true", dest),
         30,
     )
     .await?
     .stdout;
-    if current == content {
+    let local = {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(content.as_bytes());
+        h.finalize()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>()
+    };
+    if remote.trim() == local {
         return Ok(false);
     }
     if let Some(parent) = std::path::Path::new(dest).parent() {

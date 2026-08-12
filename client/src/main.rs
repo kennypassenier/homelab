@@ -473,14 +473,14 @@ async fn rpc(host: &str, token: &str, command: Command) {
                     println!("{}✗ {}{}", C_RED, resp.message, C_RESET);
                     std::process::exit(1);
                 }
-                if !awaits_payload || payload_seen {
+                if homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
                     println!("{}✓ {}{}", C_GREEN, resp.message, C_RESET);
                     std::process::exit(0);
                 }
                 done = Some(true);
             }
         }
-        if done.is_some() && payload_seen {
+        if done.is_some() && homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
             println!("{}✓ ok{}", C_GREEN, C_RESET);
             std::process::exit(0);
         }

@@ -192,6 +192,11 @@ impl MockExecutor {
             .collect()
     }
 
+    /// All paths written through write_file (for scan-style assertions).
+    pub fn file_paths(&self) -> Vec<String> {
+        self.files.lock().unwrap().keys().cloned().collect()
+    }
+
     pub fn file(&self, path: &str) -> Option<String> {
         self.files.lock().unwrap().get(path).map(|(c, _)| c.clone())
     }

@@ -894,3 +894,34 @@ async fn h2_no_kea_config_no_api_calls() {
     assert!(report.ok);
     assert!(exec.calls_containing("api/kea").is_empty());
 }
+
+// ── V8: undeclared /appdata bind is a validation error ─────────────────────
+
+#[test]
+fn v8_validate_rejects_undeclared_appdata_bind() {
+    use homelab_core::manifest::{validate, DeploySpec, FileBlob};
+    let mut m = manifest(108, "test");
+    m.storage.clear(); // nothing declared
+    let spec = DeploySpec {
+        manifest: m,
+        files: vec![FileBlob {
+            path: "app/docker-compose.yml".into(),
+            content: "services:\n  app:\n    volumes:\n      - /appdata/test/app-config:/config\n"
+                .into(),
+            mode: None,
+        }],
+        env: Default::default(),
+        gateway_route: None,
+    };
+    let err = validate(&spec).unwrap_err();
+    let msg = format!("{}", err);
+    assert!(msg.contains("not declared under storage"), "got: {}", msg);
+    // Declaring it fixes the spec.
+    let mut ok_spec = spec;
+    ok_spec.manifest.storage = vec![homelab_core::manifest::MountSpec {
+        host_path: "/appdata/test/app-config".into(),
+        mount_point: "/appdata/test/app-config".into(),
+        host_owner_uid: Some(101000),
+    }];
+    validate(&ok_spec).unwrap();
+}

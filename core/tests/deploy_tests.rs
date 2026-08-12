@@ -64,6 +64,18 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
     }
 }
 
+fn sha_hex(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(content.as_bytes());
+    let out = h
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
+    format!("{}\n", out)
+}
+
 fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) -> OpCtx<'a> {
     OpCtx {
         exec,
@@ -238,42 +250,42 @@ async fn b1_second_run_is_quiet() {
     );
     // Guards find their exact content already in place → no restarts.
     exec.respond_always(
-        "cat '/etc/docker/daemon.json'",
-        CmdOutput::ok(guards::DOCKER_DAEMON_JSON),
+        "sha256sum '/etc/docker/daemon.json'",
+        CmdOutput::ok(&sha_hex(guards::DOCKER_DAEMON_JSON)),
     );
     exec.respond_always(
-        "cat '/etc/systemd/journald.conf.d/homelab-limits.conf'",
-        CmdOutput::ok(guards::JOURNALD_LIMITS),
+        "sha256sum '/etc/systemd/journald.conf.d/homelab-limits.conf'",
+        CmdOutput::ok(&sha_hex(guards::JOURNALD_LIMITS)),
     );
     exec.respond_always(
-        "cat '/etc/logrotate.d/homelab'",
-        CmdOutput::ok(guards::LOGROTATE_POLICY),
+        "sha256sum '/etc/logrotate.d/homelab'",
+        CmdOutput::ok(&sha_hex(guards::LOGROTATE_POLICY)),
     );
     exec.respond_always(
-        "cat '/etc/systemd/system/docker-prune.service'",
-        CmdOutput::ok(guards::PRUNE_SERVICE),
+        "sha256sum '/etc/systemd/system/docker-prune.service'",
+        CmdOutput::ok(&sha_hex(guards::PRUNE_SERVICE)),
     );
     exec.respond_always(
-        "cat '/etc/systemd/system/docker-prune.timer'",
-        CmdOutput::ok(guards::PRUNE_TIMER),
+        "sha256sum '/etc/systemd/system/docker-prune.timer'",
+        CmdOutput::ok(&sha_hex(guards::PRUNE_TIMER)),
     );
     exec.respond_always(
-        "cat '/etc/apt/apt.conf.d/60homelab-clean'",
-        CmdOutput::ok(guards::APT_AUTOCLEAN),
+        "sha256sum '/etc/apt/apt.conf.d/60homelab-clean'",
+        CmdOutput::ok(&sha_hex(guards::APT_AUTOCLEAN)),
     );
     exec.respond_always(
-        "cat '/etc/apt/apt.conf.d/50unattended-upgrades'",
-        CmdOutput::ok(guards::UNATTENDED_UPGRADES),
+        "sha256sum '/etc/apt/apt.conf.d/50unattended-upgrades'",
+        CmdOutput::ok(&sha_hex(guards::UNATTENDED_UPGRADES)),
     );
     // Files already at destination content → pushes skipped too.
     let s = spec(110, "syncthing");
     exec.respond_always(
-        "cat '/opt/syncthing/syncthing/docker-compose.yml'",
-        CmdOutput::ok(&s.files[0].content),
+        "sha256sum '/opt/syncthing/syncthing/docker-compose.yml'",
+        CmdOutput::ok(&sha_hex(&s.files[0].content)),
     );
     exec.respond_always(
-        "cat '/opt/traefik-config/routes/110-app-syncthing.yml'",
-        CmdOutput::ok(s.gateway_route.as_ref().unwrap().content.as_str()),
+        "sha256sum '/opt/traefik-config/routes/110-app-syncthing.yml'",
+        CmdOutput::ok(&sha_hex(s.gateway_route.as_ref().unwrap().content.as_str())),
     );
     // Intent repo already committed → git commit exits non-zero (nothing to do).
     exec.respond_always(

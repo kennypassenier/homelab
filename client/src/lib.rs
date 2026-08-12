@@ -28,3 +28,11 @@ pub fn save_pin(fp: &str) {
     }
     let _ = std::fs::write(&path, fp);
 }
+
+/// CLI exit rule for RPCs whose payload arrives as a separate broadcast
+/// frame (GetConfig): RpcDone alone is not enough — the payload frame can
+/// lose the race and would be dropped by an early exit. Regression guard
+/// for the Config-race bug (fixed 2026-08-11).
+pub fn rpc_can_exit(awaits_payload: bool, payload_seen: bool, rpc_done_ok: bool) -> bool {
+    rpc_done_ok && (!awaits_payload || payload_seen)
+}

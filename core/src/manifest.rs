@@ -219,6 +219,30 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
         }
     }
 
+    // Every /appdata bind in a compose file must be declared as manifest
+    // storage — otherwise docker silently creates the dir on the container
+    // rootfs: unbacked-up and lost on destroy (the synctest-108 bug class).
+    let declared: Vec<&str> = m.storage.iter().map(|s| s.host_path.as_str()).collect();
+    for f in &spec.files {
+        if !f.path.ends_with("docker-compose.yml") {
+            continue;
+        }
+        for line in f.content.lines() {
+            let t = line
+                .trim()
+                .trim_start_matches("- ")
+                .trim_matches(['"', '\'']);
+            if let Some(host) = t.split(':').next() {
+                if host.starts_with("/appdata/") && !declared.contains(&host) {
+                    problems.push(format!(
+                        "{}: bind '{}' is not declared under storage: — data would land on the container rootfs (add a storage entry or remove the bind)",
+                        f.path, host
+                    ));
+                }
+            }
+        }
+    }
+
     if problems.is_empty() {
         Ok(())
     } else {

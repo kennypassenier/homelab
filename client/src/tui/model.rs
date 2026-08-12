@@ -305,7 +305,6 @@ pub fn update(model: &mut Model, msg: Msg) {
     match msg {
         Msg::ReleaseTag(tag) => {
             model.latest_release = tag;
-            return;
         }
         Msg::Tick => {
             model.tick += 1;

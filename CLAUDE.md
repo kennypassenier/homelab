@@ -13,7 +13,7 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
 |---|---|
 | Current phase | 7 · Hardening (retro-fit; build phases 0–6 complete) |
 | Last completed gate | Procedure-evaluation form (2026-08-11): V1–V10 close, V11 later, V12 retro |
-| Next gate | Phase 3 mini-round (V4) + combined M0–M6 report (V6) + doc approvals (V10); then Phase 7 gap form |
+| Next gate | OPEN: deep-dive form (A2 license + B1–B9 milestone report) AND phase-7 hardening form (H1–H22). Docs (V10) approved; A1/A3 decided (AR17/AR18) |
 | AFK mode | on for build work (Kenny: "keep going"), off for gates |
 
 ## Project state (resume here)

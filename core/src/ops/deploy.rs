@@ -76,6 +76,77 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         })
     });
 
+    // ── E3: fresh/empty config dirs are refilled from the latest snapshot
+    // BEFORE apps start. Backup-target trouble degrades to a loud warning,
+    // never a blocked deploy (spec: upgraded-by-Kenny Must).
+    step!(runner, "auto-restore check", {
+        if m.storage.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let mut all_empty = true;
+        for mount in &m.storage {
+            let probe = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &[
+                        "-c",
+                        &format!("ls -A '{}' 2>/dev/null | head -1", mount.host_path),
+                    ],
+                    30,
+                ))
+                .await?;
+            if !probe.stdout.trim().is_empty() {
+                all_empty = false;
+                break;
+            }
+        }
+        if !all_empty {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let bcfg = crate::ops::backup::BackupCfg::default();
+        let has_snapshot = exec
+            .run(&crate::ops::backup::restic_cmd(
+                &bcfg,
+                &m.stack_name,
+                &["snapshots", "--last", "--json"],
+                120,
+            ))
+            .await;
+        match has_snapshot {
+            Ok(out)
+                if out.success() && out.stdout.trim() != "[]" && !out.stdout.trim().is_empty() =>
+            {
+                log_info("[e3] config dirs are empty and a snapshot exists — restoring".into());
+                let restored = exec
+                    .run(&crate::ops::backup::restic_cmd(
+                        &bcfg,
+                        &m.stack_name,
+                        &["restore", "latest", "--target", "/"],
+                        bcfg.snapshot_timeout_s,
+                    ))
+                    .await;
+                match restored {
+                    Ok(o) if o.success() => {
+                        log_info("[e3] auto-restore complete".into());
+                        Ok(StepOutcome::Changed)
+                    }
+                    _ => {
+                        ctx.sink.emit(PipelineEvent::Line {
+                            level: Level::Warn,
+                            source: "HOST".into(),
+                            msg: "[e3] AUTO-RESTORE FAILED — deploy continues with EMPTY config dirs; restore manually if this stack had data".into(),
+                        });
+                        Ok(StepOutcome::Unchanged)
+                    }
+                }
+            }
+            _ => {
+                log_info("[e3] empty config dirs, no snapshot available — fresh stack".into());
+                Ok(StepOutcome::Unchanged)
+            }
+        }
+    });
+
     // ── C1: create or reuse the container; C3 boot policy at create. ─────
     step!(runner, "provision container", {
         if !exists {
@@ -457,6 +528,19 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             exec.write_file(&vault, env, 0o600).await?;
             log_info(format!("[vault] {} sealed (values not logged)", dest));
         }
+        // A5/E3: apps whose env the client did NOT send fall back to the
+        // vault — a wiped container gets its .env back on redeploy.
+        for app in &m.apps {
+            if spec.env.contains_key(app) {
+                continue;
+            }
+            let vault = format!("{}/secrets/{}/{}.env", ctx.state_dir, m.stack_name, app);
+            if let Ok(env) = exec.read_file(&vault).await {
+                let dest = format!("/opt/{}/{}/.env", m.stack_name, app);
+                push_content(exec, m.vmid, &dest, &env, "600").await?;
+                log_info(format!("[vault] {} restored from vault", dest));
+            }
+        }
         Ok(StepOutcome::Changed)
     });
 
@@ -544,8 +628,16 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         step!(runner, "gateway route", {
             let dest =
                 safety::check_gateway_route(&ctx.safety, route.gateway_vmid, &route.filename)?;
-            let changed =
-                push_content(exec, route.gateway_vmid, &dest, &route.content, "644").await?;
+            // H6 hardening: when the routes dir lives under /appdata/ it is a
+            // HOST path bind-mounted into the gateway — write it host-side so
+            // route fragments survive gateway recreation. The legacy /opt
+            // path keeps the pct-push behavior until the platform migration.
+            let changed = if ctx.safety.gateway_routes_dir.starts_with("/appdata/") {
+                exec.write_file(&dest, &route.content, 0o644).await?;
+                true
+            } else {
+                push_content(exec, route.gateway_vmid, &dest, &route.content, "644").await?
+            };
             log_info(format!("[route] {} (file-provider watch reloads)", dest));
             Ok(if changed {
                 StepOutcome::Changed
@@ -554,6 +646,42 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             })
         });
     }
+
+    // ── D3: garbage-collect apps removed from intent — stop + remove their
+    // compose project and /opt dir; /appdata config dirs are kept.
+    step!(runner, "garbage collect", {
+        let store = StateStore::new(exec, &ctx.state_dir);
+        let state = store.load().await;
+        let removed: Vec<String> = state
+            .stacks
+            .get(&m.stack_name)
+            .map(|s| {
+                s.apps
+                    .iter()
+                    .filter(|a| !m.apps.contains(a))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        if removed.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        for app in &removed {
+            let _ = pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "cd '/opt/{stack}/{app}' && docker compose down --remove-orphans; rm -rf '/opt/{stack}/{app}'",
+                    stack = m.stack_name,
+                    app = app
+                ),
+                300,
+            )
+            .await?;
+            log_info(format!("[gc] app '{}' removed (config dirs kept)", app));
+        }
+        Ok(StepOutcome::Changed)
+    });
 
     step!(runner, "record state", {
         let store = StateStore::new(exec, &ctx.state_dir);

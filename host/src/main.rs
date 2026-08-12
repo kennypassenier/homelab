@@ -233,12 +233,10 @@ mod tests {
                 base_url: "https://10.10.10.1".into(),
                 cred_file: "/var/lib/homelab/secrets/opnsense".into(),
             }),
-            safety: {
-                let mut sc = SafetyConfig::default();
-                sc.no_touch = vec![100, 101];
-                sc.gateway_vmid = 112;
-                sc.gateway_routes_dir = "/appdata/platform/traefik-config/routes".into();
-                sc
+            safety: SafetyConfig {
+                no_touch: vec![100, 101],
+                gateway_vmid: 112,
+                gateway_routes_dir: "/appdata/platform/traefik-config/routes".into(),
             },
             initial_settings: homelab_proto::HostConfigView {
                 backup_hour: Some(4),

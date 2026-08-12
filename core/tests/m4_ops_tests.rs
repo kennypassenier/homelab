@@ -991,10 +991,18 @@ async fn a2_hostname_mismatch_refused_in_backup_restore_update() {
 async fn h2_failed_snapshot_still_resumes_containers() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
-    exec.respond_always("restic backup", CmdOutput::failed(1, "rclone: upload timeout"));
+    exec.respond_always(
+        "restic backup",
+        CmdOutput::failed(1, "rclone: upload timeout"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = backup(&ctx(&exec, &sink, &j), &manifest(108, "test"), &BackupCfg::default()).await;
+    let report = backup(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+    )
+    .await;
     assert!(!report.ok, "snapshot failure must still fail the op");
     // …but the paused containers were restarted anyway.
     assert!(
@@ -1003,4 +1011,169 @@ async fn h2_failed_snapshot_still_resumes_containers() {
     );
     // And stale locks were cleared up front.
     assert_eq!(exec.calls_containing("restic unlock").len(), 1);
+}
+
+// ── E3 auto-restore, D3 garbage collection, H6 host-side routes ─────────────
+
+fn deploy_mocks(exec: &MockExecutor) {
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.enqueue("pct config", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+}
+
+fn deploy_spec(m: StackManifest) -> homelab_core::manifest::DeploySpec {
+    homelab_core::manifest::DeploySpec {
+        manifest: m,
+        files: vec![homelab_core::manifest::FileBlob {
+            path: "app/docker-compose.yml".into(),
+            content: "services: {}".into(),
+            mode: None,
+        }],
+        env: Default::default(),
+        gateway_route: None,
+    }
+}
+
+#[tokio::test]
+async fn e3_empty_dirs_with_snapshot_trigger_restore() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    // ls -A returns empty (dir empty); a snapshot exists.
+    exec.respond_always(
+        "snapshots --last --json",
+        CmdOutput::ok(r#"[{"short_id":"abc"}]"#),
+    );
+    exec.respond_always("restic restore", CmdOutput::ok("restored"));
+    let spec = deploy_spec(manifest(108, "test"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        exec.calls_containing("restic restore latest --target /")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn e3_nonempty_dirs_skip_restore_and_restic_failure_never_blocks() {
+    use homelab_core::ops::deploy::deploy;
+    // Non-empty: no restore attempted.
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always("ls -A", CmdOutput::ok("config\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok);
+    assert!(exec.calls_containing("restic restore").is_empty());
+    // Empty + restic restore fails: loud warning, deploy still green.
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always(
+        "snapshots --last --json",
+        CmdOutput::ok(r#"[{"short_id":"abc"}]"#),
+    );
+    exec.respond_always("restic restore", CmdOutput::failed(1, "gdrive down"));
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
+    assert!(
+        report.ok,
+        "restic failure must not block: {:?}",
+        report.error
+    );
+    assert!(sink
+        .lines()
+        .iter()
+        .any(|l| l.contains("AUTO-RESTORE FAILED")));
+}
+
+#[tokio::test]
+async fn e3_env_restored_from_vault_when_client_sends_none() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always("ls -A", CmdOutput::ok("config\n"));
+    exec.seed_file(
+        "/var/lib/homelab/secrets/test/app.env",
+        "API_KEY=from_the_vault\n",
+    );
+    let spec = deploy_spec(manifest(108, "test")); // env is empty
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    // The vault env was pushed to the container (via the staged tmp file).
+    assert!(
+        !exec
+            .calls_containing("pct push 108 /tmp/homelab-push /opt/test/app/.env")
+            .is_empty(),
+        "vault fallback must push the .env"
+    );
+}
+
+#[tokio::test]
+async fn d3_removed_app_is_stopped_and_deleted_but_config_kept() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always("ls -A", CmdOutput::ok("config\n"));
+    // Previous state knows apps [app, oldapp]; the new spec only has [app].
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{"test":{"vmid":108,"hostname":"108-app-test","apps":["app","oldapp"],"applied_at":1}}}"#,
+    );
+    let spec = deploy_spec(manifest(108, "test"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    let gc = exec.calls_containing("/opt/test/oldapp");
+    assert!(
+        gc.iter().any(|c| c.contains("docker compose down")),
+        "removed app must be composed down"
+    );
+    assert!(
+        gc.iter().any(|c| c.contains("rm -rf")),
+        "and its /opt dir removed"
+    );
+    // Config dirs under /appdata are never touched by GC.
+    assert!(!exec
+        .calls()
+        .iter()
+        .any(|c| c.contains("rm") && c.contains("/appdata/")));
+    // The surviving app was untouched by GC.
+    assert!(!exec
+        .calls_containing("rm -rf '/opt/test/app'")
+        .iter()
+        .any(|_| true));
+}
+
+#[tokio::test]
+async fn h6_appdata_routes_dir_written_host_side() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always("ls -A", CmdOutput::ok("config\n"));
+    let mut spec = deploy_spec(manifest(108, "test"));
+    spec.gateway_route = Some(homelab_core::manifest::GatewayRoute {
+        gateway_vmid: 104,
+        filename: "108-app-test.yml".into(),
+        content: "http:\n  routers: {}\n".into(),
+    });
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut c = ctx(&exec, &sink, &j);
+    c.safety.gateway_routes_dir = "/appdata/platform/traefik-config/routes".into();
+    let report = deploy(&c, &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    // Written directly on the host, NOT pushed into the gateway container.
+    assert!(exec
+        .file("/appdata/platform/traefik-config/routes/108-app-test.yml")
+        .is_some());
+    assert!(exec.calls_containing("pct push 104").is_empty());
 }

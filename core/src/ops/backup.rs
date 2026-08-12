@@ -61,6 +61,12 @@ impl Default for BackupCfg {
     }
 }
 
+/// Build a restic command from a BackupCfg (shared with deploy's E3
+/// auto-restore step).
+pub(crate) fn restic_cmd(cfg: &BackupCfg, stack: &str, args: &[&str], timeout: u64) -> Cmd {
+    restic(&cfg.restic_base, stack, &cfg.password_file, args, timeout)
+}
+
 /// E1: snapshot a stack's /appdata paths, quiescing paused containers.
 pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> OperationReport {
     let op = format!("backup-{}", m.stack_name);

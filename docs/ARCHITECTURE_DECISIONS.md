@@ -46,3 +46,20 @@ before implementation.
   YAML by design.
 - **AR12 Serial mutations**: eliminates the backup-vs-deploy race class
   outright; every transcript is the whole story.
+
+---
+
+## Amendment 2026-08-11 — Phase-3 items decided retroactively (procedure evaluation V4)
+
+**AR17 · Dependency policy: pragmatic.** Small, pure-Rust, widely-used
+crates without their own network/IO may be added silently (the practice
+during the build: sha2, base64); anything with C bindings, network stacks,
+or a heavy transitive tree requires a mini-round. Decided by Kenny in the
+V4 mini-round.
+
+**AR18 · MSRV: pinned at 1.82** (`rust-version` in the workspace, inherited
+by every crate) with a dedicated CI job compiling on exactly that toolchain.
+Chosen because the code already uses 1.82 APIs (`Option::is_none_or`).
+
+**AR19 · License: pending deep-dive.** Kenny leans MIT/Apache-2.0 dual but
+asked for a fuller explanation first; to be settled in the follow-up form.

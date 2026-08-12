@@ -30,3 +30,11 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace
+
+  msrv:
+    runs-on: ubuntu-latest
+    container: rust:1.82-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check on MSRV (AR17)
+        run: cargo check --workspace

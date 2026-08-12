@@ -65,6 +65,13 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     let exec: &dyn Executor = &texec;
     let paths: Vec<String> = m.storage.iter().map(|s| s.host_path.clone()).collect();
 
+    // A1/A2: same gate as every mutating op (quiesce/resume reach into the
+    // container).
+    step!(runner, "safety gates", {
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
     step!(runner, "init repo", {
         // Idempotent: init fails harmlessly if the repo already exists.
         let _ = exec
@@ -238,6 +245,12 @@ pub async fn restore(
         Level::Warn,
         format!("[restore] {} from snapshot '{}'", m.stack_name, snapshot),
     );
+
+    // A1/A2: restore composes down and writes over the target — full gate.
+    step!(runner, "safety gates", {
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
 
     step!(runner, "validate snapshot", {
         let out = exec

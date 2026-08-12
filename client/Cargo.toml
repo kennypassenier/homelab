@@ -1,6 +1,7 @@
 [package]
 name = "homelab-client"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 description = "Homelab CLIENT CLI: drives the HOST daemon over the authenticated WS line"
 

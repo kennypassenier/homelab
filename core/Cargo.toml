@@ -1,6 +1,7 @@
 [package]
 name = "homelab-core"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 description = "Zero-I/O domain logic: manifests, safety gates, operation pipelines, state (AR1)"
 

@@ -60,6 +60,14 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
     }
 }
 
+
+fn mock_hostname(exec: &MockExecutor, vmid: u16, stack: &str) {
+    exec.respond_always(
+        &format!("pct config {}", vmid),
+        CmdOutput::ok(&format!("hostname: {}-app-{}\n", vmid, stack)),
+    );
+}
+
 // ── C2: gated destroy ───────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -130,6 +138,7 @@ async fn c2_destroy_happy_path_lifts_protection_then_destroys() {
 #[tokio::test]
 async fn e1_backup_runs_init_quiesce_snapshot_resume_retention() {
     let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
     let sink = VecSink::new();
     let j = NullJournal;
     let cfg = BackupCfg::default();
@@ -162,6 +171,7 @@ async fn e1_backup_runs_init_quiesce_snapshot_resume_retention() {
 #[tokio::test]
 async fn e2_restore_validates_quiesces_restores_resumes_verifies() {
     let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
     exec.respond_always(
         "snapshots --last",
         CmdOutput::ok("id  time  host\nabc123  today\n"),
@@ -197,6 +207,7 @@ async fn e2_restore_validates_quiesces_restores_resumes_verifies() {
 #[tokio::test]
 async fn e2_restore_fails_when_app_not_running_after() {
     let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
     exec.respond_always("snapshots --last", CmdOutput::ok("id\nabc\n"));
     // verify returns empty → app not running.
     exec.respond_always("ps --status running --services", CmdOutput::ok(""));
@@ -224,6 +235,7 @@ use homelab_core::ops::update::update;
 #[tokio::test]
 async fn d9_update_capture_pull_verify_order() {
     let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
     exec.respond_always(
         "docker inspect --format",
         CmdOutput::ok("sha256:aaa myimg:latest\n"),
@@ -250,6 +262,7 @@ async fn d9_update_capture_pull_verify_order() {
 #[tokio::test]
 async fn d9_auto_update_skips_non_auto_policy() {
     let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
     // Policy label query returns "manual".
     exec.respond_always("com.homelab.update.policy", CmdOutput::ok("manual\n"));
     let sink = VecSink::new();
@@ -265,6 +278,7 @@ async fn d9_auto_update_skips_non_auto_policy() {
 #[tokio::test]
 async fn b6_failed_update_rolls_back_to_captured_image() {
     let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
     exec.respond_always(
         "docker inspect --format",
         CmdOutput::ok("sha256:oldimg myimg:latest\n"),
@@ -399,6 +413,7 @@ async fn h6_patch_fails_closed_on_apt_error() {
 #[tokio::test]
 async fn g8_tiered_retention_forgets_by_explicit_id() {
     let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
     // Two snapshots on the same old day (age ~100d) → older one forgotten.
     exec.respond_always(
         "snapshots --json",
@@ -924,4 +939,49 @@ fn v8_validate_rejects_undeclared_appdata_bind() {
         host_owner_uid: Some(101000),
     }];
     validate(&ok_spec).unwrap();
+}
+
+// ── A1 property: every no-touch vmid refused in EVERY mutating op ───────────
+
+#[tokio::test]
+async fn a1_property_every_no_touch_vmid_refused_in_every_op() {
+    use homelab_core::safety::DEFAULT_NO_TOUCH;
+    for &vmid in DEFAULT_NO_TOUCH {
+        let m = manifest(vmid, "evil");
+        let sink = VecSink::new();
+        let j = NullJournal;
+        // backup
+        let exec = MockExecutor::new();
+        let r = backup(&ctx(&exec, &sink, &j), &m, &BackupCfg::default()).await;
+        assert!(!r.ok, "backup must refuse vmid {}", vmid);
+        assert!(exec.calls_containing("restic").is_empty());
+        // restore
+        let exec = MockExecutor::new();
+        let r = restore(&ctx(&exec, &sink, &j), &m, &BackupCfg::default(), "latest").await;
+        assert!(!r.ok, "restore must refuse vmid {}", vmid);
+        assert!(exec.calls_containing("compose down").is_empty());
+        // update
+        let exec = MockExecutor::new();
+        let r = update(&ctx(&exec, &sink, &j), &m, None, false).await;
+        assert!(!r.ok, "update must refuse vmid {}", vmid);
+        assert!(exec.calls_containing("compose pull").is_empty());
+    }
+}
+
+#[tokio::test]
+async fn a2_hostname_mismatch_refused_in_backup_restore_update() {
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let m = manifest(108, "test");
+    for op in ["backup", "restore", "update"] {
+        let exec = MockExecutor::new();
+        exec.respond_always("pct config 108", CmdOutput::ok("hostname: 108-app-other\n"));
+        let r = match op {
+            "backup" => backup(&ctx(&exec, &sink, &j), &m, &BackupCfg::default()).await,
+            "restore" => restore(&ctx(&exec, &sink, &j), &m, &BackupCfg::default(), "latest").await,
+            _ => update(&ctx(&exec, &sink, &j), &m, None, false).await,
+        };
+        assert!(!r.ok, "{} must refuse a hostname mismatch", op);
+        assert!(format!("{}", r.error.unwrap().why).contains("refusing"));
+    }
 }

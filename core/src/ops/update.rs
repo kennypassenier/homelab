@@ -111,6 +111,12 @@ pub async fn update(
         );
     }
 
+    // A1/A2: updates pull and recreate containers inside the target.
+    step!(runner, "safety gates", {
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
     for app in &apps {
         // Own the strings the step body needs; the macro closure borrows them.
         let stack = m.stack_name.clone();

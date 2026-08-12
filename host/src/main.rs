@@ -123,10 +123,11 @@ fn load_config() -> Config {
 
 /// G8: persist the mutable settings back to host.toml, atomically, keeping
 /// the immutable fields (token/listen/state_dir) intact.
-fn persist_settings(
-    config: &Config,
-    settings: &homelab_proto::HostConfigView,
-) -> Result<(), String> {
+/// Render host.toml from the immutable config + mutable settings. Split out
+/// of persist_settings so the parse→render→parse round-trip is testable
+/// (gap: an early version silently dropped the OPNsense fields on every
+/// settings save).
+fn render_settings_toml(config: &Config, settings: &homelab_proto::HostConfigView) -> Result<String, String> {
     #[derive(serde::Serialize)]
     struct Out<'a> {
         token: &'a str,
@@ -141,6 +142,10 @@ fn persist_settings(
         exec_enabled: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         mirror_remote: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        opnsense_url: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        opnsense_cred_file: Option<&'a String>,
     }
     let out = Out {
         token: &config.token,
@@ -151,8 +156,17 @@ fn persist_settings(
         retention: &settings.retention,
         exec_enabled: config.exec_enabled,
         mirror_remote: config.mirror_remote.as_ref(),
+        opnsense_url: config.kea.as_ref().map(|k| &k.base_url),
+        opnsense_cred_file: config.kea.as_ref().map(|k| &k.cred_file),
     };
-    let raw = toml::to_string_pretty(&out).map_err(|e| e.to_string())?;
+    toml::to_string_pretty(&out).map_err(|e| e.to_string())
+}
+
+fn persist_settings(
+    config: &Config,
+    settings: &homelab_proto::HostConfigView,
+) -> Result<(), String> {
+    let raw = render_settings_toml(config, settings)?;
     let tmp = format!("{}.tmp", config.config_path);
     std::fs::write(&tmp, &raw).map_err(|e| e.to_string())?;
     use std::os::unix::fs::PermissionsExt;
@@ -160,6 +174,50 @@ fn persist_settings(
         .map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &config.config_path).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Round-trip: everything load_config understands must survive a
+    /// settings save. Guards the bug where opnsense_url/opnsense_cred_file
+    /// were silently dropped by the SETTINGS-tab save path (H2 dying on the
+    /// next restart without any warning).
+    #[test]
+    fn settings_render_keeps_every_config_field() {
+        let config = Config {
+            token: "0123456789abcdef0123".into(),
+            listen: "0.0.0.0:8443".parse().unwrap(),
+            state_dir: "/var/lib/homelab".into(),
+            config_path: "/etc/homelab/host.toml".into(),
+            exec_enabled: true,
+            mirror_remote: Some("git@github.com:k/m.git".into()),
+            kea: Some(homelab_core::ops::kea::KeaCfg {
+                base_url: "https://10.10.10.1".into(),
+                cred_file: "/var/lib/homelab/secrets/opnsense".into(),
+            }),
+            initial_settings: homelab_proto::HostConfigView {
+                backup_hour: Some(4),
+                notify_webhook: Some("http://ha/webhook/x".into()),
+                retention: homelab_core::retention::default_tiers(),
+            },
+        };
+        let rendered =
+            render_settings_toml(&config, &config.initial_settings).expect("render");
+        let parsed: FileConfig = toml::from_str(&rendered).expect("parse back");
+        assert_eq!(parsed.token.as_deref(), Some("0123456789abcdef0123"));
+        assert_eq!(parsed.backup_hour, Some(4));
+        assert_eq!(parsed.notify_webhook.as_deref(), Some("http://ha/webhook/x"));
+        assert_eq!(parsed.exec_enabled, Some(true));
+        assert_eq!(parsed.mirror_remote.as_deref(), Some("git@github.com:k/m.git"));
+        assert_eq!(parsed.opnsense_url.as_deref(), Some("https://10.10.10.1"));
+        assert_eq!(
+            parsed.opnsense_cred_file.as_deref(),
+            Some("/var/lib/homelab/secrets/opnsense")
+        );
+        assert_eq!(parsed.retention.as_ref().map(|r| r.len()), Some(3));
+    }
 }
 
 // ── Real executor (AR2) ─────────────────────────────────────────────────────

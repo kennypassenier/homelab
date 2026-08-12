@@ -1,6 +1,7 @@
 [package]
 name = "homelab-host"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 description = "Homelab HOST daemon: Proxmox LXC lifecycle + stack sync over one authenticated WS line"
 

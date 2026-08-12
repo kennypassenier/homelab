@@ -19,6 +19,43 @@ use crate::runner::Journal;
 use crate::safety::SafetyConfig;
 use crate::sink::Sink;
 
+/// A1/A2 guard shared by every mutating op that targets an existing
+/// container: the vmid must not be on the no-touch list AND must carry the
+/// expected `<vmid>-app-<stack>` hostname. Deploy/destroy embed this in
+/// their pipelines; backup/restore/update call it up front.
+pub(crate) async fn guard_target(
+    exec: &dyn Executor,
+    safety: &SafetyConfig,
+    vmid: u16,
+    expected_hostname: &str,
+) -> Result<(), CoreError> {
+    if safety.no_touch.contains(&vmid) {
+        return Err(CoreError::SafetyAbort(format!(
+            "vmid {} is on the no-touch list",
+            vmid
+        )));
+    }
+    let cfg = exec
+        .run(&crate::executor::Cmd::new("pct", &["config", &vmid.to_string()], 30))
+        .await?;
+    if !cfg.success() {
+        return Err(CoreError::Other(format!("vmid {} does not exist", vmid)));
+    }
+    let live = cfg
+        .stdout
+        .lines()
+        .find(|l| l.starts_with("hostname:"))
+        .map(|l| l.trim_start_matches("hostname:").trim().to_string())
+        .unwrap_or_default();
+    if live != expected_hostname {
+        return Err(CoreError::SafetyAbort(format!(
+            "vmid {} is '{}', expected '{}' — refusing",
+            vmid, live, expected_hostname
+        )));
+    }
+    Ok(())
+}
+
 /// Shared helper: run a shell script inside an LXC (re-exported for ops).
 pub(crate) async fn util_pct_sh(
     exec: &dyn Executor,

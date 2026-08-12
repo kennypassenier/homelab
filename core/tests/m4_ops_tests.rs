@@ -984,3 +984,23 @@ async fn a2_hostname_mismatch_refused_in_backup_restore_update() {
         assert!(r.error.unwrap().why.contains("refusing"));
     }
 }
+
+// ── H2 hardening: resume always runs; stale locks cleared ───────────────────
+
+#[tokio::test]
+async fn h2_failed_snapshot_still_resumes_containers() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("restic backup", CmdOutput::failed(1, "rclone: upload timeout"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(&ctx(&exec, &sink, &j), &manifest(108, "test"), &BackupCfg::default()).await;
+    assert!(!report.ok, "snapshot failure must still fail the op");
+    // …but the paused containers were restarted anyway.
+    assert!(
+        !exec.calls_containing("docker compose up -d").is_empty(),
+        "resume must run even when the snapshot fails"
+    );
+    // And stale locks were cleared up front.
+    assert_eq!(exec.calls_containing("restic unlock").len(), 1);
+}

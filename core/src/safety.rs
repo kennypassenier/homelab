@@ -11,6 +11,7 @@ use crate::manifest::StackManifest;
 /// 201-203 k3s.
 pub const DEFAULT_NO_TOUCH: &[u16] = &[100, 101, 102, 103, 104, 105, 106, 107, 111, 201, 202, 203];
 
+#[derive(Debug, Clone)]
 pub struct SafetyConfig {
     pub no_touch: Vec<u16>,
     pub gateway_vmid: u16,

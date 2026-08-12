@@ -45,6 +45,9 @@ pub struct BackupCfg {
     pub password_file: String,
     /// Tiered retention (G8) — computed by us, not restic's --keep-* flags.
     pub tiers: Vec<crate::retention::RetentionTier>,
+    /// Snapshot timeout. Hardening H2: the old fixed 1800 s was too small
+    /// for a first multi-GB upload over residential rclone/gdrive.
+    pub snapshot_timeout_s: u64,
 }
 
 impl Default for BackupCfg {
@@ -53,6 +56,7 @@ impl Default for BackupCfg {
             restic_base: "rclone:gdrive:homelab-backups".into(),
             password_file: "/var/lib/homelab/secrets/restic.pw".into(),
             tiers: crate::retention::default_tiers(),
+            snapshot_timeout_s: 4 * 3600,
         }
     }
 }
@@ -87,6 +91,22 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         Ok(StepOutcome::Unchanged)
     });
 
+    // H2 hardening: a previous run killed mid-snapshot can leave a stale
+    // repo lock; restic unlock only removes locks from dead processes, so
+    // this is always safe. Best-effort (repo may not exist yet).
+    step!(runner, "clear stale locks", {
+        let _ = exec
+            .run(&restic(
+                &cfg.restic_base,
+                &m.stack_name,
+                &cfg.password_file,
+                &["unlock"],
+                120,
+            ))
+            .await;
+        Ok(StepOutcome::Unchanged)
+    });
+
     // Quiesce: stop containers labeled com.homelab.backup.pause=true.
     step!(runner, "quiesce", {
         let script = "for c in $(docker ps -q --filter label=com.homelab.backup.pause=true); do docker stop $c; done; true";
@@ -94,31 +114,35 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         Ok(StepOutcome::Changed)
     });
 
-    step!(runner, "snapshot", {
-        if paths.is_empty() {
-            // No /appdata paths — nothing to snapshot (surfaced as a no-change
-            // step; the transcript makes it visible).
-            return Ok(StepOutcome::Unchanged);
-        }
-        let mut args = vec!["backup"];
-        for p in &paths {
-            args.push(p.as_str());
-        }
-        run_ok(
-            exec,
-            &restic(
-                &cfg.restic_base,
-                &m.stack_name,
-                &cfg.password_file,
-                &args,
-                1800,
-            ),
-        )
-        .await?;
-        Ok(StepOutcome::Changed)
-    });
+    // H2 hardening: the snapshot may fail, but RESUME MUST ALWAYS RUN — a
+    // fail-closed abort here would leave the quiesced databases down until
+    // a human noticed. So the snapshot error is captured, resume runs
+    // unconditionally, and only then does the operation fail.
+    let snapshot_result = runner
+        .step("snapshot", || async {
+            if paths.is_empty() {
+                return Ok(StepOutcome::Unchanged);
+            }
+            let mut args = vec!["backup"];
+            for p in &paths {
+                args.push(p.as_str());
+            }
+            run_ok(
+                exec,
+                &restic(
+                    &cfg.restic_base,
+                    &m.stack_name,
+                    &cfg.password_file,
+                    &args,
+                    cfg.snapshot_timeout_s,
+                ),
+            )
+            .await?;
+            Ok(StepOutcome::Changed)
+        })
+        .await;
 
-    // Resume the paused containers.
+    // Resume the paused containers — unconditionally.
     step!(runner, "resume", {
         let dir_cmds = m
             .apps
@@ -129,6 +153,10 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         let _ = super::util_pct_sh(exec, m.vmid, &format!("{}; true", dir_cmds), 300).await?;
         Ok(StepOutcome::Changed)
     });
+
+    if let Err(e) = snapshot_result {
+        return runner.finish_err("snapshot", &e);
+    }
 
     step!(runner, "retention", {
         // G8 tiered retention: list snapshots, compute the forget-set with

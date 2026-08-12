@@ -49,6 +49,9 @@ struct FileConfig {
     mirror_remote: Option<String>,
     opnsense_url: Option<String>,
     opnsense_cred_file: Option<String>,
+    no_touch: Option<Vec<u16>>,
+    gateway_vmid: Option<u16>,
+    gateway_routes_dir: Option<String>,
 }
 
 #[derive(Clone)]
@@ -65,6 +68,10 @@ struct Config {
     mirror_remote: Option<String>,
     /// H2: OPNsense base url + credential file for Kea reservations.
     kea: Option<homelab_core::ops::kea::KeaCfg>,
+    /// H1 (hardening): safety values configurable via host.toml so M5 can
+    /// migrate the gateway / adjust the no-touch list without a release.
+    /// Hardcoded DEFAULT_NO_TOUCH remains the default.
+    safety: SafetyConfig,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
 }
@@ -111,6 +118,19 @@ fn load_config() -> Config {
             }),
             _ => None,
         },
+        safety: {
+            let mut sc = SafetyConfig::default();
+            if let Some(list) = file.no_touch {
+                sc.no_touch = list;
+            }
+            if let Some(gw) = file.gateway_vmid {
+                sc.gateway_vmid = gw;
+            }
+            if let Some(dir) = file.gateway_routes_dir {
+                sc.gateway_routes_dir = dir;
+            }
+            sc
+        },
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -149,6 +169,12 @@ fn render_settings_toml(
         opnsense_url: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         opnsense_cred_file: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        no_touch: Option<&'a Vec<u16>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gateway_vmid: Option<u16>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gateway_routes_dir: Option<&'a String>,
     }
     let out = Out {
         token: &config.token,
@@ -161,6 +187,13 @@ fn render_settings_toml(
         mirror_remote: config.mirror_remote.as_ref(),
         opnsense_url: config.kea.as_ref().map(|k| &k.base_url),
         opnsense_cred_file: config.kea.as_ref().map(|k| &k.cred_file),
+        no_touch: (config.safety.no_touch != SafetyConfig::default().no_touch)
+            .then_some(&config.safety.no_touch),
+        gateway_vmid: (config.safety.gateway_vmid != SafetyConfig::default().gateway_vmid)
+            .then_some(config.safety.gateway_vmid),
+        gateway_routes_dir: (config.safety.gateway_routes_dir
+            != SafetyConfig::default().gateway_routes_dir)
+            .then_some(&config.safety.gateway_routes_dir),
     };
     toml::to_string_pretty(&out).map_err(|e| e.to_string())
 }
@@ -200,6 +233,13 @@ mod tests {
                 base_url: "https://10.10.10.1".into(),
                 cred_file: "/var/lib/homelab/secrets/opnsense".into(),
             }),
+            safety: {
+                let mut sc = SafetyConfig::default();
+                sc.no_touch = vec![100, 101];
+                sc.gateway_vmid = 112;
+                sc.gateway_routes_dir = "/appdata/platform/traefik-config/routes".into();
+                sc
+            },
             initial_settings: homelab_proto::HostConfigView {
                 backup_hour: Some(4),
                 notify_webhook: Some("http://ha/webhook/x".into()),
@@ -225,6 +265,12 @@ mod tests {
             Some("/var/lib/homelab/secrets/opnsense")
         );
         assert_eq!(parsed.retention.as_ref().map(|r| r.len()), Some(3));
+        assert_eq!(parsed.no_touch, Some(vec![100, 101]));
+        assert_eq!(parsed.gateway_vmid, Some(112));
+        assert_eq!(
+            parsed.gateway_routes_dir.as_deref(),
+            Some("/appdata/platform/traefik-config/routes")
+        );
     }
 }
 
@@ -242,6 +288,7 @@ impl Executor for RealExecutor {
         let fut = Command::new(&cmd.program)
             .args(&cmd.args)
             .stdin(Stdio::null())
+            .kill_on_drop(true)
             .output();
         let out = tokio::time::timeout(Duration::from_secs(cmd.timeout_s), fut)
             .await
@@ -735,7 +782,7 @@ where
         exec,
         sink: &sink,
         journal: &journal,
-        safety: SafetyConfig::default(),
+        safety: state.config.safety.clone(),
         state_dir: state.config.state_dir.clone(),
         now_unix: now,
         kea: state.config.kea.clone(),

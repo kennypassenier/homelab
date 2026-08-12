@@ -109,3 +109,32 @@ only (folder exists). After each stack's migration + first successful v2
 backup + a verified test-restore, the corresponding loose root folders become
 dead weight — Kenny archives/deletes them manually (they are the last-resort
 copy until then, so not before).
+
+## Hardening addendum H3 (2026-08-11) — privilege + uid facts, verified read-only
+
+Measured on the live host:
+
+| Guest | Privileged? | Consequence |
+|---|---|---|
+| CT 104 platform | **un**privileged | uid story unchanged by migration |
+| CT 105 downloader | **PRIVILEGED** | in-container uids = host uids |
+| CT 106 media | **PRIVILEGED** | in-container uids = host uids |
+
+Data-disk ownership (host view):
+- `/HDD18TB/.../Movies`, `/Series`, and the whole 12TB tree: **101000:101000**
+  → maps to uid 1000 inside an unprivileged CT → **correct as-is** for the
+  new PUID=1000 apps. Nothing to do.
+- `/HDD18TB/.../downloads`: **1000:1000** → host uid 1000 is OUTSIDE an
+  unprivileged container's idmap → appears as `nobody`; the new qbittorrent
+  **cannot write its own download dir**.
+
+**Required migration step (CT 105 window):** `chown -R 101000:101000` over
+the `downloads` tree ONLY (bounded — never the full 18TB). Do it during the
+105 cutover, after the old stack is stopped. **Rollback note:** the old
+privileged qbittorrent (PUID=1000) then sees downloads as foreign; rolling
+back requires chowning that tree back to 1000:1000 — record the tree size
+first (`du -sh`) so the rollback window is a known quantity.
+
+Also verify at cutover: any file the *arrs hard-linked/imported recently may
+carry uid 1000 inside Movies/Series (spot-check with
+`find -maxdepth 2 -uid 1000` before declaring the media tree clean).

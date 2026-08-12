@@ -1321,3 +1321,99 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
     assert_eq!(destroy_records[1].2, "failed");
     // AR13 parses exactly this trail after a crash: running without done.
 }
+
+// ── H19 residue: golden argv, guards positive path, route escape, kea set ───
+
+#[tokio::test]
+async fn h19_golden_pct_create_argv() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always("ls -A", CmdOutput::ok("config\n"));
+    let mut m = manifest(108, "test");
+    m.lxc.template = "local:vztmpl/debian-12.tar.zst".into(); // full-create path
+    let spec = deploy_spec(m);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    let create = exec
+        .calls()
+        .into_iter()
+        .find(|c| c.contains("pct create"))
+        .expect("create ran");
+    // The EXACT argument vector — a wrong flag here provisions wrongly.
+    assert_eq!(
+        create,
+        "pct create 108 local:vztmpl/debian-12.tar.zst --hostname 108-app-test \
+--rootfs local-lvm:4 --net0 name=eth0,bridge=vmbr0,firewall=0,ip=10.10.10.8/24,gw=10.10.10.1,tag=10 \
+--memory 512 --swap 256 --cores 1 --unprivileged 1 --features nesting=1 --onboot 1 \
+--description managed by homelab v2 :: stack test --tags homelab --timezone host \
+--protection 1 --startup order=50",
+        "golden pct create argv changed — verify deliberately and update"
+    );
+}
+
+#[tokio::test]
+async fn h19_guards_positive_branch_writes_and_restarts_once() {
+    let exec = MockExecutor::new();
+    // Everything differs from desired (sha mismatch: default empty response).
+    let sink = VecSink::new();
+    homelab_core::ops::guards::apply(&exec, &sink, 108)
+        .await
+        .unwrap();
+    // daemon.json written + docker restarted exactly once.
+    assert_eq!(exec.calls_containing("systemctl restart docker").len(), 1);
+    assert!(
+        !exec.calls_containing("pct push").is_empty(),
+        "guard files pushed"
+    );
+}
+
+#[test]
+fn h19_gateway_route_filename_escape_refused() {
+    use homelab_core::safety::{check_gateway_route, SafetyConfig};
+    let cfg = SafetyConfig::default();
+    assert!(check_gateway_route(&cfg, 104, "ok-route.yml").is_ok());
+    for evil in ["../etc/passwd.yml", "a/b.yml", "route.sh", ""] {
+        assert!(
+            check_gateway_route(&cfg, 104, evil).is_err(),
+            "must refuse: {}",
+            evil
+        );
+    }
+    // And only the configured gateway vmid is a valid destination.
+    assert!(check_gateway_route(&cfg, 105, "ok.yml").is_err());
+}
+
+#[tokio::test]
+async fn h19_kea_updates_existing_reservation_via_set_branch() {
+    use homelab_core::ops::kea::{reserve, KeaCfg};
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "search_subnet",
+        CmdOutput::ok(r#"{"rows":[{"uuid":"sub-1","subnet":"10.10.10.0/24"}]}"#),
+    );
+    // An EXISTING reservation for this ip → set_reservation, not add.
+    exec.respond_always(
+        "search_reservation",
+        CmdOutput::ok(r#"{"rows":[{"uuid":"res-9","ip_address":"10.10.10.8"}]}"#),
+    );
+    exec.respond_always("set_reservation", CmdOutput::ok(r#"{"result":"saved"}"#));
+    exec.respond_always("reconfigure", CmdOutput::ok(r#"{"status":"ok"}"#));
+    let cfg = KeaCfg {
+        base_url: "https://10.10.10.1".into(),
+        cred_file: "/var/lib/homelab/secrets/opnsense".into(),
+    };
+    reserve(
+        &exec,
+        &cfg,
+        "10.10.10.8",
+        "BC:24:11:AA:BB:CC",
+        "108-app-test",
+    )
+    .await
+    .unwrap();
+    assert_eq!(exec.calls_containing("set_reservation/res-9").len(), 1);
+    assert!(exec.calls_containing("add_reservation").is_empty());
+}

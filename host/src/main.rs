@@ -1257,6 +1257,53 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 },
             }
         }
+        Rpc::GetApplied { stack } => {
+            // D6: the applied intent lives in the host repo; secrets never
+            // do (A5), so this is safe to return.
+            if stack.is_empty()
+                || !stack
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: "invalid stack name".into(),
+                };
+            }
+            let dir = format!("{}/repo/stacks/{}", state.config.state_dir, stack);
+            let mut files: Vec<homelab_proto::FileBlob> = Vec::new();
+            fn walk(
+                base: &std::path::Path,
+                dir: &std::path::Path,
+                out: &mut Vec<homelab_proto::FileBlob>,
+            ) {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for e in entries.flatten() {
+                        let p = e.path();
+                        if p.is_dir() {
+                            walk(base, &p, out);
+                        } else if let Ok(content) = std::fs::read_to_string(&p) {
+                            out.push(homelab_proto::FileBlob {
+                                path: p.strip_prefix(base).unwrap().to_string_lossy().into_owned(),
+                                content,
+                                mode: None,
+                            });
+                        }
+                    }
+                }
+            }
+            walk(
+                std::path::Path::new(&dir),
+                std::path::Path::new(&dir),
+                &mut files,
+            );
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::to_string(&files).unwrap_or_else(|_| "[]".into()),
+            }
+        }
         Rpc::GetConfig => {
             let view = state.settings.read().unwrap().clone();
             let _ = state.log_tx.send(ServerMsg::Config(Box::new(view)));

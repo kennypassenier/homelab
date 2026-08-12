@@ -813,3 +813,136 @@ fn h17_runbook_generator_structural_snapshot() {
     }
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn d6_plan_diff_skip_update_and_line_previews() {
+    use homelab_client::tui::model::build_plan_lines;
+    use homelab_proto::{DeploySpec, FileBlob};
+    let mk = |path: &str, content: &str| FileBlob {
+        path: path.into(),
+        content: content.into(),
+        mode: None,
+    };
+    let mut m = homelab_proto::StackManifest {
+        stack_name: "test".into(),
+        vmid: 108,
+        hostname: "108-app-test".into(),
+        network: homelab_proto::NetworkSpec {
+            ip: "10.10.10.8/24".into(),
+            gateway: "g".into(),
+            bridge: "b".into(),
+            vlan: None,
+        },
+        resources: homelab_proto::ResourceSpec {
+            cores: 1,
+            memory_mb: 512,
+            swap_mb: 0,
+            disk_gb: 4,
+            storage: "s".into(),
+        },
+        lxc: homelab_proto::LxcSpec {
+            template: "t".into(),
+            unprivileged: true,
+            features: String::new(),
+            protection: false,
+            gpu: false,
+            vpn: false,
+        },
+        boot: homelab_proto::BootSpec {
+            onboot: true,
+            order: None,
+        },
+        storage: vec![],
+        apps: vec!["appa".into(), "appb".into()],
+    };
+    m.hostname = "108-app-test".into();
+    let spec = DeploySpec {
+        manifest: m,
+        files: vec![
+            mk(
+                "appa/docker-compose.yml",
+                "services:\n  appa:\n    image: x:2\n",
+            ),
+            mk(
+                "appb/docker-compose.yml",
+                "services:\n  appb:\n    image: y:1\n",
+            ),
+        ],
+        env: Default::default(),
+        gateway_route: None,
+    };
+    let applied = vec![
+        mk(
+            "appa/docker-compose.yml",
+            "services:\n  appa:\n    image: x:1\n",
+        ),
+        mk(
+            "appb/docker-compose.yml",
+            "services:\n  appb:\n    image: y:1\n",
+        ),
+        mk("gone/docker-compose.yml", "services: {}\n"),
+    ];
+    let lines = build_plan_lines(&spec, Some(&applied));
+    let text: Vec<String> = lines.iter().map(|(c, l)| format!("{}{}", c, l)).collect();
+    let joined = text.join("\n");
+    // Unchanged app → SKIP; changed app → UPDATE with the exact line diff.
+    assert!(
+        joined.contains("SKIP     test/appb (no changes)"),
+        "{}",
+        joined
+    );
+    assert!(joined.contains("UPDATE   test/appa"));
+    assert!(joined.contains("+      + image: x:2"));
+    assert!(joined.contains("-      - image: x:1"));
+    // A file removed from intent shows as REMOVE.
+    assert!(joined.contains("REMOVE   gone/docker-compose.yml"));
+    // No-changes spec: everything SKIP, nothing +/~ per app.
+    let all_same = build_plan_lines(&spec, Some(&spec.files));
+    let s2 = all_same
+        .iter()
+        .map(|(c, l)| format!("{}{}", c, l))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(s2.contains("SKIP     test/appa"));
+    assert!(s2.contains("SKIP     test/appb"));
+    assert!(!s2.contains("UPDATE   test/appa"));
+    // CREATE plan (no applied): apps are ADD.
+    let create = build_plan_lines(&spec, None);
+    let s3 = create
+        .iter()
+        .map(|(c, l)| format!("{}{}", c, l))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(s3.contains("CREATE"));
+    assert!(s3.contains("ADD      test/appa"));
+}
+
+#[test]
+fn h19_every_palette_action_reaches_a_real_handler() {
+    // G3's promise: no orphaned actions. Every palette entry must have an id
+    // the dispatcher knows; the dispatcher arm list is mirrored here — a new
+    // palette entry without a handler fails this test.
+    use homelab_client::tui::model::PALETTE;
+    // Mirror of the dispatcher match arms in model.rs::run_palette_action.
+    let handled = [
+        "tab.dashboard",
+        "tab.stacks",
+        "tab.logs",
+        "tab.doctor",
+        "tab.settings",
+        "tab.shell",
+        "refresh",
+        "doctor",
+        "fx",
+        "help",
+        "quit",
+    ];
+    for action in PALETTE {
+        assert!(
+            handled.contains(&action.id),
+            "palette action '{}' ({}) has no dispatcher arm",
+            action.id,
+            action.label
+        );
+    }
+}

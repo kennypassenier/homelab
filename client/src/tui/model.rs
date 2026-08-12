@@ -172,6 +172,8 @@ pub struct Model {
     pub local_stacks: Vec<(String, std::path::PathBuf)>,
     pub focus: Option<Focus>,
     pub plan: Option<Plan>,
+    /// D6: spec awaiting the host's applied files for a real diff plan.
+    pub plan_pending: Option<Box<homelab_proto::DeploySpec>>,
     pub wizard: Option<Wizard>,
     /// G2: presets loaded from the presets/ directory (data, not code);
     /// falls back to the synthetic built-ins for tests and bare checkouts.
@@ -229,6 +231,7 @@ impl Model {
             local_stacks: Vec::new(),
             focus: None,
             plan: None,
+            plan_pending: None,
             wizard: None,
             presets: crate::scaffold::synthetic_presets(),
             shell_target: 0,
@@ -389,6 +392,18 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 model.settings_row = 0;
             }
             ServerMsg::RpcDone(resp) => {
+                if let Some(spec) = model.plan_pending.take() {
+                    // D6: the host answered GetApplied with the applied files.
+                    let applied: Vec<homelab_proto::FileBlob> =
+                        serde_json::from_str(&resp.message).unwrap_or_default();
+                    let lines = build_plan_lines(&spec, Some(&applied));
+                    model.plan = Some(Plan {
+                        stack: spec.manifest.stack_name.clone(),
+                        lines,
+                        spec,
+                    });
+                    return;
+                }
                 if model.shell_waiting {
                     model.shell_waiting = false;
                     for line in resp.message.lines() {
@@ -839,6 +854,14 @@ pub const PALETTE: &[PaletteAction] = &[
         id: "tab.doctor",
     },
     PaletteAction {
+        label: "go: settings",
+        id: "tab.settings",
+    },
+    PaletteAction {
+        label: "go: shell",
+        id: "tab.shell",
+    },
+    PaletteAction {
         label: "refresh state",
         id: "refresh",
     },
@@ -912,6 +935,8 @@ fn run_action(model: &mut Model, id: &str) {
         "tab.stacks" => model.switch_tab(Tab::Stacks),
         "tab.logs" => model.switch_tab(Tab::Logs),
         "tab.doctor" => model.switch_tab(Tab::Doctor),
+        "tab.settings" => model.switch_tab(Tab::Settings),
+        "tab.shell" => model.switch_tab(Tab::Shell),
         "refresh" => model.outbox.push(Command::GetState),
         "doctor" => {
             model.switch_tab(Tab::Doctor);
@@ -1029,27 +1054,104 @@ fn open_plan(model: &mut Model) {
             return;
         }
     };
+    if known && !synthetic {
+        // D6: fetch the applied files first — the modal opens when the host
+        // answers, showing a REAL per-file diff instead of a static template.
+        model.status_line = "computing change plan…".into();
+        model.outbox.push(Command::GetApplied {
+            stack: spec.manifest.stack_name.clone(),
+        });
+        model.plan_pending = Some(Box::new(spec));
+        return;
+    }
+    let lines = build_plan_lines(&spec, None);
+    model.plan = Some(Plan {
+        stack: spec.manifest.stack_name.clone(),
+        lines,
+        spec: Box::new(spec),
+    });
+}
+
+/// D6: build the change-plan lines. `applied = None` → a CREATE plan;
+/// `Some(files)` → a real diff: per app SKIP (unchanged) or UPDATE with the
+/// changed files and a preview of added/removed lines.
+pub fn build_plan_lines(
+    spec: &homelab_proto::DeploySpec,
+    applied: Option<&[homelab_proto::FileBlob]>,
+) -> Vec<(char, String)> {
     let m = &spec.manifest;
     let mut lines: Vec<(char, String)> = Vec::new();
     lines.push((' ', "dry-run — nothing runs until you confirm".into()));
-    if synthetic {
-        lines.push((
-            ' ',
-            "(no local stacks/ dir — plan derived from live state)".into(),
-        ));
-    }
     lines.push((' ', String::new()));
     lines.push((' ', "plan:".into()));
-    if known {
-        lines.push((
-            '~',
-            format!("  UPDATE   {} (already provisioned)", m.hostname),
-        ));
-    } else {
-        lines.push(('+', format!("  CREATE   {} (vmid {})", m.hostname, m.vmid)));
-    }
-    for app in &m.apps {
-        lines.push(('~', format!("  SYNC     {}/{}", m.stack_name, app)));
+    match applied {
+        None => {
+            lines.push(('+', format!("  CREATE   {} (vmid {})", m.hostname, m.vmid)));
+            for app in &m.apps {
+                lines.push(('+', format!("  ADD      {}/{}", m.stack_name, app)));
+            }
+        }
+        Some(applied) => {
+            lines.push((
+                '~',
+                format!("  UPDATE   {} (already provisioned)", m.hostname),
+            ));
+            for app in &m.apps {
+                let prefix = format!("{}/", app);
+                let app_files: Vec<_> = spec
+                    .files
+                    .iter()
+                    .filter(|f| f.path.starts_with(&prefix))
+                    .collect();
+                let changed: Vec<_> = app_files
+                    .iter()
+                    .filter(|f| {
+                        applied
+                            .iter()
+                            .find(|a| a.path == f.path)
+                            .map(|a| a.content != f.content)
+                            .unwrap_or(true) // new file counts as change
+                    })
+                    .collect();
+                if changed.is_empty() {
+                    lines.push((
+                        ' ',
+                        format!("  SKIP     {}/{} (no changes)", m.stack_name, app),
+                    ));
+                    continue;
+                }
+                lines.push(('~', format!("  UPDATE   {}/{}", m.stack_name, app)));
+                for f in changed {
+                    match applied.iter().find(|a| a.path == f.path) {
+                        None => lines.push(('+', format!("    + {} (new file)", f.path))),
+                        Some(a) => {
+                            lines.push(('~', format!("    ~ {}", f.path)));
+                            let old: Vec<&str> = a.content.lines().collect();
+                            let new: Vec<&str> = f.content.lines().collect();
+                            for (shown, l) in new.iter().filter(|l| !old.contains(l)).enumerate() {
+                                if shown >= 3 {
+                                    lines.push((' ', "      …".into()));
+                                    break;
+                                }
+                                lines.push(('+', format!("      + {}", l.trim())));
+                            }
+                            for (shown, l) in old.iter().filter(|l| !new.contains(l)).enumerate() {
+                                if shown >= 3 {
+                                    break;
+                                }
+                                lines.push(('-', format!("      - {}", l.trim())));
+                            }
+                        }
+                    }
+                }
+            }
+            // Files on the host that the local spec no longer carries.
+            for a in applied {
+                if !spec.files.iter().any(|f| f.path == a.path) {
+                    lines.push(('-', format!("  REMOVE   {}", a.path)));
+                }
+            }
+        }
     }
     lines.push((' ', String::new()));
     lines.push((
@@ -1062,13 +1164,12 @@ fn open_plan(model: &mut Model) {
     ));
     lines.push((' ', "safety:".into()));
     lines.push((' ', "  ✓ hostname guard verifies before any change".into()));
-    lines.push((' ', "  ✓ fail-closed: errors disable the stack".into()));
-    lines.push((' ', "  ✓ no-touch list protects 100-107,111,201-203".into()));
-    model.plan = Some(Plan {
-        stack: m.stack_name.clone(),
-        lines,
-        spec: Box::new(spec),
-    });
+    lines.push((
+        ' ',
+        "  ✓ fail-closed: errors abort with an incident bundle".into(),
+    ));
+    lines.push((' ', "  ✓ no-touch list enforced host-side".into()));
+    lines
 }
 
 /// Lowest free vmid in 108..=354 not used by a known stack.

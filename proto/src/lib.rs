@@ -71,6 +71,11 @@ pub enum Command {
     ApplyResources(Box<StackManifest>),
     /// C5: list available OS templates + clonable golden templates.
     ListTemplates,
+    /// D6: fetch the applied (non-secret) files of a stack from the host's
+    /// intent repo, so the client can render a real change plan.
+    GetApplied {
+        stack: String,
+    },
     /// G8: read the host's runtime settings.
     GetConfig,
     /// G8: replace the host's runtime settings (persisted to host.toml).

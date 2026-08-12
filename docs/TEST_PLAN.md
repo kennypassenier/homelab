@@ -395,3 +395,20 @@ homelab import <bundle.yml> <new-name> <vmid>
    PVE_TOKEN_VALUE (PVEAuditor token) before deploying.
 - **Pass:** Prometheus on :9090 shows all three targets UP; add it as a
   Grafana datasource on the platform stack.
+
+## Not covered, by decision (phase-7 form, 2026-08-11)
+
+- **H9 (Later):** op-lock queue visibility + cancel. Mutating operations
+  serialize silently; a waiting command shows no queue position and cannot
+  be cancelled short of restarting the daemon. Chosen Later by Kenny; the
+  light variant (a "waiting behind <op>" event + reads outside the lock)
+  is the intended first step.
+- **H22 (Accepted):** (a) the API bearer token is effectively a host-root
+  credential — self-update installs arbitrary binaries by design (single
+  token + unsigned releases were explicit AR decisions); guard the token
+  accordingly. (b) A failing app's last 20 log lines are captured into
+  incident bundles; apps that log secrets to stdout put them there
+  (bundles are root-only). Both recorded as known properties, not bugs.
+- **D9 "auto-after-N-days" (registry text)**: only `manual`/`auto` exist in
+  code. Flagged for a FEATURES.md amendment or a future implementation —
+  pending Kenny's call in the completion report.

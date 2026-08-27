@@ -69,6 +69,8 @@ async fn main() {
         "ping" => rpc(&host, &token, Command::Ping).await,
         "patch" => rpc(&host, &token, Command::PatchFleet).await,
         "config" => rpc(&host, &token, Command::GetConfig).await,
+        // H10: on-demand snapshot of vault/state/TLS/intent repo.
+        "backup-host-meta" => rpc(&host, &token, Command::BackupHostMeta).await,
         // H8 (light): park / unpark a stack for the nightly scheduler.
         "enable" | "disable" => {
             let stack = args
@@ -389,6 +391,7 @@ async fn main() {
             println!(
                 "  homelab enable|disable <stack>      (un)park for the nightly scheduler (H8)"
             );
+            println!("  homelab backup-host-meta            snapshot vault/state/TLS/repo (H10)");
             println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
             println!("  homelab presets                     list the preset catalog (local)");
             println!(

@@ -80,6 +80,10 @@ pub enum Command {
     GetConfig,
     /// G8: replace the host's runtime settings (persisted to host.toml).
     SetConfig(Box<HostConfigView>),
+    /// H10: snapshot the host's own crown jewels (secrets vault, state.json,
+    /// TLS material, intent repo) into the dedicated host-meta repo. Runs
+    /// nightly; this is the on-demand trigger.
+    BackupHostMeta,
     /// H8 (light): flip a stack's enabled flag. Disabled = nightly scheduler
     /// skips it + onboot cleared; enabled = back in rotation + onboot per
     /// manifest. Never starts or stops containers.

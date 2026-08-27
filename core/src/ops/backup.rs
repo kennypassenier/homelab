@@ -383,6 +383,10 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
     let state_file = format!("{}/state.json", ctx.state_dir);
     let tls_cert = format!("{}/tls-cert.pem", ctx.state_dir);
     let tls_key = format!("{}/tls-key.pem", ctx.state_dir);
+    // The intent repo carries every applied compose file plus its git
+    // history — cheap to include, and it turns "restore the host" into
+    // "restore the host AND know what ran on it".
+    let repo = format!("{}/repo", ctx.state_dir);
 
     step!(runner, "init repo", {
         let _ = exec
@@ -404,7 +408,7 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
                 &cfg.restic_base,
                 "host-meta",
                 &cfg.password_file,
-                &["backup", &secrets, &state_file, &tls_cert, &tls_key],
+                &["backup", &secrets, &state_file, &tls_cert, &tls_key, &repo],
                 600,
             ),
         )

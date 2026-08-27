@@ -333,6 +333,50 @@ mod tests {
     }
 
     #[test]
+    fn h10_nightly_plan_always_includes_host_meta() {
+        // The bug this test was written for: the host-meta backup existed as
+        // code but no scheduler path ever reached it, so the vault (holding
+        // the ONLY copy of the restic password), state.json and the TLS
+        // material were never backed up.
+        let now = 1_800_000_000u64;
+        let fresh = now - 3600; // backed up an hour ago
+        let stale = now - 25 * 3600;
+
+        // No stack is due — the host's own crown jewels still get a snapshot.
+        let plan = nightly_plan(4, 4, now, &[("a".into(), true, fresh)], 0);
+        assert_eq!(plan, vec![NightlyTask::HostMeta]);
+
+        // Due stacks come first, host-meta closes the run.
+        let plan = nightly_plan(
+            4,
+            4,
+            now,
+            &[("a".into(), true, stale), ("b".into(), true, stale)],
+            0,
+        );
+        assert_eq!(
+            plan,
+            vec![
+                NightlyTask::Stack("a".into()),
+                NightlyTask::Stack("b".into()),
+                NightlyTask::HostMeta
+            ]
+        );
+
+        // Already snapshotted this run — not repeated on the next 20-min tick.
+        let plan = nightly_plan(4, 4, now, &[("a".into(), true, fresh)], fresh);
+        assert!(plan.is_empty());
+
+        // Wrong hour: nothing at all.
+        assert!(nightly_plan(4, 5, now, &[("a".into(), true, stale)], 0).is_empty());
+
+        // H8: a parked stack sits out, but the host-meta backup does not
+        // depend on any stack being active.
+        let plan = nightly_plan(4, 4, now, &[("a".into(), false, stale)], 0);
+        assert_eq!(plan, vec![NightlyTask::HostMeta]);
+    }
+
+    #[test]
     fn h12_bearer_check() {
         assert!(bearer_ok(
             Some("Bearer secret-token-123"),
@@ -765,6 +809,40 @@ fn backup_due(cfg_hour: u8, local_hour: u8, last_backup: u64, now: u64) -> bool 
     local_hour == cfg_hour && now.saturating_sub(last_backup) >= 20 * 3600
 }
 
+/// One unit of work in a nightly run.
+#[derive(Debug, PartialEq, Eq)]
+enum NightlyTask {
+    /// Backup + auto-update this stack.
+    Stack(String),
+    /// H10: snapshot the host's own crown jewels (vault, state, TLS, intent
+    /// repo). ALWAYS part of a nightly run, even when no stack is due —
+    /// secrets change on deploys, not on backups.
+    HostMeta,
+}
+
+/// H12 pattern: the whole nightly decision as a pure function, so "does the
+/// host-meta backup actually run?" is a test instead of an assumption.
+/// `stacks` is (name, enabled, last_backup).
+fn nightly_plan(
+    cfg_hour: u8,
+    local_hour: u8,
+    now: u64,
+    stacks: &[(String, bool, u64)],
+    last_host_meta: u64,
+) -> Vec<NightlyTask> {
+    let mut plan = Vec::new();
+    for (name, enabled, last_backup) in stacks {
+        // H8: parked stacks sit out the nightly rotation entirely.
+        if *enabled && backup_due(cfg_hour, local_hour, *last_backup, now) {
+            plan.push(NightlyTask::Stack(name.clone()));
+        }
+    }
+    if backup_due(cfg_hour, local_hour, last_host_meta, now) {
+        plan.push(NightlyTask::HostMeta);
+    }
+    plan
+}
+
 /// H12: bearer check, extracted for testing.
 fn bearer_ok(header: Option<&str>, token: &str) -> bool {
     header
@@ -812,15 +890,27 @@ async fn scheduler_loop(state: AppState) {
                 continue;
             }
         };
+        // H10: one plan per tick — stacks that are due, then the host's own
+        // crown jewels. Decided by a pure function so it is unit-tested.
+        let stack_inputs: Vec<(String, bool, u64)> = snapshot
+            .stacks
+            .iter()
+            .map(|(n, st)| (n.clone(), st.enabled, st.last_backup))
+            .collect();
+        let plan = nightly_plan(
+            hour,
+            local_hour,
+            now,
+            &stack_inputs,
+            snapshot.last_host_meta,
+        );
         for (name, st) in snapshot.stacks {
-            if !st.enabled {
-                // H8: parked stack — no nightly backup, no auto-update. One
-                // info line per tick that would have run it, nothing louder.
-                info!("scheduler: stack {} is disabled — skipped", name);
+            if !plan.contains(&NightlyTask::Stack(name.clone())) {
+                if !st.enabled {
+                    // H8: parked stack — no nightly backup, no auto-update.
+                    info!("scheduler: stack {} is disabled — skipped", name);
+                }
                 continue;
-            }
-            if !backup_due(hour, local_hour, st.last_backup, now) {
-                continue; // already done today
             }
             let Some(manifest) = st.manifest else {
                 tracing::warn!("scheduler: stack {} has no stored manifest — skipped", name);
@@ -869,6 +959,33 @@ async fn scheduler_loop(state: AppState) {
                     }
                     let _ = store.save(s).await;
                 }
+            }
+        }
+
+        // H10: the host's own crown jewels — the secrets vault (holding the
+        // only copy of the restic password), state.json, TLS material and the
+        // intent repo. Runs even when no stack was due; without it, losing the
+        // host disk loses the keys to every backup we ever made.
+        if plan.contains(&NightlyTask::HostMeta) {
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers: tiers.clone(),
+                ..Default::default()
+            };
+            let report = run_mutating_op(&state, &exec, 0, "host-meta-backup", |ctx| {
+                Box::pin(
+                    async move { homelab_core::ops::backup::backup_host_meta(ctx, &cfg).await },
+                )
+            })
+            .await;
+            if report.ok {
+                if let Ok(mut s) = store.load().await {
+                    s.last_host_meta = now;
+                    let _ = store.save(s).await;
+                }
+            } else {
+                tracing::error!(
+                    "scheduler: host-meta backup FAILED — the vault/state/TLS snapshot is the recovery path for a lost host disk; investigate now"
+                );
             }
         }
     }
@@ -1184,6 +1301,31 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 Box::pin(async move { homelab_core::ops::resize::hot_apply(ctx, &manifest).await })
             })
             .await
+        }
+        Rpc::BackupHostMeta => {
+            let tiers = state.settings.read().unwrap().retention.clone();
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers,
+                ..Default::default()
+            };
+            let resp = run_mutating_op(state, &exec, req.id, "host-meta-backup", |ctx| {
+                Box::pin(
+                    async move { homelab_core::ops::backup::backup_host_meta(ctx, &cfg).await },
+                )
+            })
+            .await;
+            if resp.ok {
+                let store =
+                    homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+                if let Ok(mut s) = store.load().await {
+                    s.last_host_meta = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let _ = store.save(s).await;
+                }
+            }
+            resp
         }
         Rpc::SetStackEnabled { stack, enabled } => {
             run_mutating_op(state, &exec, req.id, "set-enabled", |ctx| {

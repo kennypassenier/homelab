@@ -47,6 +47,11 @@ pub struct HostState {
     pub schema_version: u32,
     #[serde(default)]
     pub stacks: BTreeMap<String, StackState>,
+    /// H10: unix time of the last successful host-meta snapshot (vault,
+    /// state, TLS, intent repo). 0 = never — the nightly run then takes one
+    /// at the first opportunity.
+    #[serde(default)]
+    pub last_host_meta: u64,
 }
 
 pub struct StateStore<'a> {

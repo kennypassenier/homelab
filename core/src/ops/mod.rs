@@ -13,6 +13,7 @@ pub mod selfupdate;
 pub mod template;
 pub mod update;
 pub mod util;
+pub mod zfs;
 
 use crate::error::CoreError;
 use crate::executor::{pct_sh, CmdOutput, Executor};

@@ -438,6 +438,23 @@ offsite token validity, mirror lag — all green or an actionable hint.
 No user-facing `--demo` flag. The simulator lives on only as an internal test
 fixture for G1's TUI snapshot tests — implementation detail, not a feature.
 
+### E8 · ZFS snapshots + replication — **Should** *(added 2026-08-27)*
+Absorbs `/root/full_zfs_backup.sh` into the orchestrator (Kenny: "alles vanuit
+1 systeem ipv een systeem dat ik ga vergeten"). Declared jobs in host.toml
+(`[[zfs_jobs]]` source/target), recursive snapshots named `homelab-<stamp>`,
+incremental `send -RI` when a common base exists, retention through the same
+tiered engine as restic (G8), runs in the nightly plan, reports over the
+existing webhook/incident chain. CLI: `homelab zfs-replicate`.
+Hard refusal where the old script powered through: no common snapshot + a
+non-empty target = stop and ask, never destroy-and-reseed. An empty job list
+is an error, not a silent success — that was the old script's actual failure
+mode (it iterated over dataset names that no longer existed).
+- **Auto**: job validation, common-base selection, snapshot-name parsing and
+  date maths are pure functions; mock-executor tests assert that the refusal
+  path issues neither `zfs destroy` nor `zfs receive`.
+- **Manual**: live run against the real pools, verify snapshots on both sides
+  and that a broken chain refuses instead of re-seeding.
+
 ### G9 · Own Rust services via GHCR images — **Should** *(added 2026-08-12)*
 Pattern + tooling, zero orchestrator code: `templates/rust-service/`
 (Dockerfile + release-image.yml) makes any Rust repo publish a GHCR image

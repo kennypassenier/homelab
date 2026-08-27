@@ -97,6 +97,31 @@ an offline copy of `/var/lib/homelab/secrets/restic.pw` (password manager,
 second machine) is what makes this recoverable at all. Without it the
 backups are unopenable — no exception, no recovery service.
 
+## ZFS snapshots + replication (E8)
+
+Declared in `/etc/homelab/host.toml`:
+
+```toml
+[[zfs_jobs]]
+source = "HDD2TB"
+target = "HDD18TB/REPLICA_2TB"
+```
+
+Runs at the end of every nightly run and on demand with
+`homelab zfs-replicate`. Snapshots are named `homelab-YYYYMMDD-HHMM`; the
+old `backup-*` snapshots from the retired cron script are left untouched.
+
+**When it refuses**: "share no snapshot, but the target already holds N
+snapshots". That means the incremental chain broke (a snapshot was deleted,
+or a pool was re-created). Re-seeding would destroy the replica's history,
+so it stops. Investigate first; if a fresh seed really is what you want,
+`zfs destroy -r <target>` yourself and re-run. This refusal is the whole
+reason the feature exists — the script it replaces destroyed and re-sent
+automatically, which is one bad night away from losing every replica.
+
+**Media is deliberately out of scope**: HDD12TB and the 18TB data are films
+and series — re-downloadable, and there is no room to replicate them.
+
 ## Backup verification (quarterly drill)
 
 ```bash

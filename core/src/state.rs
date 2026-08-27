@@ -52,6 +52,9 @@ pub struct HostState {
     /// at the first opportunity.
     #[serde(default)]
     pub last_host_meta: u64,
+    /// E8: unix time of the last successful ZFS snapshot+replication run.
+    #[serde(default)]
+    pub last_zfs: u64,
 }
 
 pub struct StateStore<'a> {

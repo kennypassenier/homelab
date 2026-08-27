@@ -84,6 +84,8 @@ pub enum Command {
     /// TLS material, intent repo) into the dedicated host-meta repo. Runs
     /// nightly; this is the on-demand trigger.
     BackupHostMeta,
+    /// E8: run the configured ZFS snapshot + replication jobs now.
+    ZfsReplicate,
     /// H8 (light): flip a stack's enabled flag. Disabled = nightly scheduler
     /// skips it + onboot cleared; enabled = back in rotation + onboot per
     /// manifest. Never starts or stops containers.

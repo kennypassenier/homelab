@@ -52,6 +52,8 @@ struct FileConfig {
     no_touch: Option<Vec<u16>>,
     gateway_vmid: Option<u16>,
     gateway_routes_dir: Option<String>,
+    /// E8: ZFS snapshot+replication jobs (replaces the old cron script).
+    zfs_jobs: Option<Vec<homelab_core::ops::zfs::ZfsJob>>,
 }
 
 #[derive(Clone)]
@@ -72,6 +74,8 @@ struct Config {
     /// migrate the gateway / adjust the no-touch list without a release.
     /// Hardcoded DEFAULT_NO_TOUCH remains the default.
     safety: SafetyConfig,
+    /// E8: declared ZFS replication jobs; empty = feature off.
+    zfs_jobs: Vec<homelab_core::ops::zfs::ZfsJob>,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
 }
@@ -131,6 +135,7 @@ fn load_config() -> Config {
             }
             sc
         },
+        zfs_jobs: file.zfs_jobs.unwrap_or_default(),
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -175,6 +180,8 @@ fn render_settings_toml(
         gateway_vmid: Option<u16>,
         #[serde(skip_serializing_if = "Option::is_none")]
         gateway_routes_dir: Option<&'a String>,
+        #[serde(skip_serializing_if = "<[_]>::is_empty")]
+        zfs_jobs: &'a [homelab_core::ops::zfs::ZfsJob],
     }
     let out = Out {
         token: &config.token,
@@ -194,6 +201,7 @@ fn render_settings_toml(
         gateway_routes_dir: (config.safety.gateway_routes_dir
             != SafetyConfig::default().gateway_routes_dir)
             .then_some(&config.safety.gateway_routes_dir),
+        zfs_jobs: &config.zfs_jobs,
     };
     toml::to_string_pretty(&out).map_err(|e| e.to_string())
 }
@@ -247,6 +255,10 @@ mod tests {
                 gateway_vmid: 112,
                 gateway_routes_dir: "/appdata/platform/traefik-config/routes".into(),
             },
+            zfs_jobs: vec![homelab_core::ops::zfs::ZfsJob {
+                source: "HDD2TB".into(),
+                target: "HDD18TB/REPLICA_2TB".into(),
+            }],
             initial_settings: homelab_proto::HostConfigView {
                 backup_hour: Some(4),
                 notify_webhook: Some("http://ha/webhook/x".into()),
@@ -257,6 +269,17 @@ mod tests {
         let parsed: FileConfig = toml::from_str(&rendered).expect("parse back");
         assert_eq!(parsed.token.as_deref(), Some("0123456789abcdef0123"));
         assert_eq!(parsed.backup_hour, Some(4));
+        // E8: settings saves must not drop the zfs jobs (same class of bug
+        // as the opnsense fields once had).
+        assert_eq!(
+            parsed.zfs_jobs.as_deref(),
+            Some(
+                &[homelab_core::ops::zfs::ZfsJob {
+                    source: "HDD2TB".into(),
+                    target: "HDD18TB/REPLICA_2TB".into(),
+                }][..]
+            )
+        );
         assert_eq!(
             parsed.notify_webhook.as_deref(),
             Some("http://ha/webhook/x")
@@ -343,7 +366,7 @@ mod tests {
         let stale = now - 25 * 3600;
 
         // No stack is due — the host's own crown jewels still get a snapshot.
-        let plan = nightly_plan(4, 4, now, &[("a".into(), true, fresh)], 0);
+        let plan = nightly_plan(4, 4, now, &[("a".into(), true, fresh)], 0, now, false);
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
 
         // Due stacks come first, host-meta closes the run.
@@ -353,6 +376,8 @@ mod tests {
             now,
             &[("a".into(), true, stale), ("b".into(), true, stale)],
             0,
+            now,
+            false,
         );
         assert_eq!(
             plan,
@@ -364,15 +389,30 @@ mod tests {
         );
 
         // Already snapshotted this run — not repeated on the next 20-min tick.
-        let plan = nightly_plan(4, 4, now, &[("a".into(), true, fresh)], fresh);
+        let plan = nightly_plan(4, 4, now, &[("a".into(), true, fresh)], fresh, now, false);
         assert!(plan.is_empty());
 
         // Wrong hour: nothing at all.
-        assert!(nightly_plan(4, 5, now, &[("a".into(), true, stale)], 0).is_empty());
+        assert!(nightly_plan(4, 5, now, &[("a".into(), true, stale)], 0, now, false).is_empty());
 
         // H8: a parked stack sits out, but the host-meta backup does not
         // depend on any stack being active.
-        let plan = nightly_plan(4, 4, now, &[("a".into(), false, stale)], 0);
+        let plan = nightly_plan(4, 4, now, &[("a".into(), false, stale)], 0, now, false);
+        assert_eq!(plan, vec![NightlyTask::HostMeta]);
+    }
+
+    #[test]
+    fn e8_zfs_only_when_configured() {
+        let now = 1_800_000_000u64;
+        let stale = now - 25 * 3600;
+        // No jobs declared → the feature is simply off.
+        let plan = nightly_plan(4, 4, now, &[], stale, stale, false);
+        assert_eq!(plan, vec![NightlyTask::HostMeta]);
+        // Declared → runs once a night, after the host-meta snapshot.
+        let plan = nightly_plan(4, 4, now, &[], stale, stale, true);
+        assert_eq!(plan, vec![NightlyTask::HostMeta, NightlyTask::Zfs]);
+        // Already ran this cycle → not repeated on the next 20-min tick.
+        let plan = nightly_plan(4, 4, now, &[], stale, now - 3600, true);
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
     }
 
@@ -818,6 +858,8 @@ enum NightlyTask {
     /// repo). ALWAYS part of a nightly run, even when no stack is due —
     /// secrets change on deploys, not on backups.
     HostMeta,
+    /// E8: ZFS snapshots + replication of the declared jobs.
+    Zfs,
 }
 
 /// H12 pattern: the whole nightly decision as a pure function, so "does the
@@ -829,6 +871,8 @@ fn nightly_plan(
     now: u64,
     stacks: &[(String, bool, u64)],
     last_host_meta: u64,
+    last_zfs: u64,
+    zfs_configured: bool,
 ) -> Vec<NightlyTask> {
     let mut plan = Vec::new();
     for (name, enabled, last_backup) in stacks {
@@ -839,6 +883,9 @@ fn nightly_plan(
     }
     if backup_due(cfg_hour, local_hour, last_host_meta, now) {
         plan.push(NightlyTask::HostMeta);
+    }
+    if zfs_configured && backup_due(cfg_hour, local_hour, last_zfs, now) {
+        plan.push(NightlyTask::Zfs);
     }
     plan
 }
@@ -903,6 +950,8 @@ async fn scheduler_loop(state: AppState) {
             now,
             &stack_inputs,
             snapshot.last_host_meta,
+            snapshot.last_zfs,
+            !state.config.zfs_jobs.is_empty(),
         );
         for (name, st) in snapshot.stacks {
             if !plan.contains(&NightlyTask::Stack(name.clone())) {
@@ -986,6 +1035,23 @@ async fn scheduler_loop(state: AppState) {
                 tracing::error!(
                     "scheduler: host-meta backup FAILED — the vault/state/TLS snapshot is the recovery path for a lost host disk; investigate now"
                 );
+            }
+        }
+
+        // E8: ZFS snapshots + replication of the big pools.
+        if plan.contains(&NightlyTask::Zfs) {
+            let jobs = state.config.zfs_jobs.clone();
+            let report = run_mutating_op(&state, &exec, 0, "zfs-replicate", |ctx| {
+                Box::pin(async move { homelab_core::ops::zfs::replicate(ctx, &jobs, &tiers).await })
+            })
+            .await;
+            if report.ok {
+                if let Ok(mut s) = store.load().await {
+                    s.last_zfs = now;
+                    let _ = store.save(s).await;
+                }
+            } else {
+                tracing::error!("scheduler: ZFS replication FAILED — investigate; the old cron script used to fail silently, this one does not");
             }
         }
     }
@@ -1319,6 +1385,26 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
                 if let Ok(mut s) = store.load().await {
                     s.last_host_meta = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let _ = store.save(s).await;
+                }
+            }
+            resp
+        }
+        Rpc::ZfsReplicate => {
+            let tiers = state.settings.read().unwrap().retention.clone();
+            let jobs = state.config.zfs_jobs.clone();
+            let resp = run_mutating_op(state, &exec, req.id, "zfs-replicate", |ctx| {
+                Box::pin(async move { homelab_core::ops::zfs::replicate(ctx, &jobs, &tiers).await })
+            })
+            .await;
+            if resp.ok {
+                let store =
+                    homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+                if let Ok(mut s) = store.load().await {
+                    s.last_zfs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs())
                         .unwrap_or(0);

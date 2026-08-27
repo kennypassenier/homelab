@@ -62,14 +62,21 @@ pub fn job_problems(job: &ZfsJob) -> Option<String> {
 }
 
 /// Snapshot names (bare, without the dataset part) from `zfs list` output,
-/// oldest first, restricted to ours.
+/// oldest first — EVERY snapshot on that dataset, not just ours.
+///
+/// Both reasons are load-bearing, and the second was learned the hard way on
+/// the first live run: (1) a snapshot left by the retired cron script is a
+/// perfectly good incremental base, so the migration needs no re-seed;
+/// (2) foreign snapshots are what make a target "not empty" — filtering them
+/// out made a populated replica look like a blank slate and turned a refusal
+/// into an attempted full send. We read everything; we only ever DESTROY
+/// snapshots carrying our own prefix.
 pub fn parse_snap_names(list_stdout: &str, dataset: &str) -> Vec<String> {
     let prefix = format!("{}@", dataset);
     list_stdout
         .lines()
         .filter_map(|l| l.split_whitespace().next())
         .filter_map(|n| n.strip_prefix(&prefix))
-        .filter(|n| n.starts_with(SNAP_PREFIX))
         .map(|n| n.to_string())
         .collect()
 }
@@ -224,6 +231,12 @@ pub async fn replicate(
             let tgt_out = list(&tgt).await?;
             let target_exists = tgt_out.success();
             let tgt_snaps = parse_snap_names(&tgt_out.stdout, &tgt);
+            // Emptiness is a property of the whole SUBTREE, not just the top
+            // dataset: the retired script's retention deleted parent
+            // snapshots while children kept theirs, so a populated replica
+            // can present an empty-looking parent. A full send into that is
+            // exactly what must never be attempted.
+            let subtree_snaps = tgt_out.stdout.lines().filter(|l| l.contains('@')).count();
 
             match common_base(&src_snaps, &tgt_snaps) {
                 Some(base) => {
@@ -238,7 +251,7 @@ pub async fn replicate(
                     run_ok(exec, &Cmd::new("sh", &["-c", &script], 6 * 3600)).await?;
                     Ok(StepOutcome::Changed)
                 }
-                None if !target_exists || tgt_snaps.is_empty() => {
+                None if !target_exists || subtree_snaps == 0 => {
                     // First-time seed: nothing on the target to lose.
                     let script = format!(
                         "zfs send -R {} | zfs receive -F {}",
@@ -251,15 +264,12 @@ pub async fn replicate(
                 None => {
                     // The dangerous case the old script powered through.
                     Err(CoreError::SafetyAbort(format!(
-                        "{} and {} share no snapshot, but {} already holds {} snapshot(s). \
-                         Re-seeding would destroy that history, so this job stops here. \
-                         Decide deliberately: keep the target (investigate why the chain broke) \
-                         or wipe it yourself with `zfs destroy -r {}` and re-run for a fresh seed.",
-                        src,
-                        tgt,
-                        tgt,
-                        tgt_snaps.len(),
-                        tgt
+                        "{} and {} share no snapshot, but {} already holds {} snapshot(s) \
+                         (subtree included). Re-seeding would destroy that history, so this \
+                         job stops here. Decide deliberately: investigate why the chain broke, \
+                         or wipe the target yourself with `zfs destroy -r {}` and re-run for a \
+                         fresh seed.",
+                        src, tgt, tgt, subtree_snaps, tgt
                     )))
                 }
             }

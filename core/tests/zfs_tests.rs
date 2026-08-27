@@ -71,14 +71,79 @@ fn e8_common_base_picks_the_newest_shared_snapshot() {
 }
 
 #[test]
-fn e8_parse_snap_names_ignores_foreign_snapshots() {
+fn e8_parse_snap_names_sees_every_snapshot_on_the_dataset() {
     let out = "HDD2TB@homelab-20260801-0400\nHDD2TB@backup-20260523-1059\nHDD2TB/child@homelab-20260801-0400\n";
-    // Only this dataset's own snapshots, only ours: the old script's
-    // `backup-*` snapshots are left strictly alone.
+    // This dataset's own snapshots, ours AND foreign. Live lesson from the
+    // first real run: the retired script's `backup-*` snapshots must count,
+    // both as a usable incremental base during the migration and — the part
+    // that actually bit — as proof that the target is NOT a blank slate.
+    // They are never deleted by us; the prune step only touches `homelab-*`.
     assert_eq!(
         parse_snap_names(out, "HDD2TB"),
-        vec!["homelab-20260801-0400"]
+        vec!["homelab-20260801-0400", "backup-20260523-1059"]
     );
+}
+
+#[tokio::test]
+async fn e8_target_with_only_foreign_snapshots_is_not_empty() {
+    // The bug this test was written for, caught on the first live run: the
+    // target held only `backup-*` snapshots from the retired cron script.
+    // Counting just our own made it look empty, so the job attempted a full
+    // seed — which ZFS itself refused ("destination has snapshots"). It has
+    // to refuse before that, like any other broken chain.
+    let exec = MockExecutor::new();
+    exec.respond_always("zfs list -H -o name HDD2TB", CmdOutput::ok("HDD2TB\n"));
+    exec.respond_always("-r HDD2TB", CmdOutput::ok("HDD2TB@homelab-20260827-1845\n"));
+    exec.respond_always(
+        "-r HDD18TB/REPLICA_2TB",
+        CmdOutput::ok("HDD18TB/REPLICA_2TB@backup-20260523-1059\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = replicate(
+        &ctx(&exec, &sink, &j),
+        &[job("HDD2TB", "HDD18TB/REPLICA_2TB")],
+        &homelab_core::retention::default_tiers(),
+    )
+    .await;
+    assert!(
+        !report.ok,
+        "a target with foreign snapshots is not a blank slate"
+    );
+    assert!(
+        exec.calls_containing("zfs receive").is_empty(),
+        "no send may even be attempted"
+    );
+    assert!(exec.calls_containing("zfs destroy").is_empty());
+}
+
+#[tokio::test]
+async fn e8_rides_the_old_scripts_chain_during_migration() {
+    // Both sides still carry the retired script's last snapshot: a perfectly
+    // good incremental base, so switching over needs no re-seed and no
+    // terabyte re-transfer.
+    let exec = MockExecutor::new();
+    exec.respond_always("zfs list -H -o name HDD4TB", CmdOutput::ok("HDD4TB\n"));
+    exec.respond_always(
+        "-r HDD4TB",
+        CmdOutput::ok("HDD4TB@backup-20260827-1845\nHDD4TB@homelab-20260828-0400\n"),
+    );
+    exec.respond_always(
+        "-r HDD18TB/REPLICA_4TB",
+        CmdOutput::ok("HDD18TB/REPLICA_4TB@backup-20260827-1845\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = replicate(
+        &ctx(&exec, &sink, &j),
+        &[job("HDD4TB", "HDD18TB/REPLICA_4TB")],
+        &homelab_core::retention::default_tiers(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let inc = exec.calls_containing("zfs send -RI");
+    assert_eq!(inc.len(), 1, "incremental from the old base: {:?}", inc);
+    assert!(inc[0].contains("backup-20260827-1845"), "{}", inc[0]);
 }
 
 #[test]

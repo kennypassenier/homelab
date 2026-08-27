@@ -322,6 +322,16 @@ to a scratch dir on the host — `restic.pw` and `tls-key.pem` byte-identical,
 intent repo incl. `.git` present. `state.json` differs by design: the
 scheduler stamps `last_host_meta` AFTER the snapshot completes.
 
+### B24 · ZFS snapshots + replication (E8) — LIVE-PROVEN 2026-08-27
+Seeded `HDD2TB → HDD18TB/replica/HDD2TB` (10.5 MiB) and
+`HDD4TB → HDD18TB/replica/HDD4TB` (45.3 GiB); the second run went
+incremental (`zfs send -RI`) as intended. Two refusals proven on real data
+before that: a full seed into a target holding foreign snapshots (caught by
+ZFS, then by us — fix in v3.1.1), and an incremental into the legacy
+REPLICA_* subtree whose parent/child snapshots no longer line up. The old
+history (53 snapshots) is untouched; the retired cron script is archived at
+docs/legacy/full_zfs_backup.sh.
+
 ### B20 · HA webhook receiver (F3, HA side) — LIVE-PROVEN 2026-08-11
 Host `notify_webhook` points at `automation.homelab_ops_webhook`
 (`/api/webhook/homelab-ops-c4d81f26`, local-only, POST). Every event is

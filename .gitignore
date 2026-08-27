@@ -13,3 +13,6 @@
 # Rust build artifacts
 target/
 target-debian/
+
+# Unrelated project that happens to live in this directory
+browser_scripts/

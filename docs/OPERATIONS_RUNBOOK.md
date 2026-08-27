@@ -104,8 +104,20 @@ Declared in `/etc/homelab/host.toml`:
 ```toml
 [[zfs_jobs]]
 source = "HDD2TB"
-target = "HDD18TB/REPLICA_2TB"
+target = "HDD18TB/replica/HDD2TB"
+
+[[zfs_jobs]]
+source = "HDD4TB"
+target = "HDD18TB/replica/HDD4TB"
 ```
+
+The retired cron script replicated into `HDD18TB/REPLICA_2TB` and
+`REPLICA_4TB`. Those datasets are LEFT ALONE as frozen history (53
+snapshots, May–August 2026): its retention pruned parents and children on
+different schedules, so that subtree can no longer accept an incremental
+stream. Nothing had to be destroyed — the new chain simply lives next to it.
+Delete the old datasets whenever you are comfortable:
+`zfs destroy -r HDD18TB/REPLICA_2TB` (and `_4TB`).
 
 Runs at the end of every nightly run and on demand with
 `homelab zfs-replicate`. Snapshots are named `homelab-YYYYMMDD-HHMM`; the
@@ -118,6 +130,13 @@ so it stops. Investigate first; if a fresh seed really is what you want,
 `zfs destroy -r <target>` yourself and re-run. This refusal is the whole
 reason the feature exists — the script it replaces destroyed and re-sent
 automatically, which is one bad night away from losing every replica.
+
+**Mail vs webhook**: the retired script mailed its own HTML report; that mail
+is gone with it. E8 reports the way everything else does — the Home Assistant
+webhook and, on failure, an incident bundle. Proxmox keeps sending its own
+mails (vzdump, cluster alerts) through `/etc/pve/notifications.cfg` →
+`mail-to-root` → the GMail SMTP target; that is Proxmox's own channel and is
+untouched by the homelab.
 
 **Media is deliberately out of scope**: HDD12TB and the 18TB data are films
 and series — re-downloadable, and there is no room to replicate them.

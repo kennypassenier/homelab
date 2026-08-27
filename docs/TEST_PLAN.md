@@ -312,6 +312,16 @@ in state.json, container stayed running (the flag never touches run state).
 and auto-disable-on-failed-nightly are unit-tested; the next failed nightly
 run is the live proof of the auto-park path.
 
+### B23 · Host-meta backup + restore drill (H10) — LIVE-PROVEN 2026-08-27
+The gap that started this: `homelab-backups/host-meta` did not exist —
+`backup_host_meta` was never called by any code path, so the vault, state
+and TLS material had never been backed up. After wiring it into the nightly
+plan (v3.0.1): snapshot `ef93763b` written to
+`gdrive:homelab-backups/host-meta-config` (53 files, 35 KiB), then restored
+to a scratch dir on the host — `restic.pw` and `tls-key.pem` byte-identical,
+intent repo incl. `.git` present. `state.json` differs by design: the
+scheduler stamps `last_host_meta` AFTER the snapshot completes.
+
 ### B20 · HA webhook receiver (F3, HA side) — LIVE-PROVEN 2026-08-11
 Host `notify_webhook` points at `automation.homelab_ops_webhook`
 (`/api/webhook/homelab-ops-c4d81f26`, local-only, POST). Every event is

@@ -77,6 +77,26 @@ fights you). `homelab enable <stack>` reverses both. A failed nightly run
 auto-parks the stack after one loud message so it cannot fail every night;
 investigate, then re-enable.
 
+## The host's own crown jewels (H10)
+
+Every nightly run ends with a `host-meta` snapshot: the secrets vault
+(including `restic.pw` — the key to EVERY other backup), `state.json`, the
+TLS certificate + key, and the intent repo with its full deploy history.
+On demand: `homelab backup-host-meta`.
+
+**Exact recovery path after losing the host disk** (write this down offline —
+you cannot read it from the machine that died):
+
+```
+restic -r rclone:gdrive:homelab-backups/host-meta-config restore latest --target /
+```
+
+Note the repo is `host-meta-config` — every repo carries the `-config`
+suffix. It is encrypted with the restic password that lives INSIDE it, so
+an offline copy of `/var/lib/homelab/secrets/restic.pw` (password manager,
+second machine) is what makes this recoverable at all. Without it the
+backups are unopenable — no exception, no recovery service.
+
 ## Backup verification (quarterly drill)
 
 ```bash

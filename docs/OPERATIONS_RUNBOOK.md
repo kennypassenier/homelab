@@ -45,6 +45,14 @@ anything `ok:false` you missed.
 | Golden template | destroy CT 999 → `homelab template-build 999 <v+1>` | after major Debian updates |
 
 ## Making a release (H7 flow)
+*(H7 = release-driven host updates: the TUI spots a newer GitHub release
+and installs it over the line on a keypress.)*
+
+Working on the code itself — gates, commit hooks, the full release
+walkthrough — is [DEVELOPMENT.md](DEVELOPMENT.md). One line matters even if
+you never touch the code: **after cloning this repo on any machine, run
+`make hooks` once**, or commits are accepted with failing tests.
+
 
 The normal path for shipping daemon changes, end to end:
 

@@ -32,6 +32,7 @@ Start here:
 | [docs/LLM_COMPOSE_CONVERSION.md](docs/LLM_COMPOSE_CONVERSION.md) | paste-into-an-LLM converter for vendor compose files |
 | [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | structured per-feature test steps (offline + live) |
 | [docs/ARCHITECTURE_REFERENCE.md](docs/ARCHITECTURE_REFERENCE.md) | how it's built, for the future maintainer |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | working on the code: gates, hooks, releases |
 
 Design history: [docs/FEATURES.md](docs/FEATURES.md) (the feature registry,
 IDs A1–H6), [docs/ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md)
@@ -53,14 +54,25 @@ docs/     see above
 
 ## Development
 
+**First thing after cloning — wire the commit gates:**
+
 ```bash
-cargo test --workspace && cargo clippy --workspace --all-targets && cargo fmt --all --check
-# host binary for the Proxmox box (Debian 12 glibc):
-docker run --rm -v "$PWD":/w -w /w -e CARGO_TARGET_DIR=/w/target-debian \
-  rust:1-bookworm cargo build --release -p homelab-host
-# ship it (the host selfchecks, installs with an armed rollback, restarts):
-homelab self-update target-debian/release/homelab-host
+make hooks     # git config core.hooksPath .githooks
 ```
 
-Standing rules: red CI blocks merge; every live bug becomes a MockExecutor
-test before the fix; the no-touch list in `core/src/safety.rs` is law.
+This is not optional and it is not automatic: `core.hooksPath` is local git
+config, so it is never carried by a clone. Skip it and commits are accepted
+with failing tests and untraceable messages — which is exactly what happened
+here between v3.0.1 and v3.1.1 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)).
+
+```bash
+make gate      # fmt + clippy -D warnings + full test suite (what the hooks run)
+make release VERSION=x.y.z   # gate, tag, push; CI builds and publishes
+homelab release-update       # roll out the published release to the host
+```
+
+Everything about building, gating, releasing and rolling out lives in
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+Standing rules: red CI blocks merge; every live bug becomes a test before the
+fix; the no-touch list in `core/src/safety.rs` is law.

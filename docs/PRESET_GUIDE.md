@@ -139,9 +139,9 @@ GHCR. The bridge lives in `templates/rust-service/`:
 1. Copy `Dockerfile` (swap in your binary name) and `release-image.yml`
    into your Rust repo. Every `vX.Y.Z` tag then publishes
    `ghcr.io/<user>/<repo>:<version>` and `:latest` next to the release.
-   One-time gotcha: the first push creates the GHCR package PRIVATE even on
-   a public repo — flip it to public once (repo → Packages → settings) or
-   the host cannot pull it.
+   The package is linked to the repo and takes its visibility, so a public
+   repo yields one the host can pull anonymously — nothing to flip. (This
+   step used to say the opposite; corrected 2026-08-28 after Kenny checked.)
 2. Copy `presets/rust-service/` to `presets/<yourname>/`, point the
    `myservice` compose at your image, keep or drop the bundled RabbitMQ.
    `RABBIT_USER`/`RABBIT_PASS` go in BOTH apps' `.env` via the secrets

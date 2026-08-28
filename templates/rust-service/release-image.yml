@@ -2,9 +2,15 @@
 # image to GHCR, so the homelab can deploy/update your Rust service like any
 # other app. Copy to .github/workflows/release-image.yml in your Rust repo.
 #
-# ONE-TIME after the first push: the GHCR package is created PRIVATE even on
-# a public repo. Make it public once (repo → Packages → package settings →
-# Change visibility) so the homelab host can pull it anonymously.
+# The published package is linked to the repository and takes its visibility,
+# so a public repo yields a package the homelab host can pull anonymously.
+# (This comment used to claim the package is created PRIVATE regardless and
+# must be flipped by hand; Kenny checked on 2026-08-28 and that is wrong. It
+# is corrected here rather than in one repo at a time, because every Rust
+# project copies this file and inherited the mistake — mailbox did.)
+#
+# If a host ever cannot pull: repo → Packages → package settings is where
+# visibility lives.
 name: release-image
 
 on:

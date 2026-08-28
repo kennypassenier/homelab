@@ -1,0 +1,19 @@
+services:
+  actual:
+    image: actualbudget/actual-server:latest
+    container_name: actual
+    restart: unless-stopped
+    volumes:
+      - /appdata/__STACK__/actual-config:/data
+    ports:
+      - "5006:5006"
+    labels:
+      - com.homelab.backup.pause=true
+      - com.homelab.update.policy=manual
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

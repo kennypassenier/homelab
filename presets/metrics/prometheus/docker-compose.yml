@@ -1,0 +1,23 @@
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=90d
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /appdata/__STACK__/prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    labels:
+      - com.homelab.backup.pause=true
+      - com.homelab.update.policy=manual
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

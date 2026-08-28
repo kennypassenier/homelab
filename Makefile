@@ -1,104 +1,73 @@
-# =============================================================================
-# Makefile - Homelab Rust Binaries & Release Management
-# =============================================================================
+# ============================================================================
+# Homelab v2 — build, test, and release management.
+#
+# Releasing is tag-driven: `make release VERSION=3.0.1` runs the full local
+# gate, stamps the workspace version, commits, tags and pushes. GitHub CI
+# (.github/workflows/release.yml) then re-runs the gate and publishes the
+# binaries + SHA256SUMS as a GitHub Release. Rolling out to the host stays a
+# separate, deliberate step: `homelab release-update` (B6) or press U in the
+# TUI when the update badge appears.
+# ============================================================================
 
-# Directory for compiled applications
-APPS_DIR := apps
+.PHONY: help build test gate fmt clippy release host-binary hooks
 
-# Application names
-CLIENT_NAME := CLIENT
-HOST_NAME := HOST
-LXC_NAME := LXC
+help:
+	@echo "make build            debug build of the whole workspace"
+	@echo "make test             run all tests"
+	@echo "make gate             full local gate: fmt + clippy -D warnings + tests"
+	@echo "make hooks            wire the git-native commit gates (once per clone)"
+	@echo "make host-binary      release build of homelab-host for Debian 12 (via docker)"
+	@echo "make release VERSION=x.y.z"
+	@echo "                      gate, stamp workspace version, commit, tag vx.y.z, push."
+	@echo "                      CI publishes the GitHub Release; roll out afterwards"
+	@echo "                      with 'homelab release-update' (or U in the TUI)."
 
-# Source directories for each application
-CLIENT_SRC := client-app
-HOST_SRC := host-daemon
-LXC_SRC := lxc-daemon
+# One-time per clone: core.hooksPath is local config, never committed, so a
+# fresh clone has no enforcement until this runs.
+hooks:
+	git config core.hooksPath .githooks
+	@echo "git-native hooks active: $$(git config core.hooksPath)"
 
-# Latch settings
-LATCH_AUTO_SYNC ?= 1
-LATCH_SYNC_REQUIRED ?= 0
+build:
+	cargo build --workspace
 
-# Get current versions from Cargo.toml files
-CLIENT_VERSION = $(shell grep '^version' $(CLIENT_SRC)/Cargo.toml | head -1 | cut -d'"' -f2)
-HOST_VERSION = $(shell grep '^version' $(HOST_SRC)/Cargo.toml | head -1 | cut -d'"' -f2)
-LXC_VERSION = $(shell grep '^version' $(LXC_SRC)/Cargo.toml | head -1 | cut -d'"' -f2)
+test:
+	cargo test --workspace
 
-.PHONY: help build build-client build-client-windows build-host build-lxc clean
-.PHONY: release-host release-client release-lxc push release-all latch-sync-secrets
+fmt:
+	cargo fmt --all --check
 
-# --- Latch Secrets Sync ---
-latch-sync-secrets:
-	@echo "Syncing secrets with latch..."
-	@if [ "$$CI" = "true" ] || [ "$(LATCH_AUTO_SYNC)" != "1" ]; then exit 0; fi
-	@if command -v latch > /dev/null 2>&1; then \
-		latch commit > /dev/null 2>&1; \
-		latch push > /dev/null 2>&1; \
+clippy:
+	cargo clippy --workspace --all-targets -- -D warnings
+
+gate: fmt clippy test
+
+# Cross-build the host binary against Debian 12 glibc, same as CI does.
+host-binary:
+	docker run --rm -v $(PWD):/src -w /src rust:1-bookworm \
+		cargo build --release -p homelab-host --target-dir target-debian
+	@echo "→ target-debian/release/homelab-host"
+
+release:
+ifndef VERSION
+	$(error usage: make release VERSION=x.y.z)
+endif
+	@case "$(VERSION)" in \
+		[0-9]*.[0-9]*.[0-9]*) ;; \
+		*) echo "VERSION must be plain x.y.z (no leading v)"; exit 1 ;; \
+	esac
+	@test -z "$$(git status --porcelain)" || { echo "working tree not clean — commit first"; exit 1; }
+	@git rev-parse "v$(VERSION)" >/dev/null 2>&1 && { echo "tag v$(VERSION) already exists"; exit 1; } || true
+	$(MAKE) gate
+	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml
+	@cargo update --workspace --quiet 2>/dev/null || cargo check --workspace --quiet
+	@if ! git diff --quiet; then \
+		git add Cargo.toml Cargo.lock && \
+		git commit -m "release: v$(VERSION)"; \
 	fi
-
-# --- Build Targets ---
-build: latch-sync-secrets build-client build-host build-lxc
-
-build-client: latch-sync-secrets
-	cd $(CLIENT_SRC) && cargo build --release
-	@mkdir -p $(APPS_DIR)
-	@cp $(CLIENT_SRC)/target/release/$(CLIENT_NAME) $(APPS_DIR)/$(CLIENT_NAME)
-	@chmod +x $(APPS_DIR)/$(CLIENT_NAME)
-
-build-client-windows: latch-sync-secrets
-	rustup target add x86_64-pc-windows-gnu
-	cd $(CLIENT_SRC) && cargo build --release --target x86_64-pc-windows-gnu
-	@mkdir -p $(APPS_DIR)
-	@cp $(CLIENT_SRC)/target/x86_64-pc-windows-gnu/release/$(CLIENT_NAME).exe $(APPS_DIR)/$(CLIENT_NAME).exe
-
-build-host: latch-sync-secrets
-	cd $(HOST_SRC) && cargo build --release
-	@mkdir -p $(APPS_DIR)
-	@cp $(HOST_SRC)/target/release/$(HOST_NAME) $(APPS_DIR)/$(HOST_NAME)
-	@chmod +x $(APPS_DIR)/$(HOST_NAME)
-
-build-lxc: latch-sync-secrets
-	cd $(LXC_SRC) && cargo build --release
-	@mkdir -p $(APPS_DIR)
-	@cp $(LXC_SRC)/target/release/$(LXC_NAME) $(APPS_DIR)/$(LXC_NAME)
-	@chmod +x $(APPS_DIR)/$(LXC_NAME)
-
-# --- Release Targets ---
-# Clean is now part of the push flow to prevent accumulation of build artifacts
-push: clean release-host release-client release-lxc
-
-release-all: push
-
-release-host: build-host
-	@bash ./scripts/shared/bump-patch-version.sh $(HOST_SRC)/Cargo.toml HOST
-	@git add $(HOST_SRC)/Cargo.toml
-	@git commit -m "Bump host-daemon version to v$(HOST_VERSION)"
-	@git tag "host-daemon-v$(HOST_VERSION)" -m "Release host-daemon v$(HOST_VERSION)"
-	@git push origin HEAD --tags
-	@gh release create "host-daemon-v$(HOST_VERSION)" $(APPS_DIR)/$(HOST_NAME) --title "host-daemon v$(HOST_VERSION)" --generate-notes
-	@echo "✓ HOST release complete: v$(HOST_VERSION)"
-
-release-client: build-client build-client-windows
-	@bash ./scripts/shared/bump-patch-version.sh $(CLIENT_SRC)/Cargo.toml CLIENT client
-	@git add $(CLIENT_SRC)/Cargo.toml
-	@git commit -m "Bump client version to v$(CLIENT_VERSION)"
-	@git tag "client-v$(CLIENT_VERSION)" -m "Release client v$(CLIENT_VERSION)"
-	@git push origin HEAD --tags
-	@gh release create "client-v$(CLIENT_VERSION)" $(APPS_DIR)/CLIENT $(APPS_DIR)/CLIENT.exe --title "CLIENT v$(CLIENT_VERSION)" --generate-notes
-	@echo "✓ CLIENT release complete: v$(CLIENT_VERSION)"
-
-release-lxc: build-lxc
-	@bash ./scripts/shared/bump-patch-version.sh $(LXC_SRC)/Cargo.toml LXC lxc-daemon
-	@git add $(LXC_SRC)/Cargo.toml
-	@git commit -m "Bump lxc-daemon version to v$(LXC_VERSION)"
-	@git tag "lxc-daemon-v$(LXC_VERSION)" -m "Release lxc-daemon v$(LXC_VERSION)"
-	@git push origin HEAD --tags
-	@gh release create "lxc-daemon-v$(LXC_VERSION)" $(APPS_DIR)/$(LXC_NAME) --title "lxc-daemon v$(LXC_VERSION)" --generate-notes
-	@echo "✓ LXC release complete: v$(LXC_VERSION)"
-
-# --- Utility ---
-clean:
-	@echo "Cleaning all target directories..."
-	@find . -name "target" -type d -exec rm -rf {} +
-	@rm -rf $(APPS_DIR)/*
-	@echo "Clean complete"
+	git tag -a "v$(VERSION)" -m "homelab v$(VERSION)"
+	git push origin HEAD --follow-tags
+	@echo ""
+	@echo "✓ v$(VERSION) tagged and pushed — CI is building the release."
+	@echo "  watch:    gh run watch"
+	@echo "  roll out: homelab release-update   (after the release appears)"

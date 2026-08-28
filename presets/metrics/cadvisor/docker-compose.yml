@@ -1,0 +1,21 @@
+services:
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: unless-stopped
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - "8080:8080"
+    labels:
+      - com.homelab.update.policy=manual
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

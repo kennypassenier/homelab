@@ -1,0 +1,6 @@
+# F4: the metrics stack from the vault plan (§2) — prometheus + cadvisor +
+# pve-exporter. Grafana already runs on the platform stack; point it at
+# http://<this-stack-ip>:9090 as a Prometheus datasource.
+description: "Prometheus + cadvisor + pve-exporter"
+ram_mb: 1024
+disk_gb: 16

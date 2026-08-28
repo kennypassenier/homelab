@@ -1,0 +1,23 @@
+# Needs Proxmox API credentials: create stacks/<name>/pve-exporter/.env after
+# scaffolding with PVE_USER / PVE_TOKEN_NAME / PVE_TOKEN_VALUE (an API token
+# with PVEAuditor role suffices — never the root password).
+services:
+  pve-exporter:
+    image: prompve/prometheus-pve-exporter:latest
+    container_name: pve-exporter
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PVE_VERIFY_SSL=false
+    ports:
+      - "9221:9221"
+    labels:
+      - com.homelab.update.policy=manual
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

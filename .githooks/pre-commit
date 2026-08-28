@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Git-native quality gate (standing rule 7, Phase-5 amendment 2026-08-12).
+#
+# The Claude Code PreToolUse hook in .claude/hooks/ only loads in a session
+# opened in this directory; this one holds from ANY session, terminal or
+# tool. That is the whole point: enforcement must not depend on where the
+# commit is typed.
+#
+# Wire-up (once per clone): git config core.hooksPath .githooks
+# Deliberate bypass stays possible with `git commit --no-verify`, which is
+# a conscious act rather than a silent gap.
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "COMMIT BLOCKED — cargo not found, so the gates cannot run." >&2
+  echo "Remedy: install the Rust toolchain, or commit with --no-verify if" >&2
+  echo "you are deliberately committing from a machine that cannot build." >&2
+  exit 1
+fi
+
+# Single source of truth: the same script the session hook runs.
+gates="$root/.claude/hooks/gates.sh"
+if [ ! -x "$gates" ]; then
+  echo "COMMIT BLOCKED — $gates missing or not executable." >&2
+  echo "Remedy: restore it from the dev-procedure hooks/ directory." >&2
+  exit 1
+fi
+
+if ! out=$("$gates" 2>&1); then
+  echo "COMMIT BLOCKED — gates failed (fmt / clippy -D warnings / tests)." >&2
+  echo "$out" | tail -30 >&2
+  echo "Remedy: fix the failures above, then commit again." >&2
+  exit 1
+fi

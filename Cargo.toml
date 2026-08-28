@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["core", "proto", "host", "client", "tui-preview"]
+# Legacy generation — standalone crates, superseded by the v2 merge.
+exclude = ["client-app", "host-daemon", "lxc-daemon"]
+
+[workspace.package]
+version = "3.1.1"
+rust-version = "1.87"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+thiserror = "1"
+async-trait = "0.1"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

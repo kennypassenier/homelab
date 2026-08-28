@@ -1,0 +1,26 @@
+services:
+  syncthing:
+    image: syncthing/syncthing:latest
+    container_name: syncthing
+    hostname: __HOSTNAME__
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - /appdata/__STACK__/syncthing-config:/var/syncthing
+    ports:
+      - "8384:8384"     # web UI
+      - "22000:22000/tcp"
+      - "22000:22000/udp"
+      - "21027:21027/udp" # local discovery
+    labels:
+      - com.homelab.backup.pause=true
+      - com.homelab.update.policy=manual
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

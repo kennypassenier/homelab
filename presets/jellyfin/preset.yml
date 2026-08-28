@@ -1,0 +1,5 @@
+description: "Media server (VAAPI)"
+ram_mb: 4096
+cores: 4
+disk_gb: 64
+gpu: true

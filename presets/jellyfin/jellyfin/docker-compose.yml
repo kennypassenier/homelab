@@ -1,0 +1,26 @@
+# NOTE: hardware transcoding (VAAPI) also needs the GPU passed into the LXC —
+# that is a host-side pct config step (H4, migration phase), not compose-only.
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    volumes:
+      - /appdata/__STACK__/jellyfin-config:/config
+      # media mounts come from the LXC bind mounts; keep in-container paths stable
+      - /data/18TB:/data/18TB
+      - /data/12TB:/data/12TB
+    ports:
+      - "8096:8096"
+    devices:
+      - /dev/dri:/dev/dri   # VAAPI
+    labels:
+      - com.homelab.backup.pause=true
+      - com.homelab.update.policy=manual
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

@@ -1,0 +1,17 @@
+[package]
+name = "homelab-core"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+description = "Zero-I/O domain logic: manifests, safety gates, operation pipelines, state (AR1)"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }

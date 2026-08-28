@@ -11,7 +11,7 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
 
 | Field | Value |
 |---|---|
-| Current phase | 9 · Released — v3.0.0 (first tag) through v3.1.1 live on the host |
+| Current phase | 9 · Released — v3.0.0 (first tag) through v3.1.1 live on the host; `main` IS the rewrite since 2026-08-28 (v1 tip kept as branch `v1-archive`) |
 | Last completed gate | Pre-test backup round (2026-08-27): H10 fix, E8 build, LVM+vzdump safety net |
 | Next gate | Kenny's own test pass (docs/TEST_PLAN.md part A/B), then phase 10 retro for E8/G9/H7/H8 |
 | AFK mode | on for build work (Kenny: "keep going"), off for gates |
@@ -85,13 +85,20 @@ warnings, full suite) and both demanding IDs in brackets (`[B4]`,
 1. **git-native** — `.githooks/pre-commit` + `commit-msg`, wired with
    `git config core.hooksPath .githooks`. Holds from ANY session,
    terminal or tool. **One-time per clone: `make hooks`** (core.hooksPath
-   is local config and is never committed).
+   is local config and is never committed). Ratified by Kenny 2026-08-28:
+   full suite on every commit, `--no-verify` stays as a documented
+   escape, merge/revert/fixup/squash exempt from the ID rule.
+   Human-facing docs: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 2. **session hook** — `.claude/hooks/check-commit.sh` (PreToolUse on
    Bash), which only loads in a session opened in this directory.
 
 CI re-runs the same gates on every push; red blocks merge. Layer 1 was
 added 2026-08-28 after v3.0.1–v3.1.1 were committed from a session opened
 elsewhere, where layer 2 silently did not load.
+
+3. **branch protection** on `main` (2026-08-28): the `check` and `msrv`
+   CI jobs are required. `enforce_admins` is deliberately off so
+   `make release` can still push directly; a red gate blocks any merge.
 
 ## Build & ship
 

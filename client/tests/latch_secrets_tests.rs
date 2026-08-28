@@ -132,5 +132,13 @@ fn d12_latch_sourced_secrets() {
     let after = std::fs::read_to_string(&log).unwrap().lines().count();
     assert_eq!(before, after, "plaintext-only stacks must not touch latch");
 
+    // 7. A latch_secrets entry that names no real app is a typo, caught
+    // before latch is ever invoked (also what keeps '__' out of the path:
+    // manifest app names are validated [a-z0-9-]).
+    std::env::remove_var("LATCH_STUB_MODE");
+    let typo = stack_dir(&tmp.join("third"), "latch_secrets: [mailbx]\n");
+    let err = homelab_client::spec::build_spec(&typo).unwrap_err();
+    assert!(err.contains("no such app"), "{}", err);
+
     let _ = std::fs::remove_dir_all(&tmp);
 }

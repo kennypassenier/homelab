@@ -41,7 +41,12 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
     let mut files: Vec<FileBlob> = Vec::new();
     let mut env: BTreeMap<String, String> = BTreeMap::new();
     collect(dir, dir, &mut files, &mut env)?;
-    fetch_latch_secrets(dir, &stack_file.latch_secrets, &mut env)?;
+    fetch_latch_secrets(
+        dir,
+        &stack_file.latch_secrets,
+        &stack_file.manifest.apps,
+        &mut env,
+    )?;
 
     let gateway_route = match stack_file.gateway_route.as_ref() {
         Some(g) => {
@@ -120,10 +125,24 @@ fn collect(
 fn fetch_latch_secrets(
     dir: &Path,
     apps: &[String],
+    manifest_apps: &[String],
     env: &mut BTreeMap<String, String>,
 ) -> Result<(), String> {
     if apps.is_empty() {
         return Ok(());
+    }
+    // A latch_secrets entry that names no real app would fetch secrets into
+    // the void; manifest app names are also what keeps the latch path free
+    // of characters latch refuses (validated [a-z0-9-], so no '__').
+    for app in apps {
+        if !manifest_apps.contains(app) {
+            return Err(format!(
+                "latch_secrets names '{}' but the stack has no such app :: \
+                 apps are [{}]",
+                app,
+                manifest_apps.join(", ")
+            ));
+        }
     }
     let latch_env = std::env::var("HOMELAB_LATCH_ENV").map_err(|_| {
         "latch_secrets is set but HOMELAB_LATCH_ENV is not :: set it to the \
@@ -165,6 +184,12 @@ fn fetch_latch_secrets(
                 latch_env,
                 String::from_utf8_lossy(&out.stderr).trim()
             ));
+        }
+        // latch keeps content and messages strictly separated: informational
+        // notes (e.g. the offline stale-cache notice) arrive on stderr with
+        // exit 0 — pass them on rather than swallowing them.
+        if !out.stderr.is_empty() {
+            eprintln!("[latch] {}", String::from_utf8_lossy(&out.stderr).trim());
         }
         let content = String::from_utf8(out.stdout)
             .map_err(|_| format!("latch returned non-utf8 content for '{}'", app))?;

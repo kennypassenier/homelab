@@ -9,17 +9,24 @@
 # TUI when the update badge appears.
 # ============================================================================
 
-.PHONY: help build test gate fmt clippy release host-binary
+.PHONY: help build test gate fmt clippy release host-binary hooks
 
 help:
 	@echo "make build            debug build of the whole workspace"
 	@echo "make test             run all tests"
 	@echo "make gate             full local gate: fmt + clippy -D warnings + tests"
+	@echo "make hooks            wire the git-native commit gates (once per clone)"
 	@echo "make host-binary      release build of homelab-host for Debian 12 (via docker)"
 	@echo "make release VERSION=x.y.z"
 	@echo "                      gate, stamp workspace version, commit, tag vx.y.z, push."
 	@echo "                      CI publishes the GitHub Release; roll out afterwards"
 	@echo "                      with 'homelab release-update' (or U in the TUI)."
+
+# One-time per clone: core.hooksPath is local config, never committed, so a
+# fresh clone has no enforcement until this runs.
+hooks:
+	git config core.hooksPath .githooks
+	@echo "git-native hooks active: $$(git config core.hooksPath)"
 
 build:
 	cargo build --workspace

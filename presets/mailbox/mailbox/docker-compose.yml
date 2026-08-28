@@ -1,0 +1,48 @@
+# mailbox (G9): Kenny's own Rust message hub, deployed like any other app.
+#
+# Unlike presets/rust-service/ this ships NO broker beside it — mailbox is
+# the broker. Anything on the stack that needs eventing talks to it over
+# plain HTTP: publish, long-poll receive, ack.
+#
+# Before deploying, put both of these in this app's .env (secrets vault, not
+# git). Without them the hub starts with its door open and says so loudly on
+# every page; with only one of them it refuses to start:
+#   MAILBOX_TOKEN=$(openssl rand -hex 24)
+#   MAILBOX_SECRET_KEY=$(openssl rand -hex 32)
+# MAILBOX_TOKEN is what you log in with. MAILBOX_SECRET_KEY encrypts the
+# per-app tokens in the store, so rotating the first is safe and rotating the
+# second makes every app token unreadable.
+services:
+  mailbox:
+    image: ghcr.io/kennypassenier/mailbox:latest
+    container_name: mailbox
+    restart: unless-stopped
+    volumes:
+      # A host bind, not a named volume: restic backs up /appdata, and a
+      # named volume would be invisible to it — the hub would run fine and
+      # be backed up by nothing. The scaffolder creates this directory with
+      # the ownership the distroless image needs (uid 65532).
+      - /appdata/__STACK__/mailbox-config:/data
+    ports:
+      - "8080:8080"
+    environment:
+      MAILBOX_LISTEN: 0.0.0.0:8080
+      MAILBOX_DATA_DIR: /data
+      MAILBOX_LOG: info
+    env_file:
+      - .env
+    labels:
+      # Quiesce during the snapshot. SQLite copied mid-write is not a
+      # database, and a backup that will not restore is not a backup.
+      - com.homelab.backup.pause=true
+      # Safe to update unattended: the hub proves a hard kill never needs
+      # manual repair to restart, and the homelab rolls back on a failed
+      # health check anyway.
+      - com.homelab.update.policy=auto
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

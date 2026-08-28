@@ -13,6 +13,11 @@ struct StackFile {
     manifest: StackManifest,
     #[serde(default)]
     gateway_route: Option<GatewayRouteFile>,
+    /// D12: apps whose .env comes from latch instead of a plaintext file.
+    /// Client-side sugar only — the wire and the host vault see the same
+    /// env content either way.
+    #[serde(default)]
+    latch_secrets: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -36,6 +41,7 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
     let mut files: Vec<FileBlob> = Vec::new();
     let mut env: BTreeMap<String, String> = BTreeMap::new();
     collect(dir, dir, &mut files, &mut env)?;
+    fetch_latch_secrets(dir, &stack_file.latch_secrets, &mut env)?;
 
     let gateway_route = match stack_file.gateway_route.as_ref() {
         Some(g) => {
@@ -100,6 +106,76 @@ fn collect(
                 mode: None,
             });
         }
+    }
+    Ok(())
+}
+
+/// D12: fill in each declared app's env by asking latch, in memory only —
+/// no plaintext .env needs to exist on the workstation. The latch project
+/// root is the stacks/ directory (one `latch init` there, once), so the
+/// path inside the project is `<stack>/<app>/.env`. `--expand` is
+/// deliberate: docker compose does its own ${VAR} interpolation on .env
+/// content, so raw latch templates would collide with it — latch resolves
+/// them first or fails hard.
+fn fetch_latch_secrets(
+    dir: &Path,
+    apps: &[String],
+    env: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
+    if apps.is_empty() {
+        return Ok(());
+    }
+    let latch_env = std::env::var("HOMELAB_LATCH_ENV").map_err(|_| {
+        "latch_secrets is set but HOMELAB_LATCH_ENV is not :: set it to the \
+         latch environment to read (e.g. HOMELAB_LATCH_ENV=prod in .env)"
+            .to_string()
+    })?;
+    let stack = dir
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .ok_or_else(|| "stack dir has no name".to_string())?;
+    let project_root = dir.parent().unwrap_or(dir);
+    for app in apps {
+        // Two sources for the same app is ambiguity, not convenience: a
+        // stale plaintext file silently shadowing latch (or the reverse)
+        // is exactly the failure mode D12 exists to kill.
+        if env.contains_key(app) {
+            return Err(format!(
+                "app '{}' has BOTH a plaintext .env and latch_secrets :: \
+                 delete stacks/{}/{}/.env or drop '{}' from latch_secrets",
+                app, stack, app, app
+            ));
+        }
+        let rel = format!("{}/{}/.env", stack, app);
+        let out = std::process::Command::new("latch")
+            .args(["cat", &rel, "--env", &latch_env, "--expand"])
+            .current_dir(project_root)
+            .output()
+            .map_err(|e| {
+                format!(
+                    "cannot run latch for app '{}': {} :: install latch (or \
+                     remove latch_secrets from the stack file)",
+                    app, e
+                )
+            })?;
+        if !out.status.success() {
+            return Err(format!(
+                "latch cat {} --env {} failed: {}",
+                rel,
+                latch_env,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        let content = String::from_utf8(out.stdout)
+            .map_err(|_| format!("latch returned non-utf8 content for '{}'", app))?;
+        if content.trim().is_empty() {
+            return Err(format!(
+                "latch returned empty content for app '{}' ({} in env '{}') :: \
+                 commit+push the env file in latch first",
+                app, rel, latch_env
+            ));
+        }
+        env.insert(app.clone(), content);
     }
     Ok(())
 }

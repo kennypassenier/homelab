@@ -41,6 +41,16 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   deploy ships it over the TLS line into the host vault
   (`/var/lib/homelab/secrets/`). Never in git (gitignored), never in
   bundles, never in presets.
+- **D12 · Secrets from latch (no plaintext on the workstation)** — declare
+  `latch_secrets: [app, ...]` in the stack's `lxc-compose.yml` and set
+  `HOMELAB_LATCH_ENV` (e.g. `prod`) in `.env`. At deploy time the client
+  runs `latch cat <stack>/<app>/.env --env $HOMELAB_LATCH_ENV --expand`
+  from the stacks/ root (one `latch init` there, once) and composes the
+  env in memory — nothing touches disk. An app with BOTH a plaintext
+  `.env` and a latch_secrets entry is refused; so are a missing latch,
+  a missing file, or unresolved `${VAR}` references (latch expands them
+  first because docker compose does its own interpolation). Requires
+  latch ≥ 2.2.0 (`latch cat`).
 
 ## Deploying and changing
 

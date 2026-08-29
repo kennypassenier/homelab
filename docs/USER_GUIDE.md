@@ -97,6 +97,12 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   the stack + onboot off; containers are never started or stopped by the
   flag. A failed nightly run auto-disables the stack (one loud message
   instead of nightly noise).
+- **C7 · Native services** — your own Rust binaries under systemd, no
+  docker. `homelab adopt stacks/<name>` takes over a hand-built container
+  (stack file: `service.yml`; see docs/LLM_SERVICE_ADOPTION.md) without
+  restarting it; nightly in-container backup + the app's own self-update
+  under supervision (binary preserved, restart only on change, rollback
+  from outside). On demand: `homelab backup-native|update-native <stack>`.
 - **H5 · Host self-update** — `homelab self-update <new-binary>`: selfcheck
   gate → backup → install → armed rollback marker → restart. A release that
   crashes on start is rolled back automatically by systemd (proven with a

@@ -355,6 +355,16 @@ file on the workstation. Found and fixed B1 protection-ordering bug on the
 way (protection now last, after drive changes). Grafana datasource +
 dashboard pending Kenny's service-account token (MB5).
 
+### B27 · Native-service adoption + backup (C7) — LIVE-PROVEN 2026-08-29
+CT 109 (mailbox) and CT 112 (almanac, ExecStart wrapped in `latch run`)
+adopted via `homelab adopt stacks/<name>`; both services stayed `active`
+throughout — adoption touched nothing. First native backups written
+(mailbox-config 660 KiB, almanac-config 13 MiB) and the mailbox snapshot
+restore-drilled: the tar lists the real database files. Update supervision
+(preserve → restart-if-changed → health → rollback) is mock-proven in 9
+tests; the live broken-release drill is pending coordination with the
+mailbox project.
+
 ### B20 · HA webhook receiver (F3, HA side) — LIVE-PROVEN 2026-08-11
 Host `notify_webhook` points at `automation.homelab_ops_webhook`
 (`/api/webhook/homelab-ops-c4d81f26`, local-only, POST). Every event is

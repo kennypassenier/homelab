@@ -1,0 +1,17 @@
+# C7 native service — adopted from the hand-built CT 112 (2026-08-29).
+# ExecStart wraps the binary in `latch run` (secrets injected at start);
+# the adoption check matches on the binary appearing in the argv.
+# /opt/almanac holds binary + data + profiles + the .latch credentials —
+# backing up the whole directory makes a restore self-contained (the restic
+# repo is encrypted, so credential material in it is fine, same as
+# host-meta). update_cmd runs as the almanac user so ownership stays clean.
+stack_name: almanac
+vmid: 112
+hostname: 112-app-almanac
+unit: almanac
+binary: /opt/almanac/almanac
+env_file: /etc/almanac/latch.env
+data_dirs:
+  - /opt/almanac
+  - /etc/almanac
+update_cmd: runuser -u almanac -- /opt/almanac/almanac update

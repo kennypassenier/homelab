@@ -1,0 +1,13 @@
+# C7 native service — adopted from the hand-built CT 109 (2026-08-29).
+# The homelab supervises: nightly in-container backup, self-update with an
+# armed rollback. It never starts or stops the service on its own.
+stack_name: mailbox
+vmid: 109
+hostname: 109-app-mailbox
+unit: mailbox
+binary: /usr/local/bin/mailbox
+env_file: /etc/mailbox/mailbox.env
+data_dirs:
+  - /var/lib/mailbox
+  - /etc/mailbox
+update_cmd: mailbox update

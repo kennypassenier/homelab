@@ -14,11 +14,12 @@ scrape_configs:
       target: ["10.10.5.250"]
     static_configs:
       - targets: ["pve-exporter:9221"]
-  # almanac (CT 112) serves on 10.10.10.12:8080 but has no /metrics yet:
-  # that is new scope in its frozen feature list, pending a mini-round with
-  # Kenny in the almanac project. Do NOT point this at /healthz — that
-  # returns JSON, which Prometheus cannot parse, so the target would show a
-  # permanent parse failure; liveness checks belong in Uptime Kuma.
+  # almanac /metrics is APPROVED (its M13, 2026-08-29) but ships after its
+  # remaining rollout steps — the almanac session reports here when it
+  # serves. Exposition format on the same port; labels per source, no
+  # calendar ids. Flip the job on then. Do NOT point this at /healthz in
+  # the meantime — JSON, unparseable, permanent false "down"; liveness for
+  # almanac lives in Uptime Kuma (its AR21).
   # - job_name: almanac
   #   static_configs:
   #     - targets: ["10.10.10.12:8080"]

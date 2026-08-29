@@ -14,8 +14,11 @@ scrape_configs:
       target: ["10.10.5.250"]
     static_configs:
       - targets: ["pve-exporter:9221"]
-  # almanac (CT 112) exposes no port yet; flip this on when its HTTP
-  # service is listening.
+  # almanac (CT 112) serves on 10.10.10.12:8080 but has no /metrics yet:
+  # that is new scope in its frozen feature list, pending a mini-round with
+  # Kenny in the almanac project. Do NOT point this at /healthz — that
+  # returns JSON, which Prometheus cannot parse, so the target would show a
+  # permanent parse failure; liveness checks belong in Uptime Kuma.
   # - job_name: almanac
   #   static_configs:
   #     - targets: ["10.10.10.12:8080"]

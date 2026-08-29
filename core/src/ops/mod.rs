@@ -7,6 +7,7 @@ pub mod enable;
 pub mod guards;
 pub mod kea;
 pub mod mirror;
+pub mod native;
 pub mod patch;
 pub mod resize;
 pub mod selfupdate;

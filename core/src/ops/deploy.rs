@@ -732,6 +732,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 applied_hash: manifest::intent_hash(spec),
                 manifest: Some(m.clone()),
                 enabled,
+                native: None,
             },
         );
         store.save(state).await?;

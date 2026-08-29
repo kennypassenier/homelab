@@ -11,6 +11,7 @@ pub mod error;
 pub mod executor;
 pub mod incidents;
 pub mod manifest;
+pub mod native;
 pub mod notify;
 pub mod ops;
 pub mod retention;

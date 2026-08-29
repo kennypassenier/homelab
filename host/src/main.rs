@@ -481,6 +481,7 @@ mod tests {
                 applied_hash: String::new(),
                 manifest: Some(mk(1024)),
                 enabled: true,
+                native: None,
             },
         );
         hs.stacks.insert(
@@ -494,6 +495,7 @@ mod tests {
                 applied_hash: String::new(),
                 manifest: Some(mk(4096)),
                 enabled: true,
+                native: None,
             },
         );
         let (total, used, committed, cores, load1) =

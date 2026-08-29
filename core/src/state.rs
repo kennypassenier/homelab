@@ -35,6 +35,10 @@ pub struct StackState {
     /// run state — manual `pct stop` and this flag are independent worlds.
     #[serde(default = "enabled_default")]
     pub enabled: bool,
+    /// C7: set for native-service stacks (bare binary under systemd). A
+    /// stack has either `manifest` (compose) or `native`, never both.
+    #[serde(default)]
+    pub native: Option<crate::native::NativeServiceManifest>,
 }
 
 fn enabled_default() -> bool {

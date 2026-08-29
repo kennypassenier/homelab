@@ -332,6 +332,18 @@ REPLICA_* subtree whose parent/child snapshots no longer line up. The old
 history (53 snapshots) is untouched; the retired cron script is archived at
 docs/legacy/full_zfs_backup.sh.
 
+### B25 · Secrets from latch, end to end (D12) — LIVE-PROVEN 2026-08-29
+Against the real latch 2.2.0 (signed release): `latch init` on stacks/, a
+test variable committed+pushed to env `prod`, plaintext deleted, then
+`homelab deploy stacks/synctest-108` with `latch_secrets: [syncthing]` and
+`HOMELAB_LATCH_ENV=prod`. The variable arrived in the host vault
+(`secrets/synctest/syncthing.env`) AND in the container
+(`/opt/synctest/syncthing/.env`) while the workstation held zero plaintext
+.env files throughout (checked). Failure path proven separately against the
+real binary: latch's remedy passes through verbatim, empty stdout, exit 1.
+Cleanup: ciphertext removed from latch, stack file reverted; the stacks/
+latch project link remains for real use.
+
 ### B20 · HA webhook receiver (F3, HA side) — LIVE-PROVEN 2026-08-11
 Host `notify_webhook` points at `automation.homelab_ops_webhook`
 (`/api/webhook/homelab-ops-c4d81f26`, local-only, POST). Every event is

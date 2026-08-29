@@ -7,7 +7,7 @@
 # (This comment used to claim the package is created PRIVATE regardless and
 # must be flipped by hand; Kenny checked on 2026-08-28 and that is wrong. It
 # is corrected here rather than in one repo at a time, because every Rust
-# project copies this file and inherited the mistake — mailbox did.)
+# project copies this file and inherited the mistake — kyu did.)
 #
 # If a host ever cannot pull: repo → Packages → package settings is where
 # visibility lives.

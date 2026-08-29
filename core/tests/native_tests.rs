@@ -23,30 +23,27 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 }
 
 /// CT 109 as it really is — the first adoption target.
-fn mailbox_manifest() -> NativeServiceManifest {
+fn kyu_manifest() -> NativeServiceManifest {
     NativeServiceManifest {
-        stack_name: "mailbox".into(),
+        stack_name: "kyu".into(),
         vmid: 109,
-        hostname: "109-app-mailbox".into(),
-        unit: "mailbox".into(),
-        binary: "/usr/local/bin/mailbox".into(),
-        env_file: Some("/etc/mailbox/mailbox.env".into()),
-        data_dirs: vec!["/var/lib/mailbox".into()],
-        update_cmd: Some("mailbox update".into()),
+        hostname: "109-app-kyu".into(),
+        unit: "kyu".into(),
+        binary: "/usr/local/bin/kyu".into(),
+        env_file: Some("/etc/kyu/kyu.env".into()),
+        data_dirs: vec!["/var/lib/kyu".into()],
+        update_cmd: Some("kyu update".into()),
     }
 }
 
 fn adopt_mocks(exec: &MockExecutor) {
-    exec.respond_always(
-        "pct config 109",
-        CmdOutput::ok("hostname: 109-app-mailbox\n"),
-    );
+    exec.respond_always("pct config 109", CmdOutput::ok("hostname: 109-app-kyu\n"));
     exec.respond_always("systemctl is-active", CmdOutput::ok("active\n"));
     exec.respond_always(
         "systemctl show",
         CmdOutput::ok(
-            "ExecStart={ path=/usr/local/bin/mailbox ; argv[]=/usr/local/bin/mailbox }\n\
-             EnvironmentFiles=/etc/mailbox/mailbox.env (ignore_errors=no)\n",
+            "ExecStart={ path=/usr/local/bin/kyu ; argv[]=/usr/local/bin/kyu }\n\
+             EnvironmentFiles=/etc/kyu/kyu.env (ignore_errors=no)\n",
         ),
     );
     exec.respond_always("test -x", CmdOutput::ok(""));
@@ -54,17 +51,17 @@ fn adopt_mocks(exec: &MockExecutor) {
 
 #[test]
 fn c7_validation_catches_the_lies() {
-    assert!(validate_native(&mailbox_manifest()).is_ok());
+    assert!(validate_native(&kyu_manifest()).is_ok());
 
-    let mut wrong_host = mailbox_manifest();
-    wrong_host.hostname = "mailbox".into();
+    let mut wrong_host = kyu_manifest();
+    wrong_host.hostname = "kyu".into();
     assert!(validate_native(&wrong_host).is_err(), "hostname convention");
 
-    let mut rel_path = mailbox_manifest();
-    rel_path.binary = "usr/local/bin/mailbox".into();
+    let mut rel_path = kyu_manifest();
+    rel_path.binary = "usr/local/bin/kyu".into();
     assert!(validate_native(&rel_path).is_err(), "relative path");
 
-    let mut no_data = mailbox_manifest();
+    let mut no_data = kyu_manifest();
     no_data.data_dirs.clear();
     assert!(validate_native(&no_data).is_err(), "undeclared state");
 }
@@ -75,12 +72,12 @@ async fn c7_adopt_records_state_without_touching_the_service() {
     adopt_mocks(&exec);
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = adopt(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    let report = adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
     assert!(report.ok, "{:?}", report.error);
 
     let state = exec.file("/var/lib/homelab/state.json").unwrap();
-    assert!(state.contains("\"mailbox\""), "{}", state);
-    assert!(state.contains("/var/lib/mailbox"), "data dir recorded");
+    assert!(state.contains("\"kyu\""), "{}", state);
+    assert!(state.contains("/var/lib/kyu"), "data dir recorded");
 
     // The whole point: nothing may (re)start, stop or write in the CT.
     for forbidden in ["restart", "systemctl stop", "systemctl start", "pct push"] {
@@ -101,7 +98,7 @@ async fn c7_adopt_refuses_inactive_unit() {
     adopt_mocks(&exec);
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = adopt(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    let report = adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
     assert!(!report.ok, "adoption never starts services");
     let state = exec.file("/var/lib/homelab/state.json");
     assert!(state.is_none(), "no state may be recorded on refusal");
@@ -117,7 +114,7 @@ async fn c7_adopt_refuses_unit_running_a_different_binary() {
     adopt_mocks(&exec);
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = adopt(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    let report = adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
     assert!(!report.ok, "manifest must match reality");
 }
 
@@ -127,9 +124,9 @@ async fn c7_adopt_refuses_no_touch_and_wrong_hostname() {
     let exec = MockExecutor::new();
     let sink = VecSink::new();
     let j = NullJournal;
-    let mut m = mailbox_manifest();
+    let mut m = kyu_manifest();
     m.vmid = 104;
-    m.hostname = "104-app-mailbox".into();
+    m.hostname = "104-app-kyu".into();
     let report = adopt(&ctx(&exec, &sink, &j), &m).await;
     assert!(!report.ok, "no-touch");
     assert!(exec.calls_containing("systemctl").is_empty());
@@ -137,7 +134,7 @@ async fn c7_adopt_refuses_no_touch_and_wrong_hostname() {
     // Live hostname differs from the manifest.
     let exec = MockExecutor::new();
     exec.respond_always("pct config 109", CmdOutput::ok("hostname: 109-app-other\n"));
-    let report = adopt(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    let report = adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
     assert!(!report.ok, "A2 hostname guard");
 }
 
@@ -147,11 +144,11 @@ async fn c7_adopt_refuses_repointing_an_existing_stack() {
     adopt_mocks(&exec);
     exec.seed_file(
         "/var/lib/homelab/state.json",
-        r#"{"schema_version":1,"stacks":{"mailbox":{"vmid":140,"hostname":"140-app-mailbox","apps":["mailbox"],"applied_at":1}}}"#,
+        r#"{"schema_version":1,"stacks":{"kyu":{"vmid":140,"hostname":"140-app-kyu","apps":["kyu"],"applied_at":1}}}"#,
     );
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = adopt(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    let report = adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
     assert!(!report.ok, "a stack name points at one vmid, forever");
 }
 
@@ -168,7 +165,7 @@ async fn c7_native_backup_streams_tar_into_restic() {
     let j = NullJournal;
     let report = backup_native(
         &ctx(&exec, &sink, &j),
-        &mailbox_manifest(),
+        &kyu_manifest(),
         &BackupCfg::default(),
     )
     .await;
@@ -181,14 +178,14 @@ async fn c7_native_backup_streams_tar_into_restic() {
         "without pipefail a dead tar yields a lying empty snapshot: {}",
         p
     );
-    assert!(p.contains("'/var/lib/mailbox'"), "data dir quoted: {}", p);
+    assert!(p.contains("'/var/lib/kyu'"), "data dir quoted: {}", p);
     assert!(
-        p.contains("restic backup --stdin --stdin-filename mailbox-data.tar"),
+        p.contains("restic backup --stdin --stdin-filename kyu-data.tar"),
         "{}",
         p
     );
     assert!(
-        p.contains("mailbox-config"),
+        p.contains("kyu-config"),
         "same repo naming as compose stacks: {}",
         p
     );
@@ -204,7 +201,7 @@ async fn c7_supervised_update_restarts_only_on_binary_change() {
     exec.respond_always("sha256sum", CmdOutput::ok("aaaa\n"));
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = update_native(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
     assert!(report.ok, "{:?}", report.error);
     assert!(
         exec.calls_containing("systemctl restart").is_empty(),
@@ -217,13 +214,11 @@ async fn c7_supervised_update_restarts_only_on_binary_change() {
     exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
     adopt_mocks(&exec);
     exec.respond_always("systemctl restart", CmdOutput::ok(""));
-    let report = update_native(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
     assert!(report.ok, "{:?}", report.error);
     assert_eq!(
-        exec.calls_containing(
-            "cp -p '/usr/local/bin/mailbox' '/usr/local/bin/mailbox.homelab-prev'"
-        )
-        .len(),
+        exec.calls_containing("cp -p '/usr/local/bin/kyu' '/usr/local/bin/kyu.homelab-prev'")
+            .len(),
         1,
         "binary preserved before the update: {:?}",
         exec.calls()
@@ -242,20 +237,15 @@ async fn c7_supervised_update_rolls_back_when_new_version_stays_down() {
         "for i in 1 2 3 4 5",
         CmdOutput::failed(1, "unit stays down"),
     );
-    exec.respond_always(
-        "cp -p '/usr/local/bin/mailbox.homelab-prev'",
-        CmdOutput::ok(""),
-    );
+    exec.respond_always("cp -p '/usr/local/bin/kyu.homelab-prev'", CmdOutput::ok(""));
     adopt_mocks(&exec);
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = update_native(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
     assert!(!report.ok, "a rolled-back update is still a FAILED update");
     assert_eq!(
-        exec.calls_containing(
-            "cp -p '/usr/local/bin/mailbox.homelab-prev' '/usr/local/bin/mailbox'"
-        )
-        .len(),
+        exec.calls_containing("cp -p '/usr/local/bin/kyu.homelab-prev' '/usr/local/bin/kyu'")
+            .len(),
         1,
         "the armed rollback must restore the preserved binary: {:?}",
         exec.calls()

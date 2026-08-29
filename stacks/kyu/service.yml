@@ -1,15 +1,15 @@
 # C7 native service — adopted from the hand-built CT 109 (2026-08-29).
 # The homelab supervises: nightly in-container backup, self-update with an
 # armed rollback. It never starts or stops the service on its own.
-stack_name: mailbox
+stack_name: kyu
 vmid: 109
-hostname: 109-app-mailbox
-unit: mailbox
-binary: /usr/local/bin/mailbox
-env_file: /etc/mailbox/mailbox.env
+hostname: 109-app-kyu
+unit: kyu
+binary: /usr/local/bin/kyu
+env_file: /etc/kyu/kyu.env
 data_dirs:
-  - /var/lib/mailbox
-  - /etc/mailbox
+  - /var/lib/kyu
+  - /etc/kyu
 # update_cmd deliberately absent for now: the app has (or may have) its own
 # complete rollback mechanism, and two systems restoring binaries can fight
 # each other. Ownership is Kenny's call (form pending); until then the

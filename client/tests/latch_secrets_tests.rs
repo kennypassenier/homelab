@@ -23,12 +23,12 @@ fn stack_dir(root: &Path, latch_secrets: &str) -> PathBuf {
              network:\n  ip: 10.10.10.40/24\n  gateway: 10.10.10.1\n  bridge: vmbr0\n\
              resources:\n  cores: 1\n  memory_mb: 512\n  swap_mb: 256\n  disk_gb: 4\n\
              lxc:\n  template: clone:999\nboot:\n  onboot: true\n\
-             storage: []\napps: [mailbox]\n{}",
+             storage: []\napps: [kyu]\n{}",
             latch_secrets
         ),
     );
     write(
-        &dir.join("mailbox").join("docker-compose.yml"),
+        &dir.join("kyu").join("docker-compose.yml"),
         "services: {}\n",
     );
     dir
@@ -44,7 +44,7 @@ fn install_stub(bin_dir: &Path, log: &Path) {
         "#!/bin/sh\necho \"$(pwd)|$@\" >> {}\ncase \"$LATCH_STUB_MODE\" in\n\
          fail) echo 'no secrets found for mbtest/prod :: commit+push env files first' >&2; exit 1;;\n\
          empty) exit 0;;\n\
-         *) printf 'MAILBOX_TOKEN=stubtoken\\nMAILBOX_SECRET_KEY=stubkey\\n';;\nesac",
+         *) printf 'KYU_TOKEN=stubtoken\\nKYU_SECRET_KEY=stubkey\\n';;\nesac",
         log.display()
     )
     .unwrap();
@@ -70,7 +70,7 @@ fn d12_latch_sourced_secrets() {
 
     // 1. Declared but HOMELAB_LATCH_ENV unset → hard error naming the remedy.
     std::env::remove_var("HOMELAB_LATCH_ENV");
-    let dir = stack_dir(&tmp, "latch_secrets: [mailbox]\n");
+    let dir = stack_dir(&tmp, "latch_secrets: [kyu]\n");
     let err = homelab_client::spec::build_spec(&dir).unwrap_err();
     assert!(err.contains("HOMELAB_LATCH_ENV"), "{}", err);
 
@@ -79,14 +79,14 @@ fn d12_latch_sourced_secrets() {
     std::env::remove_var("LATCH_STUB_MODE");
     let spec = homelab_client::spec::build_spec(&dir).unwrap();
     assert_eq!(
-        spec.env.get("mailbox").map(|s| s.as_str()),
-        Some("MAILBOX_TOKEN=stubtoken\nMAILBOX_SECRET_KEY=stubkey\n"),
+        spec.env.get("kyu").map(|s| s.as_str()),
+        Some("KYU_TOKEN=stubtoken\nKYU_SECRET_KEY=stubkey\n"),
         "latch stdout becomes the app env, byte for byte"
     );
     let logged = std::fs::read_to_string(&log).unwrap();
     let line = logged.lines().last().unwrap();
     assert!(
-        line.ends_with("|cat mbtest/mailbox/.env --env prod --expand"),
+        line.ends_with("|cat mbtest/kyu/.env --env prod --expand"),
         "pinned D10 interface, --expand included: {}",
         line
     );
@@ -99,15 +99,15 @@ fn d12_latch_sourced_secrets() {
     // Plaintext-scan (standing rule 10): nothing latch produced may land on
     // the workstation disk — the stack tree holds no .env afterwards.
     assert!(
-        !dir.join("mailbox/.env").exists(),
+        !dir.join("kyu/.env").exists(),
         "no plaintext .env may be written"
     );
 
     // 3. Both sources for one app → refused, not silently preferred.
-    write(&dir.join("mailbox").join(".env"), "MAILBOX_TOKEN=plain\n");
+    write(&dir.join("kyu").join(".env"), "KYU_TOKEN=plain\n");
     let err = homelab_client::spec::build_spec(&dir).unwrap_err();
     assert!(err.contains("BOTH"), "{}", err);
-    std::fs::remove_file(dir.join("mailbox/.env")).unwrap();
+    std::fs::remove_file(dir.join("kyu/.env")).unwrap();
 
     // 4. latch fails → its stderr (which carries the remedy) reaches the user.
     std::env::set_var("LATCH_STUB_MODE", "fail");
@@ -122,12 +122,12 @@ fn d12_latch_sourced_secrets() {
     // 6. No latch_secrets declared → latch is never invoked at all.
     std::env::set_var("LATCH_STUB_MODE", "fail");
     let plain = stack_dir(&tmp.join("second"), "");
-    write(&plain.join("mailbox").join(".env"), "MAILBOX_TOKEN=plain\n");
+    write(&plain.join("kyu").join(".env"), "KYU_TOKEN=plain\n");
     let before = std::fs::read_to_string(&log).unwrap().lines().count();
     let spec = homelab_client::spec::build_spec(&plain).unwrap();
     assert_eq!(
-        spec.env.get("mailbox").map(|s| s.as_str()),
-        Some("MAILBOX_TOKEN=plain\n")
+        spec.env.get("kyu").map(|s| s.as_str()),
+        Some("KYU_TOKEN=plain\n")
     );
     let after = std::fs::read_to_string(&log).unwrap().lines().count();
     assert_eq!(before, after, "plaintext-only stacks must not touch latch");

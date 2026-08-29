@@ -39,7 +39,7 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
     **D12 · secrets via latch** (`latch_secrets` + `latch cat --expand`,
     live-proven B25), **F4 · metrics stack live on CT 113** (Prometheus +
     pve-exporter; Grafana coupling awaits Kenny's token), **C7 · native
-    services** (adopt/backup-native/update-native; CT 109 mailbox and
+    services** (adopt/backup-native/update-native; CT 109 kyu and
     CT 112 almanac adopted live, B27; broken-release rollback drill
     pending). Host runs v3.2.0. Stack files: compose stacks have
     `lxc-compose.yml`, native services `service.yml`.

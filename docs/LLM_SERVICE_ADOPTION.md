@@ -7,7 +7,7 @@ take ownership: state recorded, nightly backups, supervised self-updates —
 [LLM_COMPOSE_CONVERSION.md](LLM_COMPOSE_CONVERSION.md) (which covers
 docker-compose apps; this one covers bare binaries under systemd, C7).
 
-Proven flow: CT 109 (mailbox) and CT 112 (almanac) were adopted exactly
+Proven flow: CT 109 (kyu) and CT 112 (almanac) were adopted exactly
 this way on 2026-08-29, services untouched throughout.
 
 ## What adoption does — and refuses to do
@@ -55,16 +55,16 @@ runs exactly that way).
 `stacks/<stack>/service.yml` in the homelab repo:
 
 ```yaml
-stack_name: mailbox            # [a-z0-9-]
+stack_name: kyu            # [a-z0-9-]
 vmid: 109
-hostname: 109-app-mailbox      # must be <vmid>-app-<stack_name>
-unit: mailbox                  # systemd unit, no .service suffix
-binary: /usr/local/bin/mailbox # absolute path
-env_file: /etc/mailbox/mailbox.env   # omit if the unit has none
+hostname: 109-app-kyu      # must be <vmid>-app-<stack_name>
+unit: kyu                  # systemd unit, no .service suffix
+binary: /usr/local/bin/kyu # absolute path
+env_file: /etc/kyu/kyu.env   # omit if the unit has none
 data_dirs:                     # everything a restore-from-zero needs
-  - /var/lib/mailbox
-  - /etc/mailbox
-update_cmd: mailbox update     # omit = never updated by the homelab
+  - /var/lib/kyu
+  - /etc/kyu
+update_cmd: kyu update     # omit = never updated by the homelab
 ```
 
 Choosing `data_dirs`: ask "if this container burned down, which

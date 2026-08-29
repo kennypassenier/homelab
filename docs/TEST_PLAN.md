@@ -346,8 +346,8 @@ latch project link remains for real use.
 
 ### B26 · Metrics stack live (F4) — LIVE-PROVEN 2026-08-29
 CT 113 (`113-app-metrics`) deployed from the stack definition: Prometheus
-(90d retention) + pve-exporter + promtail. All targets up: mailbox
-(10.10.10.9:8080, `mailbox_sweeper_age_ms` scraping), pve (25 `pve_up`
+(90d retention) + pve-exporter + promtail. All targets up: kyu
+(10.10.10.9:8080, `kyu_sweeper_age_ms` scraping), pve (25 `pve_up`
 series — the whole park), prometheus itself. The pve-exporter credentials
 travelled via latch (D12's first production use): PVEAuditor token created
 on the host, staged on tmpfs, committed to latch env prod, never a readable
@@ -356,14 +356,14 @@ way (protection now last, after drive changes). Grafana datasource +
 dashboard pending Kenny's service-account token (MB5).
 
 ### B27 · Native-service adoption + backup (C7) — LIVE-PROVEN 2026-08-29
-CT 109 (mailbox) and CT 112 (almanac, ExecStart wrapped in `latch run`)
+CT 109 (kyu) and CT 112 (almanac, ExecStart wrapped in `latch run`)
 adopted via `homelab adopt stacks/<name>`; both services stayed `active`
 throughout — adoption touched nothing. First native backups written
-(mailbox-config 660 KiB, almanac-config 13 MiB) and the mailbox snapshot
+(kyu-config 660 KiB, almanac-config 13 MiB) and the kyu snapshot
 restore-drilled: the tar lists the real database files. Update supervision
 (preserve → restart-if-changed → health → rollback) is mock-proven in 9
 tests; the live broken-release drill is pending coordination with the
-mailbox project.
+kyu project.
 
 ### B20 · HA webhook receiver (F3, HA side) — LIVE-PROVEN 2026-08-11
 Host `notify_webhook` points at `automation.homelab_ops_webhook`

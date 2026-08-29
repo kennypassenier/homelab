@@ -27,7 +27,7 @@ pub struct NativeServiceManifest {
     /// not an option — the data stays where it is).
     #[serde(default)]
     pub data_dirs: Vec<String>,
-    /// The self-update verb, e.g. `mailbox update`. None = the homelab
+    /// The self-update verb, e.g. `kyu update`. None = the homelab
     /// never updates this service (by decision, recorded here).
     #[serde(default)]
     pub update_cmd: Option<String>,

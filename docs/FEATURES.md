@@ -439,13 +439,13 @@ No user-facing `--demo` flag. The simulator lives on only as an internal test
 fixture for G1's TUI snapshot tests — implementation detail, not a feature.
 
 ### C7 · Native Rust services under systemd — **Should** *(added 2026-08-28, Kenny's route "C+")*
-Kenny's own Rust services (mailbox, almanac, …) run as bare binaries under
+Kenny's own Rust services (kyu, almanac, …) run as bare binaries under
 systemd in their own LXC — no docker layer — with the homelab as the safety
 net their self-update cannot be: before the app runs `<tool> update`, the
 previous binary is preserved and a rollback is armed (the H5 pattern); a new
 version that fails to come up healthy is rolled back from OUTSIDE the app.
 Includes **adoption**: taking over an existing hand-built container (CT 109,
-`109-app-mailbox`, is the first) — verify unit/binary/EnvironmentFile/data
+`109-app-kyu`, is the first) — verify unit/binary/EnvironmentFile/data
 layout, record it in state, enable backups and update supervision, without
 restarting the service. Ships with `docs/LLM_SERVICE_ADOPTION.md` (sister to
 LLM_COMPOSE_CONVERSION.md) so a future LLM session can run an adoption
@@ -453,7 +453,7 @@ end-to-end.
 - **Auto**: install/adopt/update ops against the MockExecutor incl. the
   refusal paths (wrong unit, missing EnvironmentFile, data outside /appdata);
   rollback-armed update flow.
-- **Manual**: adopt CT 109 live; then a deliberately broken mailbox release
+- **Manual**: adopt CT 109 live; then a deliberately broken kyu release
   that self-updates and is rolled back by the homelab — the same drill H5
   passed.
 
@@ -470,7 +470,7 @@ Per-file sourcing sidesteps latch run's cross-file merge semantics entirely.
 - **Auto**: composition + mapping unit tests; plaintext-scan asserts no
   secret content is written to the workstation disk on any path; preflight
   refusal tests.
-- **Manual**: one deploy of the mailbox stack end-to-end with latch as the
+- **Manual**: one deploy of the kyu stack end-to-end with latch as the
   only secret source.
 
 ### E8 · ZFS snapshots + replication — **Should** *(added 2026-08-27)*

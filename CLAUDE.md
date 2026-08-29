@@ -35,6 +35,14 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
     `presets/rust-service/`; no orchestrator code.
   - **H10 fix** — the host-meta backup existed but was never called;
     now part of `nightly_plan()`, and it carries the intent repo too.
+  - **E8 · ZFS snapshots + replication** (absorbed the dead cron script),
+    **D12 · secrets via latch** (`latch_secrets` + `latch cat --expand`,
+    live-proven B25), **F4 · metrics stack live on CT 113** (Prometheus +
+    pve-exporter; Grafana coupling awaits Kenny's token), **C7 · native
+    services** (adopt/backup-native/update-native; CT 109 mailbox and
+    CT 112 almanac adopted live, B27; broken-release rollback drill
+    pending). Host runs v3.2.0. Stack files: compose stacks have
+    `lxc-compose.yml`, native services `service.yml`.
 - **Host daemon LIVE** on Proxmox as `homelab-host.service` (:8443, TLS
   fp SHA256:85:00:F8:84…); ships via `homelab self-update` (H5, armed
   rollback proven). Golden template = CT 999 (`clone:999` default).

@@ -63,7 +63,7 @@ endif
 	@cargo update --workspace --quiet 2>/dev/null || cargo check --workspace --quiet
 	@if ! git diff --quiet; then \
 		git add Cargo.toml Cargo.lock && \
-		git commit -m "release: v$(VERSION)"; \
+		git commit -m "release: v$(VERSION) [meta]"; \
 	fi
 	git tag -a "v$(VERSION)" -m "homelab v$(VERSION)"
 	git push origin HEAD --follow-tags

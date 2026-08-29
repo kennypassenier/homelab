@@ -344,6 +344,17 @@ real binary: latch's remedy passes through verbatim, empty stdout, exit 1.
 Cleanup: ciphertext removed from latch, stack file reverted; the stacks/
 latch project link remains for real use.
 
+### B26 · Metrics stack live (F4) — LIVE-PROVEN 2026-08-29
+CT 113 (`113-app-metrics`) deployed from the stack definition: Prometheus
+(90d retention) + pve-exporter + promtail. All targets up: mailbox
+(10.10.10.9:8080, `mailbox_sweeper_age_ms` scraping), pve (25 `pve_up`
+series — the whole park), prometheus itself. The pve-exporter credentials
+travelled via latch (D12's first production use): PVEAuditor token created
+on the host, staged on tmpfs, committed to latch env prod, never a readable
+file on the workstation. Found and fixed B1 protection-ordering bug on the
+way (protection now last, after drive changes). Grafana datasource +
+dashboard pending Kenny's service-account token (MB5).
+
 ### B20 · HA webhook receiver (F3, HA side) — LIVE-PROVEN 2026-08-11
 Host `notify_webhook` points at `automation.homelab_ops_webhook`
 (`/api/webhook/homelab-ops-c4d81f26`, local-only, POST). Every event is

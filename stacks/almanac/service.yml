@@ -14,4 +14,7 @@ env_file: /etc/almanac/latch.env
 data_dirs:
   - /opt/almanac
   - /etc/almanac
-update_cmd: runuser -u almanac -- /opt/almanac/almanac update
+# update_cmd deliberately absent for now: the app has (or may have) its own
+# complete rollback mechanism, and two systems restoring binaries can fight
+# each other. Ownership is Kenny's call (form pending); until then the
+# nightly run backs up only.

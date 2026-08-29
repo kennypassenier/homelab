@@ -10,4 +10,7 @@ env_file: /etc/mailbox/mailbox.env
 data_dirs:
   - /var/lib/mailbox
   - /etc/mailbox
-update_cmd: mailbox update
+# update_cmd deliberately absent for now: the app has (or may have) its own
+# complete rollback mechanism, and two systems restoring binaries can fight
+# each other. Ownership is Kenny's call (form pending); until then the
+# nightly run backs up only.

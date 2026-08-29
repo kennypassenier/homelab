@@ -210,7 +210,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
 /// Parse `restic snapshots --json` into `(short_id, unix_time)` pairs.
 /// Tolerant of extra fields; returns empty on malformed input (retention
 /// then keeps everything — fail-safe direction).
-fn parse_snapshots_json(raw: &str) -> Vec<(String, u64)> {
+pub(crate) fn parse_snapshots_json(raw: &str) -> Vec<(String, u64)> {
     #[derive(serde::Deserialize)]
     struct Snap {
         short_id: String,

@@ -71,6 +71,52 @@ async fn main() {
         "config" => rpc(&host, &token, Command::GetConfig).await,
         // E8: ZFS snapshots + replication of the declared jobs.
         "zfs-replicate" => rpc(&host, &token, Command::ZfsReplicate).await,
+        // C7: adopt a hand-built native-service container, and drive an
+        // adopted one. The stack file is stacks/<name>/service.yml.
+        "adopt" => {
+            let dir = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab adopt stacks/<name>"));
+            let path = Path::new(dir).join("service.yml");
+            let raw = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| die(&format!("cannot read {}: {}", path.display(), e)));
+            let m: homelab_proto::NativeServiceManifest = serde_yaml::from_str(&raw)
+                .unwrap_or_else(|e| die(&format!("service.yml parse: {}", e)));
+            if let Err(problems) = homelab_core::native::validate_native(&m) {
+                die(&format!("service.yml invalid: {}", problems.join("; ")));
+            }
+            println!(
+                "{}▶ adopt {} :: CT {} · unit {} · never restarts anything{}",
+                C_CYAN, m.stack_name, m.vmid, m.unit, C_RESET
+            );
+            rpc(&host, &token, Command::AdoptService(Box::new(m))).await;
+        }
+        "backup-native" => {
+            let stack = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab backup-native <stack>"));
+            rpc(
+                &host,
+                &token,
+                Command::BackupNative {
+                    stack: stack.clone(),
+                },
+            )
+            .await;
+        }
+        "update-native" => {
+            let stack = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab update-native <stack>"));
+            rpc(
+                &host,
+                &token,
+                Command::UpdateNative {
+                    stack: stack.clone(),
+                },
+            )
+            .await;
+        }
         // H10: on-demand snapshot of vault/state/TLS/intent repo.
         "backup-host-meta" => rpc(&host, &token, Command::BackupHostMeta).await,
         // H8 (light): park / unpark a stack for the nightly scheduler.
@@ -394,6 +440,10 @@ async fn main() {
                 "  homelab enable|disable <stack>      (un)park for the nightly scheduler (H8)"
             );
             println!("  homelab backup-host-meta            snapshot vault/state/TLS/repo (H10)");
+            println!("  homelab adopt stacks/<name>         adopt a native-service CT (C7)");
+            println!(
+                "  homelab backup-native|update-native <stack>  drive an adopted service (C7)"
+            );
             println!("  homelab zfs-replicate               ZFS snapshots + replication (E8)");
             println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
             println!("  homelab presets                     list the preset catalog (local)");

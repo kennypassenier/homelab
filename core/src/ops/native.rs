@@ -4,7 +4,7 @@
 //! nightly machinery (backup, update supervision) picks it up.
 
 use crate::error::CoreError;
-use crate::executor::{Executor, TracingExecutor};
+use crate::executor::{Cmd, Executor, TracingExecutor};
 use crate::native::NativeServiceManifest;
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
@@ -150,4 +150,211 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
 
 fn shq(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// C7 nightly backup for a native stack. The data lives INSIDE the
+/// container (adoption never restarts a service, so a bind-mount to
+/// /appdata was never an option); the snapshot therefore streams
+/// `pct exec tar` straight into `restic --stdin` — one host-side pipeline,
+/// nothing written in between. Repo naming and tiered retention are the
+/// same as every compose stack: `<base>/<stack>-config`.
+pub async fn backup_native(
+    ctx: &OpCtx<'_>,
+    m: &NativeServiceManifest,
+    cfg: &crate::ops::backup::BackupCfg,
+) -> OperationReport {
+    let op = format!("backup-{}", m.stack_name);
+    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+
+    step!(runner, "guard target", {
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    step!(runner, "init repo", {
+        // Fails harmlessly when the repo already exists — same as host-meta.
+        let _ = ctx
+            .exec
+            .run(&crate::ops::backup::restic_cmd(
+                cfg,
+                &m.stack_name,
+                &["init"],
+                120,
+            ))
+            .await;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    step!(runner, "snapshot", {
+        let dirs = m
+            .data_dirs
+            .iter()
+            .map(|d| shq(d))
+            .collect::<Vec<_>>()
+            .join(" ");
+        // pipefail is load-bearing: without it a dead `pct exec tar` still
+        // yields a "successful" empty snapshot — a backup that lies.
+        let script = format!(
+            "set -o pipefail; pct exec {} -- tar -cf - {} | \
+             env RESTIC_REPOSITORY={}/{}-config RESTIC_PASSWORD_FILE={} \
+             restic backup --stdin --stdin-filename {}-data.tar",
+            m.vmid, dirs, cfg.restic_base, m.stack_name, cfg.password_file, m.stack_name
+        );
+        crate::executor::run_ok(
+            exec,
+            &Cmd::new("sh", &["-c", &script], cfg.snapshot_timeout_s),
+        )
+        .await?;
+        Ok(StepOutcome::Changed)
+    });
+
+    step!(runner, "retention", {
+        let out = crate::executor::run_ok(
+            exec,
+            &crate::ops::backup::restic_cmd(cfg, &m.stack_name, &["snapshots", "--json"], 300),
+        )
+        .await?;
+        let snapshots = crate::ops::backup::parse_snapshots_json(&out.stdout);
+        let doomed = crate::retention::forget_list(&snapshots, &cfg.tiers, ctx.now_unix);
+        if doomed.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let mut args: Vec<&str> = vec!["forget"];
+        args.extend(doomed.iter().map(|s| s.as_str()));
+        args.push("--prune");
+        crate::executor::run_ok(
+            exec,
+            &crate::ops::backup::restic_cmd(cfg, &m.stack_name, &args, 900),
+        )
+        .await?;
+        Ok(StepOutcome::Changed)
+    });
+
+    runner.log(
+        Level::Info,
+        format!(
+            "[backup] {} (native, in-container) snapshot complete",
+            m.stack_name
+        ),
+    );
+    runner.finish_ok()
+}
+
+/// C7 update supervision — the safety net the app's own self-update cannot
+/// be. The app updates itself (`update_cmd`, Kenny's route C+); around it
+/// the homelab preserves the running binary, restarts into the new one only
+/// when the binary actually changed, verifies health, and rolls back from
+/// OUTSIDE the app when the new version does not come up.
+pub async fn update_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
+    let op = format!("update-{}", m.stack_name);
+    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+    let unit = format!("{}.service", m.unit);
+    let prev = format!("{}.homelab-prev", m.binary);
+
+    let Some(update_cmd) = m.update_cmd.clone() else {
+        runner.log(
+            Level::Info,
+            format!(
+                "[update] {} has no update_cmd — skipped by decision",
+                m.stack_name
+            ),
+        );
+        return runner.finish_ok();
+    };
+
+    step!(runner, "guard target", {
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    let mut before = String::new();
+    step!(runner, "preserve binary", {
+        let sum = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("sha256sum {} | cut -d' ' -f1", shq(&m.binary)),
+            60,
+        )
+        .await?;
+        before = sum.stdout.trim().to_string();
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("cp -p {} {}", shq(&m.binary), shq(&prev)),
+            60,
+        )
+        .await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "cannot preserve {} — refusing to update without a rollback copy",
+                m.binary
+            )));
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    step!(runner, "run self-update", {
+        let out = util_pct_sh(exec, m.vmid, &update_cmd, 900).await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "'{}' failed: {} — binary untouched, service still on the old version",
+                update_cmd,
+                out.stderr.trim()
+            )));
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    step!(runner, "restart if changed", {
+        let sum = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("sha256sum {} | cut -d' ' -f1", shq(&m.binary)),
+            60,
+        )
+        .await?;
+        if sum.stdout.trim() == before {
+            // Already current: no restart, no nightly service blip.
+            return Ok(StepOutcome::Unchanged);
+        }
+        let health = format!(
+            "systemctl restart {u} && for i in 1 2 3 4 5; do \
+             [ \"$(systemctl is-active {u})\" = active ] && exit 0; sleep 2; done; exit 1",
+            u = unit
+        );
+        let out = util_pct_sh(exec, m.vmid, &health, 120).await?;
+        if out.success() {
+            return Ok(StepOutcome::Changed);
+        }
+        // The armed rollback: restore the preserved binary from OUTSIDE the
+        // (dead) app, restart, and report the failure loudly either way.
+        let rollback = format!(
+            "cp -p {prev} {bin} && systemctl restart {u} && sleep 2 && \
+             [ \"$(systemctl is-active {u})\" = active ]",
+            prev = shq(&prev),
+            bin = shq(&m.binary),
+            u = unit
+        );
+        let rb = util_pct_sh(exec, m.vmid, &rollback, 120).await?;
+        Err(CoreError::Other(format!(
+            "new {} version did not come up healthy — rolled back to the previous binary ({}); \
+             investigate before the next nightly run",
+            m.stack_name,
+            if rb.success() {
+                "service restored and active"
+            } else {
+                "ROLLBACK ALSO FAILED — service needs hands NOW"
+            }
+        )))
+    });
+
+    runner.log(
+        Level::Info,
+        format!("[update] {} self-update supervised — healthy", m.stack_name),
+    );
+    runner.finish_ok()
 }

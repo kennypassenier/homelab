@@ -12,6 +12,7 @@ pub use homelab_core::manifest::{
     BootSpec, DeploySpec, FileBlob, GatewayRoute, LxcSpec, MountSpec, NetworkSpec, ResourceSpec,
     StackManifest,
 };
+pub use homelab_core::native::NativeServiceManifest;
 pub use homelab_core::retention::RetentionTier;
 
 pub const PROTO_VERSION: u32 = 1;
@@ -84,6 +85,19 @@ pub enum Command {
     /// TLS material, intent repo) into the dedicated host-meta repo. Runs
     /// nightly; this is the on-demand trigger.
     BackupHostMeta,
+    /// C7: adopt an existing hand-built native-service container — verify
+    /// it is what the manifest claims, record it in state, never restart it.
+    AdoptService(Box<NativeServiceManifest>),
+    /// C7: on-demand backup of a native stack (pct-exec tar into restic).
+    /// The stack must be adopted; the host reads the manifest from state.
+    BackupNative {
+        stack: String,
+    },
+    /// C7: run the app's own self-update under homelab supervision
+    /// (preserve binary, restart-if-changed, health check, armed rollback).
+    UpdateNative {
+        stack: String,
+    },
     /// E8: run the configured ZFS snapshot + replication jobs now.
     ZfsReplicate,
     /// H8 (light): flip a stack's enabled flag. Disabled = nightly scheduler

@@ -154,3 +154,116 @@ async fn c7_adopt_refuses_repointing_an_existing_stack() {
     let report = adopt(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
     assert!(!report.ok, "a stack name points at one vmid, forever");
 }
+
+// ── C7: native backup + supervised self-update ──────────────────────────────
+
+#[tokio::test]
+async fn c7_native_backup_streams_tar_into_restic() {
+    use homelab_core::ops::backup::BackupCfg;
+    use homelab_core::ops::native::backup_native;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup_native(
+        &ctx(&exec, &sink, &j),
+        &mailbox_manifest(),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let pipelines = exec.calls_containing("pct exec 109 -- tar -cf -");
+    assert_eq!(pipelines.len(), 1, "{:?}", exec.calls());
+    let p = &pipelines[0];
+    assert!(
+        p.contains("set -o pipefail"),
+        "without pipefail a dead tar yields a lying empty snapshot: {}",
+        p
+    );
+    assert!(p.contains("'/var/lib/mailbox'"), "data dir quoted: {}", p);
+    assert!(
+        p.contains("restic backup --stdin --stdin-filename mailbox-data.tar"),
+        "{}",
+        p
+    );
+    assert!(
+        p.contains("mailbox-config"),
+        "same repo naming as compose stacks: {}",
+        p
+    );
+}
+
+#[tokio::test]
+async fn c7_supervised_update_restarts_only_on_binary_change() {
+    use homelab_core::ops::native::update_native;
+    // Unchanged binary: the self-update said "already current" → no restart,
+    // no nightly service blip.
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("sha256sum", CmdOutput::ok("aaaa\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update_native(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("systemctl restart").is_empty(),
+        "no restart when the binary did not change"
+    );
+
+    // Changed binary: restart + health check, all good.
+    let exec = MockExecutor::new();
+    exec.enqueue("sha256sum", CmdOutput::ok("aaaa\n"));
+    exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
+    adopt_mocks(&exec);
+    exec.respond_always("systemctl restart", CmdOutput::ok(""));
+    let report = update_native(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        exec.calls_containing(
+            "cp -p '/usr/local/bin/mailbox' '/usr/local/bin/mailbox.homelab-prev'"
+        )
+        .len(),
+        1,
+        "binary preserved before the update: {:?}",
+        exec.calls()
+    );
+}
+
+#[tokio::test]
+async fn c7_supervised_update_rolls_back_when_new_version_stays_down() {
+    use homelab_core::ops::native::update_native;
+    let exec = MockExecutor::new();
+    exec.enqueue("sha256sum", CmdOutput::ok("aaaa\n"));
+    exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
+    // Health loop after restart fails; the rollback script (cp back +
+    // restart) succeeds.
+    exec.respond_always(
+        "for i in 1 2 3 4 5",
+        CmdOutput::failed(1, "unit stays down"),
+    );
+    exec.respond_always(
+        "cp -p '/usr/local/bin/mailbox.homelab-prev'",
+        CmdOutput::ok(""),
+    );
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update_native(&ctx(&exec, &sink, &j), &mailbox_manifest()).await;
+    assert!(!report.ok, "a rolled-back update is still a FAILED update");
+    assert_eq!(
+        exec.calls_containing(
+            "cp -p '/usr/local/bin/mailbox.homelab-prev' '/usr/local/bin/mailbox'"
+        )
+        .len(),
+        1,
+        "the armed rollback must restore the preserved binary: {:?}",
+        exec.calls()
+    );
+    let err = report.error.expect("failure carries the story");
+    assert!(
+        err.why.contains("rolled back") || err.remedy.contains("rolled back"),
+        "{:?}",
+        err
+    );
+}

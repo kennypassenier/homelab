@@ -1349,7 +1349,7 @@ async fn h19_golden_pct_create_argv() {
 --rootfs local-lvm:4 --net0 name=eth0,bridge=vmbr0,firewall=0,ip=10.10.10.8/24,gw=10.10.10.1,tag=10 \
 --memory 512 --swap 256 --cores 1 --unprivileged 1 --features nesting=1 --onboot 1 \
 --description managed by homelab v2 :: stack test --tags homelab --timezone host \
---protection 1 --startup order=50",
+--startup order=50",
         "golden pct create argv changed — verify deliberately and update"
     );
 }
@@ -1495,4 +1495,71 @@ async fn b8_old_state_json_defaults_to_enabled() {
         state.stacks["test"].enabled,
         "stacks from before the flag existed must stay in the nightly rotation"
     );
+}
+
+// ── Protection vs drive changes ─────────────────────────────────────────────
+
+/// Live-found on the first protected stack with a bind mount (metrics,
+/// 2026-08-29): Proxmox refuses drive changes ("can't update CT 113 drive
+/// 'mp0' - protection mode enabled") once the protection flag is set, so
+/// protection must be the LAST provisioning act — after resize and every
+/// mountpoint — on both the clone and the create path.
+#[tokio::test]
+async fn protection_is_set_after_all_drive_changes() {
+    use homelab_core::manifest::{DeploySpec, FileBlob};
+    use homelab_core::ops::deploy::deploy;
+    for template in ["clone:999", "debian-12"] {
+        let exec = MockExecutor::new();
+        deploy_mocks(&exec);
+        exec.respond_always("ls -A", CmdOutput::ok("config\n"));
+        let mut m = manifest(113, "prot");
+        m.lxc.template = template.into();
+        m.lxc.protection = true;
+        m.resources.disk_gb = 8;
+        let spec = DeploySpec {
+            manifest: m,
+            files: vec![FileBlob {
+                path: "app/docker-compose.yml".into(),
+                content: "services: {}".into(),
+                mode: None,
+            }],
+            env: Default::default(),
+            gateway_route: None,
+        };
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+        assert!(report.ok, "{} :: {:?}", template, report.error);
+        let calls = exec.calls();
+        let protect_idx = calls
+            .iter()
+            .position(|c| c.contains("--protection 1"))
+            .unwrap_or_else(|| panic!("{}: protection never set", template));
+        let mp_idx = calls
+            .iter()
+            .rposition(|c| c.contains("-mp0"))
+            .unwrap_or_else(|| panic!("{}: mount never set", template));
+        assert!(
+            protect_idx > mp_idx,
+            "{}: protection (call {}) must come after the last mount (call {})",
+            template,
+            protect_idx,
+            mp_idx
+        );
+        // Only the clone path resizes after the fact; create sizes the
+        // rootfs in `pct create` itself.
+        if template.starts_with("clone:") {
+            let resize_idx = calls
+                .iter()
+                .rposition(|c| c.contains("pct resize"))
+                .unwrap_or_else(|| panic!("{}: resize never ran", template));
+            assert!(
+                protect_idx > resize_idx,
+                "{}: protection (call {}) must come after resize (call {})",
+                template,
+                protect_idx,
+                resize_idx
+            );
+        }
+    }
 }

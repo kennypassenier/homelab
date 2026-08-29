@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  - job_name: mailbox
+    static_configs:
+      - targets: ["10.10.10.9:8080"]
+  - job_name: pve
+    metrics_path: /pve
+    params:
+      target: ["10.10.5.250"]
+    static_configs:
+      - targets: ["pve-exporter:9221"]
+  # almanac (CT 112) exposes no port yet; flip this on when its HTTP
+  # service is listening.
+  # - job_name: almanac
+  #   static_configs:
+  #     - targets: ["10.10.10.12:8080"]

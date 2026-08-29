@@ -206,10 +206,6 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     "--timezone".into(),
                     "host".into(),
                 ];
-                if m.lxc.protection {
-                    set_args.push("--protection".into());
-                    set_args.push("1".into());
-                }
                 if let Some(order) = m.boot.order {
                     set_args.push("--startup".into());
                     set_args.push(format!("order={}", order));
@@ -257,6 +253,15 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                             .await?;
                     }
                 }
+                // Same rule as the create path below: protection only
+                // after every drive change (see the comment there).
+                if m.lxc.protection {
+                    run_ok(
+                        exec,
+                        &Cmd::new("pct", &["set", &vm, "--protection", "1"], 60),
+                    )
+                    .await?;
+                }
                 run_ok(exec, &Cmd::new("pct", &["start", &vm], 120)).await?;
                 created = true;
                 return Ok(StepOutcome::Changed);
@@ -293,12 +298,6 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 "--timezone".into(),
                 "host".into(),
             ];
-            if m.lxc.protection {
-                // Hypervisor-level destroy refusal; gated destroy (C2) lifts
-                // it deliberately before removal.
-                args.push("--protection".into());
-                args.push("1".into());
-            }
             if let Some(order) = m.boot.order {
                 args.push("--startup".into());
                 args.push(format!("order={}", order));
@@ -343,6 +342,19 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 }
             }
             created = true;
+        }
+        // Protection is deliberately the LAST provisioning act: Proxmox
+        // refuses drive changes ("can't update CT ... drive 'mp0' -
+        // protection mode enabled") once the flag is set, so it must land
+        // after the rootfs resize and every mountpoint. Live-found on the
+        // first protected stack with a bind mount (metrics, 2026-08-29).
+        // Gated destroy (C2) lifts it deliberately before removal.
+        if created && m.lxc.protection {
+            run_ok(
+                exec,
+                &Cmd::new("pct", &["set", &vm, "--protection", "1"], 60),
+            )
+            .await?;
         }
         let status = run_ok(exec, &Cmd::new("pct", &["status", &vm], 30)).await?;
         if !status.stdout.contains("running") {

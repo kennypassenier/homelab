@@ -1,0 +1,28 @@
+stack_name: metrics
+vmid: 113
+hostname: 113-app-metrics
+network:
+  ip: 10.10.10.13/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+resources:
+  cores: 2
+  memory_mb: 1024
+  swap_mb: 512
+  disk_gb: 16
+  storage: local-lvm
+lxc:
+  template: clone:999
+  unprivileged: true
+  features: nesting=1,keyctl=1
+  protection: true
+boot:
+  onboot: true
+  order: 60
+storage:
+  - host_path: /appdata/metrics/prometheus-data
+    mount_point: /appdata/metrics/prometheus-data
+    host_owner_uid: 165534
+apps: [prometheus, promtail, pve-exporter]
+latch_secrets: [pve-exporter]

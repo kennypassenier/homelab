@@ -163,3 +163,24 @@ fn y4_finds_a_backup_that_quietly_stopped() {
     assert_eq!(found.len(), 1, "{:?}", found);
     assert!(found[0].what.contains("hours ago"), "{:?}", found[0]);
 }
+
+/// The probe address, which the first live run got wrong twice. Every case
+/// below is a route that actually exists in this homelab.
+#[test]
+fn y4_probe_address_covers_every_route_shape_in_the_house() {
+    use homelab_core::ops::fleetcheck::probe_hostport;
+    // The ordinary case: scheme and explicit port.
+    assert_eq!(probe_hostport("http://10.10.10.6:8096"), "10.10.10.6/8096");
+    // A TCP route fragment, which carries no scheme at all.
+    assert_eq!(probe_hostport("10.10.10.7:1883"), "10.10.10.7/1883");
+    // OPNsense: https and no port. Probing this as written asked for a path
+    // instead of a socket, and reported a working router as dead.
+    assert_eq!(probe_hostport("https://10.10.5.1"), "10.10.5.1/443");
+    // The http default, for symmetry.
+    assert_eq!(probe_hostport("http://10.10.10.2"), "10.10.10.2/80");
+    // A trailing path must not be mistaken for the port.
+    assert_eq!(
+        probe_hostport("http://10.10.10.9:8080/healthz"),
+        "10.10.10.9/8080"
+    );
+}

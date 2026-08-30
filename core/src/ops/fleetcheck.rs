@@ -151,3 +151,26 @@ pub fn evaluate(
 
     out
 }
+
+/// The address a route forwards to, as `host/port` for a `/dev/tcp` probe.
+///
+/// Extracted from the shell so it can be tested: the first live run reported
+/// every route in the house dead, and one of the two reasons was here —
+/// `https://10.10.5.1` carries no port, so probing it as written asks for a
+/// path rather than a socket. The other reason was the shell itself (dash has
+/// no /dev/tcp), which no amount of testing this function would have caught.
+/// Both were invisible until the check ran against the real fleet once.
+pub fn probe_hostport(target: &str) -> String {
+    let (scheme, rest) = match target.split_once("://") {
+        Some((s, r)) => (s, r),
+        None => ("", target),
+    };
+    let authority = rest.split('/').next().unwrap_or(rest);
+    match authority.rsplit_once(':') {
+        // An IPv6 literal has colons of its own; only a numeric tail is a port.
+        Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) && !port.is_empty() => {
+            format!("{}/{}", host, port)
+        }
+        _ => format!("{}/{}", authority, if scheme == "https" { 443 } else { 80 }),
+    }
+}

@@ -1539,15 +1539,17 @@ async fn gather_live_facts(
                 .or_else(|| t.strip_prefix("- address:"))
                 .map(|v| v.trim().trim_matches('"').to_string());
             if let Some(target) = target {
-                let hostport = target
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(&target)
-                    .trim_matches('"')
-                    .to_string();
+                let hostport =
+                    homelab_core::ops::fleetcheck::probe_hostport(target.trim_matches('"'));
+                // bash, not sh: /dev/tcp is a bash feature and the shell in
+                // these containers is dash, which reports "Directory
+                // nonexistent" for every address. The first run of this check
+                // called every route in the house dead, Jellyfin included —
+                // a check that always fires is worse than none, because it
+                // teaches you to stop reading it.
                 let probe = format!(
-                    "timeout 3 sh -c 'echo > /dev/tcp/{}' 2>/dev/null && echo up || echo down",
-                    hostport.replace(':', "/")
+                    "timeout 3 bash -c 'echo > /dev/tcp/{}' 2>/dev/null && echo up || echo down",
+                    hostport
                 );
                 let answered = exec
                     .run(&Cmd::new(

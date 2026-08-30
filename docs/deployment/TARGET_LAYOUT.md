@@ -1,72 +1,76 @@
 # Target layout — which service runs where
 
-Phase 4 draft, **revision 3 (2026-08-30)**. **Not approved.**
+Phase 4 output. **Frozen 2026-08-30** after three rounds and an
+`architecture-critic` pass. Changes go through mini-rounds only.
 
-Revision 1 was mine. Revision 2 answered the `architecture-critic`. Revision 3
-answers Kenny at the Phase 4 gate, where he declined to freeze and reopened
-five things. Two of his objections were right against me:
+Revision 1 was mine. Revision 2 answered the critic, who found five blocking
+objections. Revisions 3 and 4 answered Kenny, who declined to freeze twice and
+was right both times: the port collision was configuration rather than a
+reason to separate services, and reordering the containers the way I proposed
+would have moved qBittorrent and Jellyfin for no benefit he would ever feel.
 
-**The port collision was not a reason to separate services.** He asked whether
-anything besides the port kept http-switchboard away from kyu, and guessed it
-would be an easy fix. It is: `http-switchboard` takes `--listen` and an
-explicit `--healthcheck <url>`, kyu reads `KYU_LISTEN` from its environment
-file, and kyu-runner has `healthz_listen` in its config. All three are
-configuration, in three files, with no code change in any project. My
-objection justified *care*, not a different container.
+Merging metrics and observability — his question — freed the container that
+made the reordering unnecessary.
 
-**10.10.10.10 is Kenny's own desktop.** He asked whether the syncthing route
-was really wrong. It is — but not for the reason revision 2 gave. The address
-is his workstation (`eno1`, verified from the machine itself), and from the
-Proxmox host ports 8384, 22000 and 22 are all closed, so `sync.kp-soft.dev`
-resolves to a GUI nothing can reach. Syncing itself is unaffected: the desktop
-dials out to the hub, and outbound needs no open inbound port.
-The larger consequence nobody had noticed: **vmid 110 can never be used.**
-The convention gives a container the last octet `vmid - 100`, and
-`presets/syncthing/` targets exactly vmid 110. Creating it would collide with
-the workstation.
+## The layout
 
-## The proposal
-
-Ordered the way Kenny asked: metrics between the edge and the downloader, the
-rest shifting up. Nine stacks fit exactly into 104-113 with 110 held back.
-
-| # | vmid | stack | services | why here |
-|---|---|---|---|---|
-| 1 | 104 | `edge` | traefik, cloudflared, crowdsec, goaccess | nothing else reaches the outside world until this is up |
-| 2 | 105 | `metrics` | prometheus, alertmanager, pve-exporter | Kenny's placement: measuring comes before the things measured |
-| 3 | 106 | `downloader` | gluetun, qbittorrent | `network_mode: service:gluetun` — indivisible |
-| 4 | 107 | `media` | jellyfin, sonarr, radarr, bazarr, prowlarr, seerr, flaresolverr, recyclarr | the arr-suite and Jellyfin interact constantly |
-| 5 | 108 | `observability` | grafana, loki, uptime-kuma | own container per Kenny's A5 answer; no longer shares a fate with the edge |
-| 6 | 109 | `messaging` | kyu, kyu-runner, http-switchboard | everything that moves a message, per Kenny's A4 answer |
-| — | **110** | *(reserved, unusable)* | — | 10.10.10.10 belongs to Kenny's desktop |
-| 7 | 111 | `productivity` | supersync, postgres | vikunja dropped — see below |
-| 8 | 112 | `almanac` | almanac | self-updating, self-reverting |
-| 9 | 113 | `syncthing` | syncthing | promoted from `synctest` to production |
+| vmid | stack | services | change |
+|---|---|---|---|
+| 104 | `gateway` | traefik, cloudflared, crowdsec, goaccess | renamed from `platform`; the code already said `gateway_vmid: 104` |
+| 105 | `downloader` | gluetun, qbittorrent | unchanged |
+| 106 | `media` | jellyfin, sonarr, radarr, bazarr, prowlarr, seerr, flaresolverr, recyclarr | recyclarr added |
+| 107 | `metrics` | prometheus, alertmanager, pve-exporter, grafana, loki | moves here from 113; absorbs grafana and loki from 104 |
+| 108 | `uptime` | uptime-kuma | new stack; leaves 104 so it no longer watches its own host |
+| 109 | `messaging` | kyu, kyu-runner, http-switchboard | two services added |
+| **110** | *(reserved, unusable)* | — | 10.10.10.10 is Kenny's workstation |
+| 111 | `productivity` | supersync, postgres | vikunja dropped |
+| 112 | `almanac` | almanac | unchanged |
+| 113 | `syncthing` | syncthing | moves here from 108, renamed from `synctest` |
+| — | removed | — | 107 (empty), 190 and 191 (scratch) |
 
 Every container additionally carries node_exporter, cadvisor and promtail from
 the golden template (O2).
 
-## Still open, and deliberately not settled here
+**What actually moves: syncthing and the measuring services.** Everything
+Kenny addresses from his desktop — qBittorrent, Jellyfin, the arr-suite,
+SuperSync — keeps its address. That was his objection to revision 3 and it is
+fully answered rather than argued away.
 
-**Does observability leave the edge?** Revision 1 said yes. The critic's
-objection stands and is not resolved: CT 113 has **1 GB of RAM and 16 GB of
-disk** and already holds Prometheus at 90-day retention. Moving Grafana, Loki
-and Uptime Kuma there means one full disk takes down every automated watcher
-at once — including the one that would have warned about the disk. That is
-not obviously better than the split it replaces; it may be worse.
-The option neither revision listed: **bound Loki's data path with a quota**
-(its own dataset under `/appdata`). That fixes the stated failure mode
-wherever Loki runs, and turns co-location into a question about convenience
-rather than about survival. This goes to the gate form as a real choice, not
-as a recommendation dressed up as one.
+## Why metrics and observability are one stack, and Uptime Kuma is not
 
-**CT 108's identity.** Named `synctest`, running the real syncthing peer. The
-critic found the tiebreaker and it is not flattering: `sync.kp-soft.dev` is
-**broken right now**. The route file sends it to `10.10.10.10:8384`, where
-nothing answers; syncthing is on `10.10.10.8:8384`, which returns 200.
-Verified live 2026-08-30. That is a second dead route beside the MQTT one, and
-it has been that way unnoticed. Fixing the route is R8; deciding whether the
-stack is a test or production is the gate's question.
+Kenny asked whether they could merge. They can, and the reasons are his own
+grouping rule applied honestly: it is one function, Grafana is empty without
+Prometheus and Loki, and the objection I had raised — different backup
+profiles — was dissolved by his own B2 answer, since repositories are now per
+app rather than per stack.
+
+Uptime Kuma stays out because its entire value is working when the rest does
+not. Beside Prometheus, one container failure removes every automated watcher
+at once and nothing is left to say so. Today it is worse: it shares a container
+with Traefik, so it cannot report that the edge fell over.
+
+Kenny's naming: the merged stack is `metrics`, not `observability`.
+
+⚔ **Counter-argument, kept:** that is one more container for one small service,
+and a watcher running on the same hypervisor is not truly independent — a host
+failure blinds everything regardless. Real independence would need something
+outside this house.
+
+
+## Questions that were open, and how they closed
+
+- **Does observability leave the edge?** Yes. Kenny chose an own container at
+  A5, then asked at C2 whether metrics could join it. They did, which freed a
+  container and removed the need to renumber anything he uses.
+- **CT 108's identity.** Settled: syncthing is production and moves to 113
+  under its own name. The tiebreaker was that `sync.kp-soft.dev` had been
+  broken all along — the route pointed at 10.10.10.10, which is Kenny's
+  workstation, where nothing listens on 8384. Syncing itself was never
+  affected: the desktop dials out. The route is repaired to the container
+  (Kenny, B4).
+- **vmid 110.** Permanently reserved and unusable, because that address
+  belongs to the workstation. `presets/syncthing/` targets exactly vmid 110
+  and must be corrected.
 
 ## Code that has to change before this layout can exist
 
@@ -101,7 +105,7 @@ Named here so the gate form can price them, each verified in the source:
 8. **CT 109 cannot be resized by the orchestrator**: `resize::hot_apply` takes
    a `&StackManifest` and native stacks store `manifest: None`.
 
-## Counter-arguments to carry into the gate form
+## Standing risks accepted with this layout
 
 - Backing up Loki's chunks and Prometheus's TSDB to Google Drive nightly will
   meet the four-hour ceiling over a residential uplink; one timeout parks the
@@ -166,17 +170,38 @@ database and nothing else's (9 connections, all from supersync).
 Its data is not deleted: the productivity stack's existing restic history
 holds it, and B4 keeps the v1 repos until the new backups are proven.
 
-## What the reordering costs
+## What the migration costs
 
-Every stack that changes vmid changes its IP, and — under today's code — its
-stack name too, because the hostname must be `<vmid>-app-<stack>`. That means
-the reordering runs straight into the problem Kenny raised at A3: a stack whose
-name changes gets a brand-new, empty restic repository.
+Only three stacks change identity: `metrics` moves 113 → 107, `syncthing`
+moves 108 → 113 and is renamed from `synctest`, and `platform` is renamed to
+`gateway` on the same vmid. Kenny's B2 answer — one restic repository per app
+rather than per stack — means none of that costs backup history, which is
+exactly why B2 was a prerequisite rather than a side question.
 
-Four stacks move: `metrics` 113 → 105, `downloader` 105 → 106, `media`
-106 → 107, `syncthing` 108 → 113. Two are being rebuilt anyway (105, 106 in
-their old numbering), so their cost is already paid. The other two are
-currently homelab-managed and would lose their backup history unless A3 is
-settled first.
+The `synctest-config` repository is the one genuine migration: its contents
+belong to an app now called `syncthing`, so its history moves rather than
+being abandoned.
 
-**So A3 is not a side question — it is a prerequisite for the ordering.**
+## How a container is replaced (Kenny, C4)
+
+He wants the replacement to be complete: same vmid, same IP, nothing for him
+to reconfigure. That is possible because configuration now lives on the host
+under `/appdata`, which makes the container itself nearly empty — a disposable
+box to run software in.
+
+1. Copy the configuration out of the old container into
+   `/appdata/<stack>/<app>-config` on the host. The old container keeps running.
+2. Build the recipe once on a throwaway vmid and let it work end to end, so
+   the recipe is proven before anything is destroyed.
+3. vzdump the old container as the safety net.
+4. Destroy it and deploy the stack on the same vmid and IP. The configuration
+   is already on the host, so it starts with it.
+5. Verify. If it fails, restore the vzdump.
+
+Outage: the few minutes between steps 4 and 5 — container creation and start,
+with nothing to copy because the data never lived inside.
+
+⚔ **Counter-argument, kept:** there is still a window where the old container
+is gone and the new one has not proven itself. Building beside and switching
+over has no such window, at the price of a changed address. Kenny chose
+identity over that window, with step 2 as the compensation.

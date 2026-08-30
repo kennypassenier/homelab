@@ -37,6 +37,12 @@ Numbers are permanent and are never reused, including after a row closes.
 | D17 | Model v2: configuration moves to `/appdata/<stack>/<app>-config` on the host, restic runs host-side | `BACKUP_MODEL.md` | 2026-08-30 |
 | D18 | Close all three privileged-path gaps AND ship a second golden template, one privileged and one not | pending build (T28-T30, T34) | 2026-08-30 |
 | D19 | vzdump archives live on `hdd4tb-backup`; `/appdata` stays on pve-root | `/etc/pve/storage.cfg`, both jobs repointed | 2026-08-30 |
+| D23 | Phase 3 frozen: T1 file-based Prometheus discovery, T2 per-stack dashboards plus a fleet one, T3 docker labels, T4 both invocations, T5 native becomes a list, T6 unchanged | `TECH_CHOICES.md` | 2026-08-30 |
+| D24 | Phase 4 frozen: the ten-stack layout, `platform` → `gateway`, metrics and observability merged as `metrics` on 107, uptime-kuma alone on 108, syncthing to 113, vmid 110 permanently reserved | `TARGET_LAYOUT.md` | 2026-08-30 |
+| D25 | One restic repository **per app**, not per stack — so an app can move between stacks with its history | `TARGET_LAYOUT.md`, B2 | 2026-08-30 |
+| D26 | Container replacement keeps vmid and IP: prove the recipe on a throwaway vmid, vzdump, destroy, redeploy in place | `TARGET_LAYOUT.md`, C4 | 2026-08-30 |
+| D27 | http-switchboard joins kyu and kyu-runner on CT 109 with an explicit port map (8080/8082/8083); no code change in any project | `TARGET_LAYOUT.md`, A4 | 2026-08-30 |
+| D28 | Vikunja is dropped; its data stays in the productivity stack's existing backup | `TARGET_LAYOUT.md` | 2026-08-30 |
 | D20 | Phase 2 frozen after round 2; changes go through mini-rounds only | `FEATURES.md` | 2026-08-30 |
 | D21 | Grafana's admin password rotated off the shipped default and stored in latch at `platform/grafana/.env` (env prod) | verified: new password 200, old default 401 | 2026-08-30 |
 | D22 | Docker updates run through a maintained watchtower fork, with pre-stop/post-start hooks and a Jellyfin stream check | pending mini-round Z | 2026-08-30 |
@@ -117,6 +123,10 @@ Numbers are permanent and are never reused, including after a row closes.
 | T39 | Bring the restic target into `FileConfig` so a second target is expressible — F39 | — | open |
 | T40 | Let `native.rs` accept an explicit "no state, by decision" — F36 | T5 | open |
 | T41 | Propose snapshot-before-update as a third protection layer in the realisation plan — F40 | — | open |
+| T42 | Repair the syncthing route: 10.10.10.10 → the container — F34, B4 | — | open |
+| T43 | Correct `presets/syncthing/` off vmid 110, which can never be used | — | open |
+| T44 | Send kyu-runner two config corrections: `healthz_listen` 8081 → 8082 (cadvisor owns 8081 fleet-wide) and `webhook_url` to an IP instead of `homeassistant.lan` (C3) | — | open |
+| T45 | Move the `synctest-config` restic history to `syncthing-config` under the per-app scheme — D25 | T5 | open |
 | T2 | Bring `stacks/metrics/prometheus/prometheus.yml` level with the live one (almanac job, node job ×11, cadvisor job ×6) | T1 | open |
 | T3 | Add Alertmanager + its four rules + the `rules/` mount to the metrics stack | T1 | open |
 | T4 | Add node_exporter and the SMART textfile collector as managed artifacts | T1 | open |

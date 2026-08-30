@@ -18,7 +18,17 @@ gate_tree_before=$(gate_tree_fingerprint)
 
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+# `git commit` exports GIT_DIR (and friends) into its hooks. Tests that
+# spawn a real git in a temp repo of their own inherit it and end up
+# operating on THIS repo instead — core/tests/real_deps_tests.rs does
+# exactly that. In a plain clone GIT_DIR is the relative ".git", which
+# happens to resolve to the test's own repo and hides the problem; from a
+# worktree it is absolute, and the gate then goes red on a tree that is
+# fine. A gate that fails on something that is not broken teaches people
+# to bypass it, so hand the suite the clean environment it assumes.
+env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
+    -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+    cargo test --workspace
 
 # Standing rule 7, second clause: see gate_tree_fingerprint above.
 if [ "$(gate_tree_fingerprint)" != "$gate_tree_before" ]; then

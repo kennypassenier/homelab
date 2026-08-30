@@ -606,7 +606,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "homelab-client"
-version = "3.3.3"
+version = "3.3.4"
 dependencies = [
  "base64",
  "crossterm",
@@ -628,7 +628,7 @@ dependencies = [
 
 [[package]]
 name = "homelab-core"
-version = "3.3.3"
+version = "3.3.4"
 dependencies = [
  "async-trait",
  "serde",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "homelab-host"
-version = "3.3.3"
+version = "3.3.4"
 dependencies = [
  "async-trait",
  "axum",
@@ -662,7 +662,7 @@ dependencies = [
 
 [[package]]
 name = "homelab-proto"
-version = "3.3.3"
+version = "3.3.4"
 dependencies = [
  "homelab-core",
  "serde",

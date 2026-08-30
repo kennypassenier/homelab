@@ -1,6 +1,16 @@
 # Tech choices — The Homelab Deployment Project
 
-Phase 3 draft. **Not approved.** Each item below is a gate-form item.
+Phase 3 output. **Approved via the gate form on 2026-08-30** — every item
+below carries Kenny's actual answer. Frozen except through a mini-round.
+
+| Item | Decision |
+|---|---|
+| T1 | **A** — the orchestrator writes one target file per stack; Prometheus picks it up with `file_sd_configs` |
+| T2 | **A + B** — a generated dashboard per stack from a template, plus one fleet dashboard with a stack variable |
+| T3 | **A** — update behaviour is declared as docker labels, extending the existing `com.homelab.*` vocabulary |
+| T4 | **A** — the fleet check is a pure function in `core`, invoked both by a client command and by the nightly scheduler |
+| T5 | **A** — `StackState.native` becomes a list of services. Option B was presented as a trade-off and is in fact ruled out by code: `native.rs` forces `hostname == "<vmid>-app-<stack>"` and `guard_target` re-checks it live, so two stacks on one vmid would need two hostnames on one container |
+| T6 | Unchanged — MSRV 1.87, pinned toolchain, one workspace version |
 
 ## What is inherited, and therefore not re-decided
 

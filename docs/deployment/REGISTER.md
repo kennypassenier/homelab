@@ -42,6 +42,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | D25 | One restic repository **per app**, not per stack — so an app can move between stacks with its history | `TARGET_LAYOUT.md`, B2 | 2026-08-30 |
 | D26 | Container replacement keeps vmid and IP: prove the recipe on a throwaway vmid, vzdump, destroy, redeploy in place | `TARGET_LAYOUT.md`, C4 | 2026-08-30 |
 | D27 | http-switchboard joins kyu and kyu-runner on CT 109 with an explicit port map (8080/8082/8083); no code change in any project | `TARGET_LAYOUT.md`, A4 | 2026-08-30 |
+| D35 | M3 capability built: two golden templates, privilege in the name, observability agents baked in | `template.rs`, two tests | 2026-08-30 |
 | D34 | M2 complete (8/8) and M4 built: T1 discovery files, T2 generated dashboards, Y4 the fleet check as command and nightly pass. 20 suites green, clippy clean | commits 3db73bc, e65e351, 6bfc24f, 4bad39c | 2026-08-30 |
 | D33 | O7 settled by mini-round: Kenny chose the literal rule (C) over the weaker shape — "uniformiteit en een duidelijke regel hebben hier voorrang". `prometheus-data` renamed to `prometheus-config` in repo and live; 21 series of history intact after the move | `manifest.rs`, live on CT 113 | 2026-08-30 |
 | D32 | M2 in progress: O6 auto-restore per path, F38 restore timeout configurable, F39 backup target in `host.toml`, O5 clone-privilege guard and uid-mapping validation — all test-first, 19 suites green | commits 6b2bb2b, e758aee, dd96be6 | 2026-08-30 |
@@ -136,6 +137,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | T41 | Propose snapshot-before-update as a third protection layer in the realisation plan — F40 | — | open |
 | T42 | Repair the syncthing route: 10.10.10.10 → the container — F34, B4 | — | open |
 | T43 | Correct `presets/syncthing/` off vmid 110, which can never be used | — | open |
+| T46 | **Release the host binary.** M3's real templates, M4's live half and every M2 fix only take effect once the host runs the new code. First thing that waits on Kenny rather than on work | 42 commits ready, 20 suites green | waiting on Kenny |
 | T44 | Send kyu-runner two config corrections: `healthz_listen` 8081 → 8082 (cadvisor owns 8081 fleet-wide) and `webhook_url` to an IP instead of `homeassistant.lan` (C3) | — | open |
 | T45 | Migrate the existing stack-named restic histories to their per-app repositories with `restic copy`, BEFORE those stacks are next deployed — `metrics-config` → `prometheus-config`, `synctest-config` → `syncthing-config` — D25 | — | open, blocks the next deploy of those two stacks |
 | T2 | Bring `stacks/metrics/prometheus/prometheus.yml` level with the live one (almanac job, node job ×11, cadvisor job ×6) | T1 | open |

@@ -52,8 +52,6 @@ scrape_configs:
         labels: {host: downloader, role: lxc}
       - targets: ["10.10.10.6:9100"]
         labels: {host: media, role: lxc}
-      - targets: ["10.10.10.7:9100"]
-        labels: {host: mqtt, role: lxc}
       - targets: ["10.10.10.8:9100"]
         labels: {host: synctest, role: lxc}
       - targets: ["10.10.10.9:9100"]

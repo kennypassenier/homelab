@@ -16,7 +16,7 @@ Scale: **Onmisbaar** (essential) · **Gewenst** (desired) · **Later** ·
 | E1 | Deploy kyu-runner. HA automation first, then the route, then a smoke test — HA answers 200 to unknown webhook ids, so the reverse order acks into the void | Onmisbaar | A test message fires the HA automation, visible in Traces; one deliberate POST to a non-existent webhook id is measured, not assumed |
 | E2 | Deploy HTTPSwitchboard and close the alert chain. Container healthcheck on plain `/healthz`, never `?strict=1` | Onmisbaar | A deliberately triggered alert arrives as a Home Assistant notification |
 | E3 | Recyclarr for Sonarr and Radarr. TRaSH `trash_id` hashes resolved at deploy time, never written from memory | Onmisbaar | A dry run lists the profile changes; after the real run they are present in both apps |
-| E4 | Remove CT 107. MQTT terminates on the Home Assistant VM (Kenny, 2026-08-30), so the `lxc-mqtt-stack.yml` route and Traefik's `mqtt` entrypoint go with it | Onmisbaar | No Traefik route resolves to an address where nothing listens — checked across all routes, not just this one |
+| E4 | **Done 2026-08-31.** Remove CT 107. MQTT terminates on the Home Assistant VM (Kenny, 2026-08-30), so the `lxc-mqtt-stack.yml` route and Traefik's `mqtt` entrypoint go with it | Onmisbaar | No Traefik route resolves to an address where nothing listens — checked across all routes, not just this one |
 | E5 | Remove scratch containers 190 and 191, freeing 10.10.10.14/.15 for the vmid convention. 191 is shared with notification-pipeline-v2 — coordinate first | Onmisbaar | Both addresses free; a new stack can follow the convention |
 
 ## O · What the orchestrator must learn

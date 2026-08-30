@@ -105,6 +105,24 @@ Code, with tests, no live systems touched.
 **Exit:** every item has a test that fails before its fix. A drill on a
 throwaway container deploys a two-service native stack from zero.
 
+**Status 2026-08-30: six of seven done**, each red before green.
+
+| Item | Test |
+|---|---|
+| O6 auto-restore per path | `o6_restore_is_per_path_not_per_stack` |
+| F38 restore timeout configurable | `f38_restore_honours_the_configured_timeout` — measured against the old constant, not argued |
+| F39 backup target in `host.toml` | `settings_render_keeps_every_config_field`, extended |
+| O5 clone-privilege guard | `o5_clone_refuses_a_privilege_level_the_template_cannot_give` |
+| O5 uid-mapping validation | `o5_host_owner_uid_must_match_the_privilege_level` |
+| D25 per-app repositories | `d25_backup_writes_one_repo_per_owning_app` |
+| T40 declared-stateless services | `t40_stateless_must_be_declared_not_inferred` |
+| T5 several natives per stack | `t5_a_stack_holds_several_native_services`, `t5_pre_list_state_migrates_on_load` |
+
+Not done: **O7**, the `<app>-config` naming rule. It deviates from its own
+frozen text and is quarantined pending a mini-round rather than built — see
+`REGISTER.md` F42. The live drill of a two-service native stack waits for M3's
+templates and M7's scratch container.
+
 ### M3 · The golden templates
 - Two templates, privileged and unprivileged, with docker,
   unattended-upgrades, node_exporter, cadvisor and promtail baked in (O2).

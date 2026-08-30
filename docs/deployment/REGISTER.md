@@ -42,6 +42,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | D25 | One restic repository **per app**, not per stack — so an app can move between stacks with its history | `TARGET_LAYOUT.md`, B2 | 2026-08-30 |
 | D26 | Container replacement keeps vmid and IP: prove the recipe on a throwaway vmid, vzdump, destroy, redeploy in place | `TARGET_LAYOUT.md`, C4 | 2026-08-30 |
 | D27 | http-switchboard joins kyu and kyu-runner on CT 109 with an explicit port map (8080/8082/8083); no code change in any project | `TARGET_LAYOUT.md`, A4 | 2026-08-30 |
+| D39 | M5 two of three: update classes written down and labelled (Y1/Z1), O9 clean shutdown built with the pull-stop-up order asserted. O10 blocked on the refused Jellyfin key | `UPDATE_POLICY.md`, `o9_stop_first_happens_between_the_pull_and_the_up` | 2026-08-31 |
 | D38 | CT 107 destroyed (E4). Final vzdump taken first (289 MB), Traefik's `mqtt` entrypoint and route removed, the scrape target dropped from repo and live config | 20 of 20 Prometheus targets up, 0 down; fin/grafana/tasks routes still answer; fleet check clean | 2026-08-31 |
 | D36 | v3.3.0 → 3.3.2 released and live on the host, each with an armed rollback that disarmed itself. T1/T2 enabled in `host.toml` (keys placed before the `[[zfs_jobs]]` tables — bare keys after a table header belong to that table in TOML) | `homelab ping` reports 3.3.2 | 2026-08-31 |
 | D37 | `homelab check` runs clean against the real fleet: repo and reality agree | verified live after fixing two probe faults and one bookkeeping fault | 2026-08-31 |

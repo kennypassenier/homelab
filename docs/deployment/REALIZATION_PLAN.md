@@ -172,6 +172,12 @@ deployed. That is a release, and a release is Kenny's go.
 **Exit:** a deliberately failing update restores the previous version; an
 update during a stream is skipped with a readable reason.
 
+**Status 2026-08-31: two of three.** The policy is written down and applied
+(`UPDATE_POLICY.md`), and O9's clean shutdown is built with the order asserted
+— pull, stop, up — so the downtime is the swap rather than the download.
+O10 is blocked: the Jellyfin API key on CT 106 is refused, measured three
+ways (F32). The check cannot be built against an API that will not answer.
+
 ### M6 · The full backup and its drills
 Kenny's own gate: nothing is integrated before this is green.
 

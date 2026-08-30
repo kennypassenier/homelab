@@ -37,7 +37,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | F4 | A2's hostname guard, not the no-touch list, is what still refuses the legacy stacks (`lxc-media-stack` etc. are not `<vmid>-app-<stack>`) | Narrowing the no-touch list did not make them deployable | done |
 | F5 | Two drives are old: Toshiba DT01ACA200 at 110 329 power-on hours, WD40EFRX at 63 194 — both pass SMART with zero reallocations | Justifies the pending-sector alert rule; a backup target choice must not assume these drives | open |
 | F6 | Grafana runs with `GF_SECURITY_ADMIN_PASSWORD=changeme_secure_password` and 10.10.10.4:3000 answers on the LAN with no gate | Must be treated as leaked; see §6 of the vault note "Homelab Open Issues" | open |
-| F7 | kyu (CT 109) has `last_backup: NEVER` and `enabled: false`; its homelab state still describes the pre-rename `mailbox` paths, none of which exist | The hub the notification chain depends on is in no off-machine backup | open |
+| F7 | homelab's record of the kyu stack is broken (pre-rename `mailbox` paths, `enabled: false`, `last_backup: 0`) — but a daily vzdump job covers CT 109 and one restic snapshot exists on Drive | **Corrected**: the data is protected twice over; what is missing is homelab maintaining it | open |
 | F8 | `/etc/homelab/host.toml` sets `no_touch` explicitly, which REPLACES the compiled default — today's code narrowing changed nothing live | The safety decision is not yet in force; the file must be updated per container | open |
 | F9 | Uptime Kuma monitors exactly one target (kyu `/healthz`) after four weeks of uptime | Jellyfin, Traefik, HA, almanac and the whole edge are unwatched | open |
 | F10 | CT 107 is empty, yet `lxc-mqtt-stack.yml` still routes TCP :1883 to it while CT 104 publishes 1883 itself | Where MQTT terminates must be settled before 107 is removed | open |
@@ -46,6 +46,10 @@ Numbers are permanent and are never reused, including after a row closes.
 | F13 | CT 104 runs no promtail, so the host that owns Loki ships none of its own container logs | Blind spot exactly where the edge lives | open |
 | F14 | kyu's store is a 98 KB `.db` behind a 4.1 MB `.db-wal` | Any backup or move must take .db/.db-wal/.db-shm together (standing rule 15a) | open |
 | F15 | CT 111 was removed from the live no-touch list on 2026-08-29 so homelab could adopt it; the adoption never happened | Unprotected and unmanaged simultaneously | open |
+| F16 | restic backs up HOST paths (`storage[].host_path`), never paths inside a container | The four ansible-era stacks are in NO backup of any kind — no restic repo, no vzdump job | open |
+| F17 | `stacks/cloudflared` claims vmid 109 (kyu), `stacks/gateway` claims 108 (synctest), `stacks/todo` claims 111 — all v1-era leftovers | Only A2's hostname guard stops a deploy from targeting a live container | open |
+| F18 | The Google Drive target authenticates today and holds five restic repos (76 MiB) — no new token needed | B2 shrinks to a restore drill | done |
+| F19 | Those repos hold 1, 1, 1, 7 and 3 snapshots while state claims nightly runs for all of them | Unverified whether retention explains it; measure before trusting the nightly run | open |
 
 ## Tasks (T)
 
@@ -59,6 +63,11 @@ Numbers are permanent and are never reused, including after a row closes.
 | T20 | Capture the Cloudflare tunnel ingress and Access policies into the repo — F12 | needs Cloudflare credentials | open |
 | T21 | Add promtail to CT 104 — F13 | T1 | open |
 | T22 | Give Uptime Kuma a real monitor set — F9 | T1 | open |
+| T23 | Remove or rewrite the three stale stack files claiming live vmids — F17 | T1 | open |
+| T24 | Verify whether restic retention explains the snapshot counts — F19 | T1 | open |
+| T25 | Recyclarr preset (E3) | T1 | open |
+| T26 | Adopt CT 111 so SuperSync gets backups — F15/R7 | T1 | open |
+| T27 | Delete CT 107; MQTT terminates on the Home Assistant VM (Kenny, 2026-08-30), so the `lxc-mqtt-stack.yml` route and Traefik's `mqtt` entrypoint go with it | T1 | open |
 | T2 | Bring `stacks/metrics/prometheus/prometheus.yml` level with the live one (almanac job, node job ×11, cadvisor job ×6) | T1 | open |
 | T3 | Add Alertmanager + its four rules + the `rules/` mount to the metrics stack | T1 | open |
 | T4 | Add node_exporter and the SMART textfile collector as managed artifacts | T1 | open |

@@ -166,15 +166,23 @@ ansible-era `.env` is a plaintext file on a container disk with no other copy.
 
 Numbered into `REGISTER.md`; the sharp ones:
 
-- **F7 · kyu has never been backed up and is excluded from the nightly run.**
-  Homelab's state still describes the stack as `mailbox`: hostname
-  `109-app-mailbox`, unit `mailbox`, binary `/usr/local/bin/mailbox`, data
-  dirs `/var/lib/mailbox` + `/etc/mailbox` — none of which exist since the
-  rename. `enabled: false`, `last_backup: NEVER`, while almanac, metrics,
+- **F7 · homelab's own record of the kyu stack is broken, but kyu itself is
+  backed up.** Corrected 2026-08-30 after checking the backup targets rather
+  than only homelab's state — the first version of this finding claimed kyu
+  had never been backed up at all, and that was wrong.
+  What is broken: homelab's state still describes the stack as `mailbox` —
+  hostname `109-app-mailbox`, unit `mailbox`, binary `/usr/local/bin/mailbox`,
+  data dirs `/var/lib/mailbox` + `/etc/mailbox`, none of which exist since the
+  rename. `enabled: false` and `last_backup: 0`, while almanac, metrics,
   synctest, host-meta and the ZFS jobs all ran at 04:04 this morning. The
-  most likely chain is the H8 auto-disable after the first failing nightly
-  run following the rename. The hub carries its own `kyu-backup` snapshots
-  locally, so nothing is lost — but nothing is off the machine either.
+  likely chain is H8's auto-disable after the first nightly run that failed
+  the hostname guard.
+  What is NOT broken: a dedicated **vzdump job** backs up CT 109 daily at
+  03:30 (`keep-daily=7,keep-weekly=4`, storage `local`), deliberately
+  scheduled after the hub's own in-container consistent backup at 03:00 —
+  231 MB written this morning. And `gdrive:homelab-backups/mailbox-config/`
+  holds one restic snapshot from before the rename. So the data has two
+  independent copies; what is missing is homelab maintaining them.
 - **F8 · the live no-touch list overrides the code.** `/etc/homelab/host.toml`
   sets `no_touch = [100,101,102,103,104,105,106,107,201,202,203]`, and that
   key *replaces* the compiled default rather than adding to it. Today's
@@ -201,6 +209,25 @@ Numbered into `REGISTER.md`; the sharp ones:
 - **F15 · CT 111 was taken off the live no-touch list on 2026-08-29 so
   homelab could adopt it — the adoption never happened.** It has been
   unprotected and unmanaged at the same time since.
+- **F16 · restic backs up HOST paths, never paths inside a container.**
+  `core/src/ops/backup.rs` collects `manifest.storage[].host_path` and runs
+  restic on the Proxmox host against those. Configuration living at
+  `/opt/<app>-config/` inside a container is therefore invisible to it. This
+  settles §3: the four ansible-era stacks are in **no backup of any kind** —
+  no restic repo, and the only vzdump job on this host covers CT 109 alone.
+- **F17 · three stack files in this repo claim vmids that are live.**
+  `stacks/cloudflared/` says vmid 109 (kyu), `stacks/gateway/` says 108
+  (synctest), `stacks/todo/` says 111 (productivity). All three are v1-era
+  leftovers carrying the retired `deploy.last_applied_*` schema. A2's
+  hostname guard refuses each of them today (`109-app-cloudflared` is not
+  `109-app-kyu`), which is the only reason this is a hazard rather than an
+  incident.
+- **F18 · the Google Drive target works today.** Measured, not assumed:
+  `rclone lsd gdrive:` authenticated and listed the drive, and
+  `gdrive:homelab-backups` holds five restic repos totalling 76 MiB. No new
+  token is needed. Registered rather than asserted: those repos hold 1, 1, 1,
+  7 and 3 snapshots while state claims a nightly run for all of them —
+  whether retention explains that has not been verified.
 
 ## 8 · Not yet inventoried, deliberately
 

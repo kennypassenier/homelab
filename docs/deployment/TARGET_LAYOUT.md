@@ -1,66 +1,47 @@
 # Target layout — which service runs where
 
-Phase 4 draft, **revision 2 (2026-08-30)**, rewritten after the
-`architecture-critic` pass. **Not approved.**
+Phase 4 draft, **revision 3 (2026-08-30)**. **Not approved.**
 
-Revision 1 proposed functional renames, adoption of the four ansible-era
-containers in place, and a messaging container holding three services. The
-critic found five blocking objections, every one of which I verified against
-the code or the live fleet before accepting it. Three of them killed parts of
-revision 1 outright. What follows is what survives, with the reasoning kept
-rather than quietly replaced.
+Revision 1 was mine. Revision 2 answered the `architecture-critic`. Revision 3
+answers Kenny at the Phase 4 gate, where he declined to freeze and reopened
+five things. Two of his objections were right against me:
 
-## What the critic changed, and why
+**The port collision was not a reason to separate services.** He asked whether
+anything besides the port kept http-switchboard away from kyu, and guessed it
+would be an easy fix. It is: `http-switchboard` takes `--listen` and an
+explicit `--healthcheck <url>`, kyu reads `KYU_LISTEN` from its environment
+file, and kyu-runner has `healthz_listen` in its config. All three are
+configuration, in three files, with no code change in any project. My
+objection justified *care*, not a different container.
 
-**No stack is renamed.** The restic repository path is derived from the stack
-name (`core/src/ops/backup.rs:30`, `format!("{}/{}-config", base, stack)`) and
-so is the hostname guard. Renaming `metrics` → `observability` would start an
-empty repo, orphan the existing history, leave the old key in `state.json`
-pointing at a hostname that no longer exists, fail `guard_target` on the next
-nightly run and get the stack auto-disabled — which is finding **F7**, word
-for word, three more times. Functional names stay documentation; the stack
-name stays the identifier. A rename operation (state key move, repo copy,
-hostname set) would have to be built first, and nothing needs it enough.
-
-**The four ansible-era containers are rebuilt beside and cut over, not
-adopted in place.** In `core/src/ops/deploy.rs` the `pct set -mp<i>` loop
-exists on both provisioning paths and both sit inside `if !exists { … }`. A
-deploy onto an existing container therefore configures **no mountpoints at
-all**: docker would create `/appdata/media/jellyfin-config` on the container's
-own rootfs, Jellyfin would start, the deploy would go green, and restic on the
-host would snapshot an empty directory. O4's whole promise fails silently on
-the stacks that matter most. Verified in the source; `validate()` only checks
-that the bind is *declared*, never that it is *mounted*.
-Consequence, stated because it is not free: cut-over gives every rebuilt stack
-a **new vmid and a new IP**, which triggers D16 — Kenny gets the list of what
-he has to reconfigure before it happens, SuperSync being the known case.
-And it makes **E5 a hard prerequisite**: CT 190 and 191 must release
-10.10.10.14 and .15 before anything can be built beside.
-
-**HTTPSwitchboard goes to CT 113, not to the messaging container.** Three
-separate reasons, any one of which is enough. Its default listen address is
-`0.0.0.0:8080` and so is kyu's — and its `--healthcheck` with no argument
-probes `http://127.0.0.1:8080/healthz`, which on a shared container is *kyu's*
-health endpoint answering 200 for a switchboard that may be dead. It already
-ships a complete compose preset with a real container healthcheck, which
-`FEATURES.md` E2 (frozen) assumes exists. And `SCOPE.md` G2 names the grouping
-as "kyu + kyu-runner" — putting a third service there was my addition, not
-Kenny's. Moving it also means "CT 109 is down" becomes an alert that can leave
-the house instead of one that dies with its own carrier.
+**10.10.10.10 is Kenny's own desktop.** He asked whether the syncthing route
+was really wrong. It is — but not for the reason revision 2 gave. The address
+is his workstation (`eno1`, verified from the machine itself), and from the
+Proxmox host ports 8384, 22000 and 22 are all closed, so `sync.kp-soft.dev`
+resolves to a GUI nothing can reach. Syncing itself is unaffected: the desktop
+dials out to the hub, and outbound needs no open inbound port.
+The larger consequence nobody had noticed: **vmid 110 can never be used.**
+The convention gives a container the last octet `vmid - 100`, and
+`presets/syncthing/` targets exactly vmid 110. Creating it would collide with
+the workstation.
 
 ## The proposal
 
-| vmid | stack (identifier) | services | why together |
-|---|---|---|---|
-| 104 | `platform` | traefik, cloudflared, crowdsec, goaccess | one failure domain: the way in. goaccess and crowdsec both parse Traefik's access log off the same disk |
-| 105 | `downloader` | gluetun, qbittorrent | `network_mode: service:gluetun` makes the pair indivisible — that pair IS the kill switch |
-| 106 | `media` | jellyfin, sonarr, radarr, bazarr, prowlarr, seerr, flaresolverr, recyclarr | Kenny's explicit wish; recyclarr configures sonarr/radarr so it belongs beside them |
-| 108 | `synctest` | syncthing | keeps its name; see the open question below |
-| 109 | `kyu` | kyu, kyu-runner | Kenny's G2 wording exactly. The vendor designed for it: kyu-runner's unit ships `After=kyu.service` and `hub_url = http://127.0.0.1:8080` |
-| 111 | `productivity` | vikunja, supersync, postgres | Kenny's own task and sync data |
-| 112 | `almanac` | almanac | self-updating and self-reverting; deliberately left alone |
-| 113 | `metrics` | prometheus, alertmanager, pve-exporter, **http-switchboard**, and — open — grafana, loki, uptime-kuma | everything that measures, plus the translator that sits directly beside its only customer |
-| — | removed | 107 (empty), 190 and 191 (scratch, and a prerequisite) | |
+Ordered the way Kenny asked: metrics between the edge and the downloader, the
+rest shifting up. Nine stacks fit exactly into 104-113 with 110 held back.
+
+| # | vmid | stack | services | why here |
+|---|---|---|---|---|
+| 1 | 104 | `edge` | traefik, cloudflared, crowdsec, goaccess | nothing else reaches the outside world until this is up |
+| 2 | 105 | `metrics` | prometheus, alertmanager, pve-exporter | Kenny's placement: measuring comes before the things measured |
+| 3 | 106 | `downloader` | gluetun, qbittorrent | `network_mode: service:gluetun` — indivisible |
+| 4 | 107 | `media` | jellyfin, sonarr, radarr, bazarr, prowlarr, seerr, flaresolverr, recyclarr | the arr-suite and Jellyfin interact constantly |
+| 5 | 108 | `observability` | grafana, loki, uptime-kuma | own container per Kenny's A5 answer; no longer shares a fate with the edge |
+| 6 | 109 | `messaging` | kyu, kyu-runner, http-switchboard | everything that moves a message, per Kenny's A4 answer |
+| — | **110** | *(reserved, unusable)* | — | 10.10.10.10 belongs to Kenny's desktop |
+| 7 | 111 | `productivity` | supersync, postgres | vikunja dropped — see below |
+| 8 | 112 | `almanac` | almanac | self-updating, self-reverting |
+| 9 | 113 | `syncthing` | syncthing | promoted from `synctest` to production |
 
 Every container additionally carries node_exporter, cadvisor and promtail from
 the golden template (O2).
@@ -142,3 +123,60 @@ Named here so the gate form can price them, each verified in the source:
 - Recyclarr must run in scheduled mode, never one-shot: `verify health` fails a
   deploy when no service is running, and the nightly backup's resume step runs
   `docker compose up -d` for every app.
+
+## Port map for CT 109 (Kenny's A4 answer)
+
+All three services keep their defaults where they can and move where they
+must. Nothing needs a code change in any project — three configuration lines.
+
+| Port | Service | How it is set | Whose file |
+|---|---|---|---|
+| 8080 | kyu | unchanged default | — |
+| 8081 | cadvisor | baked into the golden template (O2), fleet-wide | homelab |
+| 8082 | kyu-runner `/healthz` | `healthz_listen = "10.10.10.9:8082"` | `kyu-runner/deploy/config.toml` |
+| 8083 | http-switchboard | `--listen 0.0.0.0:8083` in the unit's ExecStart | homelab-written unit |
+| 8083 | http-switchboard healthcheck | `--healthcheck http://127.0.0.1:8083/healthz` — **the argument is not optional here**: without it the check probes 8080, which is kyu, and a dead switchboard reports itself healthy | homelab-written unit |
+| 9100 | node_exporter | baked into the golden template | homelab |
+
+The one thing worth sending to the kyu-runner project: its shipped example
+config points `healthz_listen` at 8081, which the golden template now gives to
+cadvisor on every container in the fleet. Same file also points `webhook_url`
+at `homeassistant.lan`, which violates scope constraint C3 (LXC IPs, never
+names).
+
+⚔ **Counter-argument to co-locating all three, kept rather than dropped.**
+After this, every path by which Kenny learns anything is wrong runs through one
+container: Alertmanager (105) → http-switchboard (109) → Home Assistant, and
+Y2 routes the homelab's own operation notifications through kyu (109) as well.
+When the orchestrator restarts kyu during an update, the report of that
+operation — including the "rollback also failed, this needs hands now" text —
+is posted fire-and-forget with a 5-second timeout and no retry, so it is simply
+lost in that window. The mitigation is to broaden Y2's exception from "kyu
+itself is down" to **any operation whose target is the messaging stack**, which
+keeps those on the direct path.
+
+## Vikunja
+
+Dropped. Kenny: "vikunja wordt niet meer gebruikt". Confirmed on the machine —
+its database has not been written since 2026-07-08, and the only traffic in a
+week of logs is Traefik and Uptime Kuma probing `/`. The container keeps
+SuperSync and its Postgres, which the same check confirms is SuperSync's
+database and nothing else's (9 connections, all from supersync).
+
+Its data is not deleted: the productivity stack's existing restic history
+holds it, and B4 keeps the v1 repos until the new backups are proven.
+
+## What the reordering costs
+
+Every stack that changes vmid changes its IP, and — under today's code — its
+stack name too, because the hostname must be `<vmid>-app-<stack>`. That means
+the reordering runs straight into the problem Kenny raised at A3: a stack whose
+name changes gets a brand-new, empty restic repository.
+
+Four stacks move: `metrics` 113 → 105, `downloader` 105 → 106, `media`
+106 → 107, `syncthing` 108 → 113. Two are being rebuilt anyway (105, 106 in
+their old numbering), so their cost is already paid. The other two are
+currently homelab-managed and would lose their backup history unless A3 is
+settled first.
+
+**So A3 is not a side question — it is a prerequisite for the ordering.**

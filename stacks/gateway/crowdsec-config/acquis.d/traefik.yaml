@@ -1,7 +1,0 @@
-# CrowdSec acquisition config — tells CrowdSec which log files to tail and how to parse them.
-# This file is read at CrowdSec startup from /etc/crowdsec/acquis.d/
-
-filenames:
-  - /var/log/npm/proxy-host-*.log
-labels:
-  type: nginx-proxy-manager

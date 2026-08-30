@@ -77,6 +77,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | F30 | The v1 directories are all still present: `apps`, `client-app`, `host-daemon`, `lxc-daemon`, `stacks-backup` | The never-answered V1-V5 cleanup | done 2026-08-30 (Z5) |
 | F31 | A Jellyfin stream check already existed in v1 (`stacks-backup/media/jellyfin/check-streams.sh`, now in git history only) and **fails open**: a missing key, an unreachable API or an empty response all exit 0 = "safe to update" | The exact conditions in which you cannot tell whether someone is watching are the ones where it says go ahead. O10 must fail closed instead | open |
 | F32 | The `JELLYFIN_API_KEY` in `/opt/jellyfin/.env` on CT 106 is **invalid** — HTTP 401 measured three ways (Authorization MediaBrowser Token, X-Emby-Token, `?api_key=`) | O10 needs a fresh key before it can be built or tested | open |
+| F40 | Container snapshots are supported (every container is on thin-provisioned `local-lvm`) and **not one exists**. The thin pool is 20.8% used, metadata 0.9% | A near-free instant-undo layer sits unused; directly useful before an update (O9) or a risky change | open — proposal for Phase 5 |
 | F34 | **`sync.kp-soft.dev` is broken right now.** Its route file sends traffic to `10.10.10.10:8384`, where nothing answers; syncthing runs on `10.10.10.8:8384`, which returns 200. Verified live 2026-08-30 | A second dead route beside the MQTT one, unnoticed. Found by the critic, not by my own sweep — I recorded the address without checking it resolved | open (R8) |
 | F35 | `pct set -mp<i>` is only reached inside `if !exists` on both provisioning paths in `deploy.rs`; a deploy onto an existing container configures no mountpoints at all | Adopting the ansible-era stacks in place would put config on the container rootfs and have restic snapshot an empty host directory, green all the way | open |
 | F36 | `native.rs:73` refuses a manifest with empty `data_dirs`, and kyu-runner is deliberately stateless (`DynamicUser=yes`, "no state directory, no disk to protect") | kyu-runner cannot be declared as a native service today | open |
@@ -115,6 +116,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | T38 | Make the restore timeout configurable and raise it — F38 | — | open |
 | T39 | Bring the restic target into `FileConfig` so a second target is expressible — F39 | — | open |
 | T40 | Let `native.rs` accept an explicit "no state, by decision" — F36 | T5 | open |
+| T41 | Propose snapshot-before-update as a third protection layer in the realisation plan — F40 | — | open |
 | T2 | Bring `stacks/metrics/prometheus/prometheus.yml` level with the live one (almanac job, node job ×11, cadvisor job ×6) | T1 | open |
 | T3 | Add Alertmanager + its four rules + the `rules/` mount to the metrics stack | T1 | open |
 | T4 | Add node_exporter and the SMART textfile collector as managed artifacts | T1 | open |

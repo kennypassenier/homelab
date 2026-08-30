@@ -1571,6 +1571,23 @@ async fn gather_live_facts(
     facts
 }
 
+/// A backup is a backup, whoever asked for it. The scheduler recorded
+/// `last_backup` and the on-demand paths did not, so a stack backed up by
+/// hand still read as never backed up — which is exactly what the fleet check
+/// reported about kyu minutes after I had backed it up myself.
+async fn record_backup_time(state: &AppState, stack: &str) {
+    let store = homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+    if let Ok(mut s) = store.load().await {
+        if let Some(rec) = s.stacks.get_mut(stack) {
+            rec.last_backup = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let _ = store.save(s).await;
+        }
+    }
+}
+
 fn render_findings(findings: &[homelab_core::ops::fleetcheck::Finding]) -> String {
     use homelab_core::ops::fleetcheck::Severity;
     if findings.is_empty() {
@@ -1638,12 +1655,17 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 tiers: state.settings.read().unwrap().retention.clone(),
                 ..state.config.backup.clone()
             };
-            run_mutating_op(state, &exec, req.id, "backup", |ctx| {
+            let stack = manifest.stack_name.clone();
+            let resp = run_mutating_op(state, &exec, req.id, "backup", |ctx| {
                 Box::pin(
                     async move { homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await },
                 )
             })
-            .await
+            .await;
+            if resp.ok {
+                record_backup_time(state, &stack).await;
+            }
+            resp
         }
         Rpc::RestoreStack { manifest, snapshot } => {
             // The configured target and timeout, not the compiled defaults:
@@ -1747,6 +1769,9 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         if failed {
                             break;
                         }
+                    }
+                    if resp.ok {
+                        record_backup_time(state, &stack).await;
                     }
                     resp
                 }

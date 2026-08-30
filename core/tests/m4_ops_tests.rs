@@ -1106,6 +1106,61 @@ async fn e3_nonempty_dirs_skip_restore_and_restic_failure_never_blocks() {
         .any(|l| l.contains("AUTO-RESTORE FAILED")));
 }
 
+/// O6: the auto-restore used to be all-or-nothing — it only ran when EVERY
+/// path in `storage:` was empty. Wipe one app's config while its siblings are
+/// intact and nothing was restored, and nothing said so, because from the
+/// stack's point of view there was nothing wrong. The Ansible generation
+/// checked each service directory separately; this restores that.
+#[tokio::test]
+async fn o6_restore_is_per_path_not_per_stack() {
+    use homelab_core::ops::deploy::deploy;
+    let mut m = manifest(108, "test");
+    m.apps = vec!["alpha".into(), "beta".into()];
+    m.storage = vec![
+        homelab_core::manifest::MountSpec {
+            host_path: "/appdata/test/alpha-config".into(),
+            mount_point: "/appdata/test/alpha-config".into(),
+            host_owner_uid: None,
+        },
+        homelab_core::manifest::MountSpec {
+            host_path: "/appdata/test/beta-config".into(),
+            mount_point: "/appdata/test/beta-config".into(),
+            host_owner_uid: None,
+        },
+    ];
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    // alpha still holds data; beta was wiped.
+    exec.respond_always("ls -A '/appdata/test/alpha-config'", CmdOutput::ok("db\n"));
+    exec.respond_always("ls -A '/appdata/test/beta-config'", CmdOutput::ok(""));
+    exec.respond_always(
+        "snapshots --last --json",
+        CmdOutput::ok(r#"[{"short_id":"abc"}]"#),
+    );
+    exec.respond_always("restic restore", CmdOutput::ok("restored"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(m)).await;
+    assert!(report.ok, "{:?}", report.error);
+    let restores = exec.calls_containing("restic restore");
+    assert_eq!(
+        restores.len(),
+        1,
+        "exactly the wiped path should be restored, got: {:?}",
+        restores
+    );
+    assert!(
+        restores[0].contains("--path /appdata/test/beta-config"),
+        "the restore must target the wiped path only: {}",
+        restores[0]
+    );
+    assert!(
+        !restores[0].contains("alpha"),
+        "the intact path must not be touched: {}",
+        restores[0]
+    );
+}
+
 #[tokio::test]
 async fn e3_env_restored_from_vault_when_client_sends_none() {
     use homelab_core::ops::deploy::deploy;

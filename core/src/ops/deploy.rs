@@ -76,14 +76,21 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         })
     });
 
-    // ── E3: fresh/empty config dirs are refilled from the latest snapshot
-    // BEFORE apps start. Backup-target trouble degrades to a loud warning,
-    // never a blocked deploy (spec: upgraded-by-Kenny Must).
+    // ── E3/O6: every empty config dir is refilled from its own latest
+    // snapshot BEFORE apps start. Per PATH, not per stack: the first version
+    // restored only when EVERY declared path was empty, so wiping one app's
+    // config while its siblings were intact restored nothing and said nothing
+    // — from the stack's point of view there was nothing wrong. The Ansible
+    // generation checked each service directory separately; this restores
+    // that. Backup-target trouble degrades to a loud warning, never a blocked
+    // deploy (spec: upgraded-by-Kenny Must).
     step!(runner, "auto-restore check", {
         if m.storage.is_empty() {
             return Ok(StepOutcome::Unchanged);
         }
-        let mut all_empty = true;
+        let bcfg = crate::ops::backup::BackupCfg::default();
+        let mut restored_any = false;
+        let mut failed_any = false;
         for mount in &m.storage {
             let probe = exec
                 .run(&Cmd::new(
@@ -96,55 +103,67 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 ))
                 .await?;
             if !probe.stdout.trim().is_empty() {
-                all_empty = false;
-                break;
+                continue;
             }
-        }
-        if !all_empty {
-            return Ok(StepOutcome::Unchanged);
-        }
-        let bcfg = crate::ops::backup::BackupCfg::default();
-        let has_snapshot = exec
-            .run(&crate::ops::backup::restic_cmd(
-                &bcfg,
-                &m.stack_name,
-                &["snapshots", "--last", "--json"],
-                120,
-            ))
-            .await;
-        match has_snapshot {
-            Ok(out)
-                if out.success() && out.stdout.trim() != "[]" && !out.stdout.trim().is_empty() =>
-            {
-                log_info("[e3] config dirs are empty and a snapshot exists — restoring".into());
-                let restored = exec
-                    .run(&crate::ops::backup::restic_cmd(
-                        &bcfg,
-                        &m.stack_name,
-                        &["restore", "latest", "--target", "/"],
-                        bcfg.snapshot_timeout_s,
-                    ))
-                    .await;
-                match restored {
-                    Ok(o) if o.success() => {
-                        log_info("[e3] auto-restore complete".into());
-                        Ok(StepOutcome::Changed)
-                    }
-                    _ => {
-                        ctx.sink.emit(PipelineEvent::Line {
-                            level: Level::Warn,
-                            source: "HOST".into(),
-                            msg: "[e3] AUTO-RESTORE FAILED — deploy continues with EMPTY config dirs; restore manually if this stack had data".into(),
-                        });
-                        Ok(StepOutcome::Unchanged)
-                    }
+            let has_snapshot = exec
+                .run(&crate::ops::backup::restic_cmd(
+                    &bcfg,
+                    &m.stack_name,
+                    &["snapshots", "--last", "--json", "--path", &mount.host_path],
+                    120,
+                ))
+                .await;
+            let usable = matches!(&has_snapshot, Ok(out)
+                if out.success() && out.stdout.trim() != "[]" && !out.stdout.trim().is_empty());
+            if !usable {
+                log_info(format!(
+                    "[e3] {} is empty and has no snapshot — fresh",
+                    mount.host_path
+                ));
+                continue;
+            }
+            log_info(format!(
+                "[e3] {} is empty and a snapshot exists — restoring",
+                mount.host_path
+            ));
+            let restored = exec
+                .run(&crate::ops::backup::restic_cmd(
+                    &bcfg,
+                    &m.stack_name,
+                    &[
+                        "restore",
+                        "latest",
+                        "--target",
+                        "/",
+                        "--path",
+                        &mount.host_path,
+                    ],
+                    bcfg.snapshot_timeout_s,
+                ))
+                .await;
+            match restored {
+                Ok(o) if o.success() => restored_any = true,
+                _ => {
+                    failed_any = true;
+                    ctx.sink.emit(PipelineEvent::Line {
+                        level: Level::Warn,
+                        source: "HOST".into(),
+                        msg: format!(
+                            "[e3] AUTO-RESTORE FAILED for {} — deploy continues with that dir EMPTY; restore it by hand if it held data",
+                            mount.host_path
+                        ),
+                    });
                 }
             }
-            _ => {
-                log_info("[e3] empty config dirs, no snapshot available — fresh stack".into());
-                Ok(StepOutcome::Unchanged)
-            }
         }
+        if restored_any && !failed_any {
+            log_info("[e3] auto-restore complete".into());
+        }
+        Ok(if restored_any {
+            StepOutcome::Changed
+        } else {
+            StepOutcome::Unchanged
+        })
     });
 
     // ── C1: create or reuse the container; C3 boot policy at create. ─────

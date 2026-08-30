@@ -9,12 +9,19 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
 
 ## Procedure status
 
-| Field | Value |
-|---|---|
-| Current phase | 9 · Released — v3.0.0 (first tag) through v3.1.1 live on the host; `main` IS the rewrite since 2026-08-28 (v1 tip kept as branch `v1-archive`) |
-| Last completed gate | Pre-test backup round (2026-08-27): H10 fix, E8 build, LVM+vzdump safety net |
-| Next gate | Kenny's own test pass (docs/TEST_PLAN.md part A/B), then phase 10 retro for E8/G9/H7/H8 |
-| AFK mode | on for build work (Kenny: "keep going"), off for gates |
+Two projects live in this repo, each with its own phase track.
+
+| | Orchestrator (homelab v3) | **Deployment project** |
+|---|---|---|
+| Docs | `docs/*.md` | `docs/deployment/*.md` |
+| Phase | 9 · Released — v3.2.0 live on the host | **5 · Realization plan (gate open)** |
+| Frozen | features, architecture | scope, features, tech choices, architecture |
+| Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there |
+
+**The deployment project is the active work.** It brings the whole fleet under
+the orchestrator: one inventory, one target layout, one proven backup, then
+container-by-container replacement. Read `docs/deployment/REGISTER.md` first —
+it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 

@@ -661,6 +661,8 @@ async fn b8_clone_template_provisions_via_pct_clone() {
     exec.respond_always("is-system-running", CmdOutput::ok("running"));
     exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
     exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    // The golden template is unprivileged, which is what this stack asks for.
+    exec.respond_always("pct config 999", CmdOutput::ok("unprivileged: 1"));
     let mut m = manifest(108, "test");
     m.lxc.template = "clone:999".into();
     m.resources.disk_gb = 8;
@@ -1036,6 +1038,9 @@ fn deploy_mocks(exec: &MockExecutor) {
     exec.respond_always("is-system-running", CmdOutput::ok("running"));
     exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
     exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    // O5: the clone path reads the template's privilege level and refuses a
+    // mismatch, so every deploy that clones needs a template to describe.
+    exec.respond_always("pct config 999", CmdOutput::ok("unprivileged: 1"));
 }
 
 fn deploy_spec(m: StackManifest) -> homelab_core::manifest::DeploySpec {
@@ -1104,6 +1109,48 @@ async fn e3_nonempty_dirs_skip_restore_and_restic_failure_never_blocks() {
         .lines()
         .iter()
         .any(|l| l.contains("AUTO-RESTORE FAILED")));
+}
+
+/// O5: `pct clone` takes no `--unprivileged`, so a clone always inherits the
+/// template's privilege level. A manifest asking for a privileged container
+/// while cloning an unprivileged template used to produce an unprivileged one
+/// and report success — the file said one thing and the machine another, and
+/// nothing looked wrong until an app failed on permissions with no
+/// explanation. CT 105 and 106 are privileged and have to stay that way.
+#[tokio::test]
+async fn o5_clone_refuses_a_privilege_level_the_template_cannot_give() {
+    use homelab_core::ops::deploy::deploy;
+    let mut m = manifest(108, "test");
+    m.lxc.template = "clone:999".into();
+    m.lxc.unprivileged = false; // the stack wants privileged…
+    for mount in &mut m.storage {
+        mount.host_owner_uid = Some(1000); // privileged: no id mapping
+    }
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    // …but the golden template it clones is unprivileged.
+    exec.respond_always(
+        "pct config 999",
+        CmdOutput::ok("unprivileged: 1\nostype: debian"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(m)).await;
+    assert!(
+        !report.ok,
+        "the mismatch must be refused, not cloned anyway"
+    );
+    let err = report.error.expect("an error");
+    assert!(
+        err.why.contains("unprivileged") && err.why.contains("999"),
+        "the error must name the template and the mismatch: {}",
+        err.why
+    );
+    assert!(!err.remedy.is_empty(), "an error must carry a remedy");
+    assert!(
+        exec.calls_containing("pct clone").is_empty(),
+        "nothing should have been cloned"
+    );
 }
 
 /// F38: the restore timeout was a hardcoded 1800 s while the backup side had

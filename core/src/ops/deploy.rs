@@ -181,6 +181,29 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             // minutes, because docker + guards are already baked in. The
             // bootstrap steps below still run and simply skip everything.
             if let Some(tpl_vmid) = m.lxc.template.strip_prefix("clone:") {
+                // O5: `pct clone` has no --unprivileged; a clone always
+                // inherits the template's privilege level. Asking for one the
+                // template cannot give used to produce the other silently,
+                // and an app that then fails on permissions gives no hint why.
+                // CT 105 and 106 are privileged and must stay so.
+                let tpl_cfg = exec
+                    .run(&Cmd::new("pct", &["config", tpl_vmid], 30))
+                    .await?;
+                let tpl_unpriv = tpl_cfg
+                    .stdout
+                    .lines()
+                    .find_map(|l| l.strip_prefix("unprivileged:"))
+                    .map(|v| v.trim() == "1")
+                    .unwrap_or(false);
+                if tpl_unpriv != m.lxc.unprivileged {
+                    return Err(CoreError::SafetyAbort(format!(
+                        "template {} is {}, but stack '{}' asks for {} — pct clone cannot change this, it always inherits the template",
+                        tpl_vmid,
+                        if tpl_unpriv { "unprivileged" } else { "privileged" },
+                        m.stack_name,
+                        if m.lxc.unprivileged { "unprivileged" } else { "privileged" },
+                    )));
+                }
                 run_ok(
                     exec,
                     &Cmd::new(

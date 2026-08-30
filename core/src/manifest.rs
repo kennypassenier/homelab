@@ -227,6 +227,25 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
                 mount.mount_point
             ));
         }
+        // O5: an unprivileged LXC maps uid N inside to N+100000 on the host,
+        // a privileged one maps it to itself. The wrong number produces a
+        // directory the service cannot use while the deploy reports success,
+        // and the app simply does not start.
+        if let Some(uid) = mount.host_owner_uid {
+            const MAP: u32 = 100_000;
+            if m.lxc.unprivileged && uid < MAP {
+                problems.push(format!(
+                    "storage host_owner_uid {} on unprivileged stack '{}': uid {} inside the container is {} on the host — use {}",
+                    uid, m.stack_name, uid, uid + MAP, uid + MAP
+                ));
+            }
+            if !m.lxc.unprivileged && uid >= MAP {
+                problems.push(format!(
+                    "storage host_owner_uid {} on PRIVILEGED stack '{}': there is no id mapping, so the host uid is the container uid — use {}",
+                    uid, m.stack_name, uid - MAP
+                ));
+            }
+        }
     }
     for f in &spec.files {
         if f.path.contains("..") || f.path.starts_with('/') {

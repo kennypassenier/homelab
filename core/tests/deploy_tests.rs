@@ -101,6 +101,42 @@ fn script_fresh(exec: &MockExecutor) {
     exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
 }
 
+/// O5: on an unprivileged container uid 1000 inside is uid 101000 on the
+/// host, so the two privilege levels need host_owner_uid values 100000 apart.
+/// Nothing checked, and the wrong number produces a directory the service
+/// cannot use while the deploy reports success — the app just does not start.
+#[test]
+fn o5_host_owner_uid_must_match_the_privilege_level() {
+    use homelab_core::manifest::validate;
+    // Unprivileged stack given a raw uid: that is the privileged number.
+    let mut s = spec(108, "test");
+    s.manifest.lxc.unprivileged = true;
+    s.manifest.storage[0].host_owner_uid = Some(1000);
+    let err = validate(&s).expect_err("raw uid on an unprivileged stack must be refused");
+    assert!(
+        format!("{}", err).contains("101000"),
+        "the error must name the number that would work: {}",
+        err
+    );
+
+    // Privileged stack given a mapped uid: the other way round.
+    let mut s = spec(108, "test");
+    s.manifest.lxc.unprivileged = false;
+    s.manifest.storage[0].host_owner_uid = Some(101000);
+    let err = validate(&s).expect_err("mapped uid on a privileged stack must be refused");
+    assert!(format!("{}", err).contains("1000"), "{}", err);
+
+    // The combinations that are right stay right.
+    let mut ok = spec(108, "test");
+    ok.manifest.lxc.unprivileged = true;
+    ok.manifest.storage[0].host_owner_uid = Some(101000);
+    validate(&ok).expect("mapped uid on an unprivileged stack is correct");
+    let mut ok = spec(108, "test");
+    ok.manifest.lxc.unprivileged = false;
+    ok.manifest.storage[0].host_owner_uid = Some(1000);
+    validate(&ok).expect("raw uid on a privileged stack is correct");
+}
+
 // ── A1: no-touch list refuses before ANY command runs ───────────────────────
 
 #[tokio::test]

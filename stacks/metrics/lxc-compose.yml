@@ -24,5 +24,7 @@ storage:
   - host_path: /appdata/metrics/prometheus-data
     mount_point: /appdata/metrics/prometheus-data
     host_owner_uid: 165534
-apps: [prometheus, promtail, pve-exporter]
+# alertmanager was deployed by hand on 2026-08-30 and was missing here, so a
+# deploy of this stack would not have started it.
+apps: [prometheus, alertmanager, promtail, pve-exporter]
 latch_secrets: [pve-exporter]

@@ -15,7 +15,8 @@ milestone M8 of `docs/deployment/REALIZATION_PLAN.md`.
 
 | Directory | What | Moves to |
 |---|---|---|
-| `gateway/` | CT 104's Grafana provisioning (two datasources, seven dashboards) and the fleet-wide cadvisor compose file | `stacks/gateway/` |
+| `gateway/` | CT 104's Grafana provisioning: two datasources and seven dashboards | `stacks/gateway/` |
+| `fleet/` | The cadvisor compose file that runs identically on every docker host | baked into the golden template (O2) |
 | `pve-host/` | The SMART textfile collector and its systemd timer, which run on the Proxmox host itself — never inside a container, because SMART is unreadable from an unprivileged LXC | stays here; the host is not a stack |
 
 ## Why the SMART collector is a script and not an exporter

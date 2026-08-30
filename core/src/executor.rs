@@ -158,6 +158,11 @@ use std::sync::Mutex;
 #[derive(Default)]
 pub struct MockExecutor {
     calls: Mutex<Vec<String>>,
+    /// Rendered command paired with the timeout it was given. A timeout is
+    /// part of whether an operation can succeed at all — a restore that dies
+    /// at thirty minutes fails for a reason no argv assertion can see — so it
+    /// has to be assertable (deployment project, F38).
+    timeouts: Mutex<Vec<(String, u64)>>,
     queue: Mutex<Vec<(String, CmdOutput)>>,
     always: Mutex<Vec<(String, CmdOutput)>>,
     files: Mutex<HashMap<String, (String, u32)>>,
@@ -183,6 +188,17 @@ impl MockExecutor {
     /// Rendered forms of every executed command, in order.
     pub fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
+    }
+
+    /// Timeouts given to every command whose rendered form contains `needle`.
+    pub fn timeouts_for(&self, needle: &str) -> Vec<u64> {
+        self.timeouts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(c, _)| c.contains(needle))
+            .map(|(_, t)| *t)
+            .collect()
     }
 
     pub fn calls_containing(&self, needle: &str) -> Vec<String> {
@@ -218,6 +234,10 @@ impl Executor for MockExecutor {
     async fn run(&self, cmd: &Cmd) -> Result<CmdOutput, CoreError> {
         let rendered = cmd.rendered();
         self.calls.lock().unwrap().push(rendered.clone());
+        self.timeouts
+            .lock()
+            .unwrap()
+            .push((rendered.clone(), cmd.timeout_s));
         {
             let mut queue = self.queue.lock().unwrap();
             if let Some(pos) = queue.iter().position(|(m, _)| rendered.contains(m)) {

@@ -1106,6 +1106,42 @@ async fn e3_nonempty_dirs_skip_restore_and_restic_failure_never_blocks() {
         .any(|l| l.contains("AUTO-RESTORE FAILED")));
 }
 
+/// F38: the restore timeout was a hardcoded 1800 s while the backup side had
+/// already been raised to four hours for exactly the same reason — a first
+/// multi-GB transfer over a residential uplink. So a large restore from
+/// Google Drive died at thirty minutes, on the one operation you least want
+/// to discover is broken. It now comes from the configuration, and this test
+/// fails if anyone pins it back to a constant.
+#[tokio::test]
+async fn f38_restore_honours_the_configured_timeout() {
+    use homelab_core::ops::backup::{restore, BackupCfg};
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let cfg = BackupCfg {
+        restore_timeout_s: 9_999,
+        ..Default::default()
+    };
+    let _ = restore(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &cfg,
+        "latest",
+    )
+    .await;
+    let given = exec.timeouts_for("restic restore");
+    assert!(!given.is_empty(), "no restore command was issued");
+    assert!(
+        given.iter().all(|t| *t == 9_999),
+        "restore must use the configured timeout, got {:?}",
+        given
+    );
+    // And the default is no longer the old half hour.
+    assert_eq!(BackupCfg::default().restore_timeout_s, 4 * 3600);
+}
+
 /// O6: the auto-restore used to be all-or-nothing — it only ran when EVERY
 /// path in `storage:` was empty. Wipe one app's config while its siblings are
 /// intact and nothing was restored, and nothing said so, because from the

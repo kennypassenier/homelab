@@ -54,6 +54,18 @@ struct FileConfig {
     gateway_routes_dir: Option<String>,
     /// E8: ZFS snapshot+replication jobs (replaces the old cron script).
     zfs_jobs: Option<Vec<homelab_core::ops::zfs::ZfsJob>>,
+    /// Where restic writes. Was a string literal in BackupCfg::default(),
+    /// which meant exactly one backup target could ever be addressed while
+    /// the scope asks for two (deployment project, F39 / standing rule 27).
+    restic_base: Option<String>,
+    /// Path on this host to the file holding the restic password.
+    restic_password_file: Option<String>,
+    /// Seconds a single snapshot may take. Default 4 h: a first multi-GB
+    /// upload over a residential uplink is slow.
+    restic_snapshot_timeout_s: Option<u64>,
+    /// Seconds a single restore may take. Default 4 h, matching the snapshot
+    /// side — it used to be a hardcoded 1800 (F38).
+    restic_restore_timeout_s: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -76,6 +88,9 @@ struct Config {
     safety: SafetyConfig,
     /// E8: declared ZFS replication jobs; empty = feature off.
     zfs_jobs: Vec<homelab_core::ops::zfs::ZfsJob>,
+    /// Backup target and timeouts, resolved once from host.toml. Callers
+    /// clone this and override only `tiers`.
+    backup: homelab_core::ops::backup::BackupCfg,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
 }
@@ -136,6 +151,18 @@ fn load_config() -> Config {
             sc
         },
         zfs_jobs: file.zfs_jobs.unwrap_or_default(),
+        backup: {
+            let d = homelab_core::ops::backup::BackupCfg::default();
+            homelab_core::ops::backup::BackupCfg {
+                restic_base: file.restic_base.unwrap_or(d.restic_base),
+                password_file: file.restic_password_file.unwrap_or(d.password_file),
+                snapshot_timeout_s: file
+                    .restic_snapshot_timeout_s
+                    .unwrap_or(d.snapshot_timeout_s),
+                restore_timeout_s: file.restic_restore_timeout_s.unwrap_or(d.restore_timeout_s),
+                tiers: d.tiers,
+            }
+        },
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -182,7 +209,20 @@ fn render_settings_toml(
         gateway_routes_dir: Option<&'a String>,
         #[serde(skip_serializing_if = "<[_]>::is_empty")]
         zfs_jobs: &'a [homelab_core::ops::zfs::ZfsJob],
+        // Written back only when they differ from the compiled defaults, but
+        // written back they must be: a settings save that drops them would
+        // silently move the backup target, which is the same class of bug the
+        // opnsense fields once had.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        restic_base: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        restic_password_file: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        restic_snapshot_timeout_s: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        restic_restore_timeout_s: Option<u64>,
     }
+    let bdef = homelab_core::ops::backup::BackupCfg::default();
     let out = Out {
         token: &config.token,
         listen: config.listen.to_string(),
@@ -202,6 +242,14 @@ fn render_settings_toml(
             != SafetyConfig::default().gateway_routes_dir)
             .then_some(&config.safety.gateway_routes_dir),
         zfs_jobs: &config.zfs_jobs,
+        restic_base: (config.backup.restic_base != bdef.restic_base)
+            .then_some(&config.backup.restic_base),
+        restic_password_file: (config.backup.password_file != bdef.password_file)
+            .then_some(&config.backup.password_file),
+        restic_snapshot_timeout_s: (config.backup.snapshot_timeout_s != bdef.snapshot_timeout_s)
+            .then_some(config.backup.snapshot_timeout_s),
+        restic_restore_timeout_s: (config.backup.restore_timeout_s != bdef.restore_timeout_s)
+            .then_some(config.backup.restore_timeout_s),
     };
     toml::to_string_pretty(&out).map_err(|e| e.to_string())
 }
@@ -259,6 +307,11 @@ mod tests {
                 source: "HDD2TB".into(),
                 target: "HDD18TB/REPLICA_2TB".into(),
             }],
+            backup: homelab_core::ops::backup::BackupCfg {
+                restic_base: "rclone:hdd:homelab-backups".into(),
+                restore_timeout_s: 9_999,
+                ..Default::default()
+            },
             initial_settings: homelab_proto::HostConfigView {
                 backup_hour: Some(4),
                 notify_webhook: Some("http://ha/webhook/x".into()),
@@ -285,6 +338,17 @@ mod tests {
             Some("http://ha/webhook/x")
         );
         assert_eq!(parsed.exec_enabled, Some(true));
+        // F39: a settings save must not silently move the backup target back
+        // to the compiled default.
+        assert_eq!(
+            parsed.restic_base.as_deref(),
+            Some("rclone:hdd:homelab-backups")
+        );
+        assert_eq!(parsed.restic_restore_timeout_s, Some(9_999));
+        // Values left at the default stay out of the file rather than being
+        // frozen into it.
+        assert_eq!(parsed.restic_password_file, None);
+        assert_eq!(parsed.restic_snapshot_timeout_s, None);
         assert_eq!(
             parsed.mirror_remote.as_deref(),
             Some("git@github.com:k/m.git")
@@ -971,7 +1035,7 @@ async fn scheduler_loop(state: AppState) {
                 let n1 = native.clone();
                 let cfg = homelab_core::ops::backup::BackupCfg {
                     tiers: tiers.clone(),
-                    ..Default::default()
+                    ..state.config.backup.clone()
                 };
                 let backup_report =
                     run_mutating_op(&state, &exec, 0, "scheduled-backup-native", |ctx| {
@@ -1020,7 +1084,7 @@ async fn scheduler_loop(state: AppState) {
             let m1 = manifest.clone();
             let cfg = homelab_core::ops::backup::BackupCfg {
                 tiers: tiers.clone(),
-                ..Default::default()
+                ..state.config.backup.clone()
             };
             let backup_report = run_mutating_op(&state, &exec, 0, "scheduled-backup", |ctx| {
                 Box::pin(async move { homelab_core::ops::backup::backup(ctx, &m1, &cfg).await })
@@ -1069,7 +1133,7 @@ async fn scheduler_loop(state: AppState) {
         if plan.contains(&NightlyTask::HostMeta) {
             let cfg = homelab_core::ops::backup::BackupCfg {
                 tiers: tiers.clone(),
-                ..Default::default()
+                ..state.config.backup.clone()
             };
             let report = run_mutating_op(&state, &exec, 0, "host-meta-backup", |ctx| {
                 Box::pin(
@@ -1392,7 +1456,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         Rpc::BackupStack(manifest) => {
             let cfg = homelab_core::ops::backup::BackupCfg {
                 tiers: state.settings.read().unwrap().retention.clone(),
-                ..Default::default()
+                ..state.config.backup.clone()
             };
             run_mutating_op(state, &exec, req.id, "backup", |ctx| {
                 Box::pin(
@@ -1402,15 +1466,13 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             .await
         }
         Rpc::RestoreStack { manifest, snapshot } => {
+            // The configured target and timeout, not the compiled defaults:
+            // this is the path where a hardcoded 1800 s used to kill a large
+            // restore over Google Drive at thirty minutes (F38).
+            let cfg = state.config.backup.clone();
             run_mutating_op(state, &exec, req.id, "restore", |ctx| {
                 Box::pin(async move {
-                    homelab_core::ops::backup::restore(
-                        ctx,
-                        &manifest,
-                        &homelab_core::ops::backup::BackupCfg::default(),
-                        &snapshot,
-                    )
-                    .await
+                    homelab_core::ops::backup::restore(ctx, &manifest, &cfg, &snapshot).await
                 })
             })
             .await
@@ -1448,7 +1510,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             let tiers = state.settings.read().unwrap().retention.clone();
             let cfg = homelab_core::ops::backup::BackupCfg {
                 tiers,
-                ..Default::default()
+                ..state.config.backup.clone()
             };
             let resp = run_mutating_op(state, &exec, req.id, "host-meta-backup", |ctx| {
                 Box::pin(
@@ -1481,7 +1543,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     let tiers = state.settings.read().unwrap().retention.clone();
                     let cfg = homelab_core::ops::backup::BackupCfg {
                         tiers,
-                        ..Default::default()
+                        ..state.config.backup.clone()
                     };
                     run_mutating_op(state, &exec, req.id, "backup-native", |ctx| {
                         Box::pin(async move {

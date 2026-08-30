@@ -39,6 +39,7 @@ fn restic(base: &str, stack: &str, password_ref: &str, args: &[&str], timeout: u
     Cmd::new(refs[0], &refs[1..], timeout)
 }
 
+#[derive(Clone)]
 pub struct BackupCfg {
     pub restic_base: String,
     /// Path to the restic password file on the host (from the secret store).
@@ -48,6 +49,11 @@ pub struct BackupCfg {
     /// Snapshot timeout. Hardening H2: the old fixed 1800 s was too small
     /// for a first multi-GB upload over residential rclone/gdrive.
     pub snapshot_timeout_s: u64,
+    /// Restore timeout. Was a hardcoded 1800 s while the backup side had
+    /// already been raised to four hours for exactly the same reason — so a
+    /// large restore over Google Drive died at thirty minutes, on the one
+    /// operation you least want to find broken (deployment project, F38).
+    pub restore_timeout_s: u64,
 }
 
 impl Default for BackupCfg {
@@ -57,6 +63,7 @@ impl Default for BackupCfg {
             password_file: "/var/lib/homelab/secrets/restic.pw".into(),
             tiers: crate::retention::default_tiers(),
             snapshot_timeout_s: 4 * 3600,
+            restore_timeout_s: 4 * 3600,
         }
     }
 }
@@ -326,7 +333,7 @@ pub async fn restore(
                 &m.stack_name,
                 &cfg.password_file,
                 &["restore", snapshot, "--target", "/"],
-                1800,
+                cfg.restore_timeout_s,
             ),
         )
         .await?;

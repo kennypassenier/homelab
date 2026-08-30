@@ -188,6 +188,26 @@ Kenny's own gate: nothing is integrated before this is green.
 **Exit:** four recorded drill outcomes with counts — what came back, not that
 it succeeded.
 
+**Status 2026-08-31: all four drills done.** Counts, not claims:
+
+| Drill | What came back | Time |
+|---|---|---|
+| Native service (kyu) | 8 files including `.db`, `.db-wal` and `.db-shm` together; the restored database opened with 10 topics, 46 messages, 7 subscriptions, 69 deliveries, 2 apps — identical to live | 3 s |
+| Docker stack (metrics) | 23 files, 186 MiB of Prometheus TSDB from the 04:05 snapshot | 13 s |
+| Host configuration | 135 files: TLS cert (valid, CN=homelab-host), the 64-byte restic password, `state.json` parsing with 4 stacks, and the intent repo as a working git repo with real commits | 3 s |
+| Whole container (almanac, 339 MB) | restored to a free vmid: 903 MiB extracted at 442 MiB/s, the binary, its unit file and 28 MB of data all present | **4 s** |
+
+The container drill was deliberately **not started**: the restore carries the
+original hostname and IP, so starting it beside the running almanac would have
+put two of the same service on 10.10.10.12. It was inspected by mounting its
+volume read-only and then destroyed. That proves the archive is complete and
+how long a restore costs; it does not prove the service comes up, which is
+what M7 covers on a container that can safely be replaced.
+
+What remains for M6 is the part that cannot be drilled yet: the four
+ansible-era stacks are still in no backup of their own, because their
+configuration lives inside their containers until M8 moves it.
+
 ### M7 · Assembly: the first container replaced end to end
 The milestone that goes missing if nobody names it. One container, all the way
 through the C4 procedure, proving the machinery does its own job rather than

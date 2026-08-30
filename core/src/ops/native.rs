@@ -191,7 +191,7 @@ pub async fn backup_native(
             .exec
             .run(&crate::ops::backup::restic_cmd(
                 cfg,
-                &m.stack_name,
+                &m.unit,
                 &["init"],
                 120,
             ))
@@ -212,7 +212,16 @@ pub async fn backup_native(
             "set -o pipefail; pct exec {} -- tar -cf - {} | \
              env RESTIC_REPOSITORY={}/{}-config RESTIC_PASSWORD_FILE={} \
              restic backup --stdin --stdin-filename {}-data.tar",
-            m.vmid, dirs, cfg.restic_base, m.stack_name, cfg.password_file, m.stack_name
+            // D25: named after the SERVICE, not the stack. T5 puts several
+            // services on one container, and a per-stack repository would
+            // fold them into one — so moving any of them elsewhere would
+            // leave its history behind, which is what D25 exists to prevent.
+            m.vmid,
+            dirs,
+            cfg.restic_base,
+            m.unit,
+            cfg.password_file,
+            m.unit
         );
         crate::executor::run_ok(
             exec,
@@ -225,7 +234,7 @@ pub async fn backup_native(
     step!(runner, "retention", {
         let out = crate::executor::run_ok(
             exec,
-            &crate::ops::backup::restic_cmd(cfg, &m.stack_name, &["snapshots", "--json"], 300),
+            &crate::ops::backup::restic_cmd(cfg, &m.unit, &["snapshots", "--json"], 300),
         )
         .await?;
         let snapshots = crate::ops::backup::parse_snapshots_json(&out.stdout);
@@ -238,7 +247,7 @@ pub async fn backup_native(
         args.push("--prune");
         crate::executor::run_ok(
             exec,
-            &crate::ops::backup::restic_cmd(cfg, &m.stack_name, &args, 900),
+            &crate::ops::backup::restic_cmd(cfg, &m.unit, &args, 900),
         )
         .await?;
         Ok(StepOutcome::Changed)

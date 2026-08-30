@@ -384,3 +384,45 @@ async fn t5_pre_list_state_migrates_on_load() {
     );
     assert_eq!(st.last_backup, 2, "unrelated bookkeeping is untouched");
 }
+
+/// D25 for native services: the repository is named after the SERVICE, not
+/// the stack. With T5 putting kyu, kyu-runner and http-switchboard on one
+/// container, a per-stack repository would have folded three services into
+/// one — and moving any of them elsewhere would have left its history behind,
+/// which is the exact thing D25 exists to prevent.
+///
+/// For the two services live today the name is unchanged, because their unit
+/// and their stack happen to share a name. That is why this needed a test
+/// rather than an eye: nothing about the current fleet would have shown it.
+#[tokio::test]
+async fn d25_native_backup_uses_the_service_name_for_its_repo() {
+    use homelab_core::ops::backup::BackupCfg;
+    use homelab_core::ops::native::backup_native;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let runner = NativeServiceManifest {
+        unit: "kyu-runner".into(),
+        binary: "/usr/local/bin/kyu-runner".into(),
+        env_file: None,
+        data_dirs: vec!["/etc/kyu-runner".into()],
+        stateless: false,
+        update_cmd: None,
+        ..kyu_manifest()
+    };
+    let r = backup_native(&ctx(&exec, &sink, &j), &runner, &BackupCfg::default()).await;
+    assert!(r.ok, "{:?}", r.error);
+    let calls = exec.calls_containing("restic backup --stdin").join(" ");
+    assert!(
+        calls.contains("homelab-backups/kyu-runner-config"),
+        "the repo must be named after the service: {}",
+        calls
+    );
+    assert!(
+        calls.contains("kyu-runner-data.tar"),
+        "and so must the archive inside it: {}",
+        calls
+    );
+}

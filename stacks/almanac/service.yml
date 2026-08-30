@@ -14,7 +14,22 @@ env_file: /etc/almanac/latch.env
 data_dirs:
   - /opt/almanac
   - /etc/almanac
-# update_cmd deliberately absent for now: the app has (or may have) its own
-# complete rollback mechanism, and two systems restoring binaries can fight
-# each other. Ownership is Kenny's call (form pending); until then the
-# nightly run backs up only.
+# Ownership settled 2026-08-30 on Kenny's instruction: the homelab manages
+# almanac's updates. The collision this comment used to warn about is gone,
+# because `almanac update` (K19, shipped in 1.3.0) is a different command
+# from almanac's own updater: it fetches, verifies, probes and installs,
+# then EXITS without restarting and without arming its own revert.
+#
+# The split is along what each side can actually do. Almanac knows how to
+# find a release and prove its signature, checksum and that the new binary
+# starts on this machine. The homelab knows how to restart a unit and put
+# a preserved binary back when the process is dead — which a dead process
+# cannot do for itself.
+#
+# ALMANAC_SELF_UPDATE=off is set in /etc/almanac/latch.env, so the app's
+# periodic updater no longer initiates. Exactly one of these two must be
+# armed; both would eventually restore each other's copy.
+#
+# runuser because /opt/almanac and the binary are owned by the almanac
+# user, and an update running as root would leave root-owned files behind.
+update_cmd: runuser -u almanac -- /opt/almanac/almanac update

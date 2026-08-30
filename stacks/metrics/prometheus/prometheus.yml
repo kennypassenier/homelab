@@ -1,10 +1,22 @@
 global:
   scrape_interval: 30s
 
+# Alertmanager reachable by container name on the shared metrics_net network.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+  # Named `kyu`, not `mailbox`: the hub was renamed on 2026-08-29 and the
+  # live file had not followed. Series scraped before this change carry
+  # job="mailbox" and stay under that label in the history.
   - job_name: kyu
     static_configs:
       - targets: ["10.10.10.9:8080"]
@@ -14,12 +26,52 @@ scrape_configs:
       target: ["10.10.5.250"]
     static_configs:
       - targets: ["pve-exporter:9221"]
-  # almanac /metrics is APPROVED (its M13, 2026-08-29) but ships after its
-  # remaining rollout steps — the almanac session reports here when it
-  # serves. Exposition format on the same port; labels per source, no
-  # calendar ids. Flip the job on then. Do NOT point this at /healthz in
-  # the meantime — JSON, unparseable, permanent false "down"; liveness for
-  # almanac lives in Uptime Kuma (its AR21).
-  # - job_name: almanac
-  #   static_configs:
-  #     - targets: ["10.10.10.12:8080"]
+  # Almanac serves /metrics unauthenticated, deliberately: a scraper
+  # that cannot authenticate reports a healthy service as down. Its
+  # liveness endpoint is /healthz and belongs to Uptime Kuma, not here.
+  - job_name: almanac
+    static_configs:
+      - targets: ["10.10.10.12:8080"]
+  - job_name: node
+    static_configs:
+      - targets: ["10.10.5.250:9100"]
+        labels: {host: pve, role: hypervisor}
+      - targets: ["10.10.10.4:9100"]
+        labels: {host: platform, role: lxc}
+      - targets: ["10.10.10.5:9100"]
+        labels: {host: downloader, role: lxc}
+      - targets: ["10.10.10.6:9100"]
+        labels: {host: media, role: lxc}
+      - targets: ["10.10.10.7:9100"]
+        labels: {host: mqtt, role: lxc}
+      - targets: ["10.10.10.8:9100"]
+        labels: {host: synctest, role: lxc}
+      - targets: ["10.10.10.9:9100"]
+        labels: {host: mailbox, role: lxc}
+      - targets: ["10.10.10.11:9100"]
+        labels: {host: productivity, role: lxc}
+      - targets: ["10.10.10.12:9100"]
+        labels: {host: almanac, role: lxc}
+      - targets: ["10.10.10.13:9100"]
+        labels: {host: metrics, role: lxc}
+      # 10.10.10.14 and .15 are the scratch containers 190/191, removed by
+      # E5 — the layout needs those addresses back. Dropped here rather than
+      # left to alert as HostDown the moment they go.
+
+  # cadvisor runs on every Docker host, not just here: it can only see the
+  # containers of the machine it runs on. Port 8081 everywhere — gluetun already
+  # owns 8080 on the downloader stack.
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["10.10.10.4:8081"]
+        labels: {host: platform, role: lxc}
+      - targets: ["10.10.10.5:8081"]
+        labels: {host: downloader, role: lxc}
+      - targets: ["10.10.10.6:8081"]
+        labels: {host: media, role: lxc}
+      - targets: ["10.10.10.8:8081"]
+        labels: {host: synctest, role: lxc}
+      - targets: ["10.10.10.11:8081"]
+        labels: {host: productivity, role: lxc}
+      - targets: ["10.10.10.13:8081"]
+        labels: {host: metrics, role: lxc}

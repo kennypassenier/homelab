@@ -1,0 +1,55 @@
+# Alert rules for the homelab metrics stack.
+#
+# Deliberately the small set (Kenny, A2, 2026-08-29): four rules that almost
+# never fire falsely. An alert that cries wolf gets ignored within a week, and
+# a rule set you have learned to ignore is worse than none.
+#
+# Thresholds live here rather than in code precisely so they can be retuned
+# without touching a binary.
+groups:
+  - name: homelab
+    rules:
+      - alert: HostDown
+        # `up` is written by Prometheus itself for every scrape target, so this
+        # covers any host that stops answering, whatever the reason.
+        expr: up{job="node"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.host }} has not answered for 5 minutes"
+          description: "Prometheus cannot scrape {{ $labels.instance }} ({{ $labels.host }})."
+
+      - alert: FilesystemAlmostFull
+        # Excludes pseudo-filesystems: tmpfs and overlay report their own sizes
+        # and would fire constantly without saying anything about real storage.
+        expr: >
+          100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}
+          / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} * 100) > 90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.host }}: {{ $labels.mountpoint }} is over 90% full"
+          description: "Filesystem {{ $labels.mountpoint }} on {{ $labels.host }} has less than 10% free."
+
+      - alert: DiskPendingSectors
+        # The earliest warning a drive gives: sectors it can no longer read
+        # reliably and has not yet remapped. Any value above zero is worth
+        # knowing about, so there is no threshold to tune.
+        expr: smart_device_pending_sectors > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.model }} reports {{ $value }} pending sector(s)"
+          description: "Drive {{ $labels.device }} ({{ $labels.model }}, serial {{ $labels.serial }}) has sectors awaiting remap. Plan a replacement."
+
+      - alert: DiskSmartFailed
+        expr: smart_device_health_ok == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.model }} failed its own SMART self-assessment"
+          description: "Drive {{ $labels.device }} ({{ $labels.model }}, serial {{ $labels.serial }}) reports itself as failing."

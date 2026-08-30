@@ -1,0 +1,30 @@
+# Alertmanager routing for the homelab metrics stack.
+#
+# The delivery leg is deliberately EMPTY. Alertmanager's webhook payload has a
+# fixed shape that does not match what automation.homelab_ops_webhook expects in
+# Home Assistant, and HTTPSwitchboard — the translator built for exactly this
+# gap — is not deployed yet (Kenny, W1, 2026-08-30). Until it is, alerts still
+# fire, group, deduplicate and show up in this UI; they are simply not
+# delivered anywhere.
+#
+# To close the loop later: replace the `none` receiver with a webhook_config
+# pointing at HTTPSwitchboard, which then forwards to
+# http://10.10.10.2:8123/api/webhook/homelab-ops-c4d81f26.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: none
+  # Grouping by host as well as alertname means one failing machine produces one
+  # notification, not one per filesystem or per drive.
+  group_by: ["alertname", "host"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+
+receivers:
+  # A receiver with no integrations is valid and is the honest way to say
+  # "nowhere yet" — quieter and more visible than pointing at a dead endpoint,
+  # which would fill the log with delivery failures.
+  - name: none

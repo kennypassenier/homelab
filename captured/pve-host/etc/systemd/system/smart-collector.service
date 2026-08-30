@@ -1,0 +1,10 @@
+[Unit]
+Description=Write SMART attributes for the node_exporter textfile collector
+Documentation=https://github.com/prometheus/node_exporter#textfile-collector
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/smart-textfile-collector.py
+# Reading SMART needs raw device access, so this stays root, but nothing else.
+NoNewPrivileges=true
+ProtectHome=true

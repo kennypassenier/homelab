@@ -1,0 +1,16 @@
+# Auto-provisioned Prometheus datasource for Grafana.
+# Loki stays the default; dashboards reference this one by uid so the default
+# never has to change and existing log dashboards keep working untouched.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://10.10.10.13:9090
+    isDefault: false
+    editable: false
+    jsonData:
+      timeInterval: 30s
+      httpMethod: POST

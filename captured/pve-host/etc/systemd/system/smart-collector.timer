@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh SMART metrics every 15 minutes
+
+[Timer]
+# SMART attributes move slowly; 15 minutes is far more often than they change
+# and still catches a failing drive well inside an alerting window.
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

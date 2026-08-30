@@ -1,0 +1,14 @@
+# Auto-provisioned dashboards for Grafana
+apiVersion: 1
+
+providers:
+  - name: 'Homelab Dashboards'
+    orgId: 1
+    folder: 'Homelab'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: true

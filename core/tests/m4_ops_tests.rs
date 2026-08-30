@@ -1374,6 +1374,23 @@ async fn o2_the_template_bakes_the_observability_agents() {
         all.contains("prometheus-node-exporter"),
         "node_exporter must be baked in"
     );
+    // Measured on the first v2 template: deleting the ssh host keys without
+    // arranging for new ones left sshd FAILED on every clone. Kenny reaches
+    // these containers by ssh, so this is not cosmetic.
+    assert!(
+        all.contains("ssh-host-keys.service") && all.contains("ssh-keygen -A"),
+        "a clone must generate its own ssh host keys"
+    );
+    // A template that boots `degraded` makes "degraded" useless as a signal,
+    // and the deploy's wait-for-systemd loop accepts exactly that word.
+    assert!(
+        all.contains("mask nvmf-autoconnect.service openipmi.service"),
+        "hardware services an LXC cannot satisfy must be masked"
+    );
+    assert!(
+        all.contains("purge -y -qq postfix"),
+        "no mail daemon on every container"
+    );
     assert!(
         all.contains("cadvisor"),
         "cadvisor image must be pre-pulled"

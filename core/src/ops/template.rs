@@ -223,15 +223,43 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
         Ok(StepOutcome::Changed)
     });
 
-    // A clone must not inherit machine identity or apt debris.
+    // Measured on a clone of the first v2 template (2026-08-31) rather than
+    // assumed: two of these are real defects and none of them are about RAM.
+    step!(runner, "trim what cannot work in a container", {
+        let script = concat!(
+            // A fresh clone booted `degraded` because of two hardware services
+            // the Debian template pulls in and an LXC can never satisfy. That
+            // matters beyond tidiness: the deploy's wait-for-systemd loop
+            // accepts "degraded", so a template that is degraded by default
+            // makes the word useless as a signal.
+            "systemctl mask nvmf-autoconnect.service openipmi.service >/dev/null 2>&1; ",
+            // Postfix listens on 127.0.0.1:25 in every container and nothing
+            // sends mail from one. Worth ~8 MB, which is not the reason —
+            // an unused network daemon on ten containers is.
+            "export DEBIAN_FRONTEND=noninteractive; ",
+            "apt-get purge -y -qq postfix >/dev/null 2>&1; ",
+            // Docker plugins nobody uses: ~120 MB of disk per container.
+            "apt-get purge -y -qq docker-buildx-plugin docker-model-plugin docker-ce-rootless-extras >/dev/null 2>&1; ",
+            "apt-get autoremove -y -qq >/dev/null 2>&1; true"
+        );
+        let _ = pct_sh(exec, cfg.temp_vmid, script, 600).await?;
+        Ok(StepOutcome::Changed)
+    });
+
+    // A clone must not inherit machine identity or apt debris. The ssh host
+    // keys go with it — every clone must generate its own — but deleting them
+    // without arranging for that left sshd FAILED on every container built
+    // from the first v2 template. Found by cloning it and looking, not by
+    // reading the step.
     step!(runner, "generalize", {
-        let _ = pct_sh(
-            exec,
-            cfg.temp_vmid,
-            "apt-get clean && rm -f /etc/machine-id /var/lib/dbus/machine-id && touch /etc/machine-id && rm -f /etc/ssh/ssh_host_*",
-            120,
-        )
-        .await?;
+        let unit = "[Unit]\n             Description=Generate ssh host keys on first boot\n             ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key\n             Before=ssh.service\n             [Service]\n             Type=oneshot\n             ExecStart=/usr/bin/ssh-keygen -A\n             RemainAfterExit=yes\n             [Install]\n             WantedBy=multi-user.target\n";
+        let script = format!(
+            "cat > /etc/systemd/system/ssh-host-keys.service <<'UNIT'\n{}UNIT\n             systemctl enable ssh-host-keys.service >/dev/null 2>&1; \
+             apt-get clean && rm -f /etc/machine-id /var/lib/dbus/machine-id && \
+             touch /etc/machine-id && rm -f /etc/ssh/ssh_host_*",
+            unit
+        );
+        let _ = pct_sh(exec, cfg.temp_vmid, &script, 120).await?;
         Ok(StepOutcome::Changed)
     });
 

@@ -8,7 +8,7 @@ services:
       - --storage.tsdb.retention.time=90d
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - /appdata/__STACK__/prometheus-data:/prometheus
+      - /appdata/__STACK__/prometheus-config:/prometheus
     ports:
       - "9090:9090"
     labels:

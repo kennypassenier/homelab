@@ -245,6 +245,29 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
         // a privileged one maps it to itself. The wrong number produces a
         // directory the service cannot use while the deploy reports success,
         // and the app simply does not start.
+        // O7: a config directory is named after the app that owns it. The
+        // restore looks paths up by name, so a directory renamed on a whim
+        // loses track of its own snapshots — and a rule nothing enforced is
+        // how this drifted into three shapes across two stacks. Kenny chose
+        // the literal rule at the mini-round over a weaker one that would
+        // have tolerated the drift.
+        if let Some(dir) = mount.host_path.rsplit('/').next() {
+            if !dir.ends_with("-config") {
+                let owner = mount.owner(&m.stack_name);
+                problems.push(format!(
+                    "storage '{}' must be named '{}-config' — the restore finds a path by its name",
+                    mount.host_path, owner
+                ));
+            } else if let Some(app) = &mount.app {
+                let expected = format!("{}-config", app);
+                if dir != expected {
+                    problems.push(format!(
+                        "storage '{}' is owned by app '{}' but is not named '{}' — the name and the owner must agree, or the directory says one thing and the backup does another",
+                        mount.host_path, app, expected
+                    ));
+                }
+            }
+        }
         if let Some(app) = &mount.app {
             if !m.apps.contains(app) {
                 problems.push(format!(

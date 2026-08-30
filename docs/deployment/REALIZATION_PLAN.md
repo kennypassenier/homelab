@@ -30,8 +30,11 @@ Nothing here changes how a service runs.
 
 - Take a vzdump of every container that has none: 105, 106, 108, 111, 112, 113
   (104 and 109 already have nightly jobs).
-- Container snapshots become part of the replacement procedure (M7/M8): taken
-  immediately before a risky step and removed straight after.
+- ~~Container snapshots as an undo layer.~~ **Withdrawn 2026-08-30 (F43).**
+  `pct snapshot` refuses any container with a bind mountpoint, and model v2 is
+  bind mounts, so the layer does not exist where it would be used. Tried for
+  real on CT 113 before a risky step: "snapshot feature is not available".
+  vzdump remains the whole-container net.
   **Correction, 2026-08-30:** this originally said "take one per container",
   which is wrong for the same reason a snapshot is not a backup. On
   thin-provisioned LVM a snapshot grows as the origin diverges from it, so a

@@ -23,10 +23,19 @@ boot:
 storage:
   # D25: the app that owns this directory decides which restic repository
   # it lands in, so Prometheus keeps its history if it ever moves stack.
-  - host_path: /appdata/metrics/prometheus-data
-    mount_point: /appdata/metrics/prometheus-data
+  - host_path: /appdata/metrics/prometheus-config
+    mount_point: /appdata/metrics/prometheus-config
     host_owner_uid: 165534
     app: prometheus
+  # Alertmanager's silences and notification log. It was bind-mounted by its
+  # compose file and declared nowhere, so docker created it on the container
+  # rootfs — unbacked-up and lost on any rebuild. Found live 2026-08-30 while
+  # renaming the path above; the directory was still empty, so nothing was
+  # lost, which is luck rather than design.
+  - host_path: /appdata/metrics/alertmanager-config
+    mount_point: /appdata/metrics/alertmanager-config
+    host_owner_uid: 165534
+    app: alertmanager
 # alertmanager was deployed by hand on 2026-08-30 and was missing here, so a
 # deploy of this stack would not have started it.
 apps: [prometheus, alertmanager, promtail, pve-exporter]

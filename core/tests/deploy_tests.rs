@@ -42,7 +42,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             host_path: "/appdata/syncthing/syncthing-config".into(),
             mount_point: "/appdata/syncthing/syncthing-config".into(),
             host_owner_uid: Some(101000),
-            app: None,
+            app: Some("syncthing".into()),
         }],
         apps: vec!["syncthing".into()],
     }
@@ -100,6 +100,41 @@ fn script_fresh(exec: &MockExecutor) {
         CmdOutput::ok("syncthing\n"),
     );
     exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+}
+
+/// O7: a config path must be named `<app>-config`. Kenny chose the literal
+/// rule at the mini-round — "uniformiteit en een duidelijke regel hebben hier
+/// voorrang" — over the weaker shape that would have tolerated the live
+/// `prometheus-data`. The restore looks paths up by name, so a directory that
+/// is renamed loses track of its own snapshots; a rule nothing enforces is
+/// how that drifted into three different shapes in the first place.
+#[test]
+fn o7_config_paths_must_be_named_after_their_app() {
+    use homelab_core::manifest::validate;
+    let mut s = spec(108, "test");
+    s.manifest.apps = vec!["syncthing".into()];
+    s.manifest.storage[0].host_path = "/appdata/test/syncthing-data".into();
+    s.manifest.storage[0].mount_point = "/appdata/test/syncthing-data".into();
+    s.manifest.storage[0].app = Some("syncthing".into());
+    let err = validate(&s).expect_err("a path not ending in -config must be refused");
+    assert!(
+        format!("{}", err).contains("syncthing-config"),
+        "the error must name what it should have been: {}",
+        err
+    );
+
+    // The owner and the directory have to agree, or the name says one thing
+    // and the backup does another.
+    let mut s = spec(108, "test");
+    s.manifest.apps = vec!["syncthing".into(), "other".into()];
+    s.manifest.storage[0].host_path = "/appdata/test/other-config".into();
+    s.manifest.storage[0].mount_point = "/appdata/test/other-config".into();
+    s.manifest.storage[0].app = Some("syncthing".into());
+    let err = validate(&s).expect_err("owner and directory name must agree");
+    assert!(format!("{}", err).contains("syncthing"), "{}", err);
+
+    // The shape that is right stays right.
+    validate(&spec(108, "test")).expect("syncthing-config owned by syncthing is valid");
 }
 
 /// O5: on an unprivileged container uid 1000 inside is uid 101000 on the

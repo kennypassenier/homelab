@@ -34,6 +34,9 @@ Numbers are permanent and are never reused, including after a row closes.
 | D14 | `<app>-config` becomes an enforced naming rule, not a convention | pending build | 2026-08-30 |
 | D15 | MQTT terminates on the Home Assistant VM; CT 107 and its Traefik route are removed | `SCOPE.md`, T27 | 2026-08-30 |
 | D16 | A service that changes container or IP requires telling Kenny first, with the list of what he must reconfigure | `SCOPE.md` | 2026-08-30 |
+| D17 | Model v2: configuration moves to `/appdata/<stack>/<app>-config` on the host, restic runs host-side | `BACKUP_MODEL.md` | 2026-08-30 |
+| D18 | Close all three privileged-path gaps AND ship a second golden template, one privileged and one not | pending build (T28-T30, T34) | 2026-08-30 |
+| D19 | vzdump archives live on `hdd4tb-backup`; `/appdata` stays on pve-root | `/etc/pve/storage.cfg`, both jobs repointed | 2026-08-30 |
 
 ## Findings (F)
 
@@ -62,7 +65,8 @@ Numbers are permanent and are never reused, including after a row closes.
 | F21 | `pct clone` does not take `--unprivileged`, and the golden template CT 999 is unprivileged | A manifest saying `unprivileged: false` that provisions via `clone:999` silently yields an unprivileged container | open |
 | F22 | Every test in the suite uses `unprivileged: true`; the privileged path has no coverage at all | CT 105 and 106 are privileged and must stay so | open |
 | F23 | `host_owner_uid` is applied without any check against the container's privilege level | 101000 on a privileged container (or 1000 on an unprivileged one) silently produces unusable ownership | open |
-| F24 | `/appdata` sits on `pve-root` — the same 94 G filesystem as the Proxmox OS, 41% used, 53 G free | A container filling its config directory fills the hypervisor's root filesystem | open |
+| F24 | `/appdata` sits on `pve-root` — the same 94 G filesystem as the Proxmox OS | A container filling its config directory fills the hypervisor's root filesystem | partly closed (D19: archives moved, pve-root 41% → 26%) |
+| F25 | vzdump archives of CT 102 and CT 103 from 2026-07-13 exist (943 MB and 262 MB) | The two untouchable containers do have a backup, seven weeks old — worth knowing before anyone assumes otherwise | open |
 
 ## Tasks (T)
 
@@ -86,7 +90,8 @@ Numbers are permanent and are never reused, including after a row closes.
 | T30 | Validate `host_owner_uid` against the privilege level — F23 | T1 | open |
 | T31 | Close the E3 auto-restore granularity gap, test-first — D13 | T1 | open |
 | T32 | Enforce the `<app>-config` naming rule in `validate_manifest` — D14 | T1 | open |
-| T33 | Decide where vzdump archives live long-term (pve-root has 53 G) — F24 | T1 | open |
+| T33 | Decide where vzdump archives live long-term — F24 | T1 | done (D19) |
+| T34 | Build a second golden template, privileged, beside the unprivileged one — D18 | T28 | open |
 | T2 | Bring `stacks/metrics/prometheus/prometheus.yml` level with the live one (almanac job, node job ×11, cadvisor job ×6) | T1 | open |
 | T3 | Add Alertmanager + its four rules + the `rules/` mount to the metrics stack | T1 | open |
 | T4 | Add node_exporter and the SMART textfile collector as managed artifacts | T1 | open |

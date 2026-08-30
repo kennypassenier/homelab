@@ -42,6 +42,8 @@ Numbers are permanent and are never reused, including after a row closes.
 | D25 | One restic repository **per app**, not per stack — so an app can move between stacks with its history | `TARGET_LAYOUT.md`, B2 | 2026-08-30 |
 | D26 | Container replacement keeps vmid and IP: prove the recipe on a throwaway vmid, vzdump, destroy, redeploy in place | `TARGET_LAYOUT.md`, C4 | 2026-08-30 |
 | D27 | http-switchboard joins kyu and kyu-runner on CT 109 with an explicit port map (8080/8082/8083); no code change in any project | `TARGET_LAYOUT.md`, A4 | 2026-08-30 |
+| D30 | M0 complete: every guest has a vzdump and a nightly job; kyu restore drill green — restored database holds 10 topics, 46 messages, 7 subscriptions, 69 deliveries, identical to live | drill run and cleaned up | 2026-08-30 |
+| D31 | M1 complete: the monitoring drift is in the repo, promtail runs on CT 104 and its logs reach Loki | `stacks/metrics/`, `captured/` | 2026-08-30 |
 | D29 | M0 started: kyu re-adopted under its real name and **backed up for the first time** (restic snapshot f2352564, 4.5 MB, `kyu-config`); the stale `mailbox` state key removed; the syncthing route repaired and verified 200 through Traefik | live, read back | 2026-08-30 |
 | D28 | Vikunja is dropped; its data stays in the productivity stack's existing backup | `TARGET_LAYOUT.md` | 2026-08-30 |
 | D20 | Phase 2 frozen after round 2; changes go through mini-rounds only | `FEATURES.md` | 2026-08-30 |

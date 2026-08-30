@@ -1,0 +1,24 @@
+# Promtail for CT 104, the one docker host that shipped no logs to the Loki
+# it hosts itself (R6). Loki is reached at 127.0.0.1 rather than 10.10.10.4:
+# on this container that is the same service, and the loopback keeps log
+# shipping alive if the LAN or Traefik is the thing that broke — which is
+# exactly when these logs matter.
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions/positions.yaml
+
+clients:
+  - url: http://127.0.0.1:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: docker
+          stack: gateway
+          host: platform
+          __path__: /var/lib/docker/containers/*/*-json.log

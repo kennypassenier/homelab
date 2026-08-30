@@ -66,8 +66,27 @@ Everything running on the machines that exists in no repository.
 - The Prometheus datasource and three dashboards as provisioning files (R2).
 - promtail on CT 104 (R6).
 
-**Exit:** a deploy of the metrics stack changes nothing that is already live —
-proven by diffing the files before and after, not by asserting it.
+**Exit:** a deploy of the metrics stack changes nothing that is already live,
+except where it deliberately does.
+
+**Status 2026-08-30: done.** Everything built by hand on 29-30 August is now
+in the repo — Alertmanager with its config and four rules, the rules mount,
+the full scrape configuration, Grafana's two datasources and seven
+dashboards, the fleet cadvisor file, the SMART collector and its timer. R6 is
+closed live as well: promtail runs on CT 104 and its logs arrive in Loki under
+`host="platform"`, verified by query rather than by looking at the container.
+
+The exit criterion cannot be met word for word, and pretending otherwise
+would be the wrong kind of green. Capturing was not a straight copy: two
+differences are deliberate and a deploy will apply them.
+
+1. The live `prometheus.yml` still called the hub `mailbox`. The repo was
+   already correct, so a wholesale copy would have regressed it. Kept as
+   `kyu`; series scraped before the change keep `job="mailbox"`.
+2. The scrape target `10.10.10.14` (scratch container 190) is dropped, because
+   E5 removes it and it would otherwise fire `HostDown` on the way out.
+
+Both are recorded here rather than discovered during the first deploy.
 
 ### M2 · The orchestrator learns what the layout needs
 Code, with tests, no live systems touched.

@@ -150,13 +150,51 @@ pub async fn update(
             Ok(StepOutcome::Unchanged)
         });
 
-        let pull_step = format!("{} :: pull + up", app);
+        // O9: pull first, THEN stop, then start. Pulling while the service
+        // still runs keeps the window in which it is down to the swap itself
+        // rather than the download — which over a residential uplink is the
+        // difference between seconds and minutes.
+        let pull_step = format!("{} :: pull", app);
         step!(runner, &pull_step, {
             super::util_pct_sh(
                 exec,
                 vmid,
+                &format!("cd '/opt/{}/{}' && docker compose pull -q", stack, app),
+                600,
+            )
+            .await?;
+            Ok(StepOutcome::Changed)
+        });
+
+        // O9: a container labelled `com.homelab.update.stop-first=true` is
+        // stopped cleanly before the new image comes up, instead of being
+        // replaced under itself. `docker compose up -d` kills and recreates,
+        // and for Postgres that means the next start is a recovery — the
+        // pattern mirrors `com.homelab.backup.pause`, which already does this
+        // for backups.
+        let stop_step = format!("{} :: stop-first", app);
+        step!(runner, &stop_step, {
+            let script = format!(
+                "cd '/opt/{}/{}' && for c in $(docker compose ps -q); do \
+                   if [ \"$(docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.stop-first\"}}}}' $c)\" = true ]; then \
+                     docker stop -t 60 $c; fi; done; true",
+                stack, app
+            );
+            let out = super::util_pct_sh(exec, vmid, &script, 180).await?;
+            Ok(if out.stdout.trim().is_empty() {
+                StepOutcome::Unchanged
+            } else {
+                StepOutcome::Changed
+            })
+        });
+
+        let up_step = format!("{} :: up", app);
+        step!(runner, &up_step, {
+            super::util_pct_sh(
+                exec,
+                vmid,
                 &format!(
-                    "cd '/opt/{}/{}' && docker compose pull -q && docker compose up -d --remove-orphans",
+                    "cd '/opt/{}/{}' && docker compose up -d --remove-orphans",
                     stack, app
                 ),
                 600,

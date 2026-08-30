@@ -1204,6 +1204,55 @@ async fn t1_deploy_writes_a_discovery_file_and_destroy_removes_it() {
     );
 }
 
+/// O9: a database is stopped cleanly before its replacement comes up, not
+/// killed under itself. `docker compose up -d` recreates a container by
+/// killing it, and for Postgres — which SuperSync runs on CT 111 — that makes
+/// the next start a recovery. The label mirrors `com.homelab.backup.pause`,
+/// which already does exactly this for backups.
+///
+/// The order matters as much as the stop: pull first, then stop, then start,
+/// so the service is down for the swap rather than for the download.
+#[tokio::test]
+async fn o9_stop_first_happens_between_the_pull_and_the_up() {
+    use homelab_core::ops::update::update;
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always("update.policy", CmdOutput::ok("auto\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut m = manifest(108, "test");
+    m.apps = vec!["app".into()];
+    let report = update(&ctx(&exec, &sink, &j), &m, None, false).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let calls = exec.calls();
+    let idx = |needle: &str| {
+        calls
+            .iter()
+            .position(|c| c.contains(needle))
+            .unwrap_or_else(|| panic!("{} never ran, calls: {:?}", needle, calls))
+    };
+    let pull = idx("docker compose pull");
+    let stop = idx("com.homelab.update.stop-first");
+    let up = idx("docker compose up -d --remove-orphans");
+    assert!(
+        pull < stop && stop < up,
+        "order must be pull, stop, up — got pull={} stop={} up={}",
+        pull,
+        stop,
+        up
+    );
+    // A clean stop, not a kill: the default 10 s is not enough for a database
+    // to finish a checkpoint.
+    assert!(
+        calls.iter().any(|c| c.contains("docker stop -t 60")),
+        "the stop must give the service time to shut down: {:?}",
+        calls
+    );
+}
+
 /// O2/M3: two golden templates, one privileged and one not. `pct clone` cannot
 /// change a privilege level, so a container that must be privileged — CT 105
 /// and 106 are — has to be cloned from a privileged template. The name has to

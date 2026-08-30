@@ -74,7 +74,10 @@ Numbers are permanent and are never reused, including after a row closes.
 | F27 | kyu 2.0.0 publishes **no release assets at all** — kyu-runner ships a musl binary + SHA256SUMS, almanac ships a binary + SHA256SUMS + minisig | There is nothing for the homelab to download, so kyu cannot be updated by any release-driven mechanism yet | open |
 | F28 | kyu's own documentation says "updates are image pulls via compose (K13)", but kyu runs as a native systemd binary on CT 109 | Its documented update path describes a deployment that is not the one in use | open |
 | F29 | containrrr/watchtower was archived 2025-12-17; the maintained continuation is `nicholas-fedor/watchtower` | Any auto-update design has to name a fork, not "watchtower" | open |
-| F30 | The v1 directories are all still present: `apps`, `client-app`, `host-daemon`, `lxc-daemon`, `stacks-backup` | The never-answered V1-V5 cleanup, confirmed still outstanding | open |
+| F30 | The v1 directories are all still present: `apps`, `client-app`, `host-daemon`, `lxc-daemon`, `stacks-backup` | The never-answered V1-V5 cleanup | done 2026-08-30 (Z5) |
+| F31 | A Jellyfin stream check already existed in v1 (`stacks-backup/media/jellyfin/check-streams.sh`, now in git history only) and **fails open**: a missing key, an unreachable API or an empty response all exit 0 = "safe to update" | The exact conditions in which you cannot tell whether someone is watching are the ones where it says go ahead. O10 must fail closed instead | open |
+| F32 | The `JELLYFIN_API_KEY` in `/opt/jellyfin/.env` on CT 106 is **invalid** — HTTP 401 measured three ways (Authorization MediaBrowser Token, X-Emby-Token, `?api_key=`) | O10 needs a fresh key before it can be built or tested | open |
+| F33 | Unverified, because F32 blocked it: the v1 script greps for `"IsPlaying"`, which is not a field on Jellyfin's session objects as far as I know — `NowPlayingItem` and `PlayState.IsPaused` are. If so the check never matched and allowed every update | Check against a live session once a working key exists; do not assume either way | open |
 
 ## Tasks (T)
 
@@ -100,6 +103,8 @@ Numbers are permanent and are never reused, including after a row closes.
 | T32 | Enforce the `<app>-config` naming rule in `validate_manifest` — D14 | T1 | open |
 | T33 | Decide where vzdump archives live long-term — F24 | T1 | done (D19) |
 | T34 | Build a second golden template, privileged, beside the unprivileged one — D18 | T28 | open |
+| T35 | Ask the kyu session to publish release binaries + checksums, so the orchestrator can update it — Z4 | — | doing |
+| T36 | Mint a fresh Jellyfin API key; the one on CT 106 is refused — F32 | needs Kenny or Jellyfin admin access | open |
 | T2 | Bring `stacks/metrics/prometheus/prometheus.yml` level with the live one (almanac job, node job ×11, cadvisor job ×6) | T1 | open |
 | T3 | Add Alertmanager + its four rules + the `rules/` mount to the metrics stack | T1 | open |
 | T4 | Add node_exporter and the SMART textfile collector as managed artifacts | T1 | open |

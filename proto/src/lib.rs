@@ -67,6 +67,11 @@ pub enum Command {
     BuildTemplate {
         temp_vmid: u16,
         version: u32,
+        /// O2: two templates exist, because `pct clone` cannot change a
+        /// privilege level and CT 105/106 must stay privileged. Defaults to
+        /// unprivileged, which is what every stack but those two wants.
+        #[serde(default = "yes")]
+        unprivileged: bool,
     },
     /// C4: hot-apply manifest resources to the running container (grow only).
     ApplyResources(Box<StackManifest>),
@@ -150,6 +155,10 @@ pub struct StackView {
 }
 
 fn enabled_default() -> bool {
+    true
+}
+
+fn yes() -> bool {
     true
 }
 

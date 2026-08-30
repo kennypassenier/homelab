@@ -220,11 +220,27 @@ async fn main() {
             // B8: bake the golden template. Temp vmid defaults to 999.
             let temp_vmid: u16 = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(999);
             let version: u32 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
+            // O2: `--privileged` builds the second template. CT 105 and 106
+            // are privileged and a clone cannot change that, so they need one.
+            let unprivileged = !args.iter().any(|a| a == "--privileged");
             println!(
-                "{}▶ template build :: debian-12-homelab-v{} on temp vmid {}{}",
-                C_CYAN, version, temp_vmid, C_RESET
+                "{}▶ template build :: debian-12-homelab-v{}{} on temp vmid {}{}",
+                C_CYAN,
+                version,
+                if unprivileged { "" } else { "-priv" },
+                temp_vmid,
+                C_RESET
             );
-            rpc(&host, &token, Command::BuildTemplate { temp_vmid, version }).await;
+            rpc(
+                &host,
+                &token,
+                Command::BuildTemplate {
+                    temp_vmid,
+                    version,
+                    unprivileged,
+                },
+            )
+            .await;
         }
         "exec" => {
             // A6: requires exec_enabled = true in the host config.

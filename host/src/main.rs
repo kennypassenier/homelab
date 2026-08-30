@@ -1881,12 +1881,17 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 message: msg,
             }
         }
-        Rpc::BuildTemplate { temp_vmid, version } => {
+        Rpc::BuildTemplate {
+            temp_vmid,
+            version,
+            unprivileged,
+        } => {
             run_mutating_op(state, &exec, req.id, "template-build", |ctx| {
                 Box::pin(async move {
                     let cfg = homelab_core::ops::template::TemplateCfg {
                         temp_vmid,
                         version,
+                        unprivileged,
                         ..Default::default()
                     };
                     homelab_core::ops::template::build_template(ctx, &cfg).await

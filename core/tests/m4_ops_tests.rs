@@ -1204,6 +1204,92 @@ async fn t1_deploy_writes_a_discovery_file_and_destroy_removes_it() {
     );
 }
 
+/// O2/M3: two golden templates, one privileged and one not. `pct clone` cannot
+/// change a privilege level, so a container that must be privileged — CT 105
+/// and 106 are — has to be cloned from a privileged template. The name has to
+/// say which is which, because nothing else about a template does, and getting
+/// it wrong produces a container that fails on permissions much later.
+#[tokio::test]
+async fn o2_two_templates_differ_in_privilege_and_in_name() {
+    use homelab_core::ops::template::{build_template, TemplateCfg};
+    for unprivileged in [true, false] {
+        let exec = MockExecutor::new();
+        exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+        exec.respond_always("pct config", CmdOutput::failed(2, "does not exist"));
+        exec.respond_always("is-system-running", CmdOutput::ok("running"));
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let cfg = TemplateCfg {
+            temp_vmid: 997,
+            unprivileged,
+            ..Default::default()
+        };
+        let report = build_template(&ctx(&exec, &sink, &j), &cfg).await;
+        assert!(report.ok, "{:?}", report.error);
+
+        let create = exec.calls_containing("pct create").join(" ");
+        let expected = if unprivileged {
+            "--unprivileged 1"
+        } else {
+            "--unprivileged 0"
+        };
+        assert!(
+            create.contains(expected),
+            "expected {} in: {}",
+            expected,
+            create
+        );
+        let described = exec
+            .calls_containing("golden template (B8), clone with")
+            .join(" ");
+        if unprivileged {
+            assert!(!described.contains("-priv"), "{}", described);
+        } else {
+            assert!(
+                described.contains("-priv"),
+                "the name must say so: {}",
+                described
+            );
+        }
+    }
+}
+
+/// O2: the agents that were installed by hand on six hosts come from the
+/// template now. A container added after that day measured nothing until
+/// somebody noticed, which is the failure this removes.
+#[tokio::test]
+async fn o2_the_template_bakes_the_observability_agents() {
+    use homelab_core::ops::template::{build_template, TemplateCfg};
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.respond_always("pct config", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = build_template(
+        &ctx(&exec, &sink, &j),
+        &TemplateCfg {
+            temp_vmid: 997,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let all = exec.calls().join(" ");
+    assert!(
+        all.contains("prometheus-node-exporter"),
+        "node_exporter must be baked in"
+    );
+    assert!(
+        all.contains("cadvisor"),
+        "cadvisor image must be pre-pulled"
+    );
+    assert!(
+        all.contains("promtail"),
+        "promtail image must be pre-pulled"
+    );
+}
+
 /// T2: a stack brings its own dashboard. The ones that exist today were built
 /// by hand and lived in no repository until 2026-08-30, so a Grafana rebuild
 /// would have taken them — and adding a stack meant remembering to open

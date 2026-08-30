@@ -37,6 +37,11 @@ pub struct TemplateCfg {
     pub gateway: String,
     pub vlan: Option<u16>,
     pub features: String,
+    /// O5/O2: `pct clone` cannot change a privilege level, so a container that
+    /// must be privileged has to be cloned from a privileged template. Two
+    /// templates therefore exist, and the name says which is which — nothing
+    /// else about a template tells you.
+    pub unprivileged: bool,
 }
 
 impl Default for TemplateCfg {
@@ -51,12 +56,20 @@ impl Default for TemplateCfg {
             gateway: "10.10.10.1".into(),
             vlan: Some(10),
             features: "nesting=1,keyctl=1".into(),
+            unprivileged: true,
         }
     }
 }
 
 pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationReport {
-    let name = format!("debian-12-homelab-v{}", cfg.version);
+    // The suffix is not decoration: a clone silently inherits its template's
+    // privilege level, so telling the two apart at a glance is the difference
+    // between a deploy that works and one that fails on permissions later.
+    let name = format!(
+        "debian-12-homelab-v{}{}",
+        cfg.version,
+        if cfg.unprivileged { "" } else { "-priv" }
+    );
     let mut runner = Runner::new("template-build", ctx.sink, ctx.journal);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
@@ -117,7 +130,7 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
                     "--cores",
                     "2",
                     "--unprivileged",
-                    "1",
+                    if cfg.unprivileged { "1" } else { "0" },
                     "--features",
                     &cfg.features,
                     "--description",
@@ -161,6 +174,45 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
             return Err(CoreError::Command {
                 rendered: "bake docker".into(),
                 detail: install.stderr,
+            });
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    // O2: node_exporter, cadvisor and promtail on every container, from the
+    // template rather than per stack. They were installed by hand on six hosts
+    // on 2026-08-29, which is precisely the work this removes — and the reason
+    // a container added after that date measured nothing until someone noticed.
+    step!(runner, "bake observability agents", {
+        let install = pct_sh(
+            exec,
+            cfg.temp_vmid,
+            "export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq prometheus-node-exporter && systemctl enable prometheus-node-exporter",
+            600,
+        )
+        .await?;
+        if !install.success() {
+            return Err(CoreError::Command {
+                rendered: "bake node_exporter".into(),
+                detail: install.stderr,
+            });
+        }
+        // cadvisor and promtail are containers, so the template only needs
+        // their compose files and images pulled; the deploy brings them up.
+        // Port 8081, not cadvisor's own 8080: gluetun already publishes 8080
+        // on the downloader stack, and one uniform port keeps the scrape
+        // config to a single pattern.
+        let stage = pct_sh(
+            exec,
+            cfg.temp_vmid,
+            "mkdir -p /opt/cadvisor && docker pull gcr.io/cadvisor/cadvisor:latest && docker pull grafana/promtail:3.0.0",
+            900,
+        )
+        .await?;
+        if !stage.success() {
+            return Err(CoreError::Command {
+                rendered: "pre-pull agent images".into(),
+                detail: stage.stderr,
             });
         }
         Ok(StepOutcome::Changed)

@@ -11,6 +11,10 @@ services:
       - ./promtail-config.yml:/etc/promtail/config.yml:ro
       - ./data:/tmp/positions
     restart: unless-stopped
+    labels:
+      # Y1 class: automatic. Promtail ships logs and holds nothing; the worst
+      # a bad version costs is a gap in the log, and the rollback restores it.
+      - com.homelab.update.policy=auto
     networks:
       - metrics_net
 

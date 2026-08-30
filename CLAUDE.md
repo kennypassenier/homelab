@@ -66,7 +66,9 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
   docs/MIGRATION_INVENTORY.md), CT 107/111 decommission (needs explicit
   go), Kenny's own test pass (docs/TEST_PLAN.md), phase-10 retro for
   E8/G9/H7/H8, `pve/root-v2-preinstall` cleanup once v3 has proven
-  itself.
+  itself. HTTPSwitchboard preset adoption — S1 decided (policy=manual),
+  the container and the config location wait for the deployment plan;
+  verified facts in the vault note "Homelab HTTPSwitchboard Deployment".
 - **Awaiting Kenny**: D5 mirror remote+deploy-key, H2 OPNsense API creds,
   F4 PVE token.
 

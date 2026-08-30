@@ -103,7 +103,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | T32 | Enforce the `<app>-config` naming rule in `validate_manifest` — D14 | T1 | open |
 | T33 | Decide where vzdump archives live long-term — F24 | T1 | done (D19) |
 | T34 | Build a second golden template, privileged, beside the unprivileged one — D18 | T28 | open |
-| T35 | Ask the kyu session to publish release binaries + checksums, so the orchestrator can update it — Z4 | — | doing |
+| T35 | Ask the kyu session to publish release binaries + checksums, so the orchestrator can update it — Z4 | — | filed in the vault note "Homelab kyu Release Assets Request" (no kyu session was running) |
 | T36 | Mint a fresh Jellyfin API key; the one on CT 106 is refused — F32 | needs Kenny or Jellyfin admin access | open |
 | T2 | Bring `stacks/metrics/prometheus/prometheus.yml` level with the live one (almanac job, node job ×11, cadvisor job ×6) | T1 | open |
 | T3 | Add Alertmanager + its four rules + the `rules/` mount to the metrics stack | T1 | open |

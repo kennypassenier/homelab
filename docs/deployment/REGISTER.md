@@ -26,6 +26,14 @@ Numbers are permanent and are never reused, including after a row closes.
 | D6 | Project documents live in `docs/deployment/` in this repo | `SCOPE.md` | 2026-08-30 |
 | D7 | Inter-service configuration uses LXC IPs, not public URLs | `SCOPE.md` C3 | 2026-08-30 |
 | D8 | Almanac joins the scope; it already runs on CT 112 as an adopted native service | `SCOPE.md` G3 | 2026-08-30 |
+| D9 | `no_touch` override removed from the live `/etc/homelab/host.toml`; the compiled list is the only list | host.toml (read back, daemon restarted) | 2026-08-30 |
+| D10 | The three v1 stack files claiming live vmids are deleted | commit 35feb55 | 2026-08-30 |
+| D11 | Emergency vzdump of CT 104 taken (2.4 GB, 28 s) and a daily job added at 02:30, `keep-daily=3,keep-weekly=2` | `/etc/pve/jobs.cfg` job `platform-104` | 2026-08-30 |
+| D12 | The seven v1 restic repos in the Drive root stay until the new backup is proven by a restore | `BACKUP_MODEL.md` | 2026-08-30 |
+| D13 | The E3 auto-restore granularity gap is closed (per path, not per stack) | pending build | 2026-08-30 |
+| D14 | `<app>-config` becomes an enforced naming rule, not a convention | pending build | 2026-08-30 |
+| D15 | MQTT terminates on the Home Assistant VM; CT 107 and its Traefik route are removed | `SCOPE.md`, T27 | 2026-08-30 |
+| D16 | A service that changes container or IP requires telling Kenny first, with the list of what he must reconfigure | `SCOPE.md` | 2026-08-30 |
 
 ## Findings (F)
 
@@ -50,6 +58,11 @@ Numbers are permanent and are never reused, including after a row closes.
 | F17 | `stacks/cloudflared` claims vmid 109 (kyu), `stacks/gateway` claims 108 (synctest), `stacks/todo` claims 111 — all v1-era leftovers | Only A2's hostname guard stops a deploy from targeting a live container | open |
 | F18 | The Google Drive target authenticates today and holds five restic repos (76 MiB) — no new token needed | B2 shrinks to a restore drill | done |
 | F19 | Those repos hold 1, 1, 1, 7 and 3 snapshots while state claims nightly runs for all of them | Unverified whether retention explains it; measure before trusting the nightly run | open |
+| F20 | The v1 restic repos in the Drive root stopped on 2026-07-04, and `platform-config` never received a single snapshot | CT 104 had never been backed up until today's vzdump | done (D11) |
+| F21 | `pct clone` does not take `--unprivileged`, and the golden template CT 999 is unprivileged | A manifest saying `unprivileged: false` that provisions via `clone:999` silently yields an unprivileged container | open |
+| F22 | Every test in the suite uses `unprivileged: true`; the privileged path has no coverage at all | CT 105 and 106 are privileged and must stay so | open |
+| F23 | `host_owner_uid` is applied without any check against the container's privilege level | 101000 on a privileged container (or 1000 on an unprivileged one) silently produces unusable ownership | open |
+| F24 | `/appdata` sits on `pve-root` — the same 94 G filesystem as the Proxmox OS, 41% used, 53 G free | A container filling its config directory fills the hypervisor's root filesystem | open |
 
 ## Tasks (T)
 
@@ -68,6 +81,12 @@ Numbers are permanent and are never reused, including after a row closes.
 | T25 | Recyclarr preset (E3) | T1 | open |
 | T26 | Adopt CT 111 so SuperSync gets backups — F15/R7 | T1 | open |
 | T27 | Delete CT 107; MQTT terminates on the Home Assistant VM (Kenny, 2026-08-30), so the `lxc-mqtt-stack.yml` route and Traefik's `mqtt` entrypoint go with it | T1 | open |
+| T28 | Make the clone path honour `unprivileged`, or refuse the combination loudly — F21 | T1 | open |
+| T29 | Add privileged-container test coverage — F22 | T28 | open |
+| T30 | Validate `host_owner_uid` against the privilege level — F23 | T1 | open |
+| T31 | Close the E3 auto-restore granularity gap, test-first — D13 | T1 | open |
+| T32 | Enforce the `<app>-config` naming rule in `validate_manifest` — D14 | T1 | open |
+| T33 | Decide where vzdump archives live long-term (pve-root has 53 G) — F24 | T1 | open |
 | T2 | Bring `stacks/metrics/prometheus/prometheus.yml` level with the live one (almanac job, node job ×11, cadvisor job ×6) | T1 | open |
 | T3 | Add Alertmanager + its four rules + the `rules/` mount to the metrics stack | T1 | open |
 | T4 | Add node_exporter and the SMART textfile collector as managed artifacts | T1 | open |

@@ -31,6 +31,14 @@ pub struct NativeServiceManifest {
     /// never updates this service (by decision, recorded here).
     #[serde(default)]
     pub update_cmd: Option<String>,
+    /// T40: this service keeps no state at all, deliberately. Without it an
+    /// empty `data_dirs` is refused, which is right for a service that simply
+    /// forgot to declare its data — and wrong for kyu-runner, whose own unit
+    /// file says "no state directory, no disk to protect" and runs under
+    /// DynamicUser. The flag makes the difference visible instead of forcing
+    /// a fabricated directory that would then be backed up for nothing.
+    #[serde(default)]
+    pub stateless: bool,
 }
 
 fn lower_dashed(s: &str) -> bool {
@@ -70,13 +78,21 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
             problems.push(format!("path '{}' must be absolute and free of '..'", p));
         }
     }
-    if m.data_dirs.is_empty() {
+    if m.data_dirs.is_empty() && !m.stateless {
         problems.push(
             "data_dirs is empty — a service with no declared state cannot be backed up; \
-             declare at least one directory (or the decision to have none belongs in the \
-             stack file as a comment AND an explicit empty override once that exists)"
+             declare at least one directory, or set `stateless: true` if it genuinely \
+             keeps none (kyu-runner is the real case: its unit says so and it runs \
+             under DynamicUser)"
                 .into(),
         );
+    }
+    if m.stateless && !m.data_dirs.is_empty() {
+        problems.push(format!(
+            "stateless: true but {} data_dirs are declared — one of the two is wrong, \
+             and guessing which would decide silently whether this service is backed up",
+            m.data_dirs.len()
+        ));
     }
     if problems.is_empty() {
         Ok(())

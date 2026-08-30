@@ -1113,6 +1113,50 @@ async fn e3_nonempty_dirs_skip_restore_and_restic_failure_never_blocks() {
         .any(|l| l.contains("AUTO-RESTORE FAILED")));
 }
 
+/// T40: `data_dirs` may only be empty when the service says so. kyu-runner is
+/// deliberately stateless — its own unit file says "no state directory, no
+/// disk to protect" and it runs under DynamicUser — so refusing it outright
+/// forced a fabricated directory that would then be backed up for nothing.
+#[test]
+fn t40_stateless_must_be_declared_not_inferred() {
+    use homelab_core::native::{validate_native, NativeServiceManifest};
+    let base = NativeServiceManifest {
+        stack_name: "kyu".into(),
+        vmid: 109,
+        hostname: "109-app-kyu".into(),
+        unit: "kyu-runner".into(),
+        binary: "/usr/local/bin/kyu-runner".into(),
+        env_file: Some("/etc/kyu-runner/token.env".into()),
+        data_dirs: vec![],
+        update_cmd: None,
+        stateless: false,
+    };
+    // Undeclared: still refused, and the message points at the way out.
+    let problems = validate_native(&base).expect_err("empty data_dirs must be refused");
+    assert!(
+        problems.iter().any(|p| p.contains("stateless")),
+        "the refusal must name the escape: {:?}",
+        problems
+    );
+    // Declared: accepted.
+    let stateless = NativeServiceManifest {
+        stateless: true,
+        ..base.clone()
+    };
+    validate_native(&stateless).expect("a declared-stateless service is valid");
+    // Both at once is a contradiction, and guessing would silently decide
+    // whether the service is backed up.
+    let confused = NativeServiceManifest {
+        stateless: true,
+        data_dirs: vec!["/var/lib/x".into()],
+        ..base
+    };
+    let problems = validate_native(&confused).expect_err("contradiction must be refused");
+    assert!(problems
+        .iter()
+        .any(|p| p.contains("one of the two is wrong")));
+}
+
 /// D25: one restic repository per APP, not per stack. Before this the
 /// repository was named after the stack, so moving an app to another stack
 /// left its whole history behind and started it from nothing — exactly the

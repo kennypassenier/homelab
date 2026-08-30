@@ -33,6 +33,7 @@ fn kyu_manifest() -> NativeServiceManifest {
         env_file: Some("/etc/kyu/kyu.env".into()),
         data_dirs: vec!["/var/lib/kyu".into()],
         update_cmd: Some("kyu update".into()),
+        stateless: false,
     }
 }
 

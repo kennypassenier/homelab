@@ -37,6 +37,9 @@ Numbers are permanent and are never reused, including after a row closes.
 | D17 | Model v2: configuration moves to `/appdata/<stack>/<app>-config` on the host, restic runs host-side | `BACKUP_MODEL.md` | 2026-08-30 |
 | D18 | Close all three privileged-path gaps AND ship a second golden template, one privileged and one not | pending build (T28-T30, T34) | 2026-08-30 |
 | D19 | vzdump archives live on `hdd4tb-backup`; `/appdata` stays on pve-root | `/etc/pve/storage.cfg`, both jobs repointed | 2026-08-30 |
+| D20 | Phase 2 frozen after round 2; changes go through mini-rounds only | `FEATURES.md` | 2026-08-30 |
+| D21 | Grafana's admin password rotated off the shipped default and stored in latch at `platform/grafana/.env` (env prod) | verified: new password 200, old default 401 | 2026-08-30 |
+| D22 | Docker updates run through a maintained watchtower fork, with pre-stop/post-start hooks and a Jellyfin stream check | pending mini-round Z | 2026-08-30 |
 
 ## Findings (F)
 
@@ -67,6 +70,11 @@ Numbers are permanent and are never reused, including after a row closes.
 | F23 | `host_owner_uid` is applied without any check against the container's privilege level | 101000 on a privileged container (or 1000 on an unprivileged one) silently produces unusable ownership | open |
 | F24 | `/appdata` sits on `pve-root` — the same 94 G filesystem as the Proxmox OS | A container filling its config directory fills the hypervisor's root filesystem | partly closed (D19: archives moved, pve-root 41% → 26%) |
 | F25 | vzdump archives of CT 102 and CT 103 from 2026-07-13 exist (943 MB and 262 MB) | The two untouchable containers do have a backup, seven weeks old — worth knowing before anyone assumes otherwise | open |
+| F26 | Only two of Kenny's Rust services self-update: latch (minisign-signed) and almanac (M10, keeps the previous binary and reverts). kyu, kyu-runner, HTTPSwitchboard and newsflash each decided against it | The homelab must own updates for kyu and kyu-runner outright, not merely supervise them | open |
+| F27 | kyu 2.0.0 publishes **no release assets at all** — kyu-runner ships a musl binary + SHA256SUMS, almanac ships a binary + SHA256SUMS + minisig | There is nothing for the homelab to download, so kyu cannot be updated by any release-driven mechanism yet | open |
+| F28 | kyu's own documentation says "updates are image pulls via compose (K13)", but kyu runs as a native systemd binary on CT 109 | Its documented update path describes a deployment that is not the one in use | open |
+| F29 | containrrr/watchtower was archived 2025-12-17; the maintained continuation is `nicholas-fedor/watchtower` | Any auto-update design has to name a fork, not "watchtower" | open |
+| F30 | The v1 directories are all still present: `apps`, `client-app`, `host-daemon`, `lxc-daemon`, `stacks-backup` | The never-answered V1-V5 cleanup, confirmed still outstanding | open |
 
 ## Tasks (T)
 

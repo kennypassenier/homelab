@@ -3,7 +3,11 @@ name: ci
 
 on:
   push:
-    branches: [main, v2-merge]
+    # Every branch, not only main: branch protection requires the `check` and
+    # `msrv` contexts, and a branch that produces no run can never satisfy
+    # them — which locks the branch shut and leaves a pull request as the only
+    # road in (standing rule 6a). `v2-merge` was deleted 2026-08-28.
+    branches: ["**"]
   pull_request:
 
 env:

@@ -1,6 +1,22 @@
 # Realization plan — The Homelab Deployment Project
 
-Phase 5 draft. **Not approved.** Each milestone below is a gate-form item.
+Phase 5 output. **Approved via the gate form on 2026-08-30.** Kenny agreed to
+every milestone and confirmed the reasoning behind the rollout order in his
+own words:
+
+> "elke container doen we individueel zodat we bij fouten die container kunnen
+> restoren. Bij elke container dat we succesvol kunnen uitrollen daalt de kans
+> op fouten en zo kunnen we de meest gevoelige containers onder handen nemen
+> in de best mogelijke condities."
+
+That is the order's purpose exactly: each success is evidence for the next
+one, and the containers that would hurt most are done last, when the procedure
+has been rehearsed the most.
+
+He also authorised working through **M0 to M4** without asking per step
+(P7). Anything that destroys or replaces a live system — M7 onward — still
+waits for his go per step, and a deviation from a frozen decision still
+quarantines that area and queues a mini-round rather than being built on.
 
 Ordering rule, from `SCOPE.md` C1: nothing is integrated before the backup
 step is green, and inside the rollout the edge comes before what sits behind

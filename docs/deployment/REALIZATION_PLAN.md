@@ -133,7 +133,16 @@ templates and M7's scratch container.
 **Exit:** a container cloned from either appears in Prometheus and in Loki
 with no further steps.
 
-**Status 2026-08-30: the capability is built, the artifacts are not.**
+**Status 2026-08-31: DONE — both templates exist and were verified.**
+`debian-12-homelab-v2` on vmid 998 (unprivileged) and
+`debian-12-homelab-v2-priv` on 997 (privileged). Not trusted from the build
+log: a clone of 998 was started on a throwaway vmid and asked directly —
+`prometheus-node-exporter` active with `/metrics` answering 200, both agent
+images present, Docker 29.7.2 — then destroyed. The managed stacks now clone
+998 instead of the v1 template on 999.
+
+**Earlier status (2026-08-30), kept for the record: the capability is built,
+the artifacts are not.**
 `template-build` takes a privilege level, names the result `-priv` when it is
 privileged, and bakes node_exporter plus pre-pulled cadvisor and promtail
 images. Tested both ways.

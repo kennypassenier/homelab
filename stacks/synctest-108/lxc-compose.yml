@@ -21,7 +21,7 @@ resources:
   storage: local-lvm
 
 lxc:
-  template: "clone:999"
+  template: "clone:998"
   unprivileged: true
   features: "nesting=1,keyctl=1"
 

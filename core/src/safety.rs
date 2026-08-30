@@ -6,10 +6,19 @@ use crate::executor::{Cmd, Executor};
 use crate::manifest::StackManifest;
 
 /// Guests that must never be managed regardless of what a manifest claims.
-/// VM 100 OPNsense · 101 Home Assistant · CT 102/103 infra · 104-107/111
-/// legacy stacks (104-106 migrate later via explicit config change) ·
-/// 201-203 k3s.
-pub const DEFAULT_NO_TOUCH: &[u16] = &[100, 101, 102, 103, 104, 105, 106, 107, 111, 201, 202, 203];
+/// VM 100 OPNsense · CT 102 omada · CT 103 fileserver — untouchable under
+/// every circumstance, Kenny's words, no exception clause. VM 101 Home
+/// Assistant stays here too: its VM lifecycle is out of scope, while changes
+/// inside HA travel through its own API under explicit consent, which this
+/// list does not govern.
+///
+/// Narrowed 2026-08-30 (deployment project, Phase 0 gate item C5) from
+/// 100-107/111/201-203. The legacy stacks 104-107 and 111 come under
+/// management as that project integrates them one at a time; the k3s VMs
+/// 201-203 no longer exist. Removing a vmid from this list does NOT make it
+/// deployable on its own — A2 still refuses any container whose hostname is
+/// not the canonical `<vmid>-app-<stack>`, which every legacy stack fails.
+pub const DEFAULT_NO_TOUCH: &[u16] = &[100, 101, 102, 103];
 
 #[derive(Debug, Clone)]
 pub struct SafetyConfig {

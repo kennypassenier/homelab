@@ -105,7 +105,7 @@ fn script_fresh(exec: &MockExecutor) {
 
 #[tokio::test]
 async fn a1_no_touch_vmid_is_refused_with_zero_commands() {
-    for vmid in [100u16, 101, 104, 111, 201] {
+    for vmid in [100u16, 101, 102, 103] {
         let exec = MockExecutor::new();
         let sink = VecSink::new();
         let journal = NullJournal;

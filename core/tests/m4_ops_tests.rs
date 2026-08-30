@@ -85,7 +85,7 @@ async fn c2_destroy_refuses_wrong_typed_name() {
 
 #[tokio::test]
 async fn c2_destroy_refuses_no_touch_vmid() {
-    for vmid in [101u16, 104, 106] {
+    for vmid in [101u16, 102, 103] {
         let exec = MockExecutor::new();
         let sink = VecSink::new();
         let j = NullJournal;
@@ -551,7 +551,7 @@ fn a6_exec_guard_deny_by_default_and_no_touch_always() {
     // Enabled: managed vmid allowed.
     assert!(exec_guard(true, &cfg, 108).is_ok());
     // Enabled: no-touch vmids refused regardless.
-    for vmid in [101u16, 104, 106] {
+    for vmid in [101u16, 102, 103] {
         let err = exec_guard(true, &cfg, vmid).unwrap_err();
         assert!(format!("{}", err).contains("no-touch"));
     }
@@ -635,7 +635,7 @@ async fn b8_template_build_refuses_no_touch_and_existing_vmids() {
     // No-touch vmid refused before anything runs.
     let exec = MockExecutor::new();
     let cfg = TemplateCfg {
-        temp_vmid: 104,
+        temp_vmid: 102,
         ..Default::default()
     };
     let report = build_template(&ctx(&exec, &sink, &j), &cfg).await;
@@ -772,7 +772,7 @@ async fn c4_no_touch_and_hostname_guarded() {
     let sink = VecSink::new();
     let j = NullJournal;
     let exec = resize_exec(512, 1, 4, true);
-    let report = hot_apply(&ctx(&exec, &sink, &j), &manifest(104, "evil")).await;
+    let report = hot_apply(&ctx(&exec, &sink, &j), &manifest(102, "evil")).await;
     assert!(!report.ok);
     assert!(report.error.unwrap().why.contains("no-touch"));
     // Wrong hostname refused too.
@@ -965,6 +965,20 @@ async fn a1_property_every_no_touch_vmid_refused_in_every_op() {
         assert!(!r.ok, "update must refuse vmid {}", vmid);
         assert!(exec.calls_containing("compose pull").is_empty());
     }
+}
+
+/// A1: the no-touch list is a policy Kenny stated, not a convenience default,
+/// so it is pinned here — widening or narrowing it must break a test rather
+/// than pass review. Decided 2026-08-30 (deployment project, Phase 0 gate C5):
+/// VM 100 OPNsense, CT 102 omada and CT 103 fileserver are untouchable under
+/// every circumstance; VM 101 Home Assistant keeps its VM lifecycle out of the
+/// orchestrator's hands (its in-app config changes go through the HA API with
+/// explicit consent, which this list does not govern). Every other LXC comes
+/// under management as the deployment project integrates it.
+#[test]
+fn a1_no_touch_list_is_exactly_the_four_untouchable_guests() {
+    use homelab_core::safety::DEFAULT_NO_TOUCH;
+    assert_eq!(DEFAULT_NO_TOUCH, &[100u16, 101, 102, 103]);
 }
 
 #[tokio::test]

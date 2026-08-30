@@ -15,8 +15,11 @@ double (no real pct/docker calls); `pilot` = the live syncthing stack.
 ## A · Security
 
 ### A1 · Whitelist-only management + no-touch list — **Must**
-Only manifests are ever acted on; a hardcoded NO_TOUCH list (100-107, 111,
-201-203) refuses the pre-existing guests outright. `pct list` is never
+Only manifests are ever acted on; a hardcoded NO_TOUCH list (100, 101, 102,
+103) refuses those guests outright. Narrowed 2026-08-30 from 100-107/111/201-203
+by the deployment project's Phase 0 gate (item C5): 104-107 and 111 come under
+management as that project integrates them, the k3s VMs no longer exist, and
+A2 still refuses any container not named `<vmid>-app-<stack>`. `pct list` is never
 enumerated for management.
 - **Auto**: unit test — deploy manifest with vmid 101 → `SAFETY ABORT`, and
   MockExecutor proves zero commands ran.

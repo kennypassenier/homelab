@@ -192,7 +192,7 @@ homelab destroy stacks/synctest-108    # typed-name confirmation
 
 ## Standing rule during automated testing
 Everything in Part B is confined to **vmid 108** until Kenny takes over. The
-no-touch list (100-107, 111, 201-203) is enforced in code and blocks anything
+no-touch list (100, 101, 102, 103) is enforced in code and blocks anything
 else regardless of manifest content.
 
 ### B11 · Managed update + rollback (D9/B6)

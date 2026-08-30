@@ -167,6 +167,32 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         })
     });
 
+    // ── T1: tell Prometheus this stack exists. Written before the apps
+    // start, removed by destroy — so the scrape list is a consequence of what
+    // runs rather than a list somebody maintains and forgets. Best-effort on
+    // purpose: a metrics stack that is down must never block a deploy.
+    step!(runner, "metrics discovery", {
+        let Some(dir) = ctx.metrics_targets_dir.as_deref() else {
+            return Ok(StepOutcome::Unchanged);
+        };
+        let path = crate::ops::discovery::target_file(dir, &m.stack_name);
+        let body = crate::ops::discovery::targets_json(&m.stack_name, &m.network.ip);
+        if matches!(exec.read_file(&path).await, Ok(existing) if existing == body) {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let _ = exec.run(&Cmd::new("mkdir", &["-p", dir], 30)).await;
+        match exec.write_file(&path, &body, 0o644).await {
+            Ok(()) => Ok(StepOutcome::Changed),
+            Err(e) => {
+                log_info(format!(
+                    "[t1] could not write {} ({}) — this stack will not be scraped until it is",
+                    path, e
+                ));
+                Ok(StepOutcome::Unchanged)
+            }
+        }
+    });
+
     // ── C1: create or reuse the container; C3 boot policy at create. ─────
     step!(runner, "provision container", {
         if !exists {

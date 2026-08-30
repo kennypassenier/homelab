@@ -20,6 +20,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         state_dir: "/var/lib/homelab".into(),
         now_unix: NOW,
         kea: None,
+        metrics_targets_dir: None,
     }
 }
 

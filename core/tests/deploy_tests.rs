@@ -86,6 +86,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         state_dir: "/var/lib/homelab".into(),
         now_unix: 1_760_000_000,
         kea: None,
+        metrics_targets_dir: None,
     }
 }
 

@@ -58,6 +58,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         state_dir: "/var/lib/homelab".into(),
         now_unix: 1_760_000_000,
         kea: None,
+        metrics_targets_dir: None,
     }
 }
 
@@ -1157,6 +1158,65 @@ fn t40_stateless_must_be_declared_not_inferred() {
         .any(|p| p.contains("one of the two is wrong")));
 }
 
+/// T1: a stack becomes a scrape target because it was deployed, not because
+/// somebody remembered to edit a list. Eleven node addresses and six cadvisor
+/// addresses were hardcoded in prometheus.yml, and nothing kept them honest —
+/// the scratch container at 10.10.10.14 was still a target this morning, on
+/// its way to firing HostDown the moment it was removed.
+#[tokio::test]
+async fn t1_deploy_writes_a_discovery_file_and_destroy_removes_it() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut c = ctx(&exec, &sink, &j);
+    c.metrics_targets_dir = Some("/appdata/metrics/prometheus-config/targets".into());
+    let report = deploy(&c, &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let written = exec
+        .file_paths()
+        .into_iter()
+        .find(|p| p.contains("targets/test.json"))
+        .expect("a discovery file must be written");
+    assert_eq!(
+        written,
+        "/appdata/metrics/prometheus-config/targets/test.json"
+    );
+
+    // The CIDR from the manifest must not reach the scrape target.
+    let body = homelab_core::ops::discovery::targets_json("test", "10.10.10.8/24");
+    assert!(body.contains("10.10.10.8:9100"), "{}", body);
+    assert!(body.contains("10.10.10.8:8081"), "{}", body);
+    assert!(
+        !body.contains("/24"),
+        "the CIDR suffix must be stripped: {}",
+        body
+    );
+
+    // Rewriting an unchanged file must be a no-op, or the drift check would
+    // report a difference every single deploy.
+    assert_eq!(
+        homelab_core::ops::discovery::targets_json("test", "10.10.10.8/24"),
+        body
+    );
+}
+
+/// T1: with no directory configured the feature is simply off, and a deploy
+/// neither writes nor complains.
+#[tokio::test]
+async fn t1_discovery_is_off_when_unconfigured() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(exec.file_paths().iter().all(|p| !p.contains("targets/")));
+}
+
 /// D25: one restic repository per APP, not per stack. Before this the
 /// repository was named after the stack, so moving an app to another stack
 /// left its whole history behind and started it from nothing — exactly the
@@ -1528,6 +1588,7 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             state_dir: "/var/lib/homelab".into(),
             now_unix: 1_760_000_000,
             kea: None,
+            metrics_targets_dir: None,
         },
         "test",
         108,
@@ -1565,6 +1626,7 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             state_dir: "/var/lib/homelab".into(),
             now_unix: 1_760_000_000,
             kea: None,
+            metrics_targets_dir: None,
         },
         "test",
         108,

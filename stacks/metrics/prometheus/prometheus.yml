@@ -32,6 +32,16 @@ scrape_configs:
   - job_name: almanac
     static_configs:
       - targets: ["10.10.10.12:8080"]
+  # T1: stacks the orchestrator manages announce themselves. It writes one
+  # file per stack on deploy and removes it on destroy, and Prometheus picks
+  # the change up without a reload — so this list is a consequence of what
+  # runs rather than an administration that drifts. The static lists below
+  # stay for the guests the orchestrator does not manage yet; each one
+  # disappears from there as its stack is integrated in M8.
+  - job_name: managed
+    file_sd_configs:
+      - files: ["/prometheus/targets/*.json"]
+
   - job_name: node
     static_configs:
       - targets: ["10.10.5.250:9100"]

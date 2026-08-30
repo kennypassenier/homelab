@@ -66,6 +66,9 @@ struct FileConfig {
     /// Seconds a single restore may take. Default 4 h, matching the snapshot
     /// side — it used to be a hardcoded 1800 (F38).
     restic_restore_timeout_s: Option<u64>,
+    /// T1: directory the orchestrator writes per-stack Prometheus discovery
+    /// files into. Absent = off, and the scrape list stays hand-maintained.
+    metrics_targets_dir: Option<String>,
 }
 
 #[derive(Clone)]
@@ -91,6 +94,8 @@ struct Config {
     /// Backup target and timeouts, resolved once from host.toml. Callers
     /// clone this and override only `tiers`.
     backup: homelab_core::ops::backup::BackupCfg,
+    /// T1: where per-stack Prometheus discovery files are written.
+    metrics_targets_dir: Option<String>,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
 }
@@ -163,6 +168,7 @@ fn load_config() -> Config {
                 tiers: d.tiers,
             }
         },
+        metrics_targets_dir: file.metrics_targets_dir,
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -221,6 +227,8 @@ fn render_settings_toml(
         restic_snapshot_timeout_s: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         restic_restore_timeout_s: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metrics_targets_dir: Option<&'a String>,
     }
     let bdef = homelab_core::ops::backup::BackupCfg::default();
     let out = Out {
@@ -250,6 +258,7 @@ fn render_settings_toml(
             .then_some(config.backup.snapshot_timeout_s),
         restic_restore_timeout_s: (config.backup.restore_timeout_s != bdef.restore_timeout_s)
             .then_some(config.backup.restore_timeout_s),
+        metrics_targets_dir: config.metrics_targets_dir.as_ref(),
     };
     toml::to_string_pretty(&out).map_err(|e| e.to_string())
 }
@@ -312,6 +321,7 @@ mod tests {
                 restore_timeout_s: 9_999,
                 ..Default::default()
             },
+            metrics_targets_dir: Some("/appdata/metrics/prometheus-config/targets".into()),
             initial_settings: homelab_proto::HostConfigView {
                 backup_hour: Some(4),
                 notify_webhook: Some("http://ha/webhook/x".into()),
@@ -1390,6 +1400,7 @@ where
         state_dir: state.config.state_dir.clone(),
         now_unix: now,
         kea: state.config.kea.clone(),
+        metrics_targets_dir: state.config.metrics_targets_dir.clone(),
     };
     let report = op(&ctx).await;
     notify(state, exec, label, &report).await; // F3, best-effort

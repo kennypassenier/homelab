@@ -112,6 +112,18 @@ pub async fn destroy(
     });
 
     // Remove the traefik route fragment if this stack had one.
+    // T1: a destroyed stack stops being a scrape target. Without this it
+    // would keep firing HostDown on its way out — which is exactly what the
+    // scratch container at 10.10.10.14 was set up to do.
+    step!(runner, "remove metrics discovery", {
+        let Some(dir) = ctx.metrics_targets_dir.as_deref() else {
+            return Ok(StepOutcome::Unchanged);
+        };
+        let path = crate::ops::discovery::target_file(dir, stack_name);
+        let _ = exec.run(&Cmd::new("rm", &["-f", &path], 30)).await;
+        Ok(StepOutcome::Changed)
+    });
+
     step!(runner, "remove gateway route", {
         let dest = format!(
             "{}/{}-app-{}.yml",

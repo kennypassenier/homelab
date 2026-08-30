@@ -1,8 +1,6 @@
 [workspace]
 resolver = "3"
 members = ["core", "proto", "host", "client", "tui-preview"]
-# Legacy generation — standalone crates, superseded by the v2 merge.
-exclude = ["client-app", "host-daemon", "lxc-daemon"]
 
 [workspace.package]
 version = "3.2.0"

@@ -421,3 +421,47 @@ pub fn import_bundle(
     }
     Ok(dest)
 }
+
+/// Y4: every stack directory in the repository with the vmid it claims. Only
+/// the client can see this — the host has the intent repo of what it actually
+/// deployed, not the files sitting in front of the author.
+pub fn stack_files_with_vmids(base: &str) -> Vec<(String, u16)> {
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(base) {
+        Ok(e) => e,
+        Err(_) => return out,
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let manifest = dir.join("lxc-compose.yml");
+        let native = dir.join("service.yml");
+        let path = if manifest.exists() {
+            manifest
+        } else if native.exists() {
+            native
+        } else {
+            continue;
+        };
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        // Deliberately a line scan rather than a full parse: a file too broken
+        // to deserialize is exactly the one worth reporting, and refusing to
+        // look at it would hide it.
+        if let Some(vmid) = raw
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("vmid:"))
+            .and_then(|v| v.trim().parse::<u16>().ok())
+        {
+            out.push((
+                format!("{}/{}", base, entry.file_name().to_string_lossy()),
+                vmid,
+            ));
+        }
+    }
+    out.sort();
+    out
+}

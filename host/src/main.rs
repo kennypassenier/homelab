@@ -1183,6 +1183,47 @@ async fn scheduler_loop(state: AppState) {
                 tracing::error!("scheduler: ZFS replication FAILED — investigate; the old cron script used to fail silently, this one does not");
             }
         }
+
+        // Y4: after the night's work, hold the record against the machine.
+        // Unconditional, because the findings this exists for are precisely
+        // the ones that produce no failure of their own: a stack whose
+        // hostname drifted, a backup that quietly stopped, a route that leads
+        // nowhere. Stack-file facts are the client's to supply, so the
+        // nightly pass runs without them.
+        if !plan.is_empty() {
+            let live = gather_live_facts(&exec, &state, &[]).await;
+            if let Ok(snapshot) = store.load().await {
+                let findings = homelab_core::ops::fleetcheck::evaluate(
+                    &snapshot,
+                    &live,
+                    now,
+                    homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+                );
+                if findings.is_empty() {
+                    info!("fleet check: repo and reality agree");
+                } else {
+                    tracing::warn!(
+                        "fleet check: {} finding(s)\n{}",
+                        findings.len(),
+                        render_findings(&findings)
+                    );
+                    // The finding text is already in the log above; the
+                    // webhook exists so it leaves the machine.
+                    notify_raw(
+                        &state,
+                        &exec,
+                        serde_json::json!({
+                            "op": "fleet-check",
+                            "ok": false,
+                            "error": render_findings(&findings),
+                            "version": env!("CARGO_PKG_VERSION"),
+                        })
+                        .to_string(),
+                    )
+                    .await;
+                }
+            }
+        }
     }
 }
 
@@ -1425,6 +1466,108 @@ async fn native_from_state(
     }
 }
 
+/// Y4: read off the machine what the pure comparison needs. Kept separate so
+/// the judgement stays testable without a fleet.
+async fn gather_live_facts(
+    exec: &RealExecutor,
+    state: &AppState,
+    stack_files: &[(String, u16)],
+) -> homelab_core::ops::fleetcheck::LiveFacts {
+    use homelab_core::executor::{Cmd, Executor};
+    let mut facts = homelab_core::ops::fleetcheck::LiveFacts {
+        stack_files: stack_files.to_vec(),
+        ..Default::default()
+    };
+    if let Ok(out) = exec.run(&Cmd::new("pct", &["list"], 30)).await {
+        for line in out.stdout.lines().skip(1) {
+            let mut cols = line.split_whitespace();
+            if let (Some(vmid), Some(_status)) = (cols.next(), cols.next()) {
+                if let (Ok(vmid), Some(name)) = (vmid.parse::<u16>(), cols.last()) {
+                    facts.containers.push((vmid, name.to_string()));
+                }
+            }
+        }
+    }
+    // Gateway routes: read every fragment, pull out the address it forwards
+    // to, and ask whether anything is listening there. A route that resolves
+    // to nothing is only ever found by someone who needs it.
+    let gw = state.config.safety.gateway_vmid.to_string();
+    let dir = &state.config.safety.gateway_routes_dir;
+    let script = format!(
+        "for f in {}/*.yml; do echo \"### $(basename $f)\"; cat \"$f\"; done 2>/dev/null",
+        dir
+    );
+    if let Ok(out) = exec
+        .run(&Cmd::new(
+            "pct",
+            &["exec", &gw, "--", "sh", "-c", &script],
+            60,
+        ))
+        .await
+    {
+        let mut current = String::new();
+        for line in out.stdout.lines() {
+            if let Some(name) = line.strip_prefix("### ") {
+                current = name.to_string();
+                continue;
+            }
+            let t = line.trim();
+            let target = t
+                .strip_prefix("- url:")
+                .or_else(|| t.strip_prefix("- address:"))
+                .map(|v| v.trim().trim_matches('"').to_string());
+            if let Some(target) = target {
+                let hostport = target
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&target)
+                    .trim_matches('"')
+                    .to_string();
+                let probe = format!(
+                    "timeout 3 sh -c 'echo > /dev/tcp/{}' 2>/dev/null && echo up || echo down",
+                    hostport.replace(':', "/")
+                );
+                let answered = exec
+                    .run(&Cmd::new(
+                        "pct",
+                        &["exec", &gw, "--", "sh", "-c", &probe],
+                        15,
+                    ))
+                    .await
+                    .map(|o| o.stdout.contains("up"))
+                    .unwrap_or(false);
+                facts.routes.push(homelab_core::ops::fleetcheck::RouteFact {
+                    file: current.clone(),
+                    target,
+                    answered,
+                });
+            }
+        }
+    }
+    facts
+}
+
+fn render_findings(findings: &[homelab_core::ops::fleetcheck::Finding]) -> String {
+    use homelab_core::ops::fleetcheck::Severity;
+    if findings.is_empty() {
+        return "fleet check: repo and reality agree".into();
+    }
+    let mut s = format!("fleet check: {} finding(s)\n", findings.len());
+    for f in findings {
+        s.push_str(&format!(
+            "  [{}] {} — {}\n      remedy: {}\n",
+            match f.severity {
+                Severity::Broken => "broken",
+                Severity::Drift => "drift",
+            },
+            f.subject,
+            f.what,
+            f.remedy
+        ));
+    }
+    s
+}
+
 async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
     let exec = RealExecutor;
     match req.command {
@@ -1620,6 +1763,37 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     ok: false,
                     message: msg,
                 },
+            }
+        }
+        Rpc::FleetCheck { stack_files } => {
+            let live = gather_live_facts(&exec, state, &stack_files).await;
+            let snapshot =
+                match homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir)
+                    .load()
+                    .await
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return RpcResponse {
+                            id: req.id,
+                            ok: false,
+                            message: format!("state unreadable: {}", e),
+                        }
+                    }
+                };
+            let findings = homelab_core::ops::fleetcheck::evaluate(
+                &snapshot,
+                &live,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+            );
+            RpcResponse {
+                id: req.id,
+                ok: findings.is_empty(),
+                message: render_findings(&findings),
             }
         }
         Rpc::ZfsReplicate => {

@@ -100,6 +100,14 @@ pub enum Command {
     },
     /// E8: run the configured ZFS snapshot + replication jobs now.
     ZfsReplicate,
+    /// Y4: hold the repository against reality and report every difference.
+    /// The client sends what only it can see — the vmid each stack directory
+    /// claims — and the host adds what only it can see: which containers
+    /// exist, how they are named, when each stack was last backed up, and
+    /// whether every gateway route reaches something that answers.
+    FleetCheck {
+        stack_files: Vec<(String, u16)>,
+    },
     /// H8 (light): flip a stack's enabled flag. Disabled = nightly scheduler
     /// skips it + onboot cleared; enabled = back in rotation + onboot per
     /// manifest. Never starts or stops containers.

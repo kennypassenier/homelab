@@ -91,6 +91,20 @@ async fn main() {
             );
             rpc(&host, &token, Command::AdoptService(Box::new(m))).await;
         }
+        // Y4: the client contributes what only it can see — the vmid each
+        // stack directory claims — and the host contributes the rest.
+        "check" => {
+            let base = args.get(2).cloned().unwrap_or_else(|| "stacks".into());
+            let stack_files = crate::spec::stack_files_with_vmids(&base);
+            println!(
+                "{}▶ fleet check :: {} stack file(s) from {}{}",
+                C_CYAN,
+                stack_files.len(),
+                base,
+                C_RESET
+            );
+            rpc(&host, &token, Command::FleetCheck { stack_files }).await;
+        }
         "backup-native" => {
             let stack = args
                 .get(2)
@@ -440,6 +454,7 @@ async fn main() {
                 "  homelab enable|disable <stack>      (un)park for the nightly scheduler (H8)"
             );
             println!("  homelab backup-host-meta            snapshot vault/state/TLS/repo (H10)");
+            println!("  homelab check [stacks/]             hold the repo against reality (Y4)");
             println!("  homelab adopt stacks/<name>         adopt a native-service CT (C7)");
             println!(
                 "  homelab backup-native|update-native <stack>  drive an adopted service (C7)"

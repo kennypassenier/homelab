@@ -1204,6 +1204,51 @@ async fn t1_deploy_writes_a_discovery_file_and_destroy_removes_it() {
     );
 }
 
+/// O10 end to end: an app that asks to be left alone while in use is skipped,
+/// and nothing is pulled or restarted. The check fails closed, so this also
+/// covers the case that matters most — Jellyfin answering with something the
+/// orchestrator cannot read.
+#[tokio::test]
+async fn o10_an_app_in_use_is_skipped_entirely() {
+    use homelab_core::ops::update::update;
+    for (label, body) in [
+        (
+            "somebody watching",
+            r#"[{"UserName":"kenny","NowPlayingItem":{"Name":"Arrival"},"PlayState":{"IsPaused":true}}]"#,
+        ),
+        ("an unreadable answer", "<html>502</html>"),
+    ] {
+        let exec = MockExecutor::new();
+        exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+        exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test"));
+        exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+        exec.respond_always("update.policy", CmdOutput::ok("auto\n"));
+        exec.respond_always("update.busy-check", CmdOutput::ok("jellyfin\n"));
+        exec.respond_always("Sessions", CmdOutput::ok(body));
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let mut m = manifest(108, "test");
+        m.apps = vec!["app".into()];
+        let report = update(&ctx(&exec, &sink, &j), &m, None, false).await;
+        assert!(
+            report.ok,
+            "a skip is not a failure ({}): {:?}",
+            label, report.error
+        );
+        assert!(
+            exec.calls_containing("docker compose pull").is_empty(),
+            "{}: nothing may be pulled: {:?}",
+            label,
+            exec.calls_containing("docker compose")
+        );
+        assert!(
+            sink.lines().iter().any(|l| l.contains("[o10]")),
+            "{}: the skip must say so out loud",
+            label
+        );
+    }
+}
+
 /// O9: a database is stopped cleanly before its replacement comes up, not
 /// killed under itself. `docker compose up -d` recreates a container by
 /// killing it, and for Postgres — which SuperSync runs on CT 111 — that makes

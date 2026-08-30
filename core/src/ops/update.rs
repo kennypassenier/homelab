@@ -29,6 +29,29 @@ struct CapturedImage {
     repo_tag: String,
 }
 
+/// O10: does this app ask to be left alone while it is in use? A named check
+/// rather than a command in the label — there is exactly one service that
+/// needs this, and a label carrying a shell command is a place for one to
+/// appear that nobody reviewed.
+async fn app_wants_busy_check(
+    exec: &dyn Executor,
+    vmid: u16,
+    stack: &str,
+    app: &str,
+) -> Result<bool, CoreError> {
+    let out = super::util_pct_sh(
+        exec,
+        vmid,
+        &format!(
+            "cd '/opt/{}/{}' && docker compose ps -q | head -1 | xargs -r docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.busy-check\"}}}}'",
+            stack, app
+        ),
+        60,
+    )
+    .await?;
+    Ok(out.stdout.trim() == "jellyfin")
+}
+
 async fn capture_app(
     exec: &dyn Executor,
     vmid: u16,
@@ -149,6 +172,46 @@ pub async fn update(
             captured = capture_app(exec, vmid, &stack, app).await?;
             Ok(StepOutcome::Unchanged)
         });
+
+        // O10: ask before walking in. Only Jellyfin is asked, because it is
+        // the only service here where an update lands in somebody's evening —
+        // and the check fails CLOSED, so an unreachable or unparseable answer
+        // skips the update rather than assuming nobody is watching.
+        let busy_step = format!("{} :: busy check", app);
+        let mut skip_app: Option<String> = None;
+        step!(runner, &busy_step, {
+            if !app_wants_busy_check(exec, vmid, &stack, app).await? {
+                return Ok(StepOutcome::Unchanged);
+            }
+            let out = super::util_pct_sh(
+                exec,
+                vmid,
+                &format!(
+                    "cd '/opt/{}/{}' && set -a && . ./.env && set +a && \
+                     curl -sf -m 10 -H \"Authorization: MediaBrowser Token=$JELLYFIN_API_KEY\" \
+                     http://127.0.0.1:8096/Sessions",
+                    stack, app
+                ),
+                30,
+            )
+            .await?;
+            let verdict = crate::ops::busy::jellyfin_busy(&out.stdout);
+            if verdict.may_update() {
+                return Ok(StepOutcome::Unchanged);
+            }
+            skip_app = Some(match &verdict {
+                crate::ops::busy::Busy::Yes(who) => format!("in use — {}", who),
+                crate::ops::busy::Busy::Unknown(why) => {
+                    format!("could not tell ({}), so treating it as in use", why)
+                }
+                crate::ops::busy::Busy::No => unreachable!(),
+            });
+            Ok(StepOutcome::Unchanged)
+        });
+        if let Some(why) = skip_app {
+            runner.log(Level::Info, format!("[o10] {} skipped: {}", app, why));
+            continue;
+        }
 
         // O9: pull first, THEN stop, then start. Pulling while the service
         // still runs keeps the window in which it is down to the swap itself

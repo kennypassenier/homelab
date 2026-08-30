@@ -37,12 +37,28 @@ Numbers are permanent and are never reused, including after a row closes.
 | F4 | A2's hostname guard, not the no-touch list, is what still refuses the legacy stacks (`lxc-media-stack` etc. are not `<vmid>-app-<stack>`) | Narrowing the no-touch list did not make them deployable | done |
 | F5 | Two drives are old: Toshiba DT01ACA200 at 110 329 power-on hours, WD40EFRX at 63 194 — both pass SMART with zero reallocations | Justifies the pending-sector alert rule; a backup target choice must not assume these drives | open |
 | F6 | Grafana runs with `GF_SECURITY_ADMIN_PASSWORD=changeme_secure_password` and 10.10.10.4:3000 answers on the LAN with no gate | Must be treated as leaked; see §6 of the vault note "Homelab Open Issues" | open |
+| F7 | kyu (CT 109) has `last_backup: NEVER` and `enabled: false`; its homelab state still describes the pre-rename `mailbox` paths, none of which exist | The hub the notification chain depends on is in no off-machine backup | open |
+| F8 | `/etc/homelab/host.toml` sets `no_touch` explicitly, which REPLACES the compiled default — today's code narrowing changed nothing live | The safety decision is not yet in force; the file must be updated per container | open |
+| F9 | Uptime Kuma monitors exactly one target (kyu `/healthz`) after four weeks of uptime | Jellyfin, Traefik, HA, almanac and the whole edge are unwatched | open |
+| F10 | CT 107 is empty, yet `lxc-mqtt-stack.yml` still routes TCP :1883 to it while CT 104 publishes 1883 itself | Where MQTT terminates must be settled before 107 is removed | open |
+| F11 | Ansible-era config (CT 104/105/106/111) lives only inside its own container; `/appdata` holds only metrics and synctest | A container rebuild loses the configuration | open |
+| F12 | The Cloudflare tunnel ingress and every Access policy exist only in the Cloudflare dashboard; `/opt/cloudflared-config/` is empty | The edge cannot be restored from any repository | open |
+| F13 | CT 104 runs no promtail, so the host that owns Loki ships none of its own container logs | Blind spot exactly where the edge lives | open |
+| F14 | kyu's store is a 98 KB `.db` behind a 4.1 MB `.db-wal` | Any backup or move must take .db/.db-wal/.db-shm together (standing rule 15a) | open |
+| F15 | CT 111 was removed from the live no-touch list on 2026-08-29 so homelab could adopt it; the adoption never happened | Unprotected and unmanaged simultaneously | open |
 
 ## Tasks (T)
 
 | # | Task | Depends on | Status |
 |---|---|---|---|
-| T1 | Phase 1 · full inventory of every guest, its services and its hand-tuned configuration | D1 | doing |
+| T1 | Phase 1 · full inventory of every guest, its services and its hand-tuned configuration | D1 | done (`INVENTORY.md`) |
+| T16 | Repair the kyu stack entry in homelab state (re-adopt under its real name/paths) and re-enable its nightly run — F7 | T1 | open |
+| T17 | Bring `/etc/homelab/host.toml`'s `no_touch` in line with the Phase 0 decision, per container — F8 | T1 | open |
+| T18 | Decide where MQTT terminates, then remove the stale `lxc-mqtt-stack.yml` route — F10 | T1 | open |
+| T19 | Move ansible-era configuration onto `/appdata` on the host so a rebuild survives — F11 | T1 | open |
+| T20 | Capture the Cloudflare tunnel ingress and Access policies into the repo — F12 | needs Cloudflare credentials | open |
+| T21 | Add promtail to CT 104 — F13 | T1 | open |
+| T22 | Give Uptime Kuma a real monitor set — F9 | T1 | open |
 | T2 | Bring `stacks/metrics/prometheus/prometheus.yml` level with the live one (almanac job, node job ×11, cadvisor job ×6) | T1 | open |
 | T3 | Add Alertmanager + its four rules + the `rules/` mount to the metrics stack | T1 | open |
 | T4 | Add node_exporter and the SMART textfile collector as managed artifacts | T1 | open |

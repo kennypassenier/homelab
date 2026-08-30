@@ -69,6 +69,9 @@ struct FileConfig {
     /// T1: directory the orchestrator writes per-stack Prometheus discovery
     /// files into. Absent = off, and the scrape list stays hand-maintained.
     metrics_targets_dir: Option<String>,
+    /// T2: Grafana provisioning directory inside the gateway container.
+    /// Absent = off, and dashboards stay hand-made.
+    grafana_dashboards_dir: Option<String>,
 }
 
 #[derive(Clone)]
@@ -96,6 +99,8 @@ struct Config {
     backup: homelab_core::ops::backup::BackupCfg,
     /// T1: where per-stack Prometheus discovery files are written.
     metrics_targets_dir: Option<String>,
+    /// T2: Grafana's provisioning directory inside the gateway container.
+    grafana_dashboards_dir: Option<String>,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
 }
@@ -169,6 +174,7 @@ fn load_config() -> Config {
             }
         },
         metrics_targets_dir: file.metrics_targets_dir,
+        grafana_dashboards_dir: file.grafana_dashboards_dir,
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -229,6 +235,8 @@ fn render_settings_toml(
         restic_restore_timeout_s: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         metrics_targets_dir: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        grafana_dashboards_dir: Option<&'a String>,
     }
     let bdef = homelab_core::ops::backup::BackupCfg::default();
     let out = Out {
@@ -259,6 +267,7 @@ fn render_settings_toml(
         restic_restore_timeout_s: (config.backup.restore_timeout_s != bdef.restore_timeout_s)
             .then_some(config.backup.restore_timeout_s),
         metrics_targets_dir: config.metrics_targets_dir.as_ref(),
+        grafana_dashboards_dir: config.grafana_dashboards_dir.as_ref(),
     };
     toml::to_string_pretty(&out).map_err(|e| e.to_string())
 }
@@ -322,6 +331,7 @@ mod tests {
                 ..Default::default()
             },
             metrics_targets_dir: Some("/appdata/metrics/prometheus-config/targets".into()),
+            grafana_dashboards_dir: Some("/opt/grafana/provisioning/dashboards".into()),
             initial_settings: homelab_proto::HostConfigView {
                 backup_hour: Some(4),
                 notify_webhook: Some("http://ha/webhook/x".into()),
@@ -1401,6 +1411,7 @@ where
         now_unix: now,
         kea: state.config.kea.clone(),
         metrics_targets_dir: state.config.metrics_targets_dir.clone(),
+        grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
     };
     let report = op(&ctx).await;
     notify(state, exec, label, &report).await; // F3, best-effort

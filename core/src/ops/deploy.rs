@@ -744,6 +744,38 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         });
     }
 
+    // ── T2: the stack brings its own dashboard. Written into Grafana's
+    // provisioning directory on the gateway, where the watcher picks it up
+    // within ten seconds. Provisioned dashboards are files, not database
+    // rows: they survive a rebuild of that container and they diff in review.
+    // Best-effort, like the discovery file — Grafana being down is not a
+    // reason to fail a deploy.
+    if let Some(dir) = ctx.grafana_dashboards_dir.as_deref() {
+        step!(runner, "grafana dashboard", {
+            let dest = crate::ops::dashboard::dashboard_file(dir, &m.stack_name);
+            let body = crate::ops::dashboard::dashboard_json(&m.stack_name, &m.apps);
+            match push_content(exec, ctx.safety.gateway_vmid, &dest, &body, "644").await {
+                Ok(changed) => {
+                    if changed {
+                        log_info(format!("[t2] {} (provisioning watcher reloads)", dest));
+                    }
+                    Ok(if changed {
+                        StepOutcome::Changed
+                    } else {
+                        StepOutcome::Unchanged
+                    })
+                }
+                Err(e) => {
+                    log_info(format!(
+                        "[t2] could not write {} ({}) — this stack has no generated dashboard yet",
+                        dest, e
+                    ));
+                    Ok(StepOutcome::Unchanged)
+                }
+            }
+        });
+    }
+
     // ── D3: garbage-collect apps removed from intent — stop + remove their
     // compose project and /opt dir; /appdata config dirs are kept.
     step!(runner, "garbage collect", {

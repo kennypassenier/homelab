@@ -1,6 +1,7 @@
 //! Operations: step lists executed through the shared runner (AR3).
 
 pub mod backup;
+pub mod dashboard;
 pub mod deploy;
 pub mod destroy;
 pub mod discovery;
@@ -92,4 +93,7 @@ pub struct OpCtx<'a> {
     /// are written. None = feature off, and the scrape list stays whatever
     /// somebody last typed into prometheus.yml.
     pub metrics_targets_dir: Option<String>,
+    /// T2: Grafana's provisioning directory, as a path INSIDE the gateway
+    /// container. None = feature off, and dashboards stay hand-made.
+    pub grafana_dashboards_dir: Option<String>,
 }

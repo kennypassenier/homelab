@@ -59,6 +59,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         now_unix: 1_760_000_000,
         kea: None,
         metrics_targets_dir: None,
+        grafana_dashboards_dir: None,
     }
 }
 
@@ -1203,6 +1204,61 @@ async fn t1_deploy_writes_a_discovery_file_and_destroy_removes_it() {
     );
 }
 
+/// T2: a stack brings its own dashboard. The ones that exist today were built
+/// by hand and lived in no repository until 2026-08-30, so a Grafana rebuild
+/// would have taken them — and adding a stack meant remembering to open
+/// Grafana, which is the step nobody remembers.
+#[tokio::test]
+async fn t2_deploy_provisions_a_dashboard_for_the_stack() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut c = ctx(&exec, &sink, &j);
+    c.grafana_dashboards_dir = Some("/opt/grafana/provisioning/dashboards".into());
+    let report = deploy(&c, &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        !exec
+            .calls_containing("/opt/grafana/provisioning/dashboards/homelab-test.json")
+            .is_empty(),
+        "the dashboard must be pushed to the gateway: {:?}",
+        exec.calls_containing("grafana")
+    );
+}
+
+/// The generated document has to be worth provisioning: real panels, the
+/// Prometheus datasource by uid, and every query scoped to this stack so two
+/// stacks never show each other's numbers.
+#[test]
+fn t2_the_generated_dashboard_is_scoped_and_stable() {
+    use homelab_core::ops::dashboard::dashboard_json;
+    let body = dashboard_json("media", &["jellyfin".to_string(), "sonarr".to_string()]);
+    assert!(body.contains("\"uid\": \"homelab-media\""), "{}", body);
+    assert!(body.contains("\"uid\": \"prometheus\""), "{}", body);
+    assert_eq!(
+        body.matches("stack=\\\"media\\\"").count(),
+        5,
+        "every query must be scoped to this stack: {}",
+        body
+    );
+    assert!(
+        body.contains("jellyfin, sonarr"),
+        "the description should say what is in the stack: {}",
+        body
+    );
+    assert!(
+        body.contains("change the generator, not the dashboard"),
+        "an overwritten file must say so on its face"
+    );
+    // Byte-stable, or the fleet check reports drift after every deploy.
+    assert_eq!(
+        body,
+        dashboard_json("media", &["jellyfin".to_string(), "sonarr".to_string()])
+    );
+}
+
 /// T1: with no directory configured the feature is simply off, and a deploy
 /// neither writes nor complains.
 #[tokio::test]
@@ -1589,6 +1645,7 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             now_unix: 1_760_000_000,
             kea: None,
             metrics_targets_dir: None,
+            grafana_dashboards_dir: None,
         },
         "test",
         108,
@@ -1627,6 +1684,7 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             now_unix: 1_760_000_000,
             kea: None,
             metrics_targets_dir: None,
+            grafana_dashboards_dir: None,
         },
         "test",
         108,

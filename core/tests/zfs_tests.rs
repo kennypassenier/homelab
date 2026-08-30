@@ -21,6 +21,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         now_unix: NOW,
         kea: None,
         metrics_targets_dir: None,
+        grafana_dashboards_dir: None,
     }
 }
 

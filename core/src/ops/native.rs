@@ -115,21 +115,33 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
                 )));
             }
         }
+        // T5: several native services share one container, so adoption adds
+        // to the list rather than replacing it. Re-adopting the same unit
+        // replaces just that entry — which is how a manifest correction, like
+        // the mailbox→kyu rename, lands without disturbing its neighbours.
+        let previous = state.stacks.get(&m.stack_name);
+        let last_backup = previous.map(|s| s.last_backup).unwrap_or(0);
+        let mut natives: Vec<crate::native::NativeServiceManifest> =
+            previous.map(|s| s.natives.clone()).unwrap_or_default();
+        match natives.iter_mut().find(|n| n.unit == m.unit) {
+            Some(slot) => *slot = m.clone(),
+            None => natives.push(m.clone()),
+        }
+        let mut apps: Vec<String> = natives.iter().map(|n| n.unit.clone()).collect();
+        apps.sort();
+        apps.dedup();
         state.stacks.insert(
             m.stack_name.clone(),
             crate::state::StackState {
                 vmid: m.vmid,
                 hostname: m.hostname.clone(),
-                apps: vec![m.unit.clone()],
+                apps,
                 applied_at: ctx.now_unix,
-                last_backup: state
-                    .stacks
-                    .get(&m.stack_name)
-                    .map(|s| s.last_backup)
-                    .unwrap_or(0),
+                last_backup,
                 applied_hash: String::new(),
                 manifest: None,
-                native: Some(m.clone()),
+                native: None,
+                natives,
                 enabled: true,
             },
         );

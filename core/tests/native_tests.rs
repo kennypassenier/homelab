@@ -258,3 +258,127 @@ async fn c7_supervised_update_rolls_back_when_new_version_stays_down() {
         err
     );
 }
+
+/// T5: several native services share one container — the layout puts kyu,
+/// kyu-runner and http-switchboard on CT 109. They cannot be three separate
+/// stacks: `validate_native` forces the hostname `<vmid>-app-<stack>` and
+/// `guard_target` re-checks it against the live container, so three stacks on
+/// one vmid would need three hostnames on one machine. So one stack holds a
+/// list, and adoption adds to it.
+#[tokio::test]
+async fn t5_a_stack_holds_several_native_services() {
+    use homelab_core::ops::native::adopt;
+    use homelab_core::state::StateStore;
+    let exec = MockExecutor::new();
+    // Specific rules first: respond_always takes the FIRST match, so the
+    // generic "systemctl show" from adopt_mocks would otherwise answer for
+    // every unit and hand the runner kyu's ExecStart.
+    exec.respond_always(
+        "systemctl show kyu-runner.service",
+        CmdOutput::ok(
+            "ExecStart={ path=/usr/local/bin/kyu-runner ; argv[]=/usr/local/bin/kyu-runner }\n\
+             EnvironmentFiles=/etc/kyu-runner/token.env (ignore_errors=no)\n",
+        ),
+    );
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+
+    let hub = kyu_manifest();
+    let r = adopt(&ctx(&exec, &sink, &j), &hub).await;
+    assert!(r.ok, "{:?}", r.error);
+
+    let runner = NativeServiceManifest {
+        unit: "kyu-runner".into(),
+        binary: "/usr/local/bin/kyu-runner".into(),
+        env_file: Some("/etc/kyu-runner/token.env".into()),
+        data_dirs: vec![],
+        stateless: true,
+        update_cmd: None,
+        ..kyu_manifest()
+    };
+    let r = adopt(&ctx(&exec, &sink, &j), &runner).await;
+    assert!(r.ok, "{:?}", r.error);
+
+    let state = StateStore::new(&exec, "/var/lib/homelab")
+        .load()
+        .await
+        .expect("state loads");
+    let st = state.stacks.get("kyu").expect("the stack is recorded");
+    assert_eq!(st.natives.len(), 2, "both services must be recorded");
+    let units: Vec<&str> = st.natives.iter().map(|n| n.unit.as_str()).collect();
+    assert!(
+        units.contains(&"kyu") && units.contains(&"kyu-runner"),
+        "{:?}",
+        units
+    );
+    assert_eq!(st.apps, vec!["kyu".to_string(), "kyu-runner".to_string()]);
+    assert!(st.is_native());
+
+    // Re-adopting one service corrects that entry and leaves the other alone —
+    // which is how the mailbox→kyu manifest correction lands.
+    let corrected = NativeServiceManifest {
+        unit: "kyu-runner".into(),
+        binary: "/usr/local/bin/kyu-runner".into(),
+        env_file: Some("/etc/kyu-runner/token.env".into()),
+        data_dirs: vec![],
+        stateless: true,
+        update_cmd: Some("kyu-runner update".into()),
+        ..kyu_manifest()
+    };
+    let r = adopt(&ctx(&exec, &sink, &j), &corrected).await;
+    assert!(r.ok, "{:?}", r.error);
+    let state = StateStore::new(&exec, "/var/lib/homelab")
+        .load()
+        .await
+        .unwrap();
+    let st = state.stacks.get("kyu").unwrap();
+    assert_eq!(
+        st.natives.len(),
+        2,
+        "a re-adopt must not duplicate the unit"
+    );
+    let rn = st.natives.iter().find(|n| n.unit == "kyu-runner").unwrap();
+    assert_eq!(rn.update_cmd.as_deref(), Some("kyu-runner update"));
+}
+
+/// T5 migration: state written before native services became a list still
+/// loads, and its single service moves into the list. Anything else would
+/// have made the running host forget the two containers it already manages.
+#[tokio::test]
+async fn t5_pre_list_state_migrates_on_load() {
+    use homelab_core::state::StateStore;
+    let exec = MockExecutor::new();
+    let legacy = r#"{
+      "schema_version": 1,
+      "stacks": {
+        "almanac": {
+          "vmid": 112, "hostname": "112-app-almanac", "apps": ["almanac"],
+          "applied_at": 1, "last_backup": 2, "applied_hash": "",
+          "manifest": null, "enabled": true,
+          "native": {
+            "stack_name": "almanac", "vmid": 112, "hostname": "112-app-almanac",
+            "unit": "almanac", "binary": "/usr/local/bin/almanac",
+            "env_file": null, "data_dirs": ["/var/lib/almanac"], "update_cmd": null
+          }
+        }
+      }
+    }"#;
+    exec.seed_file("/var/lib/homelab/state.json", legacy);
+    let state = StateStore::new(&exec, "/var/lib/homelab")
+        .load()
+        .await
+        .expect("legacy state must still load");
+    let st = state.stacks.get("almanac").expect("stack survives");
+    assert_eq!(
+        st.natives.len(),
+        1,
+        "the single service moved into the list"
+    );
+    assert_eq!(st.natives[0].unit, "almanac");
+    assert!(
+        st.native.is_none(),
+        "the legacy field is cleared after the move"
+    );
+    assert_eq!(st.last_backup, 2, "unrelated bookkeeping is untouched");
+}

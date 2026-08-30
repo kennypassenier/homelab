@@ -35,10 +35,35 @@ pub struct StackState {
     /// run state — manual `pct stop` and this flag are independent worlds.
     #[serde(default = "enabled_default")]
     pub enabled: bool,
-    /// C7: set for native-service stacks (bare binary under systemd). A
-    /// stack has either `manifest` (compose) or `native`, never both.
+    /// C7: legacy single-service field. Kept only so state written before
+    /// T5 still loads; `HostState::load` moves it into `natives` and clears
+    /// it. Nothing should read this — read `natives`.
     #[serde(default)]
     pub native: Option<crate::native::NativeServiceManifest>,
+    /// T5: native services on this stack (bare binaries under systemd). A
+    /// stack has either `manifest` (compose) or `natives`, never both. A list
+    /// because the layout puts kyu, kyu-runner and http-switchboard on one
+    /// container, and one hostname per container means they cannot be three
+    /// separate stacks: `native.rs` forces `<vmid>-app-<stack>` and
+    /// `guard_target` re-checks it against the live container.
+    #[serde(default)]
+    pub natives: Vec<crate::native::NativeServiceManifest>,
+}
+
+impl StackState {
+    /// Fold the pre-T5 single-service field into the list. Idempotent.
+    fn migrate_natives(&mut self) {
+        if let Some(one) = self.native.take() {
+            if !self.natives.iter().any(|n| n.unit == one.unit) {
+                self.natives.push(one);
+            }
+        }
+    }
+
+    /// True for a stack the orchestrator supervises as systemd units.
+    pub fn is_native(&self) -> bool {
+        !self.natives.is_empty()
+    }
 }
 
 fn enabled_default() -> bool {
@@ -85,7 +110,13 @@ impl<'a> StateStore<'a> {
             Err(_) => return Ok(HostState::default()),
         };
         match serde_json::from_str::<HostState>(&raw) {
-            Ok(state) if state.schema_version <= STATE_SCHEMA_VERSION => Ok(state),
+            Ok(mut state) if state.schema_version <= STATE_SCHEMA_VERSION => {
+                // T5: state written before native services became a list.
+                for st in state.stacks.values_mut() {
+                    st.migrate_natives();
+                }
+                Ok(state)
+            }
             Ok(state) => Err(CoreError::State(format!(
                 "state.json schema v{} is newer than this binary understands (v{}) — refusing to touch it; update the host binary. File: {}",
                 state.schema_version, STATE_SCHEMA_VERSION, self.path

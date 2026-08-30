@@ -776,6 +776,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 manifest: Some(m.clone()),
                 enabled,
                 native: None,
+                natives: Vec::new(),
             },
         );
         store.save(state).await?;

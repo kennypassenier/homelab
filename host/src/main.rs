@@ -546,6 +546,7 @@ mod tests {
                 manifest: Some(mk(1024)),
                 enabled: true,
                 native: None,
+                natives: Vec::new(),
             },
         );
         hs.stacks.insert(
@@ -560,6 +561,7 @@ mod tests {
                 manifest: Some(mk(4096)),
                 enabled: true,
                 native: None,
+                natives: Vec::new(),
             },
         );
         let (total, used, committed, cores, load1) =
@@ -1030,21 +1032,41 @@ async fn scheduler_loop(state: AppState) {
             // C7: native stacks get the in-container backup + supervised
             // self-update instead of the compose pair; same bookkeeping,
             // same H8 auto-disable on a failed night.
-            if let Some(native) = st.native.clone() {
-                info!("scheduler: nightly run for {} (native)", name);
-                let n1 = native.clone();
-                let cfg = homelab_core::ops::backup::BackupCfg {
-                    tiers: tiers.clone(),
-                    ..state.config.backup.clone()
-                };
-                let backup_report =
-                    run_mutating_op(&state, &exec, 0, "scheduled-backup-native", |ctx| {
+            if st.is_native() {
+                info!(
+                    "scheduler: nightly run for {} ({} native service(s))",
+                    name,
+                    st.natives.len()
+                );
+                // T5: several services share the container, so every one of
+                // them is backed up and updated. One failure fails the night
+                // for the stack — the H8 auto-disable below is deliberately
+                // per stack, because they share a container and a fate.
+                let mut backup_ok = true;
+                let mut update_ok = true;
+                for native in st.natives.clone() {
+                    let n1 = native.clone();
+                    let cfg = homelab_core::ops::backup::BackupCfg {
+                        tiers: tiers.clone(),
+                        ..state.config.backup.clone()
+                    };
+                    let r = run_mutating_op(&state, &exec, 0, "scheduled-backup-native", |ctx| {
                         Box::pin(async move {
                             homelab_core::ops::native::backup_native(ctx, &n1, &cfg).await
                         })
                     })
                     .await;
-                if backup_report.ok {
+                    backup_ok &= r.ok;
+                    let n2 = native.clone();
+                    let r = run_mutating_op(&state, &exec, 0, "scheduled-update-native", |ctx| {
+                        Box::pin(
+                            async move { homelab_core::ops::native::update_native(ctx, &n2).await },
+                        )
+                    })
+                    .await;
+                    update_ok &= r.ok;
+                }
+                if backup_ok {
                     if let Ok(mut s) = store.load().await {
                         if let Some(rec) = s.stacks.get_mut(&name) {
                             rec.last_backup = now;
@@ -1052,15 +1074,7 @@ async fn scheduler_loop(state: AppState) {
                         let _ = store.save(s).await;
                     }
                 }
-                let n2 = native.clone();
-                let update_report =
-                    run_mutating_op(&state, &exec, 0, "scheduled-update-native", |ctx| {
-                        Box::pin(
-                            async move { homelab_core::ops::native::update_native(ctx, &n2).await },
-                        )
-                    })
-                    .await;
-                if !backup_report.ok || !update_report.ok {
+                if !backup_ok || !update_ok {
                     if let Ok(mut s) = store.load().await {
                         if let Some(rec) = s.stacks.get_mut(&name) {
                             if rec.enabled {
@@ -1392,19 +1406,18 @@ where
 async fn native_from_state(
     state_dir: &str,
     stack: &str,
-) -> Result<homelab_core::native::NativeServiceManifest, String> {
+) -> Result<Vec<homelab_core::native::NativeServiceManifest>, String> {
     let store = homelab_core::state::StateStore::new(&RealExecutor, state_dir);
     let snapshot = store
         .load()
         .await
         .map_err(|e| format!("state unreadable: {}", e))?;
     match snapshot.stacks.get(stack) {
-        Some(st) => st.native.clone().ok_or_else(|| {
-            format!(
-                "stack '{}' is a compose stack, not a native service :: use the regular backup/update verbs",
-                stack
-            )
-        }),
+        Some(st) if st.is_native() => Ok(st.natives.clone()),
+        Some(_) => Err(format!(
+            "stack '{}' is a compose stack, not a native service :: use the regular backup/update verbs",
+            stack
+        )),
         None => Err(format!(
             "stack '{}' is not in host state :: adopt it first (homelab adopt stacks/{})",
             stack, stack
@@ -1539,18 +1552,36 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         }
         Rpc::BackupNative { stack } => {
             match native_from_state(&state.config.state_dir, &stack).await {
-                Ok(m) => {
+                Ok(services) => {
                     let tiers = state.settings.read().unwrap().retention.clone();
                     let cfg = homelab_core::ops::backup::BackupCfg {
                         tiers,
                         ..state.config.backup.clone()
                     };
-                    run_mutating_op(state, &exec, req.id, "backup-native", |ctx| {
-                        Box::pin(async move {
-                            homelab_core::ops::native::backup_native(ctx, &m, &cfg).await
+                    // T5: the stack may hold several services; back up each,
+                    // and report the first failure rather than the last.
+                    let mut resp = RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: format!("no services on stack '{}'", stack),
+                    };
+                    for m in services {
+                        let cfg = cfg.clone();
+                        let r = run_mutating_op(state, &exec, req.id, "backup-native", |ctx| {
+                            Box::pin(async move {
+                                homelab_core::ops::native::backup_native(ctx, &m, &cfg).await
+                            })
                         })
-                    })
-                    .await
+                        .await;
+                        let failed = !r.ok;
+                        if resp.ok || failed {
+                            resp = r;
+                        }
+                        if failed {
+                            break;
+                        }
+                    }
+                    resp
                 }
                 Err(msg) => RpcResponse {
                     id: req.id,
@@ -1559,21 +1590,38 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 },
             }
         }
-        Rpc::UpdateNative { stack } => match native_from_state(&state.config.state_dir, &stack)
-            .await
-        {
-            Ok(m) => {
-                run_mutating_op(state, &exec, req.id, "update-native", |ctx| {
-                    Box::pin(async move { homelab_core::ops::native::update_native(ctx, &m).await })
-                })
-                .await
+        Rpc::UpdateNative { stack } => {
+            match native_from_state(&state.config.state_dir, &stack).await {
+                Ok(services) => {
+                    let mut resp = RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: format!("no services on stack '{}'", stack),
+                    };
+                    for m in services {
+                        let r = run_mutating_op(state, &exec, req.id, "update-native", |ctx| {
+                            Box::pin(async move {
+                                homelab_core::ops::native::update_native(ctx, &m).await
+                            })
+                        })
+                        .await;
+                        let failed = !r.ok;
+                        if resp.ok || failed {
+                            resp = r;
+                        }
+                        if failed {
+                            break;
+                        }
+                    }
+                    resp
+                }
+                Err(msg) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: msg,
+                },
             }
-            Err(msg) => RpcResponse {
-                id: req.id,
-                ok: false,
-                message: msg,
-            },
-        },
+        }
         Rpc::ZfsReplicate => {
             let tiers = state.settings.read().unwrap().retention.clone();
             let jobs = state.config.zfs_jobs.clone();

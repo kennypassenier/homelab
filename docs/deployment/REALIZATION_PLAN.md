@@ -30,8 +30,14 @@ Nothing here changes how a service runs.
 
 - Take a vzdump of every container that has none: 105, 106, 108, 111, 112, 113
   (104 and 109 already have nightly jobs).
-- Add container snapshots as an instant-undo layer (F40) and take one per
-  container.
+- Container snapshots become part of the replacement procedure (M7/M8): taken
+  immediately before a risky step and removed straight after.
+  **Correction, 2026-08-30:** this originally said "take one per container",
+  which is wrong for the same reason a snapshot is not a backup. On
+  thin-provisioned LVM a snapshot grows as the origin diverges from it, so a
+  standing snapshot on eight containers is a slow way to fill the thin pool —
+  the pool is at 20.8% and would not stay there. A snapshot is an undo button
+  with a short life, not an artifact to leave lying around.
 - Repair the kyu stack record so its nightly restic run works again (R1).
 - Give CT 111 a nightly vzdump so SuperSync is protected at all.
   **Correction, 2026-08-30:** this milestone originally said "adopt CT 111".
@@ -41,8 +47,15 @@ Nothing here changes how a service runs.
   happens when the stack is rebuilt in M8; until then vzdump is the backup.
 - Fix the two dead Traefik routes: syncthing (T42) and MQTT (E4's route half).
 
-**Exit:** every container has at least one backup taken this week, and
-`homelab state` lists CT 111. Evidence: the archive list and one restore drill.
+**Exit:** every container has at least one backup taken this week and a nightly
+job going forward. Evidence: the archive list and one restore drill.
+
+**Status 2026-08-30:** done except the restore drill. All ten guests now carry
+a vzdump — 104 (2.4 G), 105 (1.2 G), 106 (24 G), 108 (626 M), 109 (231 M),
+111 (1.3 G), 112 (338 M), 113 (965 M), plus 102 and 103 from July — and eight
+nightly jobs run between 02:30 and 03:30, before the orchestrator's own 04:00
+window. Media keeps `keep-daily=4,keep-weekly=2` rather than 14/8 because 24 GB
+a night adds up; everything else keeps 14/8.
 
 ### M1 · Close the drift, in the repo only
 Everything running on the machines that exists in no repository.

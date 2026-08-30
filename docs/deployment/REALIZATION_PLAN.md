@@ -142,6 +142,18 @@ with no further steps.
 dashboard without a manual step. The fleet check finds a gap deliberately
 recreated on a scratch container.
 
+**Status 2026-08-30: built, not yet drilled.** All three exist with tests:
+
+| Item | What it does | Test |
+|---|---|---|
+| T1 | deploy writes a per-stack discovery file, destroy removes it; Prometheus reads the directory with `file_sd_configs` | `t1_deploy_writes_a_discovery_file_and_destroy_removes_it`, `t1_discovery_is_off_when_unconfigured` |
+| T2 | deploy renders a dashboard and pushes it to Grafana's provisioning directory | `t2_deploy_provisions_a_dashboard_for_the_stack`, `t2_the_generated_dashboard_is_scoped_and_stable` |
+| Y4 | the fleet check, as `homelab check` and as a nightly pass | six tests in `fleetcheck_tests.rs` |
+
+The live half of the exit criterion — a real stack appearing by itself —
+waits for M7's scratch container, because it needs the new host binary
+deployed. That is a release, and a release is Kenny's go.
+
 ### M5 · Update behaviour
 - Update policy labels on every app, with the three classes (Y1).
 - Pre-stop / post-start hooks (O9, T3).

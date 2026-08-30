@@ -1814,6 +1814,46 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 },
             }
         }
+        Rpc::ApplyGuards { vmid } => {
+            // A1 still governs: the guards write files and restart docker, so
+            // an untouchable guest is untouchable here too.
+            if state.config.safety.no_touch.contains(&vmid) {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!(
+                        "vmid {} is on the no-touch list :: this list is the one thing that is never worked around",
+                        vmid
+                    ),
+                };
+            }
+            run_mutating_op(state, &exec, req.id, "apply-guards", |ctx| {
+                Box::pin(async move {
+                    let mut runner =
+                        homelab_core::runner::Runner::new("apply-guards", ctx.sink, ctx.journal);
+                    match runner
+                        .step("guards", || async {
+                            homelab_core::ops::guards::apply(ctx.exec, ctx.sink, vmid).await?;
+                            Ok(homelab_core::runner::StepOutcome::Changed)
+                        })
+                        .await
+                    {
+                        Ok(_) => {
+                            runner.log(
+                                homelab_core::sink::Level::Info,
+                                format!(
+                                    "[guards] {} — docker log caps, journald limits, logrotate, apt autoclean, weekly prune",
+                                    vmid
+                                ),
+                            );
+                            runner.finish_ok()
+                        }
+                        Err(e) => runner.finish_err("guards", &e),
+                    }
+                })
+            })
+            .await
+        }
         Rpc::FleetCheck { stack_files } => {
             let live = gather_live_facts(&exec, state, &stack_files).await;
             let snapshot =

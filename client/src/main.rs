@@ -93,6 +93,19 @@ async fn main() {
         }
         // Y4: the client contributes what only it can see — the vmid each
         // stack directory claims — and the host contributes the rest.
+        // G1: the runaway guards, for a container the orchestrator did not
+        // build. They are what keeps a container able to run for years.
+        "guards" => {
+            let vmid: u16 = args
+                .get(2)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| die("usage: homelab guards <vmid>"));
+            println!(
+                "{}▶ guards :: CT {} — log caps, journald limits, logrotate, weekly prune{}",
+                C_CYAN, vmid, C_RESET
+            );
+            rpc(&host, &token, Command::ApplyGuards { vmid }).await;
+        }
         "check" => {
             let base = args.get(2).cloned().unwrap_or_else(|| "stacks".into());
             let stack_files = crate::spec::stack_files_with_vmids(&base);
@@ -471,6 +484,7 @@ async fn main() {
             );
             println!("  homelab backup-host-meta            snapshot vault/state/TLS/repo (H10)");
             println!("  homelab check [stacks/]             hold the repo against reality (Y4)");
+            println!("  homelab guards <vmid>               apply the runaway guards (B2/G1)");
             println!("  homelab adopt stacks/<name>         adopt a native-service CT (C7)");
             println!(
                 "  homelab backup-native|update-native <stack>  drive an adopted service (C7)"

@@ -105,6 +105,15 @@ pub enum Command {
     },
     /// E8: run the configured ZFS snapshot + replication jobs now.
     ZfsReplicate,
+    /// G1: apply the runaway guards to a container. They exist and are
+    /// applied at bootstrap of a container the orchestrator built — which on
+    /// 2026-08-31 meant two of eight, while CT 104 carried 907 MB of docker
+    /// logs and a 397 MB journal on a 30 GB disk. This makes them reachable
+    /// for a guest the orchestrator did not create, which is where the
+    /// unbounded growth actually is.
+    ApplyGuards {
+        vmid: u16,
+    },
     /// Y4: hold the repository against reality and report every difference.
     /// The client sends what only it can see — the vmid each stack directory
     /// claims — and the host adds what only it can see: which containers

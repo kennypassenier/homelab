@@ -33,7 +33,12 @@ Nothing here changes how a service runs.
 - Add container snapshots as an instant-undo layer (F40) and take one per
   container.
 - Repair the kyu stack record so its nightly restic run works again (R1).
-- Adopt CT 111 so SuperSync gets backups at all (R7).
+- Give CT 111 a nightly vzdump so SuperSync is protected at all.
+  **Correction, 2026-08-30:** this milestone originally said "adopt CT 111".
+  That is not possible: `homelab adopt` takes a `service.yml` describing a
+  systemd unit (C7 is native-only), and CT 111 runs a docker stack whose
+  hostname is `lxc-productivity-stack`, which A2 refuses. Real adoption
+  happens when the stack is rebuilt in M8; until then vzdump is the backup.
 - Fix the two dead Traefik routes: syncthing (T42) and MQTT (E4's route half).
 
 **Exit:** every container has at least one backup taken this week, and

@@ -97,6 +97,20 @@ pub struct MountSpec {
     pub mount_point: String,
     #[serde(default)]
     pub host_owner_uid: Option<u32>,
+    /// D25: which app owns this directory. The restic repository is named
+    /// after the owner, so an app that moves to another stack keeps its whole
+    /// backup history — which is the point: before this, the repository was
+    /// named after the STACK, and moving an app meant starting from nothing.
+    /// Absent = the stack owns it (host-level paths with no single app).
+    #[serde(default)]
+    pub app: Option<String>,
+}
+
+impl MountSpec {
+    /// The restic repository this path belongs to: its app, or the stack.
+    pub fn owner<'a>(&'a self, stack_name: &'a str) -> &'a str {
+        self.app.as_deref().unwrap_or(stack_name)
+    }
 }
 
 // ── Deploy payload ───────────────────────────────────────────────────────────
@@ -231,6 +245,14 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
         // a privileged one maps it to itself. The wrong number produces a
         // directory the service cannot use while the deploy reports success,
         // and the app simply does not start.
+        if let Some(app) = &mount.app {
+            if !m.apps.contains(app) {
+                problems.push(format!(
+                    "storage '{}' is owned by app '{}', which this stack does not declare",
+                    mount.host_path, app
+                ));
+            }
+        }
         if let Some(uid) = mount.host_owner_uid {
             const MAP: u32 = 100_000;
             if m.lxc.unprivileged && uid < MAP {

@@ -35,6 +35,9 @@ storage:
   - host_path: /appdata/synctest/synctest-config
     mount_point: /appdata/synctest/synctest-config
     host_owner_uid: 101000
+    # D25: owned by the app, not the stack — which is what lets this stack be
+    # renamed to `syncthing` in M8 without abandoning its backup history.
+    app: syncthing
 
 apps:
   - syncthing

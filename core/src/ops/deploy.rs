@@ -105,10 +105,11 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             if !probe.stdout.trim().is_empty() {
                 continue;
             }
+            let owner = mount.owner(&m.stack_name);
             let has_snapshot = exec
                 .run(&crate::ops::backup::restic_cmd(
                     &bcfg,
-                    &m.stack_name,
+                    owner,
                     &["snapshots", "--last", "--json", "--path", &mount.host_path],
                     120,
                 ))
@@ -129,7 +130,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             let restored = exec
                 .run(&crate::ops::backup::restic_cmd(
                     &bcfg,
-                    &m.stack_name,
+                    owner,
                     &[
                         "restore",
                         "latest",

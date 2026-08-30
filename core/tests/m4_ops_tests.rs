@@ -43,6 +43,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             host_path: "/appdata/test/test-config".into(),
             mount_point: "/appdata/test/test-config".into(),
             host_owner_uid: Some(101000),
+            app: None,
         }],
         apps: vec!["app".into()],
     }
@@ -938,6 +939,7 @@ fn v8_validate_rejects_undeclared_appdata_bind() {
         host_path: "/appdata/test/app-config".into(),
         mount_point: "/appdata/test/app-config".into(),
         host_owner_uid: Some(101000),
+        app: None,
     }];
     validate(&ok_spec).unwrap();
 }
@@ -1111,6 +1113,67 @@ async fn e3_nonempty_dirs_skip_restore_and_restic_failure_never_blocks() {
         .any(|l| l.contains("AUTO-RESTORE FAILED")));
 }
 
+/// D25: one restic repository per APP, not per stack. Before this the
+/// repository was named after the stack, so moving an app to another stack
+/// left its whole history behind and started it from nothing — exactly the
+/// "gedoe met backups" Kenny asked to be rid of.
+#[tokio::test]
+async fn d25_backup_writes_one_repo_per_owning_app() {
+    use homelab_core::ops::backup::{backup, BackupCfg};
+    let mut m = manifest(108, "test");
+    m.apps = vec!["alpha".into(), "beta".into()];
+    m.storage = vec![
+        homelab_core::manifest::MountSpec {
+            host_path: "/appdata/test/alpha-config".into(),
+            mount_point: "/appdata/test/alpha-config".into(),
+            host_owner_uid: Some(101000),
+            app: Some("alpha".into()),
+        },
+        homelab_core::manifest::MountSpec {
+            host_path: "/appdata/test/beta-config".into(),
+            mount_point: "/appdata/test/beta-config".into(),
+            host_owner_uid: Some(101000),
+            app: Some("beta".into()),
+        },
+    ];
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test"));
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(&ctx(&exec, &sink, &j), &m, &BackupCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let snaps = exec.calls_containing("restic backup");
+    assert_eq!(snaps.len(), 2, "one snapshot per app, got: {:?}", snaps);
+    assert!(
+        snaps
+            .iter()
+            .any(|c| c.contains("/alpha-config ") || c.ends_with("/appdata/test/alpha-config")),
+        "alpha must be snapshotted: {:?}",
+        snaps
+    );
+    // Each app's paths go to its OWN repository.
+    for app in ["alpha", "beta"] {
+        let repo = format!("homelab-backups/{}-config", app);
+        assert!(
+            snaps.iter().any(|c| c.contains(&repo)),
+            "expected a snapshot into {}, got: {:?}",
+            repo,
+            snaps
+        );
+    }
+    // And the stack name is no longer a repository of its own.
+    assert!(
+        !snaps
+            .iter()
+            .any(|c| c.contains("homelab-backups/test-config")),
+        "the stack-named repo should be gone: {:?}",
+        snaps
+    );
+}
+
 /// O5: `pct clone` takes no `--unprivileged`, so a clone always inherits the
 /// template's privilege level. A manifest asking for a privileged container
 /// while cloning an unprivileged template used to produce an unprivileged one
@@ -1204,11 +1267,13 @@ async fn o6_restore_is_per_path_not_per_stack() {
             host_path: "/appdata/test/alpha-config".into(),
             mount_point: "/appdata/test/alpha-config".into(),
             host_owner_uid: None,
+            app: None,
         },
         homelab_core::manifest::MountSpec {
             host_path: "/appdata/test/beta-config".into(),
             mount_point: "/appdata/test/beta-config".into(),
             host_owner_uid: None,
+            app: None,
         },
     ];
     let exec = MockExecutor::new();

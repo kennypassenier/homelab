@@ -42,6 +42,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             host_path: "/appdata/syncthing/syncthing-config".into(),
             mount_point: "/appdata/syncthing/syncthing-config".into(),
             host_owner_uid: Some(101000),
+            app: None,
         }],
         apps: vec!["syncthing".into()],
     }

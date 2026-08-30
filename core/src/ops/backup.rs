@@ -74,13 +74,32 @@ pub(crate) fn restic_cmd(cfg: &BackupCfg, stack: &str, args: &[&str], timeout: u
     restic(&cfg.restic_base, stack, &cfg.password_file, args, timeout)
 }
 
+/// D25: group the manifest's storage paths by the app that owns them, in
+/// manifest order. A path with no declared owner belongs to the stack, which
+/// keeps host-level paths (and every manifest written before the field
+/// existed) working exactly as they did.
+pub(crate) fn owner_groups(m: &StackManifest) -> Vec<(String, Vec<String>)> {
+    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+    for mount in &m.storage {
+        let owner = mount.owner(&m.stack_name).to_string();
+        match groups.iter_mut().find(|(o, _)| *o == owner) {
+            Some((_, paths)) => paths.push(mount.host_path.clone()),
+            None => groups.push((owner, vec![mount.host_path.clone()])),
+        }
+    }
+    groups
+}
+
 /// E1: snapshot a stack's /appdata paths, quiescing paused containers.
 pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> OperationReport {
     let op = format!("backup-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
-    let paths: Vec<String> = m.storage.iter().map(|s| s.host_path.clone()).collect();
+    // D25: one repository per owning app, so an app that moves to another
+    // stack keeps its history. Order is the manifest's, so the log reads the
+    // way the file does.
+    let groups = owner_groups(m);
 
     // A1/A2: same gate as every mutating op (quiesce/resume reach into the
     // container).
@@ -90,17 +109,19 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         Ok(StepOutcome::Unchanged)
     });
 
-    step!(runner, "init repo", {
+    step!(runner, "init repos", {
         // Idempotent: init fails harmlessly if the repo already exists.
-        let _ = exec
-            .run(&restic(
-                &cfg.restic_base,
-                &m.stack_name,
-                &cfg.password_file,
-                &["init"],
-                120,
-            ))
-            .await?;
+        for (owner, _) in &groups {
+            let _ = exec
+                .run(&restic(
+                    &cfg.restic_base,
+                    owner,
+                    &cfg.password_file,
+                    &["init"],
+                    120,
+                ))
+                .await?;
+        }
         Ok(StepOutcome::Unchanged)
     });
 
@@ -108,15 +129,17 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     // repo lock; restic unlock only removes locks from dead processes, so
     // this is always safe. Best-effort (repo may not exist yet).
     step!(runner, "clear stale locks", {
-        let _ = exec
-            .run(&restic(
-                &cfg.restic_base,
-                &m.stack_name,
-                &cfg.password_file,
-                &["unlock"],
-                120,
-            ))
-            .await;
+        for (owner, _) in &groups {
+            let _ = exec
+                .run(&restic(
+                    &cfg.restic_base,
+                    owner,
+                    &cfg.password_file,
+                    &["unlock"],
+                    120,
+                ))
+                .await;
+        }
         Ok(StepOutcome::Unchanged)
     });
 
@@ -133,24 +156,26 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     // unconditionally, and only then does the operation fail.
     let snapshot_result = runner
         .step("snapshot", || async {
-            if paths.is_empty() {
+            if groups.is_empty() {
                 return Ok(StepOutcome::Unchanged);
             }
-            let mut args = vec!["backup"];
-            for p in &paths {
-                args.push(p.as_str());
+            for (owner, paths) in &groups {
+                let mut args = vec!["backup"];
+                for p in paths {
+                    args.push(p.as_str());
+                }
+                run_ok(
+                    exec,
+                    &restic(
+                        &cfg.restic_base,
+                        owner,
+                        &cfg.password_file,
+                        &args,
+                        cfg.snapshot_timeout_s,
+                    ),
+                )
+                .await?;
             }
-            run_ok(
-                exec,
-                &restic(
-                    &cfg.restic_base,
-                    &m.stack_name,
-                    &cfg.password_file,
-                    &args,
-                    cfg.snapshot_timeout_s,
-                ),
-            )
-            .await?;
             Ok(StepOutcome::Changed)
         })
         .await;
@@ -173,38 +198,41 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
 
     step!(runner, "retention", {
         // G8 tiered retention: list snapshots, compute the forget-set with
-        // our own engine, forget by explicit id.
-        let out = run_ok(
-            exec,
-            &restic(
-                &cfg.restic_base,
-                &m.stack_name,
-                &cfg.password_file,
-                &["snapshots", "--json"],
-                300,
-            ),
-        )
-        .await?;
-        let snapshots = parse_snapshots_json(&out.stdout);
-        let doomed = crate::retention::forget_list(&snapshots, &cfg.tiers, ctx.now_unix);
-        if doomed.is_empty() {
-            return Ok(StepOutcome::Unchanged);
+        // our own engine, forget by explicit id. Per repository, since D25
+        // gave every app its own.
+        let mut changed = false;
+        for (owner, _) in &groups {
+            let out = run_ok(
+                exec,
+                &restic(
+                    &cfg.restic_base,
+                    owner,
+                    &cfg.password_file,
+                    &["snapshots", "--json"],
+                    300,
+                ),
+            )
+            .await?;
+            let snapshots = parse_snapshots_json(&out.stdout);
+            let doomed = crate::retention::forget_list(&snapshots, &cfg.tiers, ctx.now_unix);
+            if doomed.is_empty() {
+                continue;
+            }
+            let mut args: Vec<&str> = vec!["forget"];
+            args.extend(doomed.iter().map(|s| s.as_str()));
+            args.push("--prune");
+            run_ok(
+                exec,
+                &restic(&cfg.restic_base, owner, &cfg.password_file, &args, 900),
+            )
+            .await?;
+            changed = true;
         }
-        let mut args: Vec<&str> = vec!["forget"];
-        args.extend(doomed.iter().map(|s| s.as_str()));
-        args.push("--prune");
-        run_ok(
-            exec,
-            &restic(
-                &cfg.restic_base,
-                &m.stack_name,
-                &cfg.password_file,
-                &args,
-                900,
-            ),
-        )
-        .await?;
-        Ok(StepOutcome::Changed)
+        Ok(if changed {
+            StepOutcome::Changed
+        } else {
+            StepOutcome::Unchanged
+        })
     });
 
     runner.log(
@@ -295,18 +323,27 @@ pub async fn restore(
         Ok(StepOutcome::Unchanged)
     });
 
+    // D25: a stack's data lives in one repository per owning app, so a
+    // restore walks all of them. Order is the manifest's.
+    let groups = owner_groups(m);
+
     step!(runner, "validate snapshot", {
-        let out = exec
-            .run(&restic(
-                &cfg.restic_base,
-                &m.stack_name,
-                &cfg.password_file,
-                &["snapshots", "--last"],
-                120,
-            ))
-            .await?;
-        if !out.success() {
-            return Err(CoreError::Other("restic repo unreachable".into()));
+        for (owner, _) in &groups {
+            let out = exec
+                .run(&restic(
+                    &cfg.restic_base,
+                    owner,
+                    &cfg.password_file,
+                    &["snapshots", "--last"],
+                    120,
+                ))
+                .await?;
+            if !out.success() {
+                return Err(CoreError::Other(format!(
+                    "restic repo for '{}' unreachable",
+                    owner
+                )));
+            }
         }
         Ok(StepOutcome::Unchanged)
     });
@@ -326,17 +363,19 @@ pub async fn restore(
     });
 
     step!(runner, "restore data", {
-        run_ok(
-            exec,
-            &restic(
-                &cfg.restic_base,
-                &m.stack_name,
-                &cfg.password_file,
-                &["restore", snapshot, "--target", "/"],
-                cfg.restore_timeout_s,
-            ),
-        )
-        .await?;
+        for (owner, _) in &groups {
+            run_ok(
+                exec,
+                &restic(
+                    &cfg.restic_base,
+                    owner,
+                    &cfg.password_file,
+                    &["restore", snapshot, "--target", "/"],
+                    cfg.restore_timeout_s,
+                ),
+            )
+            .await?;
+        }
         Ok(StepOutcome::Changed)
     });
 

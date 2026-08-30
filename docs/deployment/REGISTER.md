@@ -131,7 +131,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | T42 | Repair the syncthing route: 10.10.10.10 → the container — F34, B4 | — | open |
 | T43 | Correct `presets/syncthing/` off vmid 110, which can never be used | — | open |
 | T44 | Send kyu-runner two config corrections: `healthz_listen` 8081 → 8082 (cadvisor owns 8081 fleet-wide) and `webhook_url` to an IP instead of `homeassistant.lan` (C3) | — | open |
-| T45 | Move the `synctest-config` restic history to `syncthing-config` under the per-app scheme — D25 | T5 | open |
+| T45 | Migrate the existing stack-named restic histories to their per-app repositories with `restic copy`, BEFORE those stacks are next deployed — `metrics-config` → `prometheus-config`, `synctest-config` → `syncthing-config` — D25 | — | open, blocks the next deploy of those two stacks |
 | T2 | Bring `stacks/metrics/prometheus/prometheus.yml` level with the live one (almanac job, node job ×11, cadvisor job ×6) | T1 | open |
 | T3 | Add Alertmanager + its four rules + the `rules/` mount to the metrics stack | T1 | open |
 | T4 | Add node_exporter and the SMART textfile collector as managed artifacts | T1 | open |

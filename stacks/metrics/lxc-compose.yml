@@ -21,9 +21,12 @@ boot:
   onboot: true
   order: 60
 storage:
+  # D25: the app that owns this directory decides which restic repository
+  # it lands in, so Prometheus keeps its history if it ever moves stack.
   - host_path: /appdata/metrics/prometheus-data
     mount_point: /appdata/metrics/prometheus-data
     host_owner_uid: 165534
+    app: prometheus
 # alertmanager was deployed by hand on 2026-08-30 and was missing here, so a
 # deploy of this stack would not have started it.
 apps: [prometheus, alertmanager, promtail, pve-exporter]

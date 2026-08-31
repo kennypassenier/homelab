@@ -1,0 +1,88 @@
+# A pull-through cache, one instance per upstream registry.
+#
+# The reason it exists is measured, not assumed: the M7 drill lost 573 of its
+# 653 seconds of outage to a single `docker compose pull` that stalled for
+# 8 m 40 s and then completed in one go (F108). The same image pulled again
+# minutes later took 113 s. Nothing in this repository can fix a registry on
+# the internet having a bad evening — but a copy in the house means the second
+# container that needs an image does not have to ask.
+#
+# One instance per upstream because a pull-through cache mirrors exactly one
+# registry: `proxy.remoteurl` is a single URL. The four here are the four this
+# fleet actually pulls from, counted across every managed container on
+# 2026-08-31: docker.io 17 images, gcr.io 7, ghcr.io 6, lscr.io 1.
+#
+# Deliberately anonymous: no credentials are configured, so the cache can only
+# fetch what is public. kp-soft's image is private and is pulled directly by
+# the container that needs it, with its own read token — a cache holding a
+# private image would hand it to anyone on the LAN who asked.
+#
+# Storage is one directory per upstream under a single mount, so the whole
+# cache is one restic repository and one thing to delete when it grows.
+
+x-cache: &cache
+  image: registry:2.8.3
+  restart: unless-stopped
+  environment: &cache-env
+    REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    # Blobs are content-addressed, so a shared cache never mixes two images
+    # up; the per-upstream split is about which remote to ask, not safety.
+    REGISTRY_LOG_LEVEL: "warn"
+  networks:
+    - registry_net
+  labels:
+    - com.homelab.update.policy=manual
+
+services:
+  cache-dockerhub:
+    <<: *cache
+    container_name: cache-dockerhub
+    environment:
+      <<: *cache-env
+      REGISTRY_PROXY_REMOTEURL: "https://registry-1.docker.io"
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+    volumes:
+      - /appdata/registry/registry-config/dockerhub:/var/lib/registry
+    ports:
+      - "5000:5000"
+
+  cache-ghcr:
+    <<: *cache
+    container_name: cache-ghcr
+    environment:
+      <<: *cache-env
+      REGISTRY_PROXY_REMOTEURL: "https://ghcr.io"
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+    volumes:
+      - /appdata/registry/registry-config/ghcr:/var/lib/registry
+    ports:
+      - "5001:5000"
+
+  cache-gcr:
+    <<: *cache
+    container_name: cache-gcr
+    environment:
+      <<: *cache-env
+      REGISTRY_PROXY_REMOTEURL: "https://gcr.io"
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+    volumes:
+      - /appdata/registry/registry-config/gcr:/var/lib/registry
+    ports:
+      - "5002:5000"
+
+  cache-lscr:
+    <<: *cache
+    container_name: cache-lscr
+    environment:
+      <<: *cache-env
+      REGISTRY_PROXY_REMOTEURL: "https://lscr.io"
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+    volumes:
+      - /appdata/registry/registry-config/lscr:/var/lib/registry
+    ports:
+      - "5003:5000"
+
+networks:
+  registry_net:
+    external: true
+    name: registry_net

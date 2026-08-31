@@ -268,6 +268,42 @@ async fn d10_validator_collects_all_problems() {
     assert!(msg.contains("hostname"), "{}", msg); // canonical name changed too
 }
 
+/// A bind INSIDE a declared mount is covered by it. The check exists so data
+/// cannot land on the container's own disk; a subdirectory of a host mount
+/// lands on the host exactly as intended. Requiring an exact match refused
+/// the pull-through cache, which keeps one directory per upstream registry
+/// under a single mount — and O7's naming rule would have forced four apps
+/// into existence to express that.
+#[test]
+fn a_bind_inside_a_declared_mount_is_covered_by_it() {
+    use homelab_core::manifest::{validate, FileBlob};
+    let mut s = spec(110, "syncthing");
+    s.files.push(FileBlob {
+        path: "syncthing/docker-compose.yml".into(),
+        content:
+            "services:\n  a:\n    volumes:\n      - /appdata/syncthing/syncthing-config/sub:/data\n"
+                .into(),
+        mode: None,
+    });
+    validate(&s).expect("a subdirectory of a declared mount is fine");
+
+    // A sibling that merely shares a prefix is NOT covered — that would land
+    // on the rootfs, which is the whole point of the check.
+    let mut s = spec(110, "syncthing");
+    s.files.push(FileBlob {
+        path: "syncthing/docker-compose.yml".into(),
+        content: "services:\n  a:\n    volumes:\n      - /appdata/syncthing/syncthing-config-other:/data\n"
+            .into(),
+        mode: None,
+    });
+    let err = validate(&s).expect_err("a sibling path must still be refused");
+    assert!(
+        format!("{}", err).contains("not declared under storage"),
+        "{}",
+        err
+    );
+}
+
 // ── M1: directories this stack borrows rather than owns ────────────────────
 
 /// The media libraries are two ZFS datasets that Proxmox hands to the

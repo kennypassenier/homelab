@@ -440,7 +440,18 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
                 .trim_start_matches("- ")
                 .trim_matches(['"', '\'']);
             if let Some(host) = t.split(':').next() {
-                if host.starts_with("/appdata/") && !declared.contains(&host) {
+                // A path INSIDE a declared mount is covered by that mount:
+                // the bytes land on the host exactly as intended, which is
+                // the only thing this check is about. Requiring an exact
+                // match refused a perfectly safe layout — the pull-through
+                // cache keeps one directory per upstream registry under a
+                // single declared mount, and O7 would have forced four apps
+                // to express that.
+                let covered = declared.contains(&host)
+                    || declared
+                        .iter()
+                        .any(|d| host.starts_with(&format!("{}/", d)));
+                if host.starts_with("/appdata/") && !covered {
                     problems.push(format!(
                         "{}: bind '{}' is not declared under storage: — data would land on the container rootfs (add a storage entry or remove the bind)",
                         f.path, host

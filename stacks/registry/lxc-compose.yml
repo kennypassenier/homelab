@@ -1,0 +1,57 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# registry: a pull-through cache for the images this fleet pulls, so the
+# length of an outage stops depending on a registry on the internet having a
+# good evening.
+#
+# Kenny chose it (form M3, 2026-08-31) to be built BEFORE the media container
+# is rebuilt, and the reason is arithmetic: the M7 drill lost 573 of 653
+# seconds to one stalled pull, and media has nine images waiting where the
+# home page had one.
+#
+# Its own container because it is infrastructure for every other stack: it
+# must be up before anything else pulls, and it must not go down with the
+# stack it happens to live on.
+
+stack_name: registry
+vmid: 117
+hostname: 117-app-registry
+
+network:
+  ip: 10.10.10.17/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 2
+  memory_mb: 1024
+  swap_mb: 512
+  # A cache of the fleet's images: about 6 GB of distinct layers today, and
+  # it only ever holds what was actually asked for.
+  disk_gb: 32
+  storage: local-lvm
+
+lxc:
+  template: clone:998
+  unprivileged: true
+  features: nesting=1,keyctl=1
+  protection: true
+
+boot:
+  # Early: everything that pulls an image wants this up first. Right after
+  # the edge (5) and before every application stack.
+  onboot: true
+  order: 10
+
+storage:
+  - host_path: /appdata/registry/registry-config
+    mount_point: /appdata/registry/registry-config
+    # The registry image runs as root.
+    host_owner_uid: 100000
+    app: registry
+
+apps: [registry, promtail, cadvisor]
+
+# No route: this is spoken to by Docker daemons on the LAN, never by a
+# browser from outside, and it holds no secrets worth reaching for.

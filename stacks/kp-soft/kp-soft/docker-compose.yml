@@ -16,12 +16,44 @@ services:
     image: ghcr.io/kennypassenier/kp-soft:v0.1.1
     container_name: kp-soft
     restart: unless-stopped
-    env_file:
-      - .env
+    # The .env is NOT passed through wholesale. Its names are prefixed in
+    # latch and mapped back here, one by one.
+    #
+    # The reason, learned on 2026-08-31: latch merges every file in the
+    # project into ONE flat namespace. Same name with the same value is fine;
+    # same name with a DIFFERENT value is a hard error — and because the
+    # orchestrator reads secrets with `latch cat --expand`, which has to build
+    # that whole map to resolve ${...} references, a collision anywhere breaks
+    # the deploy of every stack, including ones that share nothing with it.
+    # Three secrets called KYU_TOKEN did exactly that today.
+    #
+    # Laravel's variable names are the generic ones every Laravel app uses:
+    # APP_KEY, APP_URL, MAIL_USERNAME, DB_DATABASE. A second PHP app in this
+    # vault would collide on nearly all of them. Prefixing here costs
+    # eighteen lines once; the alternative costs a deploy outage nobody can
+    # place, at the moment a new app is added.
     environment:
       - APP_ENV=production
       - APP_DEBUG=false
       - TZ=Europe/Brussels
+      - APP_NAME=${KPSOFT_APP_NAME}
+      - APP_KEY=${KPSOFT_APP_KEY}
+      - APP_URL=${KPSOFT_APP_URL}
+      - DB_CONNECTION=${KPSOFT_DB_CONNECTION}
+      - DB_DATABASE=${KPSOFT_DB_DATABASE}
+      - SESSION_DRIVER=${KPSOFT_SESSION_DRIVER}
+      - SESSION_LIFETIME=${KPSOFT_SESSION_LIFETIME}
+      - CACHE_STORE=${KPSOFT_CACHE_STORE}
+      - QUEUE_CONNECTION=${KPSOFT_QUEUE_CONNECTION}
+      - MAIL_MAILER=${KPSOFT_MAIL_MAILER}
+      - MAIL_HOST=${KPSOFT_MAIL_HOST}
+      - MAIL_PORT=${KPSOFT_MAIL_PORT}
+      - MAIL_SCHEME=${KPSOFT_MAIL_SCHEME}
+      - MAIL_USERNAME=${KPSOFT_MAIL_USERNAME}
+      - MAIL_PASSWORD=${KPSOFT_MAIL_PASSWORD}
+      - MAIL_FROM_ADDRESS=${KPSOFT_MAIL_FROM_ADDRESS}
+      - MAIL_FROM_NAME=${KPSOFT_MAIL_FROM_NAME}
+      - PUZZLE_INGEST_TOKEN=${KPSOFT_PUZZLE_INGEST_TOKEN}
       # The app trusts X-Forwarded-* so TLS may end upstream. Without the
       # headers arriving it builds http:// links, and a magic-link login mail
       # then carries a downgraded URL.

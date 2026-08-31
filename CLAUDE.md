@@ -14,7 +14,7 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — v3.2.0 live on the host | **5 · Realization plan (gate open)** |
+| Phase | 9 · Released — v3.15.0 live on the host | **5 · Realization plan — M0-M7 and M9 done, M8 next** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there |
 
@@ -25,7 +25,13 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.1.1** (2026-08-27); 135 tests, CI green.
+- **Released and live at v3.15.0** (2026-08-31); 211 tests, CI green.
+  The deployment project is what moves now — see `docs/deployment/REGISTER.md`.
+  M7 is done: CT 115 destroyed and rebuilt end to end, 653 s of outage of
+  which 573 s was one stalled image pull (F108). W1-W3 built straight after
+  it (host hardware readiness, per-stack retention, boot-policy drift).
+  Open Dependabot PR that does NOT pass: axum 0.7 → 0.8, a real breaking
+  upgrade; main is green.
   v3.0.0 was the first tag (Kenny's number: "hele nieuwe rewrite").
   Features added after the hardening batch:
   - **H7 · release-driven host updates** — TUI badge + `U` key +
@@ -48,7 +54,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
     pve-exporter; Grafana coupling awaits Kenny's token), **C7 · native
     services** (adopt/backup-native/update-native; CT 109 kyu and
     CT 112 almanac adopted live, B27; broken-release rollback drill
-    pending). Host runs v3.2.0. Stack files: compose stacks have
+    pending). Stack files: compose stacks have
     `lxc-compose.yml`, native services `service.yml`.
 - **Host daemon LIVE** on Proxmox as `homelab-host.service` (:8443, TLS
   fp SHA256:85:00:F8:84…); ships via `homelab self-update` (H5, armed
@@ -120,7 +126,7 @@ elsewhere, where layer 2 silently did not load.
 ## Build & ship
 
 ```bash
-cargo test --workspace                       # 135 tests
+cargo test --workspace                       # 211 tests
 docker run --rm -v "$PWD":/w -w /w -e CARGO_TARGET_DIR=/w/target-debian \
   rust:1-bookworm cargo build --release -p homelab-host
 make release VERSION=x.y.z                   # gate, tag, push; CI publishes

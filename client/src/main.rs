@@ -45,7 +45,7 @@ async fn main() {
     // and `plan` (local validation only, D10).
     let needs_token = !matches!(
         cmd,
-        "help" | "plan" | "runbook" | "presets" | "export" | "import"
+        "help" | "plan" | "runbook" | "dashboard" | "presets" | "export" | "import"
     ) && !(cmd == "tui" && offline);
     if token.is_empty() && needs_token {
         die("HOMELAB_TOKEN is not set");
@@ -423,6 +423,30 @@ async fn main() {
             );
             rpc(&host, &token, Command::SelfUpdateHost { binary_b64 }).await;
         }
+        "dashboard" => {
+            // T2's generator, run locally for a stack the orchestrator does
+            // not manage yet. CT 104, 105, 106 and 111 predate this project
+            // and get their dashboard on deploy only once they are adopted
+            // (M8); until then Kenny's four busiest containers would have no
+            // dashboard at all, which is exactly the wrong four to be blind
+            // about.
+            //
+            // Deliberately the same function the deploy calls, so what is
+            // written by hand today is byte-identical to what the deploy
+            // writes later — the adoption replaces the file instead of
+            // fighting it.
+            let stack = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab dashboard <stack> <app>..."));
+            let apps: Vec<String> = args.iter().skip(3).cloned().collect();
+            if apps.is_empty() {
+                die("usage: homelab dashboard <stack> <app>... — name at least one app");
+            }
+            print!(
+                "{}",
+                homelab_core::ops::dashboard::dashboard_json(stack, &apps)
+            );
+        }
         "runbook" => {
             // E7: generate the disaster-recovery runbook from the local stacks
             // directory — a document that works when everything else is down.
@@ -491,6 +515,7 @@ async fn main() {
             );
             println!("  homelab zfs-replicate               ZFS snapshots + replication (E8)");
             println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
+            println!("  homelab dashboard <stack> <app>...  render a stack dashboard (T2, local)");
             println!("  homelab presets                     list the preset catalog (local)");
             println!(
                 "  homelab exec <vmid> <cmd...>        remote exec (A6, requires exec_enabled)"

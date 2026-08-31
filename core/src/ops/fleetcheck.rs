@@ -49,6 +49,33 @@ pub struct LiveFacts {
     pub stack_files: Vec<(String, u16)>,
     /// G3: what every managed container's resources look like right now.
     pub growth: Vec<GrowthFact>,
+    /// Whether each managed stack's safety nets are actually attached.
+    pub coverage: Vec<CoverageFact>,
+}
+
+/// Is this stack actually being measured and actually shipping logs?
+///
+/// The most expensive class of failure in this fleet is not a service that
+/// falls over — it is a mechanism that runs, reports success and is wired to
+/// nothing. On 2026-08-31 alone: log caps that ran on five of nine
+/// containers, a growth check that watched five of nine, a discovery file the
+/// orchestrator wrote for weeks that Prometheus was never told to read, a
+/// promtail pipeline reading a field docker does not write, a database
+/// answering its healthcheck while every query failed, and an alert chain
+/// finished on every side but the middle. Not one was caught by a test. Every
+/// one was found by somebody looking.
+///
+/// So the check looks. Both fields are `Option`: `None` means the question
+/// was not asked — no Prometheus or Loki address is configured, or the stack
+/// ships no logs by design — and an unasked question must never become a
+/// finding.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CoverageFact {
+    pub stack: String,
+    /// A Prometheus target for this stack answered `up == 1`.
+    pub scraped: Option<bool>,
+    /// Loki holds at least one line from this stack in the recent window.
+    pub logs_recent: Option<bool>,
 }
 
 /// One container's resource picture, as read off the machine.
@@ -212,6 +239,7 @@ pub fn evaluate(
     }
 
     out.extend(evaluate_growth(&live.growth, growth_limits));
+    out.extend(evaluate_coverage(&live.coverage));
 
     for r in &live.routes {
         if !r.answered {
@@ -290,6 +318,35 @@ pub fn evaluate_growth(facts: &[GrowthFact], lim: GrowthLimits) -> Vec<Finding> 
                 subject: who,
                 what: "has no runaway guards: no journald cap, no docker log cap, or both".into(),
                 remedy: format!("`homelab guards {}` — without them nothing bounds log growth, which is how one service reached 923 MB unnoticed", g.vmid),
+            });
+        }
+    }
+    out
+}
+
+/// Is each stack's safety net attached? See `CoverageFact` for why this
+/// exists at all.
+///
+/// Drift rather than Broken throughout: nothing is failing: the stack runs
+/// fine. What is missing is the ability to find out when it stops, which is a
+/// slower and more expensive kind of wrong.
+pub fn evaluate_coverage(facts: &[CoverageFact]) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for c in facts {
+        if c.scraped == Some(false) {
+            out.push(Finding {
+                severity: Severity::Drift,
+                subject: c.stack.clone(),
+                what: "no Prometheus target answers for this stack — it is not being measured".into(),
+                remedy: "check /appdata/metrics/prometheus-config/targets/<stack>.json exists and that Prometheus reads that directory; a deploy writes the file, and for weeks nothing read it".into(),
+            });
+        }
+        if c.logs_recent == Some(false) {
+            out.push(Finding {
+                severity: Severity::Drift,
+                subject: c.stack.clone(),
+                what: "no log line reached Loki from this stack recently — its logs are going nowhere".into(),
+                remedy: "check promtail is running there and that its pipeline matches what docker writes; the container name came from a field docker does not produce for the life of this fleet".into(),
             });
         }
     }

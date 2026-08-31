@@ -50,6 +50,11 @@ struct FileConfig {
     /// warning survives HA being the thing that is broken — and the hub
     /// requires a token where the HA webhook did not.
     notify_auth_bearer: Option<String>,
+    /// Where the coverage check asks whether a stack is measured and whether
+    /// its logs arrive. Unset means the question is not asked at all, which
+    /// is deliberate: an unasked question must never become a finding.
+    prometheus_url: Option<String>,
+    loki_url: Option<String>,
     retention: Option<Vec<homelab_proto::RetentionTier>>,
     exec_enabled: Option<bool>,
     mirror_remote: Option<String>,
@@ -96,6 +101,11 @@ struct Config {
     /// that view is the settings the CLIENT can read back, and a secret does
     /// not belong in a screen. ssh-edited only, like exec_enabled.
     notify_auth_bearer: Option<String>,
+    /// Where the coverage check asks whether a stack is measured and whether
+    /// its logs arrive. Unset means the question is not asked at all, which
+    /// is deliberate: an unasked question must never become a finding.
+    prometheus_url: Option<String>,
+    loki_url: Option<String>,
     /// D5: git remote URL for the offsite intent mirror; None = off.
     mirror_remote: Option<String>,
     /// H2: OPNsense base url + credential file for Kea reservations.
@@ -152,6 +162,8 @@ fn load_config() -> Config {
         config_path: path,
         exec_enabled: file.exec_enabled.unwrap_or(false),
         notify_auth_bearer: file.notify_auth_bearer.clone(),
+        prometheus_url: file.prometheus_url.clone(),
+        loki_url: file.loki_url.clone(),
         mirror_remote: file.mirror_remote,
         kea: match (file.opnsense_url, file.opnsense_cred_file) {
             (Some(base_url), Some(cred_file)) => Some(homelab_core::ops::kea::KeaCfg {
@@ -226,6 +238,10 @@ fn render_settings_toml(
         #[serde(skip_serializing_if = "Option::is_none")]
         notify_auth_bearer: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        prometheus_url: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        loki_url: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         mirror_remote: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         opnsense_url: Option<&'a String>,
@@ -266,6 +282,8 @@ fn render_settings_toml(
         retention: &settings.retention,
         exec_enabled: config.exec_enabled,
         notify_auth_bearer: config.notify_auth_bearer.as_ref(),
+        prometheus_url: config.prometheus_url.as_ref(),
+        loki_url: config.loki_url.as_ref(),
         mirror_remote: config.mirror_remote.as_ref(),
         opnsense_url: config.kea.as_ref().map(|k| &k.base_url),
         opnsense_cred_file: config.kea.as_ref().map(|k| &k.cred_file),
@@ -331,6 +349,8 @@ mod tests {
             config_path: "/etc/homelab/host.toml".into(),
             exec_enabled: true,
             notify_auth_bearer: Some("a-token-that-must-survive-a-save".into()),
+            prometheus_url: Some("http://10.10.10.13:9090".into()),
+            loki_url: Some("http://10.10.10.4:3100".into()),
             mirror_remote: Some("git@github.com:k/m.git".into()),
             kea: Some(homelab_core::ops::kea::KeaCfg {
                 base_url: "https://10.10.10.1".into(),
@@ -1734,6 +1754,65 @@ async fn gather_live_facts(
         // it spends the reader's trust to say something false.
         if probed {
             facts.growth.push(g);
+        }
+    }
+
+    // Is each stack's safety net actually attached? The most expensive class
+    // of failure here is not a service falling over, it is a mechanism that
+    // runs, reports success and is wired to nothing — see CoverageFact.
+    //
+    // Both questions are skipped when their address is not configured. An
+    // unasked question must never become a finding: that is how a check earns
+    // the right to be believed.
+    let prom = state.config.prometheus_url.clone();
+    let loki = state.config.loki_url.clone();
+    if prom.is_some() || loki.is_some() {
+        if let Ok(snapshot) =
+            homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir)
+                .load()
+                .await
+        {
+            for (name, st) in &snapshot.stacks {
+                let mut c = homelab_core::ops::fleetcheck::CoverageFact {
+                    stack: name.clone(),
+                    ..Default::default()
+                };
+                if let Some(base) = prom.as_deref() {
+                    let q = format!(
+                        "{}/api/v1/query?query=max(up%7Bstack%3D%22{}%22%7D)",
+                        base.trim_end_matches('/'),
+                        name
+                    );
+                    c.scraped = Some(
+                        exec.run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
+                            .await
+                            .map(|o| o.stdout.contains("\"1\""))
+                            .unwrap_or(false),
+                    );
+                }
+                // Only ask about logs where logs are expected. A native
+                // service with no promtail ships none by design, and a
+                // finding it can never clear is worse than no finding.
+                let ships_logs = st
+                    .manifest
+                    .as_ref()
+                    .map(|m| m.apps.iter().any(|a| a == "promtail"))
+                    .unwrap_or(false);
+                if let (Some(base), true) = (loki.as_deref(), ships_logs) {
+                    let q = format!(
+                        "{}/loki/api/v1/query?query=sum(count_over_time(%7Bstack%3D%22{}%22%7D%5B1h%5D))",
+                        base.trim_end_matches('/'),
+                        name
+                    );
+                    c.logs_recent = Some(
+                        exec.run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
+                            .await
+                            .map(|o| o.stdout.contains("\"value\""))
+                            .unwrap_or(false),
+                    );
+                }
+                facts.coverage.push(c);
+            }
         }
     }
     facts

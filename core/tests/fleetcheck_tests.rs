@@ -5,7 +5,8 @@
 //! they are handed to it, it is decoration.
 
 use homelab_core::ops::fleetcheck::{
-    evaluate, evaluate_growth, GrowthFact, GrowthLimits, LiveFacts, RouteFact, Severity,
+    evaluate, evaluate_coverage, evaluate_growth, CoverageFact, GrowthFact, GrowthLimits,
+    LiveFacts, RouteFact, Severity,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -77,6 +78,7 @@ fn y4_a_healthy_fleet_is_silent() {
         }],
         stack_files: vec![("stacks/metrics".into(), 113)],
         growth: Vec::new(),
+        coverage: Vec::new(),
     };
     assert!(check(&st, &live).is_empty(), "{:?}", check(&st, &live));
 }
@@ -135,6 +137,7 @@ fn y4_finds_a_stack_file_aimed_at_someone_elses_container() {
         containers: vec![(113, "113-app-metrics".into()), (109, "109-app-kyu".into())],
         stack_files: vec![("stacks/cloudflared".into(), 109)],
         growth: Vec::new(),
+        coverage: Vec::new(),
         ..Default::default()
     };
     let found = check(&st, &live);
@@ -320,4 +323,70 @@ fn every_container_is_reported_independently() {
     let out = evaluate_growth(&[a, b, c], GrowthLimits::default());
     assert_eq!(out.len(), 3, "two for 104, none for 112, one for 106");
     assert!(out.iter().all(|f| !f.subject.contains("112")));
+}
+
+// ── Coverage: is the safety net actually attached? ──────────────────────
+//
+// The class this exists for, all found on 2026-08-31 and none by a test:
+// log caps that ran on five of nine containers, a growth check watching five
+// of nine, a discovery file written for weeks that Prometheus was never told
+// to read, a promtail pipeline reading a field docker does not write, a
+// database passing its healthcheck while every query failed, and an alert
+// chain finished on every side but the middle.
+
+/// A stack nobody is scraping is a stack whose failure nobody will see.
+#[test]
+fn a_stack_with_no_prometheus_target_is_reported() {
+    let out = evaluate_coverage(&[CoverageFact {
+        stack: "paperwork".into(),
+        scraped: Some(false),
+        logs_recent: Some(true),
+    }]);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].severity, Severity::Drift);
+    assert!(out[0].what.contains("not being measured"));
+}
+
+/// Logs that go nowhere look exactly like a quiet service.
+#[test]
+fn a_stack_whose_logs_never_arrive_is_reported() {
+    let out = evaluate_coverage(&[CoverageFact {
+        stack: "media".into(),
+        scraped: Some(true),
+        logs_recent: Some(false),
+    }]);
+    assert_eq!(out.len(), 1);
+    assert!(out[0].what.contains("going nowhere"));
+}
+
+/// The rule that keeps this check believable: a question that was not asked
+/// must never become a finding. `None` means unasked — no address configured,
+/// or a native service that ships no logs by design. A finding it could never
+/// clear would teach Kenny to skim past the whole report.
+#[test]
+fn an_unasked_question_is_never_a_finding() {
+    let out = evaluate_coverage(&[
+        CoverageFact {
+            stack: "kyu".into(),
+            scraped: Some(true),
+            logs_recent: None,
+        },
+        CoverageFact {
+            stack: "almanac".into(),
+            scraped: None,
+            logs_recent: None,
+        },
+    ]);
+    assert!(out.is_empty(), "expected silence, got {:?}", out);
+}
+
+/// A fully covered stack says nothing at all.
+#[test]
+fn a_covered_stack_is_silent() {
+    let out = evaluate_coverage(&[CoverageFact {
+        stack: "home".into(),
+        scraped: Some(true),
+        logs_recent: Some(true),
+    }]);
+    assert!(out.is_empty(), "{:?}", out);
 }

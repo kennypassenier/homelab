@@ -6,12 +6,19 @@
 # image; repo at ~/Projects/kp-soft.
 #
 # Its own container because it is the only service in the house that strangers
-# are meant to reach directly. Today they cannot: Kenny chose (K1/K5,
-# 2026-08-31) to run it at website.kp-soft.dev during development, which falls
-# under the *.kp-soft.dev wildcard and therefore sits behind Cloudflare Access
-# like everything else. Moving it to the bare kp-soft.dev — the actual goal —
-# needs a tunnel hostname added in the Cloudflare dashboard, which lives there
-# and not in any file here.
+# are meant to reach directly. Today nobody outside reaches it at all: it has
+# NO gateway route on purpose.
+#
+# The first attempt put it on website.kp-soft.dev, which falls under the
+# *.kp-soft.dev wildcard and therefore behind Cloudflare Access. That broke the
+# very thing it was meant to enable — Access answers 401 to every write, so no
+# setting, no role and no passkey could be saved. Kenny chose (mini-round M1,
+# 2026-08-31) to take it off the edge entirely until the site is ready for the
+# bare kp-soft.dev.
+#
+# Everything the migration to that address needs is written down in
+# docs/deployment/KP_SOFT_MIGRATION.md — including the trap that decides when
+# it is worth doing.
 
 stack_name: kp-soft
 vmid: 116
@@ -60,7 +67,3 @@ storage:
 
 apps: [kp-soft, promtail, cadvisor]
 latch_secrets: [kp-soft]
-
-gateway_route:
-  filename: 116-app-kp-soft.yml
-  gateway_vmid: 104

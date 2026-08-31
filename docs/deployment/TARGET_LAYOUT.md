@@ -28,7 +28,7 @@ made the reordering unnecessary.
 | 113 | `syncthing` | syncthing | moves here from 108, renamed from `synctest` |
 | 114 | `paperwork` | actual, stirling, paperless, paperless-db | added 2026-08-31, see the amendment below |
 | 115 | `home` | homepage | added 2026-08-31, see the amendment below |
-| 116 | `kp-soft` | kp-soft | added 2026-08-31; the only service meant to be reached by strangers |
+| 116 | `kp-soft` | kp-soft | added 2026-08-31; no gateway route yet — see `KP_SOFT_MIGRATION.md` |
 | — | removed | — | 107 (empty), 190 and 191 (scratch) |
 
 Every container additionally carries node_exporter, cadvisor and promtail from

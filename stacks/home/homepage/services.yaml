@@ -93,13 +93,16 @@
         description: PDF-gereedschap
 
 - Eigen:
-    # Kenny's own site. During development it sits at website.kp-soft.dev,
-    # behind Cloudflare Access like everything else; the goal is the bare
-    # kp-soft.dev, public and outside Access.
+    # The one deliberate http:// link on this page, and the reason is worth
+    # keeping: kp-soft has no gateway route at all while it is being built.
+    # Putting it on a *.kp-soft.dev name puts it behind Cloudflare Access,
+    # and Access answers 401 to every write — no setting, no role, no passkey
+    # could be saved. It goes back to an https name when it moves to the bare
+    # kp-soft.dev; see docs/deployment/KP_SOFT_MIGRATION.md.
     - kp-soft:
         icon: mdi-web
-        href: https://website.kp-soft.dev/
-        description: Eigen site
+        href: http://10.10.10.16:8080/
+        description: Eigen site (in aanbouw, alleen thuis)
 
 - Huis:
     - Home Assistant:

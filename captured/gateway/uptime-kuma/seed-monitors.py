@@ -39,6 +39,9 @@ HTTP = [
     ("paperwork · stirling",   "http://10.10.10.14:8080/login",            OK),
     ("paperwork · paperless",  "http://10.10.10.14:8000/accounts/login/",  OK),
     ("home · homepage",        "http://10.10.10.15:3000/",                 OK),
+    # /up is the app's own health endpoint, not a page — it answers 200 only
+    # when Laravel booted, reached its database and its cache.
+    ("kp-soft · site",         "http://10.10.10.16:8080/up",               OK),
     # Through cloudflared and Traefik. Every *.kp-soft.dev name sits behind
     # Cloudflare Access, so a healthy answer is the 302 to the login page.
     # The edge is one wildcard route, so a single external check is enough to
@@ -58,6 +61,7 @@ PING = [
     ("host · metrics",      "10.10.10.13"),
     ("host · paperwork",    "10.10.10.14"),
     ("host · home",         "10.10.10.15"),
+    ("host · kp-soft",      "10.10.10.16"),
 ]
 
 api = UptimeKumaApi("http://10.10.10.4:3001")

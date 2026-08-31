@@ -28,6 +28,7 @@ made the reordering unnecessary.
 | 113 | `syncthing` | syncthing | moves here from 108, renamed from `synctest` |
 | 114 | `paperwork` | actual, stirling, paperless, paperless-db | added 2026-08-31, see the amendment below |
 | 115 | `home` | homepage | added 2026-08-31, see the amendment below |
+| 116 | `kp-soft` | kp-soft | added 2026-08-31; the only service meant to be reached by strangers |
 | — | removed | — | 107 (empty), 190 and 191 (scratch) |
 
 Every container additionally carries node_exporter, cadvisor and promtail from
@@ -265,3 +266,31 @@ Bazarr, Paperless, Proxmox, Grafana), all verified answering from inside CT
 WebUI password is hashed and unreadable and its API key answered 403 to every
 header shape tried, so a widget needs either the password or a LAN auth
 whitelist — weakening a running service's authentication is Kenny's call.
+
+
+## Amendment — 2026-08-31: CT 116 `kp-soft`
+
+Kenny's own site: a public portfolio at the front, and behind a login the apps
+his friend groups use. Laravel 12 + React on FrankenPHP.
+
+Its own container because it is the only service in this house that strangers
+are meant to reach directly, and the only one that accepts file uploads from
+them. Today they cannot reach it at all: it runs at `website.kp-soft.dev`
+during development (K1), which falls under the `*.kp-soft.dev` wildcard and
+therefore sits behind Cloudflare Access like every other name here.
+
+**That inverts later, and it is the one thing to get right.** The goal is the
+bare `kp-soft.dev`, public and OUTSIDE Access. Measured 2026-08-31: the apex
+answers 404 from Cloudflare and is not Access-guarded, while
+`www.kp-soft.dev` answers 302 to the login — which is exactly what a public
+site must never do. Moving it needs a tunnel hostname added in the Cloudflare
+Zero Trust dashboard, which lives there and in no file in this repository.
+
+Kenny also accepted, explicitly rather than by omission (K5), that this will
+be the first service strangers reach directly while it sits on the same VLAN
+as Home Assistant and everything else. Restricting it in OPNsense is filed
+separately rather than allowed to block a working site for months.
+
+The mount is `/app/storage` and never `/app/database`: that directory ships
+the migrations inside the image, and a mount over it hides them, after which
+`migrate` reports "No migrations found" and every request answers 500.

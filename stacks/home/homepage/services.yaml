@@ -92,6 +92,15 @@
         href: https://pdf.kp-soft.dev/
         description: PDF-gereedschap
 
+- Eigen:
+    # Kenny's own site. During development it sits at website.kp-soft.dev,
+    # behind Cloudflare Access like everything else; the goal is the bare
+    # kp-soft.dev, public and outside Access.
+    - kp-soft:
+        icon: mdi-web
+        href: https://website.kp-soft.dev/
+        description: Eigen site
+
 - Huis:
     - Home Assistant:
         icon: home-assistant.svg

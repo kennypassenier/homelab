@@ -1,0 +1,33 @@
+# Explicit, because auto-discovery kept scanning manifests that no longer
+# exist. The v1 tree (client-app/, host-daemon/, lxc-daemon/, apps/) was
+# deleted on 2026-08-31 and Dependabot went on opening update jobs against
+# client-app/Cargo.toml, which failed every time — two red runs on main that
+# said nothing about main.
+#
+# One workspace, one manifest. Everything else here is a member of it.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Brussels
+    open-pull-requests-limit: 5
+    # One pull request for a batch of routine bumps rather than five that each
+    # need their own review and their own green CI.
+    groups:
+      cargo-minor-and-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      # The commit-msg hook requires an ID in brackets on every commit.
+      prefix: "chore(deps)"
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(ci)"

@@ -108,7 +108,7 @@ impl Backend for RemoteBackend {
                     Some(cmd) = cmd_rx.recv() => {
                         req_id += 1;
                         let req = RpcRequest { id: req_id, command: cmd };
-                        if tx.send(Message::Text(serde_json::to_string(&req).unwrap())).await.is_err() {
+                        if tx.send(Message::Text(serde_json::to_string(&req).unwrap().into())).await.is_err() {
                             let _ = evt_tx.send(BackendEvent::Disconnected("send failed".into())).await;
                             break;
                         }

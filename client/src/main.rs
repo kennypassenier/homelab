@@ -582,7 +582,7 @@ async fn rpc(host: &str, token: &str, command: Command) {
     let (mut tx, mut rx) = ws.split();
 
     let req = RpcRequest { id: 1, command };
-    tx.send(Message::Text(serde_json::to_string(&req).unwrap()))
+    tx.send(Message::Text(serde_json::to_string(&req).unwrap().into()))
         .await
         .unwrap_or_else(|e| die(&format!("send: {}", e)));
 

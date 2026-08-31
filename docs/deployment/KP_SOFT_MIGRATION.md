@@ -55,7 +55,9 @@ reason "temporary hostname" is not a free choice here. Concretely:
 
 There is a second reason not to test passkeys today: WebAuthn requires a
 secure context, and the current address is plain http. It cannot work now
-even if you wanted it to.
+even if you wanted it to — and since 2026-08-31 the app says so in those
+words instead of "registration cancelled or failed", so the browser enforces
+Kenny's rule by itself.
 
 ## What the migration actually needs
 
@@ -89,7 +91,12 @@ to Cloudflare.
    - change `APP_URL` to `https://kp-soft.dev` in **latch**, under
      `kp-soft/kp-soft` — not on the container. The deploy pushes the `.env`
      from latch every time, so an edit made on the container is gone at the
-     next deploy;
+     next deploy.
+
+     The rule, from the kp-soft session: **`APP_URL` must be exactly what
+     stands in the address bar, scheme and port included.** Today that is
+     `http://10.10.10.16:8080`; after the move it is `https://kp-soft.dev`
+     with no port. Not cosmetic — the WebAuthn relying-party id comes from it;
    - update the Homepage entry in `stacks/home/homepage/services.yaml` back
      to the https name — it is currently the one deliberate `http://` link on
      that page;

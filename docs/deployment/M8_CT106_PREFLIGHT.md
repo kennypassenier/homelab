@@ -81,3 +81,45 @@ the one design question this pre-flight produced.
   once.
 - **The image cache** (D60) is live and this is the stack it was built for:
   nine images, of which two come from Docker Hub and seven do not.
+
+## The restore drill — done before touching anything (2026-09-01)
+
+Kenny's condition for going ahead: *"We gaan enkel verder als je absoluut
+zeker bent dat we bij een fout deze container helemaal kunnen herstellen. Dit
+is de belangrijkste container. Ik eis hier perfectie."*
+
+A promise is not a net, so the net was exercised instead of asserted. A fresh
+vzdump of CT 106 was taken (24 446 182 348 bytes, 2 m 23 s) and **restored to
+a throwaway vmid**, isolated first — data mountpoints removed so it could not
+touch the libraries, its network on an unused VLAN and a different address so
+it could not touch anything else, `onboot` off.
+
+It booted. Every configuration directory came back at its expected size, and
+every database opened:
+
+| Database | Integrity | Contents | Live value |
+|---|---|---|---|
+| `sonarr.db` | ok | Series = **209** | 209 |
+| `radarr.db` | ok | Movies = **955** | 955 |
+| `bazarr.db` | ok | shows = **209** | — |
+| `jellyfin.db` | ok | BaseItems 62 372 · UserData 15 625 · Users 1 | — |
+
+The two that can be compared against the live system match exactly. The drill
+container was destroyed afterwards; the fleet is unchanged.
+
+**So the answer to his question is yes, and this is what it rests on:**
+
+1. The **libraries themselves are never touched.** Films and series live on
+   the two ZFS datasets and are only ever mounted in. A container rebuild
+   cannot reach them.
+2. Until the destroy step, the old container is intact and rollback is
+   starting it again.
+3. After it, the net is the vzdump above — **proven to restore, boot and
+   carry readable databases with the right counts**, on this machine, tonight.
+4. Plus the copied configuration on `/appdata` and, once taken, its restic
+   snapshot.
+
+What this drill does NOT prove: that Jellyfin's own application layer comes up
+clean on a restored copy, because the drill copy deliberately had no network
+and no media mounts. That check belongs to the real rebuild, against the
+counts recorded above.

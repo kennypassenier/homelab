@@ -578,8 +578,12 @@ the state you find one in after the reboot that should have started it.
   reported with the other remedy, agreement silent, an unreadable line
   treated as unknown rather than divergent) and two in `deploy_tests.rs`
   (the repair applies boot policy only; agreement writes nothing).
-- **Manual**: move a container's startup order by hand, see the fleet check
-  name it and a deploy put it back.
+- **Manual**: done 2026-08-31 on CT 115, on the live fleet. Startup order
+  moved by hand from 80 to 1; `homelab check` reported "boot order: 1 on the
+  machine, 80 in the stack file"; a deploy logged the drift and ran
+  `pct set 115 --startup order=80`; the check went silent again. The
+  container is protected, which confirms Proxmox's protection flag blocks
+  drive changes and not boot policy.
 
 ---
 

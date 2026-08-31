@@ -23,6 +23,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
         backup: Default::default(),
+        registry_cache: None,
     }
 }
 

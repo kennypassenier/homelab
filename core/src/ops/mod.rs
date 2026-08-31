@@ -15,6 +15,7 @@ pub mod mirror;
 pub mod native;
 pub mod patch;
 pub mod reconcile;
+pub mod registry_cache;
 pub mod resize;
 pub mod selfupdate;
 pub mod template;
@@ -109,4 +110,8 @@ pub struct OpCtx<'a> {
     /// directory. Not optional on purpose — the caller has to say which
     /// repository it means.
     pub backup: backup::BackupCfg,
+    /// D60: the pull-through cache in the house, when there is one. None =
+    /// every image keeps naming its own origin, which is also what happens
+    /// when the cache is configured but does not answer.
+    pub registry_cache: Option<registry_cache::CacheCfg>,
 }

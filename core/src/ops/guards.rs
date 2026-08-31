@@ -76,6 +76,7 @@ pub async fn apply(
     sink: &dyn Sink,
     vmid: u16,
     docker: bool,
+    cache: Option<&crate::ops::registry_cache::CacheCfg>,
 ) -> Result<(), CoreError> {
     let log = |msg: String| {
         sink.emit(PipelineEvent::Line {
@@ -86,16 +87,27 @@ pub async fn apply(
     };
 
     // 1. Docker container logs — must land before app containers (re)start.
-    if docker
-        && push_content(
-            exec,
-            vmid,
-            "/etc/docker/daemon.json",
-            DOCKER_DAEMON_JSON,
-            "644",
-        )
-        .await?
-    {
+    // D60: the cache speaks plain HTTP on the LAN, so the daemon has to be
+    // told those addresses are expected. Without it every cached pull fails
+    // with "server gave HTTP response to HTTPS client" — which reads like the
+    // cache is broken rather than like a setting is missing.
+    let daemon_json = match cache {
+        None => DOCKER_DAEMON_JSON.to_string(),
+        Some(c) => {
+            let hosts: Vec<String> = c
+                .upstreams
+                .iter()
+                .map(|u| format!("\"{}:{}\"", c.host, u.port))
+                .collect();
+            DOCKER_DAEMON_JSON
+                .trim_end()
+                .trim_end_matches('}')
+                .trim_end()
+                .to_string()
+                + &format!(",\n  \"insecure-registries\": [{}]\n}}\n", hosts.join(", "))
+        }
+    };
+    if docker && push_content(exec, vmid, "/etc/docker/daemon.json", &daemon_json, "644").await? {
         pct_sh(exec, vmid, "systemctl restart docker", 120).await?;
         log("[guard] docker log caps applied (10m x 3)".into());
     }

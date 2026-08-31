@@ -63,6 +63,53 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         Ok(StepOutcome::Unchanged)
     });
 
+    // ── D60: which upstreams does the cache answer for, right now?
+    // Asked from inside the container that is about to pull, because that is
+    // the only place the answer means anything. A cache that does not answer
+    // is not an error: the image keeps naming its own origin and the pull
+    // goes out to the internet exactly as it did before there was a cache.
+    let mut cache_up: Vec<String> = Vec::new();
+    step!(runner, "registry cache", {
+        let Some(cache) = ctx.registry_cache.as_ref() else {
+            return Ok(StepOutcome::Unchanged);
+        };
+        if m.native_only {
+            return Ok(StepOutcome::Unchanged);
+        }
+        for up in &cache.upstreams {
+            let probe = pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "curl -fsS -m 3 -o /dev/null http://{}:{}/v2/ && echo UP",
+                    cache.host, up.port
+                ),
+                30,
+            )
+            .await;
+            if matches!(&probe, Ok(o) if o.stdout.contains("UP")) {
+                cache_up.push(up.registry.clone());
+            }
+        }
+        Ok(StepOutcome::Unchanged)
+    });
+    if let Some(cache) = ctx.registry_cache.as_ref() {
+        if !m.native_only {
+            if cache_up.is_empty() {
+                log_info(format!(
+                    "[cache] {} answered for nothing — every image keeps its own registry",
+                    cache.host
+                ));
+            } else {
+                log_info(format!(
+                    "[cache] pulling via {} for: {}",
+                    cache.host,
+                    cache_up.join(", ")
+                ));
+            }
+        }
+    }
+
     // ── W1: refuse hardware this host cannot give, and read the group ids
     // instead of assuming them. Before the storage step, because a stack
     // that cannot work here should not leave directories behind either.
@@ -660,7 +707,14 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
 
     // ── B2 + A7. ─────────────────────────────────────────────────────────
     step!(runner, "runaway guards", {
-        guards::apply(exec, ctx.sink, m.vmid, !m.native_only).await?;
+        guards::apply(
+            exec,
+            ctx.sink,
+            m.vmid,
+            !m.native_only,
+            ctx.registry_cache.as_ref(),
+        )
+        .await?;
         Ok(StepOutcome::Unchanged)
     });
 
@@ -752,7 +806,26 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         for f in &spec.files {
             let dest = format!("/opt/{}/{}", m.stack_name, f.path);
             let perms = format!("{:o}", f.mode.unwrap_or(0o644));
-            let changed = push_content(exec, m.vmid, &dest, &f.content, &perms).await?;
+            // D60: the file in the repository names the real origin; what
+            // lands in the container names the cache, but only for the
+            // upstreams that answered a moment ago and never for a registry
+            // this stack signs into — that one is private, and the cache is
+            // anonymous by design.
+            let content = match (
+                ctx.registry_cache.as_ref(),
+                f.path.ends_with("docker-compose.yml"),
+            ) {
+                (Some(cache), true) if !cache_up.is_empty() => {
+                    crate::ops::registry_cache::rewrite_compose(
+                        &f.content,
+                        cache,
+                        &cache_up,
+                        m.registry_login.as_ref().map(|r| r.registry.as_str()),
+                    )
+                }
+                _ => f.content.clone(),
+            };
+            let changed = push_content(exec, m.vmid, &dest, &content, &perms).await?;
             if changed {
                 // The path is "<app>/<file>"; a file outside an app directory
                 // belongs to no service and needs nothing restarted.

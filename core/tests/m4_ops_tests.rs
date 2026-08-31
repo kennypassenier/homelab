@@ -65,6 +65,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
         backup: Default::default(),
+        registry_cache: None,
     }
 }
 
@@ -2136,6 +2137,7 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             metrics_targets_dir: None,
             grafana_dashboards_dir: None,
             backup: Default::default(),
+            registry_cache: None,
         },
         "test",
         108,
@@ -2176,6 +2178,7 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             metrics_targets_dir: None,
             grafana_dashboards_dir: None,
             backup: Default::default(),
+            registry_cache: None,
         },
         "test",
         108,
@@ -2231,7 +2234,7 @@ async fn h19_guards_positive_branch_writes_and_restarts_once() {
     let exec = MockExecutor::new();
     // Everything differs from desired (sha mismatch: default empty response).
     let sink = VecSink::new();
-    homelab_core::ops::guards::apply(&exec, &sink, 108, true)
+    homelab_core::ops::guards::apply(&exec, &sink, 108, true, None)
         .await
         .unwrap();
     // daemon.json written + docker restarted exactly once.

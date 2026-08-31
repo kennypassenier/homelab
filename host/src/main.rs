@@ -65,6 +65,9 @@ struct FileConfig {
     gateway_routes_dir: Option<String>,
     /// E8: ZFS snapshot+replication jobs (replaces the old cron script).
     zfs_jobs: Option<Vec<homelab_core::ops::zfs::ZfsJob>>,
+    /// D60: `[registry_cache] host = "10.10.10.17"` plus one `[[registry_cache.upstreams]]`
+    /// per mirrored registry. Absent = no cache.
+    registry_cache: Option<homelab_core::ops::registry_cache::CacheCfg>,
     /// Where restic writes. Was a string literal in BackupCfg::default(),
     /// which meant exactly one backup target could ever be addressed while
     /// the scope asks for two (deployment project, F39 / standing rule 27).
@@ -119,6 +122,9 @@ struct Config {
     /// Backup target and timeouts, resolved once from host.toml. Callers
     /// clone this and override only `tiers`.
     backup: homelab_core::ops::backup::BackupCfg,
+    /// D60: the pull-through cache in the house. Absent = images keep naming
+    /// their own origin, which is also what happens when it does not answer.
+    registry_cache: Option<homelab_core::ops::registry_cache::CacheCfg>,
     /// T1: where per-stack Prometheus discovery files are written.
     metrics_targets_dir: Option<String>,
     /// T2: Grafana's provisioning directory inside the gateway container.
@@ -186,6 +192,9 @@ fn load_config() -> Config {
             sc
         },
         zfs_jobs: file.zfs_jobs.unwrap_or_default(),
+        // D60: absent from host.toml = no cache, which is the same behaviour
+        // the fleet had before there was one.
+        registry_cache: file.registry_cache,
         backup: {
             let d = homelab_core::ops::backup::BackupCfg::default();
             homelab_core::ops::backup::BackupCfg {
@@ -361,6 +370,7 @@ mod tests {
                 gateway_vmid: 112,
                 gateway_routes_dir: "/appdata/platform/traefik-config/routes".into(),
             },
+            registry_cache: None,
             zfs_jobs: vec![homelab_core::ops::zfs::ZfsJob {
                 source: "HDD2TB".into(),
                 target: "HDD18TB/REPLICA_2TB".into(),
@@ -1518,6 +1528,7 @@ where
         metrics_targets_dir: state.config.metrics_targets_dir.clone(),
         grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         backup: state.config.backup.clone(),
+        registry_cache: state.config.registry_cache.clone(),
     };
     let report = op(&ctx).await;
     notify(state, exec, label, &report).await; // F3, best-effort
@@ -2168,7 +2179,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         homelab_core::runner::Runner::new("apply-guards", ctx.sink, ctx.journal);
                     match runner
                         .step("guards", || async {
-                            homelab_core::ops::guards::apply(ctx.exec, ctx.sink, vmid, true).await?;
+                            homelab_core::ops::guards::apply(ctx.exec, ctx.sink, vmid, true, ctx.registry_cache.as_ref()).await?;
                             Ok(homelab_core::runner::StepOutcome::Changed)
                         })
                         .await

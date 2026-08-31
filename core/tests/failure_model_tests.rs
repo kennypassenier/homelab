@@ -83,6 +83,7 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
         backup: Default::default(),
+        registry_cache: None,
     };
     let report = deploy(&ctx, &spec(110, "syncthing")).await;
     assert!(!report.ok);

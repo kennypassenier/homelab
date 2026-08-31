@@ -403,6 +403,9 @@ async fn main() {
             );
             match homelab_client::release::stage_release(&tag) {
                 Ok(binary_b64) => {
+                    if let Some(why) = homelab_client::version::too_large(binary_b64.len()) {
+                        die(&why);
+                    }
                     println!(
                         "{}✓ checksum verified — shipping over the line{}",
                         C_GREEN, C_RESET
@@ -421,6 +424,9 @@ async fn main() {
             let bytes = std::fs::read(path).unwrap_or_else(|e| die(&format!("{}: {}", path, e)));
             use base64::Engine as _;
             let binary_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            if let Some(why) = homelab_client::version::too_large(binary_b64.len()) {
+                die(&why);
+            }
             println!(
                 "{}▶ self-update :: shipping {} ({} KiB){}",
                 C_YELLOW,

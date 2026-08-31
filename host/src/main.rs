@@ -1331,6 +1331,10 @@ async fn scheduler_loop(state: AppState) {
     }
 }
 
+/// The largest single message the link carries, in bytes. Shared with the
+/// client so a payload that cannot arrive is refused before it is built.
+pub const MAX_WS_FRAME: usize = 64 * 1024 * 1024;
+
 async fn ws_upgrade(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1343,7 +1347,19 @@ async fn ws_upgrade(
     if !authed {
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
     }
-    ws.on_upgrade(move |socket| ws_session(socket, state))
+    // H5 self-update ships the whole host binary in one message, and the
+    // default frame ceiling is 16 MiB. The binary crossed it between v3.19.0
+    // (16 729 464 bytes of base64) and v3.20.0 (16 861 920) — 132 KB over —
+    // and the failure said "Connection reset by peer", which points at the
+    // network rather than at a limit nobody had ever named. The rollout had
+    // to be done by hand to get a host that could accept the next one.
+    //
+    // 64 MiB is not a considered capacity figure, it is distance: five times
+    // the current binary, so the ceiling is not reachable by growth alone.
+    // The client refuses to send more than this and says so in words.
+    ws.max_frame_size(MAX_WS_FRAME)
+        .max_message_size(MAX_WS_FRAME)
+        .on_upgrade(move |socket| ws_session(socket, state))
         .into_response()
 }
 

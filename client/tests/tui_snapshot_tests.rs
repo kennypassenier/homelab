@@ -1031,3 +1031,30 @@ fn a_host_that_is_behind_is_recognised_as_behind() {
         binary_b64: String::new(),
     }));
 }
+
+/// The host binary grew 132 KB past the link's 16 MiB default between v3.19.0
+/// and v3.20.0, and `release-update` answered "Connection reset by peer" —
+/// which names the network. The ceiling had never been written down, so there
+/// was nothing to read. Both sides now carry the same number, and the client
+/// refuses a payload that cannot arrive instead of watching it fail.
+#[test]
+fn a_payload_the_link_cannot_carry_is_refused_with_a_reason() {
+    use homelab_client::version::{too_large, MAX_WS_FRAME};
+    assert!(
+        too_large(MAX_WS_FRAME).is_none(),
+        "exactly at the ceiling is fine"
+    );
+    let why = too_large(MAX_WS_FRAME + 1).expect("one byte over must be refused");
+    assert!(
+        why.contains("this is a limit, not a network fault"),
+        "{}",
+        why
+    );
+    assert!(
+        why.contains("64 MiB"),
+        "the ceiling must be in the message: {}",
+        why
+    );
+    // The size that actually failed tonight now fits with room to spare.
+    assert!(too_large(16_861_920).is_none());
+}

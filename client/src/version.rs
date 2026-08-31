@@ -46,3 +46,27 @@ pub fn older(host: &str, client: &str) -> bool {
         _ => false,
     }
 }
+
+/// The largest single message the CLIENT↔HOST link carries. The host sets the
+/// same ceiling; this copy exists so a payload that cannot arrive is refused
+/// before it is sent, with a sentence that says what happened.
+///
+/// It was found the way these things are always found: the host binary grew
+/// 132 KB past the old 16 MiB default between two releases, and
+/// `homelab release-update` answered "Connection reset by peer". That names
+/// the network. The limit had never been written down anywhere, so there was
+/// nothing to read.
+pub const MAX_WS_FRAME: usize = 64 * 1024 * 1024;
+
+/// Refuse a payload the far side cannot accept, and say why.
+pub fn too_large(len: usize) -> Option<String> {
+    (len > MAX_WS_FRAME).then(|| {
+        format!(
+            "payload is {} MiB and the link carries at most {} MiB :: this is a limit, not a \
+             network fault — the binary has outgrown the transport and the transfer needs to \
+             be split, not retried",
+            len / 1024 / 1024,
+            MAX_WS_FRAME / 1024 / 1024
+        )
+    })
+}

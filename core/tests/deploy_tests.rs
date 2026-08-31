@@ -406,6 +406,111 @@ async fn m1_a_stack_without_borrowed_directories_is_never_probed() {
     assert!(exec.calls_containing("if [ -d ").is_empty());
 }
 
+// ── Mount drift on a container that already exists ─────────────────────────
+
+/// A mount that is missing from a live container is put back by a deploy.
+///
+/// Found the hard way: the downloader was provisioned without its two data
+/// disks because the host silently dropped a field it did not know (F118).
+/// The mounts were re-attached by hand, and a redeploy would have reported
+/// success while leaving that hand-made fix as the only thing holding them
+/// there. A repair that lives only outside the repo is not a repair.
+#[tokio::test]
+async fn a_missing_mount_is_reattached_on_an_existing_container() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    // Exists, protected, and carrying only its config mount.
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok(
+            "hostname: 110-app-syncthing\nprotection: 1\n\
+             mp0: /appdata/syncthing/syncthing-config,mp=/appdata/syncthing/syncthing-config\n\
+             onboot: 1\nstartup: order=50\n",
+        ),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    exec.respond_always("if [ -d ", CmdOutput::ok("/HDD18TB/media OK\n"));
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.data_mounts = vec![homelab_core::manifest::DataMount {
+        host_path: "/HDD18TB/media".into(),
+        mount_point: "/mnt/data/18TB".into(),
+        note: None,
+    }];
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    let calls = exec.calls();
+    let pos = |n: &str| calls.iter().position(|c| c.contains(n));
+    let add = pos("-mp1 /HDD18TB/media,mp=/mnt/data/18TB").expect("the missing mount is attached");
+    let off = pos("--protection 0").expect("protection must come off first");
+    let on = calls
+        .iter()
+        .rposition(|c| c.contains("--protection 1"))
+        .expect("and go straight back on");
+    assert!(
+        off < add && add < on,
+        "off, attach, on: {} {} {}",
+        off,
+        add,
+        on
+    );
+
+    // The mount it already has is left alone — no pointless writes.
+    assert_eq!(
+        exec.calls_containing("-mp0 ").len(),
+        0,
+        "an mp that already matches must not be rewritten"
+    );
+}
+
+/// A container whose mounts already match is not written to at all, and its
+/// protection flag is never touched.
+#[tokio::test]
+async fn matching_mounts_are_left_completely_alone() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok(
+            "hostname: 110-app-syncthing\nprotection: 1\n\
+             mp0: /appdata/syncthing/syncthing-config,mp=/appdata/syncthing/syncthing-config\n\
+             onboot: 1\nstartup: order=50\n",
+        ),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+    assert!(
+        exec.calls_containing("--protection").is_empty(),
+        "nothing to change means the flag is never touched"
+    );
+    assert!(exec.calls_containing("-mp").is_empty());
+}
+
 // ── W3: a container that already exists is put back in line ────────────────
 
 /// The W3 acceptance criterion's second half: a boot order moved by hand is

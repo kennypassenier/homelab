@@ -430,6 +430,68 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             }
             created = true;
         }
+        // A container that already existed has its MOUNTS compared with the
+        // stack file too, not just its boot policy. Proxmox will not change a
+        // drive while protection is on, so the flag comes off for exactly as
+        // long as the writes take and goes straight back.
+        //
+        // The gap this closes was found the hard way: the downloader was
+        // provisioned without its two data disks (F118), the mounts were put
+        // back by hand, and a redeploy would happily have reported success
+        // while leaving a hand-made fix as the only thing holding them there.
+        // A repair that lives only outside the repo is not a repair.
+        if !created {
+            let cfg = exec.run(&Cmd::new("pct", &["config", &vm], 30)).await?;
+            if cfg.success() {
+                let mut want: Vec<(String, String)> = Vec::new();
+                for (i, mo) in m.storage.iter().enumerate() {
+                    want.push((
+                        format!("-mp{}", i),
+                        format!("{},mp={}", mo.host_path, mo.mount_point),
+                    ));
+                }
+                for (i, dm) in m.data_mounts.iter().enumerate() {
+                    want.push((
+                        format!("-mp{}", m.storage.len() + i),
+                        format!("{},mp={}", dm.host_path, dm.mount_point),
+                    ));
+                }
+                let missing: Vec<(String, String)> = want
+                    .into_iter()
+                    .filter(|(key, val)| {
+                        let line = format!("{}: {}", key.trim_start_matches('-'), val);
+                        !cfg.stdout.lines().any(|l| l.trim() == line)
+                    })
+                    .collect();
+                if !missing.is_empty() {
+                    let protected = cfg.stdout.lines().any(|l| l.trim() == "protection: 1");
+                    if protected {
+                        run_ok(
+                            exec,
+                            &Cmd::new("pct", &["set", &vm, "--protection", "0"], 60),
+                        )
+                        .await?;
+                    }
+                    for (key, val) in &missing {
+                        log_info(format!("[mounts] {} was not attached — {}", key, val));
+                        run_ok(exec, &Cmd::new("pct", &["set", &vm, key, val], 60)).await?;
+                    }
+                    if protected {
+                        run_ok(
+                            exec,
+                            &Cmd::new("pct", &["set", &vm, "--protection", "1"], 60),
+                        )
+                        .await?;
+                    }
+                    // A mount only appears inside a running container after a
+                    // restart, so saying so is part of doing it.
+                    log_info(
+                        "[mounts] attached — a running container sees them after a reboot".into(),
+                    );
+                }
+            }
+        }
+
         // W3: a container that already existed has its boot policy compared
         // with the stack file and put back. Set at creation and never looked
         // at again means that after a power cut the fleet boots in the order

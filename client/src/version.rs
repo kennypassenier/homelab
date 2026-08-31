@@ -15,7 +15,17 @@ use homelab_proto::Command;
 pub fn mutates(c: &Command) -> bool {
     !matches!(
         c,
-        Command::Ping | Command::Status | Command::Doctor | Command::Incidents | Command::GetState
+        Command::Ping
+            | Command::Status
+            | Command::Doctor
+            | Command::Incidents
+            | Command::GetState
+            // The remedy the refusal names. Blocking it turns the guard into
+            // a trap: the first live run of this check refused
+            // `homelab release-update` against exactly the old host it was
+            // supposed to replace, and told the operator to run the command
+            // it had just refused.
+            | Command::SelfUpdateHost { .. }
     )
 }
 

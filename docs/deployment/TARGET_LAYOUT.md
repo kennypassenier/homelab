@@ -27,6 +27,7 @@ made the reordering unnecessary.
 | 112 | `almanac` | almanac | unchanged |
 | 113 | `syncthing` | syncthing | moves here from 108, renamed from `synctest` |
 | 114 | `paperwork` | actual, stirling, paperless, paperless-db | added 2026-08-31, see the amendment below |
+| 115 | `home` | homepage | added 2026-08-31, see the amendment below |
 | — | removed | — | 107 (empty), 190 and 191 (scratch) |
 
 Every container additionally carries node_exporter, cadvisor and promtail from
@@ -239,3 +240,28 @@ All three are routed through Traefik (N2). Every `*.kp-soft.dev` hostname is
 guarded by Cloudflare Access — verified 2026-08-31, `grafana` and `fin` both
 302 to `mendax1.cloudflareaccess.com`, and after deployment `budget`, `pdf`
 and `docs` do the same.
+
+
+## Amendment — 2026-08-31: CT 115 `home`
+
+Kenny asked for one page listing every service. Homepage (v2.1.2) got its own
+container rather than joining the gateway (P1).
+
+The gateway was the obvious home — a start page is the front door and belongs
+with the reverse proxy, and CT 104 has 4.5 GB of memory free. Kenny chose the
+separate container, and the reason holds: CT 104 is unmanaged until M8, so
+anything placed there gets no backup, no log caps and no monitor. Three
+separate failures on the night of 2026-08-31 came from exactly that gap.
+
+Homepage was the right tool for a specific reason. Most start pages keep
+their tiles in a database edited through a web interface, so the layout of
+the house lives somewhere that is not this repository and does not survive a
+rebuild. Homepage reads flat files: the page is in git, in the backup, and a
+change to it reads as a diff.
+
+Nine widgets carry live data (Jellyfin, Seerr, Sonarr, Radarr, Prowlarr,
+Bazarr, Paperless, Proxmox, Grafana), all verified answering from inside CT
+115 before the page was declared working. qBittorrent is a plain link: its
+WebUI password is hashed and unreadable and its API key answered 403 to every
+header shape tried, so a widget needs either the password or a LAN auth
+whitelist — weakening a running service's authentication is Kenny's call.

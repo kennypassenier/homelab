@@ -517,6 +517,24 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             }
         }
 
+        // The protection flag is intent like any other. It was set only on
+        // the run that CREATED the container, so a container whose flag had
+        // been turned off — by hand, or by an operation that lifted it and
+        // did not put it back — stayed unprotected and nothing said so. Found
+        // immediately after the mount reconciliation above: that step lifts
+        // the flag to do its work, and the deploy that followed left it off.
+        if !created && m.lxc.protection {
+            let cfg = exec.run(&Cmd::new("pct", &["config", &vm], 30)).await?;
+            if cfg.success() && !cfg.stdout.lines().any(|l| l.trim() == "protection: 1") {
+                log_info("[protection] was off — the stack file asks for it".into());
+                run_ok(
+                    exec,
+                    &Cmd::new("pct", &["set", &vm, "--protection", "1"], 60),
+                )
+                .await?;
+            }
+        }
+
         // Protection is deliberately the LAST provisioning act: Proxmox
         // refuses drive changes ("can't update CT ... drive 'mp0' -
         // protection mode enabled") once the flag is set, so it must land

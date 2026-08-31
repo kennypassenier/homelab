@@ -475,6 +475,75 @@ async fn a_missing_mount_is_reattached_on_an_existing_container() {
     );
 }
 
+/// The protection flag is intent like any other, and it was only ever set on
+/// the run that created the container. Found one minute after shipping the
+/// mount reconciliation: that step lifts the flag to do its work, and the
+/// deploy that followed left the downloader unprotected without a word.
+#[tokio::test]
+async fn protection_is_put_back_when_the_stack_file_asks_for_it() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok(
+            "hostname: 110-app-syncthing\nprotection: 0\n\
+             mp0: /appdata/syncthing/syncthing-config,mp=/appdata/syncthing/syncthing-config\n\
+             onboot: 1\nstartup: order=50\n",
+        ),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.lxc.protection = true;
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+    assert_eq!(
+        exec.calls_containing("--protection 1").len(),
+        1,
+        "turned back on exactly once"
+    );
+
+    // And a stack that does not ask for protection never touches the flag.
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok(
+            "hostname: 110-app-syncthing\nprotection: 0\n\
+             mp0: /appdata/syncthing/syncthing-config,mp=/appdata/syncthing/syncthing-config\n\
+             onboot: 1\nstartup: order=50\n",
+        ),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.lxc.protection = false;
+    assert!(deploy(&ctx(&exec, &sink, &journal), &sp).await.ok);
+    assert!(exec.calls_containing("--protection").is_empty());
+}
+
 /// A container whose mounts already match is not written to at all, and its
 /// protection flag is never touched.
 #[tokio::test]

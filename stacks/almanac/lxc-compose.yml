@@ -45,7 +45,26 @@ boot:
   onboot: true
   order: 50
 
-storage: []
+# The mount exists and is EMPTY of purpose for now — see F125.
+#
+# The first migration attempt moved almanac's data here and pointed its
+# working directory at it. That failed, and the reason is worth keeping:
+# almanac writes to `/opt/almanac/data` by ABSOLUTE path, not relative to its
+# working directory, and latch resolves its project link by absolute path
+# too. Both were measured the hard way, with the service down for eight
+# minutes, then reverted.
+#
+# The directory is kept because it already holds a verified copy of the data
+# and is the target for the next attempt: mounting the host directory AT
+# `/opt/almanac/data`, which is the docker-equivalent — the app keeps the path
+# it insists on and the bytes live on the host.
+storage:
+  - host_path: /appdata/almanac/almanac-config
+    mount_point: /appdata/almanac/almanac-config
+    # almanac runs as uid 999 inside; 100999 is that uid mapped out of an
+    # unprivileged LXC.
+    host_owner_uid: 100999
+    app: almanac
 apps: []
 
 # The systemd units this container runs. Each has its own service.yml and

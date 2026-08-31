@@ -1,0 +1,62 @@
+services:
+  # Gluetun VPN container — sole internet gateway for qBittorrent (kill switch).
+  # All qBittorrent ports are declared here because qBittorrent uses
+  # network_mode: service:gluetun and therefore has no independent network stack.
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - .env
+    environment:
+      - VPN_SERVICE_PROVIDER=surfshark
+      - VPN_TYPE=wireguard
+      - WIREGUARD_ADDRESSES=10.14.0.2/32
+      - SERVER_HOSTNAMES=ch-zur.prod.surfshark.com
+      # Use IP addresses for health checks to avoid DNS dependency during startup.
+      # The default targets (cloudflare.com, github.com) require gluetun's own DNS
+      # to be fully ready, creating a race condition that marks the container unhealthy.
+      - HEALTH_TARGET_ADDRESSES=1.1.1.1:443,8.8.8.8:443
+    ports:
+      # qBittorrent Web UI — opened on gluetun because qBittorrent has no own network
+      - "8080:8080"
+    # Gluetun exposes an internal health server on port 9999 that confirms
+    # the VPN tunnel is active. qBittorrent waits for this before starting.
+    # Use CMD-SHELL with wget -O /dev/null (GET request) — gluetun's health server
+    # only supports GET, not HEAD. wget --spider sends HEAD and gets a 405 back,
+    # causing the healthcheck to always fail even when the VPN is working.
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:9999" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Routing handled by Traefik file provider on the gateway LXC
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    # Required in the same compose file as gluetun: Docker requires both services
+    # to belong to the same compose project for network_mode: service:<name>.
+    # This is the kill switch: if gluetun stops, qBittorrent loses all connectivity.
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        # Wait not just for container start, but for a healthy VPN connection
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+      - WEBUI_PORT=8080
+      # LSIO mod that installs VueTorrent as the alternative Web UI on every container start.
+      # After first deploy: Settings → Web UI → Use alternative Web UI → /vuetorrent
+      - DOCKER_MODS=ghcr.io/vuetorrent/vuetorrent-lsio-mod:latest
+    volumes:
+      - ../downloader-config/qbittorrent:/config
+      - /mnt/data/18TB/downloads:/downloads
+    restart: unless-stopped

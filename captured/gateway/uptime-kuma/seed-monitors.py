@@ -29,6 +29,7 @@ HTTP = [
     ("downloader · qbittorrent", "http://10.10.10.5:8080/",                OK),
     ("syncthing · web",        "http://10.10.10.8:8384/rest/noauth/health", OK),
     ("almanac · healthz",      "http://10.10.10.12:8080/healthz",          OK),
+    ("kyu · runner",           "http://10.10.10.9:8082/healthz",           OK),
     ("paperwork · actual",     "http://10.10.10.14:5006/",                 OK),
     ("paperwork · stirling",   "http://10.10.10.14:8080/login",            OK),
     ("paperwork · paperless",  "http://10.10.10.14:8000/accounts/login/",  OK),

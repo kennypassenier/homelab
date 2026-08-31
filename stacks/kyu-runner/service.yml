@@ -1,0 +1,35 @@
+# C7 native service — deployed 2026-08-31 onto CT 109 beside the hub it pumps.
+#
+# kyu-runner long-polls a kyu topic and POSTs each message to a Home Assistant
+# webhook, acknowledging only on a 2xx — so the hub's lease, retry and
+# dead-letter machinery works FOR the delivery. It holds no state of its own:
+# the hub owns every cursor, and killing the runner loses nothing.
+#
+# That statelessness is why `stateless: true` below is honest rather than a
+# shortcut. What is backed up is its configuration and its token, which are
+# the only things that would have to be reconstructed.
+#
+# Kenny's R1/R2 (2026-08-31): the homelab's own warnings travel through the
+# hub instead of straight at Home Assistant, so that a warning survives HA
+# being the thing that broke.
+# stack_name is `kyu`, not `kyu-runner`, and that is deliberate. The A2 guard
+# requires the hostname to be <vmid>-app-<stack>, and this service shares CT
+# 109 with the hub it pumps — by design, since it talks to the hub over
+# localhost. The orchestrator supports exactly this: a stack holds a LIST of
+# native services and they are distinguished by their unit, which is also what
+# names the restic repository. So kyu-runner joins the kyu stack as a second
+# unit rather than pretending to be a container of its own.
+#
+# The directory is named kyu-runner because that is what a reader is looking
+# for; the manifest is what the orchestrator reads.
+stack_name: kyu
+vmid: 109
+hostname: 109-app-kyu
+unit: kyu-runner
+binary: /usr/local/bin/kyu-runner
+env_file: /etc/kyu-runner/token.env
+data_dirs:
+  - /etc/kyu-runner
+# update_cmd deliberately absent, for the same reason as kyu's: ownership of
+# the binary update is Kenny's call, and two systems restoring binaries can
+# fight each other. The nightly run backs up only.

@@ -121,10 +121,6 @@
         icon: mdi-sync
         href: https://sp.kp-soft.dev/
         description: Super Productivity
-    - Tasks:
-        icon: mdi-check-circle
-        href: https://tasks.kp-soft.dev/
-        description: Takenlijst
     - Terminus:
         icon: mdi-monitor
         href: https://trmnl.kp-soft.dev/

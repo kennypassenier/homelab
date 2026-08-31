@@ -1,9 +1,17 @@
 # Stack intent (schema v2 — intent only, no machine-written state).
 #
-# Productivity: Vikunja (the task list at tasks.kp-soft.dev) and SuperSync
-# (the sync server that keeps Kenny's Super Productivity desktop and phone in
-# step). Same vmid and same address as the container it replaces, so nothing
-# outside has to be told anything (C4).
+# Productivity: SuperSync, the server that keeps Kenny's Super Productivity
+# desktop and phone in step. Same vmid and same address as the container it
+# replaces, so nothing outside has to be told anything (C4).
+#
+# Vikunja is deliberately NOT rebuilt. Kenny: "vikunja wordt niet meer
+# gebruikt dus moet niet opnieuw geinstalleerd worden" (2026-08-31). Its
+# database is not migrated and dies with the old container — but not without
+# a copy: the vzdump taken immediately before the destroy contains the whole
+# old container, Vikunja's 557 KB database included, so the data is
+# recoverable from one archive if he ever wants it back. `tasks.kp-soft.dev`
+# stops resolving to anything as a result, and its entry is removed from the
+# front page in the same change.
 #
 # This is the first step of M8 and it was chosen for what it is NOT: nothing
 # else in the house depends on it, it borrows no media directories, and its
@@ -50,12 +58,6 @@ boot:
   order: 70
 
 storage:
-  - host_path: /appdata/productivity/vikunja-config
-    mount_point: /appdata/productivity/vikunja-config
-    # Vikunja runs as uid 1000; 101000 is that uid mapped out of an
-    # unprivileged LXC.
-    host_owner_uid: 101000
-    app: vikunja
   - host_path: /appdata/productivity/supersync-db-config
     mount_point: /appdata/productivity/supersync-db-config
     # postgres runs as uid 70 in the ALPINE image. The paperwork stack learned
@@ -70,8 +72,8 @@ storage:
 
 # supersync-db first: supersync cannot reach a database that is not up yet,
 # and the list is the ordering — `depends_on` cannot cross compose files.
-apps: [supersync-db, supersync, vikunja, promtail, cadvisor]
-latch_secrets: [supersync-db, supersync, vikunja]
+apps: [supersync-db, supersync, promtail, cadvisor]
+latch_secrets: [supersync-db, supersync]
 
 gateway_route:
   filename: 111-app-productivity.yml

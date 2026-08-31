@@ -1,7 +1,11 @@
 # Traefik route fragment for the productivity stack.
 #
-# Both names already exist and both point at 10.10.10.11, which does not
-# change in a C4 rebuild — that is the whole reason C4 keeps the address.
+# One name, at the address that does not change in a C4 rebuild — that is the
+# whole reason C4 keeps it.
+#
+# `tasks.kp-soft.dev` is deliberately gone: Kenny does not use Vikunja any
+# more, so it is not rebuilt (2026-08-31). The hostname will 404 at Traefik
+# until somebody points it somewhere; the DNS record itself is untouched.
 #
 # sp.kp-soft.dev needs its Cloudflare Access BYPASS to stay in place: the
 # sync clients send a Bearer token and open a WebSocket, and neither can
@@ -15,20 +19,12 @@
 
 http:
   routers:
-    vikunja:
-      rule: "Host(`tasks.kp-soft.dev`)"
-      entryPoints: [web]
-      service: vikunja
     supersync:
       rule: "Host(`sp.kp-soft.dev`)"
       entryPoints: [web]
       service: supersync
 
   services:
-    vikunja:
-      loadBalancer:
-        servers:
-          - url: "http://10.10.10.11:3456"
     supersync:
       loadBalancer:
         servers:

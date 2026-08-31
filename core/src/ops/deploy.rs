@@ -1121,6 +1121,16 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             .stacks
             .get(&m.stack_name)
             .map(|s| (s.last_backup, s.enabled));
+        // C7: the native services registered on this stack are NOT the
+        // deploy's to forget. Writing an empty list here unregistered kyu,
+        // kyu-runner, http-switchboard and almanac the moment their
+        // containers got a manifest — so the nightly backup of four services
+        // would simply have stopped, quietly, with nothing to see.
+        let (prior_native, prior_natives) = state
+            .stacks
+            .get(&m.stack_name)
+            .map(|s| (s.native.clone(), s.natives.clone()))
+            .unwrap_or((None, Vec::new()));
         let (mut last_backup, enabled) = prior.unwrap_or((0, true));
         // A C4 replacement destroys the record along with the container, so
         // there is nothing left to preserve and the rebuilt stack claims it
@@ -1148,8 +1158,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 applied_hash: manifest::intent_hash(spec),
                 manifest: Some(m.clone()),
                 enabled,
-                native: None,
-                natives: Vec::new(),
+                native: prior_native,
+                natives: prior_natives,
             },
         );
         store.save(state).await?;

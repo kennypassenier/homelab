@@ -927,6 +927,46 @@ async fn m7_a_replaced_stack_recovers_its_backup_time_from_the_repository() {
     );
 }
 
+/// The native services registered on a stack are not the deploy's to forget.
+///
+/// Giving CT 109 and CT 112 a container manifest wrote an empty list over
+/// their registrations, so the nightly backup of kyu, kyu-runner,
+/// http-switchboard and almanac would simply have stopped — quietly, with
+/// nothing to see. Found by reading `homelab status` after the deploy rather
+/// than the deploy's own output.
+#[tokio::test]
+async fn a_deploy_never_unregisters_the_native_services_on_its_stack() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{"syncthing":{"vmid":110,
+           "hostname":"110-app-syncthing","apps":["syncthing"],"applied_at":1,
+           "last_backup":4242,"applied_hash":"","manifest":null,
+           "enabled":true,"native":null,"natives":[
+             {"stack_name":"syncthing","vmid":110,"hostname":"110-app-syncthing",
+              "unit":"kyu","binary":"/usr/local/bin/kyu","env_file":null,
+              "data_dirs":["/var/lib/kyu"],"update_cmd":null,"stateless":false}
+           ]}}}"#,
+    );
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    let state = homelab_core::state::StateStore::new(&exec, "/var/lib/homelab")
+        .load()
+        .await
+        .expect("state written");
+    let st = state.stacks.get("syncthing").expect("stack recorded");
+    assert_eq!(st.natives.len(), 1, "the registration survives a deploy");
+    assert_eq!(st.natives[0].unit, "kyu");
+}
+
 /// The other direction, which is what makes the test above mean anything: a
 /// stack whose repository has nothing to say still records a zero, and the
 /// deploy still succeeds. A backup target that is unreachable must never be

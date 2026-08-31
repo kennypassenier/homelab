@@ -38,7 +38,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "{container_name=~\".+\"}",
+          "expr": "{container_name=~\".*\"}",
           "queryType": "range",
           "refId": "A"
         }
@@ -126,7 +126,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum by (container_name) (count_over_time({container_name=~\".+\"}[5m]))",
+          "expr": "sum by (container_name) (count_over_time({container_name=~\".*\"}[5m]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -187,7 +187,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum by (container_name) (count_over_time({container_name=~\".+\"} |= \"error\" or \"ERROR\" [24h]))",
+          "expr": "sum by (container_name) (count_over_time({container_name=~\".*\"} |~ \"(?i)error\" != \"level=info\" [24h]))",
           "queryType": "instant",
           "refId": "A"
         }
@@ -199,7 +199,10 @@
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["homelab", "overview"],
+  "tags": [
+    "homelab",
+    "overview"
+  ],
   "templating": {
     "list": []
   },

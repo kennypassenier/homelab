@@ -109,7 +109,10 @@
       "id": 2,
       "options": {
         "legend": {
-          "calcs": ["last", "mean"],
+          "calcs": [
+            "last",
+            "mean"
+          ],
           "displayMode": "table",
           "placement": "right",
           "showLegend": true
@@ -195,7 +198,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum by (container_name) (count_over_time({stack=\"$stack\"} |~ \"(?i)(error|exception|fatal|panic)\" [1h]))",
+          "expr": "sum by (container_name) (count_over_time({stack=\"$stack\"} |~ \"(?i)(error|exception|fatal|panic)\" != \"level=info\" [1h]))",
           "queryType": "instant",
           "refId": "A"
         }
@@ -207,7 +210,9 @@
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["stack-logs"],
+  "tags": [
+    "stack-logs"
+  ],
   "templating": {
     "list": [
       {
@@ -236,7 +241,7 @@
         "type": "query"
       },
       {
-        "allValue": ".+",
+        "allValue": ".*",
         "current": {
           "selected": true,
           "text": "All",

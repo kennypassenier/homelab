@@ -72,7 +72,11 @@
       "id": 1,
       "options": {
         "legend": {
-          "calcs": ["last", "mean", "max"],
+          "calcs": [
+            "last",
+            "mean",
+            "max"
+          ],
           "displayMode": "table",
           "placement": "bottom",
           "showLegend": true
@@ -89,7 +93,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum by (container_name, stack) (rate({container_name=~\".+\"}[5m]))",
+          "expr": "sum by (container_name, stack) (rate({container_name=~\".*\"}[5m]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -156,7 +160,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum by (stack) (count_over_time({container_name=~\".+\"} |~ \"(?i)(error|exception|fatal)\" [24h]))",
+          "expr": "sum by (stack) (count_over_time({container_name=~\".*\"} |~ \"(?i)(error|exception|fatal)\" != \"level=info\" [24h]))",
           "queryType": "instant",
           "refId": "A"
         }
@@ -216,7 +220,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "count(count by (container_name) (rate({container_name=~\".+\"}[5m])))",
+          "expr": "count(count by (container_name) (rate({container_name=~\".*\"}[5m])))",
           "queryType": "instant",
           "refId": "A"
         }
@@ -276,7 +280,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "count(count by (stack) (rate({container_name=~\".+\"}[5m])))",
+          "expr": "count(count by (stack) (rate({container_name=~\".*\"}[5m])))",
           "queryType": "instant",
           "refId": "A"
         }
@@ -340,7 +344,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({container_name=~\".+\"} |~ \"(?i)(error|exception|fatal)\" [5m]))",
+          "expr": "sum(count_over_time({container_name=~\".*\"} |~ \"(?i)(error|exception|fatal)\" != \"level=info\" [5m]))",
           "queryType": "instant",
           "refId": "A"
         }
@@ -405,7 +409,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "topk(10, sum by (container_name, stack) (rate({container_name=~\".+\"}[5m])))",
+          "expr": "topk(10, sum by (container_name, stack) (rate({container_name=~\".*\"}[5m])))",
           "queryType": "instant",
           "refId": "A"
         }
@@ -417,7 +421,10 @@
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["docker", "containers"],
+  "tags": [
+    "docker",
+    "containers"
+  ],
   "templating": {
     "list": []
   },

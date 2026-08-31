@@ -1,0 +1,42 @@
+# Homepage — the one page that lists everything in the house.
+#
+# Two mounts on purpose. The declared /appdata directory is Homepage's
+# working config dir, which it writes to and which the backup covers. The
+# individual YAML files are bind-mounted read-only on top of it from this
+# stack directory, so the page's actual content lives in git and a change to
+# it shows up as a diff rather than as a click somebody made once.
+#
+# Needs a .env from latch: twelve HOMEPAGE_VAR_* values that the YAML below
+# references as {{HOMEPAGE_VAR_NAME}}. Five of them were read out of the
+# services' own config files on 2026-08-31 rather than typed by Kenny.
+
+services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:v2.1.2
+    container_name: homepage
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Homepage refuses requests whose Host header it does not know. Without
+      # this it answers only on localhost and every request through Traefik
+      # comes back as a bad-host error.
+      - HOMEPAGE_ALLOWED_HOSTS=home.kp-soft.dev,10.10.10.15:3000,localhost:3000
+    volumes:
+      - /appdata/home/homepage-config:/app/config
+      - ./settings.yaml:/app/config/settings.yaml:ro
+      - ./services.yaml:/app/config/services.yaml:ro
+      - ./widgets.yaml:/app/config/widgets.yaml:ro
+      - ./bookmarks.yaml:/app/config/bookmarks.yaml:ro
+    ports:
+      - "3000:3000"
+    labels:
+      # Nothing to quiesce: the config is files and they are in git.
+      - com.homelab.update.policy=auto
+    networks:
+      - home_net
+
+networks:
+  home_net:
+    external: true
+    name: home_net

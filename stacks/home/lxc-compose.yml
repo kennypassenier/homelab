@@ -1,0 +1,60 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# Homepage: one page that lists everything in the house. Kenny asked for it
+# on 2026-08-31 and chose its own container over joining the gateway (P1).
+#
+# The gateway would have been the obvious home — a start page is the front
+# door and belongs with the reverse proxy. Kenny picked purity instead, and
+# the reason holds up: CT 104 is not managed by the orchestrator until M8, so
+# anything placed there gets no backup, no log caps and no monitor. Three
+# separate failures that night came from exactly that gap. A page whose whole
+# content lives in this repo is cheap to host properly from the start.
+#
+# Deliberately small: Homepage is a Node process reading YAML. It holds
+# nothing, computes nothing, and its config directory is the only state.
+
+stack_name: home
+vmid: 115
+hostname: 115-app-home
+
+network:
+  ip: 10.10.10.15/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 2
+  memory_mb: 1024
+  swap_mb: 512
+  disk_gb: 8
+  storage: local-lvm
+
+lxc:
+  template: clone:998
+  unprivileged: true
+  features: nesting=1,keyctl=1
+  protection: true
+
+boot:
+  onboot: true
+  # Last: it links to everything and is useful only once the rest is up.
+  order: 80
+
+storage:
+  # Homepage reads its whole configuration from this directory. It is the
+  # only state the stack has, and it is also authored in this repo, so a
+  # restore and a redeploy produce the same page.
+  - host_path: /appdata/home/homepage-config
+    mount_point: /appdata/home/homepage-config
+    # The image runs as root by default; 100000 is root mapped out of an
+    # unprivileged LXC.
+    host_owner_uid: 100000
+    app: homepage
+
+apps: [homepage, promtail, cadvisor]
+latch_secrets: [homepage]
+
+gateway_route:
+  filename: 115-app-home.yml
+  gateway_vmid: 104

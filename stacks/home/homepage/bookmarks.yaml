@@ -1,0 +1,10 @@
+- Beheer:
+    - Proxmox:
+        - abbr: PVE
+          href: https://prox.kp-soft.dev/
+    - OPNsense:
+        - abbr: FW
+          href: https://opn.kp-soft.dev/
+    - GitHub homelab:
+        - abbr: GH
+          href: https://github.com/kennypassenier/homelab

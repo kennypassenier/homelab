@@ -1,0 +1,22 @@
+title: Kenny's homelab
+description: Every service in the house, in one place
+startUrl: https://home.kp-soft.dev
+
+theme: dark
+color: slate
+headerStyle: clean
+hideVersion: true
+
+layout:
+  Media:
+    style: row
+    columns: 4
+  Papierwerk:
+    style: row
+    columns: 3
+  Huis:
+    style: row
+    columns: 4
+  Infrastructuur:
+    style: row
+    columns: 4

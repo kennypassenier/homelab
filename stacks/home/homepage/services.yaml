@@ -1,0 +1,158 @@
+# Every service in the house.
+#
+# Links point at the public hostname where one exists, so the page works the
+# same from the couch and from outside; the widgets talk to the LAN address
+# directly, because a widget that goes out through Cloudflare Access gets the
+# login page instead of an answer.
+#
+# Services without a widget are here as links on purpose: a page that only
+# lists what it can measure is not a page that lists everything.
+
+- Media:
+    - Jellyfin:
+        icon: jellyfin.svg
+        href: https://fin.kp-soft.dev/
+        description: Films en series
+        widget:
+          type: jellyfin
+          url: http://10.10.10.6:8096
+          key: "{{HOMEPAGE_VAR_JELLYFIN}}"
+          enableNowPlaying: true
+          enableBlocks: true
+    - Seerr:
+        icon: jellyseerr.svg
+        href: https://seerr.kp-soft.dev/
+        description: Aanvragen
+        widget:
+          type: jellyseerr
+          url: http://10.10.10.6:5055
+          key: "{{HOMEPAGE_VAR_SEERR}}"
+    - Sonarr:
+        icon: sonarr.svg
+        href: https://son.kp-soft.dev/
+        description: Series
+        widget:
+          type: sonarr
+          url: http://10.10.10.6:8989
+          key: "{{HOMEPAGE_VAR_SONARR}}"
+    - Radarr:
+        icon: radarr.svg
+        href: https://rad.kp-soft.dev/
+        description: Films
+        widget:
+          type: radarr
+          url: http://10.10.10.6:7878
+          key: "{{HOMEPAGE_VAR_RADARR}}"
+    - Prowlarr:
+        icon: prowlarr.svg
+        href: https://prowl.kp-soft.dev/
+        description: Indexeerders
+        widget:
+          type: prowlarr
+          url: http://10.10.10.6:9696
+          key: "{{HOMEPAGE_VAR_PROWLARR}}"
+    - Bazarr:
+        icon: bazarr.svg
+        href: https://baz.kp-soft.dev/
+        description: Ondertitels
+        widget:
+          type: bazarr
+          url: http://10.10.10.6:6767
+          key: "{{HOMEPAGE_VAR_BAZARR}}"
+    # No widget: qBittorrent's WebUI password is hashed and unreadable, and
+    # its API key answered 403 to every header shape tried on 2026-08-31.
+    # Giving it a widget needs either the password or a LAN whitelist entry,
+    # and weakening its auth is Kenny's call, not a detail to slip in here.
+    - qBittorrent:
+        icon: qbittorrent.svg
+        href: https://qbit.kp-soft.dev/
+        description: Downloads
+
+- Papierwerk:
+    - Paperless:
+        icon: paperless.svg
+        href: https://docs.kp-soft.dev/
+        description: Documentarchief
+        widget:
+          type: paperlessngx
+          url: http://10.10.10.14:8000
+          key: "{{HOMEPAGE_VAR_PAPERLESS}}"
+    - Actual Budget:
+        icon: actual-budget.svg
+        href: https://budget.kp-soft.dev/
+        description: Huishoudboekje
+    - Stirling PDF:
+        icon: stirling-pdf.svg
+        href: https://pdf.kp-soft.dev/
+        description: PDF-gereedschap
+
+- Huis:
+    - Home Assistant:
+        icon: home-assistant.svg
+        href: https://ha.kp-soft.dev/
+        description: Domotica
+    - Almanac:
+        icon: mdi-calendar-clock
+        href: https://almanac.kp-soft.dev/
+        description: Agenda-hub
+    - Syncthing:
+        icon: syncthing.svg
+        href: https://sync.kp-soft.dev/
+        description: Obsidian-kluis
+    - SuperSync:
+        icon: mdi-sync
+        href: https://sp.kp-soft.dev/
+        description: Super Productivity
+    - Tasks:
+        icon: mdi-check-circle
+        href: https://tasks.kp-soft.dev/
+        description: Takenlijst
+    - Terminus:
+        icon: mdi-monitor
+        href: https://trmnl.kp-soft.dev/
+        description: E-ink dashboard
+
+- Infrastructuur:
+    - Proxmox:
+        icon: proxmox.svg
+        href: https://prox.kp-soft.dev/
+        description: Hypervisor
+        widget:
+          type: proxmox
+          url: https://10.10.5.250:8006
+          username: "{{HOMEPAGE_VAR_PVE_USER}}!{{HOMEPAGE_VAR_PVE_TOKEN_NAME}}"
+          password: "{{HOMEPAGE_VAR_PVE_TOKEN_VALUE}}"
+          node: proxmox
+    - Grafana:
+        icon: grafana.svg
+        href: https://grafana.kp-soft.dev/
+        description: Grafieken
+        widget:
+          type: grafana
+          url: http://10.10.10.4:3000
+          username: "{{HOMEPAGE_VAR_GF_ADMIN_USER}}"
+          password: "{{HOMEPAGE_VAR_GF_ADMIN_PASSWORD}}"
+    - Uptime Kuma:
+        icon: uptime-kuma.svg
+        href: http://10.10.10.4:3001/
+        description: Bereikbaarheid
+    - Prometheus:
+        icon: prometheus.svg
+        href: http://10.10.10.13:9090/
+        description: Metingen
+    - Alertmanager:
+        icon: mdi-bell-alert
+        href: http://10.10.10.13:9093/
+        description: Meldingen
+    - Loki:
+        icon: mdi-text-box-search
+        href: http://10.10.10.4:3100/ready
+        description: Logs
+    - kyu:
+        icon: mdi-mailbox
+        href: http://10.10.10.9:8080/healthz
+        description: Berichtenhub
+    - OPNsense:
+        icon: opnsense.svg
+        href: https://opn.kp-soft.dev/
+        description: Router

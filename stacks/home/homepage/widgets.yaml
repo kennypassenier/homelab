@@ -1,0 +1,18 @@
+# The strip along the top. Deliberately short: this page is a launcher, and
+# the deep numbers live in Grafana, which is one click away below.
+- resources:
+    cpu: true
+    memory: true
+    disk: /
+
+- search:
+    provider: duckduckgo
+    target: _blank
+
+- datetime:
+    text_size: xl
+    format:
+      dateStyle: long
+      timeStyle: short
+      hourCycle: h23
+      locale: nl-BE

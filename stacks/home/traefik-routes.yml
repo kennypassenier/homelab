@@ -1,0 +1,22 @@
+# Traefik route fragment for the home stack.
+#
+# home.kp-soft.dev (P3). Kenny considered the bare kp-soft.dev and chose the
+# subdomain: it cannot knock anything existing over, and the bare name can
+# still be pointed here later as its own deliberate step.
+#
+# Like every *.kp-soft.dev name this sits behind Cloudflare Access, which
+# matters more here than elsewhere: the page names every service in the house
+# and, through its widgets, says how busy each one is.
+
+http:
+  routers:
+    homepage:
+      rule: "Host(`home.kp-soft.dev`)"
+      entryPoints: [web]
+      service: homepage
+
+  services:
+    homepage:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.15:3000"

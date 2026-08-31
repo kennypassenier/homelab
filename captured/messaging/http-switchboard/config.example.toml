@@ -1,0 +1,55 @@
+# HTTPSwitchboard, deployed 2026-08-31 on CT 109 beside kyu and kyu-runner.
+#
+# This file lives ONLY here and in the nightly backup — never in git. The
+# handover is explicit about why: the profile names the Home Assistant
+# webhook id, and that id IS the credential for the notification
+# dispatcher. Both kennypassenier/homelab and this service's own repo are
+# public, and this exact mistake already happened once in that project,
+# caught only by a pre-gate scan.
+#
+# The token comes from /etc/http-switchboard/token.env, root-owned 0600,
+# and its durable copy is in latch under kyu/http-switchboard.
+
+[kyu]
+base_url = "http://127.0.0.1:8080"
+token = "${KYU_TOKEN}"
+
+# Where this service publishes its own failure events (AR12). Never under
+# kyu.*, which the hub reserves for its own.
+[reporting]
+topic = "switchboard.events"
+
+# Alertmanager publishes its fixed payload onto the hub; this profile
+# reshapes it into the {alert, status, severity, instance, summary} that
+# automation.homelab_alert_webhook has been waiting for since 2026-08-29.
+#
+# The chain is deliberately short: this service is already a kyu consumer
+# that acknowledges only after Home Assistant accepted the message, so a
+# second hop through the hub would add a component without adding a
+# guarantee (its mini-round M1).
+#
+# An IP, not homeassistant.lan — the same reason as kyu-runner.
+[[profiles]]
+name = "alertmanager"
+subscription = "switchboard"
+from = { kyu_topic = "alerts.raw" }
+to = { url = "http://10.10.10.2:8123/api/webhook/REPLACE-WITH-THE-REAL-WEBHOOK-ID" }
+content_type = "application/json"
+body = '''
+{"alert": {{ alerts.0.labels.alertname }},
+ "status": {{ alerts.0.status }},
+ "severity": {{ alerts.0.labels.severity | default("warning") }},
+ "instance": {{ alerts.0.labels.instance | default("unknown") }},
+ "summary": {{ alerts.0.annotations.summary }}}
+'''
+
+# ── Why this is an example and not the real file ──────────────────────
+#
+# The deployed config lives ONLY at /etc/http-switchboard/config.toml on
+# CT 109, root-owned 0600, and in the nightly restic backup of that
+# directory. It names the Home Assistant webhook id, and that id IS the
+# credential for the notification dispatcher — this repository is public.
+#
+# The handover from the HTTPSwitchboard project is explicit that this exact
+# mistake already happened once there: a webhook id written into a public
+# SCOPE.md, caught only by a pre-gate scan.

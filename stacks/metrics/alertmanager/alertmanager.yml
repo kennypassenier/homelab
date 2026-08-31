@@ -1,21 +1,28 @@
 # Alertmanager routing for the homelab metrics stack.
 #
-# The delivery leg is deliberately EMPTY. Alertmanager's webhook payload has a
-# fixed shape that does not match what automation.homelab_ops_webhook expects in
-# Home Assistant, and HTTPSwitchboard — the translator built for exactly this
-# gap — is not deployed yet (Kenny, W1, 2026-08-30). Until it is, alerts still
-# fire, group, deduplicate and show up in this UI; they are simply not
-# delivered anywhere.
+# The delivery leg was empty from 2026-08-30 until 2026-08-31: Alertmanager's
+# webhook payload has a fixed shape that does not match what Home Assistant's
+# alert automation expects, and HTTPSwitchboard — the translator built for
+# exactly this gap — was not deployed. It is now, on CT 109 beside the kyu hub.
 #
-# To close the loop later: replace the `none` receiver with a webhook_config
-# pointing at HTTPSwitchboard, which then forwards to
-# http://10.10.10.2:8123/api/webhook/homelab-ops-c4d81f26.
+# The chain: Alertmanager publishes its raw payload onto the hub topic
+# alerts.raw, HTTPSwitchboard consumes it, reshapes it into the
+# {alert, status, severity, instance, summary} that
+# automation.homelab_alert_webhook has been waiting for, and delivers it —
+# acknowledging on the hub only after Home Assistant accepted it. So an alert
+# raised while Home Assistant is down waits instead of vanishing, which is the
+# same guarantee Kenny chose for the homelab's own warnings (R2).
+#
+# The token is in a file, not here: this repository is public, and a bearer
+# token in it would be a token published. The file lives in the alertmanager
+# config directory the compose file already mounts, and the nightly restic
+# backup covers it.
 
 global:
   resolve_timeout: 5m
 
 route:
-  receiver: none
+  receiver: kyu-hub
   # Grouping by host as well as alertname means one failing machine produces one
   # notification, not one per filesystem or per drive.
   group_by: ["alertname", "host"]
@@ -24,7 +31,15 @@ route:
   repeat_interval: 12h
 
 receivers:
-  # A receiver with no integrations is valid and is the honest way to say
-  # "nowhere yet" — quieter and more visible than pointing at a dead endpoint,
-  # which would fill the log with delivery failures.
-  - name: none
+  - name: kyu-hub
+    webhook_configs:
+      # An IP, not a name: everything else on this path uses one, and a
+      # notification chain should not depend on name resolution working.
+      - url: http://10.10.10.9:8080/t/alerts.raw
+        # Alertmanager retries a failed webhook on its own; the hub is the
+        # thing that makes the message durable once it lands.
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /alertmanager/kyu-token

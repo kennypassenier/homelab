@@ -1,5 +1,11 @@
 # Every service in the house.
 #
+# Every link is an https name behind Traefik, never a container IP. Kenny
+# reported the reason on 2026-08-31: an IP link is plain http, so the browser
+# warns on every click. Five services had no route at all and got one —
+# prom, alerts, kuma and kyu — and Loki, which has no page of its own, now
+# points at Grafana where its data is actually read.
+#
 # Links point at the public hostname where one exists, so the page works the
 # same from the couch and from outside; the widgets talk to the LAN address
 # directly, because a widget that goes out through Cloudflare Access gets the
@@ -134,23 +140,25 @@
           password: "{{HOMEPAGE_VAR_GF_ADMIN_PASSWORD}}"
     - Uptime Kuma:
         icon: uptime-kuma.svg
-        href: http://10.10.10.4:3001/
+        href: https://kuma.kp-soft.dev/
         description: Bereikbaarheid
     - Prometheus:
         icon: prometheus.svg
-        href: http://10.10.10.13:9090/
+        href: https://prom.kp-soft.dev/
         description: Metingen
     - Alertmanager:
         icon: mdi-bell-alert
-        href: http://10.10.10.13:9093/
+        href: https://alerts.kp-soft.dev/
         description: Meldingen
+    # Loki has no interface of its own — /ready is a health probe, not a page.
+    # Its data is read through Grafana, so the link goes there.
     - Loki:
         icon: mdi-text-box-search
-        href: http://10.10.10.4:3100/ready
-        description: Logs
+        href: https://grafana.kp-soft.dev/explore
+        description: Logs (via Grafana)
     - kyu:
         icon: mdi-mailbox
-        href: http://10.10.10.9:8080/healthz
+        href: https://kyu.kp-soft.dev/
         description: Berichtenhub
     - OPNsense:
         icon: opnsense.svg

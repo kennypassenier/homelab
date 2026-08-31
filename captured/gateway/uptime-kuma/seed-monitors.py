@@ -30,6 +30,11 @@ HTTP = [
     ("syncthing · web",        "http://10.10.10.8:8384/rest/noauth/health", OK),
     ("almanac · healthz",      "http://10.10.10.12:8080/healthz",          OK),
     ("kyu · runner",           "http://10.10.10.9:8082/healthz",           OK),
+    # The STRICT health, deliberately: it answers 503 when the switchboard
+    # cannot do its job, which is exactly what a monitor should see. The
+    # container/unit health stays on plain /healthz — wiring a restart to the
+    # strict one would restart this service because Home Assistant is down.
+    ("kyu · switchboard",      "http://10.10.10.9:8083/healthz?strict=1",  OK),
     ("paperwork · actual",     "http://10.10.10.14:5006/",                 OK),
     ("paperwork · stirling",   "http://10.10.10.14:8080/login",            OK),
     ("paperwork · paperless",  "http://10.10.10.14:8000/accounts/login/",  OK),

@@ -1,0 +1,32 @@
+# Routes for two services the orchestrator does not deploy: Uptime Kuma runs
+# on the gateway itself (CT 104, unmanaged until M8) and kyu is a native
+# service on CT 109 whose manifest has no gateway_route field.
+#
+# Added 2026-08-31: Kenny's start page linked both by IP, which means plain
+# http and a browser warning on every click. Both sit behind Cloudflare Access
+# like every other *.kp-soft.dev name.
+#
+# Captured here rather than only on the gateway, because a fix that lives only
+# on the running machine is a fix with an expiry date — that happened this
+# morning with sync.kp-soft.dev and cost the very repair it was meant to be.
+
+http:
+  routers:
+    uptime-kuma:
+      rule: "Host(`kuma.kp-soft.dev`)"
+      entryPoints: [web]
+      service: uptime-kuma
+    kyu:
+      rule: "Host(`kyu.kp-soft.dev`)"
+      entryPoints: [web]
+      service: kyu
+
+  services:
+    uptime-kuma:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.4:3001"
+    kyu:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.9:8080"

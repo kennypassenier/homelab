@@ -1,0 +1,29 @@
+# C7 native service — deployed 2026-08-31 on CT 109, the third unit there
+# after kyu and kyu-runner.
+#
+# stack_name is `kyu` for the same reason kyu-runner's is: the A2 guard wants
+# the hostname to be <vmid>-app-<stack>, and this service shares the container
+# with the hub it consumes from — deliberately, since it reads the hub over
+# localhost. A stack holds a list of native services distinguished by unit.
+#
+# What it does: Alertmanager's payload has a fixed shape that Home Assistant's
+# alert automation cannot read. This service consumes that payload off the hub,
+# reshapes it, and delivers it — acknowledging on the hub only after HA
+# accepted. An alert raised while HA is down therefore waits instead of
+# vanishing.
+#
+# /etc/http-switchboard holds the config AND the token, and is the whole of
+# what has to survive: the config names the Home Assistant webhook id, which
+# is the credential for the notification dispatcher, and is deliberately in no
+# repository — this one is public.
+stack_name: kyu
+vmid: 109
+hostname: 109-app-kyu
+unit: http-switchboard
+binary: /usr/local/bin/http-switchboard
+env_file: /etc/http-switchboard/token.env
+data_dirs:
+  - /etc/http-switchboard
+# update_cmd deliberately absent, as with the other two units here: ownership
+# of the binary update is Kenny's call, and two systems restoring binaries can
+# fight each other.

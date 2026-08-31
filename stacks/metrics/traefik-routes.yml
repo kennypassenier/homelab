@@ -1,0 +1,31 @@
+# Traefik route fragment for the metrics stack.
+#
+# Added 2026-08-31 because Kenny's start page was linking these by IP, which
+# means plain http and a browser warning on every click. Everything else on
+# that page is an https name; these had none because nothing had ever routed
+# them.
+#
+# Like every *.kp-soft.dev name they sit behind Cloudflare Access, so this
+# does not put Prometheus or Alertmanager on the open internet — it puts them
+# behind the same interactive login as Grafana, which reads the same data.
+
+http:
+  routers:
+    prometheus:
+      rule: "Host(`prom.kp-soft.dev`)"
+      entryPoints: [web]
+      service: prometheus
+    alertmanager:
+      rule: "Host(`alerts.kp-soft.dev`)"
+      entryPoints: [web]
+      service: alertmanager
+
+  services:
+    prometheus:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.13:9090"
+    alertmanager:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.13:9093"

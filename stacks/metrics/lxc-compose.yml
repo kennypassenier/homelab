@@ -40,3 +40,8 @@ storage:
 # deploy of this stack would not have started it.
 apps: [prometheus, alertmanager, promtail, pve-exporter]
 latch_secrets: [pve-exporter]
+
+# Pushes traefik-routes.yml to the gateway's watched routes directory.
+gateway_route:
+  filename: 113-app-metrics.yml
+  gateway_vmid: 104

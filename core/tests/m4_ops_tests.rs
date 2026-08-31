@@ -254,6 +254,48 @@ async fn e1_backup_with_nothing_to_pause_starts_nothing() {
     );
 }
 
+/// Every stack dashboard carries its own errors-only section, because Kenny
+/// asked for it on every one rather than only on the fleet-wide page — and
+/// because a stack deployed next month must get it without anyone
+/// remembering to add it.
+#[test]
+fn every_stack_dashboard_has_an_errors_section() {
+    let json = homelab_core::ops::dashboard::dashboard_json(
+        "media",
+        &["jellyfin".to_string(), "sonarr".to_string()],
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+    let panels = v["panels"].as_array().expect("panels");
+    let titles: Vec<&str> = panels.iter().filter_map(|p| p["title"].as_str()).collect();
+    for want in ["Errors in range", "Errors by container", "Error lines"] {
+        assert!(titles.contains(&want), "missing '{}' in {:?}", want, titles);
+    }
+    // The log panels must read Loki, not the Prometheus datasource the four
+    // resource panels use.
+    let loki: Vec<&serde_json::Value> = panels
+        .iter()
+        .filter(|p| p["datasource"]["uid"] == "loki")
+        .collect();
+    assert_eq!(loki.len(), 3, "three panels should read Loki");
+
+    // The level=info exclusion is load-bearing, not tidiness: Loki logs every
+    // query it runs, those queries contain the word "error", and without this
+    // Loki counts its own search for errors as an error.
+    for p in &loki {
+        let expr = p["targets"][0]["expr"].as_str().unwrap_or("");
+        assert!(
+            expr.contains("!= \"level=info\""),
+            "the info exclusion must survive: {}",
+            expr
+        );
+        assert!(
+            expr.contains("stack=\"media\""),
+            "a stack dashboard must only show its own errors: {}",
+            expr
+        );
+    }
+}
+
 /// A restic run over a directory that exists and is empty succeeds, writes a
 /// snapshot with nothing in it, and reports success. The record then claims
 /// the stack is backed up while a restore would give back nothing.
@@ -1561,12 +1603,29 @@ fn t2_the_generated_dashboard_is_scoped_and_stable() {
     let body = dashboard_json("media", &["jellyfin".to_string(), "sonarr".to_string()]);
     assert!(body.contains("\"uid\": \"homelab-media\""), "{}", body);
     assert!(body.contains("\"uid\": \"prometheus\""), "{}", body);
-    assert_eq!(
-        body.matches("stack=\\\"media\\\"").count(),
-        5,
-        "every query must be scoped to this stack: {}",
-        body
+    // Assert what the sentence says, rather than a count that has to be
+    // edited every time a panel is added. The count version broke the moment
+    // the errors section arrived — which is the test doing its job, but it
+    // was checking a number instead of the property it was written for.
+    let v: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+    let exprs: Vec<String> = v["panels"]
+        .as_array()
+        .expect("panels")
+        .iter()
+        .flat_map(|p| p["targets"].as_array().cloned().unwrap_or_default())
+        .filter_map(|t| t["expr"].as_str().map(|e| e.to_string()))
+        .collect();
+    assert!(
+        !exprs.is_empty(),
+        "a dashboard with no queries is decoration"
     );
+    for e in &exprs {
+        assert!(
+            e.contains("stack=\"media\""),
+            "every query must be scoped to this stack, this one is not: {}",
+            e
+        );
+    }
     assert!(
         body.contains("jellyfin, sonarr"),
         "the description should say what is in the stack: {}",

@@ -74,6 +74,57 @@ pub fn dashboard_json(stack: &str, apps: &[String]) -> String {
             y = i / 2 * 8,
         ));
     }
+    // ── Errors only, per stack ───────────────────────────────────────────
+    //
+    // Kenny asked for this on every stack dashboard, not just the fleet-wide
+    // one, and it belongs in the generator rather than in each file: a stack
+    // deployed next month gets it without anyone remembering.
+    //
+    // The `!= "level=info"` is not tidiness. Loki logs every query it runs,
+    // those queries contain the word "error", so without it Loki finds its own
+    // search for errors and counts it as one — that inflated the gateway from
+    // 29 to 314 in a single hour on 2026-08-31.
+    //
+    // These read a different datasource than the four panels above, which is
+    // why they are built here instead of in that loop.
+    let err = format!(
+        "{{stack=\"{s}\"}} |~ \"(?i)(error|exception|fatal|panic)\" != \"level=info\"",
+        s = stack
+    );
+    panels.push_str(&format!(
+        concat!(
+            ",\n    {{\n",
+            "      \"id\": 5,\n",
+            "      \"type\": \"stat\",\n",
+            "      \"title\": \"Errors in range\",\n",
+            "      \"datasource\": {{\"type\": \"loki\", \"uid\": \"loki\"}},\n",
+            "      \"gridPos\": {{\"h\": 5, \"w\": 6, \"x\": 0, \"y\": 16}},\n",
+            "      \"options\": {{\"reduceOptions\": {{\"calcs\": [\"lastNotNull\"]}}, \"colorMode\": \"value\", \"graphMode\": \"none\"}},\n",
+            "      \"targets\": [{{\"expr\": \"sum(count_over_time({e} [$__range]))\", \"queryType\": \"instant\", \"refId\": \"A\"}}]\n",
+            "    }},\n",
+            "    {{\n",
+            "      \"id\": 6,\n",
+            "      \"type\": \"bargauge\",\n",
+            "      \"title\": \"Errors by container\",\n",
+            "      \"description\": \"One container producing thousands while the rest produce single digits is the normal shape here, and the useful one: it says where to look first.\",\n",
+            "      \"datasource\": {{\"type\": \"loki\", \"uid\": \"loki\"}},\n",
+            "      \"gridPos\": {{\"h\": 5, \"w\": 18, \"x\": 6, \"y\": 16}},\n",
+            "      \"options\": {{\"displayMode\": \"gradient\", \"orientation\": \"horizontal\", \"reduceOptions\": {{\"calcs\": [\"lastNotNull\"]}}}},\n",
+            "      \"targets\": [{{\"expr\": \"topk(10, sum by (container_name) (count_over_time({e} [$__range])))\", \"queryType\": \"instant\", \"refId\": \"A\"}}]\n",
+            "    }},\n",
+            "    {{\n",
+            "      \"id\": 7,\n",
+            "      \"type\": \"logs\",\n",
+            "      \"title\": \"Error lines\",\n",
+            "      \"datasource\": {{\"type\": \"loki\", \"uid\": \"loki\"}},\n",
+            "      \"gridPos\": {{\"h\": 12, \"w\": 24, \"x\": 0, \"y\": 21}},\n",
+            "      \"options\": {{\"showTime\": true, \"showLabels\": true, \"sortOrder\": \"Descending\", \"wrapLogMessage\": true, \"dedupStrategy\": \"none\"}},\n",
+            "      \"targets\": [{{\"expr\": \"{e}\", \"refId\": \"A\"}}]\n",
+            "    }}"
+        ),
+        e = err.replace('"', "\\\""),
+    ));
+
     format!(
         concat!(
             "{{\n",

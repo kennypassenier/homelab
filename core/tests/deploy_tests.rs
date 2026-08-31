@@ -350,6 +350,15 @@ async fn a_deploy_installs_the_unit_file_and_starts_a_service_that_is_down() {
             .is_empty(),
         "the unit file is written"
     );
+    // And ONLY there. Pushing it to /opt/<stack>/<unit>/ as well cost
+    // almanac its binary: that path was the binary, the garbage collector
+    // removed it, and the push made a directory of the same name. The
+    // service survived only because the kernel holds a deleted file open.
+    assert!(
+        exec.calls_containing("/opt/kyu/kyu/kyu.service").is_empty(),
+        "a unit file must never be pushed into /opt as well: {:?}",
+        exec.calls_containing("/opt/kyu/kyu")
+    );
     assert!(!exec.calls_containing("systemctl daemon-reload").is_empty());
     assert!(!exec
         .calls_containing("systemctl enable --now kyu")

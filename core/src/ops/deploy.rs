@@ -804,6 +804,20 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let recreated_w = recreated.clone();
     step!(runner, "push files", {
         for f in &spec.files {
+            // A native unit file goes to /etc/systemd/system and nowhere
+            // else. Pushing it here too cost almanac its binary: the stack
+            // file's path is `<unit>/<unit>.service`, which lands on
+            // /opt/almanac/almanac — and that WAS the binary. The garbage
+            // collector removed it, the push then made a directory of the
+            // same name, and the service kept running only because the
+            // kernel holds a deleted file open. A restart would have found
+            // nothing there.
+            if m.natives
+                .iter()
+                .any(|u| f.path == format!("{}/{}.service", u, u))
+            {
+                continue;
+            }
             let dest = format!("/opt/{}/{}", m.stack_name, f.path);
             let perms = format!("{:o}", f.mode.unwrap_or(0o644));
             // D60: the file in the repository names the real origin; what

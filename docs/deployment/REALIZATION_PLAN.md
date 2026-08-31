@@ -240,6 +240,30 @@ its route files are what makes rollback cheap for every stack before it.
 **Exit:** S1-S5 from `SCOPE.md` all met.
 
 ### M9 · The services that had no home
+
+**Status 2026-08-31: five of five, and the exit criterion met.**
+
+- kyu-runner deployed on CT 109, adopted as a native unit, first backup taken.
+- http-switchboard deployed beside it; Alertmanager's delivery leg connected
+  through the hub, so an alert raised while Home Assistant is down waits
+  instead of vanishing.
+- Uptime Kuma's monitor set: 33 monitors where there was one, all green.
+  Every endpoint probed before it was added — a monitor that is red from
+  birth teaches you to ignore the dashboard.
+- R9, the ansible-era secrets into latch: `TUNNEL_TOKEN`,
+  `CROWDSEC_BOUNCER_API_KEY`, `WIREGUARD_PRIVATE_KEY`, SuperSync's fourteen
+  and Vikunja's two. Each verified byte-identical against the running
+  container. The first two are the ones that matter most — losing the tunnel
+  token costs every external hostname until Kenny makes a new tunnel, and
+  losing the WireGuard key leaves the downloader without its VPN.
+- Recyclarr (E3) is the one item NOT done: it is a new service rather than a
+  homeless one, and nothing depends on it.
+
+**Exit met**, and not by inspection: a deliberately labelled test alert was
+pushed through Alertmanager, translated by the switchboard and delivered to
+Home Assistant, which pushed it to Kenny's phone. 6 ms, one attempt.
+
+### M9 · The services that had no home — original plan
 - kyu-runner deployed, HA automation first (E1).
 - http-switchboard deployed, alert chain closed (E2).
 - Recyclarr (E3).

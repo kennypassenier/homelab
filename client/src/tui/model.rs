@@ -1017,6 +1017,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
     // Synthetic spec from the fleet view — enough to preview/demo.
     let d = crate::scaffold::StackDefaults::default();
     let manifest = homelab_proto::StackManifest {
+        registry_login: None,
         stack_name: stack.name.clone(),
         vmid: stack.vmid,
         hostname: stack.hostname.clone(),

@@ -67,3 +67,13 @@ storage:
 
 apps: [kp-soft, promtail, cadvisor]
 latch_secrets: [kp-soft]
+
+# The image is private on GHCR, so the deploy signs in before it pulls.
+# Until 2026-08-31 that sign-in was a `docker login` run by hand on the
+# container and recorded nowhere: a container rebuilt from scratch would have
+# failed at the pull with nothing to say why. The credentials ride in the
+# app's own .env — REGISTRY_USER and REGISTRY_TOKEN, from latch — so there is
+# no second secrets path to keep alive.
+registry_login:
+  registry: ghcr.io
+  app: kp-soft

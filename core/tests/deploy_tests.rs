@@ -10,6 +10,7 @@ use homelab_core::sink::VecSink;
 
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
+        registry_login: None,
         stack_name: stack.into(),
         vmid,
         hostname: format!("{}-app-{}", vmid, stack),
@@ -378,6 +379,80 @@ async fn t52_a_changed_compose_file_does_not_restart_twice() {
         "compose up already recreated it: {:?}",
         exec.calls_containing("docker compose")
     );
+}
+
+/// T56: an image behind a login must not need a step nobody wrote down.
+///
+/// kp-soft was the first stack with a private image, and on 2026-08-31 the
+/// deploy failed at the pull until a `docker login` was run on the container
+/// by hand. That login lived in no manifest, so a container rebuilt from
+/// scratch would have failed the same way with nothing to say why.
+#[tokio::test]
+async fn t56_a_private_registry_is_signed_into_before_the_pull() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, ""));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 110-app-syncthing\ncores: 1\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    let mut spec = spec(110, "syncthing");
+    spec.manifest.registry_login = Some(homelab_core::manifest::RegistryLogin {
+        registry: "ghcr.io".into(),
+        app: "syncthing".into(),
+    });
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let calls = exec.calls();
+    let pos = |n: &str| calls.iter().position(|c| c.contains(n)).unwrap();
+    assert!(
+        calls.iter().any(|c| c.contains("docker login ghcr.io")),
+        "the deploy must sign in: {:?}",
+        exec.calls_containing("docker")
+    );
+    assert!(
+        pos("docker login ghcr.io") < pos("docker compose pull"),
+        "signing in after the pull is signing in too late"
+    );
+    // The token must never be handed to docker as an argument, where it would
+    // sit in the process list of a machine other people can read.
+    assert!(
+        exec.calls_containing("docker login")
+            .iter()
+            .all(|c| c.contains("--password-stdin")),
+        "the token must arrive on stdin"
+    );
+}
+
+/// A stack with no private registry must not gain a login step it never
+/// asked for.
+#[tokio::test]
+async fn t56_a_stack_without_a_registry_never_logs_in() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, ""));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 110-app-syncthing\ncores: 1\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec(110, "syncthing")).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(exec.calls_containing("docker login").is_empty());
 }
 
 #[tokio::test]

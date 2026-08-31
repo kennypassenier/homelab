@@ -11,6 +11,7 @@ use homelab_core::sink::VecSink;
 
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
+        registry_login: None,
         stack_name: stack.into(),
         vmid,
         hostname: format!("{}-app-{}", vmid, stack),

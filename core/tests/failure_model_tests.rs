@@ -12,6 +12,7 @@ use homelab_core::sink::{NullSink, PipelineEvent, Sink, VecSink};
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
         manifest: StackManifest {
+            registry_login: None,
             stack_name: stack.into(),
             vmid,
             hostname: format!("{}-app-{}", vmid, stack),

@@ -20,6 +20,31 @@ pub struct StackManifest {
     #[serde(default)]
     pub storage: Vec<MountSpec>,
     pub apps: Vec<String>,
+    /// A private image registry this stack must sign in to before it can
+    /// pull.
+    ///
+    /// The orchestrator pushes compose files and runs `docker compose pull`;
+    /// an image behind a login simply fails there. kp-soft was the first
+    /// stack to need one, and on 2026-08-31 it was solved by hand — a single
+    /// `docker login` on the container that no manifest recorded. A container
+    /// rebuilt from scratch would have failed at the pull with nothing to say
+    /// why, which is the same shape as every other finding of that day: a
+    /// step that exists only in someone's memory.
+    #[serde(default)]
+    pub registry_login: Option<RegistryLogin>,
+}
+
+/// Where the credentials for a private registry come from.
+///
+/// Deliberately no new secrets channel: the values ride in an app's ordinary
+/// `.env`, which already travels from latch through the host vault to the
+/// container. One mechanism, already proven, already backed up.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RegistryLogin {
+    /// The registry host, e.g. `ghcr.io`.
+    pub registry: String,
+    /// The app whose `.env` carries `REGISTRY_USER` and `REGISTRY_TOKEN`.
+    pub app: String,
 }
 
 impl StackManifest {
@@ -300,6 +325,20 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
     for app in spec.env.keys() {
         if !m.apps.contains(app) {
             problems.push(format!("env provided for unknown app '{}'", app));
+        }
+    }
+    if let Some(r) = &m.registry_login {
+        if !m.apps.contains(&r.app) {
+            problems.push(format!(
+                "registry_login reads its credentials from app '{}', which this stack does not declare",
+                r.app
+            ));
+        }
+        if r.registry.is_empty() || r.registry.contains('/') {
+            problems.push(format!(
+                "registry_login.registry '{}' must be a bare host like 'ghcr.io'",
+                r.registry
+            ));
         }
     }
     if let Some(route) = &spec.gateway_route {

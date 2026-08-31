@@ -672,6 +672,36 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     step!(runner, "start apps", {
+        // Sign in to a private registry before anything tries to pull from
+        // it. The credentials ride in an app's ordinary .env, already pushed
+        // above, so this adds no new secrets path — it only stops the login
+        // from living in somebody's memory instead of in the manifest.
+        //
+        // Read with grep rather than by sourcing the file: a token with a
+        // parenthesis or a space in it breaks `.` in dash, and that failure
+        // looks like a wrong password.
+        if let Some(reg) = &m.registry_login {
+            let envf = format!("/opt/{}/{}/.env", m.stack_name, reg.app);
+            let script = format!(
+                "u=$(grep -m1 '^REGISTRY_USER=' '{f}' | cut -d= -f2-); \
+                 t=$(grep -m1 '^REGISTRY_TOKEN=' '{f}' | cut -d= -f2-); \
+                 [ -n \"$u\" ] && [ -n \"$t\" ] || {{ echo 'no REGISTRY_USER/REGISTRY_TOKEN in {f}' >&2; exit 1; }}; \
+                 printf %s \"$t\" | docker login {r} -u \"$u\" --password-stdin",
+                f = envf,
+                r = reg.registry
+            );
+            let out = pct_sh(exec, m.vmid, &script, 60).await?;
+            if !out.success() {
+                return Err(CoreError::Command {
+                    rendered: format!("docker login {}", reg.registry),
+                    detail: out.stderr,
+                });
+            }
+            log_info(format!(
+                "[registry] signed in to {} as the credentials in {} say",
+                reg.registry, reg.app
+            ));
+        }
         let net = format!("{}_net", m.stack_name);
         pct_sh(
             exec,

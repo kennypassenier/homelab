@@ -567,6 +567,7 @@ mod tests {
         let mut hs = homelab_core::state::HostState::default();
         let mk = |mem: u32| {
             let mut m = homelab_core::manifest::StackManifest {
+                registry_login: None,
                 stack_name: "x".into(),
                 vmid: 108,
                 hostname: "108-app-x".into(),

@@ -872,6 +872,13 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     step!(runner, "start apps", {
+        // A native-only container has no docker: nothing to network, nothing
+        // to start. Without this the deploy created an empty docker network
+        // on CT 112 — harmless, and exactly the kind of stray act that makes
+        // a reader wonder what else it did.
+        if m.native_only {
+            return Ok(StepOutcome::Unchanged);
+        }
         // Sign in to a private registry before anything tries to pull from
         // it. The credentials ride in an app's ordinary .env, already pushed
         // above, so this adds no new secrets path — it only stops the login
@@ -1067,6 +1074,11 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // ── D3: garbage-collect apps removed from intent — stop + remove their
     // compose project and /opt dir; /appdata config dirs are kept.
     step!(runner, "garbage collect", {
+        // Nor is there anything to garbage-collect: an app directory under
+        // /opt on a native-only container was never put there by a deploy.
+        if m.native_only {
+            return Ok(StepOutcome::Unchanged);
+        }
         let store = StateStore::new(exec, &ctx.state_dir);
         let state = store.load().await?;
         let removed: Vec<String> = state

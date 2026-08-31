@@ -370,7 +370,13 @@ async fn a_native_only_container_is_never_given_docker() {
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(report.ok, "deploy failed: {:?}", report.error);
 
-    for forbidden in ["get.docker.com", "docker --version", "docker compose"] {
+    for forbidden in [
+        "get.docker.com",
+        "docker --version",
+        "docker compose",
+        "docker network create",
+        "rm -rf",
+    ] {
         assert!(
             exec.calls_containing(forbidden).is_empty(),
             "a native-only container must never see '{}': {:?}",

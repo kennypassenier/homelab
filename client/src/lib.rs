@@ -6,6 +6,7 @@ pub mod scaffold;
 pub mod spec;
 pub mod tls;
 pub mod tui;
+pub mod version;
 
 use std::path::PathBuf;
 

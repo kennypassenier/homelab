@@ -988,3 +988,37 @@ fn b6_update_badge_and_u_key_flow() {
     homelab_client::tui::model::update(&mut m2, Msg::ReleaseTag(Some("v2.6.0".into())));
     assert!(m2.host_update_available().is_none());
 }
+
+// ── The version gate (2026-08-31) ───────────────────────────────────────────
+
+/// A client newer than the host loses whatever the host does not know about.
+/// Serde drops an unknown field without a word, so the deploy succeeds and
+/// silently does less than it was asked: a host one release behind ignored
+/// the `data_mounts` block, the downloader came up without its disks, and 73
+/// torrents went to `missingFiles`.
+#[test]
+fn a_host_that_is_behind_is_recognised_as_behind() {
+    use homelab_client::version::{mutates, older};
+    use homelab_proto::Command;
+
+    assert!(older("3.15.0", "3.16.0"), "one minor behind is behind");
+    assert!(older("3.15.9", "3.16.0"));
+    assert!(older("2.9.9", "3.0.0"));
+    assert!(!older("3.16.0", "3.16.0"), "equal is not behind");
+    assert!(!older("3.17.0", "3.16.0"), "ahead is not behind");
+    assert!(
+        older("v3.15.0", "3.16.0"),
+        "a leading v must not confuse it"
+    );
+    assert!(
+        !older("nonsense", "3.16.0"),
+        "an unreadable version must not block work — that would be worse than the bug"
+    );
+
+    // Read-only commands stay usable against an older host, precisely so the
+    // mismatch can be diagnosed.
+    assert!(!mutates(&Command::Ping));
+    assert!(!mutates(&Command::Status));
+    assert!(!mutates(&Command::Doctor));
+    assert!(mutates(&Command::ForgetStack { stack: "x".into() }));
+}

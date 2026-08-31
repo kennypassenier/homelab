@@ -581,10 +581,10 @@ async fn rpc(host: &str, token: &str, command: Command) {
     }
     let (mut tx, mut rx) = ws.split();
 
+    // The request is deliberately NOT sent yet: it goes out only after the
+    // host has said which version it is. See the Hello arm below.
     let req = RpcRequest { id: 1, command };
-    tx.send(Message::Text(serde_json::to_string(&req).unwrap().into()))
-        .await
-        .unwrap_or_else(|e| die(&format!("send: {}", e)));
+    let mut sent = false;
 
     while let Some(Ok(msg)) = rx.next().await {
         let Message::Text(text) = msg else { continue };
@@ -597,6 +597,31 @@ async fn rpc(host: &str, token: &str, command: Command) {
                     "{}● HOST v{} (proto {}) — link up{}",
                     C_GREEN, version, proto, C_RESET
                 );
+                // A client newer than the host loses whatever the host does
+                // not know about. Serde drops an unknown field silently, so
+                // the deploy succeeds and simply does less than it was asked
+                // to: on 2026-08-31 a host one release behind ignored the
+                // `data_mounts` block, the downloader came up without its
+                // disks, and 73 torrents went to `missingFiles`. Nothing said
+                // a word. So the client refuses to send a mutating command to
+                // an older host, and says which command fixes it.
+                if homelab_client::version::mutates(&req.command)
+                    && homelab_client::version::older(&version, env!("CARGO_PKG_VERSION"))
+                {
+                    die(&format!(
+                        "host is v{} and this client is v{} :: a host that predates a \
+                         field ignores it silently, which is how a deploy quietly does \
+                         less than you asked — run 'homelab release-update' first",
+                        version,
+                        env!("CARGO_PKG_VERSION")
+                    ));
+                }
+                if !sent {
+                    tx.send(Message::Text(serde_json::to_string(&req).unwrap().into()))
+                        .await
+                        .unwrap_or_else(|e| die(&format!("send: {}", e)));
+                    sent = true;
+                }
             }
             ServerMsg::Log { level, source, msg } => {
                 let color = match level {

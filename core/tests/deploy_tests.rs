@@ -14,6 +14,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        natives: Vec::new(),
         stack_name: stack.into(),
         vmid,
         hostname: format!("{}-app-{}", vmid, stack),
@@ -306,6 +307,133 @@ fn a_bind_inside_a_declared_mount_is_covered_by_it() {
     );
 }
 
+// ── Native units get the same cycle a docker app gets ──────────────────────
+
+/// Kenny's N1 (2026-08-31): the unit file lives in the repository and a
+/// deploy puts it there. Before this, the four files that make CT 109's
+/// services exist were only inside CT 109 — losing the container would have
+/// lost the only copy.
+#[tokio::test]
+async fn a_deploy_installs_the_unit_file_and_starts_a_service_that_is_down() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 109-app-kyu\nprotection: 1\nonboot: 1\nstartup: order=50\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    // The unit is down before, up after.
+    exec.enqueue("systemctl is-active kyu", CmdOutput::ok("inactive\n"));
+    exec.respond_always("systemctl is-active kyu", CmdOutput::ok("active\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(109, "kyu");
+    sp.manifest.hostname = "109-app-kyu".into();
+    sp.manifest.apps = vec![];
+    sp.manifest.storage = vec![];
+    sp.manifest.native_only = true;
+    sp.manifest.natives = vec!["kyu".into()];
+    sp.gateway_route = None;
+    sp.files = vec![homelab_core::manifest::FileBlob {
+        path: "kyu/kyu.service".into(),
+        content: "[Unit]\nDescription=kyu\n".into(),
+        mode: None,
+    }];
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    assert!(
+        !exec
+            .calls_containing("/etc/systemd/system/kyu.service")
+            .is_empty(),
+        "the unit file is written"
+    );
+    assert!(!exec.calls_containing("systemctl daemon-reload").is_empty());
+    assert!(!exec
+        .calls_containing("systemctl enable --now kyu")
+        .is_empty());
+}
+
+/// A service that is already running is left running. Adoption's rule holds:
+/// a deploy does not restart a production service to take ownership of it.
+#[tokio::test]
+async fn a_running_native_service_is_never_restarted_by_a_deploy() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 109-app-kyu\nprotection: 1\nonboot: 1\nstartup: order=50\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    exec.respond_always("systemctl is-active kyu", CmdOutput::ok("active\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(109, "kyu");
+    sp.manifest.hostname = "109-app-kyu".into();
+    sp.manifest.apps = vec![];
+    sp.manifest.storage = vec![];
+    sp.manifest.native_only = true;
+    sp.manifest.natives = vec!["kyu".into()];
+    sp.gateway_route = None;
+    sp.files = vec![homelab_core::manifest::FileBlob {
+        path: "kyu/kyu.service".into(),
+        content: "[Unit]\nDescription=kyu\n".into(),
+        mode: None,
+    }];
+    assert!(deploy(&ctx(&exec, &sink, &journal), &sp).await.ok);
+    // The unit itself, not the container's own housekeeping: the runaway
+    // guards restart journald, which is not this service.
+    for forbidden in [
+        "systemctl restart kyu",
+        "systemctl stop kyu",
+        "systemctl enable --now kyu",
+    ] {
+        assert!(
+            exec.calls_containing(forbidden).is_empty(),
+            "a running service must not see '{}'",
+            forbidden
+        );
+    }
+}
+
+/// A declared unit with no unit file is refused, loudly. The whole point of
+/// bringing the file into the repository is that a rebuild does not depend on
+/// somebody remembering what was in it.
+#[tokio::test]
+async fn a_declared_unit_without_its_file_is_refused() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 109-app-kyu\nprotection: 1\nonboot: 1\nstartup: order=50\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(109, "kyu");
+    sp.manifest.hostname = "109-app-kyu".into();
+    sp.manifest.apps = vec![];
+    sp.manifest.storage = vec![];
+    sp.manifest.native_only = true;
+    sp.manifest.natives = vec!["kyu".into()];
+    sp.gateway_route = None;
+    sp.files = vec![];
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(!report.ok);
+    let why = report.error.unwrap().why;
+    assert!(
+        why.contains("kyu/kyu.service"),
+        "name the missing file: {}",
+        why
+    );
+}
+
 // ── A container that runs no docker at all ─────────────────────────────────
 
 /// Kenny asked the right question on 2026-08-31: the four native services
@@ -321,6 +449,7 @@ fn native_only_lets_a_container_declare_that_it_runs_no_docker() {
     s.manifest.storage = vec![];
     s.files = vec![];
     s.manifest.native_only = true;
+    s.manifest.natives = vec!["kyu".into()];
     validate(&s).expect("a native-only container may declare no apps");
 
     // An empty list WITHOUT the flag is still refused: that is what a docker
@@ -366,7 +495,14 @@ async fn a_native_only_container_is_never_given_docker() {
     sp.manifest.storage = vec![];
     sp.files = vec![];
     sp.manifest.native_only = true;
+    sp.manifest.natives = vec!["kyu".into()];
+    sp.files = vec![homelab_core::manifest::FileBlob {
+        path: "kyu/kyu.service".into(),
+        content: "[Unit]\nDescription=kyu\n".into(),
+        mode: None,
+    }];
     sp.gateway_route = None;
+    exec.respond_always("systemctl is-active kyu", CmdOutput::ok("active\n"));
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(report.ok, "deploy failed: {:?}", report.error);
 

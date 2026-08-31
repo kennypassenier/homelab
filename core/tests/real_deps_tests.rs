@@ -107,6 +107,7 @@ fn spec(files_content: &str) -> DeploySpec {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        natives: Vec::new(),
         stack_name: "test".into(),
         vmid: 108,
         hostname: "108-app-test".into(),

@@ -38,6 +38,18 @@ pub struct StackManifest {
     /// installs it. None of that is docker's business.
     #[serde(default)]
     pub native_only: bool,
+    /// The systemd units this container runs, by name. Each one has a
+    /// `service.yml` describing it and a `<unit>/<unit>.service` file beside
+    /// it — the unit file lives in the repository now, which it did not
+    /// before: if CT 109 had been destroyed on 2026-08-31, nobody would have
+    /// had the four unit files that make its services exist. They were only
+    /// inside the containers they describe.
+    ///
+    /// Kenny's N1 (2026-08-31): a native service gets the same full cycle a
+    /// docker app gets, so these are declared here for the same reason `apps`
+    /// is — the deploy installs them, and a directory may be owned by one.
+    #[serde(default)]
+    pub natives: Vec<String>,
     /// M1 (2026-08-31): folders that belong to something else. Attached to
     /// the container, never owned by it.
     ///
@@ -315,6 +327,13 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
             m.resources.disk_gb
         ));
     }
+    if m.native_only && m.natives.is_empty() {
+        problems.push(
+            "native_only is set but no natives are declared :: name the systemd units this \
+             container runs, so the deploy knows what to install and a rebuild is not guesswork"
+                .into(),
+        );
+    }
     if m.apps.is_empty() && !m.native_only {
         problems.push(
             "a stack needs at least one app :: a container that deliberately runs no docker \
@@ -396,9 +415,12 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
             }
         }
         if let Some(app) = &mount.app {
-            if !m.apps.contains(app) {
+            // A directory may belong to a docker app or to a native systemd
+            // unit: both are things this stack runs, and both want their own
+            // restic repository named after them (D25).
+            if !m.apps.contains(app) && !m.natives.contains(app) {
                 problems.push(format!(
-                    "storage '{}' is owned by app '{}', which this stack does not declare",
+                    "storage '{}' is owned by '{}', which this stack declares neither as an app nor as a native unit",
                     mount.host_path, app
                 ));
             }

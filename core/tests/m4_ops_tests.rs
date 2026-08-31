@@ -15,6 +15,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        natives: Vec::new(),
         stack_name: stack.into(),
         vmid,
         hostname: format!("{}-app-{}", vmid, stack),

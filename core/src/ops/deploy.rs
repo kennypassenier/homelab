@@ -1112,6 +1112,80 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         Ok(StepOutcome::Changed)
     });
 
+    // Kenny's N1 (2026-08-31): a native service gets the same cycle a docker
+    // app gets. The unit file comes from the repository — it did not exist
+    // there before, so if CT 109 had been lost, nobody would have had the
+    // four files that make its services exist.
+    //
+    // Deliberately gentle: the unit is written and reloaded, and the service
+    // is started only if it is not already running. Adoption's rule holds —
+    // a running production service is not restarted to take ownership of it.
+    // Changing a unit file that is already in place is a deliberate act, not
+    // a side effect of a deploy.
+    step!(runner, "native units", {
+        if m.natives.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let mut changed = false;
+        for unit in &m.natives {
+            let Some(blob) = spec
+                .files
+                .iter()
+                .find(|f| f.path == format!("{}/{}.service", unit, unit))
+            else {
+                return Err(CoreError::SafetyAbort(format!(
+                    "stack declares native unit '{}' but {}/{}.service is not in the stack \
+                     directory :: without it a rebuild cannot recreate the service, which is \
+                     the whole reason the unit file was brought into the repository",
+                    unit, unit, unit
+                )));
+            };
+            let dest = format!("/etc/systemd/system/{}.service", unit);
+            if push_content(exec, m.vmid, &dest, &blob.content, "644").await? {
+                log_info(format!("[native] {} written", dest));
+                pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
+                changed = true;
+            }
+            let active = pct_sh(exec, m.vmid, &format!("systemctl is-active {}", unit), 30).await?;
+            if active.stdout.trim() == "active" {
+                continue;
+            }
+            log_info(format!(
+                "[native] {} is not running — enabling and starting",
+                unit
+            ));
+            run_ok(
+                exec,
+                &Cmd::new(
+                    "pct",
+                    &[
+                        "exec",
+                        &vm,
+                        "--",
+                        "sh",
+                        "-c",
+                        &format!("systemctl enable --now {}", unit),
+                    ],
+                    120,
+                ),
+            )
+            .await?;
+            let after = pct_sh(exec, m.vmid, &format!("systemctl is-active {}", unit), 30).await?;
+            if after.stdout.trim() != "active" {
+                return Err(CoreError::Command {
+                    rendered: format!("systemctl enable --now {}", unit),
+                    detail: format!("{} did not come up: {}", unit, after.stdout.trim()),
+                });
+            }
+            changed = true;
+        }
+        Ok(if changed {
+            StepOutcome::Changed
+        } else {
+            StepOutcome::Unchanged
+        })
+    });
+
     step!(runner, "record state", {
         let store = StateStore::new(exec, &ctx.state_dir);
         let mut state = store.load().await?;

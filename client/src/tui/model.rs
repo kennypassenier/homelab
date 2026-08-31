@@ -1021,6 +1021,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        natives: Vec::new(),
         stack_name: stack.name.clone(),
         vmid: stack.vmid,
         hostname: stack.hostname.clone(),

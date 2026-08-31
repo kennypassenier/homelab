@@ -47,3 +47,9 @@ boot:
 
 storage: []
 apps: []
+
+# The systemd units this container runs. Each has its own service.yml and
+# its unit file in <unit>/<unit>.service — the unit file lives here now,
+# which it did not before: losing the container would have lost the only
+# copy of the file that makes the service exist.
+natives: [almanac]

@@ -581,6 +581,7 @@ mod tests {
                 retention: None,
                 data_mounts: Vec::new(),
                 native_only: false,
+                natives: Vec::new(),
                 stack_name: "x".into(),
                 vmid: 108,
                 hostname: "108-app-x".into(),

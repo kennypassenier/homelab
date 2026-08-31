@@ -65,3 +65,9 @@ storage: []
 # No docker apps by design. The three services are named in their own
 # service.yml files: kyu, kyu-runner, http-switchboard.
 apps: []
+
+# The systemd units this container runs. Each has its own service.yml and
+# its unit file in <unit>/<unit>.service — the unit file lives here now,
+# which it did not before: losing the container would have lost the only
+# copy of the file that makes the service exist.
+natives: [kyu, kyu-runner, http-switchboard]

@@ -13,6 +13,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
+        native_only: false,
         stack_name: stack.into(),
         vmid,
         hostname: format!("{}-app-{}", vmid, stack),
@@ -302,6 +303,84 @@ fn a_bind_inside_a_declared_mount_is_covered_by_it() {
         "{}",
         err
     );
+}
+
+// ── A container that runs no docker at all ─────────────────────────────────
+
+/// Kenny asked the right question on 2026-08-31: the four native services
+/// could be backed up and updated, but nothing in the repository said how to
+/// rebuild the container they run on. A stack that can only be repaired by
+/// the person who remembers how it was built is not managed.
+#[test]
+fn native_only_lets_a_container_declare_that_it_runs_no_docker() {
+    use homelab_core::manifest::validate;
+    let mut s = spec(109, "kyu");
+    s.manifest.hostname = "109-app-kyu".into();
+    s.manifest.apps = vec![];
+    s.manifest.storage = vec![];
+    s.files = vec![];
+    s.manifest.native_only = true;
+    validate(&s).expect("a native-only container may declare no apps");
+
+    // An empty list WITHOUT the flag is still refused: that is what a docker
+    // stack looks like when somebody forgot to fill it in.
+    let mut s2 = s.clone();
+    s2.manifest.native_only = false;
+    let err = validate(&s2).expect_err("an empty app list must not pass by accident");
+    assert!(
+        format!("{}", err).contains("native_only"),
+        "the error must name the way to say it on purpose: {}",
+        err
+    );
+
+    // And the two must agree.
+    let mut s3 = s.clone();
+    s3.manifest.apps = vec!["promtail".into()];
+    let err = validate(&s3).expect_err("native_only with apps is a contradiction");
+    assert!(
+        format!("{}", err).contains("one of the two is wrong"),
+        "{}",
+        err
+    );
+}
+
+/// Such a container must never be given docker: installing it would change
+/// the very thing the manifest exists to reproduce.
+#[tokio::test]
+async fn a_native_only_container_is_never_given_docker() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 109-app-kyu\nprotection: 1\nonboot: 1\nstartup: order=50\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(109, "kyu");
+    sp.manifest.hostname = "109-app-kyu".into();
+    sp.manifest.apps = vec![];
+    sp.manifest.storage = vec![];
+    sp.files = vec![];
+    sp.manifest.native_only = true;
+    sp.gateway_route = None;
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    for forbidden in ["get.docker.com", "docker --version", "docker compose"] {
+        assert!(
+            exec.calls_containing(forbidden).is_empty(),
+            "a native-only container must never see '{}': {:?}",
+            forbidden,
+            exec.calls_containing(forbidden)
+        );
+    }
+    // And no weekly prune timer for a docker that is not there. CT 109 and
+    // CT 112 have been failing that unit every week.
+    assert!(exec.calls_containing("docker-prune").is_empty());
+    assert!(exec.calls_containing("/etc/docker/daemon.json").is_empty());
 }
 
 // ── M1: directories this stack borrows rather than owns ────────────────────

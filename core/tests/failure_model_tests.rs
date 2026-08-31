@@ -15,6 +15,7 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
             registry_login: None,
             retention: None,
             data_mounts: Vec::new(),
+            native_only: false,
             stack_name: stack.into(),
             vmid,
             hostname: format!("{}-app-{}", vmid, stack),

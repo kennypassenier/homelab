@@ -570,6 +570,7 @@ mod tests {
                 registry_login: None,
                 retention: None,
                 data_mounts: Vec::new(),
+                native_only: false,
                 stack_name: "x".into(),
                 vmid: 108,
                 hostname: "108-app-x".into(),
@@ -2167,7 +2168,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         homelab_core::runner::Runner::new("apply-guards", ctx.sink, ctx.journal);
                     match runner
                         .step("guards", || async {
-                            homelab_core::ops::guards::apply(ctx.exec, ctx.sink, vmid).await?;
+                            homelab_core::ops::guards::apply(ctx.exec, ctx.sink, vmid, true).await?;
                             Ok(homelab_core::runner::StepOutcome::Changed)
                         })
                         .await

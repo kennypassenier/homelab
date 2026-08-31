@@ -1,0 +1,67 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# CT 109 holds three native services: the kyu message hub, kyu-runner (which
+# pumps hub messages into Home Assistant) and http-switchboard (which
+# translates Alertmanager's shape into one the hub accepts). All three are
+# systemd units running a single binary, adopted with C7 — each has its own
+# `service.yml` in this repository, and this file describes the CONTAINER
+# they live in.
+#
+# It exists because Kenny asked the right question on 2026-08-31: the four
+# native services could be backed up and updated, but nothing said how to
+# rebuild the box they run on. A stack that can only be repaired by the person
+# who remembers how it was built is not managed.
+#
+# `native_only` says out loud that this container runs no docker. Every number
+# below is what CT 109 has right now, read from `pct config` — deliberately
+# small, because the hub is a single Rust binary that idles at a few MB.
+#
+# Rebuilding it, in order:
+#   1. this manifest recreates the container;
+#   2. `homelab restore stacks/kyu` puts /var/lib/kyu and /etc/kyu back from
+#      their own restic repositories (C7 backs them up per unit);
+#   3. the three binaries are installed the way C7 installs them.
+# Nothing here starts or stops a service — that stays true after a rebuild
+# too.
+
+stack_name: kyu
+vmid: 109
+hostname: 109-app-kyu
+native_only: true
+
+network:
+  ip: 10.10.10.9/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 1
+  memory_mb: 256
+  swap_mb: 128
+  disk_gb: 2
+  storage: local-lvm
+
+lxc:
+  # 998 is the unprivileged golden template. It bakes docker in, which this
+  # container does not need and will not be given — see native_only above.
+  template: clone:998
+  unprivileged: true
+  # As it is today: nesting only, no keyctl. Not copied from the other
+  # stacks, read from the container.
+  features: nesting=1
+  protection: true
+
+boot:
+  onboot: true
+  order: 50
+
+# No /appdata: adoption never bind-mounts, because it must not restart a
+# running service to take ownership of it. The services' state lives inside
+# the container at /var/lib/kyu and /etc/kyu, and C7's nightly run reaches it
+# with `pct exec tar | restic --stdin`.
+storage: []
+
+# No docker apps by design. The three services are named in their own
+# service.yml files: kyu, kyu-runner, http-switchboard.
+apps: []

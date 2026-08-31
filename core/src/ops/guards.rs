@@ -66,7 +66,17 @@ pub const PRUNE_SERVICE: &str = "[Unit]\nDescription=Prune stale Docker data (ho
 
 pub const PRUNE_TIMER: &str = "[Unit]\nDescription=Weekly Docker prune (homelab runaway guard)\n\n[Timer]\nOnCalendar=weekly\nRandomizedDelaySec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n";
 
-pub async fn apply(exec: &dyn Executor, sink: &dyn Sink, vmid: u16) -> Result<(), CoreError> {
+/// `docker` = false for a container that runs no docker at all: it gets the
+/// journald cap and nothing else. Installing the docker guards there put a
+/// weekly prune timer on CT 109 and CT 112 that has been failing ever since,
+/// which is worse than useless — a guard that fails every week teaches you to
+/// ignore failures.
+pub async fn apply(
+    exec: &dyn Executor,
+    sink: &dyn Sink,
+    vmid: u16,
+    docker: bool,
+) -> Result<(), CoreError> {
     let log = |msg: String| {
         sink.emit(PipelineEvent::Line {
             level: Level::Info,
@@ -76,14 +86,15 @@ pub async fn apply(exec: &dyn Executor, sink: &dyn Sink, vmid: u16) -> Result<()
     };
 
     // 1. Docker container logs — must land before app containers (re)start.
-    if push_content(
-        exec,
-        vmid,
-        "/etc/docker/daemon.json",
-        DOCKER_DAEMON_JSON,
-        "644",
-    )
-    .await?
+    if docker
+        && push_content(
+            exec,
+            vmid,
+            "/etc/docker/daemon.json",
+            DOCKER_DAEMON_JSON,
+            "644",
+        )
+        .await?
     {
         pct_sh(exec, vmid, "systemctl restart docker", 120).await?;
         log("[guard] docker log caps applied (10m x 3)".into());
@@ -120,32 +131,34 @@ pub async fn apply(exec: &dyn Executor, sink: &dyn Sink, vmid: u16) -> Result<()
     )
     .await?;
 
-    // 4. Weekly docker prune timer.
-    push_content(
-        exec,
-        vmid,
-        "/etc/systemd/system/docker-prune.service",
-        PRUNE_SERVICE,
-        "644",
-    )
-    .await?;
-    if push_content(
-        exec,
-        vmid,
-        "/etc/systemd/system/docker-prune.timer",
-        PRUNE_TIMER,
-        "644",
-    )
-    .await?
-    {
-        pct_sh(
+    // 4. Weekly docker prune timer — only where there is docker to prune.
+    if docker {
+        push_content(
             exec,
             vmid,
-            "systemctl daemon-reload && systemctl enable --now docker-prune.timer",
-            60,
+            "/etc/systemd/system/docker-prune.service",
+            PRUNE_SERVICE,
+            "644",
         )
         .await?;
-        log("[guard] weekly docker prune timer armed".into());
+        if push_content(
+            exec,
+            vmid,
+            "/etc/systemd/system/docker-prune.timer",
+            PRUNE_TIMER,
+            "644",
+        )
+        .await?
+        {
+            pct_sh(
+                exec,
+                vmid,
+                "systemctl daemon-reload && systemctl enable --now docker-prune.timer",
+                60,
+            )
+            .await?;
+            log("[guard] weekly docker prune timer armed".into());
+        }
     }
 
     // 5. apt cache hygiene.

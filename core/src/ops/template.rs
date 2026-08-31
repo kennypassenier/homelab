@@ -219,7 +219,7 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
     });
 
     step!(runner, "bake guards", {
-        crate::ops::guards::apply(exec, ctx.sink, cfg.temp_vmid).await?;
+        crate::ops::guards::apply(exec, ctx.sink, cfg.temp_vmid, true).await?;
         Ok(StepOutcome::Changed)
     });
 

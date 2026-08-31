@@ -20,6 +20,24 @@ pub struct StackManifest {
     #[serde(default)]
     pub storage: Vec<MountSpec>,
     pub apps: Vec<String>,
+    /// A container that runs no docker at all: its services are native
+    /// systemd units, adopted with C7 and supervised through their own
+    /// `service.yml`. CT 109 (kyu, kyu-runner, http-switchboard) and CT 112
+    /// (almanac) are the two.
+    ///
+    /// It has to be said out loud rather than inferred from an empty `apps:`
+    /// list, because an empty list is exactly what a docker stack looks like
+    /// when somebody forgot to fill it in. Kenny asked for these containers
+    /// to be rebuildable from the repository like every other one
+    /// (2026-08-31); this is the field that lets a manifest describe a
+    /// container whose whole job is to hold a binary and a unit file.
+    ///
+    /// What a rebuild then needs, in order: this manifest recreates the
+    /// container, `homelab restore` puts the service's data back from its
+    /// own restic repository, and the binary is installed the way C7 already
+    /// installs it. None of that is docker's business.
+    #[serde(default)]
+    pub native_only: bool,
     /// M1 (2026-08-31): folders that belong to something else. Attached to
     /// the container, never owned by it.
     ///
@@ -297,8 +315,19 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
             m.resources.disk_gb
         ));
     }
-    if m.apps.is_empty() {
-        problems.push("a stack needs at least one app".into());
+    if m.apps.is_empty() && !m.native_only {
+        problems.push(
+            "a stack needs at least one app :: a container that deliberately runs no docker \
+             says so with `native_only: true`, so that an empty list is never mistaken for a \
+             list somebody forgot to fill in"
+                .into(),
+        );
+    }
+    if !m.apps.is_empty() && m.native_only {
+        problems.push(format!(
+            "native_only is set but the stack declares apps ({}) :: one of the two is wrong",
+            m.apps.join(", ")
+        ));
     }
     // M1: the two lists must stay distinct. A directory the orchestrator owns
     // belongs in `storage:` and gets the strict rules; a directory it merely

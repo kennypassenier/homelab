@@ -624,6 +624,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     step!(runner, "bootstrap docker", {
+        // A native-only container has no docker and must not be given any:
+        // installing it would change the very thing this manifest exists to
+        // reproduce exactly.
+        if m.native_only {
+            return Ok(StepOutcome::Unchanged);
+        }
         let probe = pct_sh(exec, m.vmid, "docker --version", 30).await?;
         if probe.success() {
             return Ok(StepOutcome::Unchanged);
@@ -654,7 +660,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
 
     // ── B2 + A7. ─────────────────────────────────────────────────────────
     step!(runner, "runaway guards", {
-        guards::apply(exec, ctx.sink, m.vmid).await?;
+        guards::apply(exec, ctx.sink, m.vmid, !m.native_only).await?;
         Ok(StepOutcome::Unchanged)
     });
 

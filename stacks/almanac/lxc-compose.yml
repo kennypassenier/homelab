@@ -1,0 +1,49 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# CT 112 holds one native service: almanac, the hub that turns events into
+# Google Calendar entries. It is a systemd unit running a single binary,
+# adopted with C7; `service.yml` beside this file describes the service, and
+# this file describes the container it lives in.
+#
+# Same reason as CT 109: the service could be backed up and updated, but
+# nothing in the repository said how to rebuild the box. Kenny asked for that
+# on 2026-08-31.
+#
+# Every number below is what CT 112 has right now, read from `pct config`.
+#
+# Rebuilding it, in order:
+#   1. this manifest recreates the container;
+#   2. `homelab restore stacks/almanac` puts the service's data back from its
+#      own restic repository;
+#   3. the binary is installed the way C7 installs it.
+
+stack_name: almanac
+vmid: 112
+hostname: 112-app-almanac
+native_only: true
+
+network:
+  ip: 10.10.10.12/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 1
+  memory_mb: 512
+  swap_mb: 256
+  disk_gb: 4
+  storage: local-lvm
+
+lxc:
+  template: clone:998
+  unprivileged: true
+  features: nesting=1
+  protection: true
+
+boot:
+  onboot: true
+  order: 50
+
+storage: []
+apps: []

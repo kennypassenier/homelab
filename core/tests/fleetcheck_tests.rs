@@ -401,6 +401,7 @@ fn boot_manifest(vmid: u16, onboot: bool, order: u16, mem: u32, cores: u16) -> S
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
+        native_only: false,
         stack_name: "home".into(),
         vmid,
         hostname: format!("{}-app-home", vmid),

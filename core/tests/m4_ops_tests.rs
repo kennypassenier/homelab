@@ -14,6 +14,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
+        native_only: false,
         stack_name: stack.into(),
         vmid,
         hostname: format!("{}-app-{}", vmid, stack),
@@ -2230,7 +2231,7 @@ async fn h19_guards_positive_branch_writes_and_restarts_once() {
     let exec = MockExecutor::new();
     // Everything differs from desired (sha mismatch: default empty response).
     let sink = VecSink::new();
-    homelab_core::ops::guards::apply(&exec, &sink, 108)
+    homelab_core::ops::guards::apply(&exec, &sink, 108, true)
         .await
         .unwrap();
     // daemon.json written + docker restarted exactly once.

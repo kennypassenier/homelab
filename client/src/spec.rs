@@ -92,7 +92,9 @@ fn collect(
             .unwrap()
             .to_string_lossy()
             .to_string();
-        if rel == "lxc-compose.yml" || rel == "traefik-routes.yml" {
+        // Orchestrator input, not container content: service.yml describes a
+        // native unit to the homelab and has no business inside the container.
+        if rel == "lxc-compose.yml" || rel == "traefik-routes.yml" || name == "service.yml" {
             continue;
         }
         let content = std::fs::read_to_string(&path)

@@ -38,6 +38,9 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let vm = m.vmid.to_string();
     let mut exists = false;
     let mut created = false;
+    // W1: what the host actually offers, read once before anything is
+    // created. None when the stack asks for no hardware at all.
+    let mut gpu: Option<crate::ops::hardware::GpuDevices> = None;
     // For logging inside step bodies (the runner itself is mutably borrowed
     // by `step` while a body runs).
     let log_info = |msg: String| {
@@ -59,6 +62,25 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         exists = safety::check_deploy_target(exec, &ctx.safety, m).await?;
         Ok(StepOutcome::Unchanged)
     });
+
+    // ── W1: refuse hardware this host cannot give, and read the group ids
+    // instead of assuming them. Before the storage step, because a stack
+    // that cannot work here should not leave directories behind either.
+    step!(runner, "hardware readiness", {
+        if m.lxc.gpu {
+            gpu = Some(crate::ops::hardware::check_gpu(exec, &m.stack_name).await?);
+        }
+        if m.lxc.vpn {
+            crate::ops::hardware::check_tun(exec, &m.stack_name).await?;
+        }
+        Ok(StepOutcome::Unchanged)
+    });
+    if let Some(g) = &gpu {
+        log_info(format!(
+            "[w1] {} gid {} · {} gid {}",
+            g.card, g.card_gid, g.render, g.render_gid
+        ));
+    }
 
     // ── Host-side /appdata storage (survives container recreation). ──────
     step!(runner, "host storage", {
@@ -297,21 +319,11 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     let val = format!("{},mp={}", mount.host_path, mount.mount_point);
                     run_ok(exec, &Cmd::new("pct", &["set", &vm, &mp, &val], 60)).await?;
                 }
-                if m.lxc.gpu {
+                if let Some(g) = &gpu {
+                    let (dev0, dev1) = crate::ops::hardware::dev_args(g);
                     run_ok(
                         exec,
-                        &Cmd::new(
-                            "pct",
-                            &[
-                                "set",
-                                &vm,
-                                "--dev0",
-                                "/dev/dri/card0,gid=44",
-                                "--dev1",
-                                "/dev/dri/renderD128,gid=104",
-                            ],
-                            60,
-                        ),
+                        &Cmd::new("pct", &["set", &vm, "--dev0", &dev0, "--dev1", &dev1], 60),
                     )
                     .await?;
                 }
@@ -385,21 +397,11 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             // (targeted gids — render/video — NOT the old ansible
             // chmod-0777-recurse). TUN needs raw lxc config lines that pct
             // has no flag for, appended to the container config.
-            if m.lxc.gpu {
+            if let Some(g) = &gpu {
+                let (dev0, dev1) = crate::ops::hardware::dev_args(g);
                 run_ok(
                     exec,
-                    &Cmd::new(
-                        "pct",
-                        &[
-                            "set",
-                            &vm,
-                            "--dev0",
-                            "/dev/dri/card0,gid=44",
-                            "--dev1",
-                            "/dev/dri/renderD128,gid=104",
-                        ],
-                        60,
-                    ),
+                    &Cmd::new("pct", &["set", &vm, "--dev0", &dev0, "--dev1", &dev1], 60),
                 )
                 .await?;
             }

@@ -9,6 +9,7 @@ pub mod discovery;
 pub mod enable;
 pub mod fleetcheck;
 pub mod guards;
+pub mod hardware;
 pub mod kea;
 pub mod mirror;
 pub mod native;

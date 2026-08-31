@@ -266,6 +266,107 @@ async fn d10_validator_collects_all_problems() {
     assert!(msg.contains("hostname"), "{}", msg); // canonical name changed too
 }
 
+// ── W1: the host has to actually have what the stack asks for ──────────────
+
+/// F54, the most self-concealing failure left in the fleet: a stack with
+/// `gpu: true` on a host with no card comes up perfectly and transcodes on
+/// the CPU. Nothing looks wrong until a film stutters in the evening.
+#[tokio::test]
+async fn w1_a_gpu_stack_is_refused_when_the_host_has_no_card() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always(
+        "stat -c %g",
+        CmdOutput::ok("/dev/dri/card0 MISSING\n/dev/dri/renderD128 MISSING\ndri:\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.lxc.gpu = true;
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+
+    assert!(
+        !report.ok,
+        "a GPU stack on a host without one must be refused"
+    );
+    let why = report.error.unwrap().why;
+    assert!(why.contains("/dev/dri/card0"), "name the device: {}", why);
+    assert!(why.contains("syncthing"), "name the stack: {}", why);
+    assert!(
+        why.contains("transcodes on the CPU"),
+        "say what would happen instead of failing: {}",
+        why
+    );
+    // And it refuses before it builds anything.
+    assert!(exec.calls_containing("pct create").is_empty());
+    assert!(exec.calls_containing("pct clone").is_empty());
+    assert!(exec.calls_containing("mkdir -p /appdata").is_empty());
+}
+
+/// The other half of F54: the group ids were the literals 44 and 104, right
+/// on this host and silently wrong on any other. A gid that does not match
+/// hands over a device node the container cannot open — which looks exactly
+/// like the device not being there.
+#[tokio::test]
+async fn w1_the_device_group_ids_are_read_from_the_host() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always(
+        "stat -c %g",
+        CmdOutput::ok("/dev/dri/card0 993\n/dev/dri/renderD128 994\ndri: card0 renderD128 \n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.lxc.gpu = true;
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    let dev = exec.calls_containing("--dev0");
+    assert_eq!(dev.len(), 1, "exactly one passthrough call: {:?}", dev);
+    assert!(dev[0].contains("/dev/dri/card0,gid=993"), "{}", dev[0]);
+    assert!(dev[0].contains("/dev/dri/renderD128,gid=994"), "{}", dev[0]);
+    assert!(
+        !dev[0].contains("gid=44") && !dev[0].contains("gid=104"),
+        "the hardcoded numbers must be gone: {}",
+        dev[0]
+    );
+}
+
+/// The same shape for the VPN flag: without /dev/net/tun the container
+/// starts and only the tunnel inside it fails, where nothing is looking.
+#[tokio::test]
+async fn w1_a_vpn_stack_is_refused_when_the_host_has_no_tun() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always("stat -c %g", CmdOutput::ok("/dev/net/tun MISSING\ndri:\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.lxc.vpn = true;
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(!report.ok);
+    let why = report.error.unwrap().why;
+    assert!(why.contains("/dev/net/tun"), "{}", why);
+}
+
+/// A stack that asks for no hardware must not be probed at all — a check
+/// that runs where it has no business is a check that can refuse a deploy
+/// for a reason that does not apply to it.
+#[tokio::test]
+async fn w1_a_stack_without_hardware_is_never_probed() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+    assert!(
+        exec.calls_containing("stat -c %g").is_empty(),
+        "no hardware asked for, no hardware probed"
+    );
+}
+
 /// Read back what the deploy recorded for the stack under test.
 async fn recorded_backup_time(exec: &MockExecutor) -> u64 {
     homelab_core::state::StateStore::new(exec, "/var/lib/homelab")

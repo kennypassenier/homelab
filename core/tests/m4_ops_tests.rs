@@ -638,6 +638,16 @@ async fn h4_gpu_and_vpn_flags_produce_device_config() {
         "/etc/pve/lxc/108.conf",
         "arch: amd64\nhostname: 108-app-test\n",
     );
+    // W1: the host is asked what it has. This test used to assert the
+    // literals 44 and 104 — the numbers the code carried — which made it a
+    // test of the bug: measured on the real Proxmox host, renderD128 is
+    // group 993, not 104 (F110).
+    exec.respond_always(
+        "stat -c %g",
+        CmdOutput::ok(
+            "/dev/dri/card0 44\n/dev/dri/renderD128 993\n/dev/net/tun 0\ndri: card0 renderD128 \n",
+        ),
+    );
     let mut m = manifest(108, "test");
     m.lxc.gpu = true;
     m.lxc.vpn = true;
@@ -655,10 +665,11 @@ async fn h4_gpu_and_vpn_flags_produce_device_config() {
     let j = NullJournal;
     let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
     assert!(report.ok, "{:?}", report.error);
-    // GPU: exact targeted dev entries with render/video gids — never chmod.
+    // GPU: exact targeted dev entries with the gids the host reported —
+    // never chmod, and never a number this code invented.
     let dev = exec.calls_containing("--dev0 /dev/dri/card0,gid=44");
     assert_eq!(dev.len(), 1);
-    assert!(dev[0].contains("--dev1 /dev/dri/renderD128,gid=104"));
+    assert!(dev[0].contains("--dev1 /dev/dri/renderD128,gid=993"));
     assert!(
         exec.calls_containing("chmod").is_empty(),
         "no ansible chmod-recurse bug"

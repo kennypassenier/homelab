@@ -528,8 +528,41 @@ keep a stack from surviving a reboot. The flag persists across redeploys.
   refused), old-state compatibility test (missing flag = enabled).
 - **Manual**: disable, verify the nightly skip line + onboot 0, re-enable.
 
+### W1 · Host hardware readiness — **Must** *(added 2026-08-31, deployment mini-round D45)*
+v1 checked whether the Proxmox host could give what a stack asks for; this
+generation hands the devices in and assumes. A `gpu: true` stack on a host
+with no card comes up perfectly and transcodes on the CPU — the failure that
+hides itself (F54), on the stack that is last in the rollout. The group ids
+were literals: 44 for `card0`, 104 for `renderD128`. Measured on the real
+host the same day: `card0` is 44 and `renderD128` is **993**, so the second
+number was already wrong and would have been applied the moment the media
+stack was rebuilt (F110). Deploy now probes before it creates anything —
+missing device or unreadable group = refusal naming the device, the stack and
+what would otherwise happen; present device = the gid comes from the host.
+`/dev/net/tun` for `vpn: true` gets the same treatment.
+- **Auto**: four tests in `deploy_tests.rs` — refusal with nothing created,
+  gids read from the probe (never 44/104), the tun case, and a stack that
+  asks for no hardware never being probed at all.
+- **Manual**: rebuild the media stack and confirm Jellyfin transcodes on the
+  card, not the processor.
+
+### W2 · Per-stack backup retention and schedule — **Should** *(added 2026-08-31, D45)*
+One fleet-wide retention setting for stacks that differ by two orders of
+magnitude. It already pinched: media needed `keep-daily=4` by hand because
+24 GB a night against the fleet-wide 14 would cost half a terabyte, while kyu
+at 231 MB could keep two months. That difference belongs in the stack file.
+
+### W3 · Boot order and resource reconciliation — **Should** *(added 2026-08-31, D45)*
+Startup order and resources are set at creation and never checked again, so
+after a power cut the fleet boots in whatever order somebody set by hand
+years ago — not what the repo says. The C4 replacement fixes it on the way
+past for every container it rebuilds; this catches the drift afterwards.
+
 ---
 
 **Feature phase closed 2026-08-10.** Final tally: 27 Must · 23 Should ·
 7 Could · 5 Won't. Any future feature gets the next free ID in its domain and
-a registry entry here before implementation.
+a registry entry here before implementation. **W1-W3 (2026-08-31) are the
+first entries added since**, rated by Kenny in the deployment project's own
+mini-round (D45) and recorded here because that decision's evidence line said
+`FEATURES.md pending`.

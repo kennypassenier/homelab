@@ -44,6 +44,12 @@ struct FileConfig {
     state_dir: Option<String>,
     backup_hour: Option<u8>,
     notify_webhook: Option<String>,
+    /// Bearer token sent with the notification POST, when the target needs
+    /// one. Added 2026-08-31: Kenny chose to route homelab warnings through
+    /// the kyu hub rather than straight at Home Assistant (R2), so that a
+    /// warning survives HA being the thing that is broken — and the hub
+    /// requires a token where the HA webhook did not.
+    notify_auth_bearer: Option<String>,
     retention: Option<Vec<homelab_proto::RetentionTier>>,
     exec_enabled: Option<bool>,
     mirror_remote: Option<String>,
@@ -84,6 +90,12 @@ struct Config {
     /// A6: remote exec endpoint switch. Deny-by-default; ssh-edited only
     /// (deliberately NOT in the G8 settings tab).
     exec_enabled: bool,
+    /// Bearer token for the notification target, when it needs one.
+    ///
+    /// Deliberately here rather than in HostConfigView beside notify_webhook:
+    /// that view is the settings the CLIENT can read back, and a secret does
+    /// not belong in a screen. ssh-edited only, like exec_enabled.
+    notify_auth_bearer: Option<String>,
     /// D5: git remote URL for the offsite intent mirror; None = off.
     mirror_remote: Option<String>,
     /// H2: OPNsense base url + credential file for Kea reservations.
@@ -139,6 +151,7 @@ fn load_config() -> Config {
         state_dir,
         config_path: path,
         exec_enabled: file.exec_enabled.unwrap_or(false),
+        notify_auth_bearer: file.notify_auth_bearer.clone(),
         mirror_remote: file.mirror_remote,
         kea: match (file.opnsense_url, file.opnsense_cred_file) {
             (Some(base_url), Some(cred_file)) => Some(homelab_core::ops::kea::KeaCfg {
@@ -207,6 +220,11 @@ fn render_settings_toml(
         retention: &'a [homelab_proto::RetentionTier],
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         exec_enabled: bool,
+        // Written back for the same reason the OPNsense fields are: a
+        // settings save that dropped this would silently stop every
+        // notification, and the first thing you would not hear about is that.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notify_auth_bearer: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         mirror_remote: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -247,6 +265,7 @@ fn render_settings_toml(
         notify_webhook: settings.notify_webhook.as_ref(),
         retention: &settings.retention,
         exec_enabled: config.exec_enabled,
+        notify_auth_bearer: config.notify_auth_bearer.as_ref(),
         mirror_remote: config.mirror_remote.as_ref(),
         opnsense_url: config.kea.as_ref().map(|k| &k.base_url),
         opnsense_cred_file: config.kea.as_ref().map(|k| &k.cred_file),
@@ -311,6 +330,7 @@ mod tests {
             state_dir: "/var/lib/homelab".into(),
             config_path: "/etc/homelab/host.toml".into(),
             exec_enabled: true,
+            notify_auth_bearer: Some("a-token-that-must-survive-a-save".into()),
             mirror_remote: Some("git@github.com:k/m.git".into()),
             kea: Some(homelab_core::ops::kea::KeaCfg {
                 base_url: "https://10.10.10.1".into(),
@@ -341,6 +361,13 @@ mod tests {
         let rendered = render_settings_toml(&config, &config.initial_settings).expect("render");
         let parsed: FileConfig = toml::from_str(&rendered).expect("parse back");
         assert_eq!(parsed.token.as_deref(), Some("0123456789abcdef0123"));
+        // The notification bearer must survive a settings save. Dropping it
+        // would stop every notification the host sends, and the first thing
+        // you would not hear about is that.
+        assert_eq!(
+            parsed.notify_auth_bearer.as_deref(),
+            Some("a-token-that-must-survive-a-save")
+        );
         assert_eq!(parsed.backup_hour, Some(4));
         // E8: settings saves must not drop the zfs jobs (same class of bug
         // as the opnsense fields once had).
@@ -1404,26 +1431,27 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
         Some(u) => u,
         None => return,
     };
-    let _ = exec
-        .run(&Cmd::new(
-            "curl",
-            &[
-                "-m",
-                "5",
-                "-s",
-                "-o",
-                "/dev/null",
-                "-X",
-                "POST",
-                "-H",
-                "Content-Type: application/json",
-                "-d",
-                &payload,
-                &url,
-            ],
-            10,
-        ))
-        .await;
+    let bearer = state.config.notify_auth_bearer.clone();
+    let auth = bearer.map(|t| format!("authorization: Bearer {}", t));
+    let mut args: Vec<&str> = vec![
+        "-m",
+        "5",
+        "-s",
+        "-o",
+        "/dev/null",
+        "-X",
+        "POST",
+        "-H",
+        "Content-Type: application/json",
+    ];
+    if let Some(a) = auth.as_deref() {
+        args.push("-H");
+        args.push(a);
+    }
+    args.push("-d");
+    args.push(&payload);
+    args.push(&url);
+    let _ = exec.run(&Cmd::new("curl", &args, 10)).await;
 }
 
 /// Run any mutating operation under the op-lock (AR12) with uniform incident

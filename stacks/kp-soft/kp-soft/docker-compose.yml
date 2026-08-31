@@ -13,7 +13,7 @@
 
 services:
   kp-soft:
-    image: ghcr.io/kennypassenier/kp-soft:v0.1.0
+    image: ghcr.io/kennypassenier/kp-soft:v0.1.1
     container_name: kp-soft
     restart: unless-stopped
     env_file:

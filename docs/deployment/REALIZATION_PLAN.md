@@ -268,11 +268,34 @@ with tests; the third is a fact about the monitors that is now written down.
 ### M8 · The rollout, least important first
 One container per step, each its own go, in dependency order.
 
-`uptime` (done in M7) → `syncthing` → `metrics` → `productivity` →
-`messaging` → `media` → `downloader` → `gateway`.
+~~`uptime` (done in M7) → `syncthing` → `metrics` → `productivity` →
+`messaging` → `media` → `downloader` → `gateway`.~~
+**Corrected 2026-08-31 (F112).** That list was written before half of it
+existed. `uptime` became `home` and was the M7 drill; `syncthing`, `metrics`
+and `messaging` are v2-native already, built or adopted by the orchestrator
+itself. Measured rather than assumed: seven stacks are in host state, and
+exactly four containers still carry a v1 hostname.
 
-The gateway is last because everything behind it depends on it, and because
-its route files are what makes rollback cheap for every stack before it.
+**What is actually left, in the order it should now run:**
+
+1. **`productivity` (CT 111, `lxc-productivity-stack`)** — vikunja, supersync
+   and its postgres. 8 G rootfs, 2 GB RAM, unprivileged, no media mounts, and
+   its config still lives at `/opt/*-config` inside the container, so step 1
+   of the C4 procedure is a real copy-out. Nothing else depends on it. It also
+   cannot be adopted as-is — `homelab adopt` is native-only and A2 refuses its
+   hostname — so a rebuild is the only route it has.
+2. **`downloader` (CT 105)** and 3. **`media` (CT 106)** — **blocked by F111**
+   until the manifest model can say what a mount of somebody else's data is.
+   Both mount `/HDD18TB/subvol-103-disk-0` and `/HDD12TB/subvol-103-disk-0`,
+   datasets owned by no-touch CT 103, at `/mnt/data/*`. Both are privileged,
+   so they clone template 997 rather than 998. CT 106 needs `gpu: true`,
+   which is now W1's business and where F110's wrong render gid was waiting.
+   CT 105 needs `vpn: true` for gluetun's tunnel.
+4. **`gateway` (CT 104, `lxc-platform-stack`)** — traefik, cloudflared,
+   crowdsec, grafana, loki, uptime-kuma, goaccess. Last, because everything
+   behind it depends on it and because its route files are what makes
+   rollback cheap for every stack before it. Also where the two remaining
+   `:latest` pins in the house live.
 
 **Exit:** S1-S5 from `SCOPE.md` all met.
 

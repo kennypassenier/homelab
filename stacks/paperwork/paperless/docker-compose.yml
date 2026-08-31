@@ -21,9 +21,10 @@ services:
     image: ghcr.io/paperless-ngx/paperless-ngx:3.1.0
     container_name: paperless
     restart: unless-stopped
-    depends_on:
-      paperless-db:
-        condition: service_healthy
+    # No depends_on: each app in a stack is its own compose project, so a
+    # cross-project dependency is undefined. paperless-db starts first
+    # because it comes first in the manifest's apps list, and paperless's
+    # entrypoint waits for the database anyway.
     env_file:
       - .env
     environment:
@@ -32,6 +33,11 @@ services:
       - PAPERLESS_DBNAME=paperless
       - PAPERLESS_DBUSER=paperless
       - PAPERLESS_TIME_ZONE=Europe/Brussels
+      # Two variables, easily confused and both needed: LANGUAGES (plural)
+      # installs the tesseract packs at startup, LANGUAGE (singular) selects
+      # which of them to use. With only the singular set, paperless fails its
+      # own system check and s6 restarts the container in a loop.
+      - PAPERLESS_OCR_LANGUAGES=nld eng
       - PAPERLESS_OCR_LANGUAGE=nld+eng
       # Behind Traefik and Cloudflare: paperless refuses POSTs whose Origin
       # it does not recognise, which is every form submission from outside.

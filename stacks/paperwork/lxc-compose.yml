@@ -69,9 +69,20 @@ storage:
     app: paperless
   - host_path: /appdata/paperwork/paperless-db-config
     mount_point: /appdata/paperwork/paperless-db-config
-    # postgres runs as uid 999 in the official image.
-    host_owner_uid: 100999
+    # postgres runs as uid 70 in the ALPINE image, not the 999 of the
+    # Debian-based one. Measured, not assumed: the first deploy used 999 and
+    # postgres came up answering pg_isready while failing every real query
+    # with "could not open file global/pg_filenode.map: Permission denied" —
+    # a healthcheck that passes on a broken server.
+    host_owner_uid: 100070
     app: paperless-db
 
-apps: [actual, stirling, paperless, paperless-db, promtail, cadvisor]
-latch_secrets: [paperless, paperless-db]
+# Order matters: apps start in this order, so the database precedes the
+# service that needs it.
+apps: [actual, stirling, paperless-db, paperless, promtail, cadvisor]
+latch_secrets: [paperless, paperless-db, stirling]
+
+# Pushes traefik-routes.yml to the gateway's watched routes directory.
+gateway_route:
+  filename: 114-app-paperwork.yml
+  gateway_vmid: 104

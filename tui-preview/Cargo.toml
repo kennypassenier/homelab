@@ -5,7 +5,7 @@ edition = "2021"
 description = "Interactive mockup of the Homelab v2 cyberpunk TUI, driven entirely by simulated data"
 
 [dependencies]
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.28"
 rand = "0.8"
 chrono = "0.4"

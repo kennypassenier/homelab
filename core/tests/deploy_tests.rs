@@ -11,6 +11,7 @@ use homelab_core::sink::VecSink;
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
         registry_login: None,
+        retention: None,
         stack_name: stack.into(),
         vmid,
         hostname: format!("{}-app-{}", vmid, stack),
@@ -264,6 +265,81 @@ async fn d10_validator_collects_all_problems() {
     assert!(msg.contains("stack_name"), "{}", msg);
     assert!(msg.contains("memory_mb"), "{}", msg);
     assert!(msg.contains("hostname"), "{}", msg); // canonical name changed too
+}
+
+// ── W3: a container that already exists is put back in line ────────────────
+
+/// The W3 acceptance criterion's second half: a boot order moved by hand is
+/// corrected by a deploy. Set at creation and never checked again means the
+/// fleet boots in whatever order somebody typed years ago.
+#[tokio::test]
+async fn w3_a_deploy_puts_a_drifted_boot_policy_back() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    // The container exists, and disagrees with the stack file on both counts.
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok(
+            "arch: amd64\nhostname: 110-app-syncthing\nonboot: 0\nstartup: order=1\nmemory: 512\ncores: 1\n",
+        ),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    let set = exec.calls_containing("--onboot");
+    assert_eq!(set.len(), 1, "one correction: {:?}", set);
+    assert!(set[0].contains("--onboot 1"), "{}", set[0]);
+    assert!(set[0].contains("--startup order=50"), "{}", set[0]);
+    // And it stays out of the resources: raising them is `homelab resize`,
+    // lowering them is a rebuild, and neither belongs in a deploy.
+    assert!(!set[0].contains("--memory"), "{}", set[0]);
+    assert!(!set[0].contains("--cores"), "{}", set[0]);
+}
+
+/// A container that already agrees is left alone — the check must not
+/// produce a write on every deploy.
+#[tokio::test]
+async fn w3_a_container_that_agrees_is_not_written_to() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok(
+            "arch: amd64\nhostname: 110-app-syncthing\nonboot: 1\nstartup: order=50\nmemory: 512\ncores: 1\n",
+        ),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+    assert!(
+        exec.calls_containing("--onboot").is_empty(),
+        "agreement means no write"
+    );
 }
 
 // ── W1: the host has to actually have what the stack asks for ──────────────

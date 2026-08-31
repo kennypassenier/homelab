@@ -8,7 +8,7 @@ use crate::error::CoreError;
 use crate::executor::{run_ok, Cmd, Executor, TracingExecutor};
 use crate::manifest::StackManifest;
 use crate::runner::{OperationReport, Runner, StepOutcome};
-use crate::sink::Level;
+use crate::sink::{Level, PipelineEvent};
 
 use super::OpCtx;
 
@@ -310,6 +310,23 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         // G8 tiered retention: list snapshots, compute the forget-set with
         // our own engine, forget by explicit id. Per repository, since D25
         // gave every app its own.
+        //
+        // W2: the stack file's own policy wins over the fleet-wide one when
+        // it states one. Resolved here rather than where the config is built,
+        // so every caller — a manual backup, the nightly run, a future one —
+        // gets it without being told to.
+        let tiers = m.retention.as_ref().unwrap_or(&cfg.tiers);
+        if m.retention.is_some() {
+            ctx.sink.emit(PipelineEvent::Line {
+                level: Level::Info,
+                source: "HOST".into(),
+                msg: format!(
+                    "[w2] {} keeps snapshots by its own policy ({} tier(s)), not the fleet-wide one",
+                    m.stack_name,
+                    tiers.len()
+                ),
+            });
+        }
         let mut changed = false;
         for (owner, _) in &groups {
             let out = run_ok(
@@ -324,7 +341,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
             )
             .await?;
             let snapshots = parse_snapshots_json(&out.stdout);
-            let doomed = crate::retention::forget_list(&snapshots, &cfg.tiers, ctx.now_unix);
+            let doomed = crate::retention::forget_list(&snapshots, tiers, ctx.now_unix);
             if doomed.is_empty() {
                 continue;
             }

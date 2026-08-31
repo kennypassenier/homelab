@@ -14,6 +14,7 @@ pub mod kea;
 pub mod mirror;
 pub mod native;
 pub mod patch;
+pub mod reconcile;
 pub mod resize;
 pub mod selfupdate;
 pub mod template;

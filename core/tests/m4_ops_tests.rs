@@ -12,6 +12,7 @@ use homelab_core::sink::VecSink;
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
         registry_login: None,
+        retention: None,
         stack_name: stack.into(),
         vmid,
         hostname: format!("{}-app-{}", vmid, stack),
@@ -170,6 +171,97 @@ async fn e1_backup_runs_init_quiesce_snapshot_resume_retention() {
     // Tiered retention: with no snapshots listed, nothing is forgotten
     // (fail-safe: malformed/empty listing keeps everything).
     assert!(exec.calls_containing("restic forget").is_empty());
+}
+
+/// W2's acceptance criterion: two stacks with different retention produce
+/// demonstrably different forget decisions.
+///
+/// One fleet-wide policy does not fit stacks that differ by two orders of
+/// magnitude. Media needed a shorter one typed by hand because 24 GB a night
+/// against the fleet-wide fourteen days would cost half a terabyte, while kyu
+/// at 231 MB could comfortably keep two months.
+#[tokio::test]
+async fn w2_a_stack_keeps_snapshots_by_its_own_policy() {
+    use homelab_core::retention::RetentionTier;
+    // Six daily snapshots, the newest a day old.
+    let day = 86_400u64;
+    let now = 1_788_000_000u64;
+    let snaps: String = (1..=6)
+        .map(|i| {
+            format!(
+                r#"{{"short_id":"s{}","time":"{}"}}"#,
+                i,
+                unix_to_rfc3339(now - i * day)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let listing = format!("[{}]", snaps);
+
+    async fn forgotten(tiers: Option<Vec<RetentionTier>>, listing: &str, now: u64) -> String {
+        let exec = MockExecutor::new();
+        mock_hostname(&exec, 108, "test");
+        exec.respond_always("snapshots --json", CmdOutput::ok(listing));
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let mut m = manifest(108, "test");
+        m.retention = tiers;
+        let mut c = ctx(&exec, &sink, &j);
+        c.now_unix = now;
+        let report = backup(&c, &m, &BackupCfg::default()).await;
+        assert!(report.ok, "{:?}", report.error);
+        exec.calls_containing("restic forget").join(" ")
+    }
+
+    // Fleet-wide: daily for a week, so six daily snapshots all survive.
+    let fleet = forgotten(None, &listing, now).await;
+    assert!(
+        fleet.is_empty(),
+        "the fleet-wide policy keeps a week of dailies: {}",
+        fleet
+    );
+
+    // This stack's own: keep one every three days. The same six snapshots
+    // now produce a forget list.
+    let own = forgotten(
+        Some(vec![RetentionTier {
+            every_days: 3,
+            span_days: None,
+        }]),
+        &listing,
+        now,
+    )
+    .await;
+    assert!(
+        !own.is_empty(),
+        "a tighter per-stack policy must forget something the fleet-wide one keeps"
+    );
+}
+
+/// RFC3339 in the shape restic emits, without pulling in a date crate.
+fn unix_to_rfc3339(t: u64) -> String {
+    let days = t / 86_400;
+    let rem = t % 86_400;
+    // Civil-from-days (Howard Hinnant's algorithm), epoch 1970-01-01.
+    let z = days as i64 + 719_468;
+    let era = z / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        y,
+        m,
+        d,
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
 }
 
 /// The backup must resume exactly what it paused, not what the manifest

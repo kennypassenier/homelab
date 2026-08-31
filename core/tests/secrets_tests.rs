@@ -16,6 +16,7 @@ const OLD_SECRET: &str = "OLD_PLANTED_SECRET_previous_value";
 fn spec_with_secret() -> DeploySpec {
     let manifest = StackManifest {
         registry_login: None,
+        retention: None,
         stack_name: "test".into(),
         vmid: 108,
         hostname: "108-app-test".into(),

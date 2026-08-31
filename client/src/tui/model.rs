@@ -1018,6 +1018,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
     let d = crate::scaffold::StackDefaults::default();
     let manifest = homelab_proto::StackManifest {
         registry_login: None,
+        retention: None,
         stack_name: stack.name.clone(),
         vmid: stack.vmid,
         hostname: stack.hostname.clone(),

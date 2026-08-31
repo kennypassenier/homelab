@@ -13,6 +13,7 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
         manifest: StackManifest {
             registry_login: None,
+            retention: None,
             stack_name: stack.into(),
             vmid,
             hostname: format!("{}-app-{}", vmid, stack),

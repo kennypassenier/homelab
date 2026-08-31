@@ -20,6 +20,17 @@ pub struct StackManifest {
     #[serde(default)]
     pub storage: Vec<MountSpec>,
     pub apps: Vec<String>,
+    /// W2: this stack's own snapshot retention, overriding the fleet-wide
+    /// setting. Absent = the fleet-wide policy, which is the right answer for
+    /// almost every stack.
+    ///
+    /// It exists because one setting for stacks that differ by two orders of
+    /// magnitude does not hold: media needed `keep-daily=4` typed by hand
+    /// because 24 GB a night against the fleet-wide fourteen would cost half
+    /// a terabyte, while kyu at 231 MB could comfortably keep two months.
+    /// That difference belongs in the stack file, not in somebody's memory.
+    #[serde(default)]
+    pub retention: Option<Vec<crate::retention::RetentionTier>>,
     /// A private image registry this stack must sign in to before it can
     /// pull.
     ///

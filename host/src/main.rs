@@ -568,6 +568,7 @@ mod tests {
         let mk = |mem: u32| {
             let mut m = homelab_core::manifest::StackManifest {
                 registry_login: None,
+                retention: None,
                 stack_name: "x".into(),
                 vmid: 108,
                 hostname: "108-app-x".into(),
@@ -1757,6 +1758,31 @@ async fn gather_live_facts(
         if probed {
             facts.growth.push(g);
         }
+    }
+
+    // W3: the configured shape of every managed container, from `pct config`
+    // rather than from inside it — a container that does not start on boot is
+    // exactly the one you find stopped after the reboot that should have
+    // started it, and `pct exec` cannot ask a stopped guest anything.
+    for (vmid, hostname) in facts
+        .containers
+        .iter()
+        .filter(|(v, _)| !no_touch.contains(v))
+        .map(|(v, h)| (*v, h.clone()))
+        .collect::<Vec<_>>()
+    {
+        let vs = vmid.to_string();
+        let Ok(out) = exec.run(&Cmd::new("pct", &["config", &vs], 30)).await else {
+            continue;
+        };
+        if !out.success() {
+            continue;
+        }
+        facts.boot.push(homelab_core::ops::fleetcheck::BootFact {
+            vmid,
+            hostname,
+            live: homelab_core::ops::reconcile::parse(&out.stdout),
+        });
     }
 
     // Is each stack's safety net actually attached? The most expensive class

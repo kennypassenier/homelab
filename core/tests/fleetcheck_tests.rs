@@ -4,9 +4,10 @@
 //! 2026-08-30 and that nothing reported. If the check cannot find them when
 //! they are handed to it, it is decoration.
 
+use homelab_core::manifest::StackManifest;
 use homelab_core::ops::fleetcheck::{
-    evaluate, evaluate_coverage, evaluate_growth, CoverageFact, GrowthFact, GrowthLimits,
-    LiveFacts, RouteFact, Severity,
+    evaluate, evaluate_boot, evaluate_coverage, evaluate_growth, BootFact, CoverageFact,
+    GrowthFact, GrowthLimits, LiveFacts, RouteFact, Severity,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -79,6 +80,7 @@ fn y4_a_healthy_fleet_is_silent() {
         stack_files: vec![("stacks/metrics".into(), 113)],
         growth: Vec::new(),
         coverage: Vec::new(),
+        boot: Vec::new(),
     };
     assert!(check(&st, &live).is_empty(), "{:?}", check(&st, &live));
 }
@@ -138,6 +140,7 @@ fn y4_finds_a_stack_file_aimed_at_someone_elses_container() {
         stack_files: vec![("stacks/cloudflared".into(), 109)],
         growth: Vec::new(),
         coverage: Vec::new(),
+        boot: Vec::new(),
         ..Default::default()
     };
     let found = check(&st, &live);
@@ -389,4 +392,152 @@ fn a_covered_stack_is_silent() {
         logs_recent: Some(true),
     }]);
     assert!(out.is_empty(), "{:?}", out);
+}
+
+// ── W3: boot policy and resources on containers that already exist ─────────
+
+fn boot_manifest(vmid: u16, onboot: bool, order: u16, mem: u32, cores: u16) -> StackManifest {
+    let mut m = homelab_core::manifest::StackManifest {
+        registry_login: None,
+        retention: None,
+        stack_name: "home".into(),
+        vmid,
+        hostname: format!("{}-app-home", vmid),
+        network: homelab_core::manifest::NetworkSpec {
+            ip: "10.10.10.15/24".into(),
+            gateway: "10.10.10.1".into(),
+            bridge: "vmbr0".into(),
+            vlan: Some(10),
+        },
+        resources: homelab_core::manifest::ResourceSpec {
+            cores,
+            memory_mb: mem,
+            swap_mb: 512,
+            disk_gb: 8,
+            storage: "local-lvm".into(),
+        },
+        lxc: homelab_core::manifest::LxcSpec {
+            template: "clone:998".into(),
+            unprivileged: true,
+            features: "nesting=1,keyctl=1".into(),
+            protection: true,
+            gpu: false,
+            vpn: false,
+        },
+        boot: homelab_core::manifest::BootSpec {
+            onboot,
+            order: Some(order),
+        },
+        storage: vec![],
+        apps: vec!["homepage".into()],
+    };
+    m.hostname = format!("{}-app-home", vmid);
+    m
+}
+
+/// The W3 acceptance criterion, first half: a container whose boot order was
+/// moved by hand is reported. After a power cut the fleet starts in whatever
+/// order somebody typed years ago, and the rule that everything behind the
+/// edge waits for Traefik lives in a file nothing reads.
+#[test]
+fn w3_a_hand_edited_boot_order_is_reported() {
+    let mut state = HostState::default();
+    let mut st = stack(115, "115-app-home", true, 100);
+    st.manifest = Some(boot_manifest(115, true, 80, 1024, 2));
+    state.stacks.insert("home".into(), st);
+
+    let facts = vec![BootFact {
+        vmid: 115,
+        hostname: "115-app-home".into(),
+        live: homelab_core::ops::reconcile::parse(
+            "onboot: 1\nstartup: order=1\nmemory: 1024\ncores: 2\n",
+        ),
+    }];
+    let out = evaluate_boot(&state, &facts);
+    assert_eq!(out.len(), 1, "{:?}", out);
+    assert!(out[0].what.contains("boot order"), "{}", out[0].what);
+    assert!(out[0].what.contains("1 on the machine"), "{}", out[0].what);
+    assert!(
+        out[0].what.contains("80 in the stack file"),
+        "{}",
+        out[0].what
+    );
+    assert!(out[0].remedy.contains("a deploy"), "{}", out[0].remedy);
+}
+
+/// Resources diverge with a different remedy, because a deploy deliberately
+/// does not change them under a running service.
+#[test]
+fn w3_resources_are_reported_with_the_remedy_that_applies() {
+    let mut state = HostState::default();
+    let mut st = stack(115, "115-app-home", true, 100);
+    st.manifest = Some(boot_manifest(115, true, 80, 2048, 4));
+    state.stacks.insert("home".into(), st);
+
+    let facts = vec![BootFact {
+        vmid: 115,
+        hostname: "115-app-home".into(),
+        live: homelab_core::ops::reconcile::parse(
+            "onboot: 1\nstartup: order=80\nmemory: 1024\ncores: 2\n",
+        ),
+    }];
+    let out = evaluate_boot(&state, &facts);
+    assert_eq!(out.len(), 2, "memory and cores: {:?}", out);
+    assert!(
+        out.iter().all(|f| f.remedy.contains("homelab resize")),
+        "{:?}",
+        out
+    );
+}
+
+/// Agreement is silence, and an unasked question is not a finding: a stack
+/// whose record carries no manifest is skipped rather than guessed at.
+#[test]
+fn w3_a_container_that_matches_says_nothing() {
+    let mut state = HostState::default();
+    let mut st = stack(115, "115-app-home", true, 100);
+    st.manifest = Some(boot_manifest(115, true, 80, 1024, 2));
+    state.stacks.insert("home".into(), st);
+    let facts = vec![BootFact {
+        vmid: 115,
+        hostname: "115-app-home".into(),
+        live: homelab_core::ops::reconcile::parse(
+            "onboot: 1\nstartup: order=80\nmemory: 1024\ncores: 2\n",
+        ),
+    }];
+    assert!(evaluate_boot(&state, &facts).is_empty());
+
+    // No manifest recorded → nothing to compare against.
+    let mut bare = HostState::default();
+    bare.stacks
+        .insert("home".into(), stack(115, "115-app-home", true, 100));
+    assert!(evaluate_boot(&bare, &facts).is_empty());
+
+    // A config line that could not be read is unknown, not divergent.
+    let unreadable = vec![BootFact {
+        vmid: 115,
+        hostname: "115-app-home".into(),
+        live: homelab_core::ops::reconcile::parse("arch: amd64\n"),
+    }];
+    assert!(evaluate_boot(&state, &unreadable).is_empty());
+}
+
+/// The repair side stays as narrow as the reporting side is wide: the
+/// arguments a deploy would apply cover boot policy only, never resources.
+#[test]
+fn w3_the_repair_touches_boot_policy_and_nothing_else() {
+    use homelab_core::ops::reconcile::{boot_set_args, parse};
+    let m = boot_manifest(115, true, 80, 2048, 4);
+    let live = parse("onboot: 0\nstartup: order=1\nmemory: 1024\ncores: 2\n");
+    let args = boot_set_args(&m, &live).join(" ");
+    assert_eq!(args, "--onboot 1 --startup order=80", "got: {}", args);
+    assert!(
+        !args.contains("memory") && !args.contains("cores"),
+        "{}",
+        args
+    );
+
+    // Nothing to do when they agree.
+    let same = parse("onboot: 1\nstartup: order=80\nmemory: 1024\ncores: 2\n");
+    assert!(boot_set_args(&m, &same).is_empty());
 }

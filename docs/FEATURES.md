@@ -546,17 +546,40 @@ what would otherwise happen; present device = the gid comes from the host.
 - **Manual**: rebuild the media stack and confirm Jellyfin transcodes on the
   card, not the processor.
 
-### W2 · Per-stack backup retention and schedule — **Should** *(added 2026-08-31, D45)*
+### W2 · Per-stack backup retention — **Should** *(added 2026-08-31, D45)*
 One fleet-wide retention setting for stacks that differ by two orders of
 magnitude. It already pinched: media needed `keep-daily=4` by hand because
 24 GB a night against the fleet-wide 14 would cost half a terabyte, while kyu
 at 231 MB could keep two months. That difference belongs in the stack file.
+An optional `retention:` block in `lxc-compose.yml` overrides the fleet-wide
+tiers; absent means the fleet-wide policy, which is right for nearly every
+stack. Resolved inside the backup operation rather than where the config is
+built, so a manual backup and the nightly run both get it without being told.
+The *schedule* half stays fleet-wide for now — one nightly window is still
+the right shape while every stack fits in it.
+- **Auto**: `w2_a_stack_keeps_snapshots_by_its_own_policy` — the same six
+  snapshots survive under the fleet-wide policy and produce a forget list
+  under the stack's own.
+- **Manual**: give the media stack its own tiers when it is rebuilt in M8.
 
 ### W3 · Boot order and resource reconciliation — **Should** *(added 2026-08-31, D45)*
 Startup order and resources are set at creation and never checked again, so
 after a power cut the fleet boots in whatever order somebody set by hand
-years ago — not what the repo says. The C4 replacement fixes it on the way
-past for every container it rebuilds; this catches the drift afterwards.
+years ago — not what the repo says, and Kenny's rule that everything behind
+the edge waits for Traefik lives in a file nothing reads. A deploy now
+compares an existing container's boot policy with the stack file and puts it
+back. It deliberately does NOT touch memory, cores or disk: raising those is
+`homelab resize` (raise-only, because the kernel cannot take memory back
+safely) and lowering them is a rebuild, so the fleet check reports those and
+names which remedy applies. Read from `pct config`, so a stopped container
+answers too — which is the point, since "does not start on boot" is exactly
+the state you find one in after the reboot that should have started it.
+- **Auto**: four tests in `fleetcheck_tests.rs` (drift reported, resources
+  reported with the other remedy, agreement silent, an unreadable line
+  treated as unknown rather than divergent) and two in `deploy_tests.rs`
+  (the repair applies boot policy only; agreement writes nothing).
+- **Manual**: move a container's startup order by hand, see the fleet check
+  name it and a deploy put it back.
 
 ---
 

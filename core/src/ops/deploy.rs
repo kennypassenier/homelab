@@ -416,6 +416,31 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             }
             created = true;
         }
+        // W3: a container that already existed has its boot policy compared
+        // with the stack file and put back. Set at creation and never looked
+        // at again means that after a power cut the fleet boots in the order
+        // somebody typed years ago — and the rule that everything behind the
+        // edge waits for Traefik lives only in a file nothing reads.
+        // Resources are deliberately NOT touched here: raising them is
+        // `homelab resize`, lowering them is a rebuild, and neither belongs
+        // in an ordinary deploy. The fleet check reports those instead.
+        if !created {
+            let cfg = exec.run(&Cmd::new("pct", &["config", &vm], 30)).await?;
+            if cfg.success() {
+                let live = crate::ops::reconcile::parse(&cfg.stdout);
+                let args = crate::ops::reconcile::boot_set_args(m, &live);
+                if !args.is_empty() {
+                    log_info(format!(
+                        "[w3] boot policy drifted — {}",
+                        crate::ops::reconcile::divergences(m, &live).join("; ")
+                    ));
+                    let mut argv: Vec<&str> = vec!["set", &vm];
+                    argv.extend(args.iter().map(|a| a.as_str()));
+                    run_ok(exec, &Cmd::new("pct", &argv, 60)).await?;
+                }
+            }
+        }
+
         // Protection is deliberately the LAST provisioning act: Proxmox
         // refuses drive changes ("can't update CT ... drive 'mp0' -
         // protection mode enabled") once the flag is set, so it must land

@@ -1095,10 +1095,12 @@ async fn scheduler_loop(state: AppState) {
                     }
                 }
                 if !backup_ok || !update_ok {
+                    let mut parked = false;
                     if let Ok(mut s) = store.load().await {
                         if let Some(rec) = s.stacks.get_mut(&name) {
                             if rec.enabled {
                                 rec.enabled = false;
+                                parked = true;
                                 tracing::warn!(
                                     "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
                                     name, name
@@ -1106,6 +1108,15 @@ async fn scheduler_loop(state: AppState) {
                             }
                         }
                         let _ = store.save(s).await;
+                    }
+                    if parked {
+                        notify_auto_disabled(
+                            &state,
+                            &exec,
+                            &name,
+                            "nightly run failed — stack parked (H8): no backup, no update, no onboot until re-enabled",
+                        )
+                        .await;
                     }
                 }
                 continue;
@@ -1145,10 +1156,12 @@ async fn scheduler_loop(state: AppState) {
             // onboot and the running containers are untouched, so a transient
             // failure can never keep a stack from surviving a host reboot.
             if !backup_report.ok || !update_report.ok {
+                let mut parked = false;
                 if let Ok(mut s) = store.load().await {
                     if let Some(rec) = s.stacks.get_mut(&name) {
                         if rec.enabled {
                             rec.enabled = false;
+                            parked = true;
                             tracing::warn!(
                                 "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
                                 name, name
@@ -1156,6 +1169,15 @@ async fn scheduler_loop(state: AppState) {
                         }
                     }
                     let _ = store.save(s).await;
+                }
+                if parked {
+                    notify_auto_disabled(
+                        &state,
+                        &exec,
+                        &name,
+                        "nightly run failed — stack parked (H8): no backup, no update, no onboot until re-enabled",
+                    )
+                    .await;
                 }
             }
         }
@@ -1314,6 +1336,36 @@ fn spawn_mirror_push(state: &AppState) {
             tracing::warn!("mirror push failed (will retry): {}", e);
         }
     });
+}
+
+/// A stack has just been parked by H8, which is the moment it stops being
+/// protected — no nightly backup, no update, no onboot.
+///
+/// It used to be a `tracing::warn!` and nothing else. On 2026-08-31 the
+/// metrics stack parked itself after the run that stopped Alertmanager, and
+/// it stayed out of every nightly protection until Kenny happened to ask why
+/// a dashboard was empty. A stack silently losing its safety net is precisely
+/// the class of silence this project exists to remove, so it now reaches him
+/// the same way a failed operation does.
+///
+/// The op name carries the stack, matching the convention the damper relies
+/// on: two stacks parking on the same night are two notifications, not one.
+async fn notify_auto_disabled(state: &AppState, exec: &RealExecutor, stack: &str, why: &str) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let op = format!("stack-disabled-{}", stack);
+    if !state
+        .damper
+        .lock()
+        .unwrap()
+        .should_send(&op, false, Some(why), now)
+    {
+        return;
+    }
+    let payload = homelab_core::notify::op_payload(&op, stack, false, Some(why));
+    notify_raw(state, exec, payload).await;
 }
 
 /// F3: best-effort webhook to Home Assistant after every mutating operation.

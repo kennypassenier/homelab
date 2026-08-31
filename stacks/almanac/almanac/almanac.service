@@ -39,7 +39,11 @@ StartLimitBurst=0
 Type=exec
 User=almanac
 Group=almanac
-WorkingDirectory=/opt/almanac
+# The state root and the working directory both point at the mounted
+# directory, and latch's project link was moved with it (Kenny, B2
+# 2026-09-01). The BINARY stays at /opt/almanac: it belongs to a
+# version, not to the data.
+WorkingDirectory=/appdata/almanac/almanac-config
 
 # Latch injects the five secrets straight into the process (AR8), so
 # nothing lands on disk as plaintext. The key that opens Latch's store
@@ -51,7 +55,7 @@ WorkingDirectory=/opt/almanac
 # passphrase would open every project's secrets and the GitHub token;
 # the project key opens only Almanac's five values. If this LXC ever
 # leaks, the blast radius is one project instead of everything.
-EnvironmentFile=/etc/almanac/latch.env
+EnvironmentFile=/appdata/almanac/almanac-config/latch.env
 
 # Where releases are published. An address, not a secret. Leaving it
 # out is a supported configuration: self-update simply stays off and
@@ -64,10 +68,13 @@ Environment=ALMANAC_UPDATE_URL=https://github.com/kennypassenier/almanac/release
 # repository is public, so anything written here is published. It
 # comes from Latch with the other secrets, via the EnvironmentFile
 # above.
-Environment=ALMANAC_PROFILES_DIR=/opt/almanac/profiles
-Environment=ALMANAC_DATA_DIR=/opt/almanac/data
-Environment=ALMANAC_JOURNAL=/opt/almanac/data/journal.jsonl
-Environment=ALMANAC_TOKEN_STORE=/opt/almanac/data/tokens.json
+# One root, and every path derived from it (almanac 1.4.0, K20). The four
+# per-path settings that used to stand here still exist in the application
+# and still WIN over this root — deliberately, so an upgrade can never move
+# a live journal by itself. That makes half a migration silent: leaving even
+# one of them behind would keep the old location with nothing to warn you.
+# All four are gone on purpose.
+Environment=ALMANAC_STATE_DIR=/appdata/almanac/almanac-config
 
 ExecStart=/usr/local/bin/latch run -- /opt/almanac/almanac
 
@@ -89,7 +96,7 @@ ProtectHome=true
 # one beside it for AR23's revert. With only data/ writable the update
 # would verify, download, and then fail at the swap on every single
 # check, forever.
-ReadWritePaths=/opt/almanac
+ReadWritePaths=/appdata/almanac/almanac-config
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true

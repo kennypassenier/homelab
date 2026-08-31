@@ -27,9 +27,15 @@ vmid: 109
 hostname: 109-app-kyu
 unit: kyu-runner
 binary: /usr/local/bin/kyu-runner
-env_file: /etc/kyu-runner/token.env
+# Paths follow the migration of 2026-09-01: this service's state and
+# configuration live on the host at /appdata/<stack>/<unit>-config,
+# bind-mounted in, so destroying the container costs nothing. The
+# stack's own backup already covers those directories; data_dirs is
+# kept pointing at them so the C7 verbs still describe reality, and
+# the duplication with the stack backup is recorded as T61.
+env_file: /appdata/kyu/kyu-runner-config/token.env
 data_dirs:
-  - /etc/kyu-runner
+  - /appdata/kyu/kyu-runner-config
 # update_cmd deliberately absent, for the same reason as kyu's: ownership of
 # the binary update is Kenny's call, and two systems restoring binaries can
 # fight each other. The nightly run backs up only.

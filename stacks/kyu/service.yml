@@ -6,10 +6,15 @@ vmid: 109
 hostname: 109-app-kyu
 unit: kyu
 binary: /usr/local/bin/kyu
-env_file: /etc/kyu/kyu.env
+# Paths follow the migration of 2026-09-01: this service's state and
+# configuration live on the host at /appdata/<stack>/<unit>-config,
+# bind-mounted in, so destroying the container costs nothing. The
+# stack's own backup already covers those directories; data_dirs is
+# kept pointing at them so the C7 verbs still describe reality, and
+# the duplication with the stack backup is recorded as T61.
+env_file: /appdata/kyu/kyu-config/kyu.env
 data_dirs:
-  - /var/lib/kyu
-  - /etc/kyu
+  - /appdata/kyu/kyu-config
 # update_cmd deliberately absent for now: the app has (or may have) its own
 # complete rollback mechanism, and two systems restoring binaries can fight
 # each other. Ownership is Kenny's call (form pending); until then the

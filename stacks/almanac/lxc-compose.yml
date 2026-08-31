@@ -45,17 +45,26 @@ boot:
   onboot: true
   order: 50
 
-# No storage yet, deliberately (Kenny, form A1 2026-08-31: "alleen de
-# instelling vragen, nu niets veranderen").
+# Its state on the host, bind-mounted in, so destroying this container costs
+# nothing and the normal backup reaches it — the same protection every docker
+# stack has (Kenny, P1/B2 2026-09-01).
 #
-# The first attempt moved almanac's data onto /appdata and pointed its working
-# directory at it. It failed live and was reverted: almanac writes to
-# /opt/almanac/data by ABSOLUTE path, and latch keys its project link on an
-# absolute path too (F125). So the container stays exactly as it was and the
-# request went to the almanac project instead — one documented knob that moves
-# its whole state tree, the way kyu already has KYU_DATA_DIR. That session
-# answers here when it lands, and the migration is then one pass.
-storage: []
+# It took a released feature to get here. The first attempt failed because
+# almanac wrote to /opt/almanac/data by absolute path and latch keyed its
+# project link on one (F125). The request went to the almanac project, which
+# shipped ALMANAC_STATE_DIR in 1.4.0 — one root, every path derived from it —
+# and latch's link moved with the directory.
+#
+# The BINARY stays at /opt/almanac on purpose: it belongs to a version, not to
+# the data, and mixing the two lets a restore hand back an old program without
+# saying so.
+storage:
+  - host_path: /appdata/almanac/almanac-config
+    mount_point: /appdata/almanac/almanac-config
+    # almanac runs as uid 999 inside; 100999 is that uid mapped out of an
+    # unprivileged LXC.
+    host_owner_uid: 100999
+    app: almanac
 
 apps: []
 

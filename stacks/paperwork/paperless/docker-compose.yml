@@ -1,0 +1,69 @@
+# paperless-ngx — the document archive: it OCRs what you drop in the consume
+# directory, makes it full-text searchable and files the original away.
+#
+# N4 (mini-round 2026-08-31): the light build. Tika and Gotenberg — the two
+# helpers that convert Word, Excel and e-mail to PDF first — are deliberately
+# absent. All 25 documents surviving from the March 2026 install are PDFs,
+# which says what Kenny's actual paper stream looks like. Adding them later
+# is two services and no data migration.
+#
+# Everything that grows lives on the 2 TB pool, not the container rootfs:
+# documents, the consume drop-box and the search index. The mount point is
+# /appdata/paperwork/paperless-config as the manifest requires, but that path
+# is a ZFS dataset on HDD2TB, so the E8 job already replicates it to
+# HDD18TB/replica/ nightly without a new job.
+#
+# Needs a .env from latch with PAPERLESS_SECRET_KEY, PAPERLESS_DBPASS,
+# PAPERLESS_ADMIN_USER and PAPERLESS_ADMIN_PASSWORD.
+
+services:
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.1.0
+    container_name: paperless
+    restart: unless-stopped
+    depends_on:
+      paperless-db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - PAPERLESS_REDIS=redis://paperless-redis:6379
+      - PAPERLESS_DBHOST=paperless-db
+      - PAPERLESS_DBNAME=paperless
+      - PAPERLESS_DBUSER=paperless
+      - PAPERLESS_TIME_ZONE=Europe/Brussels
+      - PAPERLESS_OCR_LANGUAGE=nld+eng
+      # Behind Traefik and Cloudflare: paperless refuses POSTs whose Origin
+      # it does not recognise, which is every form submission from outside.
+      - PAPERLESS_URL=https://docs.kp-soft.dev
+      - PAPERLESS_CSRF_TRUSTED_ORIGINS=https://docs.kp-soft.dev
+      # Matches host_owner_uid 101000 on the mount: uid 1000 inside an
+      # unprivileged LXC is 101000 on the Proxmox host.
+      - USERMAP_UID=1000
+      - USERMAP_GID=1000
+      # One declared directory, four roles inside it: the manifest allows a
+      # bind only at exactly the path it declares, and a single mount also
+      # means the archive and its index restore as one consistent set.
+      - PAPERLESS_DATA_DIR=/usr/src/paperless/store/data
+      - PAPERLESS_MEDIA_ROOT=/usr/src/paperless/store/media
+      - PAPERLESS_CONSUMPTION_DIR=/usr/src/paperless/store/consume
+      - PAPERLESS_EXPORT_DIR=/usr/src/paperless/store/export
+      # Files dropped in from outside arrive without an inotify event that
+      # paperless can trust, so it also sweeps the directory on a timer.
+      - PAPERLESS_CONSUMER_POLLING=30
+    volumes:
+      - /appdata/paperwork/paperless-config:/usr/src/paperless/store
+    ports:
+      - "8000:8000"
+    labels:
+      # The search index is written continuously; copy it stopped.
+      - com.homelab.backup.pause=true
+      # Paperless runs database migrations on start and they are one-way.
+      - com.homelab.update.policy=manual
+    networks:
+      - paperwork_net
+
+networks:
+  paperwork_net:
+    external: true
+    name: paperwork_net

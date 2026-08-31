@@ -1,0 +1,77 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# Paperwork: the three personal-administration services Kenny asked for on
+# 2026-08-31 — Actual Budget (household ledger), Stirling-PDF (PDF toolbox)
+# and paperless-ngx (document archive). Grouped by function per his own
+# bundling rule; they share nothing technically, but they share a purpose,
+# a backup schedule and a blast radius.
+#
+# N1 (mini-round 2026-08-31): own container rather than joining CT 111
+# productivity. CT 111 has an 8 GB rootfs with 2.7 GB used and the three
+# docker images alone are ~5 GB, so its disk had to grow either way; a
+# separate container also keeps a paperless restore from touching supersync.
+
+stack_name: paperwork
+vmid: 114
+hostname: 114-app-paperwork
+
+network:
+  ip: 10.10.10.14/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 4
+  memory_mb: 4096
+  # Swap matches the rest of the fleet for now. It goes when G2 does: Kenny
+  # asked to avoid swap so memory pressure fails loudly instead of degrading
+  # quietly, but the fleet-wide removal waits on a week of Prometheus data.
+  swap_mb: 512
+  # Larger than any other stack because the images are: stirling-pdf carries
+  # LibreOffice and its fonts, paperless carries the OCR toolchain. Measured
+  # headroom on local-lvm at build time: 657 GB free, thin-provisioned.
+  disk_gb: 32
+  storage: local-lvm
+
+lxc:
+  template: clone:998
+  unprivileged: true
+  features: nesting=1,keyctl=1
+  protection: true
+
+boot:
+  onboot: true
+  order: 70
+
+storage:
+  # O7: a config directory is named after the app that owns it, so a restore
+  # can find its path by name.
+  - host_path: /appdata/paperwork/actual-config
+    mount_point: /appdata/paperwork/actual-config
+    host_owner_uid: 101000
+    app: actual
+  - host_path: /appdata/paperwork/stirling-config
+    mount_point: /appdata/paperwork/stirling-config
+    # Stirling-PDF runs as root inside the container; 100000 is root mapped
+    # out of an unprivileged LXC.
+    host_owner_uid: 100000
+    app: stirling
+  # paperless keeps its documents, its consume drop-box and its search index
+  # here: they grow without bound by design, so the directory is a ZFS
+  # dataset (HDD2TB/paperless-config) mounted at this path rather than a
+  # directory on the 94 GB root disk. The path obeys the /appdata rule, the
+  # bytes land on the 2 TB pool, and the E8 job replicates all of HDD2TB to
+  # HDD18TB/replica/ nightly without a new job.
+  - host_path: /appdata/paperwork/paperless-config
+    mount_point: /appdata/paperwork/paperless-config
+    host_owner_uid: 101000
+    app: paperless
+  - host_path: /appdata/paperwork/paperless-db-config
+    mount_point: /appdata/paperwork/paperless-db-config
+    # postgres runs as uid 999 in the official image.
+    host_owner_uid: 100999
+    app: paperless-db
+
+apps: [actual, stirling, paperless, paperless-db, promtail, cadvisor]
+latch_secrets: [paperless, paperless-db]

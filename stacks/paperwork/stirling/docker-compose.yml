@@ -1,0 +1,33 @@
+# Stirling-PDF — split, merge, rotate and convert PDFs. Stateless: it holds
+# no library, only whatever file you hand it for the length of one operation.
+# The mounted directory carries its own settings, nothing user-owned.
+#
+# N2 (mini-round 2026-08-31): reachable from the internet. Stirling ships
+# with no login of its own, but every *.kp-soft.dev hostname sits behind
+# Cloudflare Access — verified 2026-08-31: grafana.kp-soft.dev and
+# fin.kp-soft.dev both answer 302 to mendax1.cloudflareaccess.com. Access is
+# the gate; a second password in front of a stateless tool would be friction
+# without a threat model. Enable DOCKER_ENABLE_SECURITY if that ever changes.
+
+services:
+  stirling:
+    image: stirlingtools/stirling-pdf:2.14.3
+    container_name: stirling
+    restart: unless-stopped
+    environment:
+      - DOCKER_ENABLE_SECURITY=false
+      - SYSTEM_DEFAULTLOCALE=nl-NL
+    volumes:
+      - /appdata/paperwork/stirling-config:/configs
+    ports:
+      - "8080:8080"
+    labels:
+      # Nothing to quiesce: no database, no state carried between requests.
+      - com.homelab.update.policy=auto
+    networks:
+      - paperwork_net
+
+networks:
+  paperwork_net:
+    external: true
+    name: paperwork_net

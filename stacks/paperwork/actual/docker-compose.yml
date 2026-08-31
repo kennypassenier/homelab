@@ -1,0 +1,30 @@
+# Actual Budget — the household ledger. Single Node process on top of SQLite;
+# no external database, no broker. Everything it owns lives in one directory.
+
+services:
+  actual:
+    image: actualbudget/actual-server:25.12.0
+    container_name: actual
+    restart: unless-stopped
+    environment:
+      # Actual trusts the reverse proxy for the client IP; without this it
+      # rate-limits every request as if it came from Traefik itself.
+      - ACTUAL_TRUSTED_PROXIES=10.10.10.0/24
+    volumes:
+      - /appdata/paperwork/actual-config:/data
+    ports:
+      - "5006:5006"
+    labels:
+      # Pausing during backup: SQLite in WAL mode can be copied live, but a
+      # ledger is the one thing here worth a consistent snapshot.
+      - com.homelab.backup.pause=true
+      # Y1 class: manual. Actual migrates its budget file format on upgrade
+      # and the migration is one-way, so a version step is a decision.
+      - com.homelab.update.policy=manual
+    networks:
+      - paperwork_net
+
+networks:
+  paperwork_net:
+    external: true
+    name: paperwork_net

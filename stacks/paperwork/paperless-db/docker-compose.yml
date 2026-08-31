@@ -1,0 +1,50 @@
+# The two data services paperless needs. Kept as their own app so the
+# postgres directory is named after its owner (O7) and lands in its own
+# restic repository — a document archive and its index are restored
+# together or not at all.
+#
+# Needs a .env with POSTGRES_PASSWORD, pulled from latch at deploy time;
+# the same value is PAPERLESS_DBPASS in the paperless app's own .env.
+
+services:
+  paperless-db:
+    image: postgres:17-alpine
+    container_name: paperless-db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_DB=paperless
+      - POSTGRES_USER=paperless
+    volumes:
+      - /appdata/paperwork/paperless-db-config:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperless"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    labels:
+      # A live postgres data directory is not safe to copy file-by-file.
+      - com.homelab.backup.pause=true
+      # Postgres major versions do not read each other's data directory, so
+      # a version step here is a migration, never an update.
+      - com.homelab.update.policy=manual
+    networks:
+      - paperwork_net
+
+  paperless-redis:
+    image: redis:7-alpine
+    container_name: paperless-redis
+    restart: unless-stopped
+    # Deliberately no volume: redis is only paperless's task broker. Losing
+    # its contents costs an in-flight OCR job, which paperless retries.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    labels:
+      - com.homelab.update.policy=auto
+    networks:
+      - paperwork_net
+
+networks:
+  paperwork_net:
+    external: true
+    name: paperwork_net

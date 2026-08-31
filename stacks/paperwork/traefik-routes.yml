@@ -1,0 +1,42 @@
+# Traefik route fragment for the paperwork stack.
+# Pushed by HOST to the gateway LXC's watched routes directory
+# (/opt/traefik-config/routes/) — the file provider reloads automatically.
+#
+# N2 (mini-round 2026-08-31): all three are reachable from the internet.
+# Every *.kp-soft.dev hostname is guarded by Cloudflare Access — verified
+# 2026-08-31, grafana and fin both 302 to mendax1.cloudflareaccess.com — so
+# the interactive login happens before a request ever reaches Traefik.
+# Chosen hostnames: budget (household ledger), pdf (PDF toolbox), docs
+# (document archive). None collide with the fifteen already routed.
+#
+# entryPoints: [web] throughout, matching every other route here: cloudflared
+# terminates TLS at the edge and forwards plain HTTP to the gateway.
+
+http:
+  routers:
+    actual:
+      rule: "Host(`budget.kp-soft.dev`)"
+      entryPoints: [web]
+      service: actual
+    stirling:
+      rule: "Host(`pdf.kp-soft.dev`)"
+      entryPoints: [web]
+      service: stirling
+    paperless:
+      rule: "Host(`docs.kp-soft.dev`)"
+      entryPoints: [web]
+      service: paperless
+
+  services:
+    actual:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.14:5006"
+    stirling:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.14:8080"
+    paperless:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.14:8000"

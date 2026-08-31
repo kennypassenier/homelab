@@ -8,7 +8,9 @@ Wants=network-online.target
 Type=simple
 User=kyu
 Group=kyu
-EnvironmentFile=/etc/kyu/kyu.env
+# Config and data both live on the host now, bind-mounted in, so
+# destroying this container costs nothing (Kenny, P1 2026-08-31).
+EnvironmentFile=/appdata/kyu/kyu-config/kyu.env
 ExecStart=/usr/local/bin/kyu
 
 # Kenny asked for it to come back from trouble: always, not only on failure,
@@ -31,7 +33,7 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
-ReadWritePaths=/var/lib/kyu
+ReadWritePaths=/appdata/kyu/kyu-config
 
 [Install]
 WantedBy=multi-user.target

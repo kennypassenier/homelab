@@ -60,7 +60,35 @@ boot:
 # running service to take ownership of it. The services' state lives inside
 # the container at /var/lib/kyu and /etc/kyu, and C7's nightly run reaches it
 # with `pct exec tar | restic --stdin`.
-storage: []
+# Data and configuration on the host, bind-mounted in, so destroying this
+# container costs nothing and the normal backup reaches them — the same
+# protection every docker stack has (Kenny, P1 2026-08-31). One directory per
+# service, so each gets its own restic repository named after its owner (D25).
+#
+# The BINARIES deliberately stay in the container: they belong to a version,
+# not to the data, and mixing the two lets a restore hand back an old program
+# without saying so.
+#
+# Worth knowing: kyu's env file carries KYU_TOKEN and KYU_SECRET_KEY, and the
+# two token.env files carry the hub tokens. Until tonight those existed ONLY
+# inside this container — they were in no vault and no backup. Moving them
+# here is the first time they are protected at all.
+storage:
+  - host_path: /appdata/kyu/kyu-config
+    mount_point: /appdata/kyu/kyu-config
+    # kyu runs as uid 103 inside; 100103 is that uid mapped out of an
+    # unprivileged LXC.
+    host_owner_uid: 100103
+    app: kyu
+  - host_path: /appdata/kyu/kyu-runner-config
+    mount_point: /appdata/kyu/kyu-runner-config
+    # Read by systemd as root before it drops to a DynamicUser.
+    host_owner_uid: 100000
+    app: kyu-runner
+  - host_path: /appdata/kyu/http-switchboard-config
+    mount_point: /appdata/kyu/http-switchboard-config
+    host_owner_uid: 100000
+    app: http-switchboard
 
 # No docker apps by design. The three services are named in their own
 # service.yml files: kyu, kyu-runner, http-switchboard.

@@ -45,26 +45,18 @@ boot:
   onboot: true
   order: 50
 
-# The mount exists and is EMPTY of purpose for now — see F125.
+# No storage yet, deliberately (Kenny, form A1 2026-08-31: "alleen de
+# instelling vragen, nu niets veranderen").
 #
-# The first migration attempt moved almanac's data here and pointed its
-# working directory at it. That failed, and the reason is worth keeping:
-# almanac writes to `/opt/almanac/data` by ABSOLUTE path, not relative to its
-# working directory, and latch resolves its project link by absolute path
-# too. Both were measured the hard way, with the service down for eight
-# minutes, then reverted.
-#
-# The directory is kept because it already holds a verified copy of the data
-# and is the target for the next attempt: mounting the host directory AT
-# `/opt/almanac/data`, which is the docker-equivalent — the app keeps the path
-# it insists on and the bytes live on the host.
-storage:
-  - host_path: /appdata/almanac/almanac-config
-    mount_point: /appdata/almanac/almanac-config
-    # almanac runs as uid 999 inside; 100999 is that uid mapped out of an
-    # unprivileged LXC.
-    host_owner_uid: 100999
-    app: almanac
+# The first attempt moved almanac's data onto /appdata and pointed its working
+# directory at it. It failed live and was reverted: almanac writes to
+# /opt/almanac/data by ABSOLUTE path, and latch keys its project link on an
+# absolute path too (F125). So the container stays exactly as it was and the
+# request went to the almanac project instead — one documented knob that moves
+# its whole state tree, the way kyu already has KYU_DATA_DIR. That session
+# answers here when it lands, and the migration is then one pass.
+storage: []
+
 apps: []
 
 # The systemd units this container runs. Each has its own service.yml and

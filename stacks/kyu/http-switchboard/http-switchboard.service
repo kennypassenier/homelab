@@ -15,9 +15,9 @@ Type=simple
 # this service an identity that cannot read a root-only file. LoadCredential
 # bridges exactly that: systemd copies it into a private directory only this
 # unit can see, and %d expands to that directory.
-LoadCredential=config:/etc/http-switchboard/config.toml
+LoadCredential=config:/appdata/kyu/http-switchboard-config/config.toml
 ExecStart=/usr/local/bin/http-switchboard %d/config --listen 10.10.10.9:8083
-EnvironmentFile=/etc/http-switchboard/token.env
+EnvironmentFile=/appdata/kyu/http-switchboard-config/token.env
 Restart=on-failure
 RestartSec=5
 DynamicUser=yes

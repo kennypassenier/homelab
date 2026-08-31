@@ -1587,8 +1587,26 @@ async fn gather_live_facts(
         "grep -q max-size /etc/docker/daemon.json 2>/dev/null; ",
         "then echo guards=1; else echo guards=0; fi"
     );
-    for st in state_stacks_vmids(state).await {
-        let (vmid, hostname) = st;
+    // Every container on the hypervisor except the untouchable ones — not
+    // only the stacks this orchestrator has adopted.
+    //
+    // The first version read host state instead, which is the defensible
+    // choice for anything that ACTS. It is the wrong one for a check that
+    // only looks: it covered 5 of the 9 containers here, and the four it
+    // could not see (104, 105, 106, 111) are the oldest and fullest on the
+    // machine. That is the same blind spot as the guards themselves —
+    // a safeguard that quietly applies to almost nothing.
+    //
+    // The no-touch list is still honoured absolutely, so the report never
+    // invites action on a guest that is out of bounds.
+    let no_touch = &state.config.safety.no_touch;
+    for (vmid, hostname) in facts
+        .containers
+        .iter()
+        .filter(|(v, _)| !no_touch.contains(v))
+        .map(|(v, h)| (*v, h.clone()))
+        .collect::<Vec<_>>()
+    {
         let vs = vmid.to_string();
         let Ok(out) = exec
             .run(&Cmd::new(
@@ -1622,23 +1640,6 @@ async fn gather_live_facts(
         facts.growth.push(g);
     }
     facts
-}
-
-/// The vmid and hostname of every stack this orchestrator manages.
-///
-/// Deliberately reads host state rather than `pct list`: the growth check
-/// reports on what we own, and enumerating the hypervisor would put the
-/// no-touch guests in a report that invites acting on them.
-async fn state_stacks_vmids(state: &AppState) -> Vec<(u16, String)> {
-    let store = homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
-    match store.load().await {
-        Ok(s) => s
-            .stacks
-            .values()
-            .map(|st| (st.vmid, st.hostname.clone()))
-            .collect(),
-        Err(_) => Vec::new(),
-    }
 }
 
 /// A backup is a backup, whoever asked for it. The scheduler recorded

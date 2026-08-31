@@ -1187,7 +1187,7 @@ async fn t1_deploy_writes_a_discovery_file_and_destroy_removes_it() {
     );
 
     // The CIDR from the manifest must not reach the scrape target.
-    let body = homelab_core::ops::discovery::targets_json("test", "10.10.10.8/24");
+    let body = homelab_core::ops::discovery::targets_json("test", "10.10.10.8/24", true);
     assert!(body.contains("10.10.10.8:9100"), "{}", body);
     assert!(body.contains("10.10.10.8:8081"), "{}", body);
     assert!(
@@ -1199,9 +1199,25 @@ async fn t1_deploy_writes_a_discovery_file_and_destroy_removes_it() {
     // Rewriting an unchanged file must be a no-op, or the drift check would
     // report a difference every single deploy.
     assert_eq!(
-        homelab_core::ops::discovery::targets_json("test", "10.10.10.8/24"),
+        homelab_core::ops::discovery::targets_json("test", "10.10.10.8/24", true),
         body
     );
+
+    // A native-service stack has no docker, so it must not be given a
+    // cadvisor target. Measured on this fleet: kyu (CT 109) and almanac
+    // (CT 112) answer on 9100 and refuse 8081, so writing one would hand
+    // Prometheus an endpoint that can never come up and Alertmanager a rule
+    // that can never clear.
+    let native = homelab_core::ops::discovery::targets_json("kyu", "10.10.10.9/24", false);
+    assert!(native.contains("10.10.10.9:9100"), "{}", native);
+    assert!(
+        !native.contains("8081"),
+        "a stack without docker must get no cadvisor target: {}",
+        native
+    );
+    // Still valid JSON with exactly one entry.
+    assert_eq!(native.matches("\"targets\"").count(), 1, "{}", native);
+    assert!(!native.contains(",\n  {"), "no dangling comma: {}", native);
 }
 
 /// O10 end to end: an app that asks to be left alone while in use is skipped,

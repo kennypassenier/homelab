@@ -25,26 +25,40 @@ const CADVISOR_PORT: u16 = 8081;
 /// The file-based discovery document for one stack. Stable field order, so a
 /// rewrite that changes nothing produces a byte-identical file and the drift
 /// check has nothing to report.
-pub fn targets_json(stack: &str, ip: &str) -> String {
+pub fn targets_json(stack: &str, ip: &str, runs_docker: bool) -> String {
     let host = ip_only(ip);
-    format!(
+    let node = format!(
         concat!(
-            "[\n",
             "  {{\n",
-            "    \"targets\": [\"{host}:{node}\"],\n",
+            "    \"targets\": [\"{host}:{port}\"],\n",
             "    \"labels\": {{\"job\": \"node\", \"stack\": \"{stack}\", \"host\": \"{stack}\", \"role\": \"lxc\"}}\n",
-            "  }},\n",
-            "  {{\n",
-            "    \"targets\": [\"{host}:{cadvisor}\"],\n",
-            "    \"labels\": {{\"job\": \"cadvisor\", \"stack\": \"{stack}\", \"host\": \"{stack}\", \"role\": \"lxc\"}}\n",
-            "  }}\n",
-            "]\n"
+            "  }}"
         ),
         host = host,
-        node = NODE_EXPORTER_PORT,
-        cadvisor = CADVISOR_PORT,
+        port = NODE_EXPORTER_PORT,
         stack = stack,
-    )
+    );
+    // A native-service stack has no docker and therefore no cadvisor.
+    // Measured on this fleet 2026-08-31: kyu (CT 109) and almanac (CT 112)
+    // answer on 9100 and refuse 8081. Writing the cadvisor target anyway
+    // would give Prometheus a permanently unreachable endpoint and
+    // Alertmanager a permanently firing rule — an alert that is always on is
+    // an alert nobody reads, which costs more than the missing panel.
+    if !runs_docker {
+        return format!("[\n{}\n]\n", node);
+    }
+    let cadvisor = format!(
+        concat!(
+            "  {{\n",
+            "    \"targets\": [\"{host}:{port}\"],\n",
+            "    \"labels\": {{\"job\": \"cadvisor\", \"stack\": \"{stack}\", \"host\": \"{stack}\", \"role\": \"lxc\"}}\n",
+            "  }}"
+        ),
+        host = host,
+        port = CADVISOR_PORT,
+        stack = stack,
+    );
+    format!("[\n{},\n{}\n]\n", node, cadvisor)
 }
 
 /// Manifests carry CIDR (`10.10.10.13/24`); a scrape target must not.

@@ -176,7 +176,9 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             return Ok(StepOutcome::Unchanged);
         };
         let path = crate::ops::discovery::target_file(dir, &m.stack_name);
-        let body = crate::ops::discovery::targets_json(&m.stack_name, &m.network.ip);
+        // A stack with apps runs docker; a native-service stack does not.
+        let body =
+            crate::ops::discovery::targets_json(&m.stack_name, &m.network.ip, !m.apps.is_empty());
         if matches!(exec.read_file(&path).await, Ok(existing) if existing == body) {
             return Ok(StepOutcome::Unchanged);
         }

@@ -14,72 +14,68 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
-  # Named `kyu`, not `mailbox`: the hub was renamed on 2026-08-29 and the
-  # live file had not followed. Series scraped before this change carry
-  # job="mailbox" and stay under that label in the history.
+
+  # kyu, the message hub. Renamed from `mailbox` 2026-08-31: the service was
+  # called that until 2026-08-29 and the job name outlived it, so its series
+  # were filed under a name that no longer exists anywhere else.
   - job_name: kyu
     static_configs:
       - targets: ["10.10.10.9:8080"]
+
   - job_name: pve
     metrics_path: /pve
     params:
       target: ["10.10.5.250"]
     static_configs:
       - targets: ["pve-exporter:9221"]
+
   # Almanac serves /metrics unauthenticated, deliberately: a scraper
   # that cannot authenticate reports a healthy service as down. Its
   # liveness endpoint is /healthz and belongs to Uptime Kuma, not here.
   - job_name: almanac
     static_configs:
       - targets: ["10.10.10.12:8080"]
-  # T1: stacks the orchestrator manages announce themselves. It writes one
-  # file per stack on deploy and removes it on destroy, and Prometheus picks
-  # the change up without a reload — so this list is a consequence of what
-  # runs rather than an administration that drifts. The static lists below
-  # stay for the guests the orchestrator does not manage yet; each one
-  # disappears from there as its stack is integrated in M8.
-  - job_name: managed
+
+  # ── The fleet, discovered rather than administered (T1) ──────────────
+  #
+  # Until 2026-08-31 the LXC node and cadvisor targets were a hand-kept list
+  # here, and it had drifted exactly the way hand-kept lists do: 10.10.10.14
+  # was still labelled `scratch-mailbox` from a container destroyed that
+  # morning, so the brand-new paperwork container's metrics arrived under a
+  # dead machine's name. kyu and almanac had no cadvisor entry, the media and
+  # gateway stacks had no way to gain one, and nothing would ever have said so.
+  #
+  # The orchestrator has written /appdata/metrics/prometheus-config/targets/
+  # since the T1 work landed — one small file per stack, on every deploy.
+  # Prometheus was never told to read it. A mechanism that runs, reports
+  # success and is wired to nothing is the same failure as the log guards
+  # that ran on five of nine containers; this closes it.
+  #
+  # The path is /prometheus/targets because that is where the directory
+  # already lives: the host writes /appdata/metrics/prometheus-config/targets
+  # and the compose file mounts prometheus-config at /prometheus. A separate
+  # bind would have needed a second declared mount, and the manifest requires
+  # a declared directory to be named after the app that owns it.
+  #
+  # file_sd is polled, so adding or destroying a stack needs no reload here.
+  - job_name: node
     file_sd_configs:
       - files: ["/prometheus/targets/*.json"]
-
-  - job_name: node
+        refresh_interval: 60s
+    relabel_configs:
+      - source_labels: [job]
+        regex: node
+        action: keep
     static_configs:
+      # The hypervisor is not a stack and no deploy will ever write it.
       - targets: ["10.10.5.250:9100"]
         labels: {host: pve, role: hypervisor}
-      - targets: ["10.10.10.4:9100"]
-        labels: {host: platform, role: lxc}
-      - targets: ["10.10.10.5:9100"]
-        labels: {host: downloader, role: lxc}
-      - targets: ["10.10.10.6:9100"]
-        labels: {host: media, role: lxc}
-      - targets: ["10.10.10.8:9100"]
-        labels: {host: synctest, role: lxc}
-      - targets: ["10.10.10.9:9100"]
-        labels: {host: mailbox, role: lxc}
-      - targets: ["10.10.10.11:9100"]
-        labels: {host: productivity, role: lxc}
-      - targets: ["10.10.10.12:9100"]
-        labels: {host: almanac, role: lxc}
-      - targets: ["10.10.10.13:9100"]
-        labels: {host: metrics, role: lxc}
-      # 10.10.10.14 and .15 are the scratch containers 190/191, removed by
-      # E5 — the layout needs those addresses back. Dropped here rather than
-      # left to alert as HostDown the moment they go.
 
-  # cadvisor runs on every Docker host, not just here: it can only see the
-  # containers of the machine it runs on. Port 8081 everywhere — gluetun already
-  # owns 8080 on the downloader stack.
   - job_name: cadvisor
-    static_configs:
-      - targets: ["10.10.10.4:8081"]
-        labels: {host: platform, role: lxc}
-      - targets: ["10.10.10.5:8081"]
-        labels: {host: downloader, role: lxc}
-      - targets: ["10.10.10.6:8081"]
-        labels: {host: media, role: lxc}
-      - targets: ["10.10.10.8:8081"]
-        labels: {host: synctest, role: lxc}
-      - targets: ["10.10.10.11:8081"]
-        labels: {host: productivity, role: lxc}
-      - targets: ["10.10.10.13:8081"]
-        labels: {host: metrics, role: lxc}
+    file_sd_configs:
+      - files: ["/prometheus/targets/*.json"]
+        refresh_interval: 60s
+    relabel_configs:
+      - source_labels: [job]
+        regex: cadvisor
+        action: keep

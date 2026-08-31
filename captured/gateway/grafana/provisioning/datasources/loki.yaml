@@ -1,8 +1,23 @@
 # Auto-provisioned Loki datasource for Grafana
 apiVersion: 1
 
+# Grafana cannot change the uid of a datasource it already has: provisioning
+# looks the entry up by uid, does not find it, and the whole provisioning
+# module fails to start -- which takes Grafana down entirely, not just the
+# datasource. Found the hard way on 2026-08-31. The supported route is to let
+# provisioning delete the old entry by name first and recreate it.
+deleteDatasources:
+  - name: Loki
+    orgId: 1
+
 datasources:
   - name: Loki
+    # Pinned 2026-08-31. Without it Grafana generated P8E80F9AEF21F6940,
+    # while every log dashboard in this directory references the datasource
+    # as "loki" — so all three resolved to nothing and showed no data. The
+    # Prometheus datasource beside this one was already pinned for exactly
+    # this reason; Loki was simply forgotten, and nothing checked.
+    uid: loki
     type: loki
     access: proxy
     url: http://10.10.10.4:3100

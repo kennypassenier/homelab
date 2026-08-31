@@ -1940,16 +1940,14 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             })
             .await
         }
-        Rpc::DestroyStack { manifest, confirm } => {
+        Rpc::DestroyStack {
+            manifest,
+            confirm,
+            skip_backup,
+        } => {
             run_mutating_op(state, &exec, req.id, "destroy", |ctx| {
                 Box::pin(async move {
-                    homelab_core::ops::destroy::destroy(
-                        ctx,
-                        &manifest.stack_name,
-                        manifest.vmid,
-                        &confirm,
-                    )
-                    .await
+                    homelab_core::ops::destroy::destroy(ctx, &manifest, &confirm, skip_backup).await
                 })
             })
             .await

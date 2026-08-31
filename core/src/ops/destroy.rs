@@ -10,6 +10,16 @@ use crate::sink::Level;
 
 use super::OpCtx;
 
+/// A warning that reaches the transcript from inside a step body, where the
+/// runner itself is mutably borrowed.
+fn runner_warn(ctx: &OpCtx<'_>, msg: String) {
+    ctx.sink.emit(crate::sink::PipelineEvent::Line {
+        level: Level::Warn,
+        source: "HOST".into(),
+        msg,
+    });
+}
+
 macro_rules! step {
     ($runner:expr, $name:expr, $body:expr) => {
         match $runner.step($name, || async { $body }).await {
@@ -24,10 +34,12 @@ macro_rules! step {
 /// re-check it here so the core is safe on its own.
 pub async fn destroy(
     ctx: &OpCtx<'_>,
-    stack_name: &str,
-    vmid: u16,
+    manifest: &crate::manifest::StackManifest,
     confirmed_name: &str,
+    skip_backup: bool,
 ) -> OperationReport {
+    let stack_name = &manifest.stack_name;
+    let vmid = manifest.vmid;
     let op = format!("destroy-{}", stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
@@ -87,6 +99,49 @@ pub async fn destroy(
             )));
         }
         Ok(StepOutcome::Unchanged)
+    });
+
+    // Kenny's B1/B2 (2026-08-31): back the stack up here, while it still
+    // exists, and refuse if that fails.
+    //
+    // The question he asked was the right one — until tonight the backup
+    // before a destroy existed only because whoever ran it remembered. The
+    // procedure has always said to take one; nothing enforced it, so it was a
+    // habit, and a habit is not a safety net.
+    //
+    // For a stack whose config lives on /appdata this costs seconds and
+    // changes little: those directories survive a destroy anyway. It matters
+    // for what lives INSIDE the container, which is exactly where the native
+    // services keep their state.
+    step!(runner, "backup before destroy", {
+        if skip_backup {
+            runner_warn(
+                ctx,
+                format!(
+                    "[destroy] backup SKIPPED for {} at the operator's explicit request — \
+                     whatever this container holds that is not on /appdata is gone in a moment",
+                    stack_name
+                ),
+            );
+            return Ok(StepOutcome::Unchanged);
+        }
+        if manifest.storage.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let report = crate::ops::backup::backup(ctx, manifest, &ctx.backup).await;
+        if !report.ok {
+            let why = report
+                .error
+                .as_ref()
+                .map(|e| e.why.clone())
+                .unwrap_or_else(|| "backup failed".into());
+            return Err(CoreError::SafetyAbort(format!(
+                "refusing to destroy '{}': the backup taken first did not succeed :: {} :: \
+                 pass --no-backup to destroy anyway, which is a decision, not a retry",
+                stack_name, why
+            )));
+        }
+        Ok(StepOutcome::Changed)
     });
 
     // Stop the container (ignore "already stopped").

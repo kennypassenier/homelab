@@ -481,6 +481,16 @@ async fn main() {
                 .unwrap_or_else(|| die("usage: homelab destroy stacks/<name>"));
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             let stack = &spec.manifest.stack_name;
+            // Kenny's B2: the destroy backs up first and refuses if that
+            // fails. Skipping is deliberate and says so out loud.
+            let skip_backup = args.iter().any(|a| a == "--no-backup");
+            if skip_backup {
+                eprintln!(
+                    "{}! --no-backup: destroying without the backup that would otherwise be \
+                     taken first{}",
+                    C_YELLOW, C_RESET
+                );
+            }
             // C2: typed-name confirmation, exactly like the TUI.
             eprint!(
                 "{}Type the stack name '{}' to confirm destroy: {}",
@@ -500,6 +510,7 @@ async fn main() {
                 Command::DestroyStack {
                     manifest: Box::new(spec.manifest),
                     confirm,
+                    skip_backup,
                 },
             )
             .await;

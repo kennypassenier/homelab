@@ -33,6 +33,13 @@ pub enum Command {
     DestroyStack {
         manifest: Box<StackManifest>,
         confirm: String,
+        /// Kenny's B2 (2026-08-31): a destroy backs the stack up first and
+        /// refuses when that fails, because a backup you may skip is not a
+        /// backup. This is the deliberate way past it — `--no-backup` on the
+        /// command line — so skipping is a decision somebody takes rather
+        /// than something that happens.
+        #[serde(default)]
+        skip_backup: bool,
     },
     /// E1: back up a stack's /appdata.
     BackupStack(Box<StackManifest>),

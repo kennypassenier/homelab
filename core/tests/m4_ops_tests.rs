@@ -83,7 +83,13 @@ async fn c2_destroy_refuses_wrong_typed_name() {
     let exec = MockExecutor::new();
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = destroy(&ctx(&exec, &sink, &j), "test", 108, "wrong").await;
+    let report = destroy(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        "wrong",
+        true,
+    )
+    .await;
     assert!(!report.ok);
     assert!(report.error.unwrap().why.contains("does not match"));
     assert!(
@@ -98,7 +104,13 @@ async fn c2_destroy_refuses_no_touch_vmid() {
         let exec = MockExecutor::new();
         let sink = VecSink::new();
         let j = NullJournal;
-        let report = destroy(&ctx(&exec, &sink, &j), "evil", vmid, "evil").await;
+        let report = destroy(
+            &ctx(&exec, &sink, &j),
+            &manifest(vmid, "evil"),
+            "evil",
+            true,
+        )
+        .await;
         assert!(!report.ok, "vmid {} must be refused", vmid);
         assert!(report.error.unwrap().why.contains("no-touch"));
         assert!(exec.calls_containing("pct destroy").is_empty());
@@ -114,7 +126,7 @@ async fn c2_destroy_refuses_hostname_mismatch() {
     );
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = destroy(&ctx(&exec, &sink, &j), "test", 108, "test").await;
+    let report = destroy(&ctx(&exec, &sink, &j), &manifest(108, "test"), "test", true).await;
     assert!(!report.ok);
     assert!(report.error.unwrap().why.contains("refusing to destroy"));
     assert!(exec.calls_containing("pct destroy").is_empty());
@@ -129,7 +141,7 @@ async fn c2_destroy_happy_path_lifts_protection_then_destroys() {
     );
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = destroy(&ctx(&exec, &sink, &j), "test", 108, "test").await;
+    let report = destroy(&ctx(&exec, &sink, &j), &manifest(108, "test"), "test", true).await;
     assert!(report.ok, "{:?}", report.error);
     let calls = exec.calls();
     let pos = |n: &str| calls.iter().position(|c| c.contains(n)).unwrap();
@@ -2139,9 +2151,9 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             backup: Default::default(),
             registry_cache: None,
         },
+        &manifest(108, "test"),
         "test",
-        108,
-        "test",
+        true,
     )
     .await;
     assert!(report.ok, "{:?}", report.error);
@@ -2180,9 +2192,9 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             backup: Default::default(),
             registry_cache: None,
         },
+        &manifest(108, "test"),
         "test",
-        108,
-        "test",
+        true,
     )
     .await;
     assert!(!report.ok);
@@ -2437,4 +2449,96 @@ async fn protection_is_set_after_all_drive_changes() {
             );
         }
     }
+}
+
+// ── B1/B2: the backup that a destroy takes first ───────────────────────────
+
+/// Kenny asked whether a destroy takes a backup first. It did not — the
+/// procedure said to, and nothing enforced it, so it existed only while
+/// whoever ran it remembered. A habit is not a safety net.
+#[tokio::test]
+async fn a_destroy_backs_the_stack_up_before_it_removes_anything() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = destroy(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        "test",
+        false,
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let calls = exec.calls();
+    let backup = calls
+        .iter()
+        .position(|c| c.contains("restic backup"))
+        .expect("a backup runs");
+    let gone = calls
+        .iter()
+        .position(|c| c.contains("pct destroy"))
+        .expect("and then it destroys");
+    assert!(
+        backup < gone,
+        "the backup comes FIRST: {} vs {}",
+        backup,
+        gone
+    );
+}
+
+/// And when that backup fails, nothing is destroyed. A backup you may skip
+/// silently is not a backup.
+#[tokio::test]
+async fn a_failed_backup_stops_the_destroy() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
+    exec.respond_always(
+        "restic backup",
+        CmdOutput::failed(1, "repository unreachable"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = destroy(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        "test",
+        false,
+    )
+    .await;
+    assert!(!report.ok, "a failed backup must stop the destroy");
+    let why = report.error.unwrap().why;
+    assert!(
+        why.contains("--no-backup"),
+        "the escape must be named: {}",
+        why
+    );
+    assert!(
+        exec.calls_containing("pct destroy").is_empty(),
+        "nothing may be removed"
+    );
+
+    // The escape works, and it is the operator's decision rather than a retry.
+    let exec2 = MockExecutor::new();
+    mock_hostname(&exec2, 108, "test");
+    exec2.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
+    exec2.respond_always(
+        "restic backup",
+        CmdOutput::failed(1, "repository unreachable"),
+    );
+    let sink2 = VecSink::new();
+    let j2 = NullJournal;
+    let report = destroy(
+        &ctx(&exec2, &sink2, &j2),
+        &manifest(108, "test"),
+        "test",
+        true,
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(exec2.calls_containing("restic backup").is_empty());
+    assert_eq!(exec2.calls_containing("pct destroy 108 --purge").len(), 1);
 }

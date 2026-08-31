@@ -158,7 +158,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | T19 | Move ansible-era configuration onto `/appdata` on the host so a rebuild survives — F11 | T1 | open |
 | T20 | Capture the Cloudflare tunnel ingress and Access policies into the repo — F12 | needs Cloudflare credentials | open |
 | T21 | Add promtail to CT 104 — F13 | T1 | open |
-| T22 | Give Uptime Kuma a real monitor set — F9 | T1 | open |
+| T22 | Give Uptime Kuma a real monitor set — F9 | 29 monitors added, verified 30 of 30 green: HTTP per service, ping per container, two external hostnames for the tunnel. Script and reasoning in `captured/gateway/uptime-kuma/` | done 2026-08-31 |
 | T23 | Remove or rewrite the three stale stack files claiming live vmids — F17 | T1 | open |
 | T24 | Verify whether restic retention explains the snapshot counts — F19 | T1 | open |
 | T25 | Recyclarr preset (E3) | T1 | open |
@@ -180,6 +180,8 @@ Numbers are permanent and are never reused, including after a row closes.
 | T41 | Propose snapshot-before-update as a third protection layer in the realisation plan — F40 | — | open |
 | T42 | Repair the syncthing route: 10.10.10.10 → the container — F34, B4 | — | open |
 | T43 | Correct `presets/syncthing/` off vmid 110, which can never be used | — | open |
+| T49 | Render an Uptime Kuma monitor set from the manifest at deploy time, the way T1 renders the Prometheus targets and T2 the Grafana dashboard. Today a new stack arrives unwatched until someone re-runs the seed script by hand | The seed script exists and is idempotent, so this is a port rather than a design | open |
+| T50 | Give promtail a real container label fleet-wide, so the three Loki dashboards (F72) can work at all. Two candidate routes: retry `docker_sd_configs` on CT 108 where an experiment is cheap (F69), or set docker's `tag` log-opt in the guards and read `attrs.tag` in a promtail pipeline stage — the second needs every container recreated to take effect | — | open |
 | T47 | Re-run the paperless import verification after Kenny has looked at the archive: the 25 documents came back with full-text search but without the tags, correspondents and document dates he assigned in March, which existed only in the lost database | — | open — needs Kenny |
 | T48 | The old `/HDD2TB/paperless_media` and `/HDD2TB/paperless_consume` datasets are now source material with no consumer. Keep them until Kenny confirms the re-import is good, then they can go | — | open — needs Kenny |
 | T46 | **Release the host binary.** M3's real templates, M4's live half and every M2 fix only take effect once the host runs the new code. First thing that waits on Kenny rather than on work | 42 commits ready, 20 suites green | waiting on Kenny |

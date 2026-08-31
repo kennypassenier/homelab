@@ -30,9 +30,34 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # The .env is NOT passed through wholesale. Its names carry a stack prefix
+    # in latch and are mapped back here one by one, because latch's namespace
+    # is flat across the whole vault: a bare JWT_SECRET or POSTGRES_PASSWORD
+    # would collide with any other application that has one, and a collision
+    # in any corner breaks the deploy of every stack. Three secrets named
+    # KYU_TOKEN did exactly that on 2026-08-31.
     environment:
       - TZ=Europe/Brussels
       - PORT=1900
+      - JWT_SECRET=${SUPERSYNC_JWT_SECRET}
+      # The database lives in its own compose file on the shared network, so
+      # it is reached by container name.
+      - DATABASE_URL=postgresql://supersync:${SUPERSYNC_POSTGRES_PASSWORD}@supersync-db:5432/supersync
+      - PUBLIC_URL=${SUPERSYNC_PUBLIC_URL}
+      - HOST=${SUPERSYNC_HOST}
+      - ALLOWED_EMAILS=${SUPERSYNC_ALLOWED_EMAILS}
+      # WebAuthn ties a passkey to the exact hostname it was registered on.
+      # Change any of these three and every existing passkey stops being
+      # accepted — so they are carried across verbatim, not regenerated.
+      - WEBAUTHN_RP_ID=${SUPERSYNC_WEBAUTHN_RP_ID}
+      - WEBAUTHN_ORIGIN=${SUPERSYNC_WEBAUTHN_ORIGIN}
+      - WEBAUTHN_RP_NAME=${SUPERSYNC_WEBAUTHN_RP_NAME}
+      - SMTP_HOST=${SUPERSYNC_SMTP_HOST}
+      - SMTP_PORT=${SUPERSYNC_SMTP_PORT}
+      - SMTP_SECURE=${SUPERSYNC_SMTP_SECURE}
+      - SMTP_USER=${SUPERSYNC_SMTP_USER}
+      - SMTP_FROM=${SUPERSYNC_SMTP_FROM}
+      - SMTP_PASS=${SUPERSYNC_SMTP_PASS}
     ports:
       - "1900:1900"
     labels:

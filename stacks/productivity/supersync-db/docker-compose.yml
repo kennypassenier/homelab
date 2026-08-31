@@ -23,6 +23,9 @@ services:
       - TZ=Europe/Brussels
       - POSTGRES_USER=supersync
       - POSTGRES_DB=supersync
+      # Same value as the app's DATABASE_URL, from the same latch variable —
+      # one name, one value, no chance of the two drifting apart.
+      - POSTGRES_PASSWORD=${SUPERSYNC_POSTGRES_PASSWORD}
     volumes:
       - /appdata/productivity/supersync-db-config:/var/lib/postgresql/data
     # The tuning the hand-written stack carried, kept verbatim: it was chosen

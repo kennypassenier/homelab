@@ -28,7 +28,12 @@ scrape_configs:
             attrs: attrs
       - json:
           expressions:
-            container_name: attrs.name
+            # attrs.tag, not attrs.name: docker writes the field named by the
+            # daemon's `tag` log-opt, and there has never been an `attrs.name`.
+            # This pipeline read one for as long as it has existed, produced an
+            # empty label every time, and the three Loki dashboards that query
+            # `container_name` have therefore never shown anything.
+            container_name: attrs.tag
           source: attrs
       - labels:
           stream:

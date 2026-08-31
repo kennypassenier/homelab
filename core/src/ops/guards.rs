@@ -7,11 +7,29 @@ use crate::executor::{pct_sh, Executor};
 use crate::ops::util::push_content;
 use crate::sink::{Level, PipelineEvent, Sink};
 
+/// Docker's log settings, applied to every managed container.
+///
+/// `max-size` and `max-file` are the cap that G1 rolled out fleet-wide.
+///
+/// `tag` was added 2026-08-31 and is the fix for a three-year-old kind of
+/// silence. Every promtail config in this repo has always tried to read the
+/// container's name out of the log line's `attrs.name`, and the three Loki
+/// dashboards were written against the `container_name` label that pipeline
+/// was meant to produce. Docker writes no `attrs` field at all unless it is
+/// asked to, so the extraction found nothing, the empty label was dropped,
+/// and the dashboards queried a label that had never once existed. Nothing
+/// reported it — an empty dashboard and a working one look the same until
+/// somebody needs it, which is how Kenny found it.
+///
+/// `{{.Name}}` makes docker write `"attrs":{"tag":"jellyfin"}` on every line.
+/// The option is read when a container is CREATED, so an existing container
+/// keeps logging untagged until it is recreated.
 pub const DOCKER_DAEMON_JSON: &str = r#"{
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "10m",
-    "max-file": "3"
+    "max-file": "3",
+    "tag": "{{.Name}}"
   }
 }
 "#;

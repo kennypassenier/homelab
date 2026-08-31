@@ -31,9 +31,9 @@ scrape_configs:
             attrs: attrs
       - json:
           expressions:
-            # attrs.tag is what docker writes when the daemon carries the
-            # `tag: {{.Name}}` log-opt the guards install.
-            container_name: attrs.tag
+            # `tag`, bare: `source: attrs` already puts us inside the attrs
+            # object docker writes when the daemon carries the tag log-opt.
+            container_name: tag
           source: attrs
       - labels:
           stream:

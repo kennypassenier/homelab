@@ -28,12 +28,13 @@ scrape_configs:
             attrs: attrs
       - json:
           expressions:
-            # attrs.tag, not attrs.name: docker writes the field named by the
-            # daemon's `tag` log-opt, and there has never been an `attrs.name`.
-            # This pipeline read one for as long as it has existed, produced an
-            # empty label every time, and the three Loki dashboards that query
-            # `container_name` have therefore never shown anything.
-            container_name: attrs.tag
+            # `tag`, bare: this stage's `source: attrs` already puts us
+            # inside the attrs object, so the path must not repeat it. The
+            # original line read `attrs.name` — wrong on both counts, the
+            # field docker writes and the depth to read it at — which is why
+            # the three Loki dashboards querying `container_name` have never
+            # shown anything.
+            container_name: tag
           source: attrs
       - labels:
           stream:

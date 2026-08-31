@@ -32,8 +32,8 @@ boot:
 storage:
   # Vault data lives on the Proxmox host → survives container recreation.
   # Owner 101000 = uid 1000 inside the unprivileged LXC (syncthing's PUID).
-  - host_path: /appdata/synctest/synctest-config
-    mount_point: /appdata/synctest/synctest-config
+  - host_path: /appdata/synctest/syncthing-config
+    mount_point: /appdata/synctest/syncthing-config
     host_owner_uid: 101000
     # D25: owned by the app, not the stack — which is what lets this stack be
     # renamed to `syncthing` in M8 without abandoning its backup history.

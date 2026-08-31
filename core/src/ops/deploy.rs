@@ -607,11 +607,39 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     // ── D1: push files; env over the secrets channel (A5). ───────────────
+    //
+    // Which apps had a config file change is remembered, because pushing a
+    // file is not the same as the service reading it. `docker compose up -d`
+    // sees an unchanged compose definition and leaves the container running,
+    // so an edit to a bind-mounted config takes effect at the next unrelated
+    // restart — or never. On 2026-08-31 that cost a wrong conclusion: promtail
+    // ran four more minutes on the old pipeline and the first verification
+    // reported the fix as not working.
+    let needs_restart: std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new()));
+    let recreated: std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new()));
+    let needs_restart_w = needs_restart.clone();
+    let recreated_w = recreated.clone();
     step!(runner, "push files", {
         for f in &spec.files {
             let dest = format!("/opt/{}/{}", m.stack_name, f.path);
             let perms = format!("{:o}", f.mode.unwrap_or(0o644));
-            push_content(exec, m.vmid, &dest, &f.content, &perms).await?;
+            let changed = push_content(exec, m.vmid, &dest, &f.content, &perms).await?;
+            if changed {
+                // The path is "<app>/<file>"; a file outside an app directory
+                // belongs to no service and needs nothing restarted.
+                if let Some((app, name)) = f.path.split_once('/') {
+                    if name == "docker-compose.yml" {
+                        // compose up -d recreates this one by itself.
+                        if let Ok(mut g) = recreated_w.lock() {
+                            g.insert(app.to_string());
+                        }
+                    } else if let Ok(mut g) = needs_restart_w.lock() {
+                        g.insert(app.to_string());
+                    }
+                }
+            }
             ctx.sink.emit(PipelineEvent::Bytes {
                 op: op.clone(),
                 label: dest,
@@ -679,6 +707,34 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     rendered: format!("compose up {}", app),
                     detail: up.stderr,
                 });
+            }
+            // A config file changed under an app whose compose definition did
+            // not: `up -d` left the container alone, so the running process is
+            // still reading the old file. Restart is enough — the file is
+            // bind-mounted, so the new content is already visible inside.
+            let restart_this = needs_restart
+                .lock()
+                .map(|g| g.contains(app))
+                .unwrap_or(false)
+                && !recreated.lock().map(|g| g.contains(app)).unwrap_or(false);
+            if restart_this {
+                let r = pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!("cd '{}' && docker compose restart", dir),
+                    300,
+                )
+                .await?;
+                if !r.success() {
+                    return Err(CoreError::Command {
+                        rendered: format!("compose restart {}", app),
+                        detail: r.stderr,
+                    });
+                }
+                log_info(format!(
+                    "[config] {} restarted — its config changed and compose would not have",
+                    app
+                ));
             }
         }
         Ok(StepOutcome::Changed)

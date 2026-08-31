@@ -307,6 +307,79 @@ async fn d1_fresh_deploy_command_sequence() {
 
 // ── B1: second run is quiet (no create, no restarts, no re-enable) ──────────
 
+/// T52: pushing a config file is not the same as the service reading it.
+///
+/// `docker compose up -d` sees an unchanged compose definition and leaves the
+/// container running, so an edit to a bind-mounted config takes effect at the
+/// next unrelated restart — or never. On 2026-08-31 that cost a wrong
+/// conclusion: promtail ran four more minutes on the old pipeline while I
+/// concluded the fix had not worked.
+#[tokio::test]
+async fn t52_a_changed_config_file_restarts_its_app() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, ""));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 110-app-syncthing\ncores: 1\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    let mut spec = spec(110, "syncthing");
+    // The compose file is already in place — only the config beside it moved.
+    exec.respond_always(
+        "sha256sum '/opt/syncthing/syncthing/docker-compose.yml'",
+        CmdOutput::ok(&sha_hex(&spec.files[0].content)),
+    );
+    spec.files.push(FileBlob {
+        path: "syncthing/config.yml".into(),
+        content: "changed\n".into(),
+        mode: None,
+    });
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("docker compose restart")
+            .iter()
+            .any(|c| c.contains("/opt/syncthing/syncthing")),
+        "the app whose config changed must be restarted: {:?}",
+        exec.calls_containing("docker compose")
+    );
+}
+
+/// The other half: when only the compose file changed, `up -d` recreates the
+/// container by itself and a restart on top of that is pure churn.
+#[tokio::test]
+async fn t52_a_changed_compose_file_does_not_restart_twice() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, ""));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 110-app-syncthing\ncores: 1\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    // Every sha lookup misses, so the compose file counts as changed.
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec(110, "syncthing")).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("docker compose restart").is_empty(),
+        "compose up already recreated it: {:?}",
+        exec.calls_containing("docker compose")
+    );
+}
+
 #[tokio::test]
 async fn b1_second_run_is_quiet() {
     use homelab_core::ops::guards;

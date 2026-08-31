@@ -17,7 +17,7 @@ scrape_configs:
         labels:
           job: docker
           stack: productivity
-          host: 114-app-productivity
+          host: 111-app-productivity
           __path__: /var/lib/docker/containers/*/*-json.log
 
     pipeline_stages:
@@ -50,5 +50,5 @@ scrape_configs:
         labels:
           job: syslog
           stack: productivity
-          host: 114-app-productivity
+          host: 111-app-productivity
           __path__: /var/log/syslog

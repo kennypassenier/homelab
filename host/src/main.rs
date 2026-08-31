@@ -1218,6 +1218,7 @@ async fn scheduler_loop(state: AppState) {
                     &live,
                     now,
                     homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+                    homelab_core::ops::fleetcheck::GrowthLimits::default(),
                 );
                 if findings.is_empty() {
                     info!("fleet check: repo and reality agree");
@@ -1568,7 +1569,76 @@ async fn gather_live_facts(
             }
         }
     }
+
+    // G3: what each managed container's resources look like right now.
+    //
+    // One `pct exec` per container emitting key=value lines, rather than six
+    // round trips each. Every value has a fallback of 0 so a container that
+    // answers half the questions still reports the half it knows — a check
+    // that gives up on partial data is a check nobody trusts.
+    const PROBE: &str = concat!(
+        "df -P / | awk 'NR==2{gsub(\"%\",\"\",$5); print \"disk=\"$5}'; ",
+        "free -m | awk '/^Mem:/{if($2>0) printf \"mem=%d\\n\", ($3*100)/$2} /^Swap:/{print \"swap=\"$3}'; ",
+        "echo \"journal=$(du -sm /var/log/journal 2>/dev/null | cut -f1)\"; ",
+        "echo \"dockerlogs=$(du -sm /var/lib/docker/containers 2>/dev/null | cut -f1)\"; ",
+        // Both halves of the guard must be present. Checking only one is how
+        // a half-guarded container reads as guarded.
+        "if ls /etc/systemd/journald.conf.d/*.conf >/dev/null 2>&1 && ",
+        "grep -q max-size /etc/docker/daemon.json 2>/dev/null; ",
+        "then echo guards=1; else echo guards=0; fi"
+    );
+    for st in state_stacks_vmids(state).await {
+        let (vmid, hostname) = st;
+        let vs = vmid.to_string();
+        let Ok(out) = exec
+            .run(&Cmd::new(
+                "pct",
+                &["exec", &vs, "--", "sh", "-c", PROBE],
+                45,
+            ))
+            .await
+        else {
+            continue;
+        };
+        let mut g = homelab_core::ops::fleetcheck::GrowthFact {
+            vmid,
+            hostname,
+            ..Default::default()
+        };
+        for line in out.stdout.lines() {
+            let Some((k, v)) = line.trim().split_once('=') else {
+                continue;
+            };
+            match k {
+                "disk" => g.disk_used_pct = v.parse().unwrap_or(0),
+                "mem" => g.mem_used_pct = v.parse().unwrap_or(0),
+                "swap" => g.swap_used_mb = v.parse().unwrap_or(0),
+                "journal" => g.journal_mb = v.parse().unwrap_or(0),
+                "dockerlogs" => g.docker_logs_mb = v.parse().unwrap_or(0),
+                "guards" => g.guards = v == "1",
+                _ => {}
+            }
+        }
+        facts.growth.push(g);
+    }
     facts
+}
+
+/// The vmid and hostname of every stack this orchestrator manages.
+///
+/// Deliberately reads host state rather than `pct list`: the growth check
+/// reports on what we own, and enumerating the hypervisor would put the
+/// no-touch guests in a report that invites acting on them.
+async fn state_stacks_vmids(state: &AppState) -> Vec<(u16, String)> {
+    let store = homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+    match store.load().await {
+        Ok(s) => s
+            .stacks
+            .values()
+            .map(|st| (st.vmid, st.hostname.clone()))
+            .collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// A backup is a backup, whoever asked for it. The scheduler recorded
@@ -1878,6 +1948,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     .map(|d| d.as_secs())
                     .unwrap_or(0),
                 homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+                homelab_core::ops::fleetcheck::GrowthLimits::default(),
             );
             RpcResponse {
                 id: req.id,

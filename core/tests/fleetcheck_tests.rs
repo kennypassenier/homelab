@@ -4,7 +4,9 @@
 //! 2026-08-30 and that nothing reported. If the check cannot find them when
 //! they are handed to it, it is decoration.
 
-use homelab_core::ops::fleetcheck::{evaluate, LiveFacts, RouteFact, Severity};
+use homelab_core::ops::fleetcheck::{
+    evaluate, evaluate_growth, GrowthFact, GrowthLimits, LiveFacts, RouteFact, Severity,
+};
 use homelab_core::state::{HostState, StackState};
 
 const NOW: u64 = 1_788_000_000;
@@ -38,7 +40,24 @@ fn check(state: &HostState, live: &LiveFacts) -> Vec<homelab_core::ops::fleetche
         live,
         NOW,
         homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+        GrowthLimits::default(),
     )
+}
+
+/// A container with nothing wrong with it. Every growth test below starts
+/// here and changes exactly one thing, so the finding it produces can only
+/// have come from that change.
+fn healthy_growth(vmid: u16) -> GrowthFact {
+    GrowthFact {
+        vmid,
+        hostname: format!("{}-app-test", vmid),
+        disk_used_pct: 30,
+        mem_used_pct: 40,
+        swap_used_mb: 0,
+        journal_mb: 40,
+        docker_logs_mb: 20,
+        guards: true,
+    }
 }
 
 /// A healthy fleet produces nothing. A check that always finds something is
@@ -57,6 +76,7 @@ fn y4_a_healthy_fleet_is_silent() {
             answered: true,
         }],
         stack_files: vec![("stacks/metrics".into(), 113)],
+        growth: Vec::new(),
     };
     assert!(check(&st, &live).is_empty(), "{:?}", check(&st, &live));
 }
@@ -114,6 +134,7 @@ fn y4_finds_a_stack_file_aimed_at_someone_elses_container() {
     let live = LiveFacts {
         containers: vec![(113, "113-app-metrics".into()), (109, "109-app-kyu".into())],
         stack_files: vec![("stacks/cloudflared".into(), 109)],
+        growth: Vec::new(),
         ..Default::default()
     };
     let found = check(&st, &live);
@@ -183,4 +204,120 @@ fn y4_probe_address_covers_every_route_shape_in_the_house() {
         probe_hostport("http://10.10.10.9:8080/healthz"),
         "10.10.10.9/8080"
     );
+}
+
+// ── G3: the growth check ────────────────────────────────────────────────
+//
+// Each case below is a shape this fleet actually took on 2026-08-31, when
+// the guards were rolled out and five containers turned out to have none.
+
+/// The baseline that makes the rest meaningful: a container inside every
+/// limit produces nothing at all.
+#[test]
+fn healthy_container_reports_no_growth_findings() {
+    let out = evaluate_growth(&[healthy_growth(114)], GrowthLimits::default());
+    assert!(out.is_empty(), "expected silence, got {:?}", out);
+}
+
+/// CT 104's shape before the rollout: guards written months earlier that had
+/// never run there. This is the finding that would have caught it.
+#[test]
+fn missing_guards_are_reported() {
+    let mut g = healthy_growth(104);
+    g.guards = false;
+    let out = evaluate_growth(&[g], GrowthLimits::default());
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].severity, Severity::Drift);
+    assert!(out[0].what.contains("no runaway guards"));
+    assert!(
+        out[0].remedy.contains("homelab guards 104"),
+        "the remedy must name the command and the container: {}",
+        out[0].remedy
+    );
+}
+
+/// Loki's 923 MB lived in docker's log directory, not the journal. Both are
+/// checked, and a finding in one must not depend on the other.
+#[test]
+fn docker_logs_and_journal_are_checked_separately() {
+    let mut logs = healthy_growth(104);
+    logs.docker_logs_mb = 908;
+    let out = evaluate_growth(&[logs], GrowthLimits::default());
+    assert_eq!(out.len(), 1, "only the docker log finding: {:?}", out);
+    assert!(out[0].what.contains("908 MB"));
+
+    let mut journal = healthy_growth(104);
+    journal.journal_mb = 397;
+    let out = evaluate_growth(&[journal], GrowthLimits::default());
+    assert_eq!(out.len(), 1, "only the journal finding: {:?}", out);
+    assert!(out[0].what.contains("397 MB"));
+}
+
+/// A full rootfs is the one growth case that is not merely drift: from here
+/// an image pull or an apt upgrade can fail halfway.
+#[test]
+fn a_nearly_full_disk_is_broken_not_drift() {
+    let mut g = healthy_growth(106);
+    g.disk_used_pct = 91;
+    let out = evaluate_growth(&[g], GrowthLimits::default());
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].severity, Severity::Broken);
+
+    let mut g = healthy_growth(106);
+    g.disk_used_pct = 75;
+    let out = evaluate_growth(&[g], GrowthLimits::default());
+    assert_eq!(out.len(), 1);
+    assert_eq!(
+        out[0].severity,
+        Severity::Drift,
+        "70-85% is a trend, not a failure"
+    );
+}
+
+/// CT 106 sat at 1028 MB of swap, which is what prompted G2. Swap in use is
+/// memory pressure being hidden rather than reported, so it is a finding
+/// even while everything still works.
+#[test]
+fn swap_in_use_is_reported() {
+    let mut g = healthy_growth(106);
+    g.swap_used_mb = 1028;
+    let out = evaluate_growth(&[g], GrowthLimits::default());
+    assert_eq!(out.len(), 1);
+    assert!(out[0].what.contains("1028 MB of swap"));
+    assert!(
+        out[0].remedy.contains("more memory rather than more swap"),
+        "the remedy must point at the allocation, not at the swap size"
+    );
+}
+
+/// The limits are configurable (standing rule 27), so a fleet with different
+/// tolerances gets different answers from the same facts.
+#[test]
+fn limits_are_honoured_rather_than_hardcoded() {
+    let mut g = healthy_growth(114);
+    g.journal_mb = 120;
+    assert!(
+        evaluate_growth(&[g.clone()], GrowthLimits::default()).is_empty(),
+        "120 MB is under the default 150"
+    );
+    let strict = GrowthLimits {
+        journal_mb: 100,
+        ..GrowthLimits::default()
+    };
+    assert_eq!(evaluate_growth(&[g], strict).len(), 1);
+}
+
+/// The check runs over the whole fleet, and one loud container must not
+/// mask the others.
+#[test]
+fn every_container_is_reported_independently() {
+    let mut a = healthy_growth(104);
+    a.guards = false;
+    a.docker_logs_mb = 908;
+    let b = healthy_growth(112);
+    let mut c = healthy_growth(106);
+    c.swap_used_mb = 1028;
+    let out = evaluate_growth(&[a, b, c], GrowthLimits::default());
+    assert_eq!(out.len(), 3, "two for 104, none for 112, one for 106");
+    assert!(out.iter().all(|f| !f.subject.contains("112")));
 }

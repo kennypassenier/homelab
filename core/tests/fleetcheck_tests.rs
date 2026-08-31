@@ -400,6 +400,7 @@ fn boot_manifest(vmid: u16, onboot: bool, order: u16, mem: u32, cores: u16) -> S
     let mut m = homelab_core::manifest::StackManifest {
         registry_login: None,
         retention: None,
+        data_mounts: Vec::new(),
         stack_name: "home".into(),
         vmid,
         hostname: format!("{}-app-home", vmid),

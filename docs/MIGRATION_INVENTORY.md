@@ -138,3 +138,41 @@ first (`du -sh`) so the rollback window is a known quantity.
 Also verify at cutover: any file the *arrs hard-linked/imported recently may
 carry uid 1000 inside Movies/Series (spot-check with
 `find -maxdepth 2 -uid 1000` before declaring the media tree clean).
+
+## Addendum — 2026-08-31: Kenny's acceptance criteria, and the pre-flight
+
+Kenny set the bar for CT 105 and CT 106 in his own words (form remark, M8
+round): *"voor beide is het van cruciaal belang dat de heropbouw zowat byte
+voor byte hetzelfde resultaat geeft. Ik wil nergens instellingen moeten
+veranderen (bv in jellyfin desktop) en mijn arr-suite moet kunnen blijven
+werken, downloader is momenteel super veel aan het downloaden, die downloads
+moeten intact blijven. al mijn media bibliotheken moeten in de programma's
+onaangeroerd blijven."*
+
+That is four named guarantees, and each one has a mechanism above that
+already exists — but each one also has a way to fail silently, so they are
+written out here as things to prove rather than things to intend.
+
+| Guarantee | What actually protects it | How it is proven |
+|---|---|---|
+| Nothing to reconfigure in the Jellyfin client | the container keeps its vmid and its IP (C4), so the server address the app stores does not move; and `/opt/jellyfin-config` → `/config` carries users, devices and watch state | the desktop app connects without being touched, and a resumed episode resumes at the same second |
+| The \*arr suite keeps working | the **in-container** paths are frozen (`/data/18TB`, `/data/12TB`, `/config`, `/downloads`) — every root folder and library path in the \*arr databases is stored as an in-container path, so changing one breaks all of them at once | each \*arr's root folders show as present and healthy, with the same item counts as before |
+| The running downloads stay intact | `/opt/downloader-config/qbittorrent` carries the session, including the `.fastresume` files that say how far each torrent got; the data itself never moves because it lives on the host disks | the same torrents are present, in the same states, with progress ≥ what it was, and no torrent has re-started from zero |
+| Every media library stays untouched | the libraries are not copied at all — `data_mounts:` (D59) hands the container the same two datasets it has today | Jellyfin's library counts match the pre-rebuild numbers exactly |
+
+**Pre-flight, before either container is touched (D61).** This document was
+compiled on 2026-08-11 and its own completeness rule says a mount it does not
+list makes the plan stale. Twenty days have passed and the fleet has changed,
+so it is re-derived against the live machines first — every mount of every
+container re-read from `docker inspect` and `pct config`, every row
+re-classified, and the numbers that the acceptance table compares against
+(library counts, torrent count and states, \*arr item counts) recorded BEFORE
+anything stops. A count taken afterwards proves nothing.
+
+**The uid trap is the one to watch.** The addendum below (H3) is still true
+and still the most dangerous step: the downloads tree is owned by host uid
+1000, which does not exist inside an unprivileged container. If CT 105 is
+rebuilt unprivileged without the bounded `chown`, qbittorrent cannot write to
+its own download directory and every active torrent errors — which is exactly
+the guarantee Kenny put first. Record `du -sh` on that tree before the chown,
+so the rollback window is a known quantity rather than a surprise.

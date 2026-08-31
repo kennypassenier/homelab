@@ -17,6 +17,7 @@ fn spec_with_secret() -> DeploySpec {
     let manifest = StackManifest {
         registry_login: None,
         retention: None,
+        data_mounts: Vec::new(),
         stack_name: "test".into(),
         vmid: 108,
         hostname: "108-app-test".into(),

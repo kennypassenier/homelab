@@ -206,6 +206,7 @@ fn plan_modal_previews_changes() {
     let manifest = StackManifest {
         registry_login: None,
         retention: None,
+        data_mounts: Vec::new(),
         stack_name: "syncthing".into(),
         vmid: 110,
         hostname: "110-app-syncthing".into(),
@@ -831,6 +832,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
     let mut m = homelab_proto::StackManifest {
         registry_login: None,
         retention: None,
+        data_mounts: Vec::new(),
         stack_name: "test".into(),
         vmid: 108,
         hostname: "108-app-test".into(),

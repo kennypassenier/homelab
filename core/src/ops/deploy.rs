@@ -73,6 +73,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         if m.lxc.vpn {
             crate::ops::hardware::check_tun(exec, &m.stack_name).await?;
         }
+        // M1: the directories this stack borrows rather than owns.
+        crate::ops::hardware::check_data_mounts(exec, &m.stack_name, &m.data_mounts).await?;
         Ok(StepOutcome::Unchanged)
     });
     if let Some(g) = &gpu {
@@ -319,6 +321,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     let val = format!("{},mp={}", mount.host_path, mount.mount_point);
                     run_ok(exec, &Cmd::new("pct", &["set", &vm, &mp, &val], 60)).await?;
                 }
+                // M1: borrowed directories continue the same numbering.
+                for (i, dm) in m.data_mounts.iter().enumerate() {
+                    let mp = format!("-mp{}", m.storage.len() + i);
+                    let val = format!("{},mp={}", dm.host_path, dm.mount_point);
+                    run_ok(exec, &Cmd::new("pct", &["set", &vm, &mp, &val], 60)).await?;
+                }
                 if let Some(g) = &gpu {
                     let (dev0, dev1) = crate::ops::hardware::dev_args(g);
                     run_ok(
@@ -391,6 +399,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             for (i, mount) in m.storage.iter().enumerate() {
                 let mp = format!("-mp{}", i);
                 let val = format!("{},mp={}", mount.host_path, mount.mount_point);
+                run_ok(exec, &Cmd::new("pct", &["set", &vm, &mp, &val], 60)).await?;
+            }
+            // M1: borrowed directories continue the same numbering.
+            for (i, dm) in m.data_mounts.iter().enumerate() {
+                let mp = format!("-mp{}", m.storage.len() + i);
+                let val = format!("{},mp={}", dm.host_path, dm.mount_point);
                 run_ok(exec, &Cmd::new("pct", &["set", &vm, &mp, &val], 60)).await?;
             }
             // H4: hardware passthrough flags. GPU via pct dev entries

@@ -12,6 +12,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
         registry_login: None,
         retention: None,
+        data_mounts: Vec::new(),
         stack_name: stack.into(),
         vmid,
         hostname: format!("{}-app-{}", vmid, stack),
@@ -265,6 +266,144 @@ async fn d10_validator_collects_all_problems() {
     assert!(msg.contains("stack_name"), "{}", msg);
     assert!(msg.contains("memory_mb"), "{}", msg);
     assert!(msg.contains("hostname"), "{}", msg); // canonical name changed too
+}
+
+// ── M1: directories this stack borrows rather than owns ────────────────────
+
+/// The media libraries are two ZFS datasets that Proxmox hands to the
+/// fileserver and to the media container at the same time. They are not
+/// config, they are not backed up, and they are terabytes large — so they
+/// are declared apart from the directories the orchestrator owns, and the
+/// strict rules that make `storage:` worth having stay strict.
+#[tokio::test]
+async fn m1_a_borrowed_directory_is_mounted_but_never_created() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always("if [ -d ", CmdOutput::ok("/HDD18TB/subvol-103-disk-0 OK\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.data_mounts = vec![homelab_core::manifest::DataMount {
+        host_path: "/HDD18TB/subvol-103-disk-0".into(),
+        mount_point: "/mnt/data/18TB".into(),
+        note: Some("the fileserver's dataset".into()),
+    }];
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    // Mounted, with its number continuing after the storage entries.
+    let mp = exec.calls_containing("/HDD18TB/subvol-103-disk-0,mp=/mnt/data/18TB");
+    assert_eq!(mp.len(), 1, "{:?}", mp);
+    assert!(
+        mp[0].contains("-mp1"),
+        "storage took mp0, this is mp1: {}",
+        mp[0]
+    );
+
+    // Never created, never chowned — those are the owner's business.
+    assert!(
+        exec.calls_containing("mkdir -p /HDD18TB").is_empty(),
+        "a borrowed directory is not ours to create"
+    );
+    assert!(
+        exec.calls_containing("chown")
+            .iter()
+            .all(|c| !c.contains("/HDD18TB")),
+        "nor ours to chown"
+    );
+}
+
+/// A missing one is refused. `pct set` would happily make an empty directory,
+/// the container would start, and Jellyfin would come up with no films while
+/// every *arr root folder reported itself missing — a rebuild that silently
+/// loses the libraries.
+#[tokio::test]
+async fn m1_a_missing_borrowed_directory_stops_the_deploy() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always(
+        "if [ -d ",
+        CmdOutput::ok("/HDD18TB/subvol-103-disk-0 MISSING\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.data_mounts = vec![homelab_core::manifest::DataMount {
+        host_path: "/HDD18TB/subvol-103-disk-0".into(),
+        mount_point: "/mnt/data/18TB".into(),
+        note: None,
+    }];
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(!report.ok, "a missing library path must stop the deploy");
+    let why = report.error.unwrap().why;
+    assert!(why.contains("/HDD18TB/subvol-103-disk-0"), "{}", why);
+    assert!(
+        why.contains("libraries are empty"),
+        "say what would happen: {}",
+        why
+    );
+    assert!(exec.calls_containing("pct create").is_empty());
+    assert!(exec.calls_containing("pct clone").is_empty());
+}
+
+/// The two lists stay distinct, in both directions. Blurring them is how the
+/// strict rule on `storage:` quietly stops meaning anything.
+#[test]
+fn m1_the_two_kinds_of_directory_cannot_be_confused() {
+    use homelab_core::manifest::{validate, DataMount};
+    // A borrowed directory under /appdata is a config directory in disguise.
+    let mut s = spec(110, "syncthing");
+    s.manifest.data_mounts = vec![DataMount {
+        host_path: "/appdata/syncthing/other-config".into(),
+        mount_point: "/mnt/other".into(),
+        note: None,
+    }];
+    let err = validate(&s).expect_err("must be refused");
+    assert!(
+        format!("{}", err).contains("declare it under storage:"),
+        "the error must say where it belongs: {}",
+        err
+    );
+
+    // Two lists claiming the same place inside the container.
+    let mut s = spec(110, "syncthing");
+    s.manifest.data_mounts = vec![DataMount {
+        host_path: "/HDD18TB/media".into(),
+        mount_point: "/appdata/syncthing/syncthing-config".into(),
+        note: None,
+    }];
+    let err = validate(&s).expect_err("a mount point cannot be claimed twice");
+    assert!(format!("{}", err).contains("claimed by both"), "{}", err);
+
+    // And a relative path is refused outright.
+    let mut s = spec(110, "syncthing");
+    s.manifest.data_mounts = vec![DataMount {
+        host_path: "HDD18TB/media".into(),
+        mount_point: "/mnt/media".into(),
+        note: None,
+    }];
+    assert!(validate(&s).is_err());
+
+    // The real shape stays valid.
+    let mut ok = spec(110, "syncthing");
+    ok.manifest.data_mounts = vec![DataMount {
+        host_path: "/HDD18TB/subvol-103-disk-0".into(),
+        mount_point: "/mnt/data/18TB".into(),
+        note: Some("CT 103's dataset, mounted twice on purpose".into()),
+    }];
+    validate(&ok).expect("a borrowed media directory is valid");
+}
+
+/// A stack with no borrowed directories must not be asked about any.
+#[tokio::test]
+async fn m1_a_stack_without_borrowed_directories_is_never_probed() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+    assert!(exec.calls_containing("if [ -d ").is_empty());
 }
 
 // ── W3: a container that already exists is put back in line ────────────────

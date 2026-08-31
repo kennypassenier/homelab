@@ -118,3 +118,51 @@ pub fn dev_args(g: &GpuDevices) -> (String, String) {
         format!("{},gid={}", g.render, g.render_gid),
     )
 }
+
+/// M1: a data mount must already exist on the host. The orchestrator never
+/// creates one — that is the whole point of the separate list — so a missing
+/// path is a fact about the machine, not something to fix by making a
+/// directory.
+///
+/// It refuses rather than warns because of what the alternative looks like:
+/// `pct set` would happily create an empty directory, the container would
+/// start, Jellyfin would come up with an empty library and every *arr root
+/// folder would report itself missing. A rebuild that silently loses the
+/// media libraries is the exact failure this check exists to prevent.
+pub async fn check_data_mounts(
+    exec: &dyn Executor,
+    stack: &str,
+    mounts: &[crate::manifest::DataMount],
+) -> Result<(), CoreError> {
+    if mounts.is_empty() {
+        return Ok(());
+    }
+    let paths: Vec<&str> = mounts.iter().map(|m| m.host_path.as_str()).collect();
+    let script = paths
+        .iter()
+        .map(|p| {
+            format!(
+                "if [ -d \"{}\" ]; then echo \"{} OK\"; else echo \"{} MISSING\"; fi",
+                p, p, p
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let out = exec.run(&Cmd::new("sh", &["-c", &script], 30)).await?;
+    let missing: Vec<&str> = paths
+        .iter()
+        .filter(|p| !out.stdout.contains(&format!("{} OK", p)))
+        .copied()
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(CoreError::SafetyAbort(format!(
+        "stack '{}' declares data_mounts this host does not have: {} :: these are \
+         directories the orchestrator does not create on purpose, so a missing one \
+         means the wrong host or a pool that is not imported — deploying anyway gives \
+         a container whose libraries are empty",
+        stack,
+        missing.join(", ")
+    )))
+}

@@ -284,8 +284,13 @@ exactly four containers still carry a v1 hostname.
    of the C4 procedure is a real copy-out. Nothing else depends on it. It also
    cannot be adopted as-is — `homelab adopt` is native-only and A2 refuses its
    hostname — so a rebuild is the only route it has.
-2. **`downloader` (CT 105)** and 3. **`media` (CT 106)** — **blocked by F111**
-   until the manifest model can say what a mount of somebody else's data is.
+2. **`downloader` (CT 105)** and 3. **`media` (CT 106)** — ~~blocked by
+   F111~~ **unblocked 2026-08-31 (D59)**: `data_mounts:` says what a borrowed
+   directory is, and a missing one now stops the deploy instead of producing
+   an empty library. Both still wait on the pre-flight of D61 — the migration
+   inventory is re-derived against the live machines, and the counts the
+   acceptance test compares against are recorded, BEFORE either is touched.
+   Before media specifically: the image cache (D60).
    Both mount `/HDD18TB/subvol-103-disk-0` and `/HDD12TB/subvol-103-disk-0`,
    datasets owned by no-touch CT 103, at `/mnt/data/*`. Both are privileged,
    so they clone template 997 rather than 998. CT 106 needs `gpu: true`,

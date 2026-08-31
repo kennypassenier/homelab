@@ -20,6 +20,25 @@ pub struct StackManifest {
     #[serde(default)]
     pub storage: Vec<MountSpec>,
     pub apps: Vec<String>,
+    /// M1 (2026-08-31): folders that belong to something else. Attached to
+    /// the container, never owned by it.
+    ///
+    /// `storage:` is deliberately strict — under `/appdata/`, named
+    /// `<app>-config` — because those are the directories the orchestrator
+    /// creates, chowns and backs up, and a restore finds its snapshots by
+    /// that name. The media libraries are none of those things: they are two
+    /// ZFS datasets that Proxmox hands to CT 103 the fileserver and to the
+    /// media containers at the same time, deliberately outside the backup
+    /// scope, and terabytes large. Stretching `storage:` to fit them would
+    /// have cost the guarantee for every directory that IS ours.
+    ///
+    /// So they are declared separately and treated as read-only facts about
+    /// the host: not created, not chowned, not backed up — and a deploy
+    /// refuses if one is missing, because a media container that comes up
+    /// with an empty library is exactly the silent failure this project
+    /// keeps finding.
+    #[serde(default)]
+    pub data_mounts: Vec<DataMount>,
     /// W2: this stack's own snapshot retention, overriding the fleet-wide
     /// setting. Absent = the fleet-wide policy, which is the right answer for
     /// almost every stack.
@@ -140,6 +159,23 @@ pub struct MountSpec {
     /// Absent = the stack owns it (host-level paths with no single app).
     #[serde(default)]
     pub app: Option<String>,
+}
+
+/// A bind mount of a directory the orchestrator does not own (M1).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DataMount {
+    /// The path on the Proxmox host. Must already exist; the orchestrator
+    /// never creates it.
+    pub host_path: String,
+    /// Where it appears inside the container. This is part of the
+    /// application's configuration — every library path in the *arr
+    /// databases and every Jellyfin library points at it — so it is frozen
+    /// across a rebuild, not chosen fresh.
+    pub mount_point: String,
+    /// Free-text note on whose directory this is, kept in the manifest so
+    /// the next reader does not have to work it out.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 impl MountSpec {
@@ -263,6 +299,32 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
     }
     if m.apps.is_empty() {
         problems.push("a stack needs at least one app".into());
+    }
+    // M1: the two lists must stay distinct. A directory the orchestrator owns
+    // belongs in `storage:` and gets the strict rules; a directory it merely
+    // borrows belongs in `data_mounts:` and gets none of them. Blurring the
+    // two is how the strict rule quietly stops meaning anything.
+    for dm in &m.data_mounts {
+        if !dm.host_path.starts_with('/') || !dm.mount_point.starts_with('/') {
+            problems.push(format!(
+                "data_mounts '{}' -> '{}': both paths must be absolute",
+                dm.host_path, dm.mount_point
+            ));
+        }
+        if dm.host_path.starts_with("/appdata/") {
+            problems.push(format!(
+                "data_mounts host_path '{}' is under /appdata/, which is where the \
+                 directories this stack OWNS live :: declare it under storage: instead, \
+                 so it is created, backed up and restored",
+                dm.host_path
+            ));
+        }
+        if m.storage.iter().any(|s| s.mount_point == dm.mount_point) {
+            problems.push(format!(
+                "mount_point '{}' is claimed by both storage: and data_mounts:",
+                dm.mount_point
+            ));
+        }
     }
     for mount in &m.storage {
         if !mount.host_path.starts_with("/appdata/") {

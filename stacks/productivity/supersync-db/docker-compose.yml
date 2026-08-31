@@ -1,0 +1,60 @@
+# SuperSync's database, kept as its own app so its directory is named after
+# its owner (O7) and lands in its own restic repository (D25).
+#
+# It holds ALL of SuperSync's state. Measured on the live container
+# 2026-08-31: the `/app/data` directory the upstream compose mounts is empty
+# and root-owned while the process runs as uid 1001, so it could not have
+# been written to even if there had been anything to write. Everything Kenny
+# syncs between his desktop and his phone is in this postgres.
+#
+# Needs a .env with POSTGRES_PASSWORD from latch; the same value reaches the
+# app as SUPERSYNC_POSTGRES_PASSWORD in its own DATABASE_URL.
+
+services:
+  supersync-db:
+    # postgres 16-alpine as running on CT 111 on 2026-08-31, by digest: a
+    # major-version surprise here is a migration, not an update.
+    image: postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    container_name: supersync-db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+      - POSTGRES_USER=supersync
+      - POSTGRES_DB=supersync
+    volumes:
+      - /appdata/productivity/supersync-db-config:/var/lib/postgresql/data
+    # The tuning the hand-written stack carried, kept verbatim: it was chosen
+    # for this container's 2 GB and there is no reason for a rebuild to
+    # change how the database behaves.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - max_connections=50
+      - -c
+      - idle_in_transaction_session_timeout=300000
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supersync -d supersync"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+    shm_size: 128m
+    labels:
+      # A live postgres data directory is not safe to copy file-by-file.
+      - com.homelab.backup.pause=true
+      # Postgres major versions do not read each other's data directory, so
+      # a version step here is a migration, never an update.
+      - com.homelab.update.policy=manual
+    networks:
+      - productivity_net
+
+networks:
+  productivity_net:
+    external: true
+    name: productivity_net

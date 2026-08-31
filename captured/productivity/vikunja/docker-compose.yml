@@ -1,0 +1,25 @@
+---
+services:
+  vikunja:
+    image: vikunja/vikunja:latest
+    container_name: vikunja
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+      # Use SQLite — no external database needed for a homelab setup.
+      # The db file lives inside the mounted files volume so it's covered by Restic backups.
+      - VIKUNJA_DATABASE_TYPE=sqlite
+      - VIKUNJA_DATABASE_PATH=/app/vikunja/files/vikunja.db
+    volumes:
+      - ../vikunja-config:/app/vikunja/files
+    ports:
+      - "3456:3456"
+    restart: unless-stopped
+    networks:
+      - productivity_net
+
+networks:
+  productivity_net:
+    external: true
+    name: productivity_net

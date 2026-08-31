@@ -1,0 +1,71 @@
+---
+# SuperSync server for Super Productivity — replaces Dropbox file-polling with
+# operation sync over a WebSocket, so desktop and Android converge in seconds.
+#
+# No Caddy here, unlike upstream's compose: TLS terminates at Cloudflare and
+# Traefik on lxc-platform-stack routes sp.kp-soft.dev to port 1900 on this host.
+# That is also why 1900 binds on all interfaces rather than upstream's
+# 127.0.0.1 — Traefik reaches it from another LXC.
+
+services:
+  supersync:
+    image: ghcr.io/super-productivity/supersync:latest
+    container_name: supersync
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+      - DATABASE_URL=postgresql://supersync:${POSTGRES_PASSWORD}@postgres:5432/supersync
+      - PORT=1900
+    volumes:
+      - ../supersync-config/app:/app/data
+    ports:
+      - "1900:1900"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - productivity_net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: supersync-postgres
+    environment:
+      - TZ=Europe/Brussels
+      - POSTGRES_USER=supersync
+      - POSTGRES_DB=supersync
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    env_file:
+      - .env
+    # Sized for this 2 GB LXC, not upstream's defaults. Their 1536m cap with
+    # 384MB shared_buffers assumes a dedicated host; here it would sit against
+    # the container ceiling and hand victim selection to the host OOM killer.
+    # One user with a 100 MB quota needs a fraction of that.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - max_connections=50
+      - -c
+      - idle_in_transaction_session_timeout=300000
+    volumes:
+      - ../supersync-config/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supersync -d supersync"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+    shm_size: 128m
+    restart: unless-stopped
+    networks:
+      - productivity_net
+
+networks:
+  productivity_net:
+    external: true
+    name: productivity_net

@@ -1,0 +1,78 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# Productivity: Vikunja (the task list at tasks.kp-soft.dev) and SuperSync
+# (the sync server that keeps Kenny's Super Productivity desktop and phone in
+# step). Same vmid and same address as the container it replaces, so nothing
+# outside has to be told anything (C4).
+#
+# This is the first step of M8 and it was chosen for what it is NOT: nothing
+# else in the house depends on it, it borrows no media directories, and its
+# whole state is 70 MB. It also cannot be adopted the way kyu and almanac
+# were — `homelab adopt` describes a systemd unit and this is a docker stack,
+# and A2 refuses its current hostname — so a rebuild is the only route it has.
+#
+# Measured on the live container 2026-08-31 rather than assumed:
+#   - vikunja-config is uid 1000 inside → 101000 on the host (unprivileged).
+#   - supersync's postgres directory is uid 70, the alpine number, not 999.
+#   - supersync's own /app/data mount is EMPTY and root-owned while the
+#     process runs as 1001. It is dropped rather than carried: a declared
+#     directory with nothing in it would only make the nightly backup fail on
+#     an empty snapshot (F104). All of SuperSync's state is in its database.
+
+stack_name: productivity
+vmid: 111
+hostname: 111-app-productivity
+
+network:
+  ip: 10.10.10.11/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  # What the container has today. A rebuild is not the moment to change how
+  # much room a service gets.
+  cores: 2
+  memory_mb: 2048
+  swap_mb: 512
+  disk_gb: 8
+  storage: local-lvm
+
+lxc:
+  template: clone:998
+  unprivileged: true
+  features: nesting=1,keyctl=1
+  protection: true
+
+boot:
+  onboot: true
+  # After the edge and the database-ish services, before the front page.
+  order: 70
+
+storage:
+  - host_path: /appdata/productivity/vikunja-config
+    mount_point: /appdata/productivity/vikunja-config
+    # Vikunja runs as uid 1000; 101000 is that uid mapped out of an
+    # unprivileged LXC.
+    host_owner_uid: 101000
+    app: vikunja
+  - host_path: /appdata/productivity/supersync-db-config
+    mount_point: /appdata/productivity/supersync-db-config
+    # postgres runs as uid 70 in the ALPINE image. The paperwork stack learned
+    # this the expensive way: with the wrong number postgres answers
+    # pg_isready while failing every real query.
+    host_owner_uid: 100070
+    app: supersync-db
+  # Deliberately NO entry for supersync itself: see the note at the top. A
+  # declared directory that stays empty is not a harmless extra — it makes
+  # the nightly backup fail on an empty snapshot, and a failed nightly run
+  # auto-disables the whole stack (H8).
+
+# supersync-db first: supersync cannot reach a database that is not up yet,
+# and the list is the ordering — `depends_on` cannot cross compose files.
+apps: [supersync-db, supersync, vikunja, promtail, cadvisor]
+latch_secrets: [supersync-db, supersync, vikunja]
+
+gateway_route:
+  filename: 111-app-productivity.yml
+  gateway_vmid: 104

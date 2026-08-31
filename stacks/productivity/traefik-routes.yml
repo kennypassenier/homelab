@@ -1,0 +1,35 @@
+# Traefik route fragment for the productivity stack.
+#
+# Both names already exist and both point at 10.10.10.11, which does not
+# change in a C4 rebuild — that is the whole reason C4 keeps the address.
+#
+# sp.kp-soft.dev needs its Cloudflare Access BYPASS to stay in place: the
+# sync clients send a Bearer token and open a WebSocket, and neither can
+# satisfy the interactive Access login that guards every other *.kp-soft.dev
+# name. That bypass is Cloudflare-side and survives this rebuild untouched;
+# it is listed here so nobody removes it thinking it is leftover.
+#
+# At cutover the two hand-written fragments this file replaces must be
+# removed from the gateway, or Traefik carries two routers for the same
+# hostnames: `111-app-supersync.yml` and `lxc-productivity-stack.yml`.
+
+http:
+  routers:
+    vikunja:
+      rule: "Host(`tasks.kp-soft.dev`)"
+      entryPoints: [web]
+      service: vikunja
+    supersync:
+      rule: "Host(`sp.kp-soft.dev`)"
+      entryPoints: [web]
+      service: supersync
+
+  services:
+    vikunja:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.11:3456"
+    supersync:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.11:1900"

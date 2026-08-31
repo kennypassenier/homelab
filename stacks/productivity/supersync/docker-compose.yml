@@ -1,0 +1,47 @@
+# SuperSync server for Super Productivity: operation sync over a WebSocket,
+# so Kenny's desktop and phone converge in seconds instead of polling files.
+#
+# No Caddy, unlike upstream's compose: TLS ends at Cloudflare and Traefik
+# routes sp.kp-soft.dev here. That is also why the port binds on all
+# interfaces rather than upstream's 127.0.0.1 — Traefik reaches it from
+# another container.
+#
+# Pinned by digest rather than :latest. The hand-written stack ran :latest,
+# which means the version that comes back after a rebuild is whatever was
+# newest that day — and this rebuild has to produce the same result Kenny has
+# now. This digest is the image running on CT 111 on 2026-08-31.
+#
+# No storage of its own: everything is in supersync-db. The upstream compose
+# mounts an /app/data directory; on the live container that directory is
+# empty and root-owned while the process runs as uid 1001, so the mount is
+# dropped rather than carried over as a directory that would only ever make
+# the nightly backup fail on an empty snapshot (F104). If a future version
+# starts writing there, it gets a declared `supersync-config` then.
+#
+# Needs a .env from latch: the eleven SUPERSYNC_* values. They are prefixed
+# because latch's namespace is flat across the whole vault — JWT_SECRET and
+# POSTGRES_PASSWORD under their bare names would collide with any other app
+# that has one, and a collision anywhere breaks the deploy of every stack.
+
+services:
+  supersync:
+    image: ghcr.io/super-productivity/supersync@sha256:fcffea4b0ca478d7dc9977bf3935647c6ce4afea9f4e83f63c535e633c3797a3
+    container_name: supersync
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+      - PORT=1900
+    ports:
+      - "1900:1900"
+    labels:
+      # Its state is in the database, which is paused for its own backup.
+      - com.homelab.update.policy=manual
+    networks:
+      - productivity_net
+
+networks:
+  productivity_net:
+    external: true
+    name: productivity_net

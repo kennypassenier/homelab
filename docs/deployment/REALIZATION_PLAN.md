@@ -278,6 +278,16 @@ exactly four containers still carry a v1 hostname.
 
 **What is actually left, in the order it should now run:**
 
+**Status 2026-08-31:** two of the four are done. `productivity` (CT 111) was
+replaced in 217 s and `downloader` (CT 105) in about four minutes, both on
+their own vmid and address, both verified against numbers recorded before
+anything stopped. Two containers that were never in this list also gained
+manifests the same evening — CT 109 (kyu, kyu-runner, http-switchboard) and
+CT 112 (almanac) — because Kenny asked the question that exposed the gap:
+they could be backed up and updated, but nothing said how to rebuild the box.
+And the pull-through cache (D60) is live on CT 117, so what remains of M8 is
+media and the gateway.
+
 1. **`productivity` (CT 111, `lxc-productivity-stack`)** — vikunja, supersync
    and its postgres. 8 G rootfs, 2 GB RAM, unprivileged, no media mounts, and
    its config still lives at `/opt/*-config` inside the container, so step 1

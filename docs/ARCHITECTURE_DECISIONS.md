@@ -57,9 +57,14 @@ during the build: sha2, base64); anything with C bindings, network stacks,
 or a heavy transitive tree requires a mini-round. Decided by Kenny in the
 V4 mini-round.
 
-**AR18 · MSRV: pinned at 1.87** (`rust-version` in the workspace, inherited
+**AR18 · MSRV: pinned at 1.88** (`rust-version` in the workspace, inherited
 by every crate) with a dedicated CI job compiling on exactly that toolchain.
 Chosen because the code already uses 1.82 APIs (`Option::is_none_or`, 1.82; `u64::is_multiple_of`, 1.87 — the clippy MSRV lint caught the higher floor immediately after pinning).
+**Raised from 1.87 to 1.88 on 2026-08-31** by the ratatui 0.30 upgrade, which
+requires it. The workspace manifest was raised and the CI job was not, so the
+MSRV job failed on every push for forty minutes while claiming to check a
+floor the project no longer had — a pin in two places is a pin that drifts.
+Both now say 1.88.
 
 **AR19 · License: MIT OR Apache-2.0 (dual), decided 2026-08-11** after the
 deep-dive explanation — the Rust-ecosystem convention: patent grant for who

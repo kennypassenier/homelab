@@ -37,12 +37,12 @@ jobs:
 
   msrv:
     runs-on: ubuntu-latest
-    container: rust:1.87-bookworm
+    container: rust:1.88-bookworm
     # rust-toolchain.toml pins the project to 1.97; without this override
     # rustup inside the container would fetch 1.97 and this job would stop
     # checking the MSRV it is named after.
     env:
-      RUSTUP_TOOLCHAIN: "1.87"
+      RUSTUP_TOOLCHAIN: "1.88"
     steps:
       - uses: actions/checkout@v4
       - name: Check on MSRV (AR17)

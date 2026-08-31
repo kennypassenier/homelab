@@ -1,0 +1,66 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# kp-soft: Kenny's own site. A public portfolio at the front, and behind a
+# login the apps his friend groups use — camping trips with packing lists,
+# sim-racing lap times, binary puzzles. Laravel 12 + React in a FrankenPHP
+# image; repo at ~/Projects/kp-soft.
+#
+# Its own container because it is the only service in the house that strangers
+# are meant to reach directly. Today they cannot: Kenny chose (K1/K5,
+# 2026-08-31) to run it at website.kp-soft.dev during development, which falls
+# under the *.kp-soft.dev wildcard and therefore sits behind Cloudflare Access
+# like everything else. Moving it to the bare kp-soft.dev — the actual goal —
+# needs a tunnel hostname added in the Cloudflare dashboard, which lives there
+# and not in any file here.
+
+stack_name: kp-soft
+vmid: 116
+hostname: 116-app-kp-soft
+
+network:
+  ip: 10.10.10.16/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 2
+  memory_mb: 2048
+  swap_mb: 512
+  # PHP-FPM plus the image layers; the uploads live in the mount below and
+  # grow there, not on the rootfs.
+  disk_gb: 16
+  storage: local-lvm
+
+lxc:
+  template: clone:998
+  unprivileged: true
+  features: nesting=1,keyctl=1
+  protection: true
+
+boot:
+  onboot: true
+  order: 75
+
+storage:
+  # Everything mutable: the SQLite database, the uploaded trip photos and the
+  # logs. Mounted at /app/storage inside the container.
+  #
+  # Deliberately NOT /app/database — that directory ships the migrations and
+  # seeders inside the image, and a mount over it hides them: `migrate` then
+  # reports "No migrations found" and every request answers 500. The handover
+  # says its author walked into this once; it is recorded here so nobody
+  # repeats it from this side either.
+  - host_path: /appdata/kp-soft/kp-soft-config
+    mount_point: /appdata/kp-soft/kp-soft-config
+    # FrankenPHP runs as root in this image; 100000 is root mapped out of an
+    # unprivileged LXC.
+    host_owner_uid: 100000
+    app: kp-soft
+
+apps: [kp-soft, promtail, cadvisor]
+latch_secrets: [kp-soft]
+
+gateway_route:
+  filename: 116-app-kp-soft.yml
+  gateway_vmid: 104

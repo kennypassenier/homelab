@@ -1,0 +1,51 @@
+# kp-soft — Laravel 12 + React on FrankenPHP, one process, plain HTTP on 80.
+# TLS ends upstream at Cloudflare; Traefik forwards to this container.
+#
+# The image is PRIVATE on GHCR (verified 2026-08-31: an anonymous manifest
+# fetch answers 403), so the container needs a one-time `docker login ghcr.io`
+# with a read:packages token before this can pull. The orchestrator has no
+# mechanism for registry logins — it pushes compose files and runs
+# `docker compose pull`.
+#
+# Pinned, not :latest. A deploy you cannot repeat is not a deploy: `latest`
+# means the version that comes back after a rebuild is whatever was newest
+# that day, which is exactly what a restore must not depend on.
+
+services:
+  kp-soft:
+    image: ghcr.io/kennypassenier/kp-soft:v0.1.0
+    container_name: kp-soft
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - TZ=Europe/Brussels
+      # The app trusts X-Forwarded-* so TLS may end upstream. Without the
+      # headers arriving it builds http:// links, and a magic-link login mail
+      # then carries a downgraded URL.
+      - TRUSTED_PROXIES=10.10.10.0/24
+    volumes:
+      - /appdata/kp-soft/kp-soft-config:/app/storage
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/up"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      # SQLite is not safe to copy while it is being written to.
+      - com.homelab.backup.pause=true
+      # The entrypoint migrates on every start and migrations are one-way, so
+      # a version step is a decision, never an update.
+      - com.homelab.update.policy=manual
+    networks:
+      - kp-soft_net
+
+networks:
+  kp-soft_net:
+    external: true
+    name: kp-soft_net

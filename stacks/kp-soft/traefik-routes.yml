@@ -1,0 +1,27 @@
+# Traefik route fragment for the kp-soft stack.
+#
+# website.kp-soft.dev during development (K1, 2026-08-31). It falls under the
+# *.kp-soft.dev wildcard and therefore sits behind Cloudflare Access, which is
+# what Kenny wants while he is building: strangers cannot see a half-finished
+# site, and he reaches it with the login he already has.
+#
+# The real goal is the bare kp-soft.dev, public and NOT behind Access. That
+# needs two things this file cannot do: a tunnel hostname added in the
+# Cloudflare Zero Trust dashboard, and certainty that the apex stays outside
+# the Access application that guards every *.kp-soft.dev name today. Measured
+# 2026-08-31: the apex answers 404 from Cloudflare and is not Access-guarded;
+# www.kp-soft.dev answers 302 to the login, which is what the public site must
+# never do.
+
+http:
+  routers:
+    kp-soft:
+      rule: "Host(`website.kp-soft.dev`)"
+      entryPoints: [web]
+      service: kp-soft
+
+  services:
+    kp-soft:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.16:8080"

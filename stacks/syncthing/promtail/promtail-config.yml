@@ -16,8 +16,8 @@ scrape_configs:
           - localhost
         labels:
           job: docker
-          stack: syncthing
-          host: 110-app-syncthing
+          stack: synctest
+          host: 108-app-synctest
           __path__: /var/lib/docker/containers/*/*-json.log
 
     pipeline_stages:
@@ -49,6 +49,6 @@ scrape_configs:
           - localhost
         labels:
           job: syslog
-          stack: syncthing
-          host: 110-app-syncthing
+          stack: synctest
+          host: 108-app-synctest
           __path__: /var/log/syslog

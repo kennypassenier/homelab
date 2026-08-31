@@ -7,7 +7,7 @@ services:
       - PUID=1000
       - PGID=1000
     volumes:
-      - /appdata/syncthing/syncthing-config:/var/syncthing
+      - /appdata/synctest/syncthing-config:/var/syncthing
     ports:
       - "8384:8384"       # web GUI (via traefik / LAN only)
       - "22000:22000/tcp" # sync protocol
@@ -16,11 +16,18 @@ services:
     restart: unless-stopped
     labels:
       - com.homelab.backup.pause=true
-      - com.centurylinklabs.watchtower.enable=true
+      # Y1 class: automatic. A failed syncthing update is cheap — the peers
+      # keep their data and the rollback is proven — so it takes the nightly
+      # update rather than waiting for a hand.
+      - com.homelab.update.policy=auto
+      # The watchtower label is gone: containrrr/watchtower was archived in
+      # December 2025 and Kenny chose at Z1 that the orchestrator owns docker
+      # updates. A label for an updater that does not run is an instruction
+      # nobody reads.
     networks:
-      - syncthing_net
+      - synctest_net
 
 networks:
-  syncthing_net:
+  synctest_net:
     external: true
-    name: syncthing_net
+    name: synctest_net

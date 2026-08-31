@@ -114,6 +114,19 @@ pub enum Command {
     ApplyGuards {
         vmid: u16,
     },
+    /// Drop a stack's record from host state without touching the container.
+    ///
+    /// A stack that is renamed, or moved out of this orchestrator's care,
+    /// leaves a record behind that no longer matches anything. The fleet
+    /// check then reports it as broken forever, and a report that carries a
+    /// permanent false finding is a report people stop reading.
+    ///
+    /// Refuses while a container still answers to the recorded hostname:
+    /// that record is not stale, it is live, and forgetting it would leave a
+    /// managed stack unbacked-up and unwatched with nothing to say so.
+    ForgetStack {
+        stack: String,
+    },
     /// Y4: hold the repository against reality and report every difference.
     /// The client sends what only it can see — the vmid each stack directory
     /// claims — and the host adds what only it can see: which containers

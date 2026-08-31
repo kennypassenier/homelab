@@ -1902,6 +1902,64 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 },
             }
         }
+        Rpc::ForgetStack { stack } => {
+            let store =
+                homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+            let mut snapshot = match store.load().await {
+                Ok(s) => s,
+                Err(e) => {
+                    return RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: format!("state unreadable: {}", e),
+                    }
+                }
+            };
+            let Some(entry) = snapshot.stacks.get(&stack).cloned() else {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("no stack '{}' in host state", stack),
+                };
+            };
+            // The safety rule: only a record whose container no longer
+            // answers to that hostname may be forgotten. A live one being
+            // forgotten would go silently unbacked-up.
+            let live = exec
+                .run(&homelab_core::executor::Cmd::new("pct", &["list"], 30))
+                .await
+                .map(|o| o.stdout)
+                .unwrap_or_default();
+            if live
+                .lines()
+                .any(|l| l.split_whitespace().any(|w| w == entry.hostname))
+            {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!(
+                        "'{}' still names a live container ({}) :: this record is current, not stale — destroy the stack or rename it first",
+                        stack, entry.hostname
+                    ),
+                };
+            }
+            snapshot.stacks.remove(&stack);
+            match store.save(snapshot).await {
+                Ok(()) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!(
+                        "forgot '{}' (was vmid {} as {}) — the container was not touched",
+                        stack, entry.vmid, entry.hostname
+                    ),
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("could not write state: {}", e),
+                },
+            }
+        }
         Rpc::ApplyGuards { vmid } => {
             // A1 still governs: the guards write files and restart docker, so
             // an untouchable guest is untouchable here too.

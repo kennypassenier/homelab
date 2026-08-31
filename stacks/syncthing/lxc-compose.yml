@@ -3,25 +3,25 @@
 # always have somewhere to sync to. Spec per the vault note
 # "Homelab Planned Services" §4: tiny, onboot, versioned, not public.
 
-stack_name: syncthing
-vmid: 110
-hostname: 110-app-syncthing
+stack_name: synctest
+vmid: 108
+hostname: 108-app-synctest
 
 network:
-  ip: 10.10.10.10/24
+  ip: 10.10.10.8/24
   gateway: 10.10.10.1
   bridge: vmbr0
   vlan: 10
 
 resources:
-  cores: 1
-  memory_mb: 512
+  cores: 2
+  memory_mb: 1024
   swap_mb: 256
   disk_gb: 4
   storage: local-lvm
 
 lxc:
-  template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
+  template: "clone:998"
   unprivileged: true
   features: "nesting=1,keyctl=1"
 
@@ -32,9 +32,12 @@ boot:
 storage:
   # Vault data lives on the Proxmox host → survives container recreation.
   # Owner 101000 = uid 1000 inside the unprivileged LXC (syncthing's PUID).
-  - host_path: /appdata/syncthing/syncthing-config
-    mount_point: /appdata/syncthing/syncthing-config
+  - host_path: /appdata/synctest/syncthing-config
+    mount_point: /appdata/synctest/syncthing-config
     host_owner_uid: 101000
+    # D25: owned by the app, not the stack — which is what lets this stack be
+    # renamed to `syncthing` in M8 without abandoning its backup history.
+    app: syncthing
 
 apps:
   - syncthing
@@ -43,5 +46,5 @@ apps:
 # Web GUI behind the existing traefik on CT 104 (Cloudflare Access gates it).
 # The sync protocol itself (22000/21027) stays LAN-only, per the vault note.
 gateway_route:
-  filename: 110-app-syncthing.yml
+  filename: 108-app-synctest.yml
   gateway_vmid: 104

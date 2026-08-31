@@ -106,6 +106,13 @@ async fn main() {
             );
             rpc(&host, &token, Command::ApplyGuards { vmid }).await;
         }
+        "forget" => {
+            let stack = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab forget <stack>"))
+                .clone();
+            rpc(&host, &token, Command::ForgetStack { stack }).await;
+        }
         "check" => {
             let base = args.get(2).cloned().unwrap_or_else(|| "stacks".into());
             let stack_files = crate::spec::stack_files_with_vmids(&base);
@@ -509,6 +516,7 @@ async fn main() {
             println!("  homelab backup-host-meta            snapshot vault/state/TLS/repo (H10)");
             println!("  homelab check [stacks/]             hold the repo against reality (Y4)");
             println!("  homelab guards <vmid>               apply the runaway guards (B2/G1)");
+            println!("  homelab forget <stack>              drop a stale state record (no container touched)");
             println!("  homelab adopt stacks/<name>         adopt a native-service CT (C7)");
             println!(
                 "  homelab backup-native|update-native <stack>  drive an adopted service (C7)"

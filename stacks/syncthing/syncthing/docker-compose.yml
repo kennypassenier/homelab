@@ -7,7 +7,7 @@ services:
       - PUID=1000
       - PGID=1000
     volumes:
-      - /appdata/synctest/syncthing-config:/var/syncthing
+      - /appdata/syncthing/syncthing-config:/var/syncthing
     ports:
       - "8384:8384"       # web GUI (via traefik / LAN only)
       - "22000:22000/tcp" # sync protocol
@@ -25,9 +25,9 @@ services:
       # updates. A label for an updater that does not run is an instruction
       # nobody reads.
     networks:
-      - synctest_net
+      - syncthing_net
 
 networks:
-  synctest_net:
+  syncthing_net:
     external: true
-    name: synctest_net
+    name: syncthing_net

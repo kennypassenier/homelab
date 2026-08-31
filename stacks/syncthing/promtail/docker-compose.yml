@@ -17,9 +17,9 @@ services:
       # a bad version costs is a gap in the log, and the rollback restores it.
       - com.homelab.update.policy=auto
     networks:
-      - synctest_net
+      - syncthing_net
 
 networks:
-  synctest_net:
+  syncthing_net:
     external: true
-    name: synctest_net
+    name: syncthing_net

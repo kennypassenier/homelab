@@ -3,9 +3,9 @@
 # always have somewhere to sync to. Spec per the vault note
 # "Homelab Planned Services" §4: tiny, onboot, versioned, not public.
 
-stack_name: synctest
+stack_name: syncthing
 vmid: 108
-hostname: 108-app-synctest
+hostname: 108-app-syncthing
 
 network:
   ip: 10.10.10.8/24
@@ -32,8 +32,8 @@ boot:
 storage:
   # Vault data lives on the Proxmox host → survives container recreation.
   # Owner 101000 = uid 1000 inside the unprivileged LXC (syncthing's PUID).
-  - host_path: /appdata/synctest/syncthing-config
-    mount_point: /appdata/synctest/syncthing-config
+  - host_path: /appdata/syncthing/syncthing-config
+    mount_point: /appdata/syncthing/syncthing-config
     host_owner_uid: 101000
     # D25: owned by the app, not the stack — which is what lets this stack be
     # renamed to `syncthing` in M8 without abandoning its backup history.
@@ -46,5 +46,5 @@ apps:
 # Web GUI behind the existing traefik on CT 104 (Cloudflare Access gates it).
 # The sync protocol itself (22000/21027) stays LAN-only, per the vault note.
 gateway_route:
-  filename: 108-app-synctest.yml
+  filename: 108-app-syncthing.yml
   gateway_vmid: 104

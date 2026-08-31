@@ -1,0 +1,91 @@
+# qBittorrent behind gluetun's VPN — ONE compose file on purpose.
+#
+# qBittorrent has no network stack of its own: it runs inside gluetun's
+# namespace (`network_mode: service:gluetun`). That IS the kill switch. If the
+# VPN container stops, qBittorrent loses all connectivity instead of falling
+# back to the naked line, and Kenny's traffic never leaves the house
+# unprotected.
+#
+# Docker only accepts `service:` between services in the SAME compose project,
+# so these two cannot be separate apps in the stack file. Splitting them "for
+# tidiness" would leave a container that still runs and downloads — without
+# the VPN. That is why they share a directory, exactly as paperwork's
+# paperless-db holds two services in one file.
+#
+# Carried over verbatim from the container this replaces, including the two
+# comments that record why each setting is the way it is: the health target
+# addresses (a DNS race at startup) and the wget form of the health check
+# (gluetun answers GET, not HEAD).
+#
+# The image tags are the ones running on 2026-08-31. They are :latest on the
+# old container; pinning them by digest here would be the right thing on any
+# other day, but Kenny's bar for this rollout is that nothing changes, and
+# those two images are the pair currently proven to work together with this
+# session. Pin them at the first deliberate update instead (T60).
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - .env
+    environment:
+      - VPN_SERVICE_PROVIDER=surfshark
+      - VPN_TYPE=wireguard
+      - WIREGUARD_ADDRESSES=10.14.0.2/32
+      - SERVER_HOSTNAMES=ch-zur.prod.surfshark.com
+      # The key comes from latch under a prefixed name; gluetun reads the
+      # bare one.
+      - WIREGUARD_PRIVATE_KEY=${GLUETUN_WIREGUARD_PRIVATE_KEY}
+      # IP addresses, not hostnames: the defaults (cloudflare.com, github.com)
+      # need gluetun's own DNS to be up, which races with startup and marks a
+      # working tunnel unhealthy.
+      - HEALTH_TARGET_ADDRESSES=1.1.1.1:443,8.8.8.8:443
+    ports:
+      # qBittorrent's Web UI, published here because qBittorrent has no
+      # network of its own.
+      - "8080:8080"
+    healthcheck:
+      # gluetun's health server answers GET only; `wget --spider` sends HEAD
+      # and gets a 405, which fails forever on a perfectly good tunnel.
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:9999"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels:
+      - com.homelab.update.policy=manual
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        # Not merely started: a healthy tunnel. Without this qBittorrent can
+        # come up first and announce itself over the naked line.
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+      - WEBUI_PORT=8080
+      # VueTorrent as the alternative Web UI, installed on every start.
+      - DOCKER_MODS=ghcr.io/vuetorrent/vuetorrent-lsio-mod:latest
+    volumes:
+      - /appdata/downloader/qbittorrent-config:/config
+      # The in-container path is frozen: every save path in the session and
+      # both *arr categories are stored as /downloads/... Change it and every
+      # running torrent loses its destination.
+      - /mnt/data/18TB/downloads:/downloads
+    labels:
+      # The session files say how far each torrent got; copying them while
+      # they are being written is how a torrent restarts from zero.
+      - com.homelab.backup.pause=true
+      - com.homelab.update.policy=manual
+    restart: unless-stopped

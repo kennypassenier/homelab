@@ -1,0 +1,18 @@
+# Traefik route fragment for the downloader stack.
+#
+# One name, unchanged, at an address that does not change in a C4 rebuild.
+# The Web UI is served by gluetun's published port, because qBittorrent runs
+# inside gluetun's network namespace.
+
+http:
+  routers:
+    qbittorrent:
+      rule: "Host(`qbit.kp-soft.dev`)"
+      entryPoints: [web]
+      service: qbittorrent
+
+  services:
+    qbittorrent:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.5:8080"

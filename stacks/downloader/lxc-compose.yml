@@ -1,0 +1,83 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# Downloader: qBittorrent behind a Surfshark WireGuard tunnel. Same vmid and
+# same address as the container it replaces (C4), so qbit.kp-soft.dev, the
+# *arr download clients and every save path keep pointing at what they always
+# pointed at.
+#
+# Measured on the live container before it was touched, not assumed
+# (M8_CT105_PREFLIGHT.md):
+#
+#   - It stays PRIVILEGED. The downloads tree is owned by host uid 1000, and
+#     qBittorrent runs as PUID 1000. In a privileged container those are the
+#     same number, so the ownership question never arises. Making it
+#     unprivileged would have forced a `chown -R` over 590 GB — the single
+#     most dangerous step in the whole migration plan, and one that exists
+#     only to repair a change nobody needs to make.
+#   - It needs /dev/net/tun for the tunnel (`vpn: true`, which W1 now
+#     verifies the host can actually give).
+#   - qBittorrent and gluetun share one compose file. They must: qBittorrent
+#     runs inside gluetun's network namespace and that is the kill switch.
+#   - Both data disks are carried across although only the 18 TB one is used
+#     today. A borrowed directory costs nothing, and dropping one a torrent
+#     could be pointed at is a change with no upside.
+
+stack_name: downloader
+vmid: 105
+hostname: 105-app-downloader
+
+network:
+  ip: 10.10.10.5/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  # Exactly what the container has today.
+  cores: 2
+  memory_mb: 2048
+  swap_mb: 512
+  disk_gb: 10
+  storage: local-lvm
+
+lxc:
+  # 997 is the privileged golden template; 998 is the unprivileged one.
+  template: clone:997
+  unprivileged: false
+  features: nesting=1,keyctl=1
+  protection: true
+  gpu: false
+  vpn: true
+
+boot:
+  onboot: true
+  # After the edge, before media: the *arr apps expect their download client.
+  order: 90
+
+storage:
+  - host_path: /appdata/downloader/qbittorrent-config
+    mount_point: /appdata/downloader/qbittorrent-config
+    # Privileged container: in-container uid 1000 IS host uid 1000, so no
+    # +100000 mapping. This is the number O5 checks against the privilege
+    # level, and getting it wrong gives a directory the app cannot use while
+    # the deploy reports success.
+    host_owner_uid: 1000
+    app: qbittorrent
+
+# Directories that belong to the fileserver (CT 103), attached but never
+# owned: not created, not chowned, not backed up. 590 GB of downloads and the
+# media libraries live here.
+data_mounts:
+  - host_path: /HDD18TB/subvol-103-disk-0
+    mount_point: /mnt/data/18TB
+    note: "CT 103's dataset; holds downloads/ and the 18 TB library"
+  - host_path: /HDD12TB/subvol-103-disk-0
+    mount_point: /mnt/data/12TB
+    note: "CT 103's dataset; unused by this stack today, carried for parity"
+
+apps: [qbittorrent, promtail, cadvisor]
+latch_secrets: [qbittorrent]
+
+gateway_route:
+  filename: 105-app-downloader.yml
+  gateway_vmid: 104

@@ -7,6 +7,27 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
 (`/project-flow`). Standing rules apply to every change:
 `~/Projects/dev-procedure/STANDING_RULES.md`.
 
+## Before anything else: two rules that keep breaking
+
+Kenny has had to repeat these four times in one evening (2026-08-31). They
+are not style preferences; ignoring them costs him the ability to steer.
+
+1. **Every choice Kenny makes is ONE interactive form**, however small, per
+   `~/Projects/dev-procedure/FORM_PROTOCOL.md` — re-read fresh from disk each
+   time. The trigger that keeps being missed: **a question from Kenny that
+   contains a choice is a form, not a task.** The moment I have just measured
+   something and can see the fix is exactly the moment to stop and build the
+   form instead.
+
+2. **A decision Kenny has already made is not mine to defer, narrow or
+   re-time.** If new information makes his answer look wrong — it is late, the
+   risk changed, I am unsure — that is a new form item, not a paragraph
+   explaining what I decided instead. Reporting a unilateral change of plan in
+   prose is the same violation as never asking.
+
+Both failures look identical from his side: he answered, and then had to
+argue with the answer.
+
 ## Procedure status
 
 Two projects live in this repo, each with its own phase track.

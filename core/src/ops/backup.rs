@@ -143,10 +143,41 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         Ok(StepOutcome::Unchanged)
     });
 
-    // Quiesce: stop containers labeled com.homelab.backup.pause=true.
+    // Quiesce: stop containers labeled com.homelab.backup.pause=true, and
+    // REMEMBER WHICH ONES.
+    //
+    // This used to stop by label and resume by the manifest's `apps` list,
+    // and the two are not the same set. On 2026-08-31 the metrics stack's
+    // nightly backup stopped prometheus and alertmanager — both labelled —
+    // and resumed prometheus, promtail and pve-exporter, because host state
+    // still held the app list from before alertmanager was added. The
+    // snapshot then failed on a stale path, so nothing else touched the
+    // stack, and Alertmanager stayed down for six hours. Nothing reported
+    // it; Kenny saw it in Uptime Kuma, which had been watching it for two
+    // hours by then.
+    //
+    // A backup that can leave a service off is worse than a backup that
+    // fails, so what is paused is now what is resumed, by name.
+    let paused: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let paused_w = paused.clone();
     step!(runner, "quiesce", {
-        let script = "for c in $(docker ps -q --filter label=com.homelab.backup.pause=true); do docker stop $c; done; true";
-        let _ = super::util_pct_sh(exec, m.vmid, script, 120).await?;
+        let script = "docker ps --filter label=com.homelab.backup.pause=true --format '{{.Names}}'";
+        let out = super::util_pct_sh(exec, m.vmid, script, 60).await?;
+        let names: Vec<String> = out
+            .stdout
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        if names.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let stop = format!("docker stop {}; true", names.join(" "));
+        let _ = super::util_pct_sh(exec, m.vmid, &stop, 120).await?;
+        if let Ok(mut g) = paused_w.lock() {
+            *g = names;
+        }
         Ok(StepOutcome::Changed)
     });
 
@@ -181,14 +212,27 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         .await;
 
     // Resume the paused containers — unconditionally.
+    let paused_r = paused.clone();
     step!(runner, "resume", {
+        // Exactly what quiesce stopped, by name — this is the half that must
+        // not depend on any list that can go stale.
+        let names = paused_r.lock().map(|g| g.clone()).unwrap_or_default();
+        if !names.is_empty() {
+            let start = format!("docker start {}; true", names.join(" "));
+            let _ = super::util_pct_sh(exec, m.vmid, &start, 300).await?;
+        }
+        // Then the declared apps, which also brings back anything that was
+        // down for an unrelated reason. Belt and braces: this is the step
+        // that runs even when the snapshot failed.
         let dir_cmds = m
             .apps
             .iter()
             .map(|a| format!("cd '/opt/{}/{}' && docker compose up -d", m.stack_name, a))
             .collect::<Vec<_>>()
             .join("; ");
-        let _ = super::util_pct_sh(exec, m.vmid, &format!("{}; true", dir_cmds), 300).await?;
+        if !dir_cmds.is_empty() {
+            let _ = super::util_pct_sh(exec, m.vmid, &format!("{}; true", dir_cmds), 300).await?;
+        }
         Ok(StepOutcome::Changed)
     });
 

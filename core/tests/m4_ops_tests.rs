@@ -170,6 +170,89 @@ async fn e1_backup_runs_init_quiesce_snapshot_resume_retention() {
     assert!(exec.calls_containing("restic forget").is_empty());
 }
 
+/// The backup must resume exactly what it paused, not what the manifest
+/// happens to list.
+///
+/// On 2026-08-31 the metrics stack's nightly backup stopped prometheus AND
+/// alertmanager (both carry the pause label) and resumed prometheus,
+/// promtail and pve-exporter, because host state still held the app list
+/// from before alertmanager existed. The snapshot then failed on a stale
+/// path, so nothing else touched the stack. Alertmanager stayed down for six
+/// hours and nothing reported it.
+///
+/// So: an app that is paused but NOT in `apps` must still come back.
+#[tokio::test]
+async fn e1_backup_resumes_every_container_it_paused_even_one_not_in_apps() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    // The container list the label filter returns — note `alertmanager` is
+    // not among the manifest's apps.
+    exec.respond_always(
+        "backup.pause=true --format",
+        CmdOutput::ok("prometheus\nalertmanager\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let cfg = BackupCfg::default();
+    let report = backup(&ctx(&exec, &sink, &j), &manifest(108, "test"), &cfg).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let stopped = exec.calls_containing("docker stop");
+    assert!(
+        stopped.iter().any(|c| c.contains("alertmanager")),
+        "quiesce must stop what the label selects: {:?}",
+        stopped
+    );
+    let started = exec.calls_containing("docker start");
+    assert!(
+        started.iter().any(|c| c.contains("alertmanager")),
+        "resume must start back exactly what was paused: {:?}",
+        started
+    );
+    assert!(
+        started.iter().any(|c| c.contains("prometheus")),
+        "and the rest of them too: {:?}",
+        started
+    );
+    // Order matters: nothing may be started before the snapshot has run.
+    let calls = exec.calls();
+    let pos = |n: &str| calls.iter().position(|c| c.contains(n)).unwrap();
+    assert!(
+        pos("docker stop") < pos("restic backup"),
+        "stop before snapshot"
+    );
+    assert!(
+        pos("restic backup") < pos("docker start"),
+        "snapshot before start"
+    );
+}
+
+/// Nothing labelled means nothing stopped and nothing to start back — the
+/// step must not invent a bare `docker start` with no arguments.
+#[tokio::test]
+async fn e1_backup_with_nothing_to_pause_starts_nothing() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("backup.pause=true --format", CmdOutput::ok("\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("docker start").is_empty(),
+        "no containers were paused, so none may be started"
+    );
+    assert!(
+        exec.calls_containing("docker stop").is_empty(),
+        "and none may be stopped"
+    );
+}
+
 #[tokio::test]
 async fn e2_restore_validates_quiesces_restores_resumes_verifies() {
     let exec = MockExecutor::new();

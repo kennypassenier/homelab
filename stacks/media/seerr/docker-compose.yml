@@ -1,0 +1,28 @@
+# seerr, carried over from the container this replaces. The in-container
+# paths are frozen: every root folder in its database is stored as
+# /data/18TB or /data/12TB, so changing one breaks all of them at once.
+
+services:
+  seerr:
+    image: ghcr.io/seerr-team/seerr:latest
+    container_name: seerr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      - /appdata/media/seerr-config:/app/config
+    ports:
+      - "5055:5055"
+    labels:
+      # A live database is not safe to copy while it is being written to.
+      - com.homelab.backup.pause=true
+      - com.homelab.update.policy=auto
+    restart: unless-stopped
+    networks:
+      - media_net
+
+networks:
+  media_net:
+    external: true
+    name: media_net

@@ -1,0 +1,68 @@
+# Jellyfin, carried over from the container this replaces — including the
+# details that look odd and are not.
+#
+# `group_add` is a shotgun list of group ids covering render and video on
+# whatever host it lands on. Two of them are the real ones here, measured on
+# this machine: 44 is `video` and 993 is `render`. The others are harmless.
+# It is left as it was on purpose: this rollout's bar is that nothing
+# changes, and a tidier list is a change that can only cost transcoding.
+#
+# Transcodes go to /dev/shm (RAM), which is why shm_size is 4 GB and why the
+# /cache volume of the old container was never worth carrying: it regenerates.
+#
+# METADATA IS DELIBERATELY NOT IN THE BACKED-UP DIRECTORY (Kenny, M1
+# 2026-09-01). Jellyfin's artwork and descriptions are 8.8 GB that it
+# re-downloads by itself; keeping them in /config would put that in every
+# nightly snapshot forever, for something that comes back for free. They live
+# on their own host path instead — attached, never backed up — and a restore
+# gives back a working library whose posters fill in again over the following
+# hours.
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    user: "1000:1000"
+    group_add:
+      - "993"
+      - "44"
+      - "104"
+      - "105"
+      - "106"
+      - "107"
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    shm_size: "4gb"
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+      # The vault prefixes every variable with its app's name, even when the
+      # variable already carries it, so that "one name, one owner" has no
+      # exceptions to remember. Mapped back to what Jellyfin reads.
+      - JELLYFIN_API_KEY=${JELLYFIN_JELLYFIN_API_KEY}
+      - JELLYFIN_LOG_DIR=/config/log
+      - JELLYFIN_TRANSCODE_DIR=/dev/shm
+      - DOTNET_SYSTEM_NET_DISABLE_IPV6=1
+    volumes:
+      - /appdata/media/jellyfin-config:/config
+      # The artwork, on a path outside the backup. Mounted over /config so
+      # Jellyfin finds it exactly where it always has.
+      - /mnt/jellyfin-metadata:/config/metadata
+      - /mnt/data/18TB:/data/18TB
+      - /mnt/data/12TB:/data/12TB
+    ports:
+      - "8096:8096"
+    labels:
+      # The watch-state database is not safe to copy while it is being
+      # written to.
+      - com.homelab.backup.pause=true
+      - com.homelab.update.policy=auto
+    restart: unless-stopped
+    networks:
+      - media_net
+
+networks:
+  media_net:
+    external: true
+    name: media_net

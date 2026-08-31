@@ -1,0 +1,26 @@
+---
+# Isolated deployment for Prowlarr indexer manager
+# The shared network must exist on the Docker host prior to deployment
+
+networks:
+  media_net:
+    external: true
+
+services:
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    # LinuxServer.io images utilize PUID and PGID variables for shared storage 
+    # permission consistency rather than the native docker user directive
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      # Dynamic configuration folder targeted by backup policies
+      - ../prowlarr-config:/config
+    ports:
+      - "9696:9696"
+    restart: unless-stopped
+    networks:
+      - media_net

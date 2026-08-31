@@ -1,0 +1,24 @@
+# flaresolverr solves the challenges Prowlarr's indexers put in front of it.
+# It keeps nothing worth having: the old container's config volume was 4 KB
+# and empty, so it is not declared here at all — a directory that stays empty
+# would only make the nightly backup fail on an empty snapshot (F104).
+
+services:
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - TZ=Europe/Brussels
+    ports:
+      - "8191:8191"
+    labels:
+      - com.homelab.update.policy=auto
+    restart: unless-stopped
+    networks:
+      - media_net
+
+networks:
+  media_net:
+    external: true
+    name: media_net

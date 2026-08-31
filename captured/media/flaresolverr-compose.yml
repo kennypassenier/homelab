@@ -1,0 +1,22 @@
+# Isolated deployment for FlareSolverr proxy
+# The shared network must exist on the Docker host prior to deployment
+
+networks:
+  media_net:
+    external: true
+
+services:
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      # Set log level to info
+      - LOG_LEVEL=info
+      # Set timezone to local
+      - TZ=Europe/Brussels
+    ports:
+      # Expose port for Prowlarr to communicate with
+      - "8191:8191"
+    restart: unless-stopped
+    networks:
+      - media_net

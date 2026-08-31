@@ -1,0 +1,21 @@
+networks:
+  media_net:
+    external: true
+
+services:
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      - ../bazarr-config:/config
+      - /mnt/data/18TB:/data/18TB
+      - /mnt/data/12TB:/data/12TB
+    ports:
+      - "6767:6767"
+    restart: unless-stopped
+    networks:
+      - media_net

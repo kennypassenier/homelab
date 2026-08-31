@@ -1,0 +1,25 @@
+---
+# Isolated deployment for Seerr (media request management)
+# The shared network must exist on the Docker host prior to deployment
+
+networks:
+  media_net:
+    external: true
+
+services:
+  seerr:
+    image: ghcr.io/seerr-team/seerr:latest
+    container_name: seerr
+    # Utilize PUID and PGID variables for shared storage permission consistency
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      # Dynamic configuration folder targeted by the global Restic backup policies
+      - ../seerr-config:/app/config
+    ports:
+      - "5055:5055"
+    restart: unless-stopped
+    networks:
+      - media_net

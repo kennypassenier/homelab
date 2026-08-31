@@ -1,0 +1,46 @@
+---
+# Isolated deployment for Jellyfin with hardware acceleration and environment file
+# The shared network must exist on the Docker host prior to deployment
+
+networks:
+  media_net:
+    external: true
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    # Run as specific non-root user for shared storage permission consistency
+    user: "1000:1000"
+    # Hardware acceleration groups for Intel/AMD GPU passthrough
+    group_add:
+      - "993"
+      - "44"
+      - "104"
+      - "105"
+      - "106"
+      - "107"
+    devices:
+      # Render device for Intel GPU hardware transcoding via VAAPI
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    # Allocation of shared memory for background transcoding processes
+    shm_size: "4gb"
+    # Load required secrets and keys from the synchronized local .env file
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+      - JELLYFIN_LOG_DIR=/config/log
+      - JELLYFIN_TRANSCODE_DIR=/dev/shm
+      - DOTNET_SYSTEM_NET_DISABLE_IPV6=1
+    volumes:
+      # Dynamic configuration folder targeted by backup policies
+      - ../jellyfin-config:/config
+      # Direct mount paths for localized large-scale storage units
+      - /mnt/data/18TB:/data/18TB
+      - /mnt/data/12TB:/data/12TB
+    ports:
+      - "8096:8096"
+    restart: unless-stopped
+    networks:
+      - media_net

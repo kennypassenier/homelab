@@ -1,0 +1,57 @@
+# Traefik route fragment for the media stack.
+#
+# Six names, all at the address that does not change in a C4 rebuild. Every
+# one of them sits behind Cloudflare Access like the rest of *.kp-soft.dev.
+
+http:
+  routers:
+    jellyfin:
+      rule: "Host(`fin.kp-soft.dev`)"
+      entryPoints: [web]
+      service: jellyfin
+    sonarr:
+      rule: "Host(`son.kp-soft.dev`)"
+      entryPoints: [web]
+      service: sonarr
+    radarr:
+      rule: "Host(`rad.kp-soft.dev`)"
+      entryPoints: [web]
+      service: radarr
+    bazarr:
+      rule: "Host(`baz.kp-soft.dev`)"
+      entryPoints: [web]
+      service: bazarr
+    prowlarr:
+      rule: "Host(`prowl.kp-soft.dev`)"
+      entryPoints: [web]
+      service: prowlarr
+    seerr:
+      rule: "Host(`seerr.kp-soft.dev`)"
+      entryPoints: [web]
+      service: seerr
+
+  services:
+    jellyfin:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.6:8096"
+    sonarr:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.6:8989"
+    radarr:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.6:7878"
+    bazarr:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.6:6767"
+    prowlarr:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.6:9696"
+    seerr:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.6:5055"

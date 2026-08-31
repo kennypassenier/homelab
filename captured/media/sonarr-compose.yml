@@ -1,0 +1,28 @@
+---
+# Isolated deployment for Sonarr TV show management
+# The shared network must exist on the Docker host prior to deployment
+
+networks:
+  media_net:
+    external: true
+
+services:
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    # Utilize PUID and PGID variables for shared storage permission consistency
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      # Dynamic configuration folder targeted by the global Restic backup policies
+      - ../sonarr-config:/config
+      # Direct mount paths for localized large-scale storage units where the media resides
+      - /mnt/data/18TB:/data/18TB
+      - /mnt/data/12TB:/data/12TB
+    ports:
+      - "8989:8989"
+    restart: unless-stopped
+    networks:
+      - media_net

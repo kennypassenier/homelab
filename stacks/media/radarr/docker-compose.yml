@@ -1,0 +1,30 @@
+# radarr, carried over from the container this replaces. The in-container
+# paths are frozen: every root folder in its database is stored as
+# /data/18TB or /data/12TB, so changing one breaks all of them at once.
+
+services:
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      - /appdata/media/radarr-config:/config
+      - /mnt/data/18TB:/data/18TB
+      - /mnt/data/12TB:/data/12TB
+    ports:
+      - "7878:7878"
+    labels:
+      # A live database is not safe to copy while it is being written to.
+      - com.homelab.backup.pause=true
+      - com.homelab.update.policy=auto
+    restart: unless-stopped
+    networks:
+      - media_net
+
+networks:
+  media_net:
+    external: true
+    name: media_net

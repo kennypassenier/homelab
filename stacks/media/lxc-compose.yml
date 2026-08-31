@@ -1,0 +1,100 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# Media: Jellyfin and the *arr suite. The last and most consequential of the
+# four containers M8 replaces, and the one Kenny set the highest bar for:
+# nothing to reconfigure in the Jellyfin client, the *arr suite still working,
+# every library untouched inside the programs.
+#
+# The numbers it is measured against were recorded while everything was
+# running (M8_CT106_PREFLIGHT.md): 896 movies, 203 series, 5462 episodes and
+# 58 collections in Jellyfin; 209 series in Sonarr, 955 movies in Radarr,
+# 5 indexers in Prowlarr. And the recovery net was exercised before anything
+# was touched, not promised: a fresh vzdump restored onto a throwaway vmid,
+# booted, with every database passing an integrity check and Sonarr's 209 and
+# Radarr's 955 coming back exactly.
+
+stack_name: media
+vmid: 106
+hostname: 106-app-media
+
+network:
+  ip: 10.10.10.6/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  # What the container has today.
+  cores: 6
+  memory_mb: 8192
+  swap_mb: 512
+  disk_gb: 80
+  storage: local-lvm
+
+lxc:
+  # 997 is the privileged golden template. This container is privileged today
+  # and stays so: PUID 1000 inside must remain host uid 1000, which is what
+  # owns the media tree.
+  template: clone:997
+  unprivileged: false
+  features: nesting=1,keyctl=1
+  protection: true
+  # W1 reads the group ids from the host instead of assuming them. Measured
+  # here: card0 is 44 and renderD128 is 993 — not the 104 this code carried
+  # until today (F110). This is the container where that wrong number would
+  # have landed, and Jellyfin would have transcoded on the CPU without a word.
+  gpu: true
+  vpn: false
+
+boot:
+  onboot: true
+  # After the downloader, which the *arr apps expect to be there.
+  order: 95
+
+storage:
+  # One directory per app, so each keeps its own restic repository named
+  # after its owner (D25).
+  - host_path: /appdata/media/jellyfin-config
+    mount_point: /appdata/media/jellyfin-config
+    # Privileged container: in-container uid 1000 IS host uid 1000.
+    host_owner_uid: 1000
+    app: jellyfin
+  - host_path: /appdata/media/sonarr-config
+    mount_point: /appdata/media/sonarr-config
+    host_owner_uid: 1000
+    app: sonarr
+  - host_path: /appdata/media/radarr-config
+    mount_point: /appdata/media/radarr-config
+    host_owner_uid: 1000
+    app: radarr
+  - host_path: /appdata/media/prowlarr-config
+    mount_point: /appdata/media/prowlarr-config
+    host_owner_uid: 1000
+    app: prowlarr
+  - host_path: /appdata/media/bazarr-config
+    mount_point: /appdata/media/bazarr-config
+    host_owner_uid: 1000
+    app: bazarr
+  - host_path: /appdata/media/seerr-config
+    mount_point: /appdata/media/seerr-config
+    host_owner_uid: 1000
+    app: seerr
+
+# Attached, never owned, never backed up.
+data_mounts:
+  - host_path: /HDD18TB/subvol-103-disk-0
+    mount_point: /mnt/data/18TB
+    note: "CT 103's dataset; the 18 TB library and the downloads tree"
+  - host_path: /HDD12TB/subvol-103-disk-0
+    mount_point: /mnt/data/12TB
+    note: "CT 103's dataset; the 12 TB library"
+  - host_path: /HDD4TB/jellyfin-metadata
+    mount_point: /mnt/jellyfin-metadata
+    note: "Jellyfin's artwork — regenerable, deliberately outside the backup (Kenny, M1)"
+
+apps: [jellyfin, sonarr, radarr, prowlarr, bazarr, seerr, flaresolverr, promtail, cadvisor]
+latch_secrets: [jellyfin]
+
+gateway_route:
+  filename: 106-app-media.yml
+  gateway_vmid: 104

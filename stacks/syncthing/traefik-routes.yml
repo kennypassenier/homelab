@@ -3,6 +3,14 @@
 # (/opt/traefik-config/routes/) — the file provider reloads automatically.
 # Only the web GUI is routed; sync traffic (22000/21027) stays LAN-only.
 
+# Corrected 2026-08-31. This file pointed at 10.10.10.10, which is Kenny's
+# workstation and not the container — sync.kp-soft.dev had never worked. The
+# live gateway copy was repaired by hand on 2026-08-30 and this source file
+# was not, so the very next deploy pushed the broken address straight back
+# over the fix. That is the failure this whole project exists to kill: a
+# repair that lives only on the running machine is a repair with an expiry
+# date.
+
 http:
   routers:
     syncthing:
@@ -14,4 +22,4 @@ http:
     syncthing:
       loadBalancer:
         servers:
-          - url: "http://10.10.10.10:8384"
+          - url: "http://10.10.10.8:8384"

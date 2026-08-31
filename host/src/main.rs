@@ -1623,6 +1623,10 @@ async fn gather_live_facts(
             hostname,
             ..Default::default()
         };
+        // Did the probe actually run inside the container? The `guards` line
+        // is unconditional, so its absence means the shell never got there —
+        // a stopped guest, a template, an exec that failed.
+        let mut probed = false;
         for line in out.stdout.lines() {
             let Some((k, v)) = line.trim().split_once('=') else {
                 continue;
@@ -1633,11 +1637,24 @@ async fn gather_live_facts(
                 "swap" => g.swap_used_mb = v.parse().unwrap_or(0),
                 "journal" => g.journal_mb = v.parse().unwrap_or(0),
                 "dockerlogs" => g.docker_logs_mb = v.parse().unwrap_or(0),
-                "guards" => g.guards = v == "1",
+                "guards" => {
+                    g.guards = v == "1";
+                    probed = true;
+                }
                 _ => {}
             }
         }
-        facts.growth.push(g);
+        // Not examined is not the same as examined and found wanting. The
+        // first live run of the widened check reported the three golden
+        // templates (997, 998, 999) as having no runaway guards. They have
+        // them — baked in at build time — but they are stopped, so `pct
+        // exec` produced nothing and every field kept its zero default,
+        // which read as an unguarded container. A check that invents a
+        // finding out of a failed measurement is worse than one that misses:
+        // it spends the reader's trust to say something false.
+        if probed {
+            facts.growth.push(g);
+        }
     }
     facts
 }

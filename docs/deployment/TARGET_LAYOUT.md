@@ -26,6 +26,7 @@ made the reordering unnecessary.
 | 111 | `productivity` | supersync, postgres | vikunja dropped |
 | 112 | `almanac` | almanac | unchanged |
 | 113 | `syncthing` | syncthing | moves here from 108, renamed from `synctest` |
+| 114 | `paperwork` | actual, stirling, paperless, paperless-db | added 2026-08-31, see the amendment below |
 | — | removed | — | 107 (empty), 190 and 191 (scratch) |
 
 Every container additionally carries node_exporter, cadvisor and promtail from
@@ -205,3 +206,36 @@ with nothing to copy because the data never lived inside.
 is gone and the new one has not proven itself. Building beside and switching
 over has no such window, at the price of a changed address. Kenny chose
 identity over that window, with step 2 as the compensation.
+
+
+## Amendment — 2026-08-31: CT 114 `paperwork`
+
+This layout was frozen with ten guests. Kenny asked for three more services
+on 2026-08-31 — Actual Budget, Stirling-PDF and paperless-ngx — and the
+mini-round (N1) put them on their own container rather than into CT 111
+`productivity`.
+
+The reasoning that decided it, in the order it mattered:
+
+1. **CT 111's disk had to grow either way.** Its rootfs is 8 GB with 2.7 GB
+   used, and the three images alone are about 5 GB — stirling-pdf carries
+   LibreOffice, paperless carries the OCR toolchain. The "cheaper" option
+   was not cheaper.
+2. **Blast radius.** A paperless restore, or a postgres major-version
+   migration, should not be able to take supersync down with it.
+3. **Functional bundling**, Kenny's own rule: these three are personal
+   administration. supersync is a sync service. They share a purpose with
+   each other and none with it.
+
+vmid 114 and 10.10.10.14 were free because CT 190 and 191 were destroyed on
+2026-08-31 (D40). The container follows the prefix + vmid − 100 address
+convention like every other stack.
+
+`paperless-db` is declared as its own app so the postgres directory is named
+after its owner (O7) and lands in its own restic repository: a document
+archive and its index are restored together or not at all.
+
+All three are routed through Traefik (N2). Every `*.kp-soft.dev` hostname is
+guarded by Cloudflare Access — verified 2026-08-31, `grafana` and `fin` both
+302 to `mendax1.cloudflareaccess.com`, and after deployment `budget`, `pdf`
+and `docs` do the same.

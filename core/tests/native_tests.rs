@@ -427,3 +427,60 @@ async fn d25_native_backup_uses_the_service_name_for_its_repo() {
         calls
     );
 }
+
+/// The `homelab` tag is what makes "managed" visible in the Proxmox list, and
+/// it was only ever applied where a container is created. The two adopted
+/// containers therefore carried no tag: a filter on it silently missed them,
+/// so the tag meant "built by the orchestrator" while it read as "managed by
+/// the orchestrator". Kenny asked the question that found it.
+#[tokio::test]
+async fn c7_adoption_tags_the_container_as_managed() {
+    let exec = MockExecutor::new();
+    // First matching always-rule wins, so the override precedes the defaults.
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 109-app-kyu\narch: amd64\n"),
+    );
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let set = exec.calls_containing("--tags");
+    assert_eq!(set.len(), 1, "exactly one tag write: {:?}", set);
+    assert!(set[0].contains("homelab"), "{}", set[0]);
+}
+
+/// A container that already carries the tag is not written to again, and a
+/// container that carries somebody else's tags keeps them.
+#[tokio::test]
+async fn c7_adoption_never_clobbers_existing_tags() {
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 109-app-kyu\ntags: homelab\n"),
+    );
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    assert!(adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await.ok);
+    assert!(
+        exec.calls_containing("--tags").is_empty(),
+        "already tagged means nothing to write"
+    );
+
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 109-app-kyu\ntags: production;critical\n"),
+    );
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    assert!(adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await.ok);
+    let set = exec.calls_containing("--tags");
+    assert_eq!(set.len(), 1);
+    for t in ["production", "critical", "homelab"] {
+        assert!(set[0].contains(t), "{} must survive: {}", t, set[0]);
+    }
+}

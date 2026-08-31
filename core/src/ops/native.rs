@@ -4,7 +4,7 @@
 //! nightly machinery (backup, update supervision) picks it up.
 
 use crate::error::CoreError;
-use crate::executor::{Cmd, Executor, TracingExecutor};
+use crate::executor::{run_ok, Cmd, Executor, TracingExecutor};
 use crate::native::NativeServiceManifest;
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
@@ -102,6 +102,32 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
             )));
         }
         Ok(StepOutcome::Unchanged)
+    });
+
+    // The `homelab` tag is what makes "managed" visible in the Proxmox list.
+    // It was applied only where a container is CREATED, so the two adopted
+    // ones carried no tag and a filter on it silently missed them — a signal
+    // that means "built by the orchestrator" while it reads as "managed by
+    // the orchestrator" (Kenny's question, 2026-08-31). Adoption is the other
+    // way in, so it sets the tag too. Additive: any tag somebody else put
+    // there stays.
+    step!(runner, "tag as managed", {
+        let vm = m.vmid.to_string();
+        let cfg = exec.run(&Cmd::new("pct", &["config", &vm], 30)).await?;
+        let tags: Vec<String> = cfg
+            .stdout
+            .lines()
+            .find_map(|l| l.strip_prefix("tags:"))
+            .map(|v| v.split(';').map(|t| t.trim().to_string()).collect())
+            .unwrap_or_default();
+        if tags.iter().any(|t| t == "homelab") {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let mut all: Vec<String> = tags.into_iter().filter(|t| !t.is_empty()).collect();
+        all.push("homelab".into());
+        let joined = all.join(";");
+        run_ok(exec, &Cmd::new("pct", &["set", &vm, "--tags", &joined], 30)).await?;
+        Ok(StepOutcome::Changed)
     });
 
     step!(runner, "record state", {

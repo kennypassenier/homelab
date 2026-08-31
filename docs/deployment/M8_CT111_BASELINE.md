@@ -39,11 +39,35 @@ migration proves nothing about what the migration did (D61).
 - [x] First restic backup of `supersync-db-config`: 1323 files,
       66 063 275 bytes, snapshot `2a636b3c`. The same file count and byte
       total as the verified copy, so the backup covers what the copy carried.
-- [ ] **For Kenny to confirm:** his Super Productivity desktop and phone
-      still sync without being touched. This is the one that cannot be
-      proven from here — the passkey lives on his devices. The value it
-      depends on (`WEBAUTHN_RP_ID`) was verified byte-identical before the
-      rebuild, and the `passkeys` table still holds its single row.
+- [x] **Confirmed by Kenny, 2026-08-31:** "supersync werkt nog altijd op
+      beide apparaten". The passkey survived, which is the half that could
+      not be proven from here.
+
+## Everything else, compared line by line
+
+Kenny asked whether the rebuild was identical on every OTHER level. Read out
+of the vzdump's own `pct.conf` rather than from memory:
+
+| | old | new |
+|---|---|---|
+| arch · ostype | amd64 · debian | same |
+| cores · memory · swap | 2 · 2048 · 512 | same |
+| rootfs | 8 G on local-lvm | same |
+| features | `nesting=1,keyctl=1` | same |
+| unprivileged | 1 | same |
+| onboot | 1 | same |
+| vmid · IP | 111 · 10.10.10.11 | same |
+| **startup order** | 99 | **70** |
+| **hostname** | lxc-productivity-stack | **111-app-productivity** |
+| **tags** | none | **homelab** |
+
+So: **not identical, and every difference is deliberate.** Five of them, none
+accidental — the boot order moved into the fleet's scheme, the hostname now
+follows the convention the safety guard checks, the tag marks it managed,
+Vikunja is gone by Kenny's decision, and the postgres container is called
+`supersync-db` instead of `supersync-postgres` so its directory, its restic
+repository and its container all carry one name (O7/D25). The empty
+`/app/data` mount was dropped for the reason given in the stack file.
 
 ~~Vikunja~~ — **not rebuilt** (Kenny, at the go: it is not used any more).
 Its 557 KB database was not migrated and went with the old container; the

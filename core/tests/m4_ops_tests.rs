@@ -254,6 +254,33 @@ async fn e1_backup_with_nothing_to_pause_starts_nothing() {
     );
 }
 
+/// A restic run over a directory that exists and is empty succeeds, writes a
+/// snapshot with nothing in it, and reports success. The record then claims
+/// the stack is backed up while a restore would give back nothing.
+///
+/// A path that does NOT exist already fails loudly — that is how the metrics
+/// stack's stale path was caught on 2026-08-31. The empty one is the case
+/// nothing catches.
+#[test]
+fn a_snapshot_that_stored_nothing_is_recognised() {
+    use homelab_core::ops::backup::snapshot_is_empty;
+    let empty = r#"{"message_type":"summary","total_files_processed":0,"total_bytes_processed":0}"#;
+    assert!(snapshot_is_empty(empty), "zero files is empty");
+
+    let real = r#"{"message_type":"status","percent_done":0.5}
+{"message_type":"summary","total_files_processed":88,"total_bytes_processed":5998677}"#;
+    assert!(!snapshot_is_empty(real), "88 files is not empty");
+
+    // The rule that keeps it from crying wolf: output it does not recognise
+    // is NOT called empty. A restic that changes its json would otherwise
+    // turn every backup in the fleet into a failure overnight.
+    assert!(
+        !snapshot_is_empty("Files: 3 new, 0 changed\nAdded to the repository: 4.2 KiB\n"),
+        "unrecognised output must never be reported as empty"
+    );
+    assert!(!snapshot_is_empty(""), "no output is not evidence of empty");
+}
+
 #[tokio::test]
 async fn e2_restore_validates_quiesces_restores_resumes_verifies() {
     let exec = MockExecutor::new();

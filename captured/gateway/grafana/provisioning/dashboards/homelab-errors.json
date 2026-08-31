@@ -1,0 +1,59 @@
+{
+  "uid": "homelab-errors",
+  "title": "Homelab — errors only",
+  "tags": ["homelab"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": {"from": "now-1h", "to": "now"},
+  "description": "Every error line in the house, from every stack and every container, in one place. Asked for by Kenny on 2026-08-31. The filter excludes level=info because Loki logs each query it runs, and those queries contain the word 'error' -- without that exclusion Loki finds its own search for errors and reports it as one, which inflated the gateway from 29 to 314 in a single hour.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Errors in range",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "none"},
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 50}, {"color": "red", "value": 500}]}}, "overrides": []},
+      "targets": [{"refId": "A", "expr": "sum(count_over_time({job=\"docker\"} |~ \"(?i)(error|exception|fatal|panic)\" != \"level=info\" [$__range]))", "queryType": "instant"}]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Containers reporting errors",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "none"},
+      "targets": [{"refId": "A", "expr": "count(count by (container_name) (count_over_time({job=\"docker\"} |~ \"(?i)(error|exception|fatal|panic)\" != \"level=info\" [$__range])))", "queryType": "instant"}]
+    },
+    {
+      "id": 3,
+      "type": "bargauge",
+      "title": "Errors by container",
+      "description": "One container producing thousands while the rest produce single digits is the normal shape of this panel, and it is the useful one: it says where to look first. On the day this was built that was sonarr, retrying one unreadable file 118 times an hour.",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 0},
+      "options": {"displayMode": "gradient", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{"refId": "A", "expr": "topk(10, sum by (container_name) (count_over_time({job=\"docker\"} |~ \"(?i)(error|exception|fatal|panic)\" != \"level=info\" [$__range])))", "queryType": "instant"}]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Error rate by stack",
+      "description": "A step here is worth more than the absolute number: a stack that has always been noisy tells you nothing, one that starts being noisy tells you when.",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 4},
+      "targets": [{"refId": "A", "expr": "sum by (stack) (rate({job=\"docker\"} |~ \"(?i)(error|exception|fatal|panic)\" != \"level=info\" [5m]))"}]
+    },
+    {
+      "id": 5,
+      "type": "logs",
+      "title": "The lines themselves",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 14, "w": 24, "x": 0, "y": 10},
+      "options": {"showTime": true, "showLabels": true, "sortOrder": "Descending", "wrapLogMessage": true, "dedupStrategy": "none"},
+      "targets": [{"refId": "A", "expr": "{job=\"docker\"} |~ \"(?i)(error|exception|fatal|panic)\" != \"level=info\""}]
+    }
+  ]
+}

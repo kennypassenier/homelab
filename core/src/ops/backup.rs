@@ -191,11 +191,14 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
                 return Ok(StepOutcome::Unchanged);
             }
             for (owner, paths) in &groups {
-                let mut args = vec!["backup"];
+                // --quiet as well as --json: without it restic emits a status line per
+                // update and the operation log becomes a wall of progress json.
+                // Quiet keeps the summary, which is the only line this needs.
+                let mut args = vec!["backup", "--quiet", "--json"];
                 for p in paths {
                     args.push(p.as_str());
                 }
-                run_ok(
+                let out = run_ok(
                     exec,
                     &restic(
                         &cfg.restic_base,
@@ -206,6 +209,26 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
                     ),
                 )
                 .await?;
+                // A restic run over a directory that exists and is empty
+                // succeeds, writes a snapshot containing nothing, and reports
+                // success. The record then says the stack is backed up and
+                // the restore has nothing to give back — the same shape as
+                // every other finding here: a green result that proves the
+                // wrong thing.
+                //
+                // A path that does not exist already fails loudly (rc=1), and
+                // that is how the metrics stack's stale path was caught on
+                // 2026-08-31. An empty one is the case nothing catches.
+                if snapshot_is_empty(&out.stdout) {
+                    return Err(CoreError::Command {
+                        rendered: format!("restic backup {}", owner),
+                        detail: format!(
+                            "the snapshot for '{}' contains no files :: it covered {} — check the path holds what you think it does, because a restore from this gives back nothing",
+                            owner,
+                            paths.join(", ")
+                        ),
+                    });
+                }
             }
             Ok(StepOutcome::Changed)
         })
@@ -511,4 +534,33 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
         "[host-meta] vault/state/tls snapshot complete".to_string(),
     );
     runner.finish_ok()
+}
+
+/// Did the run that produced this output actually store anything?
+///
+/// restic's `--json` stream ends with a `summary` message carrying the
+/// counts. Absence of a summary is NOT treated as empty: a version that
+/// changes its output should not turn every backup into a failure — a check
+/// that fires on something it merely does not recognise is worse than no
+/// check, because it teaches people to ignore it.
+pub fn snapshot_is_empty(stdout: &str) -> bool {
+    for line in stdout.lines() {
+        let line = line.trim();
+        if !line.starts_with('{') || !line.contains("\"message_type\":\"summary\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let files = v
+            .get("total_files_processed")
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0);
+        let bytes = v
+            .get("total_bytes_processed")
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0);
+        return files == 0 && bytes == 0;
+    }
+    false
 }

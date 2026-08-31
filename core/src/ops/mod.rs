@@ -97,4 +97,14 @@ pub struct OpCtx<'a> {
     /// T2: Grafana's provisioning directory, as a path INSIDE the gateway
     /// container. None = feature off, and dashboards stay hand-made.
     pub grafana_dashboards_dir: Option<String>,
+    /// Where restic lives, for the operations that read the repository
+    /// without being a backup themselves — E3 auto-restore and the
+    /// `last_backup` recovery in deploy. Both used to build their own
+    /// `BackupCfg::default()` while the host had a configured one, so a
+    /// changed `restic_base` in settings.toml would have sent them to a
+    /// repository that does not exist: auto-restore then reports "no
+    /// snapshot — fresh" and the deploy continues with an empty config
+    /// directory. Not optional on purpose — the caller has to say which
+    /// repository it means.
+    pub backup: backup::BackupCfg,
 }

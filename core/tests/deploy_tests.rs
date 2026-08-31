@@ -89,6 +89,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         kea: None,
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
+        backup: Default::default(),
     }
 }
 
@@ -263,6 +264,151 @@ async fn d10_validator_collects_all_problems() {
     assert!(msg.contains("stack_name"), "{}", msg);
     assert!(msg.contains("memory_mb"), "{}", msg);
     assert!(msg.contains("hostname"), "{}", msg); // canonical name changed too
+}
+
+/// Read back what the deploy recorded for the stack under test.
+async fn recorded_backup_time(exec: &MockExecutor) -> u64 {
+    homelab_core::state::StateStore::new(exec, "/var/lib/homelab")
+        .load()
+        .await
+        .expect("state written")
+        .stacks
+        .get("syncthing")
+        .expect("stack recorded")
+        .last_backup
+}
+
+// ── M7: what a container replacement must not lose ─────────────────────────
+
+/// A C4 replacement destroys the container and its state record together, so
+/// "preserve the previous value" preserves nothing. In the M7 drill CT 115
+/// was backed up twelve minutes before it was replaced and came back saying
+/// it had never been backed up; the fleet check then called it broken while
+/// the snapshot sat in the repository, untouched and perfectly restorable.
+///
+/// The state file is a cache of what the repository knows. When the cache is
+/// gone, rebuild it from the source instead of inventing a zero.
+#[tokio::test]
+async fn m7_a_replaced_stack_recovers_its_backup_time_from_the_repository() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    // The config directory survived the destroy (that is the whole point of
+    // /appdata), so E3 has nothing to restore and only the state recovery
+    // reaches restic.
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    exec.respond_always(
+        "restic snapshots",
+        CmdOutput::ok(r#"[{"short_id":"b768d68b","time":"2026-08-31T18:17:33.981879581+02:00"}]"#),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    assert_eq!(
+        recorded_backup_time(&exec).await,
+        1_788_193_053,
+        "the snapshot time must survive the replacement"
+    );
+}
+
+/// The other direction, which is what makes the test above mean anything: a
+/// stack whose repository has nothing to say still records a zero, and the
+/// deploy still succeeds. A backup target that is unreachable must never be
+/// able to block a deploy.
+#[tokio::test]
+async fn m7_a_stack_with_no_snapshots_records_zero_and_still_deploys() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    exec.respond_always(
+        "restic snapshots",
+        CmdOutput::failed(1, "repository does not exist"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(
+        report.ok,
+        "an unreachable repository must not block a deploy"
+    );
+    assert_eq!(recorded_backup_time(&exec).await, 0);
+}
+
+/// A redeploy over a container that still exists keeps the value it already
+/// had, and must not spend a restic round trip finding that out.
+#[tokio::test]
+async fn m7_a_plain_redeploy_keeps_its_record_without_asking_restic() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{"syncthing":{"vmid":110,
+           "hostname":"110-app-syncthing","apps":["syncthing"],"applied_at":1,
+           "last_backup":4242,"applied_hash":"","manifest":null,
+           "enabled":true,"native":null,"natives":[]}}}"#,
+    );
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+    assert_eq!(recorded_backup_time(&exec).await, 4242);
+    assert!(
+        exec.calls_containing("restic snapshots").is_empty(),
+        "an existing record answers the question on its own"
+    );
+}
+
+/// The repository that deploy reads must be the one the host is configured
+/// with. Both of deploy's restic callers built their own
+/// `BackupCfg::default()`, so a changed `restic_base` in settings.toml would
+/// have pointed E3's auto-restore at a repository that does not exist — and
+/// its answer to that is "no snapshot — fresh", after which the deploy
+/// carries on and starts the app on an empty config directory.
+#[tokio::test]
+async fn e3_auto_restore_reads_the_configured_repository() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    // Empty config directory: E3 goes looking for a snapshot.
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok(""),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut c = ctx(&exec, &sink, &journal);
+    c.backup = homelab_core::ops::backup::BackupCfg {
+        restic_base: "rclone:hdd:homelab-backups".into(),
+        password_file: "/etc/homelab/restic.pw".into(),
+        ..Default::default()
+    };
+    let report = deploy(&c, &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    let probes = exec.calls_containing("restic snapshots");
+    assert!(!probes.is_empty(), "E3 must ask before it decides");
+    for call in &probes {
+        assert!(
+            call.contains("rclone:hdd:homelab-backups/syncthing-config"),
+            "the configured repository is the only one it may read: {}",
+            call
+        );
+        assert!(
+            call.contains("/etc/homelab/restic.pw"),
+            "and the configured password file: {}",
+            call
+        );
+    }
 }
 
 // ── D1: fresh deploy runs the full ordered sequence ─────────────────────────

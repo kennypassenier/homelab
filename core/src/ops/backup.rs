@@ -74,6 +74,49 @@ pub(crate) fn restic_cmd(cfg: &BackupCfg, stack: &str, args: &[&str], timeout: u
     restic(&cfg.restic_base, stack, &cfg.password_file, args, timeout)
 }
 
+/// The newest snapshot across a stack's per-app repositories, or None when
+/// nothing answered. The repository is the truth about when a stack was last
+/// backed up; `StackState::last_backup` is only a cache of it, and a C4
+/// replacement throws that cache away with the container it destroys.
+///
+/// Found by the M7 drill (2026-08-31): CT 115 was backed up twelve minutes
+/// before it was replaced, came back reporting it had never been backed up,
+/// and the fleet check dutifully called it broken while the snapshot sat in
+/// the repository untouched.
+pub(crate) async fn newest_snapshot_unix(
+    exec: &dyn Executor,
+    m: &StackManifest,
+    cfg: &BackupCfg,
+) -> Option<u64> {
+    let mut newest: Option<u64> = None;
+    for (owner, _paths) in owner_groups(m) {
+        // A repository that does not exist yet is the normal case for a new
+        // stack, so a failure here is silence, not an error.
+        let Ok(out) = exec
+            .run(&restic_cmd(
+                cfg,
+                &owner,
+                &["snapshots", "--latest", "1", "--json"],
+                120,
+            ))
+            .await
+        else {
+            continue;
+        };
+        if !out.success() {
+            continue;
+        }
+        if let Some(t) = parse_snapshots_json(&out.stdout)
+            .into_iter()
+            .map(|(_, t)| t)
+            .max()
+        {
+            newest = Some(newest.map_or(t, |n: u64| n.max(t)));
+        }
+    }
+    newest
+}
+
 /// D25: group the manifest's storage paths by the app that owns them, in
 /// manifest order. A path with no declared owner belongs to the stack, which
 /// keeps host-level paths (and every manifest written before the field

@@ -222,11 +222,48 @@ The milestone that goes missing if nobody names it. One container, all the way
 through the C4 procedure, proving the machinery does its own job rather than
 that its parts exist.
 
-- Chosen target: `uptime` (CT 108) — the smallest stack, no dependants, and
-  its failure costs nothing that matters.
+- ~~Chosen target: `uptime` (CT 108) — the smallest stack, no dependants, and
+  its failure costs nothing that matters.~~ **Retargeted 2026-08-31.** That
+  sentence was written when CT 108 was going to hold Uptime Kuma. Kuma stayed
+  on the gateway and CT 108 became the Syncthing hub for Kenny's Obsidian
+  vault, so the container the plan names as harmless is now one of the few
+  holding live state. Checked before acting rather than after.
 
-**Exit:** CT 108 destroyed and rebuilt on the same vmid and IP, Uptime Kuma
-back with its monitors, total outage measured and recorded.
+- **Target: `home` (CT 115), chosen by Kenny (form N1, 2026-08-31).** It has
+  everything the drill needs to prove — a Traefik route, a nightly restic
+  repository, two Uptime Kuma monitors, its own dashboard, the log caps — and
+  no state that matters, because the whole page is authored in this repo.
+
+**Exit:** CT 115 destroyed and rebuilt on the same vmid and IP, Homepage back
+with its widgets, total outage measured and recorded.
+
+**Status 2026-08-31: DONE.** Run in one pass (form N2) with two safety nets in
+place: a restic snapshot taken twelve minutes before (`76eb8616`, ten files)
+and a 672 MB vzdump. Neither was needed.
+
+What came back: same vmid, same IP, same hostname, `protection` back on,
+`onboot` and `startup order=80` restored, the bind mount reattached; three
+containers healthy; 200 both directly and through Traefik; both Prometheus
+targets `up` with their `stack="home"` label; logs arriving in Loki again;
+and the page itself rendering with every live widget — Jellyfin, the *arr
+services, Proxmox, Grafana — which also proves the twelve `HOMEPAGE_VAR_*`
+secrets were re-delivered from latch and still authenticate. Verified in a
+browser, not by curl: this page renders client-side and a 200 says nothing
+about what a visitor sees (F77).
+
+**Measured outage: 653 s**, by a one-second probe running throughout. The
+breakdown is the actual result, and it is not what the plan assumed: clone
+30 s, start 1 s, configuration and file push 28 s, `compose up` 13 s — and
+573 s for a single `docker compose pull` that stalled for 8 m 40 s before
+completing (F108). The orchestrator's own share is about eighty seconds.
+
+Three defects came out of it, all in the same family as everything else this
+project has found — mechanisms that run, report success and describe
+something that is not true: the rebuilt stack claimed it had never been backed
+up (F106), the deploy read the backup repository from a hardcoded default
+rather than the host's configuration (F107), and the ping monitor never
+noticed the container had been gone at all (F109). The first two are fixed
+with tests; the third is a fact about the monitors that is now written down.
 
 ### M8 · The rollout, least important first
 One container per step, each its own go, in dependency order.

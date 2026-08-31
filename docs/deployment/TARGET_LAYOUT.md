@@ -204,6 +204,15 @@ box to run software in.
 Outage: the few minutes between steps 4 and 5 — container creation and start,
 with nothing to copy because the data never lived inside.
 
+**Measured, 2026-08-31 (M7, CT 115): 653 s.** The prediction is right about
+its own subject and wrong about the total. Creating and starting the container
+took 31 s and the whole orchestrator share about eighty; the other 573 s was
+one `docker compose pull` that stalled for 8 m 40 s before completing, where
+the same image pulled again minutes later took 113 s. So the sentence above
+should be read as "a minute and a half of orchestration, plus however long a
+registry on the internet takes today" — and the second half is the part that
+decides when the service comes back. See F108 and T59.
+
 ⚔ **Counter-argument, kept:** there is still a window where the old container
 is gone and the new one has not proven itself. Building beside and switching
 over has no such window, at the price of a changed address. Kenny chose

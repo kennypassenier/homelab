@@ -90,6 +90,7 @@ async fn run_deploy(exec: &MockExecutor, sink: &VecSink) -> homelab_core::runner
         kea: None,
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
+        backup: Default::default(),
     };
     deploy(&ctx, &spec_with_secret()).await
 }
@@ -179,6 +180,7 @@ async fn sec1_shell_metachar_app_name_refused_everywhere() {
             kea: None,
             metrics_targets_dir: None,
             grafana_dashboards_dir: None,
+            backup: Default::default(),
         };
         let r = match op {
             "backup" => backup(&ctx, &m, &BackupCfg::default()).await,

@@ -1514,6 +1514,7 @@ where
         kea: state.config.kea.clone(),
         metrics_targets_dir: state.config.metrics_targets_dir.clone(),
         grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
+        backup: state.config.backup.clone(),
     };
     let report = op(&ctx).await;
     notify(state, exec, label, &report).await; // F3, best-effort

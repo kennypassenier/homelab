@@ -88,7 +88,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         if m.storage.is_empty() {
             return Ok(StepOutcome::Unchanged);
         }
-        let bcfg = crate::ops::backup::BackupCfg::default();
+        let bcfg = ctx.backup.clone();
         let mut restored_any = false;
         let mut failed_any = false;
         for mount in &m.storage {
@@ -139,7 +139,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                         "--path",
                         &mount.host_path,
                     ],
-                    bcfg.snapshot_timeout_s,
+                    bcfg.restore_timeout_s,
                 ))
                 .await;
             match restored {
@@ -905,11 +905,26 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         let mut state = store.load().await?;
         // Preserve last_backup and the H8 enabled flag across redeploys —
         // parking is an explicit operator choice; refresh everything else.
-        let (last_backup, enabled) = state
+        let prior = state
             .stacks
             .get(&m.stack_name)
-            .map(|s| (s.last_backup, s.enabled))
-            .unwrap_or((0, true));
+            .map(|s| (s.last_backup, s.enabled));
+        let (mut last_backup, enabled) = prior.unwrap_or((0, true));
+        // A C4 replacement destroys the record along with the container, so
+        // there is nothing left to preserve and the rebuilt stack claims it
+        // has never been backed up — which the fleet check then reports as
+        // broken while the snapshots sit untouched in the repository. The
+        // same happens to every stack at once on a rebuilt host. Ask the
+        // repository instead: it is the thing that actually knows.
+        if prior.is_none() {
+            if let Some(t) = crate::ops::backup::newest_snapshot_unix(exec, m, &ctx.backup).await {
+                last_backup = t;
+                log_info(format!(
+                    "[state] no record for '{}' — last backup recovered from the repository",
+                    m.stack_name
+                ));
+            }
+        }
         state.stacks.insert(
             m.stack_name.clone(),
             StackState {

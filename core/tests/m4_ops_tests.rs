@@ -155,6 +155,61 @@ async fn c2_destroy_happy_path_lifts_protection_then_destroys() {
     assert!(!state.contains("\"test\""));
 }
 
+/// The dashboard a destroy removes lives on the GATEWAY, so the removal has
+/// to happen there.
+///
+/// It did not. The step ran a bare `rm -f` on the Proxmox host for a path that
+/// only exists inside CT 104, and `rm -f` on a missing path exits 0 — so the
+/// step reported "changed" and removed nothing, every time, for as long as it
+/// existed. Found by the destroy drill on 2026-09-01: the throwaway stack was
+/// destroyed and its dashboard was still on the gateway afterwards (F162).
+///
+/// The discovery file beside it is the contrast that makes this readable: that
+/// one IS on the host, so its bare `rm -f` is right. Same-looking lines, two
+/// different machines.
+/// covers: F162
+#[tokio::test]
+async fn c2_destroy_removes_the_dashboard_on_the_gateway_not_the_host() {
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 108-app-test\nprotection: 1\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut c = ctx(&exec, &sink, &j);
+    c.grafana_dashboards_dir =
+        Some("/opt/gateway/grafana/provisioning/dashboards-generated".into());
+    c.metrics_targets_dir = Some("/appdata/metrics/prometheus-config/targets".into());
+    let report = destroy(&c, &manifest(108, "test"), "test", true).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let removed_on_gateway = exec
+        .calls_containing("homelab-test.json")
+        .into_iter()
+        .any(|c| c.contains("pct exec") && c.contains(&c2_gateway_vmid().to_string()));
+    assert!(
+        removed_on_gateway,
+        "the dashboard must be removed inside the gateway container, not on the \
+         Proxmox host where the path does not exist: {:?}",
+        exec.calls_containing("homelab-test.json")
+    );
+
+    // And the discovery file, which really is on the host, stays a plain rm.
+    let discovery: Vec<String> = exec.calls_containing("targets/test.json");
+    assert!(
+        discovery.iter().any(|c| !c.contains("pct exec")),
+        "the metrics discovery file lives on the host and must not be routed \
+         through the gateway: {:?}",
+        discovery
+    );
+}
+
+/// The gateway vmid the test context uses, named so the assertion above reads.
+fn c2_gateway_vmid() -> u16 {
+    homelab_core::safety::SafetyConfig::default().gateway_vmid
+}
+
 // ── E1/E2: backup and restore ───────────────────────────────────────────────
 
 #[tokio::test]

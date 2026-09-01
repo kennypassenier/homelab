@@ -189,7 +189,29 @@ pub async fn destroy(
             return Ok(StepOutcome::Unchanged);
         };
         let path = crate::ops::dashboard::dashboard_file(dir, stack_name);
-        let _ = exec.run(&Cmd::new("rm", &["-f", &path], 30)).await;
+        // On the GATEWAY, not on the Proxmox host. The directory is a path
+        // inside CT 104 — the deploy writes it with `pct push` — and a bare
+        // `rm -f` here ran on the host, where it does not exist, and exited 0.
+        // The step reported "changed" and removed nothing for as long as it
+        // existed; the drill on 2026-09-01 destroyed a stack and found its
+        // dashboard still sitting there afterwards (F162).
+        //
+        // Note the shape of the fault: `rm -f` on a missing path SUCCEEDS.
+        // The step could not have discovered this on its own.
+        let _ = exec
+            .run(&Cmd::new(
+                "pct",
+                &[
+                    "exec",
+                    &ctx.safety.gateway_vmid.to_string(),
+                    "--",
+                    "rm",
+                    "-f",
+                    &path,
+                ],
+                30,
+            ))
+            .await;
         Ok(StepOutcome::Changed)
     });
 

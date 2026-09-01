@@ -438,9 +438,18 @@ pub async fn backup_native(
             .join(" ");
         // pipefail is load-bearing: without it a dead `pct exec tar` still
         // yields a "successful" empty snapshot — a backup that lies.
+        // F171: RESTIC_CACHE_DIR was missing here while `backup.rs` has set
+        // it for every compose stack since it was written. This path builds
+        // the same environment by hand, and hand-built copies drift: without
+        // a cache directory restic finds neither $XDG_CACHE_HOME nor $HOME
+        // in the host's service environment, warns about it on every single
+        // run, and re-fetches metadata from Google Drive that it should have
+        // had locally. Measured 2026-09-02 in the T12 drill — the warning
+        // was in the output of every native backup and nobody had read it.
         let script = format!(
             "set -o pipefail; pct exec {} -- tar -cf - {} | \
              env RESTIC_REPOSITORY={}/{}-config RESTIC_PASSWORD_FILE={} \
+             RESTIC_CACHE_DIR={} \
              restic backup --stdin --stdin-filename {}-data.tar",
             // D25: named after the SERVICE, not the stack. T5 puts several
             // services on one container, and a per-stack repository would
@@ -451,6 +460,7 @@ pub async fn backup_native(
             cfg.restic_base,
             m.unit,
             cfg.password_file,
+            crate::ops::backup::RESTIC_CACHE_DIR,
             m.unit
         );
         crate::executor::run_ok(

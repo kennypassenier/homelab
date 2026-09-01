@@ -729,3 +729,50 @@ fn a_release_source_that_is_half_declared_is_refused() {
     named.release_asset = Some("kyu-linux-amd64".into());
     assert_eq!(named.asset_name(), "kyu-linux-amd64");
 }
+
+/// F171: the native backup builds its restic environment by hand, and the
+/// hand-built copy had drifted from the one every compose stack gets.
+///
+/// Without a cache directory restic finds neither `$XDG_CACHE_HOME` nor
+/// `$HOME` in the host service's environment. It says so on every run — the
+/// T12 drill on 2026-09-02 has the line in the output of every native backup
+/// — and then re-fetches from Google Drive metadata it should have had on
+/// disk. A warning printed nightly that nobody reads is the same as no
+/// warning at all.
+///
+/// covers: F171
+#[tokio::test]
+async fn the_native_backup_uses_the_same_restic_cache_as_every_other() {
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let cfg = homelab_core::ops::backup::BackupCfg::default();
+    let _ = homelab_core::ops::native::backup_native(&ctx(&exec, &sink, &j), &kyu_manifest(), &cfg)
+        .await;
+
+    let snapshot = exec
+        .calls()
+        .into_iter()
+        .find(|c| c.contains("restic backup --stdin"))
+        .expect("the snapshot pipeline must have run");
+    assert!(
+        snapshot.contains(&format!(
+            "RESTIC_CACHE_DIR={}",
+            homelab_core::ops::backup::RESTIC_CACHE_DIR
+        )),
+        "the streamed backup must use the same cache as every other: {}",
+        snapshot
+    );
+    // And it must still carry what it already carried, or this "fix" would
+    // have traded one missing field for another.
+    assert!(snapshot.contains("RESTIC_REPOSITORY="), "{}", snapshot);
+    assert!(snapshot.contains("RESTIC_PASSWORD_FILE="), "{}", snapshot);
+    assert!(
+        snapshot.contains("set -o pipefail"),
+        "pipefail is load-bearing — without it a dead tar yields a successful \
+         empty snapshot: {}",
+        snapshot
+    );
+}

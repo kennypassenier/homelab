@@ -1,4 +1,5 @@
-# GoAccess turns Traefik's access log into the report on go.kp-soft.dev.
+# GoAccess turns Traefik's access log into the report at
+# http://10.10.10.4:7881/ — on the LAN only, since form B2c.
 #
 # The route pointed at port 7880 for its whole life — the WEBSOCKET port,
 # which answers plain HTTP with "400 Invalid Request" (F142). The page could

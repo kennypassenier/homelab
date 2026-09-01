@@ -1,4 +1,5 @@
-# GoAccess turns Traefik's access log into the report on go.kp-soft.dev. It
+# GoAccess turns Traefik's access log into the report at
+# http://10.10.10.4:7881/ — on the LAN only, since form B2c. It
 # reads the same log directory Traefik writes and CrowdSec parses — which is
 # the coupling that makes moving those logs (form G3) a separate step rather
 # than a one-line change.

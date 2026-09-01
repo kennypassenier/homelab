@@ -293,6 +293,15 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         let mut restored_any = false;
         let mut failed_any = false;
         for mount in &m.storage {
+            // An app that declares it keeps nothing is empty BY DESIGN, so
+            // "empty, therefore restore it" is exactly the wrong conclusion.
+            // Without this the gateway asked Google Drive about
+            // cloudflared-config on every single deploy — and a stale
+            // snapshot would have been restored into a directory whose whole
+            // point is that it stays empty (F154, seen live 2026-09-01).
+            if mount.no_data {
+                continue;
+            }
             let probe = exec
                 .run(&Cmd::new(
                     "sh",

@@ -1461,6 +1461,45 @@ async fn e3_empty_dirs_with_snapshot_trigger_restore() {
     );
 }
 
+/// A path declared to keep nothing is never restored into.
+///
+/// `no_data` means the directory is empty BY DESIGN, so the auto-restore's
+/// reasoning — "empty, and a snapshot exists, therefore restore" — reaches
+/// exactly the wrong conclusion about it. Seen live on 2026-09-01: the
+/// gateway deploy asked Google Drive about cloudflared-config, whose entire
+/// point is that it stays empty, and would have restored a stale snapshot
+/// into it had one existed.
+/// covers: F154
+#[tokio::test]
+async fn e3_never_restores_into_a_path_declared_empty() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always(
+        "snapshots --last --json",
+        CmdOutput::ok(r#"[{"short_id":"abc"}]"#),
+    );
+    exec.respond_always("restic restore", CmdOutput::ok("restored"));
+
+    let mut m = manifest(108, "test");
+    for mount in m.storage.iter_mut() {
+        mount.no_data = true;
+    }
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(m)).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("restic restore").is_empty(),
+        "a declared-empty path must never be restored into"
+    );
+    assert!(
+        exec.calls_containing("snapshots --last --json").is_empty(),
+        "and it must not even be asked about — that is a round trip to \
+         Google Drive on every deploy, for a directory that is empty on purpose"
+    );
+}
+
 #[tokio::test]
 async fn e3_nonempty_dirs_skip_restore_and_restic_failure_never_blocks() {
     use homelab_core::ops::deploy::deploy;

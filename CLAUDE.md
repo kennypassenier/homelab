@@ -79,7 +79,8 @@ it is the resume point and is kept current as part of the work, not afterwards.
     `lxc-compose.yml`, native services `service.yml`.
 - **Host daemon LIVE** on Proxmox as `homelab-host.service` (:8443, TLS
   fp SHA256:85:00:F8:84…); ships via `homelab self-update` (H5, armed
-  rollback proven). Golden template = CT 999 (`clone:999` default).
+  rollback proven). Golden templates = CT 998 (v3 unprivileged, the default) and CT 997 (v3
+  privileged, for media + downloader); CT 999 is the retired v1.
 - **vmid 108** = dedicated automated-test container (create/destroy
   allowed there and only there). LVM snapshot `pve/root-v2-preinstall`
   is the host-OS rollback net.

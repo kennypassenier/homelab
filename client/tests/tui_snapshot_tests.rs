@@ -1130,3 +1130,50 @@ fn the_runbook_names_the_repositories_restic_actually_uses() {
         "there is no media-config repository, and the runbook must not name one"
     );
 }
+
+/// The template a new stack is scaffolded from must be one the fleet actually
+/// uses.
+///
+/// It was not. The default said `clone:999` — the v1 golden image — while ten
+/// of the eleven live stacks clone 998 and the two privileged ones clone 997,
+/// both v3. Every stack created from scratch would have started two
+/// generations behind on the runaway guards, the log caps and
+/// unattended-upgrades that the golden build bakes in, and nothing would have
+/// said so: the eleven that exist carry their template by hand, so the default
+/// is exercised only by a stack nobody has made yet.
+///
+/// This test is the thing that notices when the next generation lands and the
+/// default is left behind.
+#[test]
+fn the_scaffold_default_template_is_one_the_fleet_uses() {
+    let stacks = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks");
+    let mut in_use: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&stacks).unwrap().flatten() {
+        let f = entry.path().join("lxc-compose.yml");
+        let Ok(text) = std::fs::read_to_string(&f) else {
+            continue;
+        };
+        for line in text.lines() {
+            if let Some(v) = line.trim().strip_prefix("template:") {
+                in_use.push(v.trim().trim_matches('"').to_string());
+            }
+        }
+    }
+    assert!(
+        !in_use.is_empty(),
+        "no stack declares a template — this test has stopped measuring anything"
+    );
+    let default = homelab_client::scaffold::StackDefaults::default().template;
+    assert!(
+        in_use.contains(&default),
+        "the scaffold default is '{}' but the fleet uses {:?} — a new stack \
+         would be built from a template nothing else trusts",
+        default,
+        {
+            let mut u = in_use.clone();
+            u.sort();
+            u.dedup();
+            u
+        }
+    );
+}

@@ -194,3 +194,34 @@ change list to review. That document is self-contained on purpose.
 4. `homelab tui` → `N` → pick it → deploy to a test vmid (108 while it's
    the test container) → verify → destroy.
 5. Commit the preset directory.
+
+## Which of the three layers does this belong in?
+
+There are three places a service can be defined, and until 2026-09-01 there
+was no rule for choosing between them — which is how cadvisor ended up
+declared as a per-stack app in seven stacks *and* assumed unconditionally by
+the host for all of them, leaving two stacks with a scrape target and nothing
+answering it.
+
+Kenny ratified the rule below (form K2). It is not new; it describes what was
+already there.
+
+| Layer | Where | For | Live examples |
+|---|---|---|---|
+| **Golden image** | `homelab template-build` (`core/src/ops/template.rs`) | Every container needs it, and it is identical everywhere | docker, the runaway guards, unattended-upgrades, node_exporter, cadvisor |
+| **Core app** | `presets/_core/<app>/` | Every container needs it, but its configuration differs per container | promtail |
+| **Preset** | `presets/<name>/` | You want it sometimes | jellyfin, syncthing, uptime-kuma |
+
+**The trade-off that decides it.** Something in the golden image is free at
+deploy time — a clone already has it — but changing it means rebuilding the
+image and then rebuilding containers to pick it up. That is why promtail is
+*not* in the image despite running everywhere: it was changed three times this
+year, and each change would have meant a fleet-wide rebuild. Ask how often the
+thing changes, not only how widely it is used.
+
+**The template a new stack clones is not a free choice either.** The scaffold
+default must be one the fleet actually uses; `the_scaffold_default_template_is_one_the_fleet_uses`
+in `client/tests/tui_snapshot_tests.rs` fails if it drifts, and the fleet check
+reports any stack whose template does not exist on the hypervisor. Both exist
+because the default sat on the v1 image for two generations without anyone
+noticing.

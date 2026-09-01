@@ -187,6 +187,40 @@ pub fn evaluate(
 ) -> Vec<Finding> {
     let mut out = Vec::new();
 
+    // A stack that clones a template which is not there rebuilds into
+    // nothing — and it fails at the moment you need the rebuild most. The
+    // shape this guards against was found on 2026-09-01: the scaffold default
+    // still named `clone:999`, the v1 golden image, two generations after
+    // every live stack had moved to 997/998. Nobody noticed because nobody
+    // scaffolds a stack often, and the eleven that exist carry their template
+    // by hand.
+    for (name, st) in &state.stacks {
+        let Some(m) = st.manifest.as_ref() else {
+            continue;
+        };
+        let Some(rest) = m.lxc.template.trim_matches('"').strip_prefix("clone:") else {
+            continue;
+        };
+        let Ok(tmpl_vmid) = rest.trim().parse::<u16>() else {
+            continue;
+        };
+        if !live.containers.iter().any(|(v, _)| *v == tmpl_vmid) {
+            out.push(Finding {
+                severity: Severity::Broken,
+                subject: name.clone(),
+                what: format!(
+                    "clones template {}, which does not exist on the hypervisor",
+                    tmpl_vmid
+                ),
+                remedy: format!(
+                    "point {}'s lxc.template at a golden template that is there, \
+                     or rebuild {} with `homelab template-build`",
+                    name, tmpl_vmid
+                ),
+            });
+        }
+    }
+
     for (name, st) in &state.stacks {
         match live.containers.iter().find(|(v, _)| *v == st.vmid) {
             None => out.push(Finding {

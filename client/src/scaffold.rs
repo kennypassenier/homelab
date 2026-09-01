@@ -57,7 +57,13 @@ impl Default for StackDefaults {
             gateway: "10.10.10.1".into(),
             bridge: "vmbr0".into(),
             vlan: 10,
-            template: "clone:999".into(),
+            // 998, not 999. 999 is the v1 golden image and no stack has used
+            // it for two generations: ten of the eleven live stacks clone 998
+            // (v3 unprivileged) and the two privileged ones clone 997. A
+            // default nobody uses is a default nobody checks, and a stack
+            // scaffolded from it would start two generations behind on the
+            // guards, the log caps and unattended-upgrades that B8 bakes in.
+            template: "clone:998".into(),
             storage: "local-lvm".into(),
             features: "nesting=1,keyctl=1".into(),
             unprivileged: true,

@@ -1,0 +1,43 @@
+---
+networks:
+  platform_net:
+    external: true
+    name: platform_net
+
+services:
+  goaccess:
+    image: allinurl/goaccess:latest
+    container_name: goaccess
+    command:
+      # Traefik writes JSON (--accesslog.format=json), not CLF. With COMBINED,
+      # goaccess rejected every line and reported 0 entries from install until
+      # 2026-08-29 - running, restarting, and silently useless.
+      # Date and time are split with a literal T and the fractional seconds are
+      # swallowed by %^: goaccess %x demands an exact strptime match and cannot
+      # cope with "2026-08-28T19:27:45.755944372Z" as a single token.
+      # Verified before deploying: 0 invalid lines out of a 5000-line sample.
+      - '--log-format={"ClientHost":"%h","StartUTC":"%dT%t.%^","RequestMethod":"%m","RequestPath":"%U","RequestProtocol":"%H","DownstreamStatus":"%s","DownstreamContentSize":"%b","RequestHost":"%v"}'
+      - "--date-format=%Y-%m-%d"
+      - "--time-format=%H:%M:%S"
+      - "--real-time-html"
+      - "--ws-url=ws://go.kp-soft.dev:7880"
+      - "--output=/srv/report/index.html"
+      - "--port=7880"
+      - "/var/log/traefik/access.log"
+    environment:
+      - TZ=Europe/Brussels
+    volumes:
+      # Mount Traefik logs directory (read-only) so GoAccess can parse them in real-time
+      - ../traefik-config/logs:/var/log/traefik:ro
+      # Configuration and output directory for the generated HTML report (backed up by Restic)
+      - ../goaccess-config:/srv/report
+    ports:
+      - "7880:7880"
+    networks:
+      - platform_net
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.goaccess.rule=Host(`go.kp-soft.dev`)"
+      - "traefik.http.routers.goaccess.entrypoints=web"
+      - "traefik.http.services.goaccess.loadbalancer.server.port=7880"

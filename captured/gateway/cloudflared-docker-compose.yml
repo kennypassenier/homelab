@@ -1,0 +1,21 @@
+---
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    # cloudflared reads TUNNEL_TOKEN from the environment automatically.
+    # Configure ingress in the Cloudflare Zero Trust dashboard to point to
+    # http://traefik:80 (Docker DNS within platform_net) for all hostnames.
+    command: tunnel --no-autoupdate run
+    env_file:
+      - .env
+    volumes:
+      - ../cloudflared-config:/etc/cloudflared
+    restart: unless-stopped
+    networks:
+      - platform_net
+
+networks:
+  platform_net:
+    external: true
+    name: platform_net

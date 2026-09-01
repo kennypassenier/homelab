@@ -1,0 +1,25 @@
+---
+networks:
+  platform_net:
+    external: true
+    name: platform_net
+
+services:
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+      - COLLECTIONS=crowdsecurity/traefik
+    volumes:
+      - ../crowdsec-config:/etc/crowdsec
+      - ../crowdsec-config/data:/var/lib/crowdsec/data
+      # Mount Traefik access logs for parsing (read-only)
+      - ../traefik-config/logs:/var/log/traefik:ro
+      # Homelab whitelist — rendered by Ansible at deploy time
+      - ./whitelists.yaml:/etc/crowdsec/parsers/s02-enrich/homelab-whitelist.yaml:ro
+    networks:
+      - platform_net
+    restart: unless-stopped

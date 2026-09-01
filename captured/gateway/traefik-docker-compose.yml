@@ -1,0 +1,92 @@
+---
+# Traefik v3 reverse proxy for homelab services.
+# Receives traffic from Cloudflare Tunnel on port 80.
+# Provides internal routing, access logs, and CrowdSec integration.
+# TCP entrypoint on 1883 for MQTT routing.
+
+networks:
+  platform_net:
+    external: true
+    name: platform_net
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    command:
+      # API and dashboard
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+
+      # Entrypoints
+      - "--entrypoints.web.address=:80"
+
+      # Docker provider (for services co-located on this platform LXC)
+      - "--providers.docker=true"
+      - "--providers.docker.network=platform_net"
+      - "--providers.docker.exposedbydefault=false"
+
+      # File provider (remote LXC services routed by static IP)
+      # Each stack renders its own fragment into this directory at deploy time
+      - "--providers.file.directory=/etc/traefik/routes"
+      - "--providers.file.watch=true"
+
+      # CrowdSec bouncer plugin — local source, so a network hiccup at
+      # startup can never disable plugins again (2026-07-31 incident: one
+      # failed download to plugins.traefik.io turned ALL plugins off).
+      - "--experimental.localPlugins.bouncer.moduleName=github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin"
+      # Bouncer on the entrypoint, not per route: covers every current and
+      # future router, and survives re-rendering of the route files (which
+      # per-route attachment does not). @docker because the middleware is
+      # defined via labels on this container.
+      - "--entrypoints.web.http.middlewares=crowdsec-bouncer@docker"
+
+      # Access logs for CrowdSec and GoAccess
+      - "--accesslog=true"
+      - "--accesslog.filepath=/var/log/traefik/access.log"
+      - "--accesslog.format=json"
+
+      # General logs
+      - "--log.level=INFO"
+      - "--log.filepath=/var/log/traefik/traefik.log"
+
+      # Ping endpoint for health checks
+      - "--ping=true"
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+    volumes:
+      # Docker socket for service discovery (system resource - not backed up)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Configuration directory: Ansible renders routes.yml here (backed up by Restic)
+      - ../traefik-config:/etc/traefik
+      # Separate logs directory so Restic doesn't back up access logs
+      - ../traefik-config/logs:/var/log/traefik
+      # Local plugin source (see localPlugins above); read-only
+      - ../traefik-config/plugins-local:/plugins-local:ro
+    ports:
+      # HTTP entrypoint (receives traffic from Cloudflare Tunnel)
+      - "80:80"
+      # Traefik dashboard (internal access only)
+      - "8090:8080"
+    networks:
+      - platform_net
+    restart: unless-stopped
+    labels:
+      # Self-referential dashboard routing
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.kp-soft.dev`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=web"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+
+      # CrowdSec bouncer middleware (apply to routes that need protection)
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.enabled=true"
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.crowdseclapikey=${CROWDSEC_BOUNCER_API_KEY}"
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.crowdseclapihost=crowdsec:8080"
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

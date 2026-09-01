@@ -1732,3 +1732,56 @@ async fn s2_a_push_that_did_not_land_fails_its_own_step() {
         err
     );
 }
+
+/// The declared owner of a data directory must be the uid the app actually
+/// runs as — a fact only the image knows.
+///
+/// Four failures in two days had this root: a render gid assumed to be 104
+/// when the machine said 993, and a blanket chown to 100000 that handed
+/// Loki's database to root while Loki runs as 10001. It crash-looped with
+/// `permission denied`, the front door stayed down, and the cause had to be
+/// read out of a Go stack trace. Validation could not have caught any of it:
+/// it checks the +100000 container mapping, which was correct every time.
+#[tokio::test]
+async fn storage_owned_by_the_wrong_uid_fails_the_deploy() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    // The app runs as 10001 inside the container; unprivileged, so the host
+    // owner must be 110001. The directory says 100000 — the shape of the
+    // mistake, a plausible number that is simply not this app's.
+    exec.respond_first("--format '{{.Config.User}}'", CmdOutput::ok("10001\n"));
+    exec.respond_first("stat -c %u", CmdOutput::ok("100000\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.storage[0].host_owner_uid = Some(100_000);
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(
+        !report.ok,
+        "a directory the app cannot write is not a success"
+    );
+    let err = format!("{:?}", report.error);
+    assert!(
+        err.contains("110001") && err.contains("chown"),
+        "the error must give the exact remedy, not a diagnosis to work out: {}",
+        err
+    );
+}
+
+/// And the same check must stay quiet when the ownership is right, or it
+/// becomes a step everyone learns to ignore.
+#[tokio::test]
+async fn storage_owned_correctly_says_nothing() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_first("--format '{{.Config.User}}'", CmdOutput::ok("10001\n"));
+    exec.respond_first("stat -c %u", CmdOutput::ok("110001\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.storage[0].host_owner_uid = Some(110_001);
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "correct ownership must pass: {:?}", report.error);
+}

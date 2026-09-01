@@ -62,9 +62,16 @@ storage:
     mount_point: /appdata/gateway/grafana-config
     host_owner_uid: 101000
     app: grafana
+  # 110001, not 100000: Loki's image runs as uid 10001, and 10001 inside an
+  # unprivileged container is 110001 on the host. Declared 100000 first —
+  # container root — which passes validation (the +100000 mapping is right)
+  # and hands Loki's database to a user it is not. It crash-looped with
+  # `permission denied` and the front door stayed down while that was read out
+  # of a Go stack trace. A chown by hand did not fix it either: the next
+  # deploy applied this number again.
   - host_path: /appdata/gateway/loki-config
     mount_point: /appdata/gateway/loki-config
-    host_owner_uid: 100000
+    host_owner_uid: 110001
     app: loki
   - host_path: /appdata/gateway/goaccess-config
     mount_point: /appdata/gateway/goaccess-config

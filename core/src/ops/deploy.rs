@@ -1214,6 +1214,81 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     // ── B3: no green light without proof. ────────────────────────────────
+    // ── Storage ownership: does the app actually own its own data?
+    //
+    // The manifest declares host_owner_uid and validation checks the +100000
+    // mapping — the "did you forget the container is unprivileged" half. It
+    // cannot check the half that matters more: whether that uid is the one
+    // the application inside the container actually runs as. Nobody can check
+    // that by reading the stack file, because the answer lives in the image.
+    //
+    // Four times on 2026-08-31/09-01 that was the fault. A render gid assumed
+    // to be 104 when the machine said 993. A blanket chown to 100000 that
+    // gave Loki's database to root while Loki runs as 10001, so it crash-
+    // looped with `permission denied` and the front door stayed down while it
+    // was diagnosed from a stack trace. Kenny's instruction after the fourth:
+    // dig the class out so it cannot come back.
+    //
+    // So: ask the image. It is the only party that knows.
+    step!(runner, exec, ctx, m, "storage ownership", {
+        let mut wrong: Vec<String> = Vec::new();
+        for mount in &m.storage {
+            let Some(app) = mount.app.as_ref() else {
+                continue;
+            };
+            if !m.apps.contains(app) {
+                continue;
+            }
+            // What user does this app's container run as? Config.User is what
+            // the compose file asked for; when it is empty the image's own
+            // default applies, and when that is empty too it is root.
+            let out = pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "docker inspect {} --format '{{{{.Config.User}}}}' 2>/dev/null || true",
+                    app
+                ),
+                60,
+            )
+            .await
+            .map(|o| o.stdout.trim().to_string())
+            .unwrap_or_default();
+            let container_uid: u32 = out
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .parse()
+                .unwrap_or(0);
+            let want = if m.lxc.unprivileged {
+                container_uid + 100_000
+            } else {
+                container_uid
+            };
+            let have = run_ok(exec, &Cmd::new("stat", &["-c", "%u", &mount.host_path], 30))
+                .await
+                .ok()
+                .and_then(|o| o.stdout.trim().parse::<u32>().ok());
+            match have {
+                Some(h) if h != want => wrong.push(format!(
+                    "{} is owned by {} but '{}' runs as uid {} in the container, \
+                     which is {} on the host — `chown -R {}:{} {}`",
+                    mount.host_path, h, app, container_uid, want, want, want, mount.host_path
+                )),
+                _ => {}
+            }
+        }
+        if wrong.is_empty() {
+            Ok(StepOutcome::Unchanged)
+        } else {
+            Err(CoreError::Command {
+                rendered: format!("storage ownership {}", m.stack_name),
+                detail: wrong.join("; "),
+            })
+        }
+    });
+
     step!(runner, exec, ctx, m, "verify health", {
         exec.sleep_ms(5000).await;
         for app in &m.apps {

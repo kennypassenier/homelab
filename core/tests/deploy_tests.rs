@@ -1753,7 +1753,10 @@ async fn storage_owned_by_the_wrong_uid_fails_the_deploy() {
     // The app runs as 10001 inside the container; unprivileged, so the host
     // owner must be 110001. The directory says 100000 — the shape of the
     // mistake, a plausible number that is simply not this app's.
-    exec.respond_first("--format '{{.Config.User}}'", CmdOutput::ok("10001\n"));
+    exec.respond_first(
+        "--format '{{.Config.User}}",
+        CmdOutput::ok("10001|PATH=/usr/bin \n"),
+    );
     exec.respond_first("stat -c %u", CmdOutput::ok("100000\n"));
     let sink = VecSink::new();
     let journal = NullJournal;
@@ -1779,7 +1782,10 @@ async fn storage_owned_by_the_wrong_uid_fails_the_deploy() {
 async fn storage_owned_correctly_says_nothing() {
     let exec = MockExecutor::new();
     script_fresh(&exec);
-    exec.respond_first("--format '{{.Config.User}}'", CmdOutput::ok("10001\n"));
+    exec.respond_first(
+        "--format '{{.Config.User}}",
+        CmdOutput::ok("10001|PATH=/usr/bin \n"),
+    );
     exec.respond_first("stat -c %u", CmdOutput::ok("110001\n"));
     let sink = VecSink::new();
     let journal = NullJournal;
@@ -1857,5 +1863,38 @@ async fn h4_cadvisor_is_not_installed_where_there_is_no_docker() {
     assert!(
         exec.calls_containing("/opt/cadvisor").is_empty(),
         "a native-only host has no docker to report on"
+    );
+}
+
+/// The uid that writes the data is not always the uid docker was asked for.
+///
+/// The linuxserver.io images — the *arr suite, syncthing, most of this fleet
+/// — start as root and drop to PUID themselves. `Config.User` is empty and
+/// `docker exec id` says root, while every file they write belongs to 1000.
+/// Reading only Config.User produced a confident wrong answer on the first
+/// stack it met: it told us to chown syncthing's configuration to root, which
+/// would have broken it. A check that is confidently wrong is worse than no
+/// check, because its output looks like an instruction.
+#[tokio::test]
+async fn ownership_reads_puid_before_the_docker_user() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    // Config.User empty, PUID=1000 — the linuxserver shape.
+    exec.respond_first(
+        "--format '{{.Config.User}}",
+        CmdOutput::ok("|PATH=/usr/bin PUID=1000 PGID=1000 TZ=Europe/Brussels \n"),
+    );
+    exec.respond_first("stat -c %u", CmdOutput::ok("101000\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.storage[0].host_owner_uid = Some(101_000);
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(
+        report.ok,
+        "1000 inside an unprivileged container IS 101000 on the host — this \
+         must pass, not demand a chown to root: {:?}",
+        report.error
     );
 }

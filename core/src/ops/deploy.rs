@@ -1239,14 +1239,24 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             if !m.apps.contains(app) {
                 continue;
             }
-            // What user does this app's container run as? Config.User is what
-            // the compose file asked for; when it is empty the image's own
-            // default applies, and when that is empty too it is root.
+            // Which uid actually writes this data? Two mechanisms, and the
+            // second one nearly cost syncthing its config.
+            //
+            // `Config.User` is what the compose file asked docker for. But
+            // the linuxserver.io images — the *arr suite, syncthing, most of
+            // this fleet — start as root and drop to `PUID` themselves, so
+            // Config.User is empty and `docker exec id` says root while every
+            // file they write belongs to 1000. Reading only Config.User there
+            // produces a confident, wrong answer: it told us to chown
+            // syncthing's directory to root, which would have broken it.
+            //
+            // PUID wins when present, because it is the one that describes
+            // what ends up on disk.
             let out = pct_sh(
                 exec,
                 m.vmid,
                 &format!(
-                    "docker inspect {} --format '{{{{.Config.User}}}}' 2>/dev/null || true",
+                    "docker inspect {} --format '{{{{.Config.User}}}}|{{{{range .Config.Env}}}}{{{{.}}}} {{{{end}}}}' 2>/dev/null || true",
                     app
                 ),
                 60,
@@ -1254,13 +1264,20 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             .await
             .map(|o| o.stdout.trim().to_string())
             .unwrap_or_default();
-            let container_uid: u32 = out
-                .split(':')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .parse()
-                .unwrap_or(0);
+            let (user_field, env_field) = out.split_once('|').unwrap_or((out.as_str(), ""));
+            let puid = env_field
+                .split_whitespace()
+                .find_map(|kv| kv.strip_prefix("PUID="))
+                .and_then(|v| v.trim().parse::<u32>().ok());
+            let container_uid: u32 = puid.unwrap_or_else(|| {
+                user_field
+                    .split(':')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .parse()
+                    .unwrap_or(0)
+            });
             let want = if m.lxc.unprivileged {
                 container_uid + 100_000
             } else {

@@ -19,13 +19,14 @@ made the reordering unnecessary.
 | 104 | `gateway` | traefik, cloudflared, crowdsec, goaccess | renamed from `platform`; the code already said `gateway_vmid: 104` |
 | 105 | `downloader` | gluetun, qbittorrent | unchanged |
 | 106 | `media` | jellyfin, sonarr, radarr, bazarr, prowlarr, seerr, flaresolverr, recyclarr | recyclarr added |
-| 107 | `metrics` | prometheus, alertmanager, pve-exporter, grafana, loki | moves here from 113; absorbs grafana and loki from 104 |
-| 108 | `uptime` | uptime-kuma | new stack; leaves 104 so it no longer watches its own host |
+| 107 | `uptime` | uptime-kuma | **amended 2026-09-01 (D68)** — new stack; leaves 104 so it no longer watches its own host |
+| 108 | `syncthing` | syncthing | **amended 2026-09-01 (D68)** — stays where it is |
+| 113 | `metrics` | prometheus, alertmanager, pve-exporter, grafana, loki | **amended 2026-09-01 (D68)** — stays where it is; still absorbs grafana and loki from 104 |
 | 109 | `messaging` | kyu, kyu-runner, http-switchboard | two services added |
 | **110** | *(reserved, unusable)* | — | 10.10.10.10 is Kenny's workstation |
 | 111 | `productivity` | supersync, postgres | vikunja dropped |
 | 112 | `almanac` | almanac | unchanged |
-| 113 | `syncthing` | syncthing | moves here from 108, renamed from `synctest` |
+| ~~113~~ | ~~`syncthing`~~ | — | superseded by the D68 amendment above |
 | 114 | `paperwork` | actual, stirling, paperless, paperless-db | added 2026-08-31, see the amendment below |
 | 115 | `home` | homepage | added 2026-08-31, see the amendment below |
 | 116 | `kp-soft` | kp-soft | added 2026-08-31; no gateway route yet — see `KP_SOFT_MIGRATION.md` |
@@ -303,3 +304,24 @@ separately rather than allowed to block a working site for months.
 The mount is `/app/storage` and never `/app/database`: that directory ships
 the migrations inside the image, and a mount over it hides them, after which
 `migrate` reports "No migrations found" and every request answers 500.
+
+## Amendment 2026-09-01 (D68) — nothing moves
+
+The layout above originally placed Uptime Kuma on 108 and moved two other
+stacks to make room: metrics from 113 to 107, syncthing from 108 to 113. Three
+container rebuilds to place one container.
+
+Kenny asked for Uptime Kuma to get its own LXC ("make it happen"), and the
+simplest thing that just works turned out to be 107, which was free. The whole
+chain existed only because 108 was wanted: metrics was moved to free 113, and
+113 was needed because syncthing had to leave 108. Take 107 for uptime and
+none of it is necessary.
+
+What this does NOT change: the reason for the move. Uptime Kuma leaves the
+gateway because a watchman on the machine he is watching goes down with it —
+that is why 104 fell over on 2026-08-31 with nothing to report it. That reason
+is met by any container that is not 104.
+
+Grafana and Loki still move off 104 to the metrics stack, separately and after
+the gateway rebuild (H2) — carrying two databases through the one operation
+during which nothing in the house is reachable is the wrong trade.

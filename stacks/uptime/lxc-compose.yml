@@ -1,0 +1,51 @@
+# The watchman, on his own container (D68).
+#
+# He used to run on the gateway — the machine he is mostly watching. On
+# 2026-08-31 that container fell over and the thing that would have said so
+# went down with it. A watchman on the roof he is guarding is not a watchman.
+#
+# 107, not the 108 the target layout first named: 108 was occupied by
+# syncthing, and freeing it meant moving metrics too. 107 was simply free, and
+# the whole chain existed only because 108 had been asked for.
+stack_name: uptime
+vmid: 107
+hostname: 107-app-uptime
+
+network:
+  ip: 10.10.10.7/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 1
+  memory_mb: 512
+  swap_mb: 256
+  disk_gb: 8
+  storage: local-lvm
+
+lxc:
+  template: "clone:998"
+  unprivileged: true
+  features: "nesting=1,keyctl=1"
+  protection: false
+  gpu: false
+  vpn: false
+
+boot:
+  onboot: true
+  # Early, but after the gateway: a monitor that starts before the things it
+  # watches spends its first minutes reporting failures that are only its own
+  # impatience.
+  order: 20
+
+storage:
+  - host_path: /appdata/uptime/uptime-kuma-config
+    mount_point: /appdata/uptime/uptime-kuma-config
+    host_owner_uid: 100000
+    app: uptime-kuma
+
+apps: [uptime-kuma, promtail, cadvisor]
+
+gateway_route:
+  filename: 107-app-uptime.yml

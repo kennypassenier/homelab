@@ -1,0 +1,20 @@
+# Uptime Kuma, carried over from the gateway unchanged except for what had to
+# change: it is no longer on the gateway's docker network, so the route is a
+# file on the gateway rather than a label here (H3 — labels only work for a
+# container sitting on the same machine as Traefik).
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+    container_name: uptime-kuma
+    ports:
+      - "3001:3001"
+    volumes:
+      - /appdata/uptime/uptime-kuma-config:/app/data
+    restart: unless-stopped
+    labels:
+      # Its own database is the whole of its state: 36 monitors, their history
+      # and their notification settings. Paused for the snapshot because
+      # SQLite with a write-ahead log does not copy cleanly while it is being
+      # written to.
+      - "com.homelab.backup.pause=true"
+      - "com.homelab.update.policy=auto"

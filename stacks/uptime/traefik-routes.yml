@@ -1,0 +1,21 @@
+# Two hostnames, deliberately. `kuma.` is the one on the start page and the
+# one Kenny actually types; `uptime.` existed as a docker label on the gateway
+# and is documented nowhere else. Both are carried so that whichever is in a
+# bookmark keeps working, and the second can be retired once it is shown to be
+# unused.
+http:
+  routers:
+    uptime-kuma:
+      rule: "Host(`kuma.kp-soft.dev`)"
+      entryPoints: [web]
+      service: uptime-kuma
+    uptime-kuma-alt:
+      rule: "Host(`uptime.kp-soft.dev`)"
+      entryPoints: [web]
+      service: uptime-kuma
+
+  services:
+    uptime-kuma:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.7:3001"

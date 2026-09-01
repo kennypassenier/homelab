@@ -332,12 +332,18 @@ fn scaffold_has_no_watchtower_and_manual_update_policy() {
     let tmp = std::env::temp_dir().join(format!("homelab-nowatch-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
-    // Synthetic preset (no presets dir) -> generic compose generation path.
+    // Synthetic preset -> the generic compose generation path. The presets
+    // directory itself is the real one: scaffolding without it used to fall
+    // back to a hand-written promtail config, which is how a third shape of
+    // that file came to exist. It now refuses instead, so a test that wants
+    // the generic path must still give it somewhere real to read the core
+    // apps from.
     let presets = synthetic_presets();
     let synth = presets.iter().find(|p| p.name == "syncthing").unwrap();
+    let real_presets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
     scaffold_stack(
         &tmp,
-        &tmp.join("no-presets-here"),
+        &real_presets,
         &StackParams {
             name: "x",
             vmid: 121,

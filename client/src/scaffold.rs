@@ -400,7 +400,19 @@ pub fn scaffold_stack_with(
         if core_dir.is_dir() {
             copy_app_templates(&core_dir, &dir.join(core), name, vmid, &ip, &mut files)?;
         } else if core == "promtail" {
-            builtin_promtail(&dir, name, vmid, &mut files)?;
+            // presets/_core/promtail/ is missing, which means this checkout is
+            // incomplete rather than that a fallback is wanted. Emitting a
+            // second, hand-written promtail config here is how a third shape
+            // of the same file came to exist — one without pipeline_stages,
+            // so the container_name label it is supposed to produce stayed
+            // empty and three Loki dashboards queried a label that was never
+            // written. Say what is missing instead of quietly inventing it.
+            return Err(format!(
+                "presets/_core/promtail is missing from {} — a stack scaffolded \
+                 without it ships no working log config; restore the presets \
+                 directory rather than deploying this stack",
+                presets_base.display()
+            ));
         }
     }
 
@@ -487,31 +499,6 @@ fn generic_compose(app: &str, image: &str, name: &str) -> String {
 }
 
 /// Built-in promtail (D8) used when presets/_core/promtail is absent.
-fn builtin_promtail(
-    dir: &Path,
-    name: &str,
-    vmid: u16,
-    files: &mut Vec<String>,
-) -> Result<(), String> {
-    let promtail_compose = format!(
-        "services:\n  promtail:\n    image: grafana/promtail:3.0.0\n    container_name: promtail\n    command: -config.file=/etc/promtail/config.yml\n    volumes:\n      - /var/lib/docker/containers:/var/lib/docker/containers:ro\n      - /var/log:/var/log:ro\n      - ./promtail-config.yml:/etc/promtail/config.yml:ro\n      - ./data:/tmp/positions\n    restart: unless-stopped\n    networks:\n      - {name}_net\n\nnetworks:\n  {name}_net:\n    external: true\n    name: {name}_net\n"
-    );
-    write_file(
-        &dir.join("promtail").join("docker-compose.yml"),
-        &promtail_compose,
-        files,
-    )?;
-    let promtail_cfg = format!(
-        "server:\n  http_listen_port: 9080\n  grpc_listen_port: 0\n\npositions:\n  filename: /tmp/positions/positions.yaml\n\nclients:\n  - url: http://10.10.10.4:3100/loki/api/v1/push\n\nscrape_configs:\n  - job_name: docker\n    static_configs:\n      - targets: [localhost]\n        labels:\n          job: docker\n          stack: {name}\n          host: {vmid}-app-{name}\n          __path__: /var/lib/docker/containers/*/*-json.log\n"
-    );
-    write_file(
-        &dir.join("promtail").join("promtail-config.yml"),
-        &promtail_cfg,
-        files,
-    )?;
-    Ok(())
-}
-
 fn write_file(path: &Path, content: &str, files: &mut Vec<String>) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {}", parent.display(), e))?;

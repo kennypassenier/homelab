@@ -31,7 +31,7 @@ jobs:
           cp target/release/homelab dist/homelab
           cd dist && sha256sum homelab-host homelab > SHA256SUMS
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/homelab-host

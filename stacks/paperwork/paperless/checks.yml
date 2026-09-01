@@ -1,0 +1,30 @@
+# Paperless holds scanned documents, and this stack has already lost a
+# database once: F61 found 25 originals on disk with no pgdata anywhere and no
+# vzdump from that period, so the tags, correspondents and dates that existed
+# only in that database are gone. The files survived; the meaning did not.
+#
+# That is what the first reading is for. A document count that falls is the
+# one thing nobody would notice from the outside — the web page keeps
+# answering, the login keeps working, and the library is smaller.
+checks:
+  - name: "documenten in paperless"
+    command: >-
+      docker exec paperless-db psql -U paperless -d paperless -tAc
+      "select count(*) from documents_document"
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts rows in the database, not files on disk. A document whose
+      original was deleted while its row survives counts here as present —
+      the reverse of what F61 lost, and equally invisible.
+
+  - name: "de aanmeldpagina antwoordt"
+    command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/accounts/login/"
+    expect: must_match
+    layer: process
+    blind_spot: >-
+      Paperless serving a page. Its database answers separately and can be
+      down while this stays 200 — the count above is what asks that.
+
+manual:
+  - "Zoek na een herbouw op een woord dat je zeker in een document staan hebt. Volledige tekst zoeken gebruikt een index die apart van de database leeft, en een lege index geeft nul resultaten zonder één foutmelding."

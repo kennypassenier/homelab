@@ -1,0 +1,43 @@
+# What "syncthing is syncing" means — which is not what its health endpoint
+# answers.
+#
+# These checks were written on 2026-09-01 and found, on their first reading,
+# that this service has been running for weeks synchronising NOTHING: zero
+# folders, zero devices, zero connections, 120 KB on disk, and one folder
+# entry in its config with an empty id, label and path (F163).
+#
+# Everything above it was green the whole time. `/rest/noauth/health` answers
+# `{"status": "OK"}` — which is exactly what the Uptime Kuma monitor asks —
+# and the container reports healthy. The service was up. It was not a service.
+checks:
+  - name: "mappen die syncthing synchroniseert"
+    command: >-
+      docker exec syncthing sh -c 'K=$(grep -o "<apikey>[^<]*" /var/syncthing/config/config.xml | cut -d\> -f2);
+      curl -s -m 10 -H "X-API-Key: $K" http://127.0.0.1:8384/rest/config/folders |
+      grep -o "\"id\":" | wc -l'
+    expect: never_decreases
+    layer: application
+
+  - name: "apparaten die syncthing kent"
+    command: >-
+      docker exec syncthing sh -c 'K=$(grep -o "<apikey>[^<]*" /var/syncthing/config/config.xml | cut -d\> -f2);
+      curl -s -m 10 -H "X-API-Key: $K" http://127.0.0.1:8384/rest/config/devices |
+      grep -o "\"deviceID\":" | wc -l'
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Devices it knows, not devices it reaches. A peer that is configured and
+      has been off for a month counts here.
+
+  - name: "syncthing meldt zich gezond"
+    command: "curl -s -m 10 http://127.0.0.1:8384/rest/noauth/health"
+    expect: must_match
+    layer: process
+    blind_spot: >-
+      This is the reading that was believed for weeks and meant nothing: it
+      answers OK for a syncthing with no folders, no peers and no data. It is
+      kept because a change in it still says something — but it is the example
+      this whole file exists to argue against.
+
+manual:
+  - "Open de syncthing-webpagina op 10.10.10.8:8384 en kijk of je vault erbij staat en 'Up to Date' meldt. Een lege syncthing meldt zichzelf net zo gezond als een werkende (F163)."

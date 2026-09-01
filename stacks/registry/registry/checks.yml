@@ -1,0 +1,35 @@
+# The pull-through cache in the house: one registry container per upstream,
+# so an image that one container already fetched does not have to cross the
+# internet again for the next.
+#
+# The failure that matters here is the one F129 was: a cache that ANSWERS but
+# cannot serve. Its probe returned 200 in 0.7 ms and then failed to deliver a
+# layer, and the deploy sat on it until the step ceiling caught it. So the
+# readings below deliberately ask more than "did the port answer".
+checks:
+  - name: "gespiegelde registries die antwoorden"
+    command: >-
+      n=0; for p in 5000 5001 5002 5003; do
+      c=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:$p/v2/);
+      [ "$c" = "200" ] && n=$((n+1)); done; echo $n
+    expect: never_decreases
+    layer: process
+    blind_spot: >-
+      This is exactly the reading that was believed and should not have been
+      (F129): answering `/v2/` in under a millisecond says the container is
+      up, not that it can hand over a blob. The catalogue below goes one step
+      further; only a real pull goes all the way.
+
+  - name: "images die de cache vasthoudt"
+    command: >-
+      curl -s -m 15 http://127.0.0.1:5000/v2/_catalog |
+      grep -o '"[a-z0-9./_-]*"' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts what Docker Hub's mirror holds. The three other upstreams have
+      their own catalogues, and an image cached before an upstream broke stays
+      counted here afterwards.
+
+manual:
+  - "Kijk na een uitrol of er `[cache] … did not deliver` in het logboek staat. Dat is de terugval die werkt, maar het betekent ook dat de cache dat image niet leverde — twee keer achter elkaar is een signaal, niet toeval."

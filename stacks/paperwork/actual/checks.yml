@@ -1,0 +1,21 @@
+# Actual Budget keeps its data in files under /appdata and serves them over
+# its own web interface. It has its own login, so nothing here can read the
+# budget itself — which is right, and is also the limit of what these
+# readings prove.
+checks:
+  - name: "actual antwoordt"
+    command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:5006/"
+    expect: must_match
+    layer: process
+    blind_spot: >-
+      The server is up. Whether the budget file it serves is the right one, or
+      any at all, is behind a login this check does not have and should not
+      have.
+
+  - name: "budgetbestanden op schijf"
+    command: "find /appdata/paperwork/actual-config -name '*.sqlite' 2>/dev/null | wc -l"
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts files, not their contents. A budget that is present and empty
+      counts the same as a full one.

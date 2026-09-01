@@ -1,0 +1,45 @@
+# What "the watchman is watching" means, measured rather than assumed.
+#
+# The failure this stack can have is not that it falls over — that is loud.
+# It is that it keeps running while watching less than it used to. A monitor
+# switched off, or lost in a rebuild, leaves a service unwatched and the
+# dashboard still green, which is worse than no dashboard at all.
+#
+# Every command runs on the CONTAINER. Uptime Kuma has no read API without a
+# token, so its own SQLite database is asked directly — the same reasoning as
+# Jellyfin's counts: the application's own store is the only reading that
+# cannot go stale.
+checks:
+  - name: "bewakingen die uptime kuma kent"
+    command: >-
+      sqlite3 /appdata/uptime/uptime-kuma-config/kuma.db
+      "select count(*) from monitor"
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts monitors that exist, not monitors that are switched on. The
+      reading below is the one that catches a monitor being paused.
+
+  - name: "bewakingen die actief staan"
+    command: >-
+      sqlite3 /appdata/uptime/uptime-kuma-config/kuma.db
+      "select count(*) from monitor where active=1"
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Active is not the same as correct. On 2026-09-01 monitor 5 was active
+      and had been reporting Uptime Kuma itself as down for eight hours,
+      because it still pointed at the address the service left that morning
+      (F157). A monitor watching the wrong thing counts here exactly like one
+      watching the right thing.
+
+  - name: "de webpagina antwoordt"
+    command: "curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/"
+    expect: must_match
+    layer: network
+    blind_spot: >-
+      A status code from the web server. It says nothing about whether any
+      check is actually being run — the two readings above ask that.
+
+manual:
+  - "Open Uptime Kuma en kijk of er rode regels staan die er al dagen staan. Een permanent rode regel is geen storing meer, het is meubilair — en dan leest niemand het bord nog (F157)."

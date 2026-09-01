@@ -1,0 +1,26 @@
+# Alertmanager is the middle of the chain, and the middle is where it broke:
+# on 2026-08-31 the alert path was finished on every side but this one, and
+# nothing said so because every side reported itself healthy.
+checks:
+  - name: "alertmanager is gezond"
+    command: "curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:9093/-/healthy"
+    expect: must_match
+    layer: process
+    blind_spot: >-
+      Alertmanager saying it started. It says nothing about whether an alert
+      that fires actually reaches Kenny — that path runs through the
+      switchboard and the hub, and only a real test alert proves it.
+
+  - name: "ontvangers in de configuratie"
+    command: >-
+      curl -s -m 10 http://127.0.0.1:9093/api/v2/status |
+      grep -o '"name":"[a-z0-9_-]*"' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts receivers Alertmanager parsed, not receivers that answer. A
+      webhook pointing at a dead address is configured exactly like a working
+      one.
+
+manual:
+  - "Stuur één keer per kwartaal een testalarm door de hele keten en kijk of het op je telefoon aankomt. Dat is het enige dat het middenstuk bewijst — elke schakel apart meldt zichzelf gezond, ook toen de keten stuk was."

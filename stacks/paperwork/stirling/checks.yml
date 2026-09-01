@@ -1,0 +1,17 @@
+# Stirling-PDF converts and merges PDFs and keeps nothing of its own worth
+# counting. It has one property worth watching, and it is the one F62 found:
+# it ships WITHOUT authentication unless the security profile is switched on,
+# and this instance has it on with credentials from the vault.
+checks:
+  - name: "stirling vraagt om aanmelden"
+    command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/login"
+    expect: must_match
+    layer: application
+    blind_spot: >-
+      That a login page exists. It does not prove the login is enforced on
+      every other path — an unauthenticated request to a conversion endpoint
+      is the reading that would, and it is in the manual list because getting
+      it wrong would be a false alarm on a service that is behaving.
+
+manual:
+  - "Open Stirling zonder in te loggen en probeer een bewerking. Hij hoort je naar de aanmeldpagina te sturen: zonder het security-profiel draait Stirling volledig open (F62), en dat verschil is van buitenaf niet te zien aan de startpagina."

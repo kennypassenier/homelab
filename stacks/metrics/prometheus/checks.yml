@@ -1,0 +1,39 @@
+# Prometheus is the stack that watches everything else, which makes its own
+# silence the hardest to notice: nothing complains when the thing that would
+# have complained stops.
+#
+# The fault this fleet actually had was not Prometheus falling over. It was a
+# discovery file the orchestrator wrote for weeks that Prometheus had never
+# been told to read (F1's class) — the writer succeeded, the reader never
+# looked. So the readings ask what PROMETHEUS holds, never what somebody
+# wrote for it.
+checks:
+  - name: "targets die antwoorden"
+    command: >-
+      curl -s -m 15 "http://127.0.0.1:9090/api/v1/query?query=count(up==1)" |
+      grep -o '"value":\[[^]]*\]' | grep -o '[0-9]*"\]' | tr -d '"]'
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts targets that answered, not targets that SHOULD exist. A stack
+      whose discovery file was never written is not missing here — it was
+      never counted in the first place. That question belongs to the fleet
+      check, which compares the repository against reality.
+
+  - name: "alarmregels geladen"
+    command: >-
+      curl -s -m 15 http://127.0.0.1:9090/api/v1/rules |
+      grep -o '"name":' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Rules loaded, not rules that can fire. A rule whose query names a metric
+      nobody produces is loaded, valid, and permanently silent — which is how
+      an alert chain ends up finished on every side but the middle.
+
+  - name: "verschillende metrieken die binnenkomen"
+    command: >-
+      curl -s -m 20 "http://127.0.0.1:9090/api/v1/label/__name__/values" |
+      grep -o ',' | wc -l
+    expect: never_decreases
+    layer: application

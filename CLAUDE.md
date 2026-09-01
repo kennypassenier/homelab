@@ -92,8 +92,12 @@ it is the resume point and is kept current as part of the work, not afterwards.
   rollback proven). Golden templates = CT 998 (v3 unprivileged, the default) and CT 997 (v3
   privileged, for media + downloader); CT 999 is the retired v1.
 - **There is no standing test container any more.** vmid 108 used to be it;
-  since the pilot it is `108-app-syncthing` and holds Kenny's Obsidian vault
-  sync. This note said otherwise until 2026-09-01, and a form went out
+  since the pilot it is `108-app-syncthing` — which, measured 2026-09-01, is
+  running and synchronising NOTHING: zero folders, zero devices, 120 KB on
+  disk (F163). This note claimed it held Kenny's Obsidian vault sync, twice,
+  on the strength of what the M4 pilot was FOR rather than what it ended up
+  doing. Do not destroy it on that basis either — what it should do is
+  Kenny's open decision. This note said otherwise until 2026-09-01, and a form went out
   recommending drills on a live service because of it. When something has to
   be created and destroyed for real, make a throwaway stack on a free vmid
   (`stacks/drill`, vmid 118) and destroy it in the same sitting — Kenny's

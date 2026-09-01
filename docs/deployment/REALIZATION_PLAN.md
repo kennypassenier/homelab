@@ -278,7 +278,24 @@ exactly four containers still carry a v1 hostname.
 
 **What is actually left, in the order it should now run:**
 
-**Status 2026-09-01:** three of the four are done — `media` (CT 106) was
+**Status 2026-09-01 — M8 IS DONE.** All four containers replaced, plus one
+that was not on the list: Uptime Kuma left the gateway for its own container
+(D68), because a watchman on the roof he guards goes down with it.
+
+The gateway was the hardest and cost three self-inflicted outages, all three
+now guarded: the apps were not on a shared network so Traefik could not reach
+CrowdSec and the bouncer failed closed on every hostname; the route directory
+still pointed at the v1 path so every deploy wrote routes nothing reads; and
+removing a duplicate CrowdSec bouncer revoked the shared key. Total time
+unreachable was roughly fifteen minutes across the afternoon.
+
+What the rebuild bought beyond the rename: the gateway's config is on
+/appdata and survives the container, its 145 MB of access logs left the
+nightly backup, its three label-based routes became files, and it is the
+first stack whose deploy was verified by the checks written the same morning
+— which caught two real ownership faults nobody knew about.
+
+**Status 2026-09-01 (earlier):** three of the four are done — `media` (CT 106) was
 replaced overnight and verified against every count recorded before it was
 stopped; the full result is in `M8_CT106_PREFLIGHT.md`. Only the `gateway`
 (CT 104) remains. Media was not a clean run: the registry cache passes its

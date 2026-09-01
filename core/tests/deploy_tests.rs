@@ -1738,31 +1738,31 @@ async fn s2_a_push_that_did_not_land_fails_its_own_step() {
     );
 }
 
-/// The declared owner of a data directory must be the uid the app actually
-/// runs as — a fact only the image knows.
+/// Can the application write its own data? That, and nothing about uids.
 ///
-/// Four failures in two days had this root: a render gid assumed to be 104
-/// when the machine said 993, and a blanket chown to 100000 that handed
-/// Loki's database to root while Loki runs as 10001. It crash-looped with
-/// `permission denied`, the front door stayed down, and the cause had to be
-/// read out of a Go stack trace. Validation could not have caught any of it:
-/// it checks the +100000 container mapping, which was correct every time.
+/// Four earlier versions of this step tried to work out who SHOULD own the
+/// directory, and each was confidently wrong on a shape nobody had thought
+/// of: an empty user field with PUID, the name "nobody", an entrypoint that
+/// drops privileges after starting, and a supervisor whose PID 1 is root
+/// while the application runs beside it as a child. Every wrong answer was
+/// printed as a chown to copy, and each would have broken the service it was
+/// about.
+///
+/// Loki did not crash because a number was wrong. It crashed because it could
+/// not open its own database — so that is the question.
 #[tokio::test]
-async fn storage_owned_by_the_wrong_uid_fails_the_deploy() {
+async fn storage_the_app_cannot_write_fails_the_deploy() {
     let exec = MockExecutor::new();
     script_fresh(&exec);
-    // The app runs as 10001 inside the container; unprivileged, so the host
-    // owner must be 110001. The directory says 100000 — the shape of the
-    // mistake, a plausible number that is simply not this app's.
-    // Registered generic-first: respond_first inserts at the front, so the
-    // /proc matcher registered last is the one consulted for that path.
-    exec.respond_first("stat -c %u", CmdOutput::ok("100000\n"));
-    exec.respond_first("State.Pid", CmdOutput::ok("4242\n"));
-    exec.respond_first("stat -c %u /proc/4242", CmdOutput::ok("10001\n"));
+    exec.respond_first("{{.Destination}}", CmdOutput::ok("/config\n"));
+    exec.respond_first(
+        "touch /config/.homelab-write-probe",
+        CmdOutput::failed(1, "touch: /config/.homelab-write-probe: Permission denied"),
+    );
+    exec.respond_first("stat -c %u:%g", CmdOutput::ok("100000:100000\n"));
     let sink = VecSink::new();
     let journal = NullJournal;
-    let mut sp = spec(110, "syncthing");
-    sp.manifest.storage[0].host_owner_uid = Some(100_000);
+    let sp = spec(110, "syncthing");
 
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(
@@ -1771,28 +1771,53 @@ async fn storage_owned_by_the_wrong_uid_fails_the_deploy() {
     );
     let err = format!("{:?}", report.error);
     assert!(
-        err.contains("110001") && err.contains("chown"),
-        "the error must give the exact remedy, not a diagnosis to work out: {}",
+        err.contains("cannot write") && err.contains("100000"),
+        "the message must say what IS, not prescribe a fix that may be as \
+         wrong as the last four: {}",
         err
     );
 }
 
-/// And the same check must stay quiet when the ownership is right, or it
-/// becomes a step everyone learns to ignore.
+/// And it must stay quiet when the app CAN write, whatever the uids happen to
+/// be — the half that decides whether a check survives a month. Every image
+/// shape in this fleet passes here: the numbers differ, the answer does not.
 #[tokio::test]
-async fn storage_owned_correctly_says_nothing() {
+async fn storage_the_app_can_write_says_nothing() {
     let exec = MockExecutor::new();
     script_fresh(&exec);
-    exec.respond_first("stat -c %u", CmdOutput::ok("110001\n"));
-    exec.respond_first("State.Pid", CmdOutput::ok("4242\n"));
-    exec.respond_first("stat -c %u /proc/4242", CmdOutput::ok("10001\n"));
+    exec.respond_first("{{.Destination}}", CmdOutput::ok("/config\n"));
+    exec.respond_first("touch /config/.homelab-write-probe", CmdOutput::ok(""));
     let sink = VecSink::new();
     let journal = NullJournal;
-    let mut sp = spec(110, "syncthing");
-    sp.manifest.storage[0].host_owner_uid = Some(110_001);
+    let sp = spec(110, "syncthing");
 
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
-    assert!(report.ok, "correct ownership must pass: {:?}", report.error);
+    assert!(
+        report.ok,
+        "a writable directory must pass: {:?}",
+        report.error
+    );
+}
+
+/// A directory the app does not mount is not its business. The media stack
+/// declares six, one per *arr, and each container sees only its own — asking
+/// sonarr about radarr's configuration would fail for a reason that is not a
+/// fault.
+#[tokio::test]
+async fn storage_a_directory_the_app_does_not_mount_is_skipped() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_first("{{.Destination}}", CmdOutput::ok("\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let sp = spec(110, "syncthing");
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "nothing to judge here: {:?}", report.error);
+    assert!(
+        exec.calls_containing("homelab-write-probe").is_empty(),
+        "and it must not have probed at all"
+    );
 }
 
 /// H4 · cAdvisor is installed on every managed docker host, not declared per
@@ -1862,43 +1887,5 @@ async fn h4_cadvisor_is_not_installed_where_there_is_no_docker() {
     assert!(
         exec.calls_containing("/opt/cadvisor").is_empty(),
         "a native-only host has no docker to report on"
-    );
-}
-
-/// Four shapes of "which user runs this", and one reading that covers all of
-/// them.
-///
-/// Inferring it from docker's own description produced a confident wrong
-/// answer four times in one afternoon — an empty field with PUID, the name
-/// "nobody", an entrypoint that starts as root and drops afterwards, and the
-/// one easy numeric case. Each wrong answer was printed as a chown to copy.
-/// The running process has no such ambiguity: its uid is in /proc, and it is
-/// the process that writes the files.
-#[tokio::test]
-async fn ownership_reads_the_running_process_not_the_configuration() {
-    let exec = MockExecutor::new();
-    script_fresh(&exec);
-    // respond_first inserts at the FRONT, so the last registration wins.
-    // The generic directory matcher goes first and the /proc one last, or
-    // the generic one answers for /proc too.
-    exec.respond_first("stat -c %u", CmdOutput::ok("165534\n"));
-    exec.respond_first("State.Pid", CmdOutput::ok("4242\n"));
-    exec.respond_first("stat -c %u /proc/4242", CmdOutput::ok("65534\n"));
-    let sink = VecSink::new();
-    let journal = NullJournal;
-    let mut sp = spec(110, "syncthing");
-    sp.manifest.storage[0].host_owner_uid = Some(165_534);
-
-    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
-    assert!(
-        report.ok,
-        "65534 inside an unprivileged container IS 165534 on the host — this \
-         must pass rather than demand a chown to root: {:?}",
-        report.error
-    );
-    assert!(
-        !exec.calls_containing("/proc/4242").is_empty(),
-        "and it must have read the running process, not docker's description \
-         of what it was asked to be"
     );
 }

@@ -1246,22 +1246,26 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     // ── B3: no green light without proof. ────────────────────────────────
-    // ── Storage ownership: does the app actually own its own data?
+    // ── Storage ownership: can the app actually write its own data?
     //
-    // The manifest declares host_owner_uid and validation checks the +100000
-    // mapping — the "did you forget the container is unprivileged" half. It
-    // cannot check the half that matters more: whether that uid is the one
-    // the application inside the container actually runs as. Nobody can check
-    // that by reading the stack file, because the answer lives in the image.
+    // This is the fifth version of this step in one afternoon, and the first
+    // one that asks the right question. The four before it tried to work out
+    // WHO SHOULD own the directory, and each was confidently wrong on a shape
+    // nobody had thought of — an empty user field with PUID, the name
+    // "nobody", an entrypoint that drops privileges after starting, and a
+    // supervisor whose PID 1 is root while the application runs beside it as
+    // a child. Every wrong answer was printed as a `chown` to copy, and each
+    // one would have broken the service it was about.
     //
-    // Four times on 2026-08-31/09-01 that was the fault. A render gid assumed
-    // to be 104 when the machine said 993. A blanket chown to 100000 that
-    // gave Loki's database to root while Loki runs as 10001, so it crash-
-    // looped with `permission denied` and the front door stayed down while it
-    // was diagnosed from a stack trace. Kenny's instruction after the fourth:
-    // dig the class out so it cannot come back.
+    // The question that has no shapes is whether the application can write.
+    // It is also the only thing anyone actually cares about: Loki did not
+    // crash because a number was wrong, it crashed because it could not open
+    // its own database.
     //
-    // So: ask the image. It is the only party that knows.
+    // So the container is asked to write one file and delete it again. No
+    // uid arithmetic, no image conventions, no fifth special case — and when
+    // it fails, the message reports what IS rather than prescribing a fix
+    // that might be as wrong as the last four.
     step!(runner, exec, ctx, m, "storage ownership", {
         let mut wrong: Vec<String> = Vec::new();
         for mount in &m.storage {
@@ -1271,70 +1275,55 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             if !m.apps.contains(app) {
                 continue;
             }
-            // Which uid actually writes this data? Ask the running process,
-            // not the configuration.
-            //
-            // Four attempts at inferring this from docker's own description
-            // all produced confident wrong answers within one afternoon, and
-            // each wrong answer was printed as a `chown` to copy:
-            //   - `Config.User` empty, PUID=1000  → syncthing, the *arr suite
-            //   - `Config.User` = "nobody"        → prometheus, alertmanager
-            //   - `Config.User` empty, root exec  → postgres, php, actual,
-            //     which start as root and drop privileges after the entrypoint
-            //   - `Config.User` = "10001"         → loki, the only easy case
-            //
-            // The container's main process knows without ambiguity: its uid
-            // is in /proc, and it is the process that writes the files. Every
-            // shape above collapses into one reading, and a fifth shape needs
-            // no fifth special case.
-            let pid = pct_sh(
+            // Where does this host path appear inside the app's container?
+            // Docker's own mapping, so no path convention has to be guessed.
+            let dest = pct_sh(
                 exec,
                 m.vmid,
                 &format!(
-                    "docker inspect -f '{{{{.State.Pid}}}}' {} 2>/dev/null || true",
-                    app
+                    "docker inspect {} -f '{{{{range .Mounts}}}}{{{{if eq .Source \"{}\"}}}}{{{{.Destination}}}}{{{{end}}}}{{{{end}}}}' 2>/dev/null || true",
+                    app, mount.mount_point
                 ),
                 60,
             )
             .await
             .map(|o| o.stdout.trim().to_string())
             .unwrap_or_default();
-            let container_uid: u32 = if pid.is_empty() || pid == "0" {
-                // Not running. Nothing has written anything, so there is
-                // nothing to judge — the "start apps" step already failed if
-                // that was wrong.
+            if dest.is_empty() {
+                // The app does not mount this directory. It belongs to a
+                // sibling, or the container is not running — either way there
+                // is nothing here to judge.
                 continue;
-            } else {
-                match pct_sh(
+            }
+            let probe = pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "docker exec {} sh -c 'touch {}/.homelab-write-probe && rm -f {}/.homelab-write-probe' 2>&1",
+                    app, dest, dest
+                ),
+                120,
+            )
+            .await;
+            let failed = match &probe {
+                Ok(o) => !o.success(),
+                Err(_) => true,
+            };
+            if failed {
+                let owner = run_ok(
                     exec,
-                    m.vmid,
-                    &format!("stat -c %u /proc/{} 2>/dev/null || true", pid),
-                    60,
+                    &Cmd::new("stat", &["-c", "%u:%g", &mount.host_path], 30),
                 )
                 .await
-                .ok()
-                .and_then(|o| o.stdout.trim().parse::<u32>().ok())
-                {
-                    Some(u) => u,
-                    None => continue,
-                }
-            };
-            let want = if m.lxc.unprivileged {
-                container_uid + 100_000
-            } else {
-                container_uid
-            };
-            let have = run_ok(exec, &Cmd::new("stat", &["-c", "%u", &mount.host_path], 30))
-                .await
-                .ok()
-                .and_then(|o| o.stdout.trim().parse::<u32>().ok());
-            match have {
-                Some(h) if h != want => wrong.push(format!(
-                    "{} is owned by {} but '{}' runs as uid {} in the container, \
-                     which is {} on the host — `chown -R {}:{} {}`",
-                    mount.host_path, h, app, container_uid, want, want, want, mount.host_path
-                )),
-                _ => {}
+                .map(|o| o.stdout.trim().to_string())
+                .unwrap_or_else(|_| "unreadable".into());
+                wrong.push(format!(
+                    "'{}' cannot write to {} (mounted at {} inside it); the \
+                     directory belongs to {} on the host — compare that with \
+                     the user the application runs as, which is not always \
+                     the container's PID 1",
+                    app, mount.host_path, dest, owner
+                ));
             }
         }
         if wrong.is_empty() {

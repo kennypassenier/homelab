@@ -2543,3 +2543,47 @@ async fn a_failed_backup_stops_the_destroy() {
     assert!(exec2.calls_containing("restic backup").is_empty());
     assert_eq!(exec2.calls_containing("pct destroy 108 --purge").len(), 1);
 }
+
+/// T66 · whatever a deploy registers, a destroy has to unregister.
+///
+/// The dashboard was the half that was missing. A destroyed stack left its
+/// Grafana panel behind, showing a container that no longer exists — which
+/// reads as "everything is down" rather than "this is gone", and nothing
+/// distinguishes the two. The Prometheus target and the Traefik route were
+/// already removed; only this one was not.
+#[tokio::test]
+async fn t66_destroy_removes_the_dashboard_the_deploy_wrote() {
+    let exec = MockExecutor::new();
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
+    exec.respond_always("pct status", CmdOutput::ok("status: stopped"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut c = ctx(&exec, &sink, &j);
+    c.grafana_dashboards_dir = Some("/opt/grafana/provisioning/dashboards".into());
+    c.metrics_targets_dir = Some("/opt/prometheus/targets".into());
+
+    let report = destroy(&c, &manifest(108, "test"), "test", true).await;
+    assert!(report.ok, "destroy failed: {:?}", report.error);
+
+    let removed = exec.calls_containing("homelab-test.json");
+    assert_eq!(
+        removed.len(),
+        1,
+        "the dashboard this stack's deploy wrote must be removed exactly once: {:?}",
+        removed
+    );
+    assert!(
+        removed[0].contains("rm"),
+        "and removed, not merely mentioned: {}",
+        removed[0]
+    );
+    // The two that already worked must keep working.
+    assert_eq!(
+        exec.calls_containing("test.json")
+            .iter()
+            .filter(|c| c.contains("/opt/prometheus/targets"))
+            .count(),
+        1,
+        "the Prometheus target is still removed"
+    );
+}

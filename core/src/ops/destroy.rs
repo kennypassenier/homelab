@@ -179,6 +179,20 @@ pub async fn destroy(
         Ok(StepOutcome::Changed)
     });
 
+    // T66: whatever a deploy registers, a destroy has to unregister. The
+    // dashboard was the half that was missing — a destroyed stack left a
+    // panel behind showing a container that no longer exists, which reads as
+    // "everything is down" rather than "this is gone", and there is no
+    // difference visible between the two.
+    step!(runner, "remove grafana dashboard", {
+        let Some(dir) = ctx.grafana_dashboards_dir.as_deref() else {
+            return Ok(StepOutcome::Unchanged);
+        };
+        let path = crate::ops::dashboard::dashboard_file(dir, stack_name);
+        let _ = exec.run(&Cmd::new("rm", &["-f", &path], 30)).await;
+        Ok(StepOutcome::Changed)
+    });
+
     step!(runner, "remove gateway route", {
         let dest = format!(
             "{}/{}-app-{}.yml",

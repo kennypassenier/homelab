@@ -60,4 +60,4 @@ checks:
 # What no measurement settles here.
 manual:
   - "Open een route van buitenaf (bv. son.kp-soft.dev) en kijk of Cloudflare Access je binnenlaat — dat stuk kan van binnen niet gemeten worden."
-  - "go.kp-soft.dev hoort NIET meer te antwoorden: dat rapport is met opzet van het internet gehaald (form B2c). Antwoordt het toch, dan staat er nog een ingang in het Cloudflare-dashboard die weg moet."
+  - "go.kp-soft.dev hoort geen RAPPORT meer te tonen — dat is met opzet van het internet gehaald (form B2c). Dat de naam nog 302 of 404 geeft is normaal: de ingang staat nog in het Cloudflare-dashboard en dat is opruimwerk, geen risico. Zie je de GoAccess-pagina, dan is er wel iets mis."

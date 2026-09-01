@@ -13,12 +13,12 @@ So this file counts them. Every manual intervention on a managed container is
 listed with what would have to exist for it to have been unnecessary. The
 number at the top is the metric; it is meant to fall.
 
-## Open: 3
+## Open: 2 (plus one optional tidy-up)
 
 | # | What was done by hand | What would make it unnecessary | State |
 |---|---|---|---|
 | 1 | Killed a hung `docker compose pull` and re-ran it | The F129 fallback does this now, but it has never fired in the field — the images were already local by the time it shipped | **guarded, unproven** |
-| 9 | Remove the `go.kp-soft.dev` ingress and its Access policy from the Cloudflare dashboard | Nothing this orchestrator can do: the tunnel's ingress rules and every Access policy exist only in Cloudflare's own configuration (F12), and no credential for it lives here. Kenny has to click it. Until he does, the hostname is a public entry pointing at a route that no longer exists | **awaiting Kenny** |
+| 9 | Remove the `go.kp-soft.dev` ingress and its Access policy from the Cloudflare dashboard | Nothing this orchestrator can do — the tunnel's ingress and every Access policy live only in Cloudflare (F12). **But it is tidying, not a repair, and this row said otherwise until Kenny asked why.** Measured 2026-09-01 after the route was removed: from outside the hostname answers 302 (the Access login), and an authenticated request reaches Traefik and gets 404, because no router matches it. The only non-Host router in the whole gateway is Traefik's own `/ping`. So nothing is exposed and nothing is broken; what is left is a dead name in someone else's configuration | **optional — no risk measured** |
 | 8 | Read the running process uid by hand on three containers, to work out why the ownership check was wrong | Nothing: this was diagnosis rather than repair. Listed anyway, because the reason it was needed is that a check gave a confident wrong answer, and that is the thing that should not have happened | **diagnosis, not repair** |
 
 ## Closed: 6

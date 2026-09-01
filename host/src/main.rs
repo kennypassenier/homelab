@@ -97,6 +97,11 @@ struct FileConfig {
     /// gateway's route fragments. Absent = the front page stays hand-made,
     /// which is how it came to be zero bytes.
     homepage_services_file: Option<String>,
+    /// T49: the file the Uptime Kuma seeder reads its generated half from.
+    /// Absent = the watch list stays whatever a hand-run script last made,
+    /// which is how a monitor came to report Uptime Kuma itself as down from
+    /// an address it had left that morning (F157).
+    kuma_monitors_file: Option<String>,
 }
 
 #[derive(Clone)]
@@ -146,6 +151,11 @@ struct Config {
     /// gateway's route fragments. Absent = the front page stays hand-made,
     /// which is how it came to be zero bytes.
     homepage_services_file: Option<String>,
+    /// T49: the file the Uptime Kuma seeder reads its generated half from.
+    /// Absent = the watch list stays whatever a hand-run script last made,
+    /// which is how a monitor came to report Uptime Kuma itself as down from
+    /// an address it had left that morning (F157).
+    kuma_monitors_file: Option<String>,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
 }
@@ -228,6 +238,7 @@ fn load_config() -> Config {
         metrics_targets_dir: file.metrics_targets_dir,
         grafana_dashboards_dir: file.grafana_dashboards_dir,
         homepage_services_file: file.homepage_services_file,
+        kuma_monitors_file: file.kuma_monitors_file,
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -301,6 +312,8 @@ fn render_settings_toml(
         #[serde(skip_serializing_if = "Option::is_none")]
         grafana_dashboards_dir: Option<&'a String>,
         homepage_services_file: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        kuma_monitors_file: Option<&'a String>,
     }
     let bdef = homelab_core::ops::backup::BackupCfg::default();
     let out = Out {
@@ -337,6 +350,7 @@ fn render_settings_toml(
         metrics_targets_dir: config.metrics_targets_dir.as_ref(),
         grafana_dashboards_dir: config.grafana_dashboards_dir.as_ref(),
         homepage_services_file: config.homepage_services_file.as_ref(),
+        kuma_monitors_file: config.kuma_monitors_file.as_ref(),
     };
     toml::to_string_pretty(&out).map_err(|e| e.to_string())
 }
@@ -430,6 +444,9 @@ mod tests {
             metrics_targets_dir: Some("/appdata/metrics/prometheus-config/targets".into()),
             grafana_dashboards_dir: Some("/opt/grafana/provisioning/dashboards".into()),
             homepage_services_file: Some("/appdata/home/homepage-config/services.yaml".into()),
+            kuma_monitors_file: Some(
+                "/appdata/uptime/kuma-seeder-config/host-monitors.json".into(),
+            ),
             initial_settings: homelab_proto::HostConfigView {
                 backup_hour: Some(4),
                 notify_webhook: Some("http://ha/webhook/x".into()),
@@ -1595,6 +1612,7 @@ where
         metrics_targets_dir: state.config.metrics_targets_dir.clone(),
         grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         homepage_services_file: state.config.homepage_services_file.clone(),
+        kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         backup: state.config.backup.clone(),
         registry_cache: state.config.registry_cache.clone(),
     };

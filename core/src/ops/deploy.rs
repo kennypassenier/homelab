@@ -1570,6 +1570,59 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         });
     }
 
+    // ── T49: the watch list, rendered from the fleet the same way T51
+    // renders the front page and T1 the scrape targets.
+    //
+    // Fleet-wide for the same reason: Uptime Kuma has one monitor set, so
+    // this reads every stack in host state rather than only the one just
+    // deployed. It writes a FILE and stops there — the seeder in the uptime
+    // stack is what talks to Uptime Kuma, because the protocol behind that
+    // API is not one its authors offer as a public interface, and
+    // reimplementing it in Rust is exactly the thing that breaks silently on
+    // an update (Kenny, forms R13 and V2 — D87).
+    //
+    // Best-effort like its two siblings: a monitor list is a convenience,
+    // and a deploy that fails over it would be a deploy that fails over
+    // nothing.
+    if let Some(dest) = ctx.kuma_monitors_file.as_deref() {
+        step!(runner, exec, ctx, m, "uptime monitors", {
+            let store = crate::state::StateStore::new(exec, &ctx.state_dir);
+            let state = store.load().await?;
+            let mut fleet: Vec<(String, String)> = state
+                .stacks
+                .iter()
+                .filter_map(|(name, st)| {
+                    st.manifest
+                        .as_ref()
+                        .map(|mf| (name.clone(), mf.network.ip.clone()))
+                })
+                .collect();
+            // The stack being deployed is in state by now, but on a FIRST
+            // deploy the state write happens after this step — so add it
+            // here rather than let a brand-new stack wait a whole deploy
+            // for the monitor that says whether it came up.
+            if !fleet.iter().any(|(n, _)| n == &m.stack_name) {
+                fleet.push((m.stack_name.clone(), m.network.ip.clone()));
+            }
+            let monitors = crate::ops::monitors::host_monitors(&fleet);
+            let body = crate::ops::monitors::monitors_json(&monitors);
+            match exec.write_file(dest, &body, 0o644).await {
+                Ok(()) => {
+                    log_info(format!(
+                        "[t49] {} — {} host monitor(s) for the seeder",
+                        dest,
+                        monitors.len()
+                    ));
+                    Ok(StepOutcome::Changed)
+                }
+                Err(e) => {
+                    log_info(format!("[t49] could not write {} ({})", dest, e));
+                    Ok(StepOutcome::Unchanged)
+                }
+            }
+        });
+    }
+
     // ── D3: garbage-collect apps removed from intent — stop + remove their
     // compose project and /opt dir; /appdata config dirs are kept.
     // Files the container has and the repository does not.

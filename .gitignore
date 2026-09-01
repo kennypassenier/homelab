@@ -16,3 +16,7 @@ target-debian/
 
 # Unrelated project that happens to live in this directory
 browser_scripts/
+
+# Python bytecode from running a stack script locally
+__pycache__/
+*.pyc

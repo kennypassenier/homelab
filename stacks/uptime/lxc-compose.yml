@@ -44,8 +44,15 @@ storage:
     mount_point: /appdata/uptime/uptime-kuma-config
     host_owner_uid: 100000
     app: uptime-kuma
+  # T49: the seeder's installed Python library and the generated monitor
+  # list. Nothing here is precious — both are reproducible — but it is a
+  # declared mount rather than a directory that appears by itself.
+  - host_path: /appdata/uptime/kuma-seeder-config
+    mount_point: /appdata/uptime/kuma-seeder-config
+    host_owner_uid: 100000
+    app: kuma-seeder
 
-apps: [uptime-kuma, promtail]
+apps: [uptime-kuma, kuma-seeder, promtail]
 
 gateway_route:
   filename: 107-app-uptime.yml

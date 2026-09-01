@@ -158,9 +158,9 @@ restic restore latest --target /
 
 - hostname `107-app-uptime`, ip `10.10.10.7/24`
 - resources: 1 core(s), 512 MiB RAM, 256 MiB swap, 8 GiB disk
-- apps: uptime-kuma, promtail
+- apps: uptime-kuma, kuma-seeder, promtail
 - recreate from scratch: `homelab deploy stacks/uptime` (or by hand per Layer 2)
-- data restore from: `…:uptime-kuma-config`
+- data restore from: `…:uptime-kuma-config`, `…:kuma-seeder-config`
 
 ## Full-host rebuild order
 

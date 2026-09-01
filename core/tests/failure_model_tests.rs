@@ -85,6 +85,7 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
         homepage_services_file: None,
+        kuma_monitors_file: None,
         backup: Default::default(),
         registry_cache: None,
     };

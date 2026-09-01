@@ -1,0 +1,73 @@
+# Recyclarr configuration, written from the frozen decision set R1-R11
+# (vault note "Homelab Planned Services" §5, 2026-08-29). Every choice below
+# carries its decision number so a reader can find the reasoning rather than
+# guess at it.
+#
+# Two deliberate absences, both of them decisions rather than oversights:
+#
+#   * NO `quality_definition` block. The size caps R2 (150 MB/min for movie
+#     720p/1080p), R3 (100 MB/min for episode 720p/1080p) and R11 (250 MB/min
+#     for 2160p) are already set and verified in both applications. Recyclarr
+#     can only scale the whole TRaSH size table by a single ratio, so letting
+#     it near this would overwrite three measured numbers with one guess.
+#
+#   * NO raw `trash_id` hashes. They are not written from memory: a wrong hash
+#     silently scores the wrong thing, and a block on the wrong release group
+#     surfaces months later. The TRaSH guide TEMPLATES below carry the correct
+#     ids and are updated with the guides themselves.
+
+radarr:
+  main:
+    base_url: http://10.10.10.6:7878
+    api_key: !env_var RADARR_API_KEY
+
+    include:
+      # R1: ceiling at Bluray-1080p, Remux not allowed in any profile. The
+      # existing `1080p` profile is managed IN PLACE (R7) — 891 films stay
+      # linked to the profile they already point at.
+      - template: radarr-quality-profile-hd-bluray-web
+      - template: radarr-custom-formats-hd-bluray-web
+      # R8: the Ultra-HD profile is managed too, with 4K scoring.
+      - template: radarr-quality-profile-uhd-bluray-web
+      - template: radarr-custom-formats-uhd-bluray-web
+
+    # R4, R6 — deliberately NOT written yet, and this is the decision rather
+    # than an omission.
+    #
+    # Those two need custom formats referenced by TRaSH `trash_id` hashes, and
+    # the vault note MR-2 says in as many words that they are not to be
+    # written from memory: a wrong hash silently scores the wrong thing, and a
+    # block on the wrong release group only surfaces months later. An earlier
+    # draft of this file had four hashes in it, recalled rather than looked
+    # up, which is exactly the mistake that warning exists for.
+    #
+    # Resolve them at deploy time and paste the real ids here:
+    #
+    #     docker exec recyclarr recyclarr list custom-formats radarr
+    #
+    # What to look for, per decision:
+    #   R4  x265 (HD)            — score it BELOW x264, never block it
+    #   R6  dubbed releases      — block outright (a large negative score)
+    #
+    # custom_formats:
+    #   - trash_ids: [ <id> ]
+    #     assign_scores_to:
+    #       - name: HD Bluray + WEB
+    #         score: -100
+
+sonarr:
+  main:
+    base_url: http://10.10.10.6:8989
+    api_key: !env_var SONARR_API_KEY
+
+    include:
+      # R1 and R7 again, for episodes: the existing profile, managed in place.
+      - template: sonarr-quality-definition-series
+      - template: sonarr-v4-quality-profile-web-1080p
+      - template: sonarr-v4-custom-formats-web-1080p
+
+    # R5 — same reason as above: lossy audio is preferred and lossless simply
+    # does not win, which is a SCORE on a custom format, and that format is
+    # named by a hash this file will not guess.
+    #
+    #     docker exec recyclarr recyclarr list custom-formats sonarr

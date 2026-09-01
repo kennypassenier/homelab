@@ -1589,3 +1589,291 @@ fn the_scaffold_default_template_is_one_the_fleet_uses() {
         }
     );
 }
+
+/// T7: every preset that ships in this repository must scaffold into a stack
+/// that is actually deployable — not just the two the other tests happen to
+/// name. A preset is DATA, so adding one is a file edit that recompiles
+/// nothing and therefore passes every existing test by default; this is the
+/// only thing standing between "I dropped a directory in presets/" and a
+/// wizard entry that produces a broken stack.
+///
+/// What it checks per preset: the manifest and every compose file parse as
+/// YAML, no `__PLACEHOLDER__` survives substitution anywhere in the tree, and
+/// the manifest's app list matches the directories on disk.
+#[test]
+fn every_shipped_preset_scaffolds_a_valid_stack() {
+    use homelab_client::scaffold::{scaffold_stack, scan_presets, StackParams};
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = scan_presets(&presets_dir);
+    assert!(
+        presets.len() >= 8,
+        "loaded {} presets from disk — the catalog did not load",
+        presets.len()
+    );
+
+    for (i, preset) in presets.iter().enumerate() {
+        if preset.dir.is_none() {
+            // `custom` has no app directories by design: it is the empty start.
+            continue;
+        }
+        let tmp = std::env::temp_dir().join(format!(
+            "homelab-catalog-{}-{}-{}",
+            std::process::id(),
+            i,
+            preset.name
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let stack = format!("t-{}", preset.name);
+        scaffold_stack(
+            &tmp,
+            &presets_dir,
+            &StackParams {
+                name: &stack,
+                vmid: 140,
+                ram_mb: preset.meta.ram_mb.max(256),
+                cores: 1,
+                disk_gb: 8,
+                swap_mb: None,
+                no_data_paths: &[],
+                preset: Some(preset),
+            },
+        )
+        .unwrap_or_else(|e| panic!("preset '{}' does not scaffold: {}", preset.name, e));
+
+        let manifest_path = tmp.join(&stack).join("lxc-compose.yml");
+        let manifest = std::fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|e| panic!("preset '{}': no manifest: {}", preset.name, e));
+        serde_yaml::from_str::<serde_yaml::Value>(&manifest)
+            .unwrap_or_else(|e| panic!("preset '{}': manifest is not YAML: {}", preset.name, e));
+
+        // Every app directory the preset carries must appear in the manifest,
+        // and every app in the manifest must exist on disk. A mismatch means
+        // the deploy starts a directory that is not there, or leaves one
+        // behind that never starts.
+        for app in &preset.apps {
+            assert!(
+                manifest.contains(&format!("- {}", app)),
+                "preset '{}': app '{}' is on disk but not in the manifest",
+                preset.name,
+                app
+            );
+        }
+
+        // Walk the whole scaffolded tree: no placeholder may survive, and
+        // every compose file must parse.
+        let mut compose_files = 0;
+        let mut stack_dir = vec![tmp.join(&stack)];
+        while let Some(dir) = stack_dir.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    stack_dir.push(p);
+                    continue;
+                }
+                let Ok(body) = std::fs::read_to_string(&p) else {
+                    continue;
+                };
+                // `__path__` is a real promtail key, not a placeholder.
+                let leftovers: Vec<&str> = body
+                    .split_whitespace()
+                    .filter(|w| {
+                        w.starts_with("__") && w.ends_with("__") && *w != "__path__" && w.len() > 4
+                    })
+                    .collect();
+                assert!(
+                    leftovers.is_empty(),
+                    "preset '{}': {:?} still holds placeholders {:?}",
+                    preset.name,
+                    p.file_name().unwrap(),
+                    leftovers
+                );
+                if p.file_name().unwrap() == "docker-compose.yml" {
+                    compose_files += 1;
+                    serde_yaml::from_str::<serde_yaml::Value>(&body).unwrap_or_else(|e| {
+                        panic!("preset '{}': {:?} is not YAML: {}", preset.name, p, e)
+                    });
+                }
+            }
+        }
+        assert!(
+            compose_files >= 1,
+            "preset '{}' scaffolded no compose file at all",
+            preset.name
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+/// T7: the Recyclarr configuration carries two absences that are DECISIONS,
+/// and both of them look like something a helpful hand would fill in.
+///
+///   * No `quality_definition` block — the size caps (150 MB/min for movies,
+///     100 MB/min for episodes, 250 MB/min for 2160p) are already set and
+///     measured in both applications. Recyclarr can only scale the whole
+///     TRaSH size table by one ratio, so letting it near this replaces three
+///     measured numbers with one guess.
+///   * No raw `trash_id` hashes. An earlier draft of that file had four of
+///     them written from memory rather than looked up. A wrong hash scores
+///     the wrong thing silently; a block on the wrong release group surfaces
+///     months later as "why do I never get this show".
+///
+/// Neither absence is visible by reading the file, which is why it is a test.
+#[test]
+fn the_recyclarr_preset_keeps_its_two_deliberate_absences() {
+    let cfg = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../presets/recyclarr/recyclarr/recyclarr.yml");
+    let body = std::fs::read_to_string(&cfg).expect("recyclarr preset config");
+
+    let live: String = body
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !live.contains("quality_definition"),
+        "recyclarr.yml sets quality_definition — that overwrites the measured \
+         size caps R2/R3/R11 with a single scaling ratio"
+    );
+
+    // A TRaSH id is 32 lowercase hex characters. Outside a comment, one can
+    // only have come from memory: the resolved ones are pasted at deploy time
+    // from `recyclarr list custom-formats`.
+    for line in live.lines() {
+        let squashed: String = line.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        let mut run = 0usize;
+        for c in squashed.chars() {
+            if c.is_ascii_hexdigit() && !c.is_ascii_uppercase() {
+                run += 1;
+                assert!(
+                    run < 32,
+                    "recyclarr.yml carries a raw trash_id on an active line — \
+                     resolve it with `recyclarr list custom-formats` instead: {}",
+                    line.trim()
+                );
+            } else {
+                run = 0;
+            }
+        }
+    }
+}
+
+/// T49: a stack file and the directories beside it have to agree.
+///
+/// Both halves of the disagreement are silent. An app in `apps:` with no
+/// directory makes the deploy start a `/opt/<stack>/<app>` that holds
+/// nothing; a directory missing from `apps:` is never started at all and
+/// looks, from every side, exactly like a service that is simply down. The
+/// seeder added to the uptime stack is one edit away from either.
+///
+/// The relative bind mounts are checked for the same reason: `./seed.py`
+/// resolves at `docker compose up` time on the container, so a file that
+/// never travelled shows up as a container restart loop hours later, not as
+/// a failed deploy.
+///
+/// covers: F167
+#[test]
+fn every_stack_manifest_agrees_with_the_directories_beside_it() {
+    let stacks = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&stacks).unwrap().flatten() {
+        let dir = entry.path();
+        let manifest_path = dir.join("lxc-compose.yml");
+        if !manifest_path.is_file() {
+            continue;
+        }
+        let stack = dir.file_name().unwrap().to_string_lossy().to_string();
+        let raw = std::fs::read_to_string(&manifest_path).unwrap();
+        let manifest: serde_yaml::Value = serde_yaml::from_str(&raw)
+            .unwrap_or_else(|e| panic!("stack '{}': manifest is not YAML: {}", stack, e));
+
+        let declared: Vec<String> = manifest["apps"]
+            .as_sequence()
+            .map(|s| {
+                s.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // A native-service stack has no app directories by design.
+        if declared.is_empty() {
+            continue;
+        }
+        checked += 1;
+
+        // Directories that hold nothing are not app directories. An empty one
+        // is what git leaves behind when an app is dropped — it cannot track
+        // an empty directory, so `stacks/productivity/vikunja/` survived the
+        // commit that removed Vikunja and existed only in the working tree.
+        // Failing on that would make this test disagree with itself between a
+        // fresh clone and a working copy.
+        let on_disk: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .filter(|e| {
+                std::fs::read_dir(e.path())
+                    .map(|mut rd| rd.next().is_some())
+                    .unwrap_or(false)
+            })
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+
+        for app in &declared {
+            assert!(
+                on_disk.contains(app),
+                "stack '{}' declares app '{}' with no directory beside it — \
+                 the deploy would start an empty /opt/{}/{}",
+                stack,
+                app,
+                stack,
+                app
+            );
+            let compose = dir.join(app).join("docker-compose.yml");
+            assert!(
+                compose.is_file(),
+                "stack '{}': app '{}' has no docker-compose.yml",
+                stack,
+                app
+            );
+            // Every `./file` bind must exist, or it arrives as a directory
+            // on the container and the service restart-loops.
+            let body = std::fs::read_to_string(&compose).unwrap();
+            for line in body.lines() {
+                let t = line.trim();
+                let Some(rest) = t.strip_prefix("- ./") else {
+                    continue;
+                };
+                let Some((rel, _)) = rest.split_once(':') else {
+                    continue;
+                };
+                // `./data` and friends are created by the deploy; only files
+                // the repository is supposed to carry are checked.
+                if !rel.contains('.') {
+                    continue;
+                }
+                assert!(
+                    dir.join(app).join(rel).exists(),
+                    "stack '{}': {}/docker-compose.yml binds './{}' but that \
+                     file is not in the repository — it would land on the \
+                     container as an empty directory",
+                    stack,
+                    app,
+                    rel
+                );
+            }
+        }
+        for found in &on_disk {
+            assert!(
+                declared.contains(found),
+                "stack '{}' has a directory '{}' that is not in its apps list — \
+                 it is never started, which is indistinguishable from being down",
+                stack,
+                found
+            );
+        }
+    }
+    assert!(checked >= 10, "only {} stacks checked", checked);
+}

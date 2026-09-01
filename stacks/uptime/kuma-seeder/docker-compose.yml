@@ -1,0 +1,66 @@
+# T49 · the watch list follows the fleet.
+#
+# Kenny's decision (form W1, D90): the seeder is an app in THIS stack, not a
+# package on the golden images and not a script on the Proxmox host. The
+# golden images are container templates, so Python would land on twelve
+# containers that never use it — and only on the ones cloned afterwards. The
+# Proxmox host refuses loose Python packages by design (PEP 668,
+# EXTERNALLY-MANAGED, measured 2026-09-01). Here the dependency is declared
+# where it is used, is rebuilt like any other app, and travels with Uptime
+# Kuma if this stack ever moves.
+#
+# It is a loop rather than a one-shot on purpose. A container that exits is
+# a container the deploy verification reads as "not running", and a one-shot
+# only ever seeds the fleet as it was at deploy time — a stack created an
+# hour later stays unwatched until somebody remembers. Seeding is idempotent
+# (a monitor whose name exists is left exactly as it is), so re-running it
+# costs one API call per monitor and changes nothing.
+services:
+  kuma-seeder:
+    image: python:3.12-slim
+    container_name: kuma-seeder
+    env_file:
+      - .env
+    environment:
+      # Installed packages live in a docker VOLUME, not on the bind mount.
+      # Two reasons. PyPI is then reached once and never again, so an outage
+      # there does not look like a fault here. And the volume is not on
+      # /appdata, so a reproducible library never enters a restic repository
+      # — the bind mount below holds one generated JSON file and nothing
+      # else, which is what makes `com.homelab.backup` honest for this app.
+      - PYTHONUSERBASE=/pylibs
+      - PYTHONDONTWRITEBYTECODE=1
+      - SEED_INTERVAL_SECONDS=3600
+      - KUMA_URL=http://10.10.10.7:3001
+      - HOST_MONITORS_FILE=/config/host-monitors.json
+    volumes:
+      - /appdata/uptime/kuma-seeder-config:/config
+      - kuma-seeder-pylibs:/pylibs
+      - ./seed.py:/app/seed.py:ro
+    working_dir: /app
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python -c 'import uptime_kuma_api' 2>/dev/null || \
+          pip install --user --no-cache-dir --disable-pip-version-check uptime_kuma_api
+        python -c 'import uptime_kuma_api as u; print("uptime_kuma_api", u.__version__)' || true
+        exec python -u seed.py
+    restart: unless-stopped
+    labels:
+      # /config holds one generated file, so there is nothing to quiesce and
+      # nothing that a snapshot could catch half-written.
+      - "com.homelab.update.policy=auto"
+    networks:
+      - uptime_net
+
+volumes:
+  # An installed library, not data: losing it costs one pip install on the
+  # next start. Deliberately NOT on /appdata for exactly that reason.
+  kuma-seeder-pylibs:
+
+networks:
+  uptime_net:
+    external: true
+    name: uptime_net

@@ -1,0 +1,5 @@
+# Preset metadata — see docs/PRESET_GUIDE.md for the format.
+description: "Quality profiles for Sonarr and Radarr from the TRaSH guides"
+ram_mb: 512
+cores: 1
+disk_gb: 4

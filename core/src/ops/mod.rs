@@ -13,6 +13,7 @@ pub mod hardware;
 pub mod homepage;
 pub mod kea;
 pub mod mirror;
+pub mod monitors;
 pub mod native;
 pub mod patch;
 pub mod reconcile;
@@ -106,6 +107,13 @@ pub struct OpCtx<'a> {
     /// feature off and the front page stays hand-made, which is how it came
     /// to be zero bytes.
     pub homepage_services_file: Option<String>,
+    /// T49: the file the Uptime Kuma seeder reads its generated half from,
+    /// as a path on the PROXMOX HOST — it lives under `/appdata`, which the
+    /// uptime container has bind-mounted. None = feature off, and the watch
+    /// list stays whatever a hand-run script last created, which is how a
+    /// monitor came to spend eight hours reporting Uptime Kuma itself as
+    /// down from an address it had left that morning.
+    pub kuma_monitors_file: Option<String>,
     /// Where restic lives, for the operations that read the repository
     /// without being a backup themselves — E3 auto-restore and the
     /// `last_backup` recovery in deploy. Both used to build their own

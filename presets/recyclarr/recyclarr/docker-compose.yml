@@ -1,0 +1,34 @@
+# Recyclarr pushes quality profiles and custom-format scores into Sonarr and
+# Radarr from YAML, instead of settings clicked by hand that nobody can
+# reconstruct. Kenny rated it implement-now on 2026-08-29 and chose this
+# repository as its home (decision R10); the full decision set R1-R11 is in
+# the vault note "Homelab Planned Services" §5.
+#
+# It reaches the *arr services over the LAN, so it does not have to share
+# their container.
+services:
+  recyclarr:
+    image: ghcr.io/recyclarr/recyclarr:latest
+    container_name: recyclarr
+    # The image runs its own schedule; CRON_SCHEDULE is what it honours.
+    # Daily at 05:00, after the nightly backup window at 04:00 and long
+    # before anybody looks at the library.
+    environment:
+      - TZ=Europe/Brussels
+      - CRON_SCHEDULE=0 5 * * *
+    env_file:
+      - .env
+    volumes:
+      - /appdata/__STACK__/recyclarr-config:/config
+    restart: unless-stopped
+    labels:
+      # Its own configuration is the YAML in this repository; what it writes
+      # lives in Sonarr and Radarr. Nothing here needs quiescing.
+      - "com.homelab.update.policy=auto"
+    networks:
+      - __STACK___net
+
+networks:
+  __STACK___net:
+    external: true
+    name: __STACK___net

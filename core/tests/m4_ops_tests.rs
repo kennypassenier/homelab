@@ -67,6 +67,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
         homepage_services_file: None,
+        kuma_monitors_file: None,
         backup: Default::default(),
         registry_cache: None,
     }
@@ -1517,6 +1518,79 @@ async fn e3_empty_dirs_with_snapshot_trigger_restore() {
     );
 }
 
+/// One empty directory beside a full one restores exactly the empty one.
+///
+/// This is what "per path, not per stack" means, and it is the case D13 was
+/// written about: the first version restored only when EVERY declared path
+/// was empty, so wiping one app's configuration while its siblings were
+/// intact restored nothing and said nothing — from the stack's point of view
+/// there was nothing wrong.
+///
+/// The media stack has six declared paths. Losing sonarr's alone is the
+/// realistic accident, and it is precisely the one the old shape could not
+/// see.
+/// covers: F36
+#[tokio::test]
+async fn e3_restores_the_empty_path_and_leaves_its_full_sibling_alone() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+
+    let mut m = manifest(108, "test");
+    m.apps = vec!["alpha".into(), "beta".into()];
+    m.storage = vec![
+        homelab_core::manifest::MountSpec {
+            host_path: "/appdata/test/alpha-config".into(),
+            mount_point: "/appdata/test/alpha-config".into(),
+            no_data: false,
+            host_owner_uid: Some(100000),
+            app: Some("alpha".into()),
+        },
+        homelab_core::manifest::MountSpec {
+            host_path: "/appdata/test/beta-config".into(),
+            mount_point: "/appdata/test/beta-config".into(),
+            no_data: false,
+            host_owner_uid: Some(100000),
+            app: Some("beta".into()),
+        },
+    ];
+
+    // alpha is empty, beta still holds its files; both have a snapshot.
+    exec.respond_always("ls -A '/appdata/test/alpha-config'", CmdOutput::ok(""));
+    exec.respond_always(
+        "ls -A '/appdata/test/beta-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    exec.respond_always(
+        "snapshots --last --json",
+        CmdOutput::ok(r#"[{"short_id":"abc"}]"#),
+    );
+    exec.respond_always("restic restore", CmdOutput::ok("restored"));
+
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(m)).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let restores = exec.calls_containing("restic restore latest --target /");
+    assert_eq!(
+        restores.len(),
+        1,
+        "exactly one path was empty, so exactly one restore: {:?}",
+        restores
+    );
+    assert!(
+        restores[0].contains("/appdata/test/alpha-config"),
+        "and it must be the empty one: {:?}",
+        restores
+    );
+    assert!(
+        !restores[0].contains("beta-config"),
+        "the full sibling must not be touched: {:?}",
+        restores
+    );
+}
+
 /// A path declared to keep nothing is never restored into.
 ///
 /// `no_data` means the directory is empty BY DESIGN, so the auto-restore's
@@ -2354,6 +2428,7 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             metrics_targets_dir: None,
             grafana_dashboards_dir: None,
             homepage_services_file: None,
+            kuma_monitors_file: None,
             backup: Default::default(),
             registry_cache: None,
         },
@@ -2396,6 +2471,7 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             metrics_targets_dir: None,
             grafana_dashboards_dir: None,
             homepage_services_file: None,
+            kuma_monitors_file: None,
             backup: Default::default(),
             registry_cache: None,
         },

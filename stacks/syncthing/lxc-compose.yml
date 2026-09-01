@@ -48,3 +48,27 @@ apps:
 gateway_route:
   filename: 108-app-syncthing.yml
   gateway_vmid: 104
+
+# What this syncthing is FOR, written down because the container cannot say
+# it and because for weeks it did none of it (F163).
+#
+# It is the always-on peer for Kenny's Obsidian vault, so his desktop and his
+# phone stay in step without both having to be awake. Configured 2026-09-01
+# through syncthing's own API:
+#
+#   folder id    obsidian-vault  ("Obsidian vault")
+#   path         /var/syncthing/obsidian-vault
+#                 = /appdata/syncthing/syncthing-config/obsidian-vault on the
+#                   host, so the nightly restic run carries it
+#   type         sendreceive
+#   versioning   staggered, maxAge 31536000 s (one year) — Kenny's form Y3
+#   hub id       PHTJA5U-M3JLK7M-WBDDZTI-LG463UZ-34UH5TE-Q3MXQ6Y-EHHG5KX-IXHFEAR
+#
+# The versioning is the part that protects the notes rather than copies them:
+# syncthing propagates a deletion, so a note removed by accident on the phone
+# is gone everywhere. The hub keeps every overwritten and deleted version for
+# a year, and it is the only device that does.
+#
+# Deliberately NOT behind Traefik and not in the tunnel: the web interface
+# listens on 0.0.0.0:8384 and is reached at http://10.10.10.8:8384 from the
+# house.

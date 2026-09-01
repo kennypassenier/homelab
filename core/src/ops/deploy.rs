@@ -1271,24 +1271,27 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             if !m.apps.contains(app) {
                 continue;
             }
-            // Which uid actually writes this data? Two mechanisms, and the
-            // second one nearly cost syncthing its config.
+            // Which uid actually writes this data? Ask the running process,
+            // not the configuration.
             //
-            // `Config.User` is what the compose file asked docker for. But
-            // the linuxserver.io images — the *arr suite, syncthing, most of
-            // this fleet — start as root and drop to `PUID` themselves, so
-            // Config.User is empty and `docker exec id` says root while every
-            // file they write belongs to 1000. Reading only Config.User there
-            // produces a confident, wrong answer: it told us to chown
-            // syncthing's directory to root, which would have broken it.
+            // Four attempts at inferring this from docker's own description
+            // all produced confident wrong answers within one afternoon, and
+            // each wrong answer was printed as a `chown` to copy:
+            //   - `Config.User` empty, PUID=1000  → syncthing, the *arr suite
+            //   - `Config.User` = "nobody"        → prometheus, alertmanager
+            //   - `Config.User` empty, root exec  → postgres, php, actual,
+            //     which start as root and drop privileges after the entrypoint
+            //   - `Config.User` = "10001"         → loki, the only easy case
             //
-            // PUID wins when present, because it is the one that describes
-            // what ends up on disk.
-            let out = pct_sh(
+            // The container's main process knows without ambiguity: its uid
+            // is in /proc, and it is the process that writes the files. Every
+            // shape above collapses into one reading, and a fifth shape needs
+            // no fifth special case.
+            let pid = pct_sh(
                 exec,
                 m.vmid,
                 &format!(
-                    "docker inspect {} --format '{{{{.Config.User}}}}|{{{{range .Config.Env}}}}{{{{.}}}} {{{{end}}}}' 2>/dev/null || true",
+                    "docker inspect -f '{{{{.State.Pid}}}}' {} 2>/dev/null || true",
                     app
                 ),
                 60,
@@ -1296,41 +1299,24 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             .await
             .map(|o| o.stdout.trim().to_string())
             .unwrap_or_default();
-            let (user_field, env_field) = out.split_once('|').unwrap_or((out.as_str(), ""));
-            let puid = env_field
-                .split_whitespace()
-                .find_map(|kv| kv.strip_prefix("PUID="))
-                .and_then(|v| v.trim().parse::<u32>().ok());
-            let container_uid: u32 = match puid {
-                Some(p) => p,
-                None => {
-                    // Config.User is a free-form string. It can be a number
-                    // ("10001"), a NAME ("nobody"), "name:group", or empty.
-                    // Parsing it as a number and defaulting to 0 was the
-                    // third confidently-wrong answer this check gave in one
-                    // afternoon: prometheus runs as `nobody`, its directory
-                    // correctly belongs to 65534, and the check demanded a
-                    // chown to root.
-                    //
-                    // So when it is not a number, the container is asked. It
-                    // is the only party that can resolve its own name, and
-                    // it answers in one command.
-                    match user_field.split(':').next().unwrap_or("").trim() {
-                        "" => 0,
-                        n => match n.parse::<u32>() {
-                            Ok(v) => v,
-                            Err(_) => pct_sh(
-                                exec,
-                                m.vmid,
-                                &format!("docker exec {} id -u 2>/dev/null || true", app),
-                                60,
-                            )
-                            .await
-                            .ok()
-                            .and_then(|o| o.stdout.trim().parse::<u32>().ok())
-                            .unwrap_or(0),
-                        },
-                    }
+            let container_uid: u32 = if pid.is_empty() || pid == "0" {
+                // Not running. Nothing has written anything, so there is
+                // nothing to judge — the "start apps" step already failed if
+                // that was wrong.
+                continue;
+            } else {
+                match pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!("stat -c %u /proc/{} 2>/dev/null || true", pid),
+                    60,
+                )
+                .await
+                .ok()
+                .and_then(|o| o.stdout.trim().parse::<u32>().ok())
+                {
+                    Some(u) => u,
+                    None => continue,
                 }
             };
             let want = if m.lxc.unprivileged {

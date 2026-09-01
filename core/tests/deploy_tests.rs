@@ -1754,11 +1754,11 @@ async fn storage_owned_by_the_wrong_uid_fails_the_deploy() {
     // The app runs as 10001 inside the container; unprivileged, so the host
     // owner must be 110001. The directory says 100000 — the shape of the
     // mistake, a plausible number that is simply not this app's.
-    exec.respond_first(
-        "--format '{{.Config.User}}",
-        CmdOutput::ok("10001|PATH=/usr/bin \n"),
-    );
+    // Registered generic-first: respond_first inserts at the front, so the
+    // /proc matcher registered last is the one consulted for that path.
     exec.respond_first("stat -c %u", CmdOutput::ok("100000\n"));
+    exec.respond_first("State.Pid", CmdOutput::ok("4242\n"));
+    exec.respond_first("stat -c %u /proc/4242", CmdOutput::ok("10001\n"));
     let sink = VecSink::new();
     let journal = NullJournal;
     let mut sp = spec(110, "syncthing");
@@ -1783,11 +1783,9 @@ async fn storage_owned_by_the_wrong_uid_fails_the_deploy() {
 async fn storage_owned_correctly_says_nothing() {
     let exec = MockExecutor::new();
     script_fresh(&exec);
-    exec.respond_first(
-        "--format '{{.Config.User}}",
-        CmdOutput::ok("10001|PATH=/usr/bin \n"),
-    );
     exec.respond_first("stat -c %u", CmdOutput::ok("110001\n"));
+    exec.respond_first("State.Pid", CmdOutput::ok("4242\n"));
+    exec.respond_first("stat -c %u /proc/4242", CmdOutput::ok("10001\n"));
     let sink = VecSink::new();
     let journal = NullJournal;
     let mut sp = spec(110, "syncthing");
@@ -1867,58 +1865,25 @@ async fn h4_cadvisor_is_not_installed_where_there_is_no_docker() {
     );
 }
 
-/// The uid that writes the data is not always the uid docker was asked for.
+/// Four shapes of "which user runs this", and one reading that covers all of
+/// them.
 ///
-/// The linuxserver.io images — the *arr suite, syncthing, most of this fleet
-/// — start as root and drop to PUID themselves. `Config.User` is empty and
-/// `docker exec id` says root, while every file they write belongs to 1000.
-/// Reading only Config.User produced a confident wrong answer on the first
-/// stack it met: it told us to chown syncthing's configuration to root, which
-/// would have broken it. A check that is confidently wrong is worse than no
-/// check, because its output looks like an instruction.
+/// Inferring it from docker's own description produced a confident wrong
+/// answer four times in one afternoon — an empty field with PUID, the name
+/// "nobody", an entrypoint that starts as root and drops afterwards, and the
+/// one easy numeric case. Each wrong answer was printed as a chown to copy.
+/// The running process has no such ambiguity: its uid is in /proc, and it is
+/// the process that writes the files.
 #[tokio::test]
-async fn ownership_reads_puid_before_the_docker_user() {
+async fn ownership_reads_the_running_process_not_the_configuration() {
     let exec = MockExecutor::new();
     script_fresh(&exec);
-    // Config.User empty, PUID=1000 — the linuxserver shape.
-    exec.respond_first(
-        "--format '{{.Config.User}}",
-        CmdOutput::ok("|PATH=/usr/bin PUID=1000 PGID=1000 TZ=Europe/Brussels \n"),
-    );
-    exec.respond_first("stat -c %u", CmdOutput::ok("101000\n"));
-    let sink = VecSink::new();
-    let journal = NullJournal;
-    let mut sp = spec(110, "syncthing");
-    sp.manifest.storage[0].host_owner_uid = Some(101_000);
-
-    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
-    assert!(
-        report.ok,
-        "1000 inside an unprivileged container IS 101000 on the host — this \
-         must pass, not demand a chown to root: {:?}",
-        report.error
-    );
-}
-
-/// Config.User is a free-form string, and a name is not a number.
-///
-/// Third confidently-wrong answer from this check in one afternoon.
-/// Prometheus runs as `nobody`; its directory correctly belongs to 65534; the
-/// check parsed "nobody" as a number, failed, defaulted to root, and demanded
-/// a chown that would have broken it. The shapes seen in one fleet: a numeric
-/// uid, an empty field, a PUID environment variable, and a name — and each
-/// one of them arrived as a surprise.
-#[tokio::test]
-async fn ownership_resolves_a_named_user_by_asking_the_container() {
-    let exec = MockExecutor::new();
-    script_fresh(&exec);
-    // Config.User is the NAME `nobody`, no PUID anywhere.
-    exec.respond_first(
-        "--format '{{.Config.User}}",
-        CmdOutput::ok("nobody|PATH=/bin TZ=Europe/Brussels \n"),
-    );
-    exec.respond_first("id -u", CmdOutput::ok("65534\n"));
+    // respond_first inserts at the FRONT, so the last registration wins.
+    // The generic directory matcher goes first and the /proc one last, or
+    // the generic one answers for /proc too.
     exec.respond_first("stat -c %u", CmdOutput::ok("165534\n"));
+    exec.respond_first("State.Pid", CmdOutput::ok("4242\n"));
+    exec.respond_first("stat -c %u /proc/4242", CmdOutput::ok("65534\n"));
     let sink = VecSink::new();
     let journal = NullJournal;
     let mut sp = spec(110, "syncthing");
@@ -1932,8 +1897,8 @@ async fn ownership_resolves_a_named_user_by_asking_the_container() {
         report.error
     );
     assert!(
-        !exec.calls_containing("id -u").is_empty(),
-        "and it must have asked the container, because only it can resolve \
-         its own user name"
+        !exec.calls_containing("/proc/4242").is_empty(),
+        "and it must have read the running process, not docker's description \
+         of what it was asked to be"
     );
 }

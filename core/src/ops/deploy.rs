@@ -1305,6 +1305,31 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 120,
             )
             .await;
+            // A probe that cannot RUN says nothing about the data. The
+            // cloudflared image is distroless and has no shell at all, so the
+            // exec fails before it ever reaches the directory — reporting
+            // that as "cannot write" is the same mistake as counting a 403 as
+            // healthy, in the opposite direction. Same rule as the service
+            // checks: unreadable is reported, never treated as failure.
+            let out = match &probe {
+                Ok(o) => format!("{}{}", o.stdout, o.stderr),
+                Err(e) => e.to_string(),
+            };
+            let unprobeable = out.contains("executable file not found")
+                || out.contains("OCI runtime exec failed")
+                || out.contains("no such file or directory: unknown");
+            if unprobeable {
+                ctx.sink.emit(PipelineEvent::Line {
+                    level: Level::Warn,
+                    source: "HOST".into(),
+                    msg: format!(
+                        "[storage] '{}' has no shell to probe with, so whether it \
+                         can write {} is unknown — not assumed to be fine",
+                        app, mount.host_path
+                    ),
+                });
+                continue;
+            }
             let failed = match &probe {
                 Ok(o) => !o.success(),
                 Err(_) => true,
@@ -1656,15 +1681,28 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         // Every app actually running. `docker compose up -d` returning 0 is
         // not the same as a container that stayed up: a crash loop exits 0
         // on the way in.
-        if !m.native_only && !m.apps.is_empty() {
-            let ps = pct_sh(exec, m.vmid, "docker ps --format '{{.Names}}'", 120)
-                .await
-                .map(|o| o.stdout)
-                .unwrap_or_default();
-            let running: Vec<&str> = ps.lines().map(|l| l.trim()).collect();
+        //
+        // Asked per app directory rather than by container name. An app is a
+        // compose project, and a project may define several services with
+        // names of their own: `stacks/registry/registry` runs cache-dockerhub,
+        // cache-gcr, cache-ghcr and cache-lscr, and not one of them is called
+        // `registry`. Matching names reported that healthy stack as broken.
+        if !m.native_only {
             for app in &m.apps {
-                if !running.iter().any(|r| r == app) {
-                    wrong.push(format!("app '{}' is not running", app));
+                let out = pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!(
+                        "cd '/opt/{}/{}' && docker compose ps --status running --services",
+                        m.stack_name, app
+                    ),
+                    120,
+                )
+                .await
+                .map(|o| o.stdout.trim().to_string())
+                .unwrap_or_default();
+                if out.is_empty() {
+                    wrong.push(format!("app '{}' has no running service", app));
                 }
             }
         }

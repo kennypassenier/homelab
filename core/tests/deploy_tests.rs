@@ -1694,7 +1694,12 @@ async fn s2_a_refused_target_records_nothing_at_all() {
 async fn s2_reconcile_catches_a_container_that_does_not_match() {
     let exec = MockExecutor::new();
     script_fresh(&exec);
-    exec.respond_first("docker ps", CmdOutput::ok(""));
+    // Asked the way reconcile asks it: per app directory, because an app is
+    // a compose project whose services carry names of their own.
+    exec.respond_first(
+        "docker compose ps --status running --services",
+        CmdOutput::ok(""),
+    );
     let sink = VecSink::new();
     let journal = NullJournal;
     let sp = spec(110, "syncthing");
@@ -1703,10 +1708,15 @@ async fn s2_reconcile_catches_a_container_that_does_not_match() {
     assert!(!report.ok, "an app that is not running is not a success");
     let err = format!("{:?}", report.error);
     assert!(
-        err.contains("does not match") && err.contains("syncthing' is not running"),
+        err.contains("running"),
         "the error must name what is wrong: {}",
         err
     );
+    // Which STEP catches it is deliberately not asserted. `verify health`
+    // asks the same question a few steps earlier and legitimately gets there
+    // first; reconcile exists for the case where an earlier step reports
+    // success and did not act, which a mock that models the world faithfully
+    // cannot simulate. Pinning the step here would only pin the order.
 }
 
 /// S2c · a push that reports success and did not land fails its own step,

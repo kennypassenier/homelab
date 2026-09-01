@@ -236,6 +236,11 @@ pub struct Model {
     /// H7: set by the U key; the run loop picks it up, downloads+verifies
     /// the release off-thread and ships it over the line.
     pub release_update_requested: Option<String>,
+    /// T71: native services whose binaries the operator asked to install.
+    /// Drained by `tui::run`, which stages each release off-thread — the
+    /// same shape H7's release update uses, and for the same reason: the
+    /// event loop may not block on `gh`.
+    pub native_install_requested: Vec<(homelab_proto::NativeServiceManifest, Option<String>)>,
     pub wizard: Option<Wizard>,
     /// G2: presets loaded from the presets/ directory (data, not code);
     /// falls back to the synthetic built-ins for tests and bare checkouts.
@@ -296,6 +301,7 @@ impl Model {
             plan_pending: None,
             latest_release: None,
             release_update_requested: None,
+            native_install_requested: Vec::new(),
             confirm: None,
             wizard: None,
             presets: crate::scaffold::synthetic_presets(),
@@ -708,6 +714,12 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 }
             }
             KeyCode::Char('g') => start_stack_op(model, StackOp::Guards),
+            // T71: the C7 verbs. Per STACK, like every other operation here —
+            // a stack is the unit the whole interface thinks in, and CT 109
+            // holding three services is a fact about that container, not a
+            // reason to ask which one.
+            KeyCode::Char('A') => start_native_adopt(model),
+            KeyCode::Char('I') => start_native_install(model),
             KeyCode::Char('c') => start_fleet_check(model),
             KeyCode::Char('i') => {
                 model.focus = Some(Focus {
@@ -1039,6 +1051,14 @@ pub const PALETTE: &[PaletteAction] = &[
         id: "op.guards",
     },
     PaletteAction {
+        label: "adopt: native services of selected stack",
+        id: "op.adopt",
+    },
+    PaletteAction {
+        label: "install-native: binaries of selected stack",
+        id: "op.install-native",
+    },
+    PaletteAction {
         label: "fleet check: repo against reality",
         id: "op.check",
     },
@@ -1122,6 +1142,8 @@ fn run_action(model: &mut Model, id: &str) {
         "op.backup" => start_stack_op(model, StackOp::Backup),
         "op.update" => start_stack_op(model, StackOp::Update),
         "op.guards" => start_stack_op(model, StackOp::Guards),
+        "op.adopt" => start_native_adopt(model),
+        "op.install-native" => start_native_install(model),
         "op.check" => start_fleet_check(model),
         "op.restore" => {
             if let Some(name) = selected_stack_name(model) {
@@ -1281,6 +1303,85 @@ fn selected_stack_name(model: &mut Model) -> Option<String> {
 }
 
 /// Start one of the four per-stack operations on the selected stack.
+/// T71: the stack directory of the selected stack, when this client has one.
+/// A native operation needs the files on disk — a synthetic manifest built
+/// from the fleet view knows the vmid and nothing else.
+fn selected_stack_dir(model: &mut Model) -> Option<std::path::PathBuf> {
+    let name = selected_stack_name(model)?;
+    match model.local_stacks.iter().find(|(n, _)| *n == name) {
+        Some((_, dir)) => Some(dir.clone()),
+        None => {
+            model.status_line = format!(
+                "no stack directory for '{}' in this checkout — native operations act on files",
+                name
+            );
+            None
+        }
+    }
+}
+
+/// C7 adoption from the TUI: verify each declared service is what its
+/// service.yml claims and record it. Never starts or restarts anything, so
+/// running it on an already-adopted stack is a no-op that re-verifies.
+fn start_native_adopt(model: &mut Model) {
+    let Some(dir) = selected_stack_dir(model) else {
+        return;
+    };
+    let services = crate::spec::native_services(&dir);
+    if services.is_empty() {
+        model.status_line = format!("{} declares no native services", dir.display());
+        return;
+    }
+    model.focus = Some(Focus {
+        title: format!("ADOPT {} :: {} service(s)", dir.display(), services.len()),
+        feed: Vec::new(),
+        scroll: 0,
+        done: false,
+        ok: false,
+        result: String::new(),
+    });
+    for (m, _) in services {
+        model.outbox.push(Command::AdoptService(Box::new(m)));
+    }
+}
+
+/// T11 from the TUI. The download and its checksum happen off-thread — the
+/// event loop may not block on a network fetch — so this only records the
+/// request; `tui::run` stages each release and ships it, feeding progress
+/// into the focus window opened here.
+fn start_native_install(model: &mut Model) {
+    let Some(dir) = selected_stack_dir(model) else {
+        return;
+    };
+    let services = crate::spec::native_services(&dir);
+    if services.is_empty() {
+        model.status_line = format!("{} declares no native services", dir.display());
+        return;
+    }
+    let installable: Vec<_> = services
+        .into_iter()
+        .filter(|(m, _)| m.release_repo.is_some())
+        .collect();
+    if installable.is_empty() {
+        model.status_line =
+            "none of these services declares a release_repo — nothing to install from".into();
+        return;
+    }
+    model.focus = Some(Focus {
+        title: format!(
+            "INSTALL-NATIVE {} :: {} service(s)",
+            dir.display(),
+            installable.len()
+        ),
+        feed: Vec::new(),
+        scroll: 0,
+        done: false,
+        ok: false,
+        result: String::new(),
+    });
+    model.native_install_requested = installable;
+}
+
 fn start_stack_op(model: &mut Model, op: StackOp) {
     let spec = match resolve_spec(model) {
         Ok((spec, _)) => spec,
@@ -1298,6 +1399,33 @@ fn start_stack_op(model: &mut Model, op: StackOp) {
         ok: false,
         result: String::new(),
     });
+    // T71: a native stack has no compose to act on. Backing it up means
+    // streaming what is inside the container into restic, and updating it
+    // means supervising the service's own self-update — different RPCs for
+    // the same intent, so the same key does the right thing rather than
+    // reporting a stack the operator can see as one the TUI cannot touch.
+    if m.native_only {
+        let stack = m.stack_name.clone();
+        let cmd = match op {
+            StackOp::Backup => Some(Command::BackupNative { stack }),
+            StackOp::Update => Some(Command::UpdateNative { stack }),
+            StackOp::Guards => Some(Command::ApplyGuards { vmid: m.vmid }),
+            // A native service's state comes back through `homelab restore`
+            // on the stack, which needs the compose-shaped manifest this
+            // stack does not have. Saying so beats a restore that silently
+            // restores nothing.
+            StackOp::Restore => None,
+        };
+        match cmd {
+            Some(c) => model.outbox.push(c),
+            None => {
+                model.focus = None;
+                model.status_line =
+                    "restore is not wired for native stacks — use `homelab restore` (T71)".into();
+            }
+        }
+        return;
+    }
     let cmd = match op {
         StackOp::Backup => Command::BackupStack(Box::new(m)),
         // "latest" is the same default the command line uses: a restore

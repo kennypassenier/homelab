@@ -861,21 +861,6 @@ const CLI_ONLY: &[(&str, &str)] = &[
         "hot-apply of cores/RAM — a later round (form T1)",
     ),
     ("PatchFleet", "apt across the whole fleet — a later round"),
-    (
-        "AdoptService",
-        "one-off per native container, done once per service — a later round",
-    ),
-    (
-        "BackupNative",
-        "native services, scheduled; the manual path is rare — a later round",
-    ),
-    ("UpdateNative", "native services — a later round"),
-    (
-        "InstallNative",
-        "the same family as AdoptService and UpdateNative: the whole native \
-         round is command-line for now, recorded as T71 rather than deferred \
-         a fourth time in a comment",
-    ),
     ("ZfsReplicate", "runs in the nightly plan — a later round"),
     (
         "ListTemplates",
@@ -1882,4 +1867,162 @@ fn every_stack_manifest_agrees_with_the_directories_beside_it() {
         }
     }
     assert!(checked >= 10, "only {} stacks checked", checked);
+}
+
+// ── T71: the native-service family, reachable from the TUI ─────────────────
+
+/// The two shapes a native stack takes on this fleet are both read.
+///
+/// A stack with one service keeps its `service.yml` at the top
+/// (`stacks/almanac/`); a stack with several gives each unit its own
+/// directory (`stacks/kyu/kyu-runner/`). Reading only one shape would make
+/// CT 109's three services look like one, and the two that vanished would be
+/// the two nobody backs up.
+#[test]
+fn every_native_service_in_the_repository_is_found_with_its_unit_file() {
+    let stacks = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks");
+
+    let almanac = homelab_client::spec::native_services(&stacks.join("almanac"));
+    assert_eq!(almanac.len(), 1, "almanac has one service: {:?}", almanac);
+    assert_eq!(almanac[0].0.unit, "almanac");
+
+    let kyu = homelab_client::spec::native_services(&stacks.join("kyu"));
+    let units: Vec<&str> = kyu.iter().map(|(m, _)| m.unit.as_str()).collect();
+    assert_eq!(
+        units,
+        vec!["http-switchboard", "kyu", "kyu-runner"],
+        "CT 109 holds three services and all three must be found"
+    );
+
+    // The unit file is what makes the service exist; a rebuild without it
+    // produces a container with the program and nothing to run it.
+    for (m, unit_file) in kyu.iter().chain(almanac.iter()) {
+        let body = unit_file
+            .as_ref()
+            .unwrap_or_else(|| panic!("{} has no .service file in the repository", m.unit));
+        assert!(
+            body.contains(&m.binary),
+            "{}'s unit must exec the binary its service.yml declares",
+            m.unit
+        );
+    }
+
+    // Measured 2026-09-02: three of the four publish a release we can install
+    // from, and kyu does not (F168). The count is asserted so that a service
+    // silently losing its release source fails here rather than at a rebuild.
+    let with_release = kyu
+        .iter()
+        .chain(almanac.iter())
+        .filter(|(m, _)| m.release_repo.is_some())
+        .count();
+    assert_eq!(
+        with_release, 3,
+        "almanac, kyu-runner and http-switchboard declare a release source; kyu cannot (F168)"
+    );
+}
+
+/// A native stack must not be sent a compose operation.
+///
+/// The same key means the same intent everywhere in this interface — back
+/// this stack up — but a native stack has no compose to act on, and
+/// `BackupStack` on one would walk `/appdata` mounts that hold none of its
+/// state. Before T71 the TUI simply had no native path at all: four of the
+/// five C7 verbs were command-line only, each excused separately as "a later
+/// round", which is the same round deferred three times.
+#[test]
+fn a_native_stack_gets_the_native_operation_from_the_same_key() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use homelab_client::tui::model::{update, Msg};
+    use homelab_proto::Command;
+
+    let mut m = ready_model();
+    m.tab = homelab_client::tui::model::Tab::Stacks;
+    // The repository's own kyu stack: native_only, three services.
+    // Absolute: the test process runs in client/, and a relative stack path
+    // would resolve to nothing and queue nothing, which passes for the wrong
+    // reason.
+    let kyu_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/kyu");
+    m.local_stacks = vec![("kyu".into(), kyu_dir.clone())];
+    let fleet = m.fleet.as_mut().unwrap();
+    fleet.stacks.clear();
+    fleet.stacks.push(StackView {
+        name: "kyu".into(),
+        vmid: 109,
+        hostname: "109-app-kyu".into(),
+        apps: Vec::new(),
+        drift: false,
+        applied_hash: String::new(),
+        env_sealed: true,
+        online: true,
+        enabled: true,
+    });
+    m.selected_stack = 0;
+
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('B'), KeyModifiers::SHIFT)),
+    );
+    assert!(
+        matches!(m.outbox.first(), Some(Command::BackupNative { stack }) if stack == "kyu"),
+        "a native stack must get BackupNative, not BackupStack: {:?}",
+        m.outbox.first()
+    );
+    m.outbox.clear();
+    m.focus = None;
+    // Esc: an operation window stays open until it is closed, and while it
+    // is open the keys belong to it.
+    m.focus = None;
+
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('U'), KeyModifiers::SHIFT)),
+    );
+    assert!(
+        matches!(m.outbox.first(), Some(Command::UpdateNative { stack }) if stack == "kyu"),
+        "and UpdateNative, not UpdateStack: {:?}",
+        m.outbox.first()
+    );
+    m.outbox.clear();
+    m.focus = None;
+
+    // A: adopt every service the stack declares — one command each, because
+    // adoption verifies one unit against one service.yml.
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)),
+    );
+    assert_eq!(
+        m.outbox.len(),
+        3,
+        "CT 109's three services each need their own adoption: {:?}",
+        m.outbox
+    );
+    assert!(m
+        .outbox
+        .iter()
+        .all(|c| matches!(c, Command::AdoptService(_))));
+    m.outbox.clear();
+    m.focus = None;
+
+    // I: the download cannot happen on the event loop, so the key only
+    // records the request — and it must skip kyu, which publishes no release
+    // asset at all (F168).
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('I'), KeyModifiers::SHIFT)),
+    );
+    assert!(
+        m.outbox.is_empty(),
+        "no command may be queued before the binary is fetched and verified"
+    );
+    let requested: Vec<&str> = m
+        .native_install_requested
+        .iter()
+        .map(|(s, _)| s.unit.as_str())
+        .collect();
+    assert_eq!(
+        requested,
+        vec!["http-switchboard", "kyu-runner"],
+        "kyu has no release to install from and must be skipped, not attempted"
+    );
 }

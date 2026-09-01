@@ -129,6 +129,105 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
             });
         }
 
+        // T71: the I key asked for native binaries. Same shape as H7 above
+        // and for the same reason — `gh` is a network fetch and the event
+        // loop may not block on it. Sequential rather than concurrent: three
+        // downloads racing would interleave their progress lines into one
+        // window and the reader could not tell which service failed.
+        if !model.native_install_requested.is_empty() {
+            let wanted = std::mem::take(&mut model.native_install_requested);
+            let tx = side_tx.clone();
+            let ctx = cmd_tx.clone();
+            tokio::spawn(async move {
+                let log = |m: String| {
+                    Msg::Backend(backend::BackendEvent::Server(
+                        homelab_proto::ServerMsg::Log {
+                            level: homelab_proto::LogLevel::Info,
+                            source: "LOCAL".into(),
+                            msg: m,
+                        },
+                    ))
+                };
+                let fail = |m: String| {
+                    Msg::Backend(backend::BackendEvent::Server(
+                        homelab_proto::ServerMsg::RpcDone(homelab_proto::RpcResponse {
+                            id: 0,
+                            ok: false,
+                            message: m,
+                        }),
+                    ))
+                };
+                for (manifest, unit_file) in wanted {
+                    let Some(unit_file) = unit_file else {
+                        let _ = tx
+                            .send(fail(format!(
+                                "{}: no {}.service in the repository — a binary with nothing to \
+                                 run it is not an install",
+                                manifest.unit, manifest.unit
+                            )))
+                            .await;
+                        continue;
+                    };
+                    let Some(repo) = manifest.release_repo.clone() else {
+                        continue;
+                    };
+                    let asset = manifest.asset_name().to_string();
+                    let tag = {
+                        let r = repo.clone();
+                        tokio::task::spawn_blocking(move || crate::release::latest_tag_of(&r))
+                            .await
+                            .ok()
+                            .flatten()
+                    };
+                    let Some(tag) = tag else {
+                        let _ = tx
+                            .send(fail(format!(
+                                "{}: no release found in {} (gh authenticated?)",
+                                manifest.unit, repo
+                            )))
+                            .await;
+                        continue;
+                    };
+                    let _ = tx
+                        .send(log(format!(
+                            "[install] {} :: {} {} from {}",
+                            manifest.unit, asset, tag, repo
+                        )))
+                        .await;
+                    let staged = {
+                        let (r, t, a) = (repo.clone(), tag.clone(), asset.clone());
+                        tokio::task::spawn_blocking(move || crate::release::stage_asset(&r, &t, &a))
+                            .await
+                            .unwrap_or_else(|e| Err(e.to_string()))
+                    };
+                    match staged {
+                        Ok(binary_b64) => {
+                            if let Some(why) = crate::version::too_large(binary_b64.len()) {
+                                let _ = tx.send(fail(format!("{}: {}", manifest.unit, why))).await;
+                                continue;
+                            }
+                            let _ = tx
+                                .send(log(format!(
+                                    "[install] {} :: checksum verified — shipping over the line",
+                                    manifest.unit
+                                )))
+                                .await;
+                            let _ = ctx
+                                .send(homelab_proto::Command::InstallNative {
+                                    manifest: Box::new(manifest),
+                                    binary_b64,
+                                    unit_file,
+                                })
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = tx.send(fail(format!("{}: {}", manifest.unit, e))).await;
+                        }
+                    }
+                }
+            });
+        }
+
         // Flush queued commands from the pure update to the backend.
         for cmd in model.outbox.drain(..) {
             let _ = cmd_tx.send(cmd).await;

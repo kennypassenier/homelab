@@ -556,3 +556,51 @@ pub fn stack_files_with_vmids(base: &str) -> Vec<(String, u16)> {
     out.sort();
     out
 }
+
+/// T71: every native service a stack directory declares, with the unit file
+/// that makes it exist.
+///
+/// A native stack keeps one `service.yml` per unit, and where it sits depends
+/// on how many there are: a stack with a single service puts it at the top
+/// (`stacks/almanac/service.yml`), and a stack with several gives each its
+/// own directory (`stacks/kyu/kyu-runner/service.yml`). Both shapes are real
+/// on this fleet, so both are read here rather than in each caller.
+///
+/// The unit file is returned alongside because install-native cannot do
+/// anything without it, and a service whose `.service` file is missing from
+/// the repository is exactly the one worth reporting: it would rebuild into a
+/// container that holds the program and nothing to run it.
+pub fn native_services(
+    dir: &std::path::Path,
+) -> Vec<(homelab_proto::NativeServiceManifest, Option<String>)> {
+    let mut out = Vec::new();
+    let mut paths = vec![dir.join("service.yml")];
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut subs: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .map(|p| p.join("service.yml"))
+            .filter(|p| p.exists())
+            .collect();
+        subs.sort();
+        paths.extend(subs);
+    }
+    for path in paths {
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(m) = serde_yaml::from_str::<homelab_proto::NativeServiceManifest>(&raw) else {
+            continue;
+        };
+        let unit_name = format!("{}.service", m.unit);
+        let parent = path.parent().unwrap_or(dir);
+        let unit_file = [parent.join(&unit_name), dir.join(&m.unit).join(&unit_name)]
+            .iter()
+            .find_map(|p| std::fs::read_to_string(p).ok());
+        out.push((m, unit_file));
+    }
+    out.sort_by(|a, b| a.0.unit.cmp(&b.0.unit));
+    out.dedup_by(|a, b| a.0.unit == b.0.unit);
+    out
+}

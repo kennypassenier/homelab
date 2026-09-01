@@ -23,7 +23,31 @@ services:
       - /mnt/traefik-logs:/var/log/traefik:ro
       - /appdata/gateway/goaccess-config:/srv/report
     ports:
+      # The WEBSOCKET port, not a web server. GoAccess answers plain HTTP here
+      # with "400 Invalid Request" — which is why go.kp-soft.dev was routed at
+      # it and could never have worked. The report itself is a file, written
+      # to /srv/report/index.html, and something has to serve it.
       - "7880:7880"
+    restart: unless-stopped
+    labels:
+      - "com.homelab.update.policy=auto"
+
+  # The web server GoAccess does not have. Serves the report GoAccess writes,
+  # read-only, on its own port; the route points here.
+  #
+  # Live updates over the websocket will not work through Cloudflare — the
+  # page asks for ws://go.kp-soft.dev:7880 and only :443 comes through the
+  # tunnel. That costs nothing in practice: GoAccess rewrites the file
+  # continuously, so a refresh shows current numbers.
+  goaccess-report:
+    image: nginx:alpine
+    container_name: goaccess-report
+    networks:
+      - gateway_net
+    volumes:
+      - /appdata/gateway/goaccess-config:/usr/share/nginx/html:ro
+    ports:
+      - "7881:80"
     restart: unless-stopped
     labels:
       - "com.homelab.update.policy=auto"
@@ -36,3 +60,4 @@ networks:
   gateway_net:
     external: true
     name: gateway_net
+

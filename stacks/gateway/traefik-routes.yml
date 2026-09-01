@@ -33,4 +33,4 @@ http:
     goaccess:
       loadBalancer:
         servers:
-          - url: "http://10.10.10.4:7880"
+          - url: "http://10.10.10.4:7881"

@@ -219,6 +219,47 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         Ok(StepOutcome::Unchanged)
     });
 
+    // Z5 (Kenny, form Z5): a declared path that does not exist yet is not a
+    // broken backup, it is a stack that has not been deployed since its file
+    // changed. restic's own answer to it —
+    // `Fatal: all source directories/files do not exist` — names the wrong
+    // problem, and on 2026-09-02 it cost the author several minutes and a
+    // read of the raw log to work out that `stacks/uptime` had simply gained
+    // a mount that evening and never been deployed (F170).
+    step!(runner, "declared paths exist", {
+        let mut missing = Vec::new();
+        for mount in m
+            .storage
+            .iter()
+            .filter(|s| !s.no_data && s.no_backup.is_none())
+        {
+            let out = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &[
+                        "-c",
+                        &format!("test -d '{}' && echo yes || echo no", mount.host_path),
+                    ],
+                    30,
+                ))
+                .await?;
+            if out.stdout.trim() != "yes" {
+                missing.push(mount.host_path.clone());
+            }
+        }
+        if !missing.is_empty() {
+            return Err(CoreError::Validation(format!(
+                "these paths are declared in the stack file and do not exist on the host: {} :: \
+                 this is almost always a stack whose file gained a mount and was not deployed \
+                 afterwards — `homelab deploy stacks/{}` creates them. It is NOT a broken \
+                 backup, and restic's own message for it says the opposite",
+                missing.join(", "),
+                m.stack_name
+            )));
+        }
+        Ok(StepOutcome::Unchanged)
+    });
+
     step!(runner, "init repos", {
         // Idempotent: init fails harmlessly if the repo already exists.
         for (owner, _) in &groups {

@@ -1,0 +1,41 @@
+# Pull-through cache for https://registry-1.docker.io.
+#
+# Z1 (Kenny, 2026-09-02): the reason this file exists at all is `proxy.ttl`.
+# There was no expiry of any kind before it — REGISTRY_STORAGE_DELETE_ENABLED
+# grants permission to delete and nothing ever deleted, so the cache grew
+# without limit: 1.3 GB in two days, on a 32 GB disk, with nothing that would
+# ever stop it.
+#
+# It has to be a FILE. Measured 2026-09-02: setting REGISTRY_PROXY_TTL as an
+# environment variable makes registry 2.8.3 answer
+# "Ignoring unrecognized environment variable REGISTRY_PROXY_TTL" and start
+# with no expiry at all — a setting that looks applied and is not. With this
+# file the log says "Starting cached object TTL expiration scheduler...",
+# which is the line that proves it.
+#
+# 720h is a month: a layer nobody has asked for in a month costs one slow
+# pull to get back, and a cache is exactly the thing that may be slow once.
+version: 0.1
+log:
+  level: warn
+  fields:
+    service: registry
+storage:
+  cache:
+    blobdescriptor: inmemory
+  filesystem:
+    rootdirectory: /var/lib/registry
+  delete:
+    enabled: true
+http:
+  addr: :5000
+  headers:
+    X-Content-Type-Options: [nosniff]
+health:
+  storagedriver:
+    enabled: true
+    interval: 10s
+    threshold: 3
+proxy:
+  remoteurl: https://registry-1.docker.io
+  ttl: 720h

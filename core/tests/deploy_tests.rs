@@ -2230,3 +2230,41 @@ fn switching_a_backup_off_requires_saying_why() {
     homelab_core::manifest::validate(&registry_spec(registry_like()))
         .expect("the registry's own declaration must be valid");
 }
+
+/// Z5: a declared path that is not on disk yet gets a message that names the
+/// real problem.
+///
+/// F170: `stacks/uptime` gained a mount on 2026-09-02 and was not deployed
+/// afterwards. restic answered `Fatal: all source directories/files do not
+/// exist`, which reads as a broken backup. It took reading the raw log to
+/// see that the stack simply had not been deployed since its file changed.
+///
+/// covers: F170
+#[tokio::test]
+async fn a_declared_path_that_is_not_there_yet_says_deploy_first() {
+    let exec = MockExecutor::new();
+    exec.respond_always("pct config 108", CmdOutput::ok("hostname: 108-app-test\n"));
+    exec.respond_first("test -d", CmdOutput::ok("no\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let cfg = homelab_core::ops::backup::BackupCfg::default();
+    let report =
+        homelab_core::ops::backup::backup(&ctx(&exec, &sink, &j), &manifest(108, "test"), &cfg)
+            .await;
+    assert!(!report.ok, "a missing declared path must stop the backup");
+    let why = format!("{:?}", report.error);
+    assert!(
+        why.contains("homelab deploy stacks/test"),
+        "the message must name the fix: {}",
+        why
+    );
+    assert!(
+        why.contains("NOT a broken backup"),
+        "and must say what it is not, because restic's own message says the \
+         opposite: {}",
+        why
+    );
+    // The path itself has to be in there — "something is missing" is the
+    // message this replaces.
+    assert!(why.contains("/appdata/"), "{}", why);
+}

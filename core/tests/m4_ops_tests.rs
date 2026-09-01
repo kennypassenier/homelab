@@ -79,6 +79,11 @@ fn mock_hostname(exec: &MockExecutor, vmid: u16, stack: &str) {
         &format!("pct config {}", vmid),
         CmdOutput::ok(&format!("hostname: {}-app-{}\n", vmid, stack)),
     );
+    // Z5: the backup checks that every declared path is actually on the host
+    // before it runs, so the shared harness models a container whose stack
+    // HAS been deployed. A test about the other case says so itself with
+    // `respond_first`.
+    exec.respond_always("test -d", CmdOutput::ok("yes\n"));
 }
 
 // ── C2: gated destroy ───────────────────────────────────────────────────────
@@ -2092,6 +2097,8 @@ async fn d25_backup_writes_one_repo_per_owning_app() {
     let exec = MockExecutor::new();
     exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
     exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test"));
+    // Z5: this test builds its own mounts, so it also states that they exist.
+    exec.respond_always("test -d", CmdOutput::ok("yes\n"));
     exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
     let sink = VecSink::new();
     let j = NullJournal;

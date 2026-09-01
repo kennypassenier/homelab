@@ -39,10 +39,15 @@ services:
     container_name: cache-dockerhub
     environment:
       <<: *cache-env
-      REGISTRY_PROXY_REMOTEURL: "https://registry-1.docker.io"
       REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
     volumes:
       - /appdata/registry/registry-config/dockerhub:/var/lib/registry
+      # Z1: the remote and the expiry live in this file, not in the
+      # environment. `proxy.remoteurl` works either way; `proxy.ttl` does
+      # NOT — registry 2.8.3 ignores REGISTRY_PROXY_TTL with a warning and
+      # starts with no expiry at all. Keeping both in one place means they
+      # cannot disagree.
+      - ./dockerhub.yml:/etc/docker/registry/config.yml:ro
     ports:
       - "5000:5000"
 
@@ -51,10 +56,15 @@ services:
     container_name: cache-ghcr
     environment:
       <<: *cache-env
-      REGISTRY_PROXY_REMOTEURL: "https://ghcr.io"
       REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
     volumes:
       - /appdata/registry/registry-config/ghcr:/var/lib/registry
+      # Z1: the remote and the expiry live in this file, not in the
+      # environment. `proxy.remoteurl` works either way; `proxy.ttl` does
+      # NOT — registry 2.8.3 ignores REGISTRY_PROXY_TTL with a warning and
+      # starts with no expiry at all. Keeping both in one place means they
+      # cannot disagree.
+      - ./ghcr.yml:/etc/docker/registry/config.yml:ro
     ports:
       - "5001:5000"
 
@@ -63,10 +73,15 @@ services:
     container_name: cache-gcr
     environment:
       <<: *cache-env
-      REGISTRY_PROXY_REMOTEURL: "https://gcr.io"
       REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
     volumes:
       - /appdata/registry/registry-config/gcr:/var/lib/registry
+      # Z1: the remote and the expiry live in this file, not in the
+      # environment. `proxy.remoteurl` works either way; `proxy.ttl` does
+      # NOT — registry 2.8.3 ignores REGISTRY_PROXY_TTL with a warning and
+      # starts with no expiry at all. Keeping both in one place means they
+      # cannot disagree.
+      - ./gcr.yml:/etc/docker/registry/config.yml:ro
     ports:
       - "5002:5000"
 
@@ -75,10 +90,15 @@ services:
     container_name: cache-lscr
     environment:
       <<: *cache-env
-      REGISTRY_PROXY_REMOTEURL: "https://lscr.io"
       REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
     volumes:
       - /appdata/registry/registry-config/lscr:/var/lib/registry
+      # Z1: the remote and the expiry live in this file, not in the
+      # environment. `proxy.remoteurl` works either way; `proxy.ttl` does
+      # NOT — registry 2.8.3 ignores REGISTRY_PROXY_TTL with a warning and
+      # starts with no expiry at all. Keeping both in one place means they
+      # cannot disagree.
+      - ./lscr.yml:/etc/docker/registry/config.yml:ro
     ports:
       - "5003:5000"
 

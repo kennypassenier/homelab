@@ -1,0 +1,45 @@
+# What "the downloader is healthy" means. Kenny's requirement when CT 105 was
+# replaced was that the downloads survive it — and on 2026-08-31 they did not:
+# 73 of 80 torrents reported missingFiles because a manifest field the host
+# did not understand was silently dropped and the container came up without
+# its disks (F118). About 7 GB had to be fetched again.
+#
+# These read qBittorrent's own state files rather than its API. The API needs
+# a login and the password is not in the vault; storing it there so a check
+# can use it is a decision for Kenny rather than something to slip in. The
+# consequence is named under each check.
+checks:
+  - name: "torrents bekend"
+    command: >-
+      ls /appdata/downloader/qbittorrent-config/qBittorrent/BT_backup/*.fastresume
+      2>/dev/null | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      qBittorrent's own resume files, one per torrent it is tracking. Counts
+      what it knows about, not whether any of it can still see its data —
+      which is exactly the distinction F118 turned on. The state that WOULD
+      say so (missingFiles) needs the API, and therefore a credential we have
+      deliberately not stored.
+
+  - name: "de twee schijven aangekoppeld"
+    command: "ls -d /mnt/data/18TB /mnt/data/12TB 2>/dev/null | wc -l"
+    expect: must_match
+    layer: process
+    blind_spot: >-
+      That the mount points exist, not that they hold anything. An empty bind
+      mount looks identical here — precisely how F118 stayed invisible until
+      torrents started failing.
+
+  - name: "media zichtbaar op de 18TB"
+    command: "ls /mnt/data/18TB/ 2>/dev/null | wc -l"
+    expect: never_decreases
+    layer: process
+    blind_spot: >-
+      Counts top-level entries, so it distinguishes an empty mount from a
+      populated one. It says nothing about the files below them.
+
+manual:
+  - "Open qBittorrent en kijk of er torrents op 'missingFiles' staan — dat is de meting die hier ontbreekt en de belangrijkste van allemaal."
+  - "Controleer of de actieve downloads vooruitgaan en niet allemaal op nul staan."
+  - "Kijk bij één afgeronde download of het bestand echt op de juiste schijf staat."

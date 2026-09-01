@@ -174,17 +174,15 @@ boot: {onboot: true, order: 50}
 storage: []
 apps: [app]
 ";
-    // The correct spelling parses.
-    std::fs::write(
-        dir.join("lxc-compose.yml"),
-        format!("{}latch_secrets: [app]\n", base),
-    )
-    .unwrap();
-    let ok_spelling = format!("{:?}", homelab_client::spec::build_spec(&dir));
+    // A stack file with no extra keys parses. Deliberately NOT one with
+    // `latch_secrets:` — that would invoke latch, and a sibling test in this
+    // binary pins the exact latch command line it sees.
+    std::fs::write(dir.join("lxc-compose.yml"), base).unwrap();
+    let plain = format!("{:?}", homelab_client::spec::build_spec(&dir));
     assert!(
-        !ok_spelling.to_lowercase().contains("unknown field"),
-        "the correct spelling must not be refused as unknown: {}",
-        ok_spelling
+        !plain.to_lowercase().contains("unknown field"),
+        "a stack file without extra keys must parse: {}",
+        plain
     );
     // The typo does not.
     std::fs::write(

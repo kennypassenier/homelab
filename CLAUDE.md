@@ -7,7 +7,7 @@ This project follows the dev procedure in `~/Projects/dev-procedure/`
 (`/project-flow`). Standing rules apply to every change:
 `~/Projects/dev-procedure/STANDING_RULES.md`.
 
-## Before anything else: two rules that keep breaking
+## Before anything else: three rules that keep breaking
 
 Kenny has had to repeat these four times in one evening (2026-08-31). They
 are not style preferences; ignoring them costs him the ability to steer.
@@ -24,6 +24,16 @@ are not style preferences; ignoring them costs him the ability to steer.
    risk changed, I am unsure — that is a new form item, not a paragraph
    explaining what I decided instead. Reporting a unilateral change of plan in
    prose is the same violation as never asking.
+
+3. **My answer text may not contain a question mark aimed at Kenny.** No
+   "shall I…", no "say the word and I'll…". Reporting belongs in prose;
+   choosing never does. This one is deliberately FORMAL rather than
+   substantive, because rule 1 requires me to *recognise* that I am putting a
+   choice — and that is exactly the judgement that fails when something is
+   running in the background. On 2026-09-01 all five prose-borne choices fell
+   in that state, and one of them killed a backup Kenny never asked to stop.
+   Second half: while a form is unanswered I start no new live action on the
+   machines; code, tests and documents continue.
 
 Both failures look identical from his side: he answered, and then had to
 argue with the answer.

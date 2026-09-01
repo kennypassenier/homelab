@@ -5,6 +5,8 @@ services:
   traefik:
     image: traefik:latest
     container_name: traefik
+    networks:
+      - gateway_net
     command:
       - "--api.dashboard=true"
       - "--api.insecure=false"
@@ -27,7 +29,15 @@ services:
       - "--accesslog.filepath=/var/log/traefik/access.log"
       - "--accesslog.format=json"
       - "--log.level=INFO"
-      - "--log.filepath=/var/log/traefik/traefik.log"
+      # Traefik's OWN log goes to stdout, so it lands in docker's log like
+      # every other container here: capped by the runaway guards, shipped to
+      # Loki by promtail, and readable with `docker logs`. It used to go to a
+      # file, which meant nothing shipped it, nothing capped it, and the
+      # reason for a fleet-wide 403 on 2026-09-01 could only be found by
+      # knowing which file to open.
+      #
+      # The ACCESS log stays a file on purpose: CrowdSec parses it and
+      # GoAccess reports on it, so it has two readers that need it on disk.
       - "--ping=true"
     env_file:
       - .env
@@ -62,3 +72,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+# One network for the whole stack, created by the deploy. Traefik must be ON
+# it, not merely told its name: the --providers.docker.network flag says which
+# network to prefer when a container has several, and it cannot join one by
+# itself. Without this, traefik sits on its own default network, cannot reach
+# crowdsec:8080, and the bouncer plugin fails closed — 403 on every hostname
+# in the house, which is exactly what happened on 2026-09-01.
+networks:
+  gateway_net:
+    external: true
+    name: gateway_net

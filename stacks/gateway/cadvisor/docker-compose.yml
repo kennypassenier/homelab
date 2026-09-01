@@ -2,6 +2,8 @@ services:
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     container_name: cadvisor
+    networks:
+      - gateway_net
     restart: unless-stopped
     command:
       # Only report Docker containers. Without this cadvisor also emits a series
@@ -28,3 +30,12 @@ services:
 # that host's containers, and metrics_net exists only on the metrics stack.
 # Prometheus scrapes it over the LAN on the published port, which works
 # identically everywhere.
+
+# One network for the whole stack, created by the deploy. Without it every app
+# is its own compose project on its own default network, and Traefik cannot
+# reach CrowdSec — at which point the bouncer plugin fails closed and answers
+# 403 to everything. That is what happened on 2026-09-01.
+networks:
+  gateway_net:
+    external: true
+    name: gateway_net

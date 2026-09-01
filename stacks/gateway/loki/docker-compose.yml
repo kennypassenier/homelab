@@ -6,6 +6,8 @@ services:
   loki:
     image: grafana/loki:3.0.0
     container_name: loki
+    networks:
+      - gateway_net
     ports:
       - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
@@ -19,3 +21,12 @@ services:
       # same version and the two have to agree. This is one of the eleven
       # services where the `auto` policy could never do anything (form H5).
       - "com.homelab.update.policy=auto"
+
+# One network for the whole stack, created by the deploy. Without it every app
+# is its own compose project on its own default network, and Traefik cannot
+# reach CrowdSec — at which point the bouncer plugin fails closed and answers
+# 403 to everything. That is what happened on 2026-09-01.
+networks:
+  gateway_net:
+    external: true
+    name: gateway_net

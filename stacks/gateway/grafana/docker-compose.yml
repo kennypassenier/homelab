@@ -5,6 +5,8 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
+    networks:
+      - gateway_net
     user: "1000:1000"
     ports:
       - "3000:3000"
@@ -24,3 +26,12 @@ services:
       # grafana.db holds 19 dashboards and 2 datasources.
       - "com.homelab.backup.pause=true"
       - "com.homelab.update.policy=auto"
+
+# One network for the whole stack, created by the deploy. Without it every app
+# is its own compose project on its own default network, and Traefik cannot
+# reach CrowdSec — at which point the bouncer plugin fails closed and answers
+# 403 to everything. That is what happened on 2026-09-01.
+networks:
+  gateway_net:
+    external: true
+    name: gateway_net

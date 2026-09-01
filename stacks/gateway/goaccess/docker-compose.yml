@@ -6,6 +6,8 @@ services:
   goaccess:
     image: allinurl/goaccess:latest
     container_name: goaccess
+    networks:
+      - gateway_net
     command:
       - '--log-format={"ClientHost":"%h","StartUTC":"%dT%t.%^","RequestMethod":"%m","RequestPath":"%U","RequestProtocol":"%H","DownstreamStatus":"%s","DownstreamContentSize":"%b","RequestHost":"%v"}'
       - "--date-format=%Y-%m-%d"
@@ -25,3 +27,12 @@ services:
     restart: unless-stopped
     labels:
       - "com.homelab.update.policy=auto"
+
+# One network for the whole stack, created by the deploy. Without it every app
+# is its own compose project on its own default network, and Traefik cannot
+# reach CrowdSec — at which point the bouncer plugin fails closed and answers
+# 403 to everything. That is what happened on 2026-09-01.
+networks:
+  gateway_net:
+    external: true
+    name: gateway_net

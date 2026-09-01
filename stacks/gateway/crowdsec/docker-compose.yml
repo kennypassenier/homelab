@@ -4,6 +4,8 @@ services:
   crowdsec:
     image: crowdsecurity/crowdsec:latest
     container_name: crowdsec
+    networks:
+      - gateway_net
     environment:
       - TZ=Europe/Brussels
       - COLLECTIONS=crowdsecurity/traefik
@@ -20,3 +22,12 @@ services:
       # history; a torn copy loses the key Traefik authenticates with.
       - "com.homelab.backup.pause=true"
       - "com.homelab.update.policy=auto"
+
+# One network for the whole stack, created by the deploy. Without it every app
+# is its own compose project on its own default network, and Traefik cannot
+# reach CrowdSec — at which point the bouncer plugin fails closed and answers
+# 403 to everything. That is what happened on 2026-09-01.
+networks:
+  gateway_net:
+    external: true
+    name: gateway_net

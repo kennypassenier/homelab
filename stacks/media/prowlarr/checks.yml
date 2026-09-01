@@ -1,0 +1,29 @@
+# What "prowlarr is healthy" means, from the readings made by hand during the
+# CT 106 rebuild. The API key comes from prowlarr's own config file: a key
+# stored here would be a secret in the wrong place, and one that would rot
+# unnoticed the way Jellyfin's did (F131).
+checks:
+  - name: "indexers"
+    command: >-
+      K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml);
+      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:9696/api/v1/indexer |
+      grep -cE '"definitionName":'
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts what prowlarr knows about, not whether the files behind it are
+      readable.
+
+  - name: "gezondheidsmeldingen"
+    command: >-
+      K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml);
+      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:9696/api/v1/health |
+      grep -oE '"type":' | wc -l
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      How many warnings there are, not whether they matter. Three failing
+      indexers during the rebuild were all healthy an hour later.
+
+manual:
+  - "Doe een handmatige zoekopdracht in Prowlarr — dat is de enige manier om te zien of de indexers echt antwoorden."

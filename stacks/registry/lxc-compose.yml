@@ -50,6 +50,16 @@ storage:
     # The registry image runs as root.
     host_owner_uid: 100000
     app: registry
+    # Z3 (Kenny, 2026-09-02). Measured that night: 1381 MB and 457 seconds,
+    # the slowest of the thirteen stacks and a fifth of the whole nightly
+    # round — to protect layers that are re-downloadable by definition. That
+    # is what a pull-through cache IS. A restored cache would also be a cache
+    # full of months-old layers, replaced by the next pull anyway.
+    no_backup: >-
+      a pull-through cache: every layer is re-downloadable from its upstream
+      registry, so a lost cache costs one slow pull and nothing else.
+      Measured 2026-09-02: backing it up cost 1381 MB and 457 s per night,
+      a fifth of the whole round, for data that protects nothing
 
 apps: [registry, promtail]
 

@@ -196,6 +196,25 @@ pub struct MountSpec {
     /// declared stays exactly as alarming as it should be.
     #[serde(default)]
     pub no_data: bool,
+    /// Z3: this directory is deliberately NOT backed up, and the string is
+    /// why (Kenny, form Z3, 2026-09-02).
+    ///
+    /// Different from `no_data`, which says the app keeps NOTHING and is
+    /// checked by the backup asserting the directory is empty. This one says
+    /// the app keeps plenty and none of it is worth protecting, which no test
+    /// can verify — the registry cache holds 1.3 GB and every byte of it is
+    /// re-downloadable from upstream (F173).
+    ///
+    /// The reason is the value rather than a separate field, so the flag
+    /// cannot be set without one. That is the whole safety story available
+    /// here: a flag that switches backups off is exactly the kind somebody
+    /// sets on the wrong thing and discovers years later, and "reproducible"
+    /// is not a property any check can confirm. What it can do is stay
+    /// VISIBLE — the fleet check and the runbook name every path marked this
+    /// way, with its reason, so "this is not kept" is something you read
+    /// rather than something missing.
+    #[serde(default)]
+    pub no_backup: Option<String>,
     #[serde(default)]
     pub host_owner_uid: Option<u32>,
     /// D25: which app owns this directory. The restic repository is named
@@ -346,6 +365,35 @@ fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
             problems.push(format!(
                 "app name '{}' must be non-empty lowercase [a-z0-9-] (it is used in shell paths)",
                 app
+            ));
+        }
+    }
+    // Z3: the flag that switches a backup off may not be set without saying
+    // why. It is the one guard available — nothing can verify that a
+    // directory is genuinely reproducible — so the guard is that the reason
+    // has to exist and be readable by a person a year from now.
+    for mount in &m.storage {
+        if let Some(reason) = &mount.no_backup {
+            if reason.trim().len() < 10 {
+                problems.push(format!(
+                    "mount '{}' is marked no_backup with no usable reason ('{}') — a flag that \
+                     switches backups off is the kind somebody sets on the wrong thing and \
+                     discovers years later, so the reason is the only thing standing between a \
+                     deliberate choice and a silent gap",
+                    mount.host_path,
+                    reason.trim()
+                ));
+            }
+        }
+        // Both at once is a contradiction: no_data says there is nothing to
+        // back up, no_backup says there is something and it does not matter.
+        // Guessing which was meant would silently decide whether a directory
+        // is protected.
+        if mount.no_data && mount.no_backup.is_some() {
+            problems.push(format!(
+                "mount '{}' sets both no_data and no_backup — one says it holds nothing, the \
+                 other says it holds something not worth keeping; one of the two is wrong",
+                mount.host_path
             ));
         }
     }

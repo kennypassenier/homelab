@@ -147,6 +147,15 @@ pub fn owner_groups(m: &StackManifest) -> Vec<(String, Vec<String>)> {
         if mount.no_data {
             continue;
         }
+        // Z3: declared reproducible, so no repository either. The difference
+        // from `no_data` is what it means, not what it does here: that one
+        // holds nothing, this one holds something nobody needs to keep. The
+        // reason travels with the flag and is surfaced by the fleet check and
+        // the runbook, because a directory that is silently unprotected and
+        // one that is deliberately unprotected must not look the same.
+        if mount.no_backup.is_some() {
+            continue;
+        }
         let owner = mount.owner(&m.stack_name).to_string();
         match groups.iter_mut().find(|(o, _)| *o == owner) {
             Some((_, paths)) => paths.push(mount.host_path.clone()),

@@ -386,7 +386,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
              - resources: {} core(s), {} MiB RAM, {} MiB swap, {} GiB disk\n\
              - apps: {}\n\
              - recreate from scratch: {}\n\
-             - data restore from: {}\n\n",
+             - data restore from: {}\n{}\n",
             m.stack_name,
             m.vmid,
             m.hostname,
@@ -402,6 +402,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
             },
             recreate_line(name, &m),
             restic_repos(&m),
+            not_kept(&m),
         ));
     }
     doc.push_str(
@@ -415,6 +416,29 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
     );
     std::fs::write(out_path, &doc).map_err(|e| e.to_string())?;
     Ok(included)
+}
+
+/// Z3: what this stack deliberately does NOT keep, and why.
+///
+/// A runbook that lists only what can be restored quietly implies everything
+/// else is covered. Naming the exceptions is the difference between reading
+/// "the cache is not in the backup, on purpose, because it re-downloads" at
+/// 3am and concluding the backup is broken.
+fn not_kept(m: &homelab_core::manifest::StackManifest) -> String {
+    let lines: Vec<String> = m
+        .storage
+        .iter()
+        .filter_map(|s| {
+            s.no_backup
+                .as_ref()
+                .map(|why| format!("- NOT backed up: `{}` — {}", s.host_path, why))
+        })
+        .collect();
+    if lines.is_empty() {
+        String::new()
+    } else {
+        lines.join("\n") + "\n"
+    }
 }
 
 // ── D11: stack export/import bundles ────────────────────────────────────────

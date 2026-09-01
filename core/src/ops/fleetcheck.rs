@@ -24,6 +24,15 @@ pub enum Severity {
     Broken,
     /// Working, but drifting — it will bite on the next deploy or outage.
     Drift,
+    /// Not a problem: something deliberately arranged, printed so it stays
+    /// visible (Kenny, form Z3, 2026-09-02).
+    ///
+    /// The case it exists for: a stack whose data is declared reproducible
+    /// has no backup, and a check that only knows Broken and Drift would
+    /// either shout "never been backed up" at a decision, or say nothing at
+    /// all — and silence makes a deliberate gap indistinguishable from a
+    /// forgotten one. Neither is the truth; this is.
+    Noted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -275,7 +284,40 @@ pub fn evaluate(
         }
 
         let age = now_unix.saturating_sub(st.last_backup);
-        if st.last_backup == 0 {
+        // Z3: a stack that keeps nothing worth keeping, by declaration, is
+        // not a stack that was forgotten. Saying "never been backed up"
+        // about a decision trains the reader to ignore the line — and that
+        // line is the one that has to be believed when it IS real.
+        let declared_unkept: Vec<&crate::manifest::MountSpec> = st
+            .manifest
+            .as_ref()
+            .map(|m| m.storage.iter().filter(|s| s.no_backup.is_some()).collect())
+            .unwrap_or_default();
+        let keeps_nothing = st
+            .manifest
+            .as_ref()
+            .map(|m| {
+                !m.storage.is_empty()
+                    && m.storage.iter().all(|s| s.no_data || s.no_backup.is_some())
+            })
+            .unwrap_or(false);
+        for mount in &declared_unkept {
+            out.push(Finding {
+                severity: Severity::Noted,
+                subject: name.clone(),
+                what: format!(
+                    "{} is deliberately not backed up — {}",
+                    mount.host_path,
+                    mount.no_backup.as_deref().unwrap_or("")
+                ),
+                remedy:
+                    "nothing to do; listed so a deliberate gap never looks like a forgotten one"
+                        .into(),
+            });
+        }
+        if keeps_nothing {
+            // Deliberate, already said above per mount.
+        } else if st.last_backup == 0 {
             out.push(Finding {
                 severity: Severity::Broken,
                 subject: name.clone(),

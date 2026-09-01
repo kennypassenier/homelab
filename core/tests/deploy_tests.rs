@@ -47,6 +47,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             host_path: "/appdata/syncthing/syncthing-config".into(),
             mount_point: "/appdata/syncthing/syncthing-config".into(),
             no_data: false,
+            no_backup: None,
             host_owner_uid: Some(101000),
             app: Some("syncthing".into()),
         }],
@@ -2144,4 +2145,88 @@ fn a_staging_path_is_unique_per_target_file() {
         "{}",
         gateway
     );
+}
+
+// ── Z3: a directory that is deliberately not kept ──────────────────────────
+
+fn registry_spec(mut m: homelab_core::manifest::StackManifest) -> DeploySpec {
+    // The mount is owned by an app, so the stack has to declare that app —
+    // the same rule every other stack obeys.
+    m.apps = vec!["registry".into()];
+    let mut sp = spec(m.vmid, &m.stack_name);
+    sp.manifest = m;
+    sp
+}
+
+fn registry_like() -> homelab_core::manifest::StackManifest {
+    let mut m = manifest(117, "registry");
+    m.storage = vec![homelab_core::manifest::MountSpec {
+        host_path: "/appdata/registry/registry-config".into(),
+        mount_point: "/appdata/registry/registry-config".into(),
+        no_data: false,
+        no_backup: Some(
+            "a pull-through cache: every layer is re-downloadable from upstream".into(),
+        ),
+        host_owner_uid: Some(100000),
+        app: Some("registry".into()),
+    }];
+    m
+}
+
+/// A path declared reproducible gets no restic repository at all.
+///
+/// Measured 2026-09-02: backing the registry cache up cost 1381 MB and 457
+/// seconds a night — the slowest of thirteen stacks, a fifth of the whole
+/// round — to protect layers that are re-downloadable by definition.
+///
+/// covers: F173
+#[test]
+fn a_path_declared_reproducible_gets_no_repository() {
+    let groups = homelab_core::ops::backup::owner_groups(&registry_like());
+    assert!(
+        groups.is_empty(),
+        "no_backup must yield no repository, not an empty one: {:?}",
+        groups
+    );
+    // And without the flag the same mount does get one, or this test would
+    // pass against a manifest that simply has no storage.
+    let mut kept = registry_like();
+    kept.storage[0].no_backup = None;
+    let groups = homelab_core::ops::backup::owner_groups(&kept);
+    assert_eq!(groups.len(), 1, "{:?}", groups);
+    assert_eq!(groups[0].0, "registry");
+}
+
+/// The flag cannot be set without a reason a person can still read later.
+///
+/// It is the only guard available: nothing can verify that a directory is
+/// genuinely reproducible, so the reason is what stands between a deliberate
+/// choice and a silent gap.
+#[test]
+fn switching_a_backup_off_requires_saying_why() {
+    let mut m = registry_like();
+    m.storage[0].no_backup = Some("cache".into());
+    let sp = registry_spec(m);
+    let err = homelab_core::manifest::validate(&sp).expect_err("a one-word reason must be refused");
+    assert!(
+        format!("{:?}", err).contains("no usable reason"),
+        "{:?}",
+        err
+    );
+
+    // A contradiction is refused too: no_data says it holds nothing,
+    // no_backup says it holds something not worth keeping.
+    let mut m = registry_like();
+    m.storage[0].no_data = true;
+    let err = homelab_core::manifest::validate(&registry_spec(m))
+        .expect_err("both flags at once must be refused");
+    assert!(
+        format!("{:?}", err).contains("one of the two is wrong"),
+        "{:?}",
+        err
+    );
+
+    // The real declaration passes.
+    homelab_core::manifest::validate(&registry_spec(registry_like()))
+        .expect("the registry's own declaration must be valid");
 }

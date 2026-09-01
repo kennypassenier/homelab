@@ -1515,6 +1515,7 @@ fn the_runbook_names_the_repositories_restic_actually_uses() {
             host_path: format!("/appdata/media/{}-config", app),
             mount_point: format!("/appdata/media/{}-config", app),
             no_data: false,
+            no_backup: None,
             host_owner_uid: Some(1000),
             app: Some(app.into()),
         });

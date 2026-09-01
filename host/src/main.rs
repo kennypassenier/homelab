@@ -1546,8 +1546,24 @@ async fn scheduler_loop(state: AppState) {
                     homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
                     homelab_core::ops::fleetcheck::GrowthLimits::default(),
                 );
-                if findings.is_empty() {
-                    info!("fleet check: repo and reality agree");
+                // Z3: a `Noted` finding is a decision, not a fault. Letting
+                // one raise the alarm would train the reader to ignore this
+                // notification — and it is the one that has to be believed
+                // when it IS real.
+                let problems: Vec<_> = findings
+                    .iter()
+                    .filter(|f| f.severity != homelab_core::ops::fleetcheck::Severity::Noted)
+                    .cloned()
+                    .collect();
+                if problems.is_empty() {
+                    info!(
+                        "fleet check: repo and reality agree{}",
+                        if findings.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\n{}", render_findings(&findings))
+                        }
+                    );
                 } else {
                     tracing::warn!(
                         "fleet check: {} finding(s)\n{}",
@@ -2240,6 +2256,7 @@ fn render_findings(findings: &[homelab_core::ops::fleetcheck::Finding]) -> Strin
             match f.severity {
                 Severity::Broken => "broken",
                 Severity::Drift => "drift",
+                Severity::Noted => "noted",
             },
             f.subject,
             f.what,

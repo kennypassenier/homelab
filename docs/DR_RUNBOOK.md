@@ -144,7 +144,8 @@ restic restore latest --target /
 - resources: 2 core(s), 1024 MiB RAM, 512 MiB swap, 32 GiB disk
 - apps: registry, promtail
 - recreate from scratch: `homelab deploy stacks/registry` (or by hand per Layer 2)
-- data restore from: `…:registry-config`
+- data restore from: no /appdata paths — nothing to restore
+- NOT backed up: `/appdata/registry/registry-config` — a pull-through cache: every layer is re-downloadable from its upstream registry, so a lost cache costs one slow pull and nothing else. Measured 2026-09-02: backing it up cost 1381 MB and 457 s per night, a fifth of the whole round, for data that protects nothing
 
 ### syncthing (vmid 108)
 

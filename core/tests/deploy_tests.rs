@@ -1928,7 +1928,59 @@ async fn h4_cadvisor_is_installed_by_the_guards_on_every_docker_host() {
         exec.calls_containing("cd /opt/cadvisor && docker compose up -d")
             .len()
             == 1,
-        "and bring it up exactly once"
+        "and bring it up"
+    );
+}
+
+/// And it must bring cadvisor up even when the compose file is ALREADY there.
+///
+/// This is the half that was missing, and it cost the fleet nine of its ten
+/// container-metric sources. The guard read `if push_content(...)`, which is
+/// true only when the content DIFFERS — so the first deploy wrote the file and
+/// started cadvisor, and every deploy after that found the file identical and
+/// skipped the start. A cadvisor that never came up, or came up once and later
+/// stopped, could not be repaired by any number of deploys: the guard was
+/// permanently satisfied because the FILE was in place, while its purpose is
+/// that the SERVICE runs.
+///
+/// Measured 2026-09-01: the file on 10 of 10 containers, cadvisor running on
+/// 1. Starting it by hand on one of the nine worked first time and took a
+/// second — nothing was broken except that nobody asked (F164).
+/// covers: F164
+#[tokio::test]
+async fn h4_cadvisor_is_started_even_when_its_compose_file_is_unchanged() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    // The file is already on the container with exactly the content the guard
+    // would push — the state nine of ten containers were in.
+    let want = homelab_core::ops::guards::CADVISOR_COMPOSE;
+    let digest = {
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        for b in <sha2::Sha256 as sha2::Digest>::digest(want.as_bytes()) {
+            let _ = write!(out, "{:02x}", b);
+        }
+        out
+    };
+    // The command is `sha256sum '<dest>' | cut -d' ' -f1`, so the remote side
+    // answers the bare digest — anything else compares unequal and push_content
+    // reports "changed", which is how the first version of this test passed
+    // against the very code it was written to catch.
+    exec.respond_always(
+        "sha256sum '/opt/cadvisor/docker-compose.yml'",
+        CmdOutput::ok(&format!("{}\n", digest)),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+    assert!(
+        !exec
+            .calls_containing("cd /opt/cadvisor && docker compose up -d")
+            .is_empty(),
+        "an unchanged compose file must still result in cadvisor being started — \
+         that is the whole difference between guarding a file and guarding a service"
     );
 }
 

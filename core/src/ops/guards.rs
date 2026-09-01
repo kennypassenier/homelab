@@ -233,18 +233,33 @@ pub async fn apply(
     // 4b. cAdvisor on every docker host (H4). Same reasoning as the log caps:
     // something every container needs, that nothing per-stack should have to
     // remember to declare.
-    if docker
-        && push_content(
+    if docker {
+        push_content(
             exec,
             vmid,
             "/opt/cadvisor/docker-compose.yml",
             CADVISOR_COMPOSE,
             "644",
         )
-        .await?
-    {
+        .await?;
+        // Unconditionally, NOT only when the file changed.
+        //
+        // It used to read `if push_content(...).await?`, and that returns true
+        // only when the content DIFFERS. So the first run wrote the file and
+        // started cadvisor, and every run after found the file identical and
+        // skipped the start. A cadvisor that never came up, or came up once
+        // and later stopped, could not be repaired by any number of deploys:
+        // the guard was permanently satisfied because the FILE was in place,
+        // while its purpose is that the SERVICE runs.
+        //
+        // Measured 2026-09-01 across the fleet — the file on 10 of 10
+        // containers, cadvisor running on 1. Starting it by hand on one of the
+        // nine worked first time and took a second (F164).
+        //
+        // `docker compose up -d` is idempotent, so running it every time costs
+        // a no-op and buys self-repair.
         pct_sh(exec, vmid, "cd /opt/cadvisor && docker compose up -d", 300).await?;
-        log("[guard] cadvisor installed — this host reports its containers".into());
+        log("[guard] cadvisor up — this host reports its containers".into());
     }
 
     // 5. apt cache hygiene.

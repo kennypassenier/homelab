@@ -21,6 +21,16 @@ macro_rules! step {
     };
 }
 
+/// Where restic keeps its index cache. Without it every single operation
+/// re-downloads the repository index from Google Drive first.
+///
+/// It was not missing by choice: restic derives the path from `$XDG_CACHE_HOME`
+/// or `$HOME`, and a systemd service has neither, so every backup in this
+/// fleet has run with `unable to open cache: neither $XDG_CACHE_HOME nor
+/// $HOME are defined` in its output — a line that reads as noise and costs a
+/// full index fetch per repository, of which the gateway alone has six.
+pub const RESTIC_CACHE_DIR: &str = "/var/lib/homelab/restic-cache";
+
 /// Build a Cmd that runs restic with the repo env inline (via `env`).
 fn restic(base: &str, stack: &str, password_ref: &str, args: &[&str], timeout: u64) -> Cmd {
     // The host wraps this so RESTIC_PASSWORD comes from its secret store; here
@@ -32,6 +42,7 @@ fn restic(base: &str, stack: &str, password_ref: &str, args: &[&str], timeout: u
         "env".to_string(),
         format!("RESTIC_REPOSITORY={}", repo),
         format!("RESTIC_PASSWORD_FILE={}", password_ref),
+        format!("RESTIC_CACHE_DIR={}", RESTIC_CACHE_DIR),
         "restic".to_string(),
     ];
     full.extend(args.iter().map(|s| s.to_string()));

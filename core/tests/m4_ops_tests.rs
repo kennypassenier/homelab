@@ -414,6 +414,38 @@ fn every_stack_dashboard_has_an_errors_section() {
 /// A path that does NOT exist already fails loudly — that is how the metrics
 /// stack's stale path was caught on 2026-08-31. The empty one is the case
 /// nothing catches.
+/// Every restic invocation must name a cache directory.
+///
+/// restic finds its cache through `$XDG_CACHE_HOME` or `$HOME`, and a systemd
+/// service has neither — so every backup this fleet has ever taken printed
+/// "unable to open cache" and then fetched the whole repository index from
+/// Google Drive again. Six repositories on the gateway, six index fetches, on
+/// an operation already slow enough to look stuck.
+/// covers: F153
+#[tokio::test]
+async fn every_restic_call_names_a_cache_directory() {
+    use homelab_core::ops::backup::RESTIC_CACHE_DIR;
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let cfg = BackupCfg::default();
+    let _ = backup(&ctx(&exec, &sink, &j), &manifest(108, "test"), &cfg).await;
+
+    let restic_calls = exec.calls_containing("RESTIC_REPOSITORY=");
+    assert!(
+        !restic_calls.is_empty(),
+        "the fixture must actually reach restic"
+    );
+    for c in &restic_calls {
+        assert!(
+            c.contains(&format!("RESTIC_CACHE_DIR={}", RESTIC_CACHE_DIR)),
+            "a restic call without a cache directory re-downloads the index: {}",
+            c
+        );
+    }
+}
+
 /// covers: F105
 #[test]
 fn a_snapshot_that_stored_nothing_is_recognised() {

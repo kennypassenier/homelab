@@ -35,7 +35,7 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — v3.27.0 live on the host | **5 · Realization plan — M8 DONE; the whole fleet is orchestrator-managed** |
+| Phase | 9 · Released — v3.34.0 live on the host | **5 · Realization plan — M8 DONE; the whole fleet is orchestrator-managed** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there |
 
@@ -46,7 +46,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.27.0** (2026-09-01); 247 tests, CI green.
+- **Released and live at v3.34.0** (2026-09-01); 270 tests, CI green.
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.
   M7 is done: CT 115 destroyed and rebuilt end to end, 653 s of outage of
   which 573 s was one stalled image pull (F108). W1-W3 built straight after
@@ -81,9 +81,13 @@ it is the resume point and is kept current as part of the work, not afterwards.
   fp SHA256:85:00:F8:84…); ships via `homelab self-update` (H5, armed
   rollback proven). Golden templates = CT 998 (v3 unprivileged, the default) and CT 997 (v3
   privileged, for media + downloader); CT 999 is the retired v1.
-- **vmid 108** = dedicated automated-test container (create/destroy
-  allowed there and only there). LVM snapshot `pve/root-v2-preinstall`
-  is the host-OS rollback net.
+- **There is no standing test container any more.** vmid 108 used to be it;
+  since the pilot it is `108-app-syncthing` and holds Kenny's Obsidian vault
+  sync. This note said otherwise until 2026-09-01, and a form went out
+  recommending drills on a live service because of it. When something has to
+  be created and destroyed for real, make a throwaway stack on a free vmid
+  (`stacks/drill`, vmid 118) and destroy it in the same sitting — Kenny's
+  form B1. LVM snapshot `pve/root-v2-preinstall` is the host-OS rollback net.
 - **No-touch list is law**: `core/src/safety.rs` (VMs 100/101/201–203,
   CT 102/103, and 104–107/111 until migration).
 - **Backups (audited 2026-08-27)**: nightly restic per stack +

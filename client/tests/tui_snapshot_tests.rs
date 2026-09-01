@@ -841,6 +841,12 @@ const CLI_ONLY: &[(&str, &str)] = &[
         "one-line version print; the TUI shows it in the header already",
     ),
     (
+        "PruneOrphans",
+        "removes files after somebody has read the list the deploy printed — the \
+         same reasoning as DestroyStack: deleting should mean leaving the \
+         comfortable interface and typing the stack name out (Kenny, form H2b)",
+    ),
+    (
         "DestroyStack",
         "deliberate friction: destroying a container should mean leaving the \
          comfortable interface and typing it out (Kenny's C2 gate)",

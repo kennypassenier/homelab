@@ -475,6 +475,41 @@ async fn main() {
                 Err(e) => die(&format!("runbook: {}", e)),
             }
         }
+        "prune-orphans" => {
+            // Kenny's H2b: the deploy REPORTS files the repository no longer
+            // has, and this removes them — after the same typed confirmation
+            // a destroy asks for. Two steps on purpose: deleting is the
+            // irreversible direction, and a deploy runs when nobody is
+            // looking.
+            let dir = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab prune-orphans stacks/<name>"));
+            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            let stack = spec.manifest.stack_name.clone();
+            eprint!(
+                "{}Type the stack name '{}' to remove the files the repository no longer \
+                 has (the deploy log lists them): {}",
+                C_RED, stack, C_RESET
+            );
+            use std::io::Write as _;
+            std::io::stderr().flush().ok();
+            let mut typed = String::new();
+            std::io::stdin().read_line(&mut typed).ok();
+            let confirm = typed.trim().to_string();
+            if confirm != stack {
+                die("name mismatch — nothing removed");
+            }
+            rpc(
+                &host,
+                &token,
+                Command::PruneOrphans {
+                    manifest: Box::new(spec.manifest.clone()),
+                    spec: Box::new(spec),
+                    confirm,
+                },
+            )
+            .await;
+        }
         "destroy" => {
             let dir = args
                 .get(2)
@@ -527,6 +562,7 @@ async fn main() {
                 "  homelab patch                       apt dist-upgrade all managed stacks (H6)"
             );
             println!("  homelab destroy stacks/<name>       gated destroy (C2)");
+            println!("  homelab prune-orphans stacks/<name>  remove files the repo dropped (H2b)");
             println!(
                 "  homelab enable|disable <stack>      (un)park for the nightly scheduler (H8)"
             );

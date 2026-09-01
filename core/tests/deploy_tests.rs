@@ -148,6 +148,59 @@ fn o7_config_paths_must_be_named_after_their_app() {
     validate(&spec(108, "test")).expect("syncthing-config owned by syncthing is valid");
 }
 
+/// A bind mount inside a READ-ONLY bind mount of the same service is refused;
+/// inside a writable one it is fine.
+///
+/// Grafana went down for four minutes on 2026-09-01 because of the first
+/// case, and no gate could see it: `docker compose config` accepts it,
+/// validation accepted it, the whole suite stayed green. Only runc knows,
+/// and only when it tries to start the container.
+///
+/// The second half of this test is the reason the rule is narrow. Its first
+/// version refused ANY nesting and was measured against the fleet the moment
+/// it was written (Kenny's G7) — it also refused the running gateway, because
+/// CrowdSec mounts one file inside its own `/etc/crowdsec`, which works every
+/// day because that outer mount is writable. Live on the same container:
+/// `/etc/crowdsec rw=true`, `/etc/grafana/provisioning :ro`.
+/// covers: F159
+#[test]
+fn a_mount_inside_a_read_only_mount_is_refused() {
+    use homelab_core::manifest::validate;
+
+    let nested = |mode: &str| -> String {
+        format!(
+            "services:\n  app:\n    image: x\n    volumes:\n      \
+             - ./provisioning:/etc/app/provisioning{}\n      \
+             - ./generated:/etc/app/provisioning/generated:ro\n",
+            mode
+        )
+    };
+
+    let mut s = spec(108, "test");
+    s.files.push(FileBlob {
+        path: "app/docker-compose.yml".into(),
+        content: nested(":ro"),
+        mode: None,
+    });
+    let err = validate(&s).expect_err("a mount inside a read-only mount must be refused");
+    let msg = format!("{}", err);
+    assert!(
+        msg.contains("READ-ONLY") && msg.contains("/etc/app/provisioning/generated"),
+        "the message must name the nesting and why it cannot work: {}",
+        msg
+    );
+
+    // Writable outer mount: docker can create the mountpoint, and CrowdSec
+    // has been doing exactly this on the live gateway for months.
+    let mut s = spec(108, "test");
+    s.files.push(FileBlob {
+        path: "app/docker-compose.yml".into(),
+        content: nested(""),
+        mode: None,
+    });
+    validate(&s).expect("nesting inside a WRITABLE mount is legitimate and must pass");
+}
+
 /// O5: on an unprivileged container uid 1000 inside is uid 101000 on the
 /// host, so the two privilege levels need host_owner_uid values 100000 apart.
 /// Nothing checked, and the wrong number produces a directory the service

@@ -2223,6 +2223,70 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 },
             }
         }
+        Rpc::PruneOrphans {
+            manifest,
+            spec,
+            confirm,
+        } => {
+            if confirm != manifest.stack_name {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!(
+                        "confirmation '{}' does not match stack '{}' — nothing removed",
+                        confirm, manifest.stack_name
+                    ),
+                };
+            }
+            // A1/A2: the same gate every mutating operation passes. Removing
+            // files reaches into a container, so the no-touch list and the
+            // hostname check apply exactly as they do to a deploy.
+            if let Err(e) =
+                homelab_core::safety::check_deploy_target(&exec, &state.config.safety, &manifest)
+                    .await
+            {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("{}", e),
+                };
+            }
+            let orphans = homelab_core::ops::deploy::orphan_files(&exec, &manifest, &spec).await;
+            if orphans.is_empty() {
+                return RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!(
+                        "nothing to remove — everything under /opt/{} is in the repository",
+                        manifest.stack_name
+                    ),
+                };
+            }
+            let mut removed = 0usize;
+            for o in &orphans {
+                let path = format!("/opt/{}/{}", manifest.stack_name, o);
+                // -f, never -r: this removes FILES the repository dropped.
+                // A directory would take whatever else is under it, which is
+                // exactly the surprise this whole feature exists to avoid.
+                if exec
+                    .run(&homelab_core::executor::Cmd::new(
+                        "pct",
+                        &["exec", &manifest.vmid.to_string(), "--", "rm", "-f", &path],
+                        60,
+                    ))
+                    .await
+                    .is_ok()
+                {
+                    removed += 1;
+                    tracing::info!("[prune] removed {}", path);
+                }
+            }
+            RpcResponse {
+                id: req.id,
+                ok: removed == orphans.len(),
+                message: format!("removed {} of {} orphan file(s)", removed, orphans.len()),
+            }
+        }
         Rpc::ForgetStack { stack } => {
             let store =
                 homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);

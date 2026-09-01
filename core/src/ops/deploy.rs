@@ -120,6 +120,47 @@ async fn mark_incomplete(
 type CacheOriginals =
     std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, (String, String, String)>>>;
 
+/// Files under `/opt/<stack>/` on the container that this deploy did not send.
+///
+/// Compared against the spec's own file list, so the answer is "what the
+/// repository no longer has" rather than "what looks old". Best-effort: a
+/// container that will not answer produces an empty list rather than a
+/// finding, because an unasked question must never become one.
+///
+/// `.env` files are excluded on purpose — they come from the host vault
+/// (D12), never from the repository, so every one of them would be reported
+/// as an orphan forever.
+pub async fn orphan_files(
+    exec: &dyn crate::executor::Executor,
+    m: &crate::manifest::StackManifest,
+    spec: &DeploySpec,
+) -> Vec<String> {
+    let sent: std::collections::BTreeSet<&str> =
+        spec.files.iter().map(|f| f.path.as_str()).collect();
+    let out = match pct_sh(
+        exec,
+        m.vmid,
+        &format!(
+            "cd '/opt/{0}' 2>/dev/null && find . -type f -printf '%P\\n' 2>/dev/null || true",
+            m.stack_name
+        ),
+        120,
+    )
+    .await
+    {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
+    out.stdout
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .filter(|l| !l.ends_with(".env"))
+        .filter(|l| !sent.contains(*l))
+        .map(str::to_string)
+        .collect()
+}
+
 pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let m = &spec.manifest;
     let op = format!("deploy-{}", m.stack_name);
@@ -1465,6 +1506,44 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
 
     // ── D3: garbage-collect apps removed from intent — stop + remove their
     // compose project and /opt dir; /appdata config dirs are kept.
+    // Files the container has and the repository does not.
+    //
+    // The garbage collection below works per APP DIRECTORY: an app that
+    // leaves the stack file takes its directory with it. A FILE that leaves
+    // an app takes nothing — the deploy puts files down and has never picked
+    // one up. Thirteen Grafana dashboards deleted from the repository on
+    // 2026-09-01 were still on CT 104 two deploys later, one of them with the
+    // same uid as its replacement (F161).
+    //
+    // Reporting only, deliberately (Kenny, form H2b). Deleting is the
+    // irreversible direction and a deploy runs when nobody is looking;
+    // `homelab prune-orphans` does the removing, after showing the same list
+    // and asking.
+    step!(runner, exec, ctx, m, "orphan files", {
+        if m.native_only {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let orphans = orphan_files(exec, m, spec).await;
+        if orphans.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        log_info(format!(
+            "[orphans] {} file(s) on the container that the repository no longer has — \
+             `homelab prune-orphans stacks/{}` removes them after showing the list:",
+            orphans.len(),
+            m.stack_name
+        ));
+        for o in orphans.iter().take(20) {
+            log_info(format!("[orphans]   {}", o));
+        }
+        if orphans.len() > 20 {
+            log_info(format!("[orphans]   … and {} more", orphans.len() - 20));
+        }
+        // Never a failure: a file too many breaks nothing today, and a deploy
+        // that goes red over it would be one people learn to ignore.
+        Ok(StepOutcome::Unchanged)
+    });
+
     step!(runner, exec, ctx, m, "garbage collect", {
         // Nor is there anything to garbage-collect: an app directory under
         // /opt on a native-only container was never put there by a deploy.

@@ -287,6 +287,55 @@ pub fn validate_manifest(m: &StackManifest) -> Result<(), CoreError> {
     }
 }
 
+/// (service, container-side path, read-only) for every bind mount in a
+/// compose file.
+///
+/// Deliberately a line scanner rather than a yaml parse: the same shape the
+/// `/appdata` check next to it uses, so the two agree about what a mount is,
+/// and it survives the anchors and merge keys real compose files carry.
+fn compose_mount_targets(content: &str) -> Vec<(String, String, bool)> {
+    let mut out = Vec::new();
+    let mut service = String::new();
+    let mut in_services = false;
+    for line in content.lines() {
+        let indent = line.len() - line.trim_start().len();
+        let t = line.trim();
+        if t.starts_with('#') || t.is_empty() {
+            continue;
+        }
+        if indent == 0 {
+            in_services = t.starts_with("services:");
+            continue;
+        }
+        // `  name:` directly under services: — two spaces in every compose
+        // file this repository ships.
+        if in_services && indent == 2 && t.ends_with(':') && !t.contains(' ') {
+            service = t.trim_end_matches(':').to_string();
+            continue;
+        }
+        let Some(rest) = t.strip_prefix("- ") else {
+            continue;
+        };
+        let rest = rest.trim_matches(['"', '\'']);
+        // host:container[:mode] — a bind, not a named volume or a port.
+        if !rest.starts_with('.') && !rest.starts_with('/') {
+            continue;
+        }
+        let parts: Vec<&str> = rest.split(':').collect();
+        if parts.len() < 2 || service.is_empty() {
+            continue;
+        }
+        let target = parts[1].trim();
+        let read_only = parts
+            .get(2)
+            .is_some_and(|m| m.split(',').any(|x| x.trim() == "ro"));
+        if target.starts_with('/') {
+            out.push((service.clone(), target.to_string(), read_only));
+        }
+    }
+    out
+}
+
 fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
     for app in &m.apps {
         if app.is_empty()
@@ -505,6 +554,52 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
                 "gateway route filename '{}' invalid",
                 route.filename
             ));
+        }
+    }
+
+    // A bind mount may not target a path INSIDE another bind mount of the
+    // same container.
+    //
+    // Grafana was down for four minutes on 2026-09-01 because of exactly
+    // this: `./provisioning:/etc/grafana/provisioning:ro` and, beside it,
+    // `./dashboards-generated:/etc/grafana/provisioning/dashboards-generated:ro`.
+    // Docker has to create the second mountpoint inside the first, which the
+    // first has just made read-only, and runc fails at container start with
+    // "read-only file system". `docker compose config` accepts it, this
+    // validation accepted it, and the whole 271-test suite stayed green —
+    // only the container runtime can tell (F159).
+    //
+    // Only when the OUTER mount is read-only, which is the whole of the
+    // difference. The first version of this rule refused any nesting and was
+    // measured against the fleet the moment it was written (Kenny's G7): it
+    // also refused the running gateway, because CrowdSec mounts one file
+    // inside its own `/etc/crowdsec` — and that works, every day, because
+    // that outer mount is writable. Live proof of both halves on the same
+    // container: `/etc/crowdsec rw=true`, `/etc/grafana/provisioning :ro`.
+    //
+    // So the rule says what the failure actually is instead of what it
+    // resembles (Kenny, form G8b, choosing the narrower rule over dropping
+    // it).
+    for f in &spec.files {
+        if !f.path.ends_with("docker-compose.yml") {
+            continue;
+        }
+        let targets = compose_mount_targets(&f.content);
+        for (svc, inner, _) in &targets {
+            for (svc2, outer, outer_ro) in &targets {
+                if svc != svc2 || inner == outer || !outer_ro {
+                    continue;
+                }
+                if inner.starts_with(&format!("{}/", outer)) {
+                    problems.push(format!(
+                        "{}: service '{}' mounts '{}' inside its own READ-ONLY mount '{}' — \
+                         docker has to create the mountpoint inside a directory it has just \
+                         mounted read-only, and the container fails to start with \
+                         'read-only file system'. Put the two beside each other instead",
+                        f.path, svc, inner, outer
+                    ));
+                }
+            }
         }
     }
 

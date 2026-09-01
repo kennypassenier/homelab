@@ -134,6 +134,19 @@ pub enum Command {
     ForgetStack {
         stack: String,
     },
+    /// H2b: remove files under `/opt/<stack>/` that the repository no longer
+    /// has. `confirm` must equal the stack name.
+    ///
+    /// Separate from the deploy on purpose (Kenny, form H2b): the deploy
+    /// REPORTS orphans on every run and never removes anything, because
+    /// deleting is the irreversible direction and a deploy runs when nobody
+    /// is watching. This is the deliberate second step, taken after somebody
+    /// has read the list.
+    PruneOrphans {
+        manifest: Box<StackManifest>,
+        spec: Box<DeploySpec>,
+        confirm: String,
+    },
     /// Y4: hold the repository against reality and report every difference.
     /// The client sends what only it can see — the vmid each stack directory
     /// claims — and the host adds what only it can see: which containers

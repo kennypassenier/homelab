@@ -8,4 +8,13 @@ services:
       - "8080:80"
     volumes:
       - /appdata/drill/app-config:/usr/share/nginx/html
+    # Writes one file into its own data directory before serving it. Two
+    # drills need that: the ownership probe has something real to try, and
+    # the destroy path has a non-empty directory to back up — an empty one
+    # would be refused by the empty-snapshot guard and the destroy would stop
+    # before the cleanup this stack exists to watch (F154).
+    command:
+      - /bin/sh
+      - -c
+      - echo "drill" > /usr/share/nginx/html/index.html && exec nginx -g 'daemon off;'
     restart: unless-stopped

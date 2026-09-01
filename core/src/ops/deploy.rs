@@ -1504,6 +1504,72 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         });
     }
 
+    // ── T51: the front page, rendered from the routes this orchestrator
+    // has already written for the whole fleet.
+    //
+    // Fleet-wide rather than per stack, because Homepage keeps one file — so
+    // this step reads every route fragment in the gateway's route directory
+    // rather than only the one it just wrote. Best-effort, like the discovery
+    // file and the dashboard: a front page is a convenience, and a deploy
+    // that fails over it would be a deploy that fails over nothing.
+    if let Some(dest) = ctx.homepage_services_file.as_deref() {
+        step!(runner, exec, ctx, m, "homepage services", {
+            let dir = &ctx.safety.gateway_routes_dir;
+            let listing = pct_sh(
+                exec,
+                ctx.safety.gateway_vmid,
+                &format!("ls -1 '{}'/*.yml 2>/dev/null || true", dir),
+                60,
+            )
+            .await?;
+            let mut stacks: Vec<(String, Vec<crate::ops::homepage::Entry>)> = Vec::new();
+            for path in listing
+                .stdout
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+            {
+                let name = std::path::Path::new(path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                // `112-app-almanac` → `almanac`; a hand-written
+                // `manual-…` fragment keeps its own name.
+                let stack = name
+                    .split_once("-app-")
+                    .map(|(_, s)| s.to_string())
+                    .unwrap_or(name);
+                let body = pct_sh(
+                    exec,
+                    ctx.safety.gateway_vmid,
+                    &format!("cat '{}'", path),
+                    60,
+                )
+                .await?;
+                let entries = crate::ops::homepage::entries_from_route(&body.stdout);
+                if !entries.is_empty() {
+                    stacks.push((stack, entries));
+                }
+            }
+            stacks.sort_by(|a, b| a.0.cmp(&b.0));
+            let body = crate::ops::homepage::services_yaml(&stacks);
+            match exec.write_file(dest, &body, 0o644).await {
+                Ok(()) => {
+                    log_info(format!(
+                        "[t51] {} — {} stack(s) on the front page",
+                        dest,
+                        stacks.len()
+                    ));
+                    Ok(StepOutcome::Changed)
+                }
+                Err(e) => {
+                    log_info(format!("[t51] could not write {} ({})", dest, e));
+                    Ok(StepOutcome::Unchanged)
+                }
+            }
+        });
+    }
+
     // ── D3: garbage-collect apps removed from intent — stop + remove their
     // compose project and /opt dir; /appdata config dirs are kept.
     // Files the container has and the repository does not.

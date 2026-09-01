@@ -10,6 +10,7 @@ pub mod enable;
 pub mod fleetcheck;
 pub mod guards;
 pub mod hardware;
+pub mod homepage;
 pub mod kea;
 pub mod mirror;
 pub mod native;
@@ -100,6 +101,11 @@ pub struct OpCtx<'a> {
     /// T2: Grafana's provisioning directory, as a path INSIDE the gateway
     /// container. None = feature off, and dashboards stay hand-made.
     pub grafana_dashboards_dir: Option<String>,
+    /// T51: Homepage's `services.yaml`, as a path on the PROXMOX HOST — it
+    /// lives under `/appdata`, like every other app's configuration. None =
+    /// feature off and the front page stays hand-made, which is how it came
+    /// to be zero bytes.
+    pub homepage_services_file: Option<String>,
     /// Where restic lives, for the operations that read the repository
     /// without being a backup themselves — E3 auto-restore and the
     /// `last_backup` recovery in deploy. Both used to build their own

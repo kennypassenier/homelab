@@ -95,6 +95,7 @@ async fn run_deploy(exec: &MockExecutor, sink: &VecSink) -> homelab_core::runner
         kea: None,
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
+        homepage_services_file: None,
         backup: Default::default(),
         registry_cache: None,
     };
@@ -186,6 +187,7 @@ async fn sec1_shell_metachar_app_name_refused_everywhere() {
             kea: None,
             metrics_targets_dir: None,
             grafana_dashboards_dir: None,
+            homepage_services_file: None,
             backup: Default::default(),
             registry_cache: None,
         };

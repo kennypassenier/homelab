@@ -210,6 +210,7 @@ async fn r9_intent_history_against_real_git_two_deploys_two_commits_revert_works
         kea: None,
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
+        homepage_services_file: None,
         backup: Default::default(),
         registry_cache: None,
     };
@@ -265,6 +266,7 @@ async fn r9_broken_git_identity_fails_the_deploy_not_silently() {
         kea: None,
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
+        homepage_services_file: None,
         backup: Default::default(),
         registry_cache: None,
     };

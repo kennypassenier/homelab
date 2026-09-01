@@ -66,6 +66,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         kea: None,
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
+        homepage_services_file: None,
         backup: Default::default(),
         registry_cache: None,
     }
@@ -2352,6 +2353,7 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             kea: None,
             metrics_targets_dir: None,
             grafana_dashboards_dir: None,
+            homepage_services_file: None,
             backup: Default::default(),
             registry_cache: None,
         },
@@ -2393,6 +2395,7 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             kea: None,
             metrics_targets_dir: None,
             grafana_dashboards_dir: None,
+            homepage_services_file: None,
             backup: Default::default(),
             registry_cache: None,
         },

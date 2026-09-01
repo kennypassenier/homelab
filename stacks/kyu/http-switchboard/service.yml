@@ -33,3 +33,7 @@ data_dirs:
 # update_cmd deliberately absent, as with the other two units here: ownership
 # of the binary update is Kenny's call, and two systems restoring binaries can
 # fight each other.
+
+# T11: measured 2026-09-02 — release v1.0.0 carries `http-switchboard` and a
+# SHA256SUMS; the asset name matches the unit name, so it needs no override.
+release_repo: kennypassenier/http-switchboard

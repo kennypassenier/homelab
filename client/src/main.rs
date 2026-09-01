@@ -91,6 +91,78 @@ async fn main() {
             );
             rpc(&host, &token, Command::AdoptService(Box::new(m))).await;
         }
+        // T11: install a native service into a container the deploy has
+        // already created. The other half of C7 — until now the orchestrator
+        // could take over a hand-built container and could not build one.
+        "install-native" => {
+            let dir = args.get(2).unwrap_or_else(|| {
+                die("usage: homelab install-native stacks/<name>[/<unit>] [<tag>]")
+            });
+            let path = Path::new(dir).join("service.yml");
+            let raw = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| die(&format!("cannot read {}: {}", path.display(), e)));
+            let m: homelab_proto::NativeServiceManifest = serde_yaml::from_str(&raw)
+                .unwrap_or_else(|e| die(&format!("service.yml parse: {}", e)));
+            if let Err(problems) = homelab_core::native::validate_native(&m) {
+                die(&format!("service.yml invalid: {}", problems.join("; ")));
+            }
+            let Some(repo) = m.release_repo.clone() else {
+                die(&format!(
+                    "{} declares no release_repo — this service is adopt-only, and where its \
+                     binary comes from is not written down anywhere. Add release_repo to its \
+                     service.yml rather than installing by hand again",
+                    m.unit
+                ));
+            };
+            // The unit file lives beside the service file, or in the unit's
+            // own directory when several services share one stack.
+            let unit_name = format!("{}.service", m.unit);
+            let candidates = [
+                Path::new(dir).join(&unit_name),
+                Path::new(dir).join(&m.unit).join(&unit_name),
+            ];
+            let unit_file = candidates
+                .iter()
+                .find_map(|p| std::fs::read_to_string(p).ok())
+                .unwrap_or_else(|| {
+                    die(&format!(
+                        "no {} found beside {} — the file that makes the service exist is not \
+                         in the repository, so a rebuilt container would have the binary and \
+                         nothing to run it",
+                        unit_name, dir
+                    ))
+                });
+            let asset = m.asset_name().to_string();
+            let tag = match args.get(3).cloned() {
+                Some(t) => t,
+                None => homelab_client::release::latest_tag_of(&repo).unwrap_or_else(|| {
+                    die(&format!("no release found in {} (gh authenticated?)", repo))
+                }),
+            };
+            println!(
+                "{}▶ install-native {} :: CT {} · {} {} from {}{}",
+                C_CYAN, m.unit, m.vmid, asset, tag, repo, C_RESET
+            );
+            let binary_b64 = homelab_client::release::stage_asset(&repo, &tag, &asset)
+                .unwrap_or_else(|e| die(&e));
+            if let Some(why) = homelab_client::version::too_large(binary_b64.len()) {
+                die(&why);
+            }
+            println!(
+                "{}✓ checksum verified — shipping over the line{}",
+                C_GREEN, C_RESET
+            );
+            rpc(
+                &host,
+                &token,
+                Command::InstallNative {
+                    manifest: Box::new(m),
+                    binary_b64,
+                    unit_file,
+                },
+            )
+            .await;
+        }
         // Y4: the client contributes what only it can see — the vmid each
         // stack directory claims — and the host contributes the rest.
         // G1: the runaway guards, for a container the orchestrator did not

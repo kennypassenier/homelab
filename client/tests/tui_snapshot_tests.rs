@@ -870,6 +870,12 @@ const CLI_ONLY: &[(&str, &str)] = &[
         "native services, scheduled; the manual path is rare — a later round",
     ),
     ("UpdateNative", "native services — a later round"),
+    (
+        "InstallNative",
+        "the same family as AdoptService and UpdateNative: the whole native \
+         round is command-line for now, recorded as T71 rather than deferred \
+         a fourth time in a comment",
+    ),
     ("ZfsReplicate", "runs in the nightly plan — a later round"),
     (
         "ListTemplates",

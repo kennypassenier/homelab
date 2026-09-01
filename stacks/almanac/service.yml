@@ -42,3 +42,9 @@ data_dirs:
 # reproduces the unit line for line: same directory, same environment file,
 # same user, same latch wrapper.
 update_cmd: cd /appdata/almanac/almanac-config && set -a && . /appdata/almanac/almanac-config/latch.env && set +a && runuser -u almanac --preserve-environment -- /usr/local/bin/latch run -- /opt/almanac/almanac update
+
+# T11: where the binary comes from, so a rebuilt container can be finished by
+# the orchestrator instead of by whoever remembers how it was done. Measured
+# 2026-09-02: release v1.4.0 carries `almanac` and a SHA256SUMS, which is what
+# `homelab install-native` verifies against before it ships anything.
+release_repo: kennypassenier/almanac

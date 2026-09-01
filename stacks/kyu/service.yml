@@ -19,3 +19,11 @@ data_dirs:
 # complete rollback mechanism, and two systems restoring binaries can fight
 # each other. Ownership is Kenny's call (form pending); until then the
 # nightly run backs up only.
+
+# T11: NO release_repo, and that is a finding rather than an omission (F168).
+# Measured 2026-09-02: release v2.0.0 of kennypassenier/kyu carries no assets
+# at all — no binary, no SHA256SUMS. The hub that every other service on this
+# container talks to is the one service whose binary cannot be reinstalled
+# from its own release; the copy running on CT 109 was built and placed by
+# hand, and nothing written down says how. Its own repository has to publish a
+# release artefact before `homelab install-native` can finish a rebuild here.

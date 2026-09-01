@@ -39,6 +39,25 @@ pub struct NativeServiceManifest {
     /// a fabricated directory that would then be backed up for nothing.
     #[serde(default)]
     pub stateless: bool,
+    /// T11: where the binary comes from when the orchestrator installs it —
+    /// `owner/repo` of the GitHub release. None = this service is adopted
+    /// only, and its binary arrived by a hand nobody wrote down. That was
+    /// true of all four native services until this field existed: the
+    /// container manifest said "the binaries are installed the way C7
+    /// installs them" and C7 had no such verb.
+    #[serde(default)]
+    pub release_repo: Option<String>,
+    /// The asset name inside that release. Defaults to the unit name when
+    /// absent, which is what all four services happen to use.
+    #[serde(default)]
+    pub release_asset: Option<String>,
+}
+
+impl NativeServiceManifest {
+    /// The release asset to fetch, falling back to the unit name.
+    pub fn asset_name(&self) -> &str {
+        self.release_asset.as_deref().unwrap_or(&self.unit)
+    }
 }
 
 fn lower_dashed(s: &str) -> bool {
@@ -93,6 +112,23 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
              and guessing which would decide silently whether this service is backed up",
             m.data_dirs.len()
         ));
+    }
+    // A repository is `owner/name` and nothing else. The check is here
+    // rather than at the download because a typo would otherwise surface as
+    // `gh` saying "release not found", which reads as "the release is
+    // missing" — a completely different problem from "the stack file is
+    // wrong".
+    if let Some(repo) = &m.release_repo {
+        let parts: Vec<&str> = repo.split('/').collect();
+        if parts.len() != 2 || parts.iter().any(|p| p.is_empty()) {
+            problems.push(format!("release_repo '{}' must be 'owner/name'", repo));
+        }
+    }
+    if m.release_asset.is_some() && m.release_repo.is_none() {
+        problems.push(
+            "release_asset is set without a release_repo — there is nowhere to fetch it from"
+                .into(),
+        );
     }
     if problems.is_empty() {
         Ok(())

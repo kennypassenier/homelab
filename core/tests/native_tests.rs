@@ -40,6 +40,8 @@ fn kyu_manifest() -> NativeServiceManifest {
         data_dirs: vec!["/var/lib/kyu".into()],
         update_cmd: Some("kyu update".into()),
         stateless: false,
+        release_repo: None,
+        release_asset: None,
     }
 }
 
@@ -300,6 +302,8 @@ async fn t5_a_stack_holds_several_native_services() {
         env_file: Some("/etc/kyu-runner/token.env".into()),
         data_dirs: vec![],
         stateless: true,
+        release_repo: None,
+        release_asset: None,
         update_cmd: None,
         ..kyu_manifest()
     };
@@ -329,6 +333,8 @@ async fn t5_a_stack_holds_several_native_services() {
         env_file: Some("/etc/kyu-runner/token.env".into()),
         data_dirs: vec![],
         stateless: true,
+        release_repo: None,
+        release_asset: None,
         update_cmd: Some("kyu-runner update".into()),
         ..kyu_manifest()
     };
@@ -413,6 +419,8 @@ async fn d25_native_backup_uses_the_service_name_for_its_repo() {
         env_file: None,
         data_dirs: vec!["/etc/kyu-runner".into()],
         stateless: false,
+        release_repo: None,
+        release_asset: None,
         update_cmd: None,
         ..kyu_manifest()
     };
@@ -488,4 +496,236 @@ async fn c7_adoption_never_clobbers_existing_tags() {
     for t in ["production", "critical", "homelab"] {
         assert!(set[0].contains(t), "{} must survive: {}", t, set[0]);
     }
+}
+
+// ── T11: installing a native service into a container the deploy made ──
+//
+// The half of C7 that never existed. `stacks/kyu/lxc-compose.yml` has said
+// since it was written that a rebuild ends with "the three binaries are
+// installed the way C7 installs them" — and that was a sentence, not a verb.
+
+const UNIT_FILE: &str = "[Unit]\nDescription=kyu\n\n[Service]\n\
+                         ExecStart=/usr/local/bin/kyu\n\n[Install]\n\
+                         WantedBy=multi-user.target\n";
+
+fn install_manifest() -> NativeServiceManifest {
+    NativeServiceManifest {
+        release_repo: Some("kennypassenier/kyu".into()),
+        ..kyu_manifest()
+    }
+}
+
+/// A unit file that runs a different program than the manifest declares is
+/// refused BEFORE anything is written. Adoption already refuses this
+/// mismatch when it finds it live; catching it here means the container
+/// never reaches that state at all.
+#[tokio::test]
+async fn an_install_refuses_a_unit_file_that_runs_a_different_binary() {
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let wrong = "[Service]\nExecStart=/usr/local/bin/something-else\n";
+    let report = homelab_core::ops::native::install_native(
+        &ctx(&exec, &sink, &j),
+        &install_manifest(),
+        "YmluYXJ5",
+        wrong,
+    )
+    .await;
+    assert!(
+        !report.ok,
+        "a unit that execs another binary must be refused"
+    );
+    let why = format!("{:?}", report.error);
+    assert!(why.contains("does not exec"), "{}", why);
+    // Nothing may have been written: the check has to come before the push.
+    assert!(
+        !exec.file_paths().iter().any(|p| p.contains(".service")),
+        "no unit file may be written when it was refused: {:?}",
+        exec.file_paths()
+    );
+}
+
+/// An empty unit file is its own refusal. A binary installed with nothing to
+/// run it produces a container that holds the program and no service — which
+/// looks, from every reading, exactly like a service that is down.
+#[tokio::test]
+async fn an_install_without_a_unit_file_is_refused() {
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = homelab_core::ops::native::install_native(
+        &ctx(&exec, &sink, &j),
+        &install_manifest(),
+        "YmluYXJ5",
+        "   \n",
+    )
+    .await;
+    assert!(!report.ok);
+    assert!(format!("{:?}", report.error).contains("no unit file"));
+}
+
+/// The happy path: stage beside the target, install the unit, activate, and
+/// end up recorded in state exactly as adoption would record it — a service
+/// built this way and one taken over by hand must be indistinguishable
+/// afterwards.
+#[tokio::test]
+async fn an_install_stages_beside_the_target_before_it_replaces_anything() {
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("test -f", CmdOutput::ok("no\n"));
+    exec.respond_always("base64 -d", CmdOutput::ok(""));
+    exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
+    exec.respond_always("systemctl stop", CmdOutput::ok(""));
+    exec.respond_always("cat /var/lib/homelab/state.json", CmdOutput::failed(1, ""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = homelab_core::ops::native::install_native(
+        &ctx(&exec, &sink, &j),
+        &install_manifest(),
+        "YmluYXJ5",
+        UNIT_FILE,
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let cmds = exec.calls();
+    let all = cmds.join(" ;; ");
+    // Staged beside, never over: a transfer that dies half way must leave
+    // the running service on its own binary.
+    assert!(
+        all.contains("/usr/local/bin/kyu.homelab-new"),
+        "the binary must be staged beside the target: {}",
+        all
+    );
+    // The move happens only after the unit file is in place and systemd has
+    // reloaded — otherwise `start` would run against a unit that is not there.
+    let staged = cmds
+        .iter()
+        .position(|c| c.contains("base64 -d"))
+        .expect("decode step");
+    let reload = cmds
+        .iter()
+        .position(|c| c.contains("daemon-reload"))
+        .expect("daemon-reload step");
+    let moved = cmds
+        .iter()
+        .position(|c| c.contains("mv -f"))
+        .expect("move-into-place step");
+    assert!(
+        staged < reload && reload < moved,
+        "order must be decode → daemon-reload → move: {:?}",
+        cmds
+    );
+    // The unit file travels by `pct push`, so it shows up as a command
+    // rather than a written host file.
+    assert!(
+        all.contains("/etc/systemd/system/kyu.service"),
+        "the unit file must land in /etc/systemd/system: {}",
+        all
+    );
+}
+
+/// A FIRST install that does not come up has nothing to roll back to, and
+/// the message has to say so. Claiming a rollback that did not happen is
+/// worse than the failure: it tells the reader the service is on its old
+/// version when there is no old version.
+#[tokio::test]
+async fn a_first_install_that_fails_says_there_is_nothing_to_roll_back_to() {
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("test -f", CmdOutput::ok("no\n"));
+    exec.respond_always("base64 -d", CmdOutput::ok(""));
+    exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
+    // The activation script fails: the service never reaches `active`.
+    // `respond_first`, because the shared harness models a healthy container
+    // and this test is about an unhealthy one — and the activation script
+    // contains `systemctl is-active`, which that harness already answers.
+    exec.respond_first("journalctl", CmdOutput::ok("kyu: address in use\n"));
+    exec.respond_first("mv -f", CmdOutput::failed(1, "did not start"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = homelab_core::ops::native::install_native(
+        &ctx(&exec, &sink, &j),
+        &install_manifest(),
+        "YmluYXJ5",
+        UNIT_FILE,
+    )
+    .await;
+    assert!(!report.ok);
+    let why = format!("{:?}", report.error);
+    assert!(
+        why.contains("no previous binary") && why.contains("FIRST install"),
+        "the failure must not claim a rollback that cannot exist: {}",
+        why
+    );
+    assert!(
+        why.contains("address in use"),
+        "the reason the service refused to start belongs in the message: {}",
+        why
+    );
+    assert!(
+        !why.contains("rolled back"),
+        "nothing was rolled back: {}",
+        why
+    );
+}
+
+/// A RE-install that does not come up returns to the binary that was
+/// running. The difference between this and the test above is a fact about
+/// the container, not a flag the caller passes.
+#[tokio::test]
+async fn a_reinstall_that_fails_returns_to_the_binary_that_was_running() {
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("test -f", CmdOutput::ok("yes\n"));
+    exec.respond_always("cp -p", CmdOutput::ok(""));
+    exec.respond_always("base64 -d", CmdOutput::ok(""));
+    exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
+    exec.respond_first("cp -p", CmdOutput::ok(""));
+    exec.respond_first("mv -f", CmdOutput::failed(1, "did not start"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = homelab_core::ops::native::install_native(
+        &ctx(&exec, &sink, &j),
+        &install_manifest(),
+        "YmluYXJ5",
+        UNIT_FILE,
+    )
+    .await;
+    assert!(!report.ok);
+    let why = format!("{:?}", report.error);
+    assert!(why.contains("rolled back"), "{}", why);
+    let all = exec.calls().join(" ;; ");
+    assert!(
+        all.contains("kyu.homelab-prev"),
+        "the previous binary must have been preserved and restored: {}",
+        all
+    );
+}
+
+/// The release source is part of the stack file or it is nowhere. A
+/// `release_asset` with no repository names a file in a place nobody
+/// declared, and `gh` would report "release not found" — which reads as a
+/// missing release rather than a wrong stack file.
+#[test]
+fn a_release_source_that_is_half_declared_is_refused() {
+    let mut half = kyu_manifest();
+    half.release_asset = Some("kyu".into());
+    let problems = validate_native(&half).expect_err("asset without repo must be refused");
+    assert!(problems.iter().any(|p| p.contains("nowhere to fetch")));
+
+    let mut bad_repo = install_manifest();
+    bad_repo.release_repo = Some("kyu".into());
+    let problems = validate_native(&bad_repo).expect_err("a repo must be owner/name");
+    assert!(problems.iter().any(|p| p.contains("owner/name")));
+
+    // The default asset name is the unit name — which is what all four
+    // native services happen to use.
+    assert_eq!(install_manifest().asset_name(), "kyu");
+    let mut named = install_manifest();
+    named.release_asset = Some("kyu-linux-amd64".into());
+    assert_eq!(named.asset_name(), "kyu-linux-amd64");
 }

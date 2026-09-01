@@ -187,6 +187,209 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
     runner.finish_ok()
 }
 
+/// T11: install a native service's binary and unit file into a container
+/// the orchestrator has already created.
+///
+/// This is the half of C7 that never existed. `stacks/kyu/lxc-compose.yml`
+/// has said since 2026-08-31 that a rebuild goes "1. this manifest recreates
+/// the container; 2. restore puts the data back; 3. the three binaries are
+/// installed the way C7 installs them" — and step 3 was a sentence, not a
+/// verb. A stack that can only be finished by the person who remembers how
+/// it was built is not managed, which is the exact reason that container
+/// manifest was written in the first place.
+///
+/// The container is NOT created here: `homelab deploy` already does that for
+/// a `native_only` stack, skipping the docker bootstrap. Duplicating it would
+/// give two provisioning paths that drift.
+///
+/// `binary_b64` is verified by the CLIENT against the release's SHA256SUMS
+/// before it is sent, the same way H7 stages the host's own binary — the
+/// desktop has the authenticated `gh`, so the private repository never needs
+/// a credential on the Proxmox host.
+///
+/// A first install and a re-install are deliberately the same operation. The
+/// difference that matters is whether there is a previous binary to roll back
+/// to, and that is a fact about the container, not a flag the caller passes.
+pub async fn install_native(
+    ctx: &OpCtx<'_>,
+    m: &NativeServiceManifest,
+    binary_b64: &str,
+    unit_file: &str,
+) -> OperationReport {
+    let op = format!("install-{}", m.unit);
+    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+    let unit = format!("{}.service", m.unit);
+    let prev = format!("{}.homelab-prev", m.binary);
+    let staged = format!("{}.homelab-new", m.binary);
+    let unit_path = format!("/etc/systemd/system/{}", unit);
+
+    step!(runner, "validate manifest", {
+        crate::native::validate_native(m)
+            .map_err(|p| CoreError::SafetyAbort(format!("native manifest: {}", p.join("; "))))?;
+        if unit_file.trim().is_empty() {
+            return Err(CoreError::Validation(format!(
+                "no unit file for {} — the file that makes the service exist is not in the \
+                 repository, and installing a binary without it produces a container with a \
+                 program on it and nothing to run it",
+                m.unit
+            )));
+        }
+        if !unit_file.contains(&m.binary) {
+            return Err(CoreError::Validation(format!(
+                "the unit file does not exec '{}' — the same mismatch adoption refuses, caught \
+                 before it is written rather than after",
+                m.binary
+            )));
+        }
+        Ok(StepOutcome::Unchanged)
+    });
+
+    step!(runner, "guard target", {
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    // Whether there is something to fall back to is discovered, not assumed.
+    let mut had_previous = false;
+    step!(runner, "preserve previous binary", {
+        let probe = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("test -f {} && echo yes || echo no", shq(&m.binary)),
+            30,
+        )
+        .await?;
+        had_previous = probe.stdout.trim() == "yes";
+        if !had_previous {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("cp -p {} {}", shq(&m.binary), shq(&prev)),
+            120,
+        )
+        .await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "cannot preserve the running {} — refusing to replace a binary with no way back",
+                m.binary
+            )));
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    // The binary travels as base64 text because that is what `pct push`
+    // carries reliably; it is decoded on the container. The decoded file is
+    // staged BESIDE the target rather than over it, so a transfer that dies
+    // half way leaves the running service on its own binary.
+    step!(runner, "stage binary", {
+        let b64_path = format!("{}.b64", staged);
+        crate::ops::util::push_content(exec, m.vmid, &b64_path, binary_b64, "600").await?;
+        let script = format!(
+            "base64 -d {b64} > {new} && chmod 755 {new} && rm -f {b64} && test -s {new}",
+            b64 = shq(&b64_path),
+            new = shq(&staged)
+        );
+        let out = util_pct_sh(exec, m.vmid, &script, 300).await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "could not decode the binary into {} ({}) — nothing was replaced",
+                staged,
+                out.stderr.trim()
+            )));
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    step!(runner, "install unit file", {
+        crate::ops::util::push_content(exec, m.vmid, &unit_path, unit_file, "644").await?;
+        let out = util_pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "systemctl daemon-reload failed: {}",
+                out.stderr.trim()
+            )));
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    step!(runner, "activate", {
+        // Stopping first is deliberate: replacing the file under a running
+        // process leaves the old one mapped, so the service keeps running the
+        // version that was just replaced and every reading afterwards lies.
+        let script = format!(
+            "systemctl stop {u} 2>/dev/null; mv -f {new} {bin} && \
+             systemctl enable {u} >/dev/null 2>&1 && systemctl start {u} && \
+             for i in 1 2 3 4 5; do \
+               [ \"$(systemctl is-active {u})\" = active ] && exit 0; sleep 2; done; exit 1",
+            u = unit,
+            new = shq(&staged),
+            bin = shq(&m.binary)
+        );
+        let out = util_pct_sh(exec, m.vmid, &script, 180).await?;
+        if out.success() {
+            return Ok(StepOutcome::Changed);
+        }
+        if !had_previous {
+            // Nothing to roll back to, and saying so plainly matters: a
+            // rollback message here would claim a safety net that does not
+            // exist. The unit is left stopped rather than restart-looping.
+            let _ = util_pct_sh(exec, m.vmid, &format!("systemctl stop {}", unit), 60).await;
+            let log = util_pct_sh(
+                exec,
+                m.vmid,
+                &format!("journalctl -u {} -n 20 --no-pager 2>&1 | tail -20", unit),
+                60,
+            )
+            .await?;
+            return Err(CoreError::Other(format!(
+                "{} did not come up and there is no previous binary to return to — this was a \
+                 FIRST install, so the container now has the program and no working service. \
+                 Last log lines: {}",
+                m.unit,
+                log.stdout.trim()
+            )));
+        }
+        let rollback = format!(
+            "cp -p {prev} {bin} && systemctl restart {u} && sleep 2 && \
+             [ \"$(systemctl is-active {u})\" = active ]",
+            prev = shq(&prev),
+            bin = shq(&m.binary),
+            u = unit
+        );
+        let rb = util_pct_sh(exec, m.vmid, &rollback, 180).await?;
+        Err(CoreError::Other(format!(
+            "the installed {} did not come up healthy — rolled back to the previous binary ({})",
+            m.unit,
+            if rb.success() {
+                "service restored and active"
+            } else {
+                "ROLLBACK ALSO FAILED — service needs hands NOW"
+            }
+        )))
+    });
+
+    // Installed and healthy: the same record adoption writes, so a service
+    // built this way and one taken over by hand are indistinguishable
+    // afterwards — which is the point.
+    let report = adopt(ctx, m).await;
+    if !report.ok {
+        return report;
+    }
+
+    runner.log(
+        Level::Info,
+        format!(
+            "[install] {} on {} — binary installed, unit active, stack recorded",
+            m.unit, m.hostname
+        ),
+    );
+    runner.finish_ok()
+}
+
 fn shq(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }

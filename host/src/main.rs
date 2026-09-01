@@ -2179,6 +2179,24 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             })
             .await
         }
+        Rpc::InstallNative {
+            manifest,
+            binary_b64,
+            unit_file,
+        } => {
+            run_mutating_op(state, &exec, req.id, "install-native", |ctx| {
+                Box::pin(async move {
+                    homelab_core::ops::native::install_native(
+                        ctx,
+                        &manifest,
+                        &binary_b64,
+                        &unit_file,
+                    )
+                    .await
+                })
+            })
+            .await
+        }
         Rpc::BackupNative { stack } => {
             match native_from_state(&state.config.state_dir, &stack).await {
                 Ok(services) => {

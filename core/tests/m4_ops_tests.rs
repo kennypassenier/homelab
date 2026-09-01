@@ -1679,6 +1679,8 @@ fn t40_stateless_must_be_declared_not_inferred() {
         data_dirs: vec![],
         update_cmd: None,
         stateless: false,
+        release_repo: None,
+        release_asset: None,
     };
     // Undeclared: still refused, and the message points at the way out.
     let problems = validate_native(&base).expect_err("empty data_dirs must be refused");
@@ -1690,6 +1692,8 @@ fn t40_stateless_must_be_declared_not_inferred() {
     // Declared: accepted.
     let stateless = NativeServiceManifest {
         stateless: true,
+        release_repo: None,
+        release_asset: None,
         ..base.clone()
     };
     validate_native(&stateless).expect("a declared-stateless service is valid");
@@ -1697,6 +1701,8 @@ fn t40_stateless_must_be_declared_not_inferred() {
     // whether the service is backed up.
     let confused = NativeServiceManifest {
         stateless: true,
+        release_repo: None,
+        release_asset: None,
         data_dirs: vec!["/var/lib/x".into()],
         ..base
     };

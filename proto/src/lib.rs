@@ -100,6 +100,17 @@ pub enum Command {
     /// C7: adopt an existing hand-built native-service container — verify
     /// it is what the manifest claims, record it in state, never restart it.
     AdoptService(Box<NativeServiceManifest>),
+    /// T11: install a native service's binary and unit file into a container
+    /// the deploy has already created. The CLIENT downloads the release and
+    /// verifies its checksum before sending, so the host needs no GitHub
+    /// credential and never sees an unverified binary.
+    InstallNative {
+        manifest: Box<NativeServiceManifest>,
+        /// The verified binary, base64. Decoded on the container.
+        binary_b64: String,
+        /// The systemd unit file, straight from the repository.
+        unit_file: String,
+    },
     /// C7: on-demand backup of a native stack (pct-exec tar into restic).
     /// The stack must be adopted; the host reads the manifest from state.
     BackupNative {

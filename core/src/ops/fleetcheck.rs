@@ -105,6 +105,15 @@ pub struct CoverageFact {
     /// merely quiet — a check that alarms on healthy silence is a check that
     /// gets switched off, and then the real silence goes unnoticed too.
     pub logs_recent: Option<bool>,
+    /// Grafana holds the dashboard this stack's deploy generated.
+    ///
+    /// Not "the file was written" — the deploy has believed that for weeks.
+    /// It wrote seven dashboards into `/opt/grafana/provisioning/dashboards`
+    /// while Grafana mounted `/opt/gateway/grafana/provisioning`, reported
+    /// success every time, and its only failure message reads "this stack has
+    /// no generated dashboard yet" (F149). So the reader is asked, not the
+    /// writer: does Grafana list a dashboard with this stack's uid.
+    pub dashboard_provisioned: Option<bool>,
 }
 
 /// One container's resource picture, as read off the machine.
@@ -403,6 +412,14 @@ pub fn evaluate_coverage(facts: &[CoverageFact]) -> Vec<Finding> {
                 subject: c.stack.clone(),
                 what: "no Prometheus target answers for this stack — it is not being measured".into(),
                 remedy: "check /appdata/metrics/prometheus-config/targets/<stack>.json exists and that Prometheus reads that directory; a deploy writes the file, and for weeks nothing read it".into(),
+            });
+        }
+        if c.dashboard_provisioned == Some(false) {
+            out.push(Finding {
+                severity: Severity::Drift,
+                subject: c.stack.clone(),
+                what: "Grafana does not have this stack's generated dashboard — the deploy wrote it somewhere Grafana never reads".into(),
+                remedy: "check that `grafana_dashboards_dir` in host.toml is a directory the Grafana container actually mounts; the deploy's own report cannot tell you, because writing the file is all it checks (F149)".into(),
             });
         }
         if c.logs_recent == Some(false) {

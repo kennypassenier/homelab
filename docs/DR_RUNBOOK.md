@@ -74,13 +74,21 @@ restic restore latest --target /
 - recreate from scratch: `homelab deploy stacks/downloader` (or by hand per Layer 2)
 - data restore from: `…:qbittorrent-config`
 
+### drill (vmid 118)
+
+- hostname `118-app-drill`, ip `10.10.10.18/24`
+- resources: 1 core(s), 512 MiB RAM, 256 MiB swap, 4 GiB disk
+- apps: app, promtail
+- recreate from scratch: `homelab deploy stacks/drill` (or by hand per Layer 2)
+- data restore from: `…:app-config`
+
 ### gateway (vmid 104)
 
 - hostname `104-app-gateway`, ip `10.10.10.4/24`
 - resources: 4 core(s), 5120 MiB RAM, 1024 MiB swap, 30 GiB disk
 - apps: traefik, cloudflared, crowdsec, grafana, loki, goaccess, promtail
 - recreate from scratch: `homelab deploy stacks/gateway` (or by hand per Layer 2)
-- data restore from: `…:traefik-config`, `…:cloudflared-config`, `…:crowdsec-config`, `…:grafana-config`, `…:loki-config`, `…:goaccess-config`
+- data restore from: `…:traefik-config`, `…:crowdsec-config`, `…:grafana-config`, `…:loki-config`, `…:goaccess-config`
 
 ### home (vmid 115)
 

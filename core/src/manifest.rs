@@ -180,6 +180,22 @@ pub struct BootSpec {
 pub struct MountSpec {
     pub host_path: String,
     pub mount_point: String,
+    /// This app keeps nothing of its own on disk, and that is a fact about
+    /// the app rather than an accident of the moment.
+    ///
+    /// Kenny's answer to form B4, and a better one than the alternatives.
+    /// `cloudflared` has a mount and an empty directory: the tunnel's
+    /// configuration lives in the Cloudflare dashboard (F12). The
+    /// empty-snapshot guard correctly refused to record a snapshot with no
+    /// files in it, and in doing so stopped the gateway's backup before
+    /// grafana, loki and goaccess were ever attempted — five good
+    /// repositories hidden by one directory that has nothing to hold (F154).
+    ///
+    /// Saying so in the file settles it: the app gets no repository at all,
+    /// so there is nothing to refuse, and an empty directory that is NOT
+    /// declared stays exactly as alarming as it should be.
+    #[serde(default)]
+    pub no_data: bool,
     #[serde(default)]
     pub host_owner_uid: Option<u32>,
     /// D25: which app owns this directory. The restic repository is named

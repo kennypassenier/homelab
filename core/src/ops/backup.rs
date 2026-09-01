@@ -141,6 +141,12 @@ pub(crate) async fn newest_snapshot_unix(
 pub fn owner_groups(m: &StackManifest) -> Vec<(String, Vec<String>)> {
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     for mount in &m.storage {
+        // An app that declares it keeps nothing gets no repository at all —
+        // there is then nothing for the empty-snapshot guard to refuse, and
+        // nothing that can stop the rest of the stack (F154, Kenny's B4).
+        if mount.no_data {
+            continue;
+        }
         let owner = mount.owner(&m.stack_name).to_string();
         match groups.iter_mut().find(|(o, _)| *o == owner) {
             Some((_, paths)) => paths.push(mount.host_path.clone()),
@@ -166,6 +172,41 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     step!(runner, "safety gates", {
         crate::manifest::validate_manifest(m)?;
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    // The other half of `no_data`: a declaration is only worth having if it
+    // is checked. An app that says it keeps nothing and then keeps something
+    // has quietly opted its data out of every backup, which is a worse
+    // failure than the one the flag was added to fix.
+    step!(runner, "declared-empty paths", {
+        let mut wrong = Vec::new();
+        for mount in m.storage.iter().filter(|s| s.no_data) {
+            let out = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &[
+                        "-c",
+                        &format!(
+                            "find '{}' -mindepth 1 -maxdepth 1 2>/dev/null | head -5 | wc -l",
+                            mount.host_path
+                        ),
+                    ],
+                    60,
+                ))
+                .await?;
+            if out.stdout.trim() != "0" {
+                wrong.push(mount.host_path.clone());
+            }
+        }
+        if !wrong.is_empty() {
+            return Err(CoreError::Validation(format!(
+                "these paths are declared `no_data: true` and are not empty: {} — \
+                 nothing in them is being backed up, by declaration. Either the \
+                 declaration is stale or something started writing there",
+                wrong.join(", ")
+            )));
+        }
         Ok(StepOutcome::Unchanged)
     });
 

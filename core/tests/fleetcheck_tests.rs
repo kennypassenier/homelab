@@ -345,10 +345,54 @@ fn a_stack_with_no_prometheus_target_is_reported() {
         stack: "paperwork".into(),
         scraped: Some(false),
         logs_recent: Some(true),
+        dashboard_provisioned: None,
     }]);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].severity, Severity::Drift);
     assert!(out[0].what.contains("not being measured"));
+}
+
+/// The deploy writing a dashboard is not the same question as Grafana having
+/// it, and for seven weeks only the first was asked.
+///
+/// The finding names the reader, not the writer: the file WAS written, every
+/// time, into a directory Grafana does not mount. "Wrote it" was true and
+/// useless.
+/// covers: F149
+#[test]
+fn a_dashboard_grafana_never_received_is_reported() {
+    let out = evaluate_coverage(&[CoverageFact {
+        stack: "media".into(),
+        scraped: Some(true),
+        logs_recent: Some(true),
+        dashboard_provisioned: Some(false),
+    }]);
+    assert_eq!(out.len(), 1);
+    assert!(
+        out[0].what.contains("Grafana does not have"),
+        "the finding must name the reader: {}",
+        out[0].what
+    );
+}
+
+/// And the unasked question must stay unasked. A host with no dashboards
+/// directory configured, or a gateway that did not answer, produces `None` —
+/// which must never become thirteen findings about a Grafana that is simply
+/// down.
+/// covers: F149
+#[test]
+fn an_unasked_dashboard_question_is_never_a_finding() {
+    let out = evaluate_coverage(&[CoverageFact {
+        stack: "media".into(),
+        scraped: Some(true),
+        logs_recent: Some(true),
+        dashboard_provisioned: None,
+    }]);
+    assert!(
+        out.is_empty(),
+        "None means not asked, not failed: {:?}",
+        out
+    );
 }
 
 /// Logs that go nowhere look exactly like a quiet service — which is why the
@@ -365,6 +409,7 @@ fn a_stack_whose_logs_never_arrive_is_reported() {
         stack: "media".into(),
         scraped: Some(true),
         logs_recent: Some(false),
+        dashboard_provisioned: None,
     }]);
     assert_eq!(out.len(), 1);
     assert!(
@@ -390,11 +435,13 @@ fn an_unasked_question_is_never_a_finding() {
             stack: "kyu".into(),
             scraped: Some(true),
             logs_recent: None,
+            dashboard_provisioned: None,
         },
         CoverageFact {
             stack: "almanac".into(),
             scraped: None,
             logs_recent: None,
+            dashboard_provisioned: None,
         },
     ]);
     assert!(out.is_empty(), "expected silence, got {:?}", out);
@@ -407,6 +454,7 @@ fn a_covered_stack_is_silent() {
         stack: "home".into(),
         scraped: Some(true),
         logs_recent: Some(true),
+        dashboard_provisioned: None,
     }]);
     assert!(out.is_empty(), "{:?}", out);
 }

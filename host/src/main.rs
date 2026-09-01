@@ -1863,6 +1863,15 @@ async fn gather_live_facts(
     let prom = state.config.prometheus_url.clone();
     let loki = state.config.loki_url.clone();
     let window = sane_window(&state.config.logs_window);
+    // Which dashboards Grafana actually holds, asked once rather than per
+    // stack. Grafana is the reader; the deploy is the writer, and the writer
+    // has been reporting success into a dead directory (F149). Only asked
+    // when a dashboards directory is configured — an unasked question must
+    // never become a finding.
+    let provisioned: Option<Vec<String>> = match state.config.grafana_dashboards_dir.as_deref() {
+        Some(dir) => grafana_generated_uids(exec, state.config.safety.gateway_vmid, dir).await,
+        None => None,
+    };
     if prom.is_some() || loki.is_some() {
         if let Ok(snapshot) =
             homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir)
@@ -1916,11 +1925,61 @@ async fn gather_live_facts(
                             .unwrap_or(false),
                     );
                 }
+                if let Some(uids) = provisioned.as_ref() {
+                    let uid = format!("homelab-{}", name);
+                    c.dashboard_provisioned = Some(uids.iter().any(|u| u == &uid));
+                }
                 facts.coverage.push(c);
             }
         }
     }
     facts
+}
+
+/// The uids of the generated dashboards Grafana is actually serving.
+///
+/// Asked of Grafana over its own API, with the credentials read from the
+/// app's `.env` at the moment of asking — the same reasoning as Jellyfin's
+/// key (F131): a credential handed to a check goes stale without telling
+/// anybody, and the service itself is the only source that cannot.
+///
+/// The `.env` path is DERIVED from the configured dashboards directory
+/// rather than typed, because a second typed path is exactly what caused the
+/// fault this question exists to catch. `/opt/gateway/grafana/dashboards-generated`
+/// → `/opt/gateway/grafana/.env`.
+///
+/// `None` means the question could not be asked at all (no parent directory,
+/// the container unreachable, Grafana refusing) — never an empty answer, so a
+/// gateway that is down does not turn every stack into a finding.
+async fn grafana_generated_uids(
+    exec: &dyn homelab_core::executor::Executor,
+    gateway_vmid: u16,
+    dashboards_dir: &str,
+) -> Option<Vec<String>> {
+    let app_dir = std::path::Path::new(dashboards_dir).parent()?.to_str()?;
+    let script = format!(
+        "U=$(grep -h GRAFANA_GF_ADMIN_USER {0}/.env | cut -d= -f2);          P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD {0}/.env | cut -d= -f2);          curl -s -m 15 -u \"$U:$P\" 'http://127.0.0.1:3000/api/search?tag=generated&limit=500'",
+        app_dir
+    );
+    let out = exec
+        .run(&Cmd::new(
+            "pct",
+            &["exec", &gateway_vmid.to_string(), "--", "sh", "-c", &script],
+            60,
+        ))
+        .await
+        .ok()?;
+    if !out.stdout.contains("\"uid\"") {
+        return None;
+    }
+    Some(
+        out.stdout
+            .split("\"uid\":\"")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .map(str::to_string)
+            .collect(),
+    )
 }
 
 /// A backup is a backup, whoever asked for it. The scheduler recorded

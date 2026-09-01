@@ -1,0 +1,26 @@
+# The second dashboard provider: the ones the orchestrator generates.
+#
+# They used to be committed next to the hand-written dashboards and ALSO
+# written by every deploy — into `/opt/grafana/provisioning/dashboards`, a
+# directory Grafana does not mount, so for weeks the deploy reported success
+# and Grafana served the committed copies instead (F149). Two of the three
+# compared had already drifted apart.
+#
+# Now they have their own directory and their own folder in Grafana. Nothing
+# is committed there: the deploy is the only writer, which is what makes the
+# question "did Grafana get it" answerable at all.
+apiVersion: 1
+
+providers:
+  - name: 'Homelab Generated'
+    orgId: 1
+    folder: 'Homelab (generated)'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    # Edits made in the browser are overwritten by the next deploy anyway —
+    # saying so here means Grafana refuses the edit instead of losing it.
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards-generated
+      foldersFromFilesStructure: false

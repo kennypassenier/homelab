@@ -46,6 +46,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         storage: vec![MountSpec {
             host_path: "/appdata/syncthing/syncthing-config".into(),
             mount_point: "/appdata/syncthing/syncthing-config".into(),
+            no_data: false,
             host_owner_uid: Some(101000),
             app: Some("syncthing".into()),
         }],

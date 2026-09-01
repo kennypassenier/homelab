@@ -47,6 +47,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         storage: vec![MountSpec {
             host_path: "/appdata/test/test-config".into(),
             mount_point: "/appdata/test/test-config".into(),
+            no_data: false,
             host_owner_uid: Some(101000),
             app: None,
         }],
@@ -414,6 +415,65 @@ fn every_stack_dashboard_has_an_errors_section() {
 /// A path that does NOT exist already fails loudly — that is how the metrics
 /// stack's stale path was caught on 2026-08-31. The empty one is the case
 /// nothing catches.
+/// An app that declares it keeps nothing gets no repository, and one that
+/// declares it and then keeps something fails loudly.
+///
+/// Kenny's answer to form B4. cloudflared has a mount and an empty directory
+/// because the tunnel's configuration lives in the Cloudflare dashboard and
+/// nowhere on disk; the empty-snapshot guard refused it — correctly — and
+/// stopped the gateway's backup before grafana, loki and goaccess were ever
+/// attempted. Saying "this app keeps nothing" in the stack file removes the
+/// repository instead of the backup.
+/// covers: F154
+#[tokio::test]
+async fn a_path_declared_empty_is_not_backed_up_and_must_really_be_empty() {
+    use homelab_core::ops::backup::owner_groups;
+    let mut m = manifest(108, "test");
+    m.storage = vec![
+        homelab_core::manifest::MountSpec {
+            host_path: "/appdata/test/keeper-config".into(),
+            mount_point: "/appdata/test/keeper-config".into(),
+            no_data: false,
+            host_owner_uid: Some(100000),
+            app: Some("keeper".into()),
+        },
+        homelab_core::manifest::MountSpec {
+            host_path: "/appdata/test/hollow-config".into(),
+            mount_point: "/appdata/test/hollow-config".into(),
+            no_data: true,
+            host_owner_uid: Some(100000),
+            app: Some("hollow".into()),
+        },
+    ];
+
+    let owners: Vec<String> = owner_groups(&m).into_iter().map(|(o, _)| o).collect();
+    assert_eq!(
+        owners,
+        vec!["keeper".to_string()],
+        "a declared-empty app must get no repository at all"
+    );
+
+    // And the declaration is held to: a directory that fills up anyway stops
+    // the backup with a sentence naming it, because by declaration nothing in
+    // it is being saved.
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("hollow-config' -mindepth 1", CmdOutput::ok("3\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(&ctx(&exec, &sink, &j), &m, &BackupCfg::default()).await;
+    assert!(
+        !report.ok,
+        "a non-empty declared-empty path is not a success"
+    );
+    let err = format!("{:?}", report.error);
+    assert!(
+        err.contains("hollow-config") && err.contains("no_data"),
+        "the message must name the path and the declaration: {}",
+        err
+    );
+}
+
 /// Every restic invocation must name a cache directory.
 ///
 /// restic finds its cache through `$XDG_CACHE_HOME` or `$HOME`, and a systemd
@@ -1256,6 +1316,7 @@ fn v8_validate_rejects_undeclared_appdata_bind() {
     ok_spec.manifest.storage = vec![homelab_core::manifest::MountSpec {
         host_path: "/appdata/test/app-config".into(),
         mount_point: "/appdata/test/app-config".into(),
+        no_data: false,
         host_owner_uid: Some(101000),
         app: None,
     }];
@@ -1833,12 +1894,14 @@ async fn d25_backup_writes_one_repo_per_owning_app() {
         homelab_core::manifest::MountSpec {
             host_path: "/appdata/test/alpha-config".into(),
             mount_point: "/appdata/test/alpha-config".into(),
+            no_data: false,
             host_owner_uid: Some(101000),
             app: Some("alpha".into()),
         },
         homelab_core::manifest::MountSpec {
             host_path: "/appdata/test/beta-config".into(),
             mount_point: "/appdata/test/beta-config".into(),
+            no_data: false,
             host_owner_uid: Some(101000),
             app: Some("beta".into()),
         },
@@ -1973,12 +2036,14 @@ async fn o6_restore_is_per_path_not_per_stack() {
         homelab_core::manifest::MountSpec {
             host_path: "/appdata/test/alpha-config".into(),
             mount_point: "/appdata/test/alpha-config".into(),
+            no_data: false,
             host_owner_uid: None,
             app: None,
         },
         homelab_core::manifest::MountSpec {
             host_path: "/appdata/test/beta-config".into(),
             mount_point: "/appdata/test/beta-config".into(),
+            no_data: false,
             host_owner_uid: None,
             app: None,
         },

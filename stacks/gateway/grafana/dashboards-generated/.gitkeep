@@ -1,0 +1,3 @@
+The orchestrator writes one dashboard per stack into this directory on every
+deploy. Nothing is committed here on purpose — the deploy is the only writer,
+which is the whole point of the directory existing (F149, Kenny's form B3).

@@ -54,10 +54,19 @@ storage:
   # The directory is empty today, so nothing has ever needed to write to it —
   # which is exactly why this went unnoticed until the ownership check asked
   # the image instead of trusting the number (F137).
+  #
+  # `no_data` says that emptiness is the design, not an accident. The tunnel's
+  # ingress rules and every Access policy live in the Cloudflare dashboard and
+  # nowhere on disk (F12). Before this was declared, the empty-snapshot guard
+  # refused the directory — correctly — and in doing so stopped the gateway's
+  # backup before grafana, loki and goaccess were ever attempted (F154). Now
+  # the app simply has no repository, and a directory that fills up anyway
+  # fails the backup with a sentence saying so.
   - host_path: /appdata/gateway/cloudflared-config
     mount_point: /appdata/gateway/cloudflared-config
     host_owner_uid: 165532
     app: cloudflared
+    no_data: true
   - host_path: /appdata/gateway/crowdsec-config
     mount_point: /appdata/gateway/crowdsec-config
     host_owner_uid: 100000

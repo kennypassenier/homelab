@@ -1189,6 +1189,7 @@ fn the_runbook_names_the_repositories_restic_actually_uses() {
         m.storage.push(MountSpec {
             host_path: format!("/appdata/media/{}-config", app),
             mount_point: format!("/appdata/media/{}-config", app),
+            no_data: false,
             host_owner_uid: Some(1000),
             app: Some(app.into()),
         });

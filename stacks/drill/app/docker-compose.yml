@@ -1,0 +1,11 @@
+# One small image, pulled for real, so the registry-cache fallback has
+# something to fall back from.
+services:
+  app:
+    image: nginx:alpine
+    container_name: app
+    ports:
+      - "8080:80"
+    volumes:
+      - /appdata/drill/app-config:/usr/share/nginx/html
+    restart: unless-stopped

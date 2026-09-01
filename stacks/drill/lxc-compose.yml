@@ -1,0 +1,53 @@
+# A stack that exists to be broken and thrown away.
+#
+# Kenny's form B1: the drills for the three safety nets that have never fired
+# need a container that may be destroyed, and the one my own form named — vmid
+# 108 — has been 108-app-syncthing since the pilot and holds his Obsidian
+# vault sync. The note calling 108 "the test container" was simply stale.
+#
+# So this is the disposable one: a free vmid, no data anybody wants, a route
+# that exists only so destroying it can be watched, and one small image so the
+# pull is real. It is created, broken on purpose three ways, and destroyed in
+# the same sitting.
+stack_name: drill
+vmid: 118
+hostname: 118-app-drill
+
+network:
+  ip: 10.10.10.18/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 1
+  memory_mb: 512
+  swap_mb: 256
+  # Deliberately small: one of the drills fills this disk to see whether the
+  # step that reads back what it pushed actually notices.
+  disk_gb: 4
+  storage: local-lvm
+
+lxc:
+  template: "clone:998"
+  unprivileged: true
+  features: "nesting=1,keyctl=1"
+  protection: false
+  gpu: false
+  vpn: false
+
+boot:
+  # Never on boot. If this container survives the sitting it was made for,
+  # it should at least not come back after a reboot.
+  onboot: false
+
+storage:
+  - host_path: /appdata/drill/app-config
+    mount_point: /appdata/drill/app-config
+    host_owner_uid: 100000
+    app: app
+
+apps: [app, promtail]
+
+gateway_route:
+  filename: 118-app-drill.yml

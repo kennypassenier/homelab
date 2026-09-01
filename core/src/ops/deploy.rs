@@ -1301,15 +1301,38 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 .split_whitespace()
                 .find_map(|kv| kv.strip_prefix("PUID="))
                 .and_then(|v| v.trim().parse::<u32>().ok());
-            let container_uid: u32 = puid.unwrap_or_else(|| {
-                user_field
-                    .split(':')
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .parse()
-                    .unwrap_or(0)
-            });
+            let container_uid: u32 = match puid {
+                Some(p) => p,
+                None => {
+                    // Config.User is a free-form string. It can be a number
+                    // ("10001"), a NAME ("nobody"), "name:group", or empty.
+                    // Parsing it as a number and defaulting to 0 was the
+                    // third confidently-wrong answer this check gave in one
+                    // afternoon: prometheus runs as `nobody`, its directory
+                    // correctly belongs to 65534, and the check demanded a
+                    // chown to root.
+                    //
+                    // So when it is not a number, the container is asked. It
+                    // is the only party that can resolve its own name, and
+                    // it answers in one command.
+                    match user_field.split(':').next().unwrap_or("").trim() {
+                        "" => 0,
+                        n => match n.parse::<u32>() {
+                            Ok(v) => v,
+                            Err(_) => pct_sh(
+                                exec,
+                                m.vmid,
+                                &format!("docker exec {} id -u 2>/dev/null || true", app),
+                                60,
+                            )
+                            .await
+                            .ok()
+                            .and_then(|o| o.stdout.trim().parse::<u32>().ok())
+                            .unwrap_or(0),
+                        },
+                    }
+                }
+            };
             let want = if m.lxc.unprivileged {
                 container_uid + 100_000
             } else {

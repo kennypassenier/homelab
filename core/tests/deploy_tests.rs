@@ -1899,3 +1899,41 @@ async fn ownership_reads_puid_before_the_docker_user() {
         report.error
     );
 }
+
+/// Config.User is a free-form string, and a name is not a number.
+///
+/// Third confidently-wrong answer from this check in one afternoon.
+/// Prometheus runs as `nobody`; its directory correctly belongs to 65534; the
+/// check parsed "nobody" as a number, failed, defaulted to root, and demanded
+/// a chown that would have broken it. The shapes seen in one fleet: a numeric
+/// uid, an empty field, a PUID environment variable, and a name — and each
+/// one of them arrived as a surprise.
+#[tokio::test]
+async fn ownership_resolves_a_named_user_by_asking_the_container() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    // Config.User is the NAME `nobody`, no PUID anywhere.
+    exec.respond_first(
+        "--format '{{.Config.User}}",
+        CmdOutput::ok("nobody|PATH=/bin TZ=Europe/Brussels \n"),
+    );
+    exec.respond_first("id -u", CmdOutput::ok("65534\n"));
+    exec.respond_first("stat -c %u", CmdOutput::ok("165534\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.storage[0].host_owner_uid = Some(165_534);
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(
+        report.ok,
+        "65534 inside an unprivileged container IS 165534 on the host — this \
+         must pass rather than demand a chown to root: {:?}",
+        report.error
+    );
+    assert!(
+        !exec.calls_containing("id -u").is_empty(),
+        "and it must have asked the container, because only it can resolve \
+         its own user name"
+    );
+}

@@ -113,6 +113,84 @@ fn script_fresh(exec: &MockExecutor) {
     exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
 }
 
+/// A clone can never change a container's privilege level, so asking for one
+/// the template cannot give must stop the deploy rather than silently produce
+/// the other.
+///
+/// `pct clone` has no `--unprivileged`: the copy always inherits the
+/// template. A stack file asking for the opposite used to get the template's
+/// answer without a word, and the app that then failed on permissions gave no
+/// hint why — the same shape as every fault of 2026-09-01, where the machine
+/// did something reasonable and said nothing.
+///
+/// This test exists because the guard was written months ago and had no test
+/// at all (T29): the privileged path — CT 105 and 106, which must stay
+/// privileged for the GPU — was never exercised.
+/// covers: F21, F22
+#[tokio::test]
+async fn a_clone_refuses_a_privilege_level_the_template_cannot_give() {
+    // Template 998 is unprivileged; the stack asks for privileged.
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always("pct config 998", CmdOutput::ok("unprivileged: 1\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.lxc.unprivileged = false;
+    sp.manifest.lxc.template = "clone:998".into();
+    // A privileged stack maps uids straight through, so the declared owner
+    // has to lose the +100000 offset or the O5 rule refuses it first.
+    for mount in sp.manifest.storage.iter_mut() {
+        if let Some(uid) = mount.host_owner_uid {
+            mount.host_owner_uid = Some(uid.saturating_sub(100_000));
+        }
+    }
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(!report.ok, "the deploy must refuse this combination");
+    let err = format!("{:?}", report.error);
+    assert!(
+        err.contains("unprivileged") && err.contains("privileged") && err.contains("998"),
+        "the message must name the template, what it is, and what was asked: {}",
+        err
+    );
+    assert!(
+        exec.calls_containing("pct clone").is_empty(),
+        "and nothing may have been cloned"
+    );
+}
+
+/// And the matching case passes: a privileged stack cloning the privileged
+/// template is exactly how the media and downloader stacks are built.
+/// covers: F22
+#[tokio::test]
+async fn a_privileged_stack_cloning_the_privileged_template_is_allowed() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always("pct config 997", CmdOutput::ok("unprivileged: 0\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.lxc.unprivileged = false;
+    sp.manifest.lxc.template = "clone:997".into();
+    for mount in sp.manifest.storage.iter_mut() {
+        if let Some(uid) = mount.host_owner_uid {
+            mount.host_owner_uid = Some(uid.saturating_sub(100_000));
+        }
+    }
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(
+        report.ok,
+        "a matching privilege level must pass: {:?}",
+        report.error
+    );
+    assert!(
+        !exec.calls_containing("pct clone").is_empty(),
+        "and it must actually clone"
+    );
+}
+
 /// O7: a config path must be named `<app>-config`. Kenny chose the literal
 /// rule at the mini-round — "uniformiteit en een duidelijke regel hebben hier
 /// voorrang" — over the weaker shape that would have tolerated the live

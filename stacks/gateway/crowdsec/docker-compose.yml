@@ -1,0 +1,22 @@
+# CrowdSec reads Traefik's access log, decides which addresses are hostile,
+# and Traefik's bouncer plugin asks it about every request.
+services:
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    environment:
+      - TZ=Europe/Brussels
+      - COLLECTIONS=crowdsecurity/traefik
+    volumes:
+      - /appdata/gateway/crowdsec-config:/etc/crowdsec
+      - /appdata/gateway/crowdsec-config/data:/var/lib/crowdsec/data
+      - /appdata/gateway/traefik-config/logs:/var/log/traefik:ro
+      # Local networks and Tailscale are never hostile. Without this a
+      # burst of your own traffic can get your own address banned.
+      - ./whitelists.yaml:/etc/crowdsec/parsers/s02-enrich/homelab-whitelist.yaml:ro
+    restart: unless-stopped
+    labels:
+      # Its database holds the bouncer registrations and the decision
+      # history; a torn copy loses the key Traefik authenticates with.
+      - "com.homelab.backup.pause=true"
+      - "com.homelab.update.policy=auto"

@@ -1,0 +1,21 @@
+# Loki receives from every container's promtail. Its 156 MB under
+# loki-config/data is a log DATABASE, not configuration — Kenny chose to
+# carry it across (form G2), because a rebuild is exactly the event you later
+# want to be able to look back at.
+services:
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - /appdata/gateway/loki-config/data:/loki
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+    restart: unless-stopped
+    labels:
+      - "com.homelab.backup.pause=true"
+      # Pinned to 3.0.0 on purpose: promtail on nine stacks is pinned to the
+      # same version and the two have to agree. This is one of the eleven
+      # services where the `auto` policy could never do anything (form H5).
+      - "com.homelab.update.policy=auto"

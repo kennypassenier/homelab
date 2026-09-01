@@ -1,0 +1,79 @@
+# The front door. Everything from outside the house arrives here, so this is
+# the one container whose absence is total: while it is down there is no
+# Jellyfin, no *arr suite, and no remote Home Assistant.
+#
+# Renamed from `platform` (its v1 hostname was lxc-platform-stack, which A2
+# refuses). The code has said `gateway_vmid: 104` all along.
+#
+# Uptime Kuma used to live here and moved to CT 107 on 2026-09-01 (D68): a
+# watchman on the roof he guards goes down with it, which is exactly what
+# happened on 2026-08-31.
+#
+# Grafana and Loki still run here. The target layout moves them to the metrics
+# stack, deliberately AFTER this rebuild (Kenny, form H2): carrying two
+# databases through the one operation during which nothing is reachable is the
+# wrong trade, and moving them later costs a dashboard, not the house.
+stack_name: gateway
+vmid: 104
+hostname: 104-app-gateway
+
+network:
+  ip: 10.10.10.4/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 4
+  memory_mb: 5120
+  swap_mb: 1024
+  disk_gb: 30
+  storage: local-lvm
+
+lxc:
+  template: "clone:998"
+  unprivileged: true
+  features: "nesting=1,keyctl=1"
+  protection: false
+  gpu: false
+  vpn: false
+
+boot:
+  onboot: true
+  # First of the managed containers. Everything else is reachable through it,
+  # and a stack that boots before its own front door spends its first minutes
+  # unreachable for a reason that has nothing to do with itself.
+  order: 5
+
+storage:
+  - host_path: /appdata/gateway/traefik-config
+    mount_point: /appdata/gateway/traefik-config
+    host_owner_uid: 100000
+    app: traefik
+  - host_path: /appdata/gateway/cloudflared-config
+    mount_point: /appdata/gateway/cloudflared-config
+    host_owner_uid: 100000
+    app: cloudflared
+  - host_path: /appdata/gateway/crowdsec-config
+    mount_point: /appdata/gateway/crowdsec-config
+    host_owner_uid: 100000
+    app: crowdsec
+  - host_path: /appdata/gateway/grafana-config
+    mount_point: /appdata/gateway/grafana-config
+    host_owner_uid: 101000
+    app: grafana
+  - host_path: /appdata/gateway/loki-config
+    mount_point: /appdata/gateway/loki-config
+    host_owner_uid: 100000
+    app: loki
+  - host_path: /appdata/gateway/goaccess-config
+    mount_point: /appdata/gateway/goaccess-config
+    host_owner_uid: 100000
+    app: goaccess
+
+apps: [traefik, cloudflared, crowdsec, grafana, loki, goaccess, promtail, cadvisor]
+
+latch_secrets: [traefik, cloudflared, grafana]
+
+gateway_route:
+  filename: 104-app-gateway.yml

@@ -1,0 +1,64 @@
+# Traefik v3. Receives everything from the Cloudflare tunnel on :80 — there is
+# no :443 here, TLS terminates at Cloudflare, which is why every route says
+# entryPoints: [web].
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+      - "--entrypoints.web.address=:80"
+      # Docker provider, for the containers on this machine.
+      - "--providers.docker=true"
+      - "--providers.docker.network=gateway_net"
+      - "--providers.docker.exposedbydefault=false"
+      # File provider: every stack renders its own route fragment here.
+      - "--providers.file.directory=/etc/traefik/routes"
+      - "--providers.file.watch=true"
+      # Local plugin source. A single failed download to plugins.traefik.io
+      # once turned ALL plugins off (2026-07-31), so the source is on disk.
+      - "--experimental.localPlugins.bouncer.moduleName=github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin"
+      # On the entrypoint rather than per route: it then covers every current
+      # and future router and survives the route files being re-rendered,
+      # which per-route attachment does not.
+      - "--entrypoints.web.http.middlewares=crowdsec-bouncer@docker"
+      - "--accesslog=true"
+      - "--accesslog.filepath=/var/log/traefik/access.log"
+      - "--accesslog.format=json"
+      - "--log.level=INFO"
+      - "--log.filepath=/var/log/traefik/traefik.log"
+      - "--ping=true"
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Brussels
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /appdata/gateway/traefik-config:/etc/traefik
+      # Same directory, mounted twice on purpose: Traefik writes its logs
+      # here and CrowdSec and GoAccess read them. 141 of the 142 MB in
+      # traefik-config is this. Kenny chose (form G3) to move it out of the
+      # backed-up tree as a separate step AFTER this rebuild.
+      - /appdata/gateway/traefik-config/logs:/var/log/traefik
+      - /appdata/gateway/traefik-config/plugins-local:/plugins-local:ro
+    ports:
+      - "80:80"
+      - "8090:8080"
+    restart: unless-stopped
+    labels:
+      # A definition, not a route — the entrypoint flag above names it
+      # `@docker`, so it has to be declared here. The three ROUTES that used
+      # to be labels now live in traefik-routes.yml.
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.enabled=true"
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.crowdseclapikey=${TRAEFIK_CROWDSEC_BOUNCER_API_KEY}"
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.crowdseclapihost=crowdsec:8080"
+      - "com.homelab.backup.pause=true"
+      - "com.homelab.update.policy=auto"
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

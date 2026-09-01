@@ -1,0 +1,26 @@
+# Grafana. Still on the gateway; the target layout moves it to the metrics
+# stack after this rebuild (form H2), because a database migration inside the
+# one window where nothing is reachable is the wrong trade.
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    user: "1000:1000"
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_GF_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_GF_ADMIN_PASSWORD}
+      - GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION=false
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/homelab-overview.json
+    volumes:
+      - /appdata/gateway/grafana-config:/var/lib/grafana
+      - ./provisioning:/etc/grafana/provisioning:ro
+    restart: unless-stopped
+    labels:
+      # grafana.db holds 19 dashboards and 2 datasources.
+      - "com.homelab.backup.pause=true"
+      - "com.homelab.update.policy=auto"

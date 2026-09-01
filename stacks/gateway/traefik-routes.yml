@@ -1,0 +1,36 @@
+# The gateway's own three hostnames. They used to be docker labels on these
+# containers, which works only because Traefik shares a machine with them —
+# the moment a service leaves, the label stops meaning anything (that is what
+# happened to Uptime Kuma on 2026-09-01). Routes as files behave the same
+# wherever the backend runs, and they survive the container being rebuilt.
+#
+# The CrowdSec middleware stays a label on traefik itself: it is a definition
+# rather than a route, and the `--entrypoints.web.http.middlewares=
+# crowdsec-bouncer@docker` flag names it by that origin. Moving it here would
+# make it @file and require changing that flag in the same breath as this
+# rebuild — a second thing that has to go right during the one operation
+# where nothing in the house is reachable.
+http:
+  routers:
+    traefik-dashboard:
+      rule: "Host(`traefik.kp-soft.dev`)"
+      entryPoints: [web]
+      service: api@internal
+    grafana:
+      rule: "Host(`grafana.kp-soft.dev`)"
+      entryPoints: [web]
+      service: grafana
+    goaccess:
+      rule: "Host(`go.kp-soft.dev`)"
+      entryPoints: [web]
+      service: goaccess
+
+  services:
+    grafana:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.4:3000"
+    goaccess:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.4:7880"

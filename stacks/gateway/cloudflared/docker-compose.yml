@@ -1,0 +1,19 @@
+# The tunnel. Its token is the single credential whose loss is total: without
+# it nothing reaches the house from outside, no matter what else is healthy.
+# Ingress is configured in the Cloudflare Zero Trust dashboard and points at
+# http://traefik:80 — resolved by docker DNS on this stack's own network, so
+# traefik must keep its container name.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    command: tunnel --no-autoupdate run
+    env_file:
+      - .env
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARED_TUNNEL_TOKEN}
+    volumes:
+      - /appdata/gateway/cloudflared-config:/etc/cloudflared
+    restart: unless-stopped
+    labels:
+      - "com.homelab.update.policy=auto"

@@ -1,0 +1,27 @@
+# GoAccess turns Traefik's access log into the report on go.kp-soft.dev. It
+# reads the same log directory Traefik writes and CrowdSec parses — which is
+# the coupling that makes moving those logs (form G3) a separate step rather
+# than a one-line change.
+services:
+  goaccess:
+    image: allinurl/goaccess:latest
+    container_name: goaccess
+    command:
+      - '--log-format={"ClientHost":"%h","StartUTC":"%dT%t.%^","RequestMethod":"%m","RequestPath":"%U","RequestProtocol":"%H","DownstreamStatus":"%s","DownstreamContentSize":"%b","RequestHost":"%v"}'
+      - "--date-format=%Y-%m-%d"
+      - "--time-format=%H:%M:%S"
+      - "--real-time-html"
+      - "--ws-url=ws://go.kp-soft.dev:7880"
+      - "--output=/srv/report/index.html"
+      - "--port=7880"
+      - "/var/log/traefik/access.log"
+    environment:
+      - TZ=Europe/Brussels
+    volumes:
+      - /appdata/gateway/traefik-config/logs:/var/log/traefik:ro
+      - /appdata/gateway/goaccess-config:/srv/report
+    ports:
+      - "7880:7880"
+    restart: unless-stopped
+    labels:
+      - "com.homelab.update.policy=auto"

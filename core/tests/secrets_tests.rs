@@ -143,7 +143,7 @@ async fn r10_secret_only_in_vault_and_push_tmp_never_in_repo_or_state() {
         let content = exec.file(&path).unwrap_or_default();
         let has_secret = content.contains(SECRET);
         let allowed = path.starts_with("/var/lib/homelab/secrets/")
-            || path == "/var/lib/homelab/push-staging";
+            || path.starts_with("/var/lib/homelab/push-staging");
         if has_secret {
             assert!(allowed, "secret written outside the vault: {}", path);
         }

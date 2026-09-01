@@ -1741,9 +1741,16 @@ async fn f129_a_cache_that_cannot_serve_falls_back_to_the_real_registry() {
     );
     // And what went back is the file naming the real registry — otherwise
     // `up -d` starts an image the cache still cannot serve.
+    // T74: the staging path is derived per target file now, so the test finds
+    // the compose by its content rather than by a fixed name. Asking for one
+    // hard-coded path was what coupled this assertion to the old shared file.
     let staged = exec
-        .file("/var/lib/homelab/push-staging")
-        .expect("something was staged");
+        .file_paths()
+        .into_iter()
+        .filter(|p| p.starts_with("/var/lib/homelab/push-staging-"))
+        .filter_map(|p| exec.file(&p))
+        .find(|body| body.contains("app:latest"))
+        .expect("the compose must have been staged");
     assert!(
         staged.contains("ghcr.io/o/app:latest") && !staged.contains("10.10.10.17:5001"),
         "the last staged compose must name the real registry: {}",
@@ -1996,7 +2003,11 @@ async fn h4_cadvisor_is_installed_by_the_guards_on_every_docker_host() {
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(report.ok, "deploy failed: {:?}", report.error);
 
-    let staged = exec.file("/var/lib/homelab/push-staging");
+    let staged = exec
+        .file_paths()
+        .into_iter()
+        .find(|p| p.starts_with("/var/lib/homelab/push-staging-"))
+        .and_then(|p| exec.file(&p));
     assert!(
         exec.calls_containing("/opt/cadvisor/docker-compose.yml")
             .iter()
@@ -2090,5 +2101,47 @@ async fn h4_cadvisor_is_not_installed_where_there_is_no_docker() {
     assert!(
         exec.calls_containing("/opt/cadvisor").is_empty(),
         "a native-only host has no docker to report on"
+    );
+}
+
+/// T74: two files bound for two different containers must not share a
+/// staging path on the host.
+///
+/// The old behaviour was one fixed path for the whole daemon. It could not
+/// misfire while the host serialises every operation — and the failure it
+/// would produce once that changes is the worst kind: the gateway's traefik
+/// compose lands in the media container, and both `pct push` calls report
+/// success, so nothing anywhere says what happened.
+///
+/// covers: F169
+#[test]
+fn a_staging_path_is_unique_per_target_file() {
+    use homelab_core::ops::util::staging_path;
+
+    let gateway = staging_path(104, "/opt/gateway/traefik/docker-compose.yml");
+    let media = staging_path(106, "/opt/media/jellyfin/docker-compose.yml");
+    assert_ne!(
+        gateway, media,
+        "two stacks pushing at once must not share one staging file"
+    );
+
+    // Same container, different files: also distinct — a stack pushes many
+    // files, and they must not queue through one name either.
+    let a = staging_path(104, "/opt/gateway/traefik/docker-compose.yml");
+    let b = staging_path(104, "/opt/gateway/crowdsec/docker-compose.yml");
+    assert_ne!(a, b);
+
+    // Deterministic: core never reads clocks, and a random name would leave a
+    // different orphan behind after every failed push.
+    assert_eq!(
+        gateway,
+        staging_path(104, "/opt/gateway/traefik/docker-compose.yml")
+    );
+
+    // Still under the root-only state dir (H21) — not a predictable /tmp path.
+    assert!(
+        gateway.starts_with("/var/lib/homelab/push-staging-"),
+        "{}",
+        gateway
     );
 }

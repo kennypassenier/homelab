@@ -2274,7 +2274,13 @@ async fn e3_env_restored_from_vault_when_client_sends_none() {
     // The vault env was pushed to the container (via the staged tmp file).
     assert!(
         !exec
-            .calls_containing("pct push 108 /var/lib/homelab/push-staging /opt/test/app/.env")
+            // T74: the staging path is derived per target file, so this
+            // matches on the DESTINATION — which is what the assertion is
+            // actually about — instead of the host-side temporary name.
+            .calls_containing("/opt/test/app/.env")
+            .into_iter()
+            .filter(|c| c.starts_with("pct push 108 /var/lib/homelab/push-staging-"))
+            .collect::<Vec<_>>()
             .is_empty(),
         "vault fallback must push the .env"
     );

@@ -50,9 +50,13 @@ storage:
     mount_point: /appdata/gateway/traefik-config
     host_owner_uid: 100000
     app: traefik
+  # 165532: cloudflared's image runs as the nonroot user 65532, not as root.
+  # The directory is empty today, so nothing has ever needed to write to it —
+  # which is exactly why this went unnoticed until the ownership check asked
+  # the image instead of trusting the number (F137).
   - host_path: /appdata/gateway/cloudflared-config
     mount_point: /appdata/gateway/cloudflared-config
-    host_owner_uid: 100000
+    host_owner_uid: 165532
     app: cloudflared
   - host_path: /appdata/gateway/crowdsec-config
     mount_point: /appdata/gateway/crowdsec-config
@@ -77,6 +81,19 @@ storage:
     mount_point: /appdata/gateway/goaccess-config
     host_owner_uid: 100000
     app: goaccess
+
+# G3: Traefik's access log is 145 of the 146 MB under traefik-config, and it
+# is data that is different tomorrow and never restored. Borrowed from a pool
+# outside /appdata, so the nightly snapshot drops from 146 MB to 1.2 MB.
+#
+# Only the HOST side moves. Inside the containers the path stays
+# /var/log/traefik, because Traefik writes it, CrowdSec parses it and GoAccess
+# reports on it — three readers whose configuration should not have to know
+# where the bytes physically live.
+data_mounts:
+  - host_path: /HDD2TB/logs/traefik
+    mount_point: /mnt/traefik-logs
+    note: "Traefik access + rotated logs. Regenerable, deliberately outside the backup."
 
 apps: [traefik, cloudflared, crowdsec, grafana, loki, goaccess, promtail, cadvisor]
 

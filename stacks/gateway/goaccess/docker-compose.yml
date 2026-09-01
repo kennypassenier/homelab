@@ -20,7 +20,7 @@ services:
     environment:
       - TZ=Europe/Brussels
     volumes:
-      - /appdata/gateway/traefik-config/logs:/var/log/traefik:ro
+      - /mnt/traefik-logs:/var/log/traefik:ro
       - /appdata/gateway/goaccess-config:/srv/report
     ports:
       - "7880:7880"

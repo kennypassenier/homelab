@@ -50,7 +50,7 @@ services:
       # here and CrowdSec and GoAccess read them. 141 of the 142 MB in
       # traefik-config is this. Kenny chose (form G3) to move it out of the
       # backed-up tree as a separate step AFTER this rebuild.
-      - /appdata/gateway/traefik-config/logs:/var/log/traefik
+      - /mnt/traefik-logs:/var/log/traefik
       - /appdata/gateway/traefik-config/plugins-local:/plugins-local:ro
     ports:
       - "80:80"

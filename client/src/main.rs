@@ -274,6 +274,98 @@ async fn main() {
             }
             rpc(&host, &token, Command::ExecIn { vmid, command }).await;
         }
+        "new" => {
+            // T65 / F136: a stack could only ever be created through the TUI
+            // wizard. Twenty-one commands and not one of them scaffolded, so
+            // every stack made without the TUI was hand-written — which is
+            // how three stack files ended up claiming live vmids.
+            //
+            // Same scaffolder, same preset catalogue, same defaults as the
+            // wizard: `homelab new <name> --preset <p> --vmid <n> [...]`.
+            let name = args
+                .get(2)
+                .filter(|a| !a.starts_with("--"))
+                .cloned()
+                .unwrap_or_else(|| {
+                    die("usage: homelab new <name> --preset <preset> --vmid <n> \
+                         [--ram MiB] [--cores N] [--disk GiB] [--swap MiB] \
+                         [--no-data /appdata/<stack>/<app>-config]")
+                });
+            let flag = |k: &str| -> Option<String> {
+                args.iter()
+                    .position(|a| a == k)
+                    .and_then(|i| args.get(i + 1))
+                    .cloned()
+            };
+            let num = |k: &str, what: &str| -> Option<u64> {
+                flag(k).map(|v| {
+                    v.parse()
+                        .unwrap_or_else(|_| die(&format!("{} takes a number, got '{}'", what, v)))
+                })
+            };
+            let presets_dir = Path::new("presets");
+            let presets = homelab_client::scaffold::scan_presets(presets_dir);
+            let preset_name = flag("--preset")
+                .unwrap_or_else(|| die("--preset is required; `homelab presets` lists them"));
+            let preset = presets
+                .iter()
+                .find(|p| p.name == preset_name)
+                .unwrap_or_else(|| {
+                    die(&format!(
+                        "no preset '{}' — `homelab presets` lists what there is",
+                        preset_name
+                    ))
+                });
+            let vmid = num("--vmid", "--vmid").unwrap_or_else(|| {
+                die("--vmid is required: the address and hostname are derived from it")
+            }) as u16;
+            let d = homelab_client::scaffold::StackDefaults::default();
+            let ram = num("--ram", "--ram").unwrap_or(preset.meta.ram_mb as u64) as u32;
+            // Every `--no-data` flag names one path that keeps nothing of its
+            // own (D79). The wizard asks this per directory; here it is
+            // repeatable so a script can say the same thing.
+            let no_data: Vec<String> = args
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| *a == "--no-data")
+                .filter_map(|(i, _)| args.get(i + 1).cloned())
+                .collect();
+            let params = homelab_client::scaffold::StackParams {
+                name: &name,
+                vmid,
+                ram_mb: ram,
+                cores: num("--cores", "--cores").unwrap_or(preset.meta.cores.unwrap_or(2) as u64)
+                    as u16,
+                disk_gb: num("--disk", "--disk").unwrap_or(preset.meta.disk_gb.unwrap_or(8) as u64)
+                    as u16,
+                swap_mb: Some(num("--swap", "--swap").unwrap_or(d.swap_for(ram) as u64) as u32),
+                preset: Some(preset),
+                no_data_paths: &no_data,
+            };
+            match homelab_client::scaffold::scaffold_stack(
+                Path::new("stacks"),
+                presets_dir,
+                &params,
+            ) {
+                Ok(s) => {
+                    println!(
+                        "{}✓ scaffolded {}{} — {} file(s)",
+                        C_GREEN,
+                        s.dir.display(),
+                        C_RESET,
+                        s.files.len()
+                    );
+                    for f in &s.files {
+                        println!("    {}", f);
+                    }
+                    println!(
+                        "\n  next: read the compose files, then `homelab plan stacks/{}`",
+                        name
+                    );
+                }
+                Err(e) => die(&e),
+            }
+        }
         "presets" => {
             // G2: list the data-driven preset catalog (local, no network).
             for pr in homelab_client::scaffold::scan_presets(Path::new("presets")) {
@@ -578,6 +670,7 @@ async fn main() {
             println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
             println!("  homelab dashboard <stack> <app>...  render a stack dashboard (T2, local)");
             println!("  homelab presets                     list the preset catalog (local)");
+            println!("  homelab new <name> --preset <p> --vmid <n>   scaffold a stack (T65)");
             println!(
                 "  homelab exec <vmid> <cmd...>        remote exec (A6, requires exec_enabled)"
             );

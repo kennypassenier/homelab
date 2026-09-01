@@ -985,6 +985,80 @@ fn every_host_operation_is_reachable_or_deliberately_not() {
     );
 }
 
+/// A stack can be created without the TUI, and the result is the wizard's.
+///
+/// F136: for twenty-one CLI commands there was no way to scaffold a stack —
+/// only the interactive wizard could. So every stack made outside the TUI was
+/// hand-written, which is how three stack files came to claim live vmids.
+///
+/// The test that matters is not that `homelab new` produces files, it is that
+/// it produces the SAME files: one scaffolder, one preset catalogue, one set
+/// of defaults. Two paths that drift apart would be worse than one path.
+/// covers: F136
+#[test]
+fn a_stack_scaffolded_without_the_wizard_matches_the_wizard() {
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = homelab_client::scaffold::scan_presets(&presets_dir);
+    let syncthing = presets.iter().find(|p| p.name == "syncthing").unwrap();
+    let d = homelab_client::scaffold::StackDefaults::default();
+
+    let mk = |dir: &std::path::Path, no_data: &[String]| {
+        homelab_client::scaffold::scaffold_stack(
+            dir,
+            &presets_dir,
+            &homelab_client::scaffold::StackParams {
+                name: "twin",
+                vmid: 151,
+                ram_mb: syncthing.meta.ram_mb,
+                cores: syncthing.meta.cores.unwrap_or(2),
+                disk_gb: syncthing.meta.disk_gb.unwrap_or(8),
+                swap_mb: Some(d.swap_for(syncthing.meta.ram_mb)),
+                preset: Some(syncthing),
+                no_data_paths: no_data,
+            },
+        )
+        .unwrap()
+    };
+
+    let tmp = std::env::temp_dir().join(format!("homelab-new-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let (a, b) = (tmp.join("cli"), tmp.join("wiz"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+
+    let cli = mk(&a, &[]);
+    let wiz = mk(&b, &[]);
+    let names = |s: &homelab_client::scaffold::Scaffolded, root: &std::path::Path| -> Vec<String> {
+        let mut v: Vec<String> = s
+            .files
+            .iter()
+            .map(|f| {
+                std::path::Path::new(f)
+                    .strip_prefix(root)
+                    .unwrap()
+                    .display()
+                    .to_string()
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(
+        names(&cli, &a),
+        names(&wiz, &b),
+        "the two paths must scaffold the same set of files"
+    );
+    for f in names(&cli, &a) {
+        assert_eq!(
+            std::fs::read_to_string(a.join(&f)).unwrap(),
+            std::fs::read_to_string(b.join(&f)).unwrap(),
+            "{} differs between the two paths",
+            f
+        );
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// The wizard can reach `no_data`, and its preview cannot drift from what it
 /// scaffolds.
 ///

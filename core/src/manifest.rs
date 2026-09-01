@@ -447,6 +447,15 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
             }
         }
     }
+    // A service's checks are refused before they are ever run when they
+    // cannot answer the question they exist for. Kenny's challenge: this was
+    // called discipline, and two thirds of it did not have to be.
+    for (app, sc) in &spec.checks {
+        for problem in crate::checks::shortcomings(sc) {
+            problems.push(format!("checks for '{}': {}", app, problem));
+        }
+    }
+
     for f in &spec.files {
         if f.path.contains("..") || f.path.starts_with('/') {
             problems.push(format!("file path '{}' escapes the stack root", f.path));

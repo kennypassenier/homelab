@@ -21,6 +21,7 @@ checks:
       curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
       sed 's/.*"MovieCount":\([0-9]*\).*/\1/'
     expect: never_decreases
+    layer: application
     blind_spot: >-
       Counts what Jellyfin has indexed, not whether any of it plays. A library
       of unreadable files counts the same as a healthy one.
@@ -31,6 +32,7 @@ checks:
       curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
       sed 's/.*"SeriesCount":\([0-9]*\).*/\1/'
     expect: never_decreases
+    layer: application
 
   - name: "afleveringen"
     command: >-
@@ -38,6 +40,7 @@ checks:
       curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
       sed 's/.*"EpisodeCount":\([0-9]*\).*/\1/'
     expect: never_decreases
+    layer: application
 
   - name: "collections"
     command: >-
@@ -45,6 +48,7 @@ checks:
       curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
       sed 's/.*"BoxSetCount":\([0-9]*\).*/\1/'
     expect: never_decreases
+    layer: application
 
   # Not a count: the paths every library and every *arr root folder is stored
   # against. Changing one breaks all of them at once, and it would not show up
@@ -55,20 +59,28 @@ checks:
       curl -s -m 30 "http://127.0.0.1:8096/Library/VirtualFolders?api_key=$K" |
       grep -o '/data/[0-9]*TB/[A-Za-z0-9]*' | sort -u | tr '\n' ','
     expect: must_match
+    layer: application
 
   - name: "hardwareversnelling"
     command: >-
       grep -oE '<HardwareAccelerationType>[a-z]*' /appdata/media/jellyfin-config/config/encoding.xml |
       cut -d'>' -f2
     expect: must_match
+    layer: process
     blind_spot: >-
-      Reads the setting, not a transcode. That the GPU is configured does not
+      Reads the setting on disk, not a transcode. That the GPU is configured does not
       prove it is used — only an actual transcode does, and that is in the
       manual list below.
 
   - name: "grafische kaart aanwezig"
     command: "ls /dev/dri/renderD128 2>/dev/null"
     expect: must_be_present
+    layer: network
+    blind_spot: >-
+      Only that the device node exists. It says nothing about whether the
+      driver loads, whether Jellyfin may open it, or whether a transcode
+      actually uses it — the render gid was wrong for months while this file
+      was present the whole time (F110).
 
 # What no measurement settles. These reach Kenny as a notification he has to
 # acknowledge, because a list he has to go and find is a list that does not

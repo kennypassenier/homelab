@@ -120,3 +120,79 @@ fn blind_spots_are_reported_with_a_green_result() {
         blind
     );
 }
+
+/// Kenny's challenge, as a rule rather than an intention.
+///
+/// He asked why "does this measure the right thing" had to be discipline
+/// instead of automation. Two thirds of it did not: once a check declares
+/// which layer it reaches, code can refuse the shapes that actually caused
+/// today's faults.
+#[test]
+fn a_service_whose_deepest_check_is_a_port_is_refused() {
+    let sc = ServiceChecks {
+        checks: vec![Check {
+            name: "poort antwoordt".into(),
+            command: "curl -s -o /dev/null -w %{http_code} http://127.0.0.1:8096/".into(),
+            expect: Expect::MustBePresent,
+            layer: Layer::Network,
+            blind_spot: Some("says nothing about the library".into()),
+        }],
+        manual: vec![],
+    };
+    let missing = shortcomings(&sc);
+    assert!(
+        missing.iter().any(|m| m.contains("application")),
+        "the registry cache answered a port in 0.7ms and could not serve a \
+         byte — a service measured only at that depth is not measured: {:?}",
+        missing
+    );
+}
+
+/// And a shallow check must say what it does not prove, because that is
+/// exactly the one that gets mistaken for proof. Nobody reads "films: 935" as
+/// evidence the network is fine; plenty of people read "port answered" as
+/// evidence the service is.
+#[test]
+fn a_shallow_check_must_declare_its_blind_spot() {
+    let mut sc = ServiceChecks {
+        checks: vec![
+            Check {
+                name: "poort antwoordt".into(),
+                command: "true".into(),
+                expect: Expect::MustBePresent,
+                layer: Layer::Network,
+                blind_spot: None,
+            },
+            Check {
+                name: "films".into(),
+                command: "true".into(),
+                expect: Expect::NeverDecreases,
+                layer: Layer::Application,
+                blind_spot: None,
+            },
+        ],
+        manual: vec![],
+    };
+    let missing = shortcomings(&sc);
+    assert_eq!(
+        missing.len(),
+        1,
+        "only the shallow one owes an explanation: {:?}",
+        missing
+    );
+    assert!(missing[0].contains("poort antwoordt"));
+
+    sc.checks[0].blind_spot = Some("only that something is listening".into());
+    assert!(
+        shortcomings(&sc).is_empty(),
+        "with the blind spot declared, both rules are satisfied"
+    );
+}
+
+/// A service with no checks at all is not judged. Saying nothing is a
+/// different thing from saying something shallow, and treating them the same
+/// would push people to write one meaningless check to silence the rule.
+#[test]
+fn a_service_without_checks_is_not_nagged() {
+    assert!(shortcomings(&ServiceChecks::default()).is_empty());
+}

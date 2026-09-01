@@ -102,6 +102,19 @@ struct FileConfig {
     /// which is how a monitor came to report Uptime Kuma itself as down from
     /// an address it had left that morning (F157).
     kuma_monitors_file: Option<String>,
+    /// Y1: how many stack backups the nightly round runs at once. Measured
+    /// 2026-09-02: a full round took ~38 minutes for thirteen stacks, of
+    /// which only ~6 minutes was writing data — the rest was small questions
+    /// to Google Drive, each waiting on a round-trip rather than on
+    /// bandwidth, which is exactly the kind of waiting that overlaps.
+    ///
+    /// Configurable rather than a constant, and not only on principle: a
+    /// backup pauses its containers for a clean snapshot, so this number is
+    /// also "how much of the house may be briefly still at 04:00". Kenny
+    /// chose three (form Y4): about a third of the wait, and never more than
+    /// three services quiet at once.
+    #[serde(default = "default_backup_concurrency")]
+    backup_concurrency: usize,
 }
 
 #[derive(Clone)]
@@ -156,6 +169,18 @@ struct Config {
     /// which is how a monitor came to report Uptime Kuma itself as down from
     /// an address it had left that morning (F157).
     kuma_monitors_file: Option<String>,
+    /// Y1: how many stack backups the nightly round runs at once. Measured
+    /// 2026-09-02: a full round took ~38 minutes for thirteen stacks, of
+    /// which only ~6 minutes was writing data — the rest was small questions
+    /// to Google Drive, each waiting on a round-trip rather than on
+    /// bandwidth, which is exactly the kind of waiting that overlaps.
+    ///
+    /// Configurable rather than a constant, and not only on principle: a
+    /// backup pauses its containers for a clean snapshot, so this number is
+    /// also "how much of the house may be briefly still at 04:00". Kenny
+    /// chose three (form Y4): about a third of the wait, and never more than
+    /// three services quiet at once.
+    backup_concurrency: usize,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
 }
@@ -239,6 +264,7 @@ fn load_config() -> Config {
         grafana_dashboards_dir: file.grafana_dashboards_dir,
         homepage_services_file: file.homepage_services_file,
         kuma_monitors_file: file.kuma_monitors_file,
+        backup_concurrency: file.backup_concurrency,
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -314,6 +340,8 @@ fn render_settings_toml(
         homepage_services_file: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         kuma_monitors_file: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        backup_concurrency: Option<usize>,
     }
     let bdef = homelab_core::ops::backup::BackupCfg::default();
     let out = Out {
@@ -351,8 +379,28 @@ fn render_settings_toml(
         grafana_dashboards_dir: config.grafana_dashboards_dir.as_ref(),
         homepage_services_file: config.homepage_services_file.as_ref(),
         kuma_monitors_file: config.kuma_monitors_file.as_ref(),
+        backup_concurrency: (config.backup_concurrency != default_backup_concurrency())
+            .then_some(config.backup_concurrency),
     };
     toml::to_string_pretty(&out).map_err(|e| e.to_string())
+}
+
+/// Y1: how many backups actually run at once, given what the config says.
+///
+/// Zero is the case worth guarding. `backup_concurrency = 0` in host.toml
+/// reads like "no limit" to the person typing it and means "run none" to the
+/// stream that consumes it — so a typo meant to go faster would silently
+/// produce a night with no backups at all, and the only sign would be
+/// `last_backup` never moving. Clamped to at least one: slow is recoverable,
+/// silent is not.
+fn effective_concurrency(configured: usize) -> usize {
+    configured.max(1)
+}
+
+/// Kenny's choice (form Y4, 2026-09-02): three at a time. About a third of
+/// the wait, and never more than three services briefly quiet at 04:00.
+fn default_backup_concurrency() -> usize {
+    3
 }
 
 /// A day. The coverage question is asked nightly and on demand, so a stack
@@ -447,6 +495,7 @@ mod tests {
             kuma_monitors_file: Some(
                 "/appdata/uptime/kuma-seeder-config/host-monitors.json".into(),
             ),
+            backup_concurrency: 3,
             initial_settings: homelab_proto::HostConfigView {
                 backup_hour: Some(4),
                 notify_webhook: Some("http://ha/webhook/x".into()),
@@ -620,6 +669,27 @@ mod tests {
         // Already ran this cycle → not repeated on the next 20-min tick.
         let plan = nightly_plan(4, 4, now, &[], stale, now - 3600, true);
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
+    }
+
+    #[test]
+    fn y1_a_configured_zero_never_means_no_backups() {
+        // The dangerous reading: "0 = unlimited" to a person, "0 = none" to
+        // the stream. A night with no backups at all, and the only trace is
+        // last_backup standing still.
+        assert_eq!(effective_concurrency(0), 1, "zero must not mean none");
+        assert_eq!(effective_concurrency(1), 1);
+        assert_eq!(effective_concurrency(3), 3, "Kenny's choice, form Y4");
+        assert_eq!(effective_concurrency(13), 13);
+    }
+
+    #[test]
+    fn y1_the_default_is_the_number_kenny_chose() {
+        assert_eq!(
+            default_backup_concurrency(),
+            3,
+            "form Y4: about a third of the wait, never more than three \
+             services quiet at once"
+        );
     }
 
     #[test]
@@ -1118,6 +1188,98 @@ fn bearer_ok(header: Option<&str>, token: &str) -> bool {
 /// stack's last backup is >20h old, run backup (E1) then auto-updates (D9)
 /// for that stack. Uses the same op machinery as RPCs (op-lock, incidents,
 /// notifications), so a client-triggered deploy never overlaps.
+/// Y1: the nightly backups, several at a time.
+///
+/// Kenny asked why so much of a run is spent waiting, and measuring answered
+/// it: on 2026-09-02 a full round took about 38 minutes for thirteen stacks,
+/// of which only ~6 minutes was actually writing data. The other half hour
+/// was 36 small questions to Google Drive — does this repository exist, which
+/// snapshots are there, forget the old ones — each one waiting on a
+/// round-trip, not on bandwidth. That kind of waiting overlaps almost
+/// perfectly, which is why this helps far more than a bandwidth argument
+/// would suggest.
+///
+/// The global lock is taken ONCE for the whole round rather than dropped:
+/// backups still cannot interleave with a deploy or a destroy, exactly as
+/// before. What changed is only that they can interleave with EACH OTHER.
+/// That is the conservative half of the win, and it is the half that is
+/// obviously safe.
+///
+/// `limit` bounds how many run at once. Not a constant: a backup pauses its
+/// containers to take a clean snapshot, so the number is also "how much of
+/// the house may be briefly still at 04:00" — which is Kenny's call, not the
+/// author's (he chose three).
+async fn run_backup_batch(
+    state: &AppState,
+    exec: &RealExecutor,
+    jobs: Vec<BackupJob>,
+    limit: usize,
+) -> std::collections::HashMap<String, bool> {
+    use futures_util::stream::StreamExt;
+    if jobs.is_empty() {
+        return std::collections::HashMap::new();
+    }
+    let limit = effective_concurrency(limit);
+    info!(
+        "scheduler: backing up {} stack(s), {} at a time",
+        jobs.len(),
+        limit
+    );
+    let _guard = state.op_lock.lock().await;
+    let results: Vec<(String, bool)> = futures_util::stream::iter(jobs)
+        .map(|job| async move {
+            let name = job.stack.clone();
+            let ok = match job.what {
+                BackupWhat::Compose(manifest) => {
+                    let cfg = job.cfg.clone();
+                    run_op_locked(state, exec, 0, "scheduled-backup", |ctx| {
+                        Box::pin(async move {
+                            homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await
+                        })
+                    })
+                    .await
+                    .ok
+                }
+                // T5: several services share one container, so all of them are
+                // backed up and one failure fails the night for the stack —
+                // they share a container and a fate. Sequential WITHIN a
+                // stack: they are on the same container, so overlapping their
+                // pauses would stop that container twice over.
+                BackupWhat::Native(services) => {
+                    let mut ok = true;
+                    for native in services {
+                        let cfg = job.cfg.clone();
+                        let r = run_op_locked(state, exec, 0, "scheduled-backup-native", |ctx| {
+                            Box::pin(async move {
+                                homelab_core::ops::native::backup_native(ctx, &native, &cfg).await
+                            })
+                        })
+                        .await;
+                        ok &= r.ok;
+                    }
+                    ok
+                }
+            };
+            (name, ok)
+        })
+        .buffer_unordered(limit)
+        .collect()
+        .await;
+    results.into_iter().collect()
+}
+
+/// One stack's share of the nightly backup phase.
+struct BackupJob {
+    stack: String,
+    what: BackupWhat,
+    cfg: homelab_core::ops::backup::BackupCfg,
+}
+
+enum BackupWhat {
+    Compose(Box<homelab_proto::StackManifest>),
+    Native(Vec<homelab_core::native::NativeServiceManifest>),
+}
+
 async fn scheduler_loop(state: AppState) {
     let exec = RealExecutor;
     loop {
@@ -1170,6 +1332,37 @@ async fn scheduler_loop(state: AppState) {
             snapshot.last_zfs,
             !state.config.zfs_jobs.is_empty(),
         );
+        // Y1: every due backup runs first, several at a time, under one
+        // hold of the global lock. Then the loop below does the updates one
+        // by one — an update replaces running containers, which is a very
+        // different risk from reading their data, so it stays serial.
+        //
+        // Backups before updates also orders the night sensibly on its own:
+        // everything is safe on disk before anything is replaced.
+        let backup_jobs: Vec<BackupJob> = snapshot
+            .stacks
+            .iter()
+            .filter(|(name, _)| plan.contains(&NightlyTask::Stack((*name).clone())))
+            .filter_map(|(name, st)| {
+                let cfg = homelab_core::ops::backup::BackupCfg {
+                    tiers: tiers.clone(),
+                    ..state.config.backup.clone()
+                };
+                let what = if st.is_native() {
+                    BackupWhat::Native(st.natives.clone())
+                } else {
+                    BackupWhat::Compose(Box::new(st.manifest.clone()?))
+                };
+                Some(BackupJob {
+                    stack: name.clone(),
+                    what,
+                    cfg,
+                })
+            })
+            .collect();
+        let backup_done =
+            run_backup_batch(&state, &exec, backup_jobs, state.config.backup_concurrency).await;
+
         for (name, st) in snapshot.stacks {
             if !plan.contains(&NightlyTask::Stack(name.clone())) {
                 if !st.enabled {
@@ -1191,21 +1384,10 @@ async fn scheduler_loop(state: AppState) {
                 // them is backed up and updated. One failure fails the night
                 // for the stack — the H8 auto-disable below is deliberately
                 // per stack, because they share a container and a fate.
-                let mut backup_ok = true;
+                // Y1: the backup already ran in the batch above.
+                let backup_ok = backup_done.get(&name).copied().unwrap_or(false);
                 let mut update_ok = true;
                 for native in st.natives.clone() {
-                    let n1 = native.clone();
-                    let cfg = homelab_core::ops::backup::BackupCfg {
-                        tiers: tiers.clone(),
-                        ..state.config.backup.clone()
-                    };
-                    let r = run_mutating_op(&state, &exec, 0, "scheduled-backup-native", |ctx| {
-                        Box::pin(async move {
-                            homelab_core::ops::native::backup_native(ctx, &n1, &cfg).await
-                        })
-                    })
-                    .await;
-                    backup_ok &= r.ok;
                     let n2 = native.clone();
                     let r = run_mutating_op(&state, &exec, 0, "scheduled-update-native", |ctx| {
                         Box::pin(
@@ -1255,16 +1437,9 @@ async fn scheduler_loop(state: AppState) {
                 continue;
             };
             info!("scheduler: nightly run for {}", name);
-            let m1 = manifest.clone();
-            let cfg = homelab_core::ops::backup::BackupCfg {
-                tiers: tiers.clone(),
-                ..state.config.backup.clone()
-            };
-            let backup_report = run_mutating_op(&state, &exec, 0, "scheduled-backup", |ctx| {
-                Box::pin(async move { homelab_core::ops::backup::backup(ctx, &m1, &cfg).await })
-            })
-            .await;
-            if backup_report.ok {
+            // Y1: the backup already ran in the batch above.
+            let backup_ok = backup_done.get(&name).copied().unwrap_or(false);
+            if backup_ok {
                 // Record last_backup so tomorrow's check is accurate.
                 if let Ok(mut s) = store.load().await {
                     if let Some(rec) = s.stacks.get_mut(&name) {
@@ -1284,7 +1459,7 @@ async fn scheduler_loop(state: AppState) {
             // then silence instead of a fresh failure every night. State-only:
             // onboot and the running containers are untouched, so a transient
             // failure can never keep a stack from surviving a host reboot.
-            if !backup_report.ok || !update_report.ok {
+            if !backup_ok || !update_report.ok {
                 let mut parked = false;
                 if let Ok(mut s) = store.load().await {
                     if let Some(rec) = s.stacks.get_mut(&name) {
@@ -1590,6 +1765,29 @@ where
     >,
 {
     let _guard = state.op_lock.lock().await;
+    run_op_locked(state, exec, req_id, label, op).await
+}
+
+/// The body of a mutating operation WITHOUT taking the global lock.
+///
+/// Y1: the nightly backup phase holds that lock once for the whole round and
+/// runs several backups inside it, so it needs the work without the locking.
+/// Every RPC still goes through `run_mutating_op`, which is this plus the
+/// lock — there is one implementation, not two that can drift.
+async fn run_op_locked<F>(
+    state: &AppState,
+    exec: &RealExecutor,
+    req_id: u64,
+    label: &str,
+    op: F,
+) -> RpcResponse
+where
+    F: for<'a> FnOnce(
+        &'a OpCtx<'a>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = homelab_core::runner::OperationReport> + Send + 'a>,
+    >,
+{
     let broadcast = BroadcastSink {
         log_tx: state.log_tx.clone(),
     };

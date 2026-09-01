@@ -290,7 +290,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | T14 | Clean up CT 190 and 191 after coordinating with pipeline-v2 | T12 | open |
 | T15 | Rename the stale worktree branch `hungry-elbakyan-85a663` under `.claude/worktrees/` to something descriptive, or remove it | — | open |
 | T62 | **Expert review of every setting in every managed LXC**, run in a SEPARATE session so it is not the session that just defended those choices; its report comes back into the rollout conversation, which decides what to change (Kenny, 2026-09-01) | media + gateway both live | open |
-| T63 | **Five separate expert-review sessions** after the rollout — the system itself, security, usability, devops, Rust. Each is given its context by the rollout session, reviews independently, and reports back. **The rollout session goes on hold from the moment the first one starts** and resumes only when all five have reported (Kenny, 2026-09-01) | the rollout finished | open |
+| T63 | **A panel of expert-review sessions** after the rollout. Kenny named seven lenses so far — the system itself, security, usability, devops, Rust, how logging is arranged, and Grafana with everything around it — and asked for suggestions of further ones. **The list is approved by him before any session is started.** Each is given its context by the rollout session, reviews independently, and reports back. **The rollout session goes on hold from the moment the first one starts** and resumes only when all five have reported (Kenny, 2026-09-01) | the rollout finished | open |
 
 ## Inherited open items (from before this project)
 

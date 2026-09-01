@@ -169,13 +169,14 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
         WizStep::Preset => 1,
         WizStep::Name => 2,
         WizStep::Resources => 3,
-        WizStep::Review => 4,
+        WizStep::Storage => 4,
+        WizStep::Review => 5,
     };
     let block = Block::bordered()
         .border_type(BorderType::Double)
         .border_style(THEME.border_modal())
         .title(Line::from(Span::styled(
-            format!(" >> STACK_FORGE :: STEP {}/4 << ", step_no),
+            format!(" >> STACK_FORGE :: STEP {}/5 << ", step_no),
             Style::new().fg(THEME.magenta).add_modifier(Modifier::BOLD),
         )))
         .style(Style::new().bg(THEME.elevated).fg(THEME.text));
@@ -189,7 +190,7 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
     .split(inner);
 
     // Breadcrumb.
-    let crumbs = ["PRESET", "NAME", "RESOURCES", "REVIEW"];
+    let crumbs = ["PRESET", "NAME", "RESOURCES", "STORAGE", "REVIEW"];
     let mut spans: Vec<Span> = vec![Span::raw(" ")];
     for (i, c) in crumbs.iter().enumerate() {
         let active = i + 1 == step_no;
@@ -357,6 +358,60 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
                 ]),
             ];
             f.render_widget(Paragraph::new(lines), rows[1]);
+        }
+        WizStep::Storage => {
+            // One row per /appdata directory this stack will get. The
+            // question is deliberately about the APP rather than the path:
+            // "keeps files of its own" is something Kenny knows about a
+            // service, where "no_data: true" is something only the manifest
+            // knows.
+            let mut lines: Vec<Line> = vec![
+                Line::from(Span::styled(
+                    "  Which of these keeps files of its own?",
+                    Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    "  An app that keeps nothing gets no backup repository, so an",
+                    THEME.muted_style(),
+                )),
+                Line::from(Span::styled(
+                    "  empty directory is the design instead of a stopped backup.",
+                    THEME.muted_style(),
+                )),
+                Line::from(""),
+            ];
+            for (i, path) in wiz.storage_paths.iter().enumerate() {
+                let sel = i == wiz.storage_idx;
+                let hollow = wiz.storage_no_data.get(i).copied().unwrap_or(false);
+                let style = if sel {
+                    Style::new()
+                        .fg(THEME.cyan)
+                        .bg(fx::pulse_bg(model.tick, model.fx))
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::new().fg(THEME.text)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(if sel { "▶ " } else { "  " }, style),
+                    Span::styled(
+                        if hollow {
+                            "[ keeps nothing ] "
+                        } else {
+                            "[ keeps files   ] "
+                        },
+                        if hollow { THEME.warn() } else { THEME.ok() },
+                    ),
+                    Span::styled(path.clone(), style),
+                ]));
+            }
+            f.render_widget(Paragraph::new(lines), rows[1]);
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    " ↑↓ choose · SPACE toggle · ENTER continue · ESC back ",
+                    THEME.muted_style(),
+                ))),
+                rows[2],
+            );
         }
         WizStep::Review => {
             let p = &presets[wiz.preset_idx];

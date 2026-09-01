@@ -101,6 +101,14 @@ pub enum WizStep {
     Preset,
     Name,
     Resources,
+    /// Which of the stack's `/appdata` directories the app actually keeps
+    /// something in.
+    ///
+    /// Kenny, form B4b: "de TUI moet van alle features van dit project
+    /// gebruik kunnen maken". `no_data` was added the same evening it was
+    /// needed, and a flag reachable only by editing YAML is a flag the wizard
+    /// will keep producing stacks without.
+    Storage,
     Review,
 }
 
@@ -128,6 +136,14 @@ pub struct Wizard {
     pub res_field: ResField,
     /// True while typing a custom disk size digit-by-digit.
     pub disk_typing: bool,
+    /// The `/appdata` paths this stack will have, previewed from the preset's
+    /// compose templates before anything is written.
+    pub storage_paths: Vec<String>,
+    /// Index into `storage_paths` of the row being answered.
+    pub storage_idx: usize,
+    /// Same length as `storage_paths`: true = this app keeps nothing of its
+    /// own, and the manifest will say so.
+    pub storage_no_data: Vec<bool>,
 }
 
 /// RAM ladder: 256, 512, 1024, 2048, then +1024 up to 32768.
@@ -650,6 +666,9 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                     vmid,
                     res_field: ResField::Ram,
                     disk_typing: false,
+                    storage_paths: Vec::new(),
+                    storage_idx: 0,
+                    storage_no_data: Vec::new(),
                 });
             }
             _ => {}
@@ -1351,16 +1370,55 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                     w.disk = 2;
                 }
                 w.disk_typing = false;
-                w.step = WizStep::Review;
+                // Preview the paths this stack will have, from the same
+                // templates the scaffold copies — asked here rather than in
+                // the manifest afterwards, so nothing is written before the
+                // question is answered.
+                w.storage_paths = crate::scaffold::preview_appdata_paths(
+                    std::path::Path::new("presets"),
+                    presets.get(w.preset_idx),
+                    &w.name,
+                    w.vmid,
+                );
+                w.storage_idx = 0;
+                w.storage_no_data = vec![false; w.storage_paths.len()];
+                w.step = if w.storage_paths.is_empty() {
+                    WizStep::Review
+                } else {
+                    WizStep::Storage
+                };
             }
             _ => {}
         },
-        WizStep::Review => match key.code {
+        WizStep::Storage => match key.code {
             KeyCode::Esc => w.step = WizStep::Resources,
+            KeyCode::Up if !w.storage_paths.is_empty() => {
+                w.storage_idx = (w.storage_idx + w.storage_paths.len() - 1) % w.storage_paths.len();
+            }
+            KeyCode::Down if !w.storage_paths.is_empty() => {
+                w.storage_idx = (w.storage_idx + 1) % w.storage_paths.len();
+            }
+            // Space toggles the row: "keeps files" ⇄ "keeps nothing".
+            KeyCode::Char(' ') if !w.storage_paths.is_empty() => {
+                let i = w.storage_idx;
+                w.storage_no_data[i] = !w.storage_no_data[i];
+            }
+            KeyCode::Enter => w.step = WizStep::Review,
+            _ => {}
+        },
+        WizStep::Review => match key.code {
+            KeyCode::Esc => w.step = WizStep::Storage,
             KeyCode::Enter => {
                 let preset = &presets[w.preset_idx];
                 let name = w.name.clone();
                 let (ram, cores, disk, swap, vmid) = (w.ram, w.cores, w.disk, w.swap, w.vmid);
+                let no_data: Vec<String> = w
+                    .storage_paths
+                    .iter()
+                    .zip(w.storage_no_data.iter())
+                    .filter(|(_, hollow)| **hollow)
+                    .map(|(p, _)| p.clone())
+                    .collect();
                 match crate::scaffold::scaffold_stack(
                     std::path::Path::new("stacks"),
                     std::path::Path::new("presets"),
@@ -1372,6 +1430,7 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                         disk_gb: disk,
                         swap_mb: Some(swap),
                         preset: Some(preset),
+                        no_data_paths: &no_data,
                     },
                 ) {
                     Ok(s) => {

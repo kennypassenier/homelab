@@ -279,10 +279,13 @@ fn wizard_renders_preset_step() {
         swap_touched: false,
         vmid: 108,
         res_field: ResField::Ram,
+        storage_paths: Vec::new(),
+        storage_idx: 0,
+        storage_no_data: Vec::new(),
         disk_typing: false,
     });
     let out = render(&m);
-    assert!(out.contains("STACK_FORGE :: STEP 1/4"));
+    assert!(out.contains("STACK_FORGE :: STEP 1/5"));
     assert!(out.contains("syncthing"));
     assert!(out.contains("jellyfin"));
 }
@@ -302,10 +305,13 @@ fn wizard_resources_step_shows_all_fields() {
         swap_touched: false,
         vmid: 108,
         res_field: ResField::Disk,
+        storage_paths: Vec::new(),
+        storage_idx: 0,
+        storage_no_data: Vec::new(),
         disk_typing: false,
     });
     let out = render(&m);
-    assert!(out.contains("STEP 3/4"));
+    assert!(out.contains("STEP 3/5"));
     assert!(out.contains("RAM"));
     assert!(out.contains("CPU"));
     assert!(out.contains("DISK"));
@@ -352,6 +358,7 @@ fn scaffold_has_no_watchtower_and_manual_update_policy() {
             cores: 2,
             disk_gb: 8,
             swap_mb: None,
+            no_data_paths: &[],
             preset: Some(synth),
         },
     )
@@ -395,6 +402,7 @@ fn scaffold_writes_a_deployable_stack() {
             cores: 2,
             disk_gb: 8,
             swap_mb: None,
+            no_data_paths: &[],
             preset: Some(syncthing),
         },
     )
@@ -504,6 +512,7 @@ fn preset_templates_substitute_and_apps_list_matches_dirs() {
             cores: 1,
             disk_gb: 4,
             swap_mb: None,
+            no_data_paths: &[],
             preset: Some(syncthing),
         },
     )
@@ -572,6 +581,7 @@ fn manifest_storage_is_derived_from_compose_appdata_binds() {
             cores: 1,
             disk_gb: 4,
             swap_mb: None,
+            no_data_paths: &[],
             preset: Some(syncthing),
         },
     )
@@ -612,6 +622,7 @@ fn b4_drift_flag_computed_from_applied_hash() {
             cores: 1,
             disk_gb: 4,
             swap_mb: None,
+            no_data_paths: &[],
             preset: Some(syncthing),
         },
     )
@@ -672,6 +683,7 @@ fn d11_bundle_round_trip_excludes_secrets_and_substitutes() {
             cores: 1,
             disk_gb: 4,
             swap_mb: None,
+            no_data_paths: &[],
             preset: Some(syncthing),
         },
     )
@@ -806,6 +818,91 @@ fn the_committed_runbook_matches_a_fresh_generation() {
     );
 }
 
+/// The wizard can reach `no_data`, and its preview cannot drift from what it
+/// scaffolds.
+///
+/// Kenny, form B4b: "de TUI moet van alle features van dit project gebruik
+/// kunnen maken". The flag exists because an undeclared empty directory
+/// stopped the gateway's whole backup; a flag only reachable by editing YAML
+/// would let the wizard keep producing exactly that stack.
+///
+/// The second half is the part worth a test: the wizard has to ASK about the
+/// paths before anything is written, so it previews them from the same
+/// templates the scaffold copies. If those two ever disagree, the answer
+/// lands on a path that does not exist and the flag silently does nothing.
+/// covers: F154, F155
+#[test]
+fn the_wizard_can_declare_an_app_that_keeps_nothing() {
+    let tmp = std::env::temp_dir().join(format!("homelab-nodata-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let stacks = tmp.join("stacks");
+    std::fs::create_dir_all(&stacks).unwrap();
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = homelab_client::scaffold::scan_presets(&presets_dir);
+    let syncthing = presets.iter().find(|p| p.name == "syncthing").unwrap();
+
+    // What the wizard would show, before writing anything.
+    let preview = homelab_client::scaffold::preview_appdata_paths(
+        &presets_dir,
+        Some(syncthing),
+        "hollow",
+        150,
+    );
+    assert!(
+        !preview.is_empty(),
+        "the wizard has nothing to ask about, so the step would be skipped"
+    );
+
+    let declared = vec![preview[0].clone()];
+    let s = homelab_client::scaffold::scaffold_stack(
+        &stacks,
+        &presets_dir,
+        &homelab_client::scaffold::StackParams {
+            name: "hollow",
+            vmid: 150,
+            ram_mb: 512,
+            cores: 1,
+            disk_gb: 4,
+            swap_mb: None,
+            preset: Some(syncthing),
+            no_data_paths: &declared,
+        },
+    )
+    .unwrap();
+
+    let manifest = std::fs::read_to_string(s.dir.join("lxc-compose.yml")).unwrap();
+    let m: homelab_core::manifest::StackManifest = serde_yaml::from_str(&manifest).unwrap();
+
+    // Preview and result must describe the same set of paths.
+    let written: Vec<String> = m.storage.iter().map(|x| x.host_path.clone()).collect();
+    assert_eq!(
+        written, preview,
+        "the wizard asked about one set of paths and the scaffold wrote another"
+    );
+
+    // And the answer reached the manifest, on that path and no other.
+    for mount in &m.storage {
+        assert_eq!(
+            mount.no_data,
+            declared.contains(&mount.host_path),
+            "no_data landed on the wrong path: {}",
+            mount.host_path
+        );
+    }
+    // The declared one then has no restic repository at all.
+    let owners: Vec<String> = homelab_core::ops::backup::owner_groups(&m)
+        .into_iter()
+        .map(|(o, _)| o)
+        .collect();
+    assert!(
+        owners.len() < m.storage.len(),
+        "a declared-empty app must drop out of the repository list: {:?}",
+        owners
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// covers: F150, F151
 #[test]
 fn h17_runbook_generator_structural_snapshot() {
@@ -830,6 +927,7 @@ fn h17_runbook_generator_structural_snapshot() {
                 cores: 1,
                 disk_gb: 4,
                 swap_mb: None,
+                no_data_paths: &[],
                 preset: Some(syncthing),
             },
         )

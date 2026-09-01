@@ -254,6 +254,50 @@ pub fn synthetic_presets() -> Vec<LoadedPreset> {
     ]
 }
 
+/// The `/appdata` paths a scaffold WOULD create, without creating anything.
+///
+/// The wizard needs them before it writes: the question "does this app keep
+/// files of its own" has to be asked about real paths, and the answer has to
+/// reach the manifest the same run. Reads the same templates the scaffold
+/// copies and applies the same substitution, so preview and result cannot
+/// drift apart.
+pub fn preview_appdata_paths(
+    presets_base: &Path,
+    preset: Option<&LoadedPreset>,
+    name: &str,
+    vmid: u16,
+) -> Vec<String> {
+    let ip = format!("10.10.10.{}", vmid.saturating_sub(100));
+    let mut out = std::collections::BTreeSet::new();
+    let mut scan = |raw: &str| {
+        let content = substitute(raw, name, vmid, &ip);
+        for path in appdata_paths_in(&content) {
+            out.insert(path);
+        }
+    };
+    if let Some(pr) = preset {
+        if let Some(dir) = pr.dir.as_ref() {
+            for app in &pr.apps {
+                if let Ok(raw) = std::fs::read_to_string(dir.join(app).join("docker-compose.yml")) {
+                    scan(&raw);
+                }
+            }
+        } else if let Some((app, image)) = pr.synth_app.as_ref() {
+            scan(&generic_compose(app, image, name));
+        }
+    }
+    for core in &StackDefaults::default().core_apps {
+        let f = presets_base
+            .join("_core")
+            .join(core)
+            .join("docker-compose.yml");
+        if let Ok(raw) = std::fs::read_to_string(f) {
+            scan(&raw);
+        }
+    }
+    out.into_iter().collect()
+}
+
 /// Substitute the scaffold placeholders in a template file.
 fn substitute(template: &str, name: &str, vmid: u16, ip: &str) -> String {
     template
@@ -272,6 +316,15 @@ pub struct StackParams<'a> {
     /// None = auto via the swap formula; Some(0) is valid (no swap).
     pub swap_mb: Option<u32>,
     pub preset: Option<&'a LoadedPreset>,
+    /// `/appdata` paths whose app keeps nothing of its own, written into the
+    /// manifest as `no_data: true`.
+    ///
+    /// Kenny's rule, form B4b: "de TUI moet van alle features van dit project
+    /// gebruik kunnen maken". A flag only the person editing YAML by hand can
+    /// reach is a flag that will be forgotten at exactly the moment it is
+    /// needed — the gateway's cloudflared directory sat empty and undeclared
+    /// for months, and the backup it silently stopped was found by accident.
+    pub no_data_paths: &'a [String],
 }
 
 /// Create `base/<name>/` with a manifest, the preset's apps, and the core
@@ -300,6 +353,7 @@ pub fn scaffold_stack_with(
         disk_gb,
         swap_mb,
         preset,
+        no_data_paths,
     } = *p;
     let dir = base.join(name);
     if dir.exists() {
@@ -427,10 +481,16 @@ pub fn scaffold_stack_with(
         let entries = appdata
             .iter()
             .map(|path| {
+                let hollow = if no_data_paths.iter().any(|n| n == path) {
+                    "\n    # Declared to keep nothing of its own: this app gets no restic\n    # repository at all, so an empty directory here is the design rather\n    # than a backup that silently stopped (F154).\n    no_data: true"
+                } else {
+                    ""
+                };
                 format!(
-                    "  - host_path: {p}\n    mount_point: {p}\n    host_owner_uid: {uid}",
+                    "  - host_path: {p}\n    mount_point: {p}\n    host_owner_uid: {uid}{hollow}",
                     p = path,
-                    uid = d.appdata_owner_uid
+                    uid = d.appdata_owner_uid,
+                    hollow = hollow
                 )
             })
             .collect::<Vec<_>>()
@@ -454,19 +514,30 @@ fn appdata_mounts(files: &[String]) -> Vec<String> {
         let Ok(raw) = std::fs::read_to_string(f) else {
             continue;
         };
-        for line in raw.lines() {
-            let t = line
-                .trim()
-                .trim_start_matches("- ")
-                .trim_matches(['"', '\'']);
-            if let Some(host) = t.split(':').next() {
-                if host.starts_with("/appdata/") {
-                    out.insert(host.to_string());
-                }
-            }
+        for path in appdata_paths_in(&raw) {
+            out.insert(path);
         }
     }
     out.into_iter().collect()
+}
+
+/// The host side of every `/appdata/...` bind in one compose file. Shared by
+/// the scaffold and the wizard's preview so the two cannot disagree about
+/// which paths a stack is going to have.
+fn appdata_paths_in(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in raw.lines() {
+        let t = line
+            .trim()
+            .trim_start_matches("- ")
+            .trim_matches(['"', '\'']);
+        if let Some(host) = t.split(':').next() {
+            if host.starts_with("/appdata/") {
+                out.push(host.to_string());
+            }
+        }
+    }
+    out
 }
 
 /// Copy every file in `src` to `dst` with placeholder substitution.

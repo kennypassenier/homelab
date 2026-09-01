@@ -12,9 +12,9 @@ services:
       - ./data:/tmp/positions
     restart: unless-stopped
     networks:
-      - __STACK___net
+      - uptime_net
 
 networks:
-  __STACK___net:
+  uptime_net:
     external: true
-    name: __STACK___net
+    name: uptime_net

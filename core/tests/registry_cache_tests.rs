@@ -23,6 +23,7 @@ fn cfg() -> CacheCfg {
                 port: 5003,
             },
         ],
+        pull_timeout_secs: 180,
     }
 }
 

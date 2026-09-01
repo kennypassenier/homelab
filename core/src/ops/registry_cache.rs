@@ -36,6 +36,29 @@ pub struct CacheCfg {
     /// Host or address the containers reach it at, e.g. `10.10.10.17`.
     pub host: String,
     pub upstreams: Vec<CacheUpstream>,
+    /// How long one image may take through the cache before the deploy stops
+    /// waiting and goes to the real registry instead (F129, Kenny's form R2).
+    ///
+    /// A cache that answers `/v2/` is not a cache that can serve a blob: the
+    /// ghcr.io proxy did both — 200 on the probe, then it streamed 157 MB of
+    /// a layer, hit an HTTP/2 PROTOCOL_ERROR against GitHub, answered 500
+    /// after 10m12s, and docker began again. The deploy sat there until the
+    /// 900 s step ceiling caught it, while the same container measured
+    /// 4.1 MB/s pulling the same image directly.
+    ///
+    /// So the probe cannot be the only gate. This is the second one, and it
+    /// is deliberately generous: a cold cache genuinely does have to fetch
+    /// from the internet before it can answer, and a first pull of a large
+    /// image is slow for honest reasons.
+    #[serde(default = "default_pull_timeout_secs")]
+    pub pull_timeout_secs: u64,
+}
+
+/// Three minutes. Long enough for a cold cache fetching a large image over a
+/// domestic line, short enough that a broken one costs a fraction of what
+/// F129 cost.
+pub fn default_pull_timeout_secs() -> u64 {
+    180
 }
 
 /// Rewrite the `image:` lines of a compose file to point at the cache.

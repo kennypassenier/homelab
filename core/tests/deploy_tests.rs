@@ -1538,3 +1538,83 @@ async fn h1_gateway_route_only_to_the_gateway() {
         .contains("gateway routes may only target"));
     assert!(exec.calls_containing("pct push 106").is_empty());
 }
+
+/// F129 · the fallback half of C1: a cache that answers its probe but cannot
+/// serve a blob must not be able to hold the deploy hostage.
+///
+/// The real case, 2026-09-01: the ghcr.io proxy answered `/v2/` in under a
+/// millisecond, then streamed 157 MB of a layer, hit an HTTP/2 PROTOCOL_ERROR
+/// against GitHub, returned 500 after 10m12s, and docker started over. The
+/// deploy sat there until the 900 s step ceiling caught it — while the same
+/// container pulled the same image directly at 4.1 MB/s. Seerr and
+/// flaresolverr had to be started by hand.
+#[tokio::test]
+async fn f129_a_cache_that_cannot_serve_falls_back_to_the_real_registry() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    // The probe passes — that is the whole point, a broken cache looks alive.
+    exec.respond_always("http://10.10.10.17:5001/v2/", CmdOutput::ok("UP\n"));
+    // The pull through the cache fails; the retry afterwards succeeds.
+    exec.enqueue("docker compose pull", CmdOutput::failed(1, "500 Internal"));
+    exec.respond_always("docker compose pull", CmdOutput::ok(""));
+
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.files[0].content = "services:\n  app:\n    image: ghcr.io/o/app:latest\n".into();
+    // No gateway route: its push happens after the pull step and would
+    // otherwise be the last thing staged, hiding what the fallback wrote.
+    sp.gateway_route = None;
+
+    let mut c = ctx(&exec, &sink, &journal);
+    let cache = homelab_core::ops::registry_cache::CacheCfg {
+        host: "10.10.10.17".into(),
+        upstreams: vec![homelab_core::ops::registry_cache::CacheUpstream {
+            registry: "ghcr.io".into(),
+            port: 5001,
+        }],
+        pull_timeout_secs: 180,
+    };
+    c.registry_cache = Some(cache);
+
+    let report = deploy(&c, &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    // Pushed twice: once pointed at the cache, once put back. push_content
+    // asks the container for the file's hash before every write, so the
+    // number of those asks is the number of push attempts.
+    let pushes = exec.calls_containing("sha256sum '/opt/syncthing/syncthing/docker-compose.yml'");
+    assert_eq!(
+        pushes.len(),
+        2,
+        "compose pushed once for the cache and once for the fallback: {:?}",
+        pushes
+    );
+    // And what went back is the file naming the real registry — otherwise
+    // `up -d` starts an image the cache still cannot serve.
+    let staged = exec
+        .file("/var/lib/homelab/push-staging")
+        .expect("something was staged");
+    assert!(
+        staged.contains("ghcr.io/o/app:latest") && !staged.contains("10.10.10.17:5001"),
+        "the last staged compose must name the real registry: {}",
+        staged
+    );
+
+    // Bounded first attempt, full budget for the retry.
+    let budgets = exec.timeouts_for("docker compose pull");
+    assert_eq!(budgets, vec![180, 900], "first attempt bounded, retry not");
+
+    // The truncated blob is cleared, or the direct pull dies on a digest
+    // mismatch that reads like a broken image.
+    assert_eq!(
+        exec.calls_containing("docker system prune -f").len(),
+        1,
+        "the abandoned layer must be pruned before the retry"
+    );
+
+    assert!(
+        sink.lines().iter().any(|l| l.contains("falling back")),
+        "the fallback must be visible in the transcript, not silent"
+    );
+}

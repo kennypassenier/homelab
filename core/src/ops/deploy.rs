@@ -21,6 +21,10 @@ macro_rules! step {
         }
     };
 }
+/// F129 · per app: where its compose lives in the container, what it said
+/// before the cache rewrite, and the mode to write it back with.
+type CacheOriginals =
+    std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, (String, String, String)>>>;
 
 pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let m = &spec.manifest;
@@ -802,6 +806,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new()));
     let needs_restart_w = needs_restart.clone();
     let recreated_w = recreated.clone();
+    // F129: what each rewritten app's compose said BEFORE it was pointed at
+    // the cache. Kept so the pull step can put the real registry back when
+    // the cache turns out not to serve — the fallback half of Kenny's C1.
+    let cache_orig: CacheOriginals =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
+    let cache_orig_w = cache_orig.clone();
     step!(runner, "push files", {
         for f in &spec.files {
             // A native unit file goes to /etc/systemd/system and nowhere
@@ -830,12 +840,26 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 f.path.ends_with("docker-compose.yml"),
             ) {
                 (Some(cache), true) if !cache_up.is_empty() => {
-                    crate::ops::registry_cache::rewrite_compose(
+                    let rewritten = crate::ops::registry_cache::rewrite_compose(
                         &f.content,
                         cache,
                         &cache_up,
                         m.registry_login.as_ref().map(|r| r.registry.as_str()),
-                    )
+                    );
+                    // Only a compose the rewrite actually touched can fall
+                    // back; recording the untouched ones would make the pull
+                    // step re-push identical bytes for every app in the stack.
+                    if rewritten != f.content {
+                        if let Some((app, _)) = f.path.split_once('/') {
+                            if let Ok(mut g) = cache_orig_w.lock() {
+                                g.insert(
+                                    app.to_string(),
+                                    (dest.clone(), f.content.clone(), perms.clone()),
+                                );
+                            }
+                        }
+                    }
+                    rewritten
                 }
                 _ => f.content.clone(),
             };
@@ -933,13 +957,66 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         .await?;
         for app in &m.apps {
             let dir = format!("/opt/{}/{}", m.stack_name, app);
-            let pull = pct_sh(
-                exec,
-                m.vmid,
-                &format!("cd '{}' && docker compose pull -q", dir),
-                900,
-            )
-            .await?;
+            // F129 · the fallback half of C1. An app whose compose was
+            // pointed at the cache gets a bounded first attempt; anything
+            // else keeps the full step budget, because then there is nowhere
+            // to fall back TO and cutting it short would only turn a slow
+            // registry into a failed deploy.
+            let fallback = cache_orig.lock().ok().and_then(|g| g.get(app).cloned());
+            let budget = match (&fallback, ctx.registry_cache.as_ref()) {
+                (Some(_), Some(c)) => c.pull_timeout_secs,
+                _ => 900,
+            };
+            let cmd = format!("cd '{}' && docker compose pull -q", dir);
+            // Not `?`: a timeout is an Err by the Executor contract, and a
+            // timeout is precisely the case the fallback exists for. Taking
+            // the error here would step over it.
+            let first = pct_sh(exec, m.vmid, &cmd, budget).await;
+            let mut pull = match first {
+                Ok(o) if o.success() => o,
+                other => {
+                    if fallback.is_none() {
+                        // Nothing to fall back to — the original behaviour,
+                        // error and all.
+                        let o = other?;
+                        return Err(CoreError::Command {
+                            rendered: format!("compose pull {}", app),
+                            detail: o.stderr,
+                        });
+                    }
+                    match other {
+                        Ok(o) => o,
+                        Err(e) => crate::executor::CmdOutput {
+                            code: 1,
+                            stdout: String::new(),
+                            stderr: e.to_string(),
+                        },
+                    }
+                }
+            };
+            if !pull.success() {
+                // The cache did not deliver. Put the real registry back in
+                // the file and pull that — and LEAVE it there, so the
+                // `up -d` two lines down starts the image we actually
+                // fetched instead of one the cache still cannot serve.
+                if let Some((dest, original, perms)) = fallback {
+                    ctx.sink.emit(PipelineEvent::Line {
+                            level: Level::Warn,
+                            source: "HOST".into(),
+                            msg: format!(
+                                "[cache] {} did not deliver within {}s — falling back to its own registry",
+                                app, budget
+                            ),
+                        });
+                    push_content(exec, m.vmid, &dest, &original, &perms).await?;
+                    // A half-written layer from the abandoned attempt
+                    // makes the direct pull fail on a digest mismatch,
+                    // which reads like the image itself is broken. It is
+                    // not: it is the truncated blob the cache left behind.
+                    pct_sh(exec, m.vmid, "docker system prune -f", 300).await?;
+                    pull = pct_sh(exec, m.vmid, &cmd, 900).await?;
+                }
+            }
             if !pull.success() {
                 return Err(CoreError::Command {
                     rendered: format!("compose pull {}", app),

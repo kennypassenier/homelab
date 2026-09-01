@@ -33,14 +33,15 @@ services:
     devices:
       - /dev/dri/renderD128:/dev/dri/renderD128
     shm_size: "4gb"
-    env_file:
-      - .env
     environment:
       - TZ=Europe/Brussels
-      # The vault prefixes every variable with its app's name, even when the
-      # variable already carries it, so that "one name, one owner" has no
-      # exceptions to remember. Mapped back to what Jellyfin reads.
-      - JELLYFIN_API_KEY=${JELLYFIN_JELLYFIN_API_KEY}
+      # No JELLYFIN_API_KEY here, deliberately (R3). The container this
+      # replaces passed one, and Jellyfin did not know it: the value was
+      # absent from its own ApiKeys table and the server answered 401 to it.
+      # It had been dead for an unknown length of time, looking exactly like
+      # a working credential. The four keys Jellyfin does know — Seerr, Home
+      # Assistant, ClaudeDesktop, Homelab — live in its database and are
+      # restored with /config, so nothing needs to hand it one at boot.
       - JELLYFIN_LOG_DIR=/config/log
       - JELLYFIN_TRANSCODE_DIR=/dev/shm
       - DOTNET_SYSTEM_NET_DISABLE_IPV6=1

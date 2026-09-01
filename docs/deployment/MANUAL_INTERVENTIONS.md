@@ -13,11 +13,12 @@ So this file counts them. Every manual intervention on a managed container is
 listed with what would have to exist for it to have been unnecessary. The
 number at the top is the metric; it is meant to fall.
 
-## Open: 1
+## Open: 2
 
 | # | What was done by hand | What would make it unnecessary | State |
 |---|---|---|---|
 | 1 | Killed a hung `docker compose pull` and re-ran it | The F129 fallback does this now, but it has never fired in the field — the images were already local by the time it shipped | **guarded, unproven** |
+| 8 | Read the running process uid by hand on three containers, to work out why the ownership check was wrong | Nothing: this was diagnosis rather than repair. Listed anyway, because the reason it was needed is that a check gave a confident wrong answer, and that is the thing that should not have happened | **diagnosis, not repair** |
 
 ## Closed: 6
 

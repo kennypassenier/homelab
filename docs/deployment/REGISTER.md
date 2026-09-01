@@ -285,7 +285,7 @@ Numbers are permanent and are never reused, including after a row closes.
 |---|---|---|---|
 | T1 | Phase 1 · full inventory of every guest, its services and its hand-tuned configuration | D1 | done (`INVENTORY.md`) |
 | T16 | Repair the kyu stack entry in homelab state (re-adopt under its real name/paths) and re-enable its nightly run — F7 | T1 **Verified against reality 2026-09-01:** the `kyu` stack is in host state. | done 2026-09-01 |
-| T17 | Bring `/etc/homelab/host.toml`'s `no_touch` in line with the Phase 0 decision, per container — F8 | T1 | open |
+| T17 | Bring `/etc/homelab/host.toml`'s `no_touch` in line with the Phase 0 decision, per container — F8 | T1 **Verified against reality 2026-09-01:** the built-in list is `[100, 101, 102, 103]` and those are exactly the four guests that must never be touched — VM 100 OPNsense, VM 101 Home Assistant, CT 102 omada, CT 103 fileserver. The k3s VMs 201-203 the Phase 0 decision also named no longer exist (`qm list` shows only 100, 101 and a template). Nothing to bring in line. | done 2026-09-01 |
 | T18 | Decide where MQTT terminates, then remove the stale `lxc-mqtt-stack.yml` route — F10 | T1 | open |
 | T19 | Move ansible-era configuration onto `/appdata` on the host so a rebuild survives — F11 | T1 | open |
 | T20 | Capture the Cloudflare tunnel ingress and Access policies into the repo — F12 | needs Cloudflare credentials | open |
@@ -302,7 +302,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | T31 | Close the E3 auto-restore granularity gap, test-first — D13 | T1 | open |
 | T32 | Enforce the `<app>-config` naming rule in `validate_manifest` — D14 | T1 **Verified against reality 2026-09-01:** `validate` refuses a storage path not named `<owner>-config`, and refuses one whose name disagrees with its declared app (`manifest.rs`). | done 2026-09-01 |
 | T33 | Decide where vzdump archives live long-term — F24 | T1 | done (D19) |
-| T34 | Build a second golden template, privileged, beside the unprivileged one — D18 | T28 | open |
+| T34 | Build a second golden template, privileged, beside the unprivileged one — D18 | T28 **Verified against reality 2026-09-01:** CT 997 `debian-12-homelab-v3-priv` exists beside CT 998, and the media and downloader stacks clone from it. | done 2026-09-01 |
 | T35 | Ask the kyu session to publish release binaries + checksums, so the orchestrator can update it — Z4 | — | filed in the vault note "Homelab kyu Release Assets Request" (no kyu session was running) |
 | T36 | Mint a fresh Jellyfin API key; the one on CT 106 is refused — F32 | needs Kenny or Jellyfin admin access **Confirmed still open 2026-09-01:** the repo carries only a comment saying the key is deliberately absent, yet `/opt/media/jellyfin/.env` on CT 106 still holds `JELLYFIN_JELLYFIN_API_KEY` — it comes from the vault, not the repository, so removing it from the repo never removed it. **Done 2026-09-01:** the key was removed from `/var/lib/homelab/secrets/media/jellyfin.env` (a backup of the old file kept beside it) and the media deploy carried the change; `grep -c JELLYFIN_API_KEY` on CT 106 now answers 0. It had to be removed from the VAULT — taking it out of the repository never touched it, because `.env` comes from the vault (D12). | done 2026-09-01 |
 | T37 | Fix the syncthing route: `10.10.10.10` → `10.10.10.8` — F34 | — **Verified against reality 2026-09-01:** no stack file references 10.10.10.10 any more; only a comment recording the correction. | done 2026-09-01 |

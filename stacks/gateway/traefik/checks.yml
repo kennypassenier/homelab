@@ -25,20 +25,26 @@ checks:
 
   # The one reading that would have caught the fleet-wide 403. Every layer is
   # in it: the entrypoint, the CrowdSec middleware that fails closed, and a
-  # backend on another container. Anything in that chain breaking turns 200
-  # into something else, which is exactly what "all my routes stopped working"
-  # looked like from Kenny's side.
+  # backend. Anything in that chain breaking changes the answer, which is
+  # exactly what "all my routes stopped working" looked like from Kenny's
+  # side — every hostname in the house answered 403 at once.
+  #
+  # `kuma.` rather than the gateway's own `grafana.`: it is rendered by
+  # another stack into the route directory and its backend lives on another
+  # container, so this reading also covers the file provider picking up a
+  # foreign route — which is what F138 broke.
   - name: "een echt verzoek door de hele keten"
     command: >-
       curl -s -m 15 -o /dev/null -w '%{http_code}'
-      -H "Host: go.kp-soft.dev" http://127.0.0.1/
+      -H "Host: kuma.kp-soft.dev" http://127.0.0.1/
     expect: must_match
     layer: application
     blind_spot: >-
       Runs inside the house, so it proves the chain from the entrypoint
       inward. It says nothing about Cloudflare, the tunnel, or Access — and
       those cannot be checked from here, because Access answers 302 to an
-      unauthenticated request whatever is behind it.
+      unauthenticated request whatever is behind it. The 302 this reading
+      returns is the app's own redirect to its login page, not Access's.
 
   - name: "traefik logt naar docker, niet naar een bestand"
     command: >-
@@ -54,3 +60,4 @@ checks:
 # What no measurement settles here.
 manual:
   - "Open een route van buitenaf (bv. son.kp-soft.dev) en kijk of Cloudflare Access je binnenlaat — dat stuk kan van binnen niet gemeten worden."
+  - "go.kp-soft.dev hoort NIET meer te antwoorden: dat rapport is met opzet van het internet gehaald (form B2c). Antwoordt het toch, dan staat er nog een ingang in het Cloudflare-dashboard die weg moet."

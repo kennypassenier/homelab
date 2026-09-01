@@ -88,6 +88,43 @@ pub struct Focus {
     pub result: String,
 }
 
+/// The six host operations the TUI can start on the selected stack (form T1).
+///
+/// They are one type rather than six code paths because the shape is
+/// identical — resolve the stack's manifest, open a progress window, send the
+/// command — and six copies of that is six places for one of them to drift.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum StackOp {
+    Backup,
+    Restore,
+    Update,
+    Guards,
+}
+
+impl StackOp {
+    pub fn title(&self) -> &'static str {
+        match self {
+            StackOp::Backup => "BACKUP",
+            StackOp::Restore => "RESTORE",
+            StackOp::Update => "UPDATE",
+            StackOp::Guards => "GUARDS",
+        }
+    }
+}
+
+/// A typed confirmation, for the operations that overwrite or remove.
+///
+/// Restore is the one of the six that can destroy data: it replaces a
+/// stack's `/appdata` with whatever the snapshot holds. Typing the stack
+/// name is the same gate `homelab destroy` uses — a keystroke away from a
+/// live restore is not a gate.
+pub struct Confirm {
+    pub op: StackOp,
+    pub stack: String,
+    pub typed: String,
+    pub prompt: String,
+}
+
 /// D6 change-plan preview: what a deploy would do, shown before it runs.
 /// ENTER executes, ESC cancels.
 pub struct Plan {
@@ -181,6 +218,8 @@ pub struct Model {
     pub log_follow: bool,
     pub log_source: usize, // 0 = ALL, else stack index + 1
     pub transfers: Vec<Transfer>,
+    /// Open typed confirmation, if any (restore).
+    pub confirm: Option<Confirm>,
     pub palette_open: bool,
     pub palette_input: String,
     pub palette_sel: usize,
@@ -257,6 +296,7 @@ impl Model {
             plan_pending: None,
             latest_release: None,
             release_update_requested: None,
+            confirm: None,
             wizard: None,
             presets: crate::scaffold::synthetic_presets(),
             shell_target: 0,
@@ -507,6 +547,13 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         }
         return;
     }
+    // A typed confirmation swallows every key until it is answered — the
+    // point of it is that no keystroke meant for something else can start a
+    // restore.
+    if model.confirm.is_some() {
+        confirm_key(model, key);
+        return;
+    }
     if model.wizard.is_some() {
         wizard_key(model, key);
         return;
@@ -636,6 +683,43 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 }
             }
             KeyCode::Char('D') => start_deploy(model),
+            // The six operations Kenny reaches for in ordinary use (form T1).
+            // They existed only on the command line, which meant opening a
+            // terminal while already sitting in the interface built for this
+            // — sixteen host operations were unreachable from the TUI and
+            // these are the ones that come up daily (F156).
+            KeyCode::Char('B') => start_stack_op(model, StackOp::Backup),
+            KeyCode::Char('U') => start_stack_op(model, StackOp::Update),
+            KeyCode::Char('R') => {
+                // Restore overwrites live data, so it is the one of the six
+                // that asks first. The same shape as destroy: type the stack
+                // name.
+                if let Some(name) = selected_stack_name(model) {
+                    model.confirm = Some(Confirm {
+                        op: StackOp::Restore,
+                        stack: name.clone(),
+                        typed: String::new(),
+                        prompt: format!(
+                            "RESTORE {} — this overwrites its /appdata from the latest \
+                             snapshot. Type the stack name to confirm.",
+                            name
+                        ),
+                    });
+                }
+            }
+            KeyCode::Char('g') => start_stack_op(model, StackOp::Guards),
+            KeyCode::Char('c') => start_fleet_check(model),
+            KeyCode::Char('i') => {
+                model.focus = Some(Focus {
+                    title: "INCIDENT BUNDLES".into(),
+                    feed: Vec::new(),
+                    scroll: 0,
+                    done: false,
+                    ok: false,
+                    result: String::new(),
+                });
+                model.outbox.push(Command::Incidents);
+            }
             KeyCode::Char('e') => {
                 // H8 (light): toggle the selected stack's enabled flag. The
                 // GetState refresh rides behind the op — the host handles
@@ -935,6 +1019,33 @@ pub const PALETTE: &[PaletteAction] = &[
         label: "run doctor",
         id: "doctor",
     },
+    // The six from form T1, reachable by name as well as by key — the point
+    // of the palette is that nothing in this interface requires knowing a
+    // keybind first.
+    PaletteAction {
+        label: "backup: selected stack",
+        id: "op.backup",
+    },
+    PaletteAction {
+        label: "update: selected stack",
+        id: "op.update",
+    },
+    PaletteAction {
+        label: "restore: selected stack (asks first)",
+        id: "op.restore",
+    },
+    PaletteAction {
+        label: "guards: apply to selected stack",
+        id: "op.guards",
+    },
+    PaletteAction {
+        label: "fleet check: repo against reality",
+        id: "op.check",
+    },
+    PaletteAction {
+        label: "incidents: list captured bundles",
+        id: "op.incidents",
+    },
     PaletteAction {
         label: "cycle effects (F2)",
         id: "fx",
@@ -1007,6 +1118,35 @@ fn run_action(model: &mut Model, id: &str) {
         "doctor" => {
             model.switch_tab(Tab::Doctor);
             model.outbox.push(Command::Doctor);
+        }
+        "op.backup" => start_stack_op(model, StackOp::Backup),
+        "op.update" => start_stack_op(model, StackOp::Update),
+        "op.guards" => start_stack_op(model, StackOp::Guards),
+        "op.check" => start_fleet_check(model),
+        "op.restore" => {
+            if let Some(name) = selected_stack_name(model) {
+                model.confirm = Some(Confirm {
+                    op: StackOp::Restore,
+                    stack: name.clone(),
+                    typed: String::new(),
+                    prompt: format!(
+                        "RESTORE {} — this overwrites its /appdata from the latest \
+                         snapshot. Type the stack name to confirm.",
+                        name
+                    ),
+                });
+            }
+        }
+        "op.incidents" => {
+            model.focus = Some(Focus {
+                title: "INCIDENT BUNDLES".into(),
+                feed: Vec::new(),
+                scroll: 0,
+                done: false,
+                ok: false,
+                result: String::new(),
+            });
+            model.outbox.push(Command::Incidents);
         }
         "fx" => model.fx = model.fx.cycle(),
         "help" => model.help_open = true,
@@ -1090,6 +1230,111 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
 }
 
 /// SHIFT+D: deploy the selected fleet stack.
+/// Type the stack name, ENTER to run, ESC to abandon. Nothing else.
+fn confirm_key(model: &mut Model, key: crossterm::event::KeyEvent) {
+    use crossterm::event::KeyCode;
+    let Some(c) = model.confirm.as_mut() else {
+        return;
+    };
+    match key.code {
+        KeyCode::Esc => {
+            model.confirm = None;
+            model.status_line = "cancelled".into();
+        }
+        KeyCode::Char(ch) => c.typed.push(ch),
+        KeyCode::Backspace => {
+            c.typed.pop();
+        }
+        KeyCode::Enter => {
+            if c.typed.trim() == c.stack {
+                let op = c.op;
+                model.confirm = None;
+                start_stack_op(model, op);
+            } else {
+                // Deliberately not "try again": the mismatch is the answer.
+                model.status_line =
+                    format!("typed name does not match '{}' — nothing was done", c.stack);
+                model.confirm = None;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The name of the stack the cursor is on, or None with a status line said.
+fn selected_stack_name(model: &mut Model) -> Option<String> {
+    let name = model
+        .fleet
+        .as_ref()
+        .and_then(|f| f.stacks.get(model.selected_stack))
+        .map(|s| s.name.clone())
+        .or_else(|| {
+            model
+                .local_stacks
+                .get(model.selected_stack)
+                .map(|(n, _)| n.clone())
+        });
+    if name.is_none() {
+        model.status_line = "no stack selected".into();
+    }
+    name
+}
+
+/// Start one of the four per-stack operations on the selected stack.
+fn start_stack_op(model: &mut Model, op: StackOp) {
+    let spec = match resolve_spec(model) {
+        Ok((spec, _)) => spec,
+        Err(e) => {
+            model.status_line = e;
+            return;
+        }
+    };
+    let m = spec.manifest;
+    model.focus = Some(Focus {
+        title: format!("{} {} :: vmid {}", op.title(), m.stack_name, m.vmid),
+        feed: Vec::new(),
+        scroll: 0,
+        done: false,
+        ok: false,
+        result: String::new(),
+    });
+    let cmd = match op {
+        StackOp::Backup => Command::BackupStack(Box::new(m)),
+        // "latest" is the same default the command line uses: a restore
+        // that asks which snapshot before it can run is a restore nobody
+        // performs under pressure.
+        StackOp::Restore => Command::RestoreStack {
+            manifest: Box::new(m),
+            snapshot: "latest".into(),
+        },
+        StackOp::Update => Command::UpdateStack {
+            manifest: Box::new(m),
+            app: None,
+        },
+        StackOp::Guards => Command::ApplyGuards { vmid: m.vmid },
+    };
+    model.outbox.push(cmd);
+}
+
+/// Y4 from the TUI: the same fleet check `homelab check` runs, over the stack
+/// directories this client can see.
+fn start_fleet_check(model: &mut Model) {
+    let stack_files: Vec<(String, u16)> = crate::spec::stack_files_with_vmids("stacks");
+    if stack_files.is_empty() {
+        model.status_line = "no stack files found under stacks/".into();
+        return;
+    }
+    model.focus = Some(Focus {
+        title: format!("FLEET CHECK :: {} stack file(s)", stack_files.len()),
+        feed: Vec::new(),
+        scroll: 0,
+        done: false,
+        ok: false,
+        result: String::new(),
+    });
+    model.outbox.push(Command::FleetCheck { stack_files });
+}
+
 fn start_deploy(model: &mut Model) {
     match resolve_spec(model) {
         Ok((spec, _synthetic)) => {

@@ -13,7 +13,13 @@ services:
       - "--date-format=%Y-%m-%d"
       - "--time-format=%H:%M:%S"
       - "--real-time-html"
-      - "--ws-url=ws://go.kp-soft.dev:7880"
+      # The LAN address, not the public hostname (Kenny, form B2c). GoAccess
+      # pushes every update over this websocket, and a page served over https
+      # may not open an insecure one — so through Cloudflare the numbers froze
+      # at container start and stayed there (F148). Pointed at the address the
+      # browser can actually reach, over a page that is plain http, it does
+      # what it was built to do.
+      - "--ws-url=ws://10.10.10.4:7880"
       - "--output=/srv/report/index.html"
       - "--port=7880"
       - "/var/log/traefik/access.log"
@@ -27,6 +33,10 @@ services:
       # with "400 Invalid Request" — which is why go.kp-soft.dev was routed at
       # it and could never have worked. The report itself is a file, written
       # to /srv/report/index.html, and something has to serve it.
+      #
+      # Reachable on the LAN only: no Traefik route points here and the
+      # hostname is gone from the tunnel, so the browser that opens the report
+      # on 7881 is the same browser that connects here on 7880.
       - "7880:7880"
     restart: unless-stopped
     labels:
@@ -35,10 +45,14 @@ services:
   # The web server GoAccess does not have. Serves the report GoAccess writes,
   # read-only, on its own port; the route points here.
   #
-  # Live updates over the websocket will not work through Cloudflare — the
-  # page asks for ws://go.kp-soft.dev:7880 and only :443 comes through the
-  # tunnel. That costs nothing in practice: GoAccess rewrites the file
-  # continuously, so a refresh shows current numbers.
+  # Read the report at http://10.10.10.4:7881/ — on the LAN, deliberately.
+  #
+  # The comment that used to stand here claimed "GoAccess rewrites the file
+  # continuously, so a refresh shows current numbers". That was my assumption
+  # written down as a fact, and it was wrong: in real-time mode the file is
+  # written exactly once and every later number arrives over the websocket
+  # (F148). Measured 2026-09-01 — access.log live at 17:51, index.html last
+  # written at 14:35.
   goaccess-report:
     image: nginx:alpine
     container_name: goaccess-report

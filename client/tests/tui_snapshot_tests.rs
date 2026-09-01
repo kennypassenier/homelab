@@ -818,6 +818,167 @@ fn the_committed_runbook_matches_a_fresh_generation() {
     );
 }
 
+/// Every host operation is either reachable from the TUI or listed here as
+/// deliberately command-line-only.
+///
+/// Kenny's rule, 2026-09-01: "de TUI moet van alle features van dit project
+/// gebruik kunnen maken." Measured that evening, the TUI could send nine of
+/// the host's twenty-five operations; the other sixteen existed only on the
+/// command line, which meant opening a terminal while already sitting in the
+/// interface built for the job (F156).
+///
+/// A list would go stale the first time somebody added a command, so this is
+/// a test instead: a new `Command` variant fails the suite until it is either
+/// wired into the TUI or written down here with a reason. Neither answer is
+/// wrong; leaving the question unanswered is.
+const CLI_ONLY: &[(&str, &str)] = &[
+    (
+        "Ping",
+        "the client's own connection probe, not an operation",
+    ),
+    (
+        "Status",
+        "one-line version print; the TUI shows it in the header already",
+    ),
+    (
+        "DestroyStack",
+        "deliberate friction: destroying a container should mean leaving the \
+         comfortable interface and typing it out (Kenny's C2 gate)",
+    ),
+    (
+        "BackupHostMeta",
+        "runs nightly on its own; there is no moment where an operator wants it \
+         by hand from a stack view",
+    ),
+    (
+        "ApplyResources",
+        "hot-apply of cores/RAM — a later round (form T1)",
+    ),
+    ("PatchFleet", "apt across the whole fleet — a later round"),
+    (
+        "AdoptService",
+        "one-off per native container, done once per service — a later round",
+    ),
+    (
+        "BackupNative",
+        "native services, scheduled; the manual path is rare — a later round",
+    ),
+    ("UpdateNative", "native services — a later round"),
+    ("ZfsReplicate", "runs in the nightly plan — a later round"),
+    (
+        "ListTemplates",
+        "golden-template maintenance, a few times a year — a later round",
+    ),
+    (
+        "BuildTemplate",
+        "golden-template maintenance — a later round",
+    ),
+    (
+        "ForgetStack",
+        "housekeeping after a rename; rare and easy to do wrong — a later round",
+    ),
+];
+
+/// covers: F156
+#[test]
+fn every_host_operation_is_reachable_or_deliberately_not() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let proto = std::fs::read_to_string(root.join("proto/src/lib.rs")).unwrap();
+    // Brace-counted, not "the first \n}\n": half these variants are structs
+    // with bodies of their own, and stopping at the first closing brace found
+    // fifteen of twenty-eight — a parser that silently reads part of the file
+    // is the same failure this test exists to catch.
+    let body = {
+        let i = proto.find("pub enum Command").expect("Command enum");
+        let rest = &proto[i..];
+        let open = rest.find('{').expect("enum body");
+        let mut depth = 0i32;
+        let mut end = rest.len();
+        for (k, c) in rest.char_indices().skip(open) {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = k;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        &rest[open..end]
+    };
+    let variants: Vec<String> = body
+        .lines()
+        .filter_map(|l| {
+            let t = l.strip_prefix("    ")?;
+            let name: String = t.chars().take_while(|c| c.is_alphanumeric()).collect();
+            // The delimiter may be a space away: `DestroyStack {` is a
+            // variant, and looking only at the character immediately after the
+            // name found fifteen of twenty-eight.
+            let after = t[name.len()..].trim_start().chars().next()?;
+            let starts_upper = name.chars().next()?.is_uppercase();
+            (starts_upper && matches!(after, '{' | '(' | ',')).then_some(name)
+        })
+        .collect();
+    assert!(
+        variants.len() > 20,
+        "the enum parser found only {} variants — the shape changed and this \
+         check would pass on nothing",
+        variants.len()
+    );
+
+    // Everything the TUI sends.
+    let mut tui_src = String::new();
+    fn walk(dir: &std::path::Path, out: &mut String) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push_str(&std::fs::read_to_string(&p).unwrap());
+            }
+        }
+    }
+    walk(&root.join("client/src/tui"), &mut tui_src);
+
+    let mut unreachable = Vec::new();
+    for v in &variants {
+        let sent = tui_src.contains(&format!("Command::{}", v));
+        let excused = CLI_ONLY.iter().any(|(n, _)| n == v);
+        if !sent && !excused {
+            unreachable.push(v.clone());
+        }
+    }
+    assert!(
+        unreachable.is_empty(),
+        "these host operations can only be reached from the command line and \
+         are not written down as such — wire them into the TUI or add them to \
+         CLI_ONLY with a reason: {:?}",
+        unreachable
+    );
+
+    // And the excuse list may not rot: an entry for a command the TUI now
+    // sends, or for one that no longer exists, is a comment pretending to be
+    // a decision.
+    let stale: Vec<&str> = CLI_ONLY
+        .iter()
+        .map(|(n, _)| *n)
+        .filter(|n| {
+            !variants.iter().any(|v| v == n) || tui_src.contains(&format!("Command::{}", n))
+        })
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "CLI_ONLY still excuses commands that are gone or now reachable: {:?}",
+        stale
+    );
+}
+
 /// The wizard can reach `no_data`, and its preview cannot drift from what it
 /// scaffolds.
 ///
@@ -1107,26 +1268,21 @@ fn d6_plan_diff_skip_update_and_line_previews() {
 #[test]
 fn h19_every_palette_action_reaches_a_real_handler() {
     // G3's promise: no orphaned actions. Every palette entry must have an id
-    // the dispatcher knows; the dispatcher arm list is mirrored here — a new
-    // palette entry without a handler fails this test.
+    // the dispatcher knows.
+    //
+    // The arm list used to be copied into this test by hand, which is the
+    // same two-lists-that-drift shape the whole of 2026-09-01 was spent
+    // removing — and it drifted on the first change: six new actions were
+    // wired into the dispatcher and the copy here still held eleven. So the
+    // dispatcher source is read instead of mirrored.
     use homelab_client::tui::model::PALETTE;
-    // Mirror of the dispatcher match arms in model.rs::run_palette_action.
-    let handled = [
-        "tab.dashboard",
-        "tab.stacks",
-        "tab.logs",
-        "tab.doctor",
-        "tab.settings",
-        "tab.shell",
-        "refresh",
-        "doctor",
-        "fx",
-        "help",
-        "quit",
-    ];
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/model.rs"),
+    )
+    .unwrap();
     for action in PALETTE {
         assert!(
-            handled.contains(&action.id),
+            src.contains(&format!("\"{}\" =>", action.id)),
             "palette action '{}' ({}) has no dispatcher arm",
             action.id,
             action.label

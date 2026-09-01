@@ -27,4 +27,4 @@ checks:
       what asks that.
 
 manual:
-  - "Open go.kp-soft.dev en kijk of de cijfers van vandaag zijn, niet van vanmorgen — de pagina wordt niet live bijgewerkt zolang de websocket niet door Cloudflare komt (F148)."
+  - "Open http://10.10.10.4:7881/ op het huisnetwerk en kijk of het tellertje beweegt terwijl je kijkt — dat is het bewijs dat de websocket het doet. Via een publieke naam is dit rapport niet meer bereikbaar, met opzet."

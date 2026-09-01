@@ -1,4 +1,4 @@
-# The gateway's own three hostnames. They used to be docker labels on these
+# The gateway's own two hostnames. They used to be docker labels on these
 # containers, which works only because Traefik shares a machine with them —
 # the moment a service leaves, the label stops meaning anything (that is what
 # happened to Uptime Kuma on 2026-09-01). Routes as files behave the same
@@ -20,17 +20,23 @@ http:
       rule: "Host(`grafana.kp-soft.dev`)"
       entryPoints: [web]
       service: grafana
-    goaccess:
-      rule: "Host(`go.kp-soft.dev`)"
-      entryPoints: [web]
-      service: goaccess
+
+  # go.kp-soft.dev is gone on purpose (Kenny, form B2c). The GoAccess report
+  # is a tool for the house, and routing it through Cloudflare was what broke
+  # it: the page arrives over https, an https page may not open an insecure
+  # websocket, and GoAccess pushes every update over exactly such a
+  # websocket. Through the tunnel the numbers therefore froze at the moment
+  # the container started — measured 2026-09-01, access.log live at 17:51 and
+  # the page still showing 14:35 (F148).
+  #
+  # On the LAN the page is http, the websocket is allowed, and GoAccess works
+  # the way it was built to. So the report lives at http://10.10.10.4:7881/
+  # and nothing about it is on the internet any more — one hostname fewer, one
+  # Access policy fewer, and the whole websocket question settled by removal
+  # rather than by another moving part.
 
   services:
     grafana:
       loadBalancer:
         servers:
           - url: "http://10.10.10.4:3000"
-    goaccess:
-      loadBalancer:
-        servers:
-          - url: "http://10.10.10.4:7881"

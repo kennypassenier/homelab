@@ -87,12 +87,61 @@ pub fn draw(f: &mut Frame, model: &Model) {
     if let Some(wiz) = &model.wizard {
         draw_wizard(f, model, wiz);
     }
+    if let Some(c) = &model.confirm {
+        draw_confirm(f, c);
+    }
     if model.help_open {
         draw_help(f);
     }
     if model.palette_open {
         draw_palette(f, model);
     }
+}
+
+/// The typed confirmation for a restore. Small, red-bordered, and it says
+/// what the operation will overwrite rather than asking "are you sure".
+fn draw_confirm(f: &mut Frame, c: &crate::tui::model::Confirm) {
+    let area = f.area();
+    let w = 64u16.min(area.width.saturating_sub(4));
+    let h = 9u16.min(area.height.saturating_sub(2));
+    let rect = Rect {
+        x: (area.width.saturating_sub(w)) / 2,
+        y: area.height / 3,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .border_type(BorderType::Double)
+        .border_style(Style::new().fg(THEME.red))
+        .title(Line::from(Span::styled(
+            format!(" >> CONFIRM {} << ", c.op.title()),
+            Style::new().fg(THEME.red).add_modifier(Modifier::BOLD),
+        )))
+        .style(Style::new().bg(THEME.elevated).fg(THEME.text));
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let lines = vec![
+        Line::from(Span::styled(c.prompt.clone(), Style::new().fg(THEME.text))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  > ", THEME.muted_style()),
+            Span::styled(
+                c.typed.clone(),
+                Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("_", THEME.muted_style()),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ENTER confirm · ESC cancel",
+            THEME.muted_style(),
+        )),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }),
+        inner,
+    );
 }
 
 fn draw_plan(f: &mut Frame, model: &Model, plan: &crate::tui::model::Plan) {
@@ -680,10 +729,10 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
 fn draw_help(f: &mut Frame) {
     let area = f.area();
     let w = 60u16.min(area.width - 4);
-    let h = 16u16.min(area.height - 4);
+    let h = 24u16.min(area.height - 4);
     let rect = Rect {
         x: (area.width - w) / 2,
-        y: area.height / 5,
+        y: area.height / 8,
         width: w,
         height: h,
     };
@@ -704,8 +753,16 @@ fn draw_help(f: &mut Frame) {
         ("UP / DOWN", "move selection / scroll"),
         ("LEFT / RIGHT", "log source (Logs tab)"),
         ("SPACE", "follow logs"),
-        ("R", "refresh fleet state"),
-        ("E", "park/unpark stack for nightly runs (H8)"),
+        ("n / p / SHIFT+D", "new stack · plan · deploy"),
+        ("SHIFT+B", "back up the selected stack"),
+        ("SHIFT+U", "update the selected stack"),
+        ("SHIFT+R", "restore it (asks for the name first)"),
+        ("g", "apply the runaway guards"),
+        ("c", "fleet check — repo against reality"),
+        ("i", "incident bundles"),
+        ("r", "refresh fleet state"),
+        ("e", "park/unpark stack for nightly runs"),
+        ("u", "update the host binary when one is offered"),
         ("CTRL+K", "command palette"),
         ("F2", "cycle effect intensity"),
         ("H", "this help"),

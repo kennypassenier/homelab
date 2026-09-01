@@ -44,11 +44,13 @@ The exact files the daemon deployed are in git: `/var/lib/homelab/repo`.
 
 ## Layer 3 — Restore data from backup
 
-Restic repos per stack: `rclone:gdrive:homelab-backups/<stack>-config`, password
+Restic repos are per OWNING APP, not per stack:
+`rclone:gdrive:homelab-backups/<app>-config` — the exact names per stack are
+listed below. Password
 file `/var/lib/homelab/secrets/restic.pw` (keep an offline copy of this
 password — without it backups are unreadable!).
 ```sh
-export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<stack>-config
+export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<app>-config
 export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
 restic snapshots
 restic restore latest --target /
@@ -56,33 +58,109 @@ restic restore latest --target /
 
 ## Stacks
 
-### cloudflared — LEGACY (v1 manifest, not deployable by v2)
+### almanac (vmid 112)
 
-Recover by hand per Layer 2, or migrate it to a v2 stack first.
+- hostname `112-app-almanac`, ip `10.10.10.12/24`
+- resources: 1 core(s), 512 MiB RAM, 256 MiB swap, 4 GiB disk
+- apps: none — native services under systemd, not compose
+- recreate from scratch: `homelab adopt stacks/almanac` — native services; the unit files and binaries come from the service's own release, not from a compose pull
+- data restore from: `…:almanac-config`
 
-### gateway — LEGACY (v1 manifest, not deployable by v2)
+### downloader (vmid 105)
 
-Recover by hand per Layer 2, or migrate it to a v2 stack first.
+- hostname `105-app-downloader`, ip `10.10.10.5/24`
+- resources: 2 core(s), 2048 MiB RAM, 512 MiB swap, 10 GiB disk
+- apps: qbittorrent, promtail
+- recreate from scratch: `homelab deploy stacks/downloader` (or by hand per Layer 2)
+- data restore from: `…:qbittorrent-config`
 
-### synctest (vmid 108)
+### gateway (vmid 104)
 
-- hostname `108-app-synctest`, ip `10.10.10.8/24`
+- hostname `104-app-gateway`, ip `10.10.10.4/24`
+- resources: 4 core(s), 5120 MiB RAM, 1024 MiB swap, 30 GiB disk
+- apps: traefik, cloudflared, crowdsec, grafana, loki, goaccess, promtail
+- recreate from scratch: `homelab deploy stacks/gateway` (or by hand per Layer 2)
+- data restore from: `…:traefik-config`, `…:cloudflared-config`, `…:crowdsec-config`, `…:grafana-config`, `…:loki-config`, `…:goaccess-config`
+
+### home (vmid 115)
+
+- hostname `115-app-home`, ip `10.10.10.15/24`
+- resources: 2 core(s), 1024 MiB RAM, 512 MiB swap, 8 GiB disk
+- apps: homepage, promtail
+- recreate from scratch: `homelab deploy stacks/home` (or by hand per Layer 2)
+- data restore from: `…:homepage-config`
+
+### kp-soft (vmid 116)
+
+- hostname `116-app-kp-soft`, ip `10.10.10.16/24`
+- resources: 2 core(s), 2048 MiB RAM, 512 MiB swap, 16 GiB disk
+- apps: kp-soft, promtail
+- recreate from scratch: `homelab deploy stacks/kp-soft` (or by hand per Layer 2)
+- data restore from: `…:kp-soft-config`
+
+### kyu (vmid 109)
+
+- hostname `109-app-kyu`, ip `10.10.10.9/24`
+- resources: 1 core(s), 256 MiB RAM, 128 MiB swap, 2 GiB disk
+- apps: none — native services under systemd, not compose
+- recreate from scratch: `homelab adopt stacks/kyu` — native services; the unit files and binaries come from the service's own release, not from a compose pull
+- data restore from: `…:kyu-config`, `…:kyu-runner-config`, `…:http-switchboard-config`
+
+### media (vmid 106)
+
+- hostname `106-app-media`, ip `10.10.10.6/24`
+- resources: 6 core(s), 8192 MiB RAM, 512 MiB swap, 80 GiB disk
+- apps: jellyfin, sonarr, radarr, prowlarr, bazarr, seerr, flaresolverr, promtail
+- recreate from scratch: `homelab deploy stacks/media` (or by hand per Layer 2)
+- data restore from: `…:jellyfin-config`, `…:sonarr-config`, `…:radarr-config`, `…:prowlarr-config`, `…:bazarr-config`, `…:seerr-config`
+
+### metrics (vmid 113)
+
+- hostname `113-app-metrics`, ip `10.10.10.13/24`
+- resources: 2 core(s), 1024 MiB RAM, 512 MiB swap, 16 GiB disk
+- apps: prometheus, alertmanager, promtail, pve-exporter
+- recreate from scratch: `homelab deploy stacks/metrics` (or by hand per Layer 2)
+- data restore from: `…:prometheus-config`, `…:alertmanager-config`
+
+### paperwork (vmid 114)
+
+- hostname `114-app-paperwork`, ip `10.10.10.14/24`
+- resources: 4 core(s), 4096 MiB RAM, 512 MiB swap, 32 GiB disk
+- apps: actual, stirling, paperless-db, paperless, promtail
+- recreate from scratch: `homelab deploy stacks/paperwork` (or by hand per Layer 2)
+- data restore from: `…:actual-config`, `…:stirling-config`, `…:paperless-config`, `…:paperless-db-config`
+
+### productivity (vmid 111)
+
+- hostname `111-app-productivity`, ip `10.10.10.11/24`
+- resources: 2 core(s), 2048 MiB RAM, 512 MiB swap, 8 GiB disk
+- apps: supersync-db, supersync, promtail
+- recreate from scratch: `homelab deploy stacks/productivity` (or by hand per Layer 2)
+- data restore from: `…:supersync-db-config`
+
+### registry (vmid 117)
+
+- hostname `117-app-registry`, ip `10.10.10.17/24`
+- resources: 2 core(s), 1024 MiB RAM, 512 MiB swap, 32 GiB disk
+- apps: registry, promtail
+- recreate from scratch: `homelab deploy stacks/registry` (or by hand per Layer 2)
+- data restore from: `…:registry-config`
+
+### syncthing (vmid 108)
+
+- hostname `108-app-syncthing`, ip `10.10.10.8/24`
 - resources: 2 core(s), 1024 MiB RAM, 256 MiB swap, 4 GiB disk
 - apps: syncthing, promtail
-- recreate from scratch: `homelab deploy stacks/synctest-108` (or by hand per Layer 2)
-- data restore: restic repo `…:synctest-config`, then redeploy
-
-### syncthing (vmid 110)
-
-- hostname `110-app-syncthing`, ip `10.10.10.10/24`
-- resources: 1 core(s), 512 MiB RAM, 256 MiB swap, 4 GiB disk
-- apps: syncthing, promtail
 - recreate from scratch: `homelab deploy stacks/syncthing` (or by hand per Layer 2)
-- data restore: restic repo `…:syncthing-config`, then redeploy
+- data restore from: `…:syncthing-config`
 
-### todo — LEGACY (v1 manifest, not deployable by v2)
+### uptime (vmid 107)
 
-Recover by hand per Layer 2, or migrate it to a v2 stack first.
+- hostname `107-app-uptime`, ip `10.10.10.7/24`
+- resources: 1 core(s), 512 MiB RAM, 256 MiB swap, 8 GiB disk
+- apps: uptime-kuma, promtail
+- recreate from scratch: `homelab deploy stacks/uptime` (or by hand per Layer 2)
+- data restore from: `…:uptime-kuma-config`
 
 ## Full-host rebuild order
 

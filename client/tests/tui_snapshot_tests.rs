@@ -777,6 +777,35 @@ fn v8_config_race_regression_rpc_exit_rule() {
     assert!(!rpc_can_exit(false, false, false));
 }
 
+/// The document in the repository is the one somebody opens when the host is
+/// gone — and until 2026-09-01 it had never been regenerated after the
+/// generator was fixed. It still listed the gateway as "LEGACY (v1 manifest,
+/// not deployable)", still said restic repos were per stack, and predated
+/// five of the thirteen stacks. Every fix landed in the generator and none of
+/// them in the artefact.
+///
+/// So the artefact is checked, not the generator. A stack file that changes
+/// without the runbook being regenerated fails here, which is the only moment
+/// anybody would notice before the worst day.
+/// covers: F152
+#[test]
+fn the_committed_runbook_matches_a_fresh_generation() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let out = std::env::temp_dir().join(format!("homelab-dr-{}.md", std::process::id()));
+    homelab_client::spec::generate_runbook(&root.join("stacks"), out.to_str().unwrap()).unwrap();
+    let fresh = std::fs::read_to_string(&out).unwrap();
+    let committed = std::fs::read_to_string(root.join("docs/DR_RUNBOOK.md")).unwrap();
+    let _ = std::fs::remove_file(&out);
+    assert_eq!(
+        fresh, committed,
+        "docs/DR_RUNBOOK.md is stale — run `homelab runbook docs/DR_RUNBOOK.md` \
+         and read the diff before committing it"
+    );
+}
+
 /// covers: F150, F151
 #[test]
 fn h17_runbook_generator_structural_snapshot() {

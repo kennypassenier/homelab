@@ -5,9 +5,11 @@
 # dead-letter machinery works FOR the delivery. It holds no state of its own:
 # the hub owns every cursor, and killing the runner loses nothing.
 #
-# That statelessness is why `stateless: true` below is honest rather than a
-# shortcut. What is backed up is its configuration and its token, which are
-# the only things that would have to be reconstructed.
+# That statelessness is why the declaration below lists only `data_dirs` —
+# its configuration and its token, the two things that would have to be
+# reconstructed — and claims nothing else. (An earlier version of this comment
+# talked about a `stateless: true` key. There is no such key here, and
+# core/src/native.rs would reject it beside data_dirs anyway.)
 #
 # Kenny's R1/R2 (2026-08-31): the homelab's own warnings travel through the
 # hub instead of straight at Home Assistant, so that a warning survives HA

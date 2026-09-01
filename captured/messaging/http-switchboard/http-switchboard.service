@@ -1,3 +1,7 @@
+# HISTORICAL — this is the unit as it ran BEFORE the C7 migration, kept as the
+# record of what was there. It points at /etc/http-switchboard; the live unit
+# points at /appdata/kyu/http-switchboard-config and lives at
+# stacks/kyu/http-switchboard/http-switchboard.service. Do not deploy this one.
 [Unit]
 Description=HTTPSwitchboard - reshapes a message and delivers it where the config says
 After=network-online.target kyu.service

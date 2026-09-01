@@ -7,7 +7,17 @@ use serde::Deserialize;
 
 use homelab_proto::{DeploySpec, FileBlob, GatewayRoute, StackManifest};
 
+/// A typo used to be free. `latch_secret:` instead of `latch_secrets:` parsed
+/// cleanly, deployed cleanly, and produced a container with no secrets in it;
+/// `gateway_routes:` instead of `gateway_route:` produced a hostname with no
+/// route. Both are the shape that cost the downloader its disks on
+/// 2026-08-31 — a field the reader did not recognise and silently dropped.
+///
+/// `deny_unknown_fields` has to sit on the OUTER struct: `flatten` swallows
+/// everything it does not recognise and hands it on, so the inner manifest can
+/// never see a stray key.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StackFile {
     #[serde(flatten)]
     manifest: StackManifest,
@@ -50,6 +60,25 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
 
     let gateway_route = match stack_file.gateway_route.as_ref() {
         Some(g) => {
+            // The filename is declared here and independently DERIVED by
+            // destroy (`<vmid>-app-<stack>.yml`), which has no access to this
+            // field — the manifest that reaches the host does not carry it.
+            // As long as the two can disagree, a stack that names its file
+            // anything else deploys fine and leaves a router behind when it is
+            // destroyed, still answering for a hostname that has moved. That
+            // is F115 exactly. Requiring them to agree removes the class
+            // rather than the symptom.
+            let derived = format!(
+                "{}-app-{}.yml",
+                stack_file.manifest.vmid, stack_file.manifest.stack_name
+            );
+            if g.filename != derived {
+                return Err(format!(
+                    "gateway_route.filename is '{}' but destroy removes '{}' — \
+                     they must match, or the route outlives the stack",
+                    g.filename, derived
+                ));
+            }
             let route_path = dir.join("traefik-routes.yml");
             let content = std::fs::read_to_string(&route_path)
                 .map_err(|e| format!("gateway_route set but {}: {}", route_path.display(), e))?;
@@ -221,6 +250,20 @@ pub fn scan_local_stacks(base: &Path) -> Vec<(String, PathBuf)> {
     out.sort();
     out
 }
+/// The repositories a stack's data actually lives in, named the way restic
+/// names them. One per owning app, not one per stack — the runbook said the
+/// latter and was wrong for every stack in the fleet.
+fn restic_repos(m: &homelab_core::manifest::StackManifest) -> String {
+    let groups = homelab_core::ops::backup::owner_groups(m);
+    if groups.is_empty() {
+        return "no /appdata paths — nothing to restore".to_string();
+    }
+    groups
+        .iter()
+        .map(|(owner, _)| format!("`…:{}-config`", owner))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// E7: generate the disaster-recovery runbook from the local stacks dir.
 /// Deliberately plain markdown with copy-pasteable commands — this document
@@ -266,7 +309,9 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          ```\n\
          The exact files the daemon deployed are in git: `/var/lib/homelab/repo`.\n\n\
          ## Layer 3 — Restore data from backup\n\n\
-         Restic repos per stack: `rclone:gdrive:homelab-backups/<stack>-config`, password\n\
+         Restic repos are per OWNING APP, not per stack:\n\
+         `rclone:gdrive:homelab-backups/<app>-config` — the exact names per stack are\n\
+         listed below. Password\n\
          file `/var/lib/homelab/secrets/restic.pw` (keep an offline copy of this\n\
          password — without it backups are unreadable!).\n\
          ```sh\n\
@@ -301,7 +346,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
              - resources: {} core(s), {} MiB RAM, {} MiB swap, {} GiB disk\n\
              - apps: {}\n\
              - recreate from scratch: `homelab deploy stacks/{}` (or by hand per Layer 2)\n\
-             - data restore: restic repo `…:{}-config`, then redeploy\n\n",
+             - data restore from: {}\n\n",
             m.stack_name,
             m.vmid,
             m.hostname,
@@ -312,7 +357,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
             m.resources.disk_gb,
             m.apps.join(", "),
             name,
-            m.stack_name,
+            restic_repos(&m),
         ));
     }
     doc.push_str(

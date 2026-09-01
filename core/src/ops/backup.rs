@@ -121,7 +121,13 @@ pub(crate) async fn newest_snapshot_unix(
 /// manifest order. A path with no declared owner belongs to the stack, which
 /// keeps host-level paths (and every manifest written before the field
 /// existed) working exactly as they did.
-pub(crate) fn owner_groups(m: &StackManifest) -> Vec<(String, Vec<String>)> {
+/// Public because the disaster-recovery runbook must name the SAME
+/// repositories the backup actually writes to. It used to derive them itself,
+/// from the stack name, and so printed `media-config` for a stack whose
+/// repositories are `jellyfin-config`, `sonarr-config`, `radarr-config` and
+/// three more. That document is read exactly once — when everything else is
+/// gone — and it would have said the backups were not there.
+pub fn owner_groups(m: &StackManifest) -> Vec<(String, Vec<String>)> {
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     for mount in &m.storage {
         let owner = mount.owner(&m.stack_name).to_string();

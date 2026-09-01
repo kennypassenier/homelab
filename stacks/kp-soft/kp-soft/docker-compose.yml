@@ -2,10 +2,11 @@
 # TLS ends upstream at Cloudflare; Traefik forwards to this container.
 #
 # The image is PRIVATE on GHCR (verified 2026-08-31: an anonymous manifest
-# fetch answers 403), so the container needs a one-time `docker login ghcr.io`
-# with a read:packages token before this can pull. The orchestrator has no
-# mechanism for registry logins — it pushes compose files and runs
-# `docker compose pull`.
+# fetch answers 403), so the container has to sign in before it can pull.
+# The orchestrator does that itself: `registry_login:` in this stack's
+# lxc-compose.yml names ghcr.io and the app whose token to use, and the deploy
+# signs in before the pull. (This comment used to say no such mechanism
+# existed. It was written before the mechanism did, and outlived it.)
 #
 # Pinned, not :latest. A deploy you cannot repeat is not a deploy: `latest`
 # means the version that comes back after a rebuild is whatever was newest

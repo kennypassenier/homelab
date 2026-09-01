@@ -1060,3 +1060,73 @@ fn a_payload_the_link_cannot_carry_is_refused_with_a_reason() {
     // The size that actually failed tonight now fits with room to spare.
     assert!(too_large(16_861_920).is_none());
 }
+
+/// The runbook must name the repositories restic actually writes to.
+///
+/// It derived them from the stack name and printed `media-config`; the media
+/// stack's data lives in `jellyfin-config`, `sonarr-config`, `radarr-config`,
+/// `prowlarr-config`, `bazarr-config` and `seerr-config`. That document is
+/// read exactly once — when everything else is gone — and it would have said
+/// the backups were not there.
+#[test]
+fn the_runbook_names_the_repositories_restic_actually_uses() {
+    use homelab_core::manifest::*;
+    let mut m = StackManifest {
+        registry_login: None,
+        retention: None,
+        data_mounts: Vec::new(),
+        native_only: false,
+        natives: Vec::new(),
+        stack_name: "media".into(),
+        vmid: 106,
+        hostname: "106-app-media".into(),
+        network: NetworkSpec {
+            ip: "10.10.10.6/24".into(),
+            gateway: "10.10.10.1".into(),
+            bridge: "vmbr0".into(),
+            vlan: Some(10),
+        },
+        resources: ResourceSpec {
+            cores: 4,
+            memory_mb: 4096,
+            swap_mb: 512,
+            disk_gb: 80,
+            storage: "local-lvm".into(),
+        },
+        lxc: LxcSpec {
+            template: "clone:997".into(),
+            unprivileged: false,
+            features: "nesting=1,keyctl=1".into(),
+            protection: false,
+            gpu: true,
+            vpn: false,
+        },
+        boot: BootSpec {
+            onboot: true,
+            order: Some(50),
+        },
+        storage: Vec::new(),
+        apps: vec!["jellyfin".into(), "sonarr".into()],
+    };
+    for app in ["jellyfin", "sonarr"] {
+        m.storage.push(MountSpec {
+            host_path: format!("/appdata/media/{}-config", app),
+            mount_point: format!("/appdata/media/{}-config", app),
+            host_owner_uid: Some(1000),
+            app: Some(app.into()),
+        });
+    }
+    let repos = homelab_core::ops::backup::owner_groups(&m)
+        .iter()
+        .map(|(o, _)| o.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        repos,
+        vec!["jellyfin".to_string(), "sonarr".to_string()],
+        "one repository per owning app — this is what backup.rs writes to"
+    );
+    assert!(
+        !repos.contains(&"media".to_string()),
+        "there is no media-config repository, and the runbook must not name one"
+    );
+}

@@ -142,3 +142,61 @@ fn d12_latch_sourced_secrets() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// A typo in a stack file must be refused, not ignored.
+///
+/// `latch_secret:` instead of `latch_secrets:` used to parse cleanly, deploy
+/// cleanly, and produce a container with no secrets in it. `gateway_routes:`
+/// instead of `gateway_route:` produced a hostname with no route. Both are
+/// the shape that cost the downloader its disks on 2026-08-31: a field the
+/// reader did not recognise and dropped without a word.
+#[test]
+fn a_misspelled_key_in_a_stack_file_is_refused() {
+    // Named for this test, not just the pid: tests in one binary share a
+    // process id, and a sibling test was reaching into this directory.
+    let tmp = std::env::temp_dir().join(format!(
+        "homelab-typo-{}-{}",
+        std::process::id(),
+        "unknownfield"
+    ));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let dir = tmp.join("typo");
+    std::fs::create_dir_all(dir.join("app")).unwrap();
+    std::fs::write(dir.join("app/docker-compose.yml"), "services: {}\n").unwrap();
+    let base = "\
+stack_name: typo
+vmid: 150
+hostname: 150-app-typo
+network: {ip: 10.10.10.50/24, gateway: 10.10.10.1, bridge: vmbr0, vlan: 10}
+resources: {cores: 1, memory_mb: 512, swap_mb: 256, disk_gb: 4, storage: local-lvm}
+lxc: {template: 'clone:998', unprivileged: true, features: 'nesting=1', protection: false, gpu: false, vpn: false}
+boot: {onboot: true, order: 50}
+storage: []
+apps: [app]
+";
+    // The correct spelling parses.
+    std::fs::write(
+        dir.join("lxc-compose.yml"),
+        format!("{}latch_secrets: [app]\n", base),
+    )
+    .unwrap();
+    let ok_spelling = format!("{:?}", homelab_client::spec::build_spec(&dir));
+    assert!(
+        !ok_spelling.to_lowercase().contains("unknown field"),
+        "the correct spelling must not be refused as unknown: {}",
+        ok_spelling
+    );
+    // The typo does not.
+    std::fs::write(
+        dir.join("lxc-compose.yml"),
+        format!("{}latch_secret: [app]\n", base),
+    )
+    .unwrap();
+    let err = format!("{:?}", homelab_client::spec::build_spec(&dir));
+    assert!(
+        err.contains("latch_secret") || err.to_lowercase().contains("unknown field"),
+        "a misspelled key must be named and refused, got: {}",
+        err
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}

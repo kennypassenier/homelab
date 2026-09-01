@@ -114,6 +114,20 @@ is left untouched — only these four exact tokens are substituted.
   `/appdata/` binds and generates the manifest `storage:` entries from them
   (host dir creation, ownership, LXC mount). One source of truth; nothing
   to keep in sync.
+- **An app that keeps nothing gets `no_data: true`** on its storage entry.
+  Some services hold their whole configuration somewhere else — cloudflared's
+  ingress rules and Access policies live in the Cloudflare dashboard, and its
+  `/appdata` directory has been empty since the day it was created. Without
+  the flag the backup correctly refuses to record a snapshot with no files in
+  it, and stops the whole stack there: on 2026-09-01 that one empty directory
+  is why the gateway's other five repositories were never written (F154).
+
+  The wizard asks — the STORAGE step lists every `/appdata` directory the
+  stack will get and each is toggled between "keeps files" and "keeps
+  nothing". A declared-empty app gets no restic repository at all, and the
+  declaration is held to: a `no_data` path that turns out non-empty fails the
+  backup with a sentence naming it, because by declaration nothing in it is
+  being saved.
 - **Labels**:
   - `com.homelab.backup.pause=true` — stop this container during the
     snapshot (only needed for apps whose data must be quiesced).

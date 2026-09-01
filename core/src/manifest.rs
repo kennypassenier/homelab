@@ -244,6 +244,12 @@ pub struct DeploySpec {
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub gateway_route: Option<GatewayRoute>,
+    /// J1-J3: per-app health checks, keyed by app name. Orchestrator input
+    /// like the manifest itself — it never enters the container, because what
+    /// "healthy" means is the homelab's question about the service rather
+    /// than something the service needs to be told.
+    #[serde(default)]
+    pub checks: BTreeMap<String, crate::checks::ServiceChecks>,
 }
 
 // ── Validation (D10) ─────────────────────────────────────────────────────────

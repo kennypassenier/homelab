@@ -67,6 +67,7 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
             filename: "110-app-syncthing.yml".into(),
             content: "http: {}\n".into(),
         }),
+        checks: Default::default(),
     }
 }
 

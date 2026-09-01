@@ -1,0 +1,80 @@
+# What "Jellyfin is healthy" means, measured rather than assumed.
+#
+# These are the readings taken by hand during the CT 106 rebuild on
+# 2026-09-01. Writing them down is the whole point: that knowledge existed
+# for one night and would have evaporated by the next rebuild.
+#
+# Every command runs on the CONTAINER, not inside the docker container: that
+# is the level the orchestrator already works at, it reaches every app on
+# localhost, and it can read /appdata directly. Jellyfin's own image has no
+# sqlite3 in it, so a check written one level deeper cannot run at all.
+#
+# The API key is read from Jellyfin's
+# own database rather than passed in, because the key that WAS passed in
+# turned out to be dead and had been for an unknown length of time (F131) —
+# asking the application which keys it accepts is the only reading that
+# cannot go stale.
+checks:
+  - name: "films in de bibliotheek"
+    command: >-
+      K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
+      curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
+      sed 's/.*"MovieCount":\([0-9]*\).*/\1/'
+    expect: never_decreases
+    blind_spot: >-
+      Counts what Jellyfin has indexed, not whether any of it plays. A library
+      of unreadable files counts the same as a healthy one.
+
+  - name: "series in de bibliotheek"
+    command: >-
+      K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
+      curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
+      sed 's/.*"SeriesCount":\([0-9]*\).*/\1/'
+    expect: never_decreases
+
+  - name: "afleveringen"
+    command: >-
+      K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
+      curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
+      sed 's/.*"EpisodeCount":\([0-9]*\).*/\1/'
+    expect: never_decreases
+
+  - name: "collections"
+    command: >-
+      K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
+      curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
+      sed 's/.*"BoxSetCount":\([0-9]*\).*/\1/'
+    expect: never_decreases
+
+  # Not a count: the paths every library and every *arr root folder is stored
+  # against. Changing one breaks all of them at once, and it would not show up
+  # in any number.
+  - name: "bibliotheekpaden"
+    command: >-
+      K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
+      curl -s -m 30 "http://127.0.0.1:8096/Library/VirtualFolders?api_key=$K" |
+      grep -o '/data/[0-9]*TB/[A-Za-z0-9]*' | sort -u | tr '\n' ','
+    expect: must_match
+
+  - name: "hardwareversnelling"
+    command: >-
+      grep -oE '<HardwareAccelerationType>[a-z]*' /appdata/media/jellyfin-config/config/encoding.xml |
+      cut -d'>' -f2
+    expect: must_match
+    blind_spot: >-
+      Reads the setting, not a transcode. That the GPU is configured does not
+      prove it is used — only an actual transcode does, and that is in the
+      manual list below.
+
+  - name: "grafische kaart aanwezig"
+    command: "ls /dev/dri/renderD128 2>/dev/null"
+    expect: must_be_present
+
+# What no measurement settles. These reach Kenny as a notification he has to
+# acknowledge, because a list he has to go and find is a list that does not
+# get read (form I2).
+manual:
+  - "Speel een film af op de televisie en kijk of het beeld klopt."
+  - "Controleer of het geluid synchroon loopt bij een aflevering met AC3-geluid."
+  - "Open een film met ingebrande ondertitels en kijk of die leesbaar zijn."
+  - "Kijk in de Jellyfin-app op je telefoon of de posters geladen worden — het artwork staat op een aparte schijf."

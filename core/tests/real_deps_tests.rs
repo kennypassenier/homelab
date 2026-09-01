@@ -176,6 +176,7 @@ fn spec(files_content: &str) -> DeploySpec {
         }],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     }
 }
 

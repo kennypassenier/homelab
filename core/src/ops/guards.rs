@@ -179,6 +179,18 @@ pub async fn apply(
         300,
     )
     .await?;
+
+    // sqlite3, because a service's own health checks (J1) run at this level
+    // and several of them ask the application's database what it holds. The
+    // alternative is a check that depends on a tool somebody installed by
+    // hand once, which is the shape of a check that works until it does not.
+    pct_sh(
+        exec,
+        vmid,
+        "command -v sqlite3 >/dev/null || (export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq sqlite3)",
+        300,
+    )
+    .await?;
     push_content(
         exec,
         vmid,

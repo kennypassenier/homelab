@@ -255,6 +255,7 @@ fn plan_modal_previews_changes() {
             files: vec![],
             env: Default::default(),
             gateway_route: None,
+            checks: Default::default(),
         }),
     });
     let out = render(&m);
@@ -889,6 +890,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
         ],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     };
     let applied = vec![
         mk(

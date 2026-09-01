@@ -1064,6 +1064,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
             files: vec![],
             env: Default::default(),
             gateway_route: None,
+            checks: Default::default(),
         },
         true,
     ))

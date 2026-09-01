@@ -50,7 +50,8 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
 
     let mut files: Vec<FileBlob> = Vec::new();
     let mut env: BTreeMap<String, String> = BTreeMap::new();
-    collect(dir, dir, &mut files, &mut env)?;
+    let mut checks: BTreeMap<String, homelab_core::checks::ServiceChecks> = BTreeMap::new();
+    collect(dir, dir, &mut files, &mut env, &mut checks)?;
     fetch_latch_secrets(
         dir,
         &stack_file.latch_secrets,
@@ -96,6 +97,7 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
         files,
         env,
         gateway_route,
+        checks,
     })
 }
 
@@ -104,6 +106,7 @@ fn collect(
     dir: &Path,
     files: &mut Vec<FileBlob>,
     env: &mut BTreeMap<String, String>,
+    checks: &mut BTreeMap<String, homelab_core::checks::ServiceChecks>,
 ) -> Result<(), String> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
@@ -113,7 +116,7 @@ fn collect(
         let path: PathBuf = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
         if path.is_dir() {
-            collect(root, &path, files, env)?;
+            collect(root, &path, files, env, checks)?;
             continue;
         }
         let rel = path
@@ -124,6 +127,22 @@ fn collect(
         // Orchestrator input, not container content: service.yml describes a
         // native unit to the homelab and has no business inside the container.
         if rel == "lxc-compose.yml" || rel == "traefik-routes.yml" || name == "service.yml" {
+            continue;
+        }
+        // Same reason: checks.yml says what healthy MEANS for this service.
+        // That is the homelab's question about the service, not something the
+        // service has to be told, so it travels beside the spec rather than
+        // into the container.
+        if name == "checks.yml" {
+            let app = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {}", rel, e))?;
+            let parsed: homelab_core::checks::ServiceChecks =
+                serde_yaml::from_str(&text).map_err(|e| format!("{}: {}", rel, e))?;
+            checks.insert(app, parsed);
             continue;
         }
         let content = std::fs::read_to_string(&path)

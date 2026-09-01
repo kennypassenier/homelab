@@ -161,6 +161,38 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         Ok(StepOutcome::Unchanged)
     });
 
+    // ── J1: the BEFORE half of every service's own health checks.
+    //
+    // Here, and not later, because "may rise, never fall" is only true while
+    // the two readings are minutes apart — and because everything after this
+    // point can change what is being measured. A stack that does not exist
+    // yet simply reads empty, which the comparison treats as "nothing to
+    // compare against" rather than as a fault.
+    let mut baseline: std::collections::BTreeMap<String, Vec<(String, String)>> =
+        std::collections::BTreeMap::new();
+    step!(runner, exec, ctx, m, "baseline", {
+        if !exists || spec.checks.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        for (app, sc) in &spec.checks {
+            let mut readings = Vec::new();
+            for c in &sc.checks {
+                let out = pct_sh(exec, m.vmid, &c.command, 120)
+                    .await
+                    .map(|o| o.stdout.trim().to_string())
+                    .unwrap_or_default();
+                readings.push((c.name.clone(), out));
+            }
+            baseline.insert(app.clone(), readings);
+        }
+        Ok(StepOutcome::Unchanged)
+    });
+    for (app, readings) in &baseline {
+        for (name, value) in readings {
+            log_info(format!("[baseline] {} · {} = {}", app, name, value));
+        }
+    }
+
     // ── D60: which upstreams does the cache answer for, right now?
     // Asked from inside the container that is about to pull, because that is
     // the only place the answer means anything. A cache that does not answer
@@ -1671,6 +1703,80 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             })
         }
     });
+
+    // ── J1: the AFTER half. Same commands, same container, minutes later.
+    step!(runner, exec, ctx, m, "service checks", {
+        if spec.checks.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let mut all: Vec<crate::checks::Reading> = Vec::new();
+        for (app, sc) in &spec.checks {
+            let before = baseline.get(app);
+            for c in &sc.checks {
+                let after = pct_sh(exec, m.vmid, &c.command, 120)
+                    .await
+                    .map(|o| o.stdout.trim().to_string())
+                    .unwrap_or_default();
+                let b = before
+                    .and_then(|rs| rs.iter().find(|(n, _)| n == &c.name))
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_default();
+                all.push(crate::checks::Reading {
+                    name: format!("{} · {}", app, c.name),
+                    before: b,
+                    after,
+                    expect: c.expect,
+                    blind_spot: c.blind_spot.clone(),
+                });
+            }
+        }
+        let (verdicts, blind) = crate::checks::judge_all(&all);
+        for (r, v) in all.iter().zip(verdicts.iter()) {
+            match v {
+                crate::checks::Verdict::Ok => {
+                    log_info(format!("[check] {} :: {} → {}", r.name, r.before, r.after))
+                }
+                crate::checks::Verdict::Unreadable(why) => ctx.sink.emit(PipelineEvent::Line {
+                    level: Level::Warn,
+                    source: "HOST".into(),
+                    msg: format!("[check] {}", why),
+                }),
+                crate::checks::Verdict::Regressed(_) => {}
+            }
+        }
+        // Reported even when everything passed: a green result is exactly
+        // when nobody asks what was not checked.
+        for b in &blind {
+            log_info(format!("[check] does not prove: {}", b));
+        }
+        let bad = crate::checks::regressions(&verdicts);
+        if bad.is_empty() {
+            Ok(StepOutcome::Unchanged)
+        } else {
+            Err(CoreError::Command {
+                rendered: format!("service checks {}", m.stack_name),
+                detail: bad.join("; "),
+            })
+        }
+    });
+
+    // The list no measurement can settle. It goes out as a notification Kenny
+    // has to acknowledge (form I2) rather than a page he has to go and find.
+    let manual: Vec<String> = spec
+        .checks
+        .values()
+        .flat_map(|sc| sc.manual.iter().cloned())
+        .collect();
+    if !manual.is_empty() {
+        runner.log(
+            Level::Warn,
+            format!(
+                "[check] {} thing(s) only a person can confirm:\n  - {}",
+                manual.len(),
+                manual.join("\n  - ")
+            ),
+        );
+    }
 
     runner.log(
         Level::Info,

@@ -717,6 +717,7 @@ fn b4_intent_hash_changes_with_any_file_edit() {
         }],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     };
     let h1 = intent_hash(&base);
     assert_eq!(h1, intent_hash(&base), "deterministic");
@@ -768,6 +769,7 @@ async fn h4_gpu_and_vpn_flags_produce_device_config() {
         }],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     };
     let sink = VecSink::new();
     let j = NullJournal;
@@ -808,6 +810,7 @@ async fn h4_no_flags_no_device_config() {
         }],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     };
     let sink = VecSink::new();
     let j = NullJournal;
@@ -951,6 +954,7 @@ async fn b8_clone_template_provisions_via_pct_clone() {
         }],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     };
     let sink = VecSink::new();
     let j = NullJournal;
@@ -1111,6 +1115,7 @@ async fn h2_deploy_registers_kea_reservation_on_create() {
         }],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     };
     let sink = VecSink::new();
     let j = NullJournal;
@@ -1152,6 +1157,7 @@ async fn h2_kea_failure_never_blocks_deploy() {
         }],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     };
     let sink = VecSink::new();
     let j = NullJournal;
@@ -1179,6 +1185,7 @@ async fn h2_no_kea_config_no_api_calls() {
         }],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     };
     let sink = VecSink::new();
     let j = NullJournal;
@@ -1204,6 +1211,7 @@ fn v8_validate_rejects_undeclared_appdata_bind() {
         }],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     };
     let err = validate(&spec).unwrap_err();
     let msg = format!("{}", err);
@@ -1330,6 +1338,7 @@ fn deploy_spec(m: StackManifest) -> homelab_core::manifest::DeploySpec {
         }],
         env: Default::default(),
         gateway_route: None,
+        checks: Default::default(),
     }
 }
 
@@ -2413,6 +2422,7 @@ async fn protection_is_set_after_all_drive_changes() {
             }],
             env: Default::default(),
             gateway_route: None,
+            checks: Default::default(),
         };
         let sink = VecSink::new();
         let j = NullJournal;

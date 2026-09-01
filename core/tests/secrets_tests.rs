@@ -62,6 +62,7 @@ fn spec_with_secret() -> DeploySpec {
         }],
         env,
         gateway_route: None,
+        checks: Default::default(),
     }
 }
 

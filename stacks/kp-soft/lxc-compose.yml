@@ -65,7 +65,7 @@ storage:
     host_owner_uid: 100000
     app: kp-soft
 
-apps: [kp-soft, promtail, cadvisor]
+apps: [kp-soft, promtail]
 latch_secrets: [kp-soft]
 
 # The image is private on GHCR, so the deploy signs in before it pulls.

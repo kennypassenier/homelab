@@ -51,7 +51,7 @@ storage:
     host_owner_uid: 100000
     app: registry
 
-apps: [registry, promtail, cadvisor]
+apps: [registry, promtail]
 
 # No route: this is spoken to by Docker daemons on the LAN, never by a
 # browser from outside, and it holds no secrets worth reaching for.

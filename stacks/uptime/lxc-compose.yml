@@ -45,7 +45,7 @@ storage:
     host_owner_uid: 100000
     app: uptime-kuma
 
-apps: [uptime-kuma, promtail, cadvisor]
+apps: [uptime-kuma, promtail]
 
 gateway_route:
   filename: 107-app-uptime.yml

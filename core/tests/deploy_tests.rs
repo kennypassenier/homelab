@@ -1442,6 +1442,10 @@ async fn b1_second_run_is_quiet() {
         "sha256sum '/etc/apt/apt.conf.d/50unattended-upgrades'",
         CmdOutput::ok(&sha_hex(guards::UNATTENDED_UPGRADES)),
     );
+    exec.respond_always(
+        "sha256sum '/opt/cadvisor/docker-compose.yml'",
+        CmdOutput::ok(&sha_hex(guards::CADVISOR_COMPOSE)),
+    );
     // Files already at destination content → pushes skipped too.
     let s = spec(110, "syncthing");
     exec.respond_always(
@@ -1784,4 +1788,74 @@ async fn storage_owned_correctly_says_nothing() {
 
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(report.ok, "correct ownership must pass: {:?}", report.error);
+}
+
+/// H4 · cAdvisor is installed on every managed docker host, not declared per
+/// stack.
+///
+/// It was a per-stack app directory in seven of thirteen stacks while
+/// `deploy.rs` wrote a Prometheus scrape target for every stack with apps.
+/// The metrics and syncthing stacks were therefore scraped and answered
+/// nothing — permanently down, permanently silent, because the HostDown rule
+/// watches the node job and not this one. An empty container panel and a
+/// working one look identical.
+#[tokio::test]
+async fn h4_cadvisor_is_installed_by_the_guards_on_every_docker_host() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    // A stack that does NOT declare cadvisor as one of its apps.
+    let sp = spec(110, "syncthing");
+    assert!(
+        !sp.manifest.apps.iter().any(|a| a == "cadvisor"),
+        "this test is only meaningful for a stack that does not declare it"
+    );
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    let staged = exec.file("/var/lib/homelab/push-staging");
+    assert!(
+        exec.calls_containing("/opt/cadvisor/docker-compose.yml")
+            .iter()
+            .any(|c| c.contains("sha256sum")),
+        "the guards must push a cadvisor compose to this host: {:?}",
+        staged
+    );
+    assert!(
+        exec.calls_containing("cd /opt/cadvisor && docker compose up -d")
+            .len()
+            == 1,
+        "and bring it up exactly once"
+    );
+}
+
+/// And never on a container that runs no docker: a weekly prune timer on a
+/// native-only host has been failing every week since it was installed, which
+/// is worse than useless — a guard that fails on schedule teaches you to
+/// ignore failures.
+#[tokio::test]
+async fn h4_cadvisor_is_not_installed_where_there_is_no_docker() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.native_only = true;
+    sp.manifest.apps = Vec::new();
+    sp.manifest.natives = vec!["thing".into()];
+    sp.files = vec![homelab_core::manifest::FileBlob {
+        path: "thing/thing.service".into(),
+        content: "[Unit]\n".into(),
+        mode: None,
+    }];
+    sp.manifest.storage = Vec::new();
+    sp.gateway_route = None;
+
+    let _ = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(
+        exec.calls_containing("/opt/cadvisor").is_empty(),
+        "a native-only host has no docker to report on"
+    );
 }

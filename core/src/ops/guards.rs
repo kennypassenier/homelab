@@ -34,6 +34,51 @@ pub const DOCKER_DAEMON_JSON: &str = r#"{
 }
 "#;
 
+/// cAdvisor, on every managed docker host.
+///
+/// H4. It was a per-stack app directory in seven of thirteen stacks, while
+/// `deploy.rs` wrote a Prometheus scrape target for EVERY stack with apps —
+/// so metrics and syncthing were scraped and answered nothing, permanently
+/// down and permanently silent: the HostDown rule watches the node job, not
+/// this one, so an empty container panel and a working one look the same.
+///
+/// It belongs here rather than in the golden template, even though the
+/// template is where "every container gets it" naturally lives. Baking it in
+/// only reaches containers cloned afterwards, and the two blind spots are
+/// containers that already exist. The guards run on every managed container
+/// on every deploy, which is exactly the reach this needs.
+pub const CADVISOR_COMPOSE: &str = r#"services:
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: unless-stopped
+    command:
+      # Docker containers only. Without this cadvisor also emits a series per
+      # cgroup, which in an LXC means thousands of metrics nobody reads.
+      - --docker_only=true
+      # Container labels become Prometheus labels; the *arr stacks carry
+      # enough of them to blow up cardinality for no analytical gain.
+      - --store_container_labels=false
+      # Matches the 30s scrape interval: sampling faster only burns CPU.
+      - --housekeeping_interval=30s
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      # 8081 rather than cadvisor's own 8080: on the downloader stack that
+      # port is already published by gluetun, and one uniform port everywhere
+      # keeps the scrape config to a single pattern.
+      - "8081:8080"
+    labels:
+      - com.homelab.update.policy=manual
+# No custom network on purpose: cadvisor has to run on EVERY docker host to
+# see that host's containers, and a stack network exists only on its own
+# stack. Prometheus scrapes the published port over the LAN, identically
+# everywhere.
+"#;
+
 pub const JOURNALD_LIMITS: &str =
     "[Journal]\nSystemMaxUse=100M\nRuntimeMaxUse=50M\nMaxRetentionSec=1month\n";
 
@@ -171,6 +216,23 @@ pub async fn apply(
             .await?;
             log("[guard] weekly docker prune timer armed".into());
         }
+    }
+
+    // 4b. cAdvisor on every docker host (H4). Same reasoning as the log caps:
+    // something every container needs, that nothing per-stack should have to
+    // remember to declare.
+    if docker
+        && push_content(
+            exec,
+            vmid,
+            "/opt/cadvisor/docker-compose.yml",
+            CADVISOR_COMPOSE,
+            "644",
+        )
+        .await?
+    {
+        pct_sh(exec, vmid, "cd /opt/cadvisor && docker compose up -d", 300).await?;
+        log("[guard] cadvisor installed — this host reports its containers".into());
     }
 
     // 5. apt cache hygiene.

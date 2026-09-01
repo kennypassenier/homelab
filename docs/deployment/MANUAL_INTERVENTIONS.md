@@ -40,3 +40,8 @@ none is proven either.
 The measurement Kenny asked for is therefore not "did I deploy after a manual
 repair" but **"how many entries are in the open table, and is that number
 falling"** — checked at the next milestone, and again in the retrospective.
+
+**First reading, 2026-09-01:** two open. Every one of the thirteen stacks has
+since been deployed cleanly through the full check set, which is the closest
+thing to proof the closed entries have: whatever was repaired by hand survived
+a deploy that would have overwritten it.

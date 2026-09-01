@@ -1,0 +1,30 @@
+# GoAccess turns Traefik's access log into the report on go.kp-soft.dev.
+#
+# The route pointed at port 7880 for its whole life — the WEBSOCKET port,
+# which answers plain HTTP with "400 Invalid Request" (F142). The page could
+# never have worked, and nothing said so, because nothing asked. It is asked
+# here.
+checks:
+  - name: "verzoeken in het rapport"
+    command: >-
+      curl -s -m 20 http://127.0.0.1:7881/ |
+      grep -o 'total_requests": [0-9]*' | head -1 | grep -o '[0-9]*$'
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      The number resets when logrotate turns the access log at 02:00, so a
+      pair straddling that moment reads as a fall. The pair is taken minutes
+      apart, which makes it unlikely rather than impossible.
+
+  - name: "het rapport antwoordt"
+    command: >-
+      curl -s -m 20 -o /dev/null -w '%{http_code}' http://127.0.0.1:7881/
+    expect: must_match
+    layer: network
+    blind_spot: >-
+      A status code from the nginx sidecar. It proves something serves the
+      file; it does not prove GoAccess still writes it — the reading above is
+      what asks that.
+
+manual:
+  - "Open go.kp-soft.dev en kijk of de cijfers van vandaag zijn, niet van vanmorgen — de pagina wordt niet live bijgewerkt zolang de websocket niet door Cloudflare komt (F148)."

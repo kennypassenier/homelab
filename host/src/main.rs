@@ -55,6 +55,13 @@ struct FileConfig {
     /// is deliberate: an unasked question must never become a finding.
     prometheus_url: Option<String>,
     loki_url: Option<String>,
+    /// How far back the log-coverage question looks. A quiet service is not
+    /// a broken one: `homepage` and `kp-soft` ship a few hundred lines a day
+    /// and none at all in a given hour, and the first version of this check
+    /// reported both as "logs are going nowhere". A check that alarms on
+    /// healthy silence is a check that gets ignored, and then the real
+    /// silence goes unnoticed too.
+    logs_window: Option<String>,
     retention: Option<Vec<homelab_proto::RetentionTier>>,
     exec_enabled: Option<bool>,
     mirror_remote: Option<String>,
@@ -109,6 +116,8 @@ struct Config {
     /// is deliberate: an unasked question must never become a finding.
     prometheus_url: Option<String>,
     loki_url: Option<String>,
+    /// Window for the log-coverage question; see the file field.
+    logs_window: String,
     /// D5: git remote URL for the offsite intent mirror; None = off.
     mirror_remote: Option<String>,
     /// H2: OPNsense base url + credential file for Kea reservations.
@@ -170,6 +179,7 @@ fn load_config() -> Config {
         notify_auth_bearer: file.notify_auth_bearer.clone(),
         prometheus_url: file.prometheus_url.clone(),
         loki_url: file.loki_url.clone(),
+        logs_window: file.logs_window.clone().unwrap_or_else(default_logs_window),
         mirror_remote: file.mirror_remote,
         kea: match (file.opnsense_url, file.opnsense_cred_file) {
             (Some(base_url), Some(cred_file)) => Some(homelab_core::ops::kea::KeaCfg {
@@ -250,6 +260,7 @@ fn render_settings_toml(
         prometheus_url: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         loki_url: Option<&'a String>,
+        logs_window: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         mirror_remote: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -293,6 +304,7 @@ fn render_settings_toml(
         notify_auth_bearer: config.notify_auth_bearer.as_ref(),
         prometheus_url: config.prometheus_url.as_ref(),
         loki_url: config.loki_url.as_ref(),
+        logs_window: (config.logs_window != default_logs_window()).then_some(&config.logs_window),
         mirror_remote: config.mirror_remote.as_ref(),
         opnsense_url: config.kea.as_ref().map(|k| &k.base_url),
         opnsense_cred_file: config.kea.as_ref().map(|k| &k.cred_file),
@@ -316,6 +328,29 @@ fn render_settings_toml(
         grafana_dashboards_dir: config.grafana_dashboards_dir.as_ref(),
     };
     toml::to_string_pretty(&out).map_err(|e| e.to_string())
+}
+
+/// A day. The coverage question is asked nightly and on demand, so a stack
+/// that has shipped nothing in twenty-four hours has genuinely stopped —
+/// while an hour of quiet is normal for a service nobody browsed.
+fn default_logs_window() -> String {
+    "24h".into()
+}
+
+/// Only `<digits><unit>` reaches the query string. The window is pasted into
+/// a hand-built URL, and a value out of a config file is not a value to trust
+/// with that: anything else falls back to the default rather than producing a
+/// query that silently means something other than it says.
+fn sane_window(w: &str) -> String {
+    let ok = w.len() >= 2
+        && w.chars().next().is_some_and(|c| c.is_ascii_digit())
+        && w[..w.len() - 1].chars().all(|c| c.is_ascii_digit())
+        && matches!(w.chars().last(), Some('s' | 'm' | 'h' | 'd' | 'w'));
+    if ok {
+        w.to_string()
+    } else {
+        default_logs_window()
+    }
 }
 
 fn persist_settings(
@@ -360,6 +395,7 @@ mod tests {
             notify_auth_bearer: Some("a-token-that-must-survive-a-save".into()),
             prometheus_url: Some("http://10.10.10.13:9090".into()),
             loki_url: Some("http://10.10.10.4:3100".into()),
+            logs_window: "6h".into(),
             mirror_remote: Some("git@github.com:k/m.git".into()),
             kea: Some(homelab_core::ops::kea::KeaCfg {
                 base_url: "https://10.10.10.1".into(),
@@ -1826,6 +1862,7 @@ async fn gather_live_facts(
     // the right to be believed.
     let prom = state.config.prometheus_url.clone();
     let loki = state.config.loki_url.clone();
+    let window = sane_window(&state.config.logs_window);
     if prom.is_some() || loki.is_some() {
         if let Ok(snapshot) =
             homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir)
@@ -1859,10 +1896,18 @@ async fn gather_live_facts(
                     .map(|m| m.apps.iter().any(|a| a == "promtail"))
                     .unwrap_or(false);
                 if let (Some(base), true) = (loki.as_deref(), ships_logs) {
+                    // `container_name=~".+"` is not decoration. F79 was not
+                    // silence: lines kept arriving for months while promtail
+                    // read `attrs.name`, a field docker does not write, so
+                    // every line landed without the label the dashboards
+                    // query by. Counting lines would have passed throughout.
+                    // Counting LABELLED lines is the question that was
+                    // actually being got wrong.
                     let q = format!(
-                        "{}/loki/api/v1/query?query=sum(count_over_time(%7Bstack%3D%22{}%22%7D%5B1h%5D))",
+                        "{}/loki/api/v1/query?query=sum(count_over_time(%7Bstack%3D%22{}%22%2Ccontainer_name%3D~%22.%2B%22%7D%5B{}%5D))",
                         base.trim_end_matches('/'),
-                        name
+                        name,
+                        window
                     );
                     c.logs_recent = Some(
                         exec.run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))

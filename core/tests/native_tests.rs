@@ -434,6 +434,7 @@ async fn d25_native_backup_uses_the_service_name_for_its_repo() {
 /// containers therefore carried no tag: a filter on it silently missed them,
 /// so the tag meant "built by the orchestrator" while it read as "managed by
 /// the orchestrator". Kenny asked the question that found it.
+/// covers: F117
 #[tokio::test]
 async fn c7_adoption_tags_the_container_as_managed() {
     let exec = MockExecutor::new();
@@ -454,6 +455,7 @@ async fn c7_adoption_tags_the_container_as_managed() {
 
 /// A container that already carries the tag is not written to again, and a
 /// container that carries somebody else's tags keeps them.
+/// covers: F117
 #[tokio::test]
 async fn c7_adoption_never_clobbers_existing_tags() {
     let exec = MockExecutor::new();

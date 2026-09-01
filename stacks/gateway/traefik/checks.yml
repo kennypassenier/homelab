@@ -1,0 +1,56 @@
+# What "the gateway works" means, measured rather than assumed.
+#
+# This file exists because two faults of 2026-09-01 were repaired without one.
+# Traefik's own log was moved out of a file and into docker's log (F139), and
+# nothing would notice it being moved back. The route directory was pointed at
+# the v1 path (F138), and the symptom was that Traefik loaded no routes at all
+# while answering perfectly well on its port. Both are readings, so both are
+# written down here instead of being remembered.
+#
+# Every command runs on the CONTAINER. Traefik's API is not published on 8080
+# (`--api.insecure=false`), so it is asked the way everything else asks it:
+# through the entrypoint, with the Host header its own route matches on.
+checks:
+  - name: "routes die traefik geladen heeft"
+    command: >-
+      curl -s -m 15 -H "Host: traefik.kp-soft.dev"
+      http://127.0.0.1/api/http/routers |
+      grep -o '"status":"enabled"' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts the routes Traefik accepted, not that any of them reaches a
+      living backend. A route to a container that is down is enabled and
+      counted.
+
+  # The one reading that would have caught the fleet-wide 403. Every layer is
+  # in it: the entrypoint, the CrowdSec middleware that fails closed, and a
+  # backend on another container. Anything in that chain breaking turns 200
+  # into something else, which is exactly what "all my routes stopped working"
+  # looked like from Kenny's side.
+  - name: "een echt verzoek door de hele keten"
+    command: >-
+      curl -s -m 15 -o /dev/null -w '%{http_code}'
+      -H "Host: go.kp-soft.dev" http://127.0.0.1/
+    expect: must_match
+    layer: application
+    blind_spot: >-
+      Runs inside the house, so it proves the chain from the entrypoint
+      inward. It says nothing about Cloudflare, the tunnel, or Access — and
+      those cannot be checked from here, because Access answers 302 to an
+      unauthenticated request whatever is behind it.
+
+  - name: "traefik logt naar docker, niet naar een bestand"
+    command: >-
+      docker inspect traefik --format '{{json .Config.Cmd}}' |
+      tr ',' '\n' | grep -c '^"--log.filepath'
+    expect: must_match
+    layer: process
+    blind_spot: >-
+      Reads the flag, not the log. It proves nothing shipped the log away
+      again; it does not prove promtail is reading it or that Loki accepted
+      it — the fleet check asks that, per stack.
+
+# What no measurement settles here.
+manual:
+  - "Open een route van buitenaf (bv. son.kp-soft.dev) en kijk of Cloudflare Access je binnenlaat — dat stuk kan van binnen niet gemeten worden."

@@ -777,6 +777,7 @@ fn v8_config_race_regression_rpc_exit_rule() {
     assert!(!rpc_can_exit(false, false, false));
 }
 
+/// covers: F150, F151
 #[test]
 fn h17_runbook_generator_structural_snapshot() {
     // E7: the total-loss document must regenerate correctly from a fixture
@@ -809,9 +810,29 @@ fn h17_runbook_generator_structural_snapshot() {
     std::fs::create_dir_all(stacks.join("old-v1")).unwrap();
     std::fs::write(stacks.join("old-v1/lxc-compose.yml"), "not: [valid v2").unwrap();
 
+    // A native stack: no compose apps at all, systemd units instead. It is
+    // the case the document got wrong for every one of them.
+    std::fs::create_dir_all(stacks.join("gamma")).unwrap();
+    std::fs::write(
+        stacks.join("gamma/lxc-compose.yml"),
+        concat!(
+            "stack_name: gamma\n",
+            "vmid: 152\n",
+            "hostname: 152-app-gamma\n",
+            "native_only: true\n",
+            "network:\n  ip: 10.10.10.152/24\n  gateway: 10.10.10.1\n",
+            "  bridge: vmbr0\n  vlan: 10\n",
+            "resources:\n  cores: 1\n  memory_mb: 256\n  swap_mb: 128\n  disk_gb: 2\n",
+            "lxc:\n  template: \"clone:998\"\n",
+            "boot:\n  onboot: true\n",
+            "apps: []\n",
+        ),
+    )
+    .unwrap();
+
     let out = tmp.join("DR.md");
     let n = homelab_client::spec::generate_runbook(&stacks, out.to_str().unwrap()).unwrap();
-    assert_eq!(n, 2);
+    assert_eq!(n, 3);
     let doc = std::fs::read_to_string(&out).unwrap();
     for needle in [
         "## Layer 0",
@@ -821,11 +842,29 @@ fn h17_runbook_generator_structural_snapshot() {
         "### beta (vmid 151)",
         "hostname `150-app-alpha`",
         "LEGACY",
-        "homelab-backups/<stack>-config",
+        "homelab-backups/<app>-config",
         "## Full-host rebuild order",
     ] {
         assert!(doc.contains(needle), "runbook lost section: {}", needle);
     }
+    // The line somebody actually copies in a disaster. The prose above it
+    // said per owning app for months while this said per stack, and the test
+    // asserted the wrong half — which is how a fixed document stayed broken
+    // in the one place it gets used.
+    assert!(
+        !doc.contains("homelab-backups/<stack>-config"),
+        "the copy-pasteable export must not contradict the sentence above it"
+    );
+    // And a native stack must not be told to deploy compose apps it has none
+    // of.
+    assert!(
+        doc.contains("`homelab adopt stacks/gamma`"),
+        "a native stack needs its own recovery path"
+    );
+    assert!(
+        !doc.contains("`homelab deploy stacks/gamma`"),
+        "and must not be told to run the compose path"
+    );
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
@@ -1047,6 +1086,7 @@ fn a_host_that_is_behind_is_recognised_as_behind() {
 /// which names the network. The ceiling had never been written down, so there
 /// was nothing to read. Both sides now carry the same number, and the client
 /// refuses a payload that cannot arrive instead of watching it fail.
+/// covers: F122
 #[test]
 fn a_payload_the_link_cannot_carry_is_refused_with_a_reason() {
     use homelab_client::version::{too_large, MAX_WS_FRAME};

@@ -291,6 +291,7 @@ fn unix_to_rfc3339(t: u64) -> String {
 /// hours and nothing reported it.
 ///
 /// So: an app that is paused but NOT in `apps` must still come back.
+/// covers: F75
 #[tokio::test]
 async fn e1_backup_resumes_every_container_it_paused_even_one_not_in_apps() {
     let exec = MockExecutor::new();
@@ -339,6 +340,7 @@ async fn e1_backup_resumes_every_container_it_paused_even_one_not_in_apps() {
 
 /// Nothing labelled means nothing stopped and nothing to start back — the
 /// step must not invent a bare `docker start` with no arguments.
+/// covers: F75
 #[tokio::test]
 async fn e1_backup_with_nothing_to_pause_starts_nothing() {
     let exec = MockExecutor::new();
@@ -412,6 +414,7 @@ fn every_stack_dashboard_has_an_errors_section() {
 /// A path that does NOT exist already fails loudly — that is how the metrics
 /// stack's stale path was caught on 2026-08-31. The empty one is the case
 /// nothing catches.
+/// covers: F105
 #[test]
 fn a_snapshot_that_stored_nothing_is_recognised() {
     use homelab_core::ops::backup::snapshot_is_empty;

@@ -351,7 +351,14 @@ fn a_stack_with_no_prometheus_target_is_reported() {
     assert!(out[0].what.contains("not being measured"));
 }
 
-/// Logs that go nowhere look exactly like a quiet service.
+/// Logs that go nowhere look exactly like a quiet service — which is why the
+/// window this is asked over is a setting and not the hour it started as.
+///
+/// The finding has to name what was actually measured: LABELLED lines. F79
+/// was months of lines arriving without a container name while three
+/// dashboards (F72) stayed blank, and a finding that says "nothing is shipping"
+/// would send the reader looking in the wrong place.
+/// covers: F79
 #[test]
 fn a_stack_whose_logs_never_arrive_is_reported() {
     let out = evaluate_coverage(&[CoverageFact {
@@ -360,7 +367,16 @@ fn a_stack_whose_logs_never_arrive_is_reported() {
         logs_recent: Some(false),
     }]);
     assert_eq!(out.len(), 1);
-    assert!(out[0].what.contains("going nowhere"));
+    assert!(
+        out[0].what.contains("LABELLED"),
+        "the finding must say which reading failed: {}",
+        out[0].what
+    );
+    assert!(
+        out[0].what.contains("F79"),
+        "and point at the fault it exists for: {}",
+        out[0].what
+    );
 }
 
 /// The rule that keeps this check believable: a question that was not asked

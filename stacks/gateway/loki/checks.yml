@@ -1,0 +1,25 @@
+# Loki is where every container's log ends up, which makes it the one service
+# whose silence is invisible: nothing complains when logs stop arriving,
+# because the complaint would have arrived as a log.
+#
+# The label list is here on purpose. F126 was not silence — promtail read
+# `attrs.name`, a field docker does not write, so lines arrived for months
+# without a `container_name` and three dashboards querying it stayed blank. A
+# line count was green throughout. The set of labels Loki knows is the reading
+# that was actually wrong.
+checks:
+  - name: "labels die loki kent"
+    command: >-
+      curl -s -m 15 http://127.0.0.1:3100/loki/api/v1/labels |
+      tr -d '[]{}"' | cut -d: -f3 | tr ',' '\n' | sort | tr '\n' ','
+    expect: must_match
+    layer: application
+
+  - name: "loki is klaar"
+    command: "curl -s -m 10 http://127.0.0.1:3100/ready"
+    expect: must_match
+    layer: process
+    blind_spot: >-
+      Loki saying it is ready to receive. It says nothing about whether
+      anything is sending — that question belongs to each stack's promtail and
+      is asked by the fleet check.

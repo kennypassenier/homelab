@@ -1,0 +1,36 @@
+# Grafana holds the dashboards, and a rebuild of this container is exactly
+# when they would quietly not come back.
+#
+# The credentials are read from the app's own .env at check time rather than
+# passed in — the same reasoning as Jellyfin's API key (F131): a credential
+# handed to a check goes stale without telling anyone, and asking the service
+# itself is the only reading that cannot.
+#
+# Note the table trap: `select count(*) from dashboard` on grafana.db returns
+# 0 on Grafana 13, which stores dashboards in unified storage instead. The
+# database was right and the query was wrong — so the API is asked, not the
+# file.
+checks:
+  - name: "dashboards"
+    command: >-
+      U=$(grep -h GRAFANA_GF_ADMIN_USER /opt/gateway/grafana/.env | cut -d= -f2);
+      P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD /opt/gateway/grafana/.env | cut -d= -f2);
+      curl -s -m 15 -u "$U:$P" "http://127.0.0.1:3000/api/search?type=dash-db&limit=500" |
+      grep -o '"uid"' | wc -l
+    expect: never_decreases
+    layer: application
+
+  - name: "datasources"
+    command: >-
+      U=$(grep -h GRAFANA_GF_ADMIN_USER /opt/gateway/grafana/.env | cut -d= -f2);
+      P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD /opt/gateway/grafana/.env | cut -d= -f2);
+      curl -s -m 15 -u "$U:$P" http://127.0.0.1:3000/api/datasources |
+      grep -o '"uid"' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts datasources, not datasources that answer. A Loki entry pointing
+      at a dead address counts the same as a working one.
+
+manual:
+  - "Open het homelab-overview dashboard en kijk of de grafieken data tonen — een dashboard dat bestaat is niet hetzelfde als een dashboard dat iets laat zien."

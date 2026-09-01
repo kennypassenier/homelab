@@ -91,7 +91,19 @@ pub struct CoverageFact {
     pub stack: String,
     /// A Prometheus target for this stack answered `up == 1`.
     pub scraped: Option<bool>,
-    /// Loki holds at least one line from this stack in the recent window.
+    /// Loki holds at least one line from this stack, carrying a container
+    /// name, inside the configured window.
+    ///
+    /// Labelled, because F79 was not silence. Promtail read `attrs.name` —
+    /// a field docker does not write — so lines arrived for months with an
+    /// empty `container_name` and the three dashboards querying it stayed
+    /// blank. A plain line count would have been green throughout.
+    ///
+    /// The window is a host setting (`logs_window`, default 24h) rather than
+    /// the hour it started as. On 2026-09-01 the hour version reported
+    /// `home` and `kp-soft` as "going nowhere" while both were healthy and
+    /// merely quiet — a check that alarms on healthy silence is a check that
+    /// gets switched off, and then the real silence goes unnoticed too.
     pub logs_recent: Option<bool>,
 }
 
@@ -397,7 +409,7 @@ pub fn evaluate_coverage(facts: &[CoverageFact]) -> Vec<Finding> {
             out.push(Finding {
                 severity: Severity::Drift,
                 subject: c.stack.clone(),
-                what: "no log line reached Loki from this stack recently — its logs are going nowhere".into(),
+                what: "no LABELLED log line reached Loki from this stack recently — either nothing is shipping, or it ships without the container name (F79)".into(),
                 remedy: "check promtail is running there and that its pipeline matches what docker writes; the container name came from a field docker does not produce for the life of this fleet".into(),
             });
         }

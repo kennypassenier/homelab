@@ -1,0 +1,19 @@
+# CrowdSec decides whether a request is let through, and the Traefik plugin
+# that asks it FAILS CLOSED: no answer means 403 for everything.
+#
+# On 2026-09-01 a duplicate bouncer was deleted, which revoked the key both
+# entries shared, and every hostname in the house went dead (F140). The count
+# below is the reading that was not being taken.
+checks:
+  - name: "geregistreerde bouncers"
+    command: "docker exec crowdsec cscli bouncers list -o raw | tail -n +2 | wc -l"
+    expect: never_decreases
+    layer: application
+
+  - name: "geladen scenario's"
+    command: "docker exec crowdsec cscli scenarios list -o raw | tail -n +2 | wc -l"
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Scenarios loaded, not scenarios matching. A CrowdSec that parses no log
+      line has every scenario loaded and sees nothing.

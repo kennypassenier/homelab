@@ -314,6 +314,7 @@ fn a_bind_inside_a_declared_mount_is_covered_by_it() {
 /// deploy puts it there. Before this, the four files that make CT 109's
 /// services exist were only inside CT 109 — losing the container would have
 /// lost the only copy.
+/// covers: F124
 #[tokio::test]
 async fn a_deploy_installs_the_unit_file_and_starts_a_service_that_is_down() {
     let exec = MockExecutor::new();
@@ -1173,6 +1174,7 @@ async fn m7_a_plain_redeploy_keeps_its_record_without_asking_restic() {
 /// have pointed E3's auto-restore at a repository that does not exist — and
 /// its answer to that is "no snapshot — fresh", after which the deploy
 /// carries on and starts the app on an empty config directory.
+/// covers: F107
 #[tokio::test]
 async fn e3_auto_restore_reads_the_configured_repository() {
     let exec = MockExecutor::new();
@@ -1553,6 +1555,7 @@ async fn h1_gateway_route_only_to_the_gateway() {
 /// deploy sat there until the 900 s step ceiling caught it — while the same
 /// container pulled the same image directly at 4.1 MB/s. Seerr and
 /// flaresolverr had to be started by hand.
+/// covers: F129, F130
 #[tokio::test]
 async fn f129_a_cache_that_cannot_serve_falls_back_to_the_real_registry() {
     let exec = MockExecutor::new();
@@ -1690,6 +1693,7 @@ async fn s2_a_refused_target_records_nothing_at_all() {
 /// The divergence used here is the one no single step can catch: the app was
 /// started, `docker compose up -d` returned zero, and the container is not
 /// running. A crash loop exits zero on the way in.
+/// covers: F133, F147
 #[tokio::test]
 async fn s2_reconcile_catches_a_container_that_does_not_match() {
     let exec = MockExecutor::new();
@@ -1760,6 +1764,7 @@ async fn s2_a_push_that_did_not_land_fails_its_own_step() {
 ///
 /// Loki did not crash because a number was wrong. It crashed because it could
 /// not open its own database — so that is the question.
+/// covers: F137, F141, F143, F144, F145
 #[tokio::test]
 async fn storage_the_app_cannot_write_fails_the_deploy() {
     let exec = MockExecutor::new();
@@ -1791,6 +1796,7 @@ async fn storage_the_app_cannot_write_fails_the_deploy() {
 /// And it must stay quiet when the app CAN write, whatever the uids happen to
 /// be — the half that decides whether a check survives a month. Every image
 /// shape in this fleet passes here: the numbers differ, the answer does not.
+/// covers: F146
 #[tokio::test]
 async fn storage_the_app_can_write_says_nothing() {
     let exec = MockExecutor::new();
@@ -1813,6 +1819,7 @@ async fn storage_the_app_can_write_says_nothing() {
 /// declares six, one per *arr, and each container sees only its own — asking
 /// sonarr about radarr's configuration would fail for a reason that is not a
 /// fault.
+/// covers: F146
 #[tokio::test]
 async fn storage_a_directory_the_app_does_not_mount_is_skipped() {
     let exec = MockExecutor::new();

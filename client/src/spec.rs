@@ -284,6 +284,27 @@ fn restic_repos(m: &homelab_core::manifest::StackManifest) -> String {
         .join(", ")
 }
 
+/// How this stack comes back, which is not the same command for every stack.
+///
+/// A native stack has no compose apps and `homelab deploy` is not its path:
+/// kyu and almanac are systemd units, adopted rather than deployed. The
+/// runbook said "deploy" for all thirteen — harmless while everything works,
+/// and exactly the wrong instruction at the moment it is read.
+fn recreate_line(dir_name: &str, m: &homelab_core::manifest::StackManifest) -> String {
+    if m.apps.is_empty() {
+        format!(
+            "`homelab adopt stacks/{}` — native services; the unit files and \
+             binaries come from the service's own release, not from a compose pull",
+            dir_name
+        )
+    } else {
+        format!(
+            "`homelab deploy stacks/{}` (or by hand per Layer 2)",
+            dir_name
+        )
+    }
+}
+
 /// E7: generate the disaster-recovery runbook from the local stacks dir.
 /// Deliberately plain markdown with copy-pasteable commands — this document
 /// must be useful when the TUI, the host daemon, or the whole host is down.
@@ -334,7 +355,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          file `/var/lib/homelab/secrets/restic.pw` (keep an offline copy of this\n\
          password — without it backups are unreadable!).\n\
          ```sh\n\
-         export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<stack>-config\n\
+         export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<app>-config\n\
          export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw\n\
          restic snapshots\n\
          restic restore latest --target /\n\
@@ -364,7 +385,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
              - hostname `{}`, ip `{}`\n\
              - resources: {} core(s), {} MiB RAM, {} MiB swap, {} GiB disk\n\
              - apps: {}\n\
-             - recreate from scratch: `homelab deploy stacks/{}` (or by hand per Layer 2)\n\
+             - recreate from scratch: {}\n\
              - data restore from: {}\n\n",
             m.stack_name,
             m.vmid,
@@ -374,8 +395,12 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
             m.resources.memory_mb,
             m.resources.swap_mb,
             m.resources.disk_gb,
-            m.apps.join(", "),
-            name,
+            if m.apps.is_empty() {
+                "none — native services under systemd, not compose".to_string()
+            } else {
+                m.apps.join(", ")
+            },
+            recreate_line(name, &m),
             restic_repos(&m),
         ));
     }

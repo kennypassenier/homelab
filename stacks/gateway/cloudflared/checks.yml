@@ -1,0 +1,16 @@
+# Deliberately empty, and that is the finding rather than an omission.
+#
+# Everything worth knowing about the tunnel is on the other side of it.
+# `cloudflared tunnel info` needs the account credentials, not the tunnel
+# token this container has; the connection count in its log resets on every
+# restart, which is precisely when a deploy takes both readings; and a request
+# from outside proves nothing, because Cloudflare Access answers 302 to an
+# unauthenticated request whether or not anything is running behind it.
+#
+# So there is no honest automatic reading here. Writing "no checks" down is
+# worth more than inventing one that always passes: a check that cannot fail
+# is read as proof, and this file is the argument that there is none.
+checks: []
+
+manual:
+  - "Open een route van buitenaf op je telefoon, buiten het huisnetwerk — dat is het enige dat bewijst dat de tunnel staat."

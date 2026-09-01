@@ -123,3 +123,51 @@ What this drill does NOT prove: that Jellyfin's own application layer comes up
 clean on a restored copy, because the drill copy deliberately had no network
 and no media mounts. That check belongs to the real rebuild, against the
 counts recorded above.
+
+---
+
+## Result — 2026-09-01
+
+The check the drill could not make has now been made, against a live rebuild.
+
+**Copy fidelity.** Every config directory was compared file by file, name and
+size, under `LC_ALL=C`: sonarr 2175 files, radarr 5822, prowlarr 637, bazarr
+366, seerr 17, jellyfin 788 — all identical. The artwork moved separately to
+its own host path: 35 436 files on both sides, 8.6 GB.
+
+**Application state after the rebuild**, read from each app's own API, not
+from disk:
+
+| | recorded before | after |
+|---|---|---|
+| Sonarr series | 209 | 209 |
+| Radarr movies | 955 | 955 |
+| Prowlarr indexers | 5 | 5 |
+| Jellyfin series | 203 | 203 |
+| Jellyfin episodes | 5462 | 5462 |
+| Jellyfin collections | 58 | 58 |
+| Jellyfin movies | 896 | 898 |
+
+The two extra films are arrivals from the same night — the downloader was
+running throughout — and one of them, *Mandy*, was indexed **after** the
+rebuild. That is the strongest single piece of evidence here: it is not a
+restored count, it is the live library scan doing its job on the new
+container.
+
+**Libraries** still point at `/data/12TB/…` and `/data/18TB/…`, the frozen
+paths, and Collections at `/config/data/collections`. **Hardware transcoding**
+survives: `/dev/dri/renderD128` is present in the LXC and inside the Jellyfin
+container, `encoding.xml` still says vaapi with hardware encoding on, and
+`JELLYFIN_TRANSCODE_DIR=/dev/shm` still has its 4 GB. Nothing had to be
+changed in any client.
+
+**One in-container path did change**, deliberately and invisibly to the apps:
+config now lives at `/appdata/media/<app>-config` rather than
+`/opt/<app>-config`. Docker maps it to `/config` exactly as before, which is
+the only path any of these applications has ever stored.
+
+**Cost.** Not a clean run. Two of the nine apps could not pull their image
+because the registry cache answers its health probe and then fails to deliver
+(F129) — they were started by hand, and the fallback that makes this
+self-healing shipped in v3.25.0. The dead `JELLYFIN_API_KEY` was found here
+too (F131).

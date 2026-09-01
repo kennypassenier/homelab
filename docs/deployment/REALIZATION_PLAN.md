@@ -278,6 +278,15 @@ exactly four containers still carry a v1 hostname.
 
 **What is actually left, in the order it should now run:**
 
+**Status 2026-09-01:** three of the four are done — `media` (CT 106) was
+replaced overnight and verified against every count recorded before it was
+stopped; the full result is in `M8_CT106_PREFLIGHT.md`. Only the `gateway`
+(CT 104) remains. Media was not a clean run: the registry cache passes its
+health probe and then cannot deliver a large ghcr.io blob (F129), which cost
+two apps their automatic start. They were started by hand and the fallback
+that makes this self-healing shipped in v3.25.0, so the next deploy of this
+stack is the proof that it works unattended.
+
 **Status 2026-08-31:** two of the four are done. `productivity` (CT 111) was
 replaced in 217 s and `downloader` (CT 105) in about four minutes, both on
 their own vmid and address, both verified against numbers recorded before

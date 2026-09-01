@@ -35,7 +35,7 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — v3.15.0 live on the host | **5 · Realization plan — M0-M7 and M9 done, M8 next** |
+| Phase | 9 · Released — v3.25.0 live on the host | **5 · Realization plan — M8 nearly done, gateway (CT 104) last** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there |
 
@@ -46,7 +46,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.15.0** (2026-08-31); 211 tests, CI green.
+- **Released and live at v3.25.0** (2026-09-01); 238 tests, CI green.
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.
   M7 is done: CT 115 destroyed and rebuilt end to end, 653 s of outage of
   which 573 s was one stalled image pull (F108). W1-W3 built straight after

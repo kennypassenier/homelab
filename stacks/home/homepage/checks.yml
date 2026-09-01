@@ -1,0 +1,30 @@
+# Homepage is the page Kenny opens first, which makes an empty one the most
+# expensive kind of broken: it answers, it looks like a dashboard, and it
+# tells him nothing is wrong because it tells him nothing at all.
+#
+# Measured 2026-09-01 while writing this: every config file under
+# `homepage-config/` contains zero `href` entries and `services.yaml` is 0
+# bytes. The page renders and lists nothing (T51 is the task to generate it
+# from the manifest instead of by hand).
+checks:
+  - name: "diensten op de startpagina"
+    command: >-
+      curl -s -m 15 http://127.0.0.1:3000/ |
+      grep -o 'href="http' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts links on the rendered page, not whether any of them answers.
+      Homepage draws a tile for a service that is down exactly as it draws
+      one for a service that is up.
+
+  - name: "de startpagina antwoordt"
+    command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/"
+    expect: must_match
+    layer: network
+    blind_spot: >-
+      This is the reading the Uptime Kuma monitor takes, and it is 200 for a
+      page with nothing on it — which is what it has been.
+
+manual:
+  - "Kijk of de startpagina de diensten toont die je verwacht. Een lege Homepage antwoordt net zo vrolijk met 200 als een volle."

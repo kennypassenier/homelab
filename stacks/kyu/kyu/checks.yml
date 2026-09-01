@@ -1,0 +1,36 @@
+# The message hub. Everything that wants to reach Kenny goes through here, so
+# its silence is the kind nothing else reports: a hub that accepts messages
+# and delivers none looks identical from every side that talks to it.
+#
+# These run on the CONTAINER, which is a native-service host — no docker, so
+# the commands address the service directly on its LAN address. It binds
+# 10.10.10.9, not localhost, which is worth writing down: probing 127.0.0.1
+# returned nothing and made a healthy service look dead once already.
+checks:
+  - name: "de hub kan naar zijn opslag schrijven"
+    command: >-
+      curl -s -m 10 http://10.10.10.9:8080/healthz |
+      grep -o '"store":"[a-z]*"' | cut -d'"' -f4
+    expect: must_match
+    layer: application
+
+  - name: "onderwerpen op de hub"
+    command: >-
+      curl -s -m 10 http://10.10.10.9:8080/metrics |
+      grep '^kyu_topics ' | awk '{print $2}'
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts topics that exist, not topics anybody still publishes to. A topic
+      nothing has written to in months counts the same as a busy one.
+
+  - name: "abonnementen"
+    command: >-
+      curl -s -m 10 http://10.10.10.9:8080/metrics |
+      grep '^kyu_subscriptions ' | awk '{print $2}'
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      A subscription is a promise to deliver, not a delivery. The hub was
+      finished on every side but the middle once before, and every side
+      reported itself healthy throughout.

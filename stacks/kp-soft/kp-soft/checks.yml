@@ -1,0 +1,18 @@
+# The public site. It is the one container strangers can reach (K5), which
+# makes "does it serve the right thing" a different question from "is it up".
+checks:
+  - name: "de gezondheidspagina"
+    command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/up"
+    expect: must_match
+    layer: application
+
+  - name: "de startpagina levert inhoud"
+    command: "curl -s -m 15 http://127.0.0.1:8080/ | wc -c"
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts bytes, not correctness. A page that renders an error nicely is
+      as large as one that works.
+
+manual:
+  - "Open kp-soft.dev van buiten het huisnetwerk. Dit is de enige stack die strangers kunnen bereiken, en van binnen meten zegt niets over wat zij zien."

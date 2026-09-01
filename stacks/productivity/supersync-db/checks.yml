@@ -1,0 +1,18 @@
+# SuperSync keeps everything in postgres, so the database is the stack — the
+# web container can be replaced, this cannot.
+checks:
+  - name: "tabellen in de database"
+    command: >-
+      docker exec supersync-db psql -U supersync -tAc
+      "select count(*) from information_schema.tables where table_schema='public'"
+    expect: never_decreases
+    layer: application
+
+  - name: "de database antwoordt"
+    command: "docker exec supersync-db pg_isready -U supersync"
+    expect: must_be_present
+    layer: process
+    blind_spot: >-
+      pg_isready answers from the server, not from the data. A database that
+      accepts connections while every query fails is exactly the shape the
+      paperless database had (F55's class).

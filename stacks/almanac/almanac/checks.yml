@@ -1,0 +1,15 @@
+# The gateway from apps to Google Calendar. A native service on CT 112, which
+# has no curl — wget is what is available there, and a check written with the
+# wrong tool simply fails to run and reports nothing.
+checks:
+  - name: "almanac is gezond"
+    command: "wget -q -O - -T 10 http://127.0.0.1:8080/healthz"
+    expect: must_match
+    layer: application
+    blind_spot: >-
+      The service answering about itself. Whether an event actually lands in
+      the calendar depends on a Google token that can expire without anything
+      here changing.
+
+manual:
+  - "Maak een testafspraak via almanac en kijk of hij in Google Calendar verschijnt. Een verlopen token laat de dienst gezond ogen en levert niets af."

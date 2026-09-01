@@ -1,0 +1,12 @@
+# Translates Alertmanager's message shape into one the hub accepts. It sits
+# exactly in the middle of the alert chain, which is where that chain has
+# broken before without anything saying so.
+checks:
+  - name: "de switchboard is gezond"
+    command: "curl -s -m 10 -o /dev/null -w '%{http_code}' http://10.10.10.9:8083/healthz?strict=1"
+    expect: must_match
+    layer: application
+    blind_spot: >-
+      `strict=1` makes it check its own downstream too, which is more than a
+      plain liveness probe — but it still cannot know whether Alertmanager is
+      sending anything at all.

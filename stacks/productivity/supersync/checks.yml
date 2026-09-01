@@ -1,0 +1,27 @@
+# The web side of SuperSync. It listens on 1900, not 8080 — worth writing
+# down, because checking the wrong port is how a healthy service gets reported
+# as dead, which happened once while this file was being written.
+#
+# Its `/health` is one of the good ones: it does not say "I am up", it says
+# whether it can reach its own database and how many clients are connected.
+# That is the difference between a reading at the network and one at the
+# application.
+checks:
+  - name: "supersync bereikt zijn database"
+    command: >-
+      curl -s -m 15 http://127.0.0.1:1900/health |
+      grep -o '"db":"[a-z]*"' | cut -d'"' -f4
+    expect: must_match
+    layer: application
+
+  - name: "de webpagina antwoordt"
+    command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:1900/"
+    expect: must_match
+    layer: process
+    blind_spot: >-
+      The web server is up. It served pages perfectly well while its database
+      was unreachable would be the interesting case — and the reading above
+      is what asks that.
+
+manual:
+  - "Open Super Productivity op je telefoon en op de desktop en kijk of een taak die je op de een aanmaakt op de ander verschijnt. Het aantal websocket-verbindingen in /health telt clients, niet of hun synchronisatie klopt."

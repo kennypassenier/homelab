@@ -1583,7 +1583,14 @@ async fn f129_a_cache_that_cannot_serve_falls_back_to_the_real_registry() {
     // Pushed twice: once pointed at the cache, once put back. push_content
     // asks the container for the file's hash before every write, so the
     // number of those asks is the number of push attempts.
-    let pushes = exec.calls_containing("sha256sum '/opt/syncthing/syncthing/docker-compose.yml'");
+    // Only the form push_content uses to decide whether to write; the S2
+    // verification asks the same question with a different command, and
+    // counting both would measure the check instead of the pushes.
+    let pushes: Vec<String> = exec
+        .calls_containing("sha256sum '/opt/syncthing/syncthing/docker-compose.yml'")
+        .into_iter()
+        .filter(|c| c.contains("cut -d"))
+        .collect();
     assert_eq!(
         pushes.len(),
         2,
@@ -1616,5 +1623,112 @@ async fn f129_a_cache_that_cannot_serve_falls_back_to_the_real_registry() {
     assert!(
         sink.lines().iter().any(|l| l.contains("falling back")),
         "the fallback must be visible in the transcript, not silent"
+    );
+}
+
+/// S2a · a deploy that stops half-way must still leave a record.
+///
+/// The case, 2026-09-01: the media stack failed at "start apps", so the
+/// `record state` step — the last one — never ran, and the orchestrator did
+/// not know the stack existed. Nine containers were running and nothing was
+/// backing up 12 GB of their configuration. A stack that is plainly broken is
+/// recoverable; one that is invisible is not, because nobody goes looking.
+#[tokio::test]
+async fn s2_a_failed_deploy_still_records_the_stack() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always("docker compose pull", CmdOutput::failed(1, "boom"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let sp = spec(110, "syncthing");
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(!report.ok, "this deploy is meant to fail");
+
+    let state = exec
+        .file("/var/lib/homelab/state.json")
+        .expect("state was written even though the deploy failed");
+    assert!(
+        state.contains("\"syncthing\"") && state.contains("incomplete_step"),
+        "the stack must exist in state and say where it stopped: {}",
+        state
+    );
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("recorded as incomplete")),
+        "and must say so out loud"
+    );
+}
+
+/// S2a-bis · but a refusal is not a half-deploy. A1 promises that a no-touch
+/// target runs zero commands, and writing a state record is a command.
+#[tokio::test]
+async fn s2_a_refused_target_records_nothing_at_all() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let sp = spec(100, "syncthing");
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(!report.ok, "vmid 100 is on the no-touch list");
+    assert!(
+        exec.file("/var/lib/homelab/state.json").is_none(),
+        "a refusal leaves nothing behind, state included"
+    );
+}
+
+/// S2b · the reconciliation pass rejects a deploy whose steps all succeeded
+/// but whose container does not match the stack file.
+///
+/// The divergence used here is the one no single step can catch: the app was
+/// started, `docker compose up -d` returned zero, and the container is not
+/// running. A crash loop exits zero on the way in.
+#[tokio::test]
+async fn s2_reconcile_catches_a_container_that_does_not_match() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_first("docker ps", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let sp = spec(110, "syncthing");
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(!report.ok, "an app that is not running is not a success");
+    let err = format!("{:?}", report.error);
+    assert!(
+        err.contains("does not match") && err.contains("syncthing' is not running"),
+        "the error must name what is wrong: {}",
+        err
+    );
+}
+
+/// S2c · a push that reports success and did not land fails its own step,
+/// not three steps later.
+///
+/// F124 is the case this is shaped after: a unit file was pushed onto the
+/// path that held a running program's own binary. The push reported success —
+/// it had, after all, written a file — and the service survived only because
+/// the kernel keeps a deleted file open for a process still running it.
+/// Reading the file back says immediately that what is there is not what was
+/// sent.
+#[tokio::test]
+async fn s2_a_push_that_did_not_land_fails_its_own_step() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    // The container answers every hash query with something else.
+    exec.respond_first("sha256sum", CmdOutput::ok("0000000000000000 /opt/x\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let sp = spec(110, "syncthing");
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(!report.ok, "a push that did not land is not a success");
+    let err = format!("{:?}", report.error);
+    assert!(
+        err.contains("push files") && err.contains("the change is not there"),
+        "the step must name itself and say what is wrong: {}",
+        err
     );
 }

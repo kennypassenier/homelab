@@ -13,13 +13,107 @@ use crate::sink::{Level, PipelineEvent};
 use crate::state::{StackState, StateStore};
 
 /// Shorthand: run a step, bail out of the operation on failure (A3).
+///
+/// S2: before bailing, leave a record that this stack was half-deployed. The
+/// deploy's own `record state` step is the last one, so until now a failure
+/// anywhere before it wrote nothing at all — see `mark_incomplete`.
 macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
+    ($runner:expr, $exec:expr, $ctx:expr, $m:expr, $name:expr, $body:expr) => {
         match $runner.step($name, || async { $body }).await {
             Ok(outcome) => outcome,
-            Err(e) => return $runner.finish_err($name, &e),
+            Err(e) => {
+                mark_incomplete($exec, $ctx, $m, $name).await;
+                return $runner.finish_err($name, &e);
+            }
         }
     };
+}
+
+/// Like `step!`, but the step must prove its own work (S2).
+macro_rules! stepv {
+    ($runner:expr, $exec:expr, $ctx:expr, $m:expr, $name:expr, $body:expr, $verify:expr) => {
+        match $runner
+            .step_verified($name, || async { $body }, || async { $verify })
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                mark_incomplete($exec, $ctx, $m, $name).await;
+                return $runner.finish_err($name, &e);
+            }
+        }
+    };
+}
+
+/// Record that a deploy stopped part-way, so the stack is at least visible.
+///
+/// Deliberately silent about its own failures: this runs while another error
+/// is already on its way to the operator, and a second one stacked on top of
+/// it helps nobody. The worst case is the state we had before — no record —
+/// which is exactly what this exists to avoid, so it is worth attempting and
+/// not worth escalating.
+async fn mark_incomplete(
+    exec: &dyn crate::executor::Executor,
+    ctx: &OpCtx<'_>,
+    m: &crate::manifest::StackManifest,
+    step: &str,
+) {
+    // A1 promises that a refused target runs ZERO commands, and D10 promises
+    // the same for a manifest that does not validate. Writing a state record
+    // is a command. These four steps all run before anything on the machine
+    // has been touched, so a failure in them leaves nothing half-done and
+    // there is nothing to record — recording anyway would both break the
+    // guarantee and invent a stack the operator never deployed.
+    const BEFORE_ANYTHING_CHANGES: [&str; 4] = [
+        "validate",
+        "safety gates",
+        "registry cache",
+        "hardware readiness",
+    ];
+    if BEFORE_ANYTHING_CHANGES.contains(&step) {
+        return;
+    }
+    let store = StateStore::new(exec, &ctx.state_dir);
+    let Ok(mut state) = store.load().await else {
+        return;
+    };
+    match state.stacks.get_mut(&m.stack_name) {
+        // Known already: keep everything, just mark where it stopped. The
+        // manifest on record stays the last one that fully applied, because
+        // that is what actually ran — not what this attempt wanted.
+        Some(existing) => existing.incomplete_step = Some(step.to_string()),
+        // Never recorded: write the minimum that makes it exist. Nightly
+        // backups key off this entry, and 12 GB of configuration with no
+        // backup was how this defect announced itself.
+        None => {
+            state.stacks.insert(
+                m.stack_name.clone(),
+                StackState {
+                    vmid: m.vmid,
+                    hostname: m.hostname.clone(),
+                    apps: m.apps.clone(),
+                    applied_at: ctx.now_unix,
+                    last_backup: 0,
+                    applied_hash: String::new(),
+                    manifest: Some(m.clone()),
+                    enabled: true,
+                    native: None,
+                    natives: Vec::new(),
+                    incomplete_step: Some(step.to_string()),
+                },
+            );
+        }
+    }
+    let _ = store.save(state).await;
+    ctx.sink.emit(PipelineEvent::Line {
+        level: Level::Warn,
+        source: "HOST".into(),
+        msg: format!(
+            "[state] '{}' recorded as incomplete at step '{}' — it is managed, \
+             but what is on the container is not what the stack file says",
+            m.stack_name, step
+        ),
+    });
 }
 /// F129 · per app: where its compose lives in the container, what it said
 /// before the cache rewrite, and the mode to write it back with.
@@ -56,13 +150,13 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     };
 
     // ── D10: never trust the client — validate host-side too. ────────────
-    step!(runner, "validate", {
+    step!(runner, exec, ctx, m, "validate", {
         manifest::validate(spec)?;
         Ok(StepOutcome::Unchanged)
     });
 
     // ── A1 + A2: refuse before anything mutates. ─────────────────────────
-    step!(runner, "safety gates", {
+    step!(runner, exec, ctx, m, "safety gates", {
         exists = safety::check_deploy_target(exec, &ctx.safety, m).await?;
         Ok(StepOutcome::Unchanged)
     });
@@ -73,7 +167,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // is not an error: the image keeps naming its own origin and the pull
     // goes out to the internet exactly as it did before there was a cache.
     let mut cache_up: Vec<String> = Vec::new();
-    step!(runner, "registry cache", {
+    step!(runner, exec, ctx, m, "registry cache", {
         let Some(cache) = ctx.registry_cache.as_ref() else {
             return Ok(StepOutcome::Unchanged);
         };
@@ -117,7 +211,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // ── W1: refuse hardware this host cannot give, and read the group ids
     // instead of assuming them. Before the storage step, because a stack
     // that cannot work here should not leave directories behind either.
-    step!(runner, "hardware readiness", {
+    step!(runner, exec, ctx, m, "hardware readiness", {
         if m.lxc.gpu {
             gpu = Some(crate::ops::hardware::check_gpu(exec, &m.stack_name).await?);
         }
@@ -136,7 +230,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     }
 
     // ── Host-side /appdata storage (survives container recreation). ──────
-    step!(runner, "host storage", {
+    step!(runner, exec, ctx, m, "host storage", {
         for mount in &m.storage {
             run_ok(exec, &Cmd::new("mkdir", &["-p", &mount.host_path], 30)).await?;
             if let Some(uid) = mount.host_owner_uid {
@@ -159,7 +253,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // generation checked each service directory separately; this restores
     // that. Backup-target trouble degrades to a loud warning, never a blocked
     // deploy (spec: upgraded-by-Kenny Must).
-    step!(runner, "auto-restore check", {
+    step!(runner, exec, ctx, m, "auto-restore check", {
         if m.storage.is_empty() {
             return Ok(StepOutcome::Unchanged);
         }
@@ -246,7 +340,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // start, removed by destroy — so the scrape list is a consequence of what
     // runs rather than a list somebody maintains and forgets. Best-effort on
     // purpose: a metrics stack that is down must never block a deploy.
-    step!(runner, "metrics discovery", {
+    step!(runner, exec, ctx, m, "metrics discovery", {
         let Some(dir) = ctx.metrics_targets_dir.as_deref() else {
             return Ok(StepOutcome::Unchanged);
         };
@@ -271,7 +365,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     // ── C1: create or reuse the container; C3 boot policy at create. ─────
-    step!(runner, "provision container", {
+    step!(runner, exec, ctx, m, "provision container", {
         if !exists {
             let mut net = format!(
                 "name=eth0,bridge={},firewall=0,ip={},gw={}",
@@ -613,7 +707,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
 
     // H2: register the static IP as a Kea reservation (fail-open — a DHCP
     // nicety must never block a deploy).
-    step!(runner, "dhcp reservation", {
+    step!(runner, exec, ctx, m, "dhcp reservation", {
         let Some(kea_cfg) = ctx.kea.as_ref() else {
             return Ok(StepOutcome::Unchanged);
         };
@@ -649,7 +743,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         }
     });
 
-    step!(runner, "wait for systemd", {
+    step!(runner, exec, ctx, m, "wait for systemd", {
         let mut ready = false;
         for _ in 0..30 {
             let out = pct_sh(
@@ -674,7 +768,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         Ok(StepOutcome::Unchanged)
     });
 
-    step!(runner, "bootstrap docker", {
+    step!(runner, exec, ctx, m, "bootstrap docker", {
         // A native-only container has no docker and must not be given any:
         // installing it would change the very thing this manifest exists to
         // reproduce exactly.
@@ -710,7 +804,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     // ── B2 + A7. ─────────────────────────────────────────────────────────
-    step!(runner, "runaway guards", {
+    step!(runner, exec, ctx, m, "runaway guards", {
         guards::apply(
             exec,
             ctx.sink,
@@ -723,7 +817,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     // ── D4: intent into the host-local git repo (never secrets, A5). ─────
-    step!(runner, "commit intent", {
+    step!(runner, exec, ctx, m, "commit intent", {
         let repo = format!("{}/repo", ctx.state_dir);
         let stack_dir = format!("{}/stacks/{}", repo, m.stack_name);
         for f in &spec.files {
@@ -806,110 +900,161 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new()));
     let needs_restart_w = needs_restart.clone();
     let recreated_w = recreated.clone();
+    // S2: every file this deploy actually wrote into the container, with the
+    // hash it should now have. Checked once at the end of the step — a push
+    // that reports success and lands somewhere else, or on top of something
+    // else, is the shape F124 took.
+    let pushed: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let pushed_w = pushed.clone();
     // F129: what each rewritten app's compose said BEFORE it was pointed at
     // the cache. Kept so the pull step can put the real registry back when
     // the cache turns out not to serve — the fallback half of Kenny's C1.
     let cache_orig: CacheOriginals =
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
     let cache_orig_w = cache_orig.clone();
-    step!(runner, "push files", {
-        for f in &spec.files {
-            // A native unit file goes to /etc/systemd/system and nowhere
-            // else. Pushing it here too cost almanac its binary: the stack
-            // file's path is `<unit>/<unit>.service`, which lands on
-            // /opt/almanac/almanac — and that WAS the binary. The garbage
-            // collector removed it, the push then made a directory of the
-            // same name, and the service kept running only because the
-            // kernel holds a deleted file open. A restart would have found
-            // nothing there.
-            if m.natives
-                .iter()
-                .any(|u| f.path == format!("{}/{}.service", u, u))
-            {
-                continue;
-            }
-            let dest = format!("/opt/{}/{}", m.stack_name, f.path);
-            let perms = format!("{:o}", f.mode.unwrap_or(0o644));
-            // D60: the file in the repository names the real origin; what
-            // lands in the container names the cache, but only for the
-            // upstreams that answered a moment ago and never for a registry
-            // this stack signs into — that one is private, and the cache is
-            // anonymous by design.
-            let content = match (
-                ctx.registry_cache.as_ref(),
-                f.path.ends_with("docker-compose.yml"),
-            ) {
-                (Some(cache), true) if !cache_up.is_empty() => {
-                    let rewritten = crate::ops::registry_cache::rewrite_compose(
-                        &f.content,
-                        cache,
-                        &cache_up,
-                        m.registry_login.as_ref().map(|r| r.registry.as_str()),
-                    );
-                    // Only a compose the rewrite actually touched can fall
-                    // back; recording the untouched ones would make the pull
-                    // step re-push identical bytes for every app in the stack.
-                    if rewritten != f.content {
-                        if let Some((app, _)) = f.path.split_once('/') {
-                            if let Ok(mut g) = cache_orig_w.lock() {
-                                g.insert(
-                                    app.to_string(),
-                                    (dest.clone(), f.content.clone(), perms.clone()),
-                                );
+    stepv!(
+        runner,
+        exec,
+        ctx,
+        m,
+        "push files",
+        {
+            for f in &spec.files {
+                // A native unit file goes to /etc/systemd/system and nowhere
+                // else. Pushing it here too cost almanac its binary: the stack
+                // file's path is `<unit>/<unit>.service`, which lands on
+                // /opt/almanac/almanac — and that WAS the binary. The garbage
+                // collector removed it, the push then made a directory of the
+                // same name, and the service kept running only because the
+                // kernel holds a deleted file open. A restart would have found
+                // nothing there.
+                if m.natives
+                    .iter()
+                    .any(|u| f.path == format!("{}/{}.service", u, u))
+                {
+                    continue;
+                }
+                let dest = format!("/opt/{}/{}", m.stack_name, f.path);
+                let perms = format!("{:o}", f.mode.unwrap_or(0o644));
+                // D60: the file in the repository names the real origin; what
+                // lands in the container names the cache, but only for the
+                // upstreams that answered a moment ago and never for a registry
+                // this stack signs into — that one is private, and the cache is
+                // anonymous by design.
+                let content = match (
+                    ctx.registry_cache.as_ref(),
+                    f.path.ends_with("docker-compose.yml"),
+                ) {
+                    (Some(cache), true) if !cache_up.is_empty() => {
+                        let rewritten = crate::ops::registry_cache::rewrite_compose(
+                            &f.content,
+                            cache,
+                            &cache_up,
+                            m.registry_login.as_ref().map(|r| r.registry.as_str()),
+                        );
+                        // Only a compose the rewrite actually touched can fall
+                        // back; recording the untouched ones would make the pull
+                        // step re-push identical bytes for every app in the stack.
+                        if rewritten != f.content {
+                            if let Some((app, _)) = f.path.split_once('/') {
+                                if let Ok(mut g) = cache_orig_w.lock() {
+                                    g.insert(
+                                        app.to_string(),
+                                        (dest.clone(), f.content.clone(), perms.clone()),
+                                    );
+                                }
                             }
                         }
+                        rewritten
                     }
-                    rewritten
-                }
-                _ => f.content.clone(),
-            };
-            let changed = push_content(exec, m.vmid, &dest, &content, &perms).await?;
-            if changed {
-                // The path is "<app>/<file>"; a file outside an app directory
-                // belongs to no service and needs nothing restarted.
-                if let Some((app, name)) = f.path.split_once('/') {
-                    if name == "docker-compose.yml" {
-                        // compose up -d recreates this one by itself.
-                        if let Ok(mut g) = recreated_w.lock() {
+                    _ => f.content.clone(),
+                };
+                let changed = push_content(exec, m.vmid, &dest, &content, &perms).await?;
+                if changed {
+                    if let Ok(mut g) = pushed_w.lock() {
+                        g.push((dest.clone(), manifest::sha256_hex(content.as_bytes())));
+                    }
+                    // The path is "<app>/<file>"; a file outside an app directory
+                    // belongs to no service and needs nothing restarted.
+                    if let Some((app, name)) = f.path.split_once('/') {
+                        if name == "docker-compose.yml" {
+                            // compose up -d recreates this one by itself.
+                            if let Ok(mut g) = recreated_w.lock() {
+                                g.insert(app.to_string());
+                            }
+                        } else if let Ok(mut g) = needs_restart_w.lock() {
                             g.insert(app.to_string());
                         }
-                    } else if let Ok(mut g) = needs_restart_w.lock() {
-                        g.insert(app.to_string());
                     }
                 }
+                ctx.sink.emit(PipelineEvent::Bytes {
+                    op: op.clone(),
+                    label: dest,
+                    done: f.content.len() as u64,
+                    total: Some(f.content.len() as u64),
+                });
             }
-            ctx.sink.emit(PipelineEvent::Bytes {
-                op: op.clone(),
-                label: dest,
-                done: f.content.len() as u64,
-                total: Some(f.content.len() as u64),
-            });
-        }
-        for (app, env) in &spec.env {
-            let dest = format!("/opt/{}/{}/.env", m.stack_name, app);
-            push_content(exec, m.vmid, &dest, env, "600").await?;
-            // HOST-side vault copy for redeploys — outside the git repo.
-            let vault = format!("{}/secrets/{}/{}.env", ctx.state_dir, m.stack_name, app);
-            exec.write_file(&vault, env, 0o600).await?;
-            log_info(format!("[vault] {} sealed (values not logged)", dest));
-        }
-        // A5/E3: apps whose env the client did NOT send fall back to the
-        // vault — a wiped container gets its .env back on redeploy.
-        for app in &m.apps {
-            if spec.env.contains_key(app) {
-                continue;
-            }
-            let vault = format!("{}/secrets/{}/{}.env", ctx.state_dir, m.stack_name, app);
-            if let Ok(env) = exec.read_file(&vault).await {
+            for (app, env) in &spec.env {
                 let dest = format!("/opt/{}/{}/.env", m.stack_name, app);
-                push_content(exec, m.vmid, &dest, &env, "600").await?;
-                log_info(format!("[vault] {} restored from vault", dest));
+                push_content(exec, m.vmid, &dest, env, "600").await?;
+                // HOST-side vault copy for redeploys — outside the git repo.
+                let vault = format!("{}/secrets/{}/{}.env", ctx.state_dir, m.stack_name, app);
+                exec.write_file(&vault, env, 0o600).await?;
+                log_info(format!("[vault] {} sealed (values not logged)", dest));
+            }
+            // A5/E3: apps whose env the client did NOT send fall back to the
+            // vault — a wiped container gets its .env back on redeploy.
+            for app in &m.apps {
+                if spec.env.contains_key(app) {
+                    continue;
+                }
+                let vault = format!("{}/secrets/{}/{}.env", ctx.state_dir, m.stack_name, app);
+                if let Ok(env) = exec.read_file(&vault).await {
+                    let dest = format!("/opt/{}/{}/.env", m.stack_name, app);
+                    push_content(exec, m.vmid, &dest, &env, "600").await?;
+                    log_info(format!("[vault] {} restored from vault", dest));
+                }
+            }
+            Ok(StepOutcome::Changed)
+        },
+        {
+            // Ask the container what those files now hash to. One command for all
+            // of them, because a round trip per file is what makes a check like
+            // this get switched off later. `.env` files are deliberately absent
+            // from the list: their content is not ours to echo back, and the
+            // vault copy is the record that matters for them.
+            let want = pushed.lock().map(|g| g.clone()).unwrap_or_default();
+            if want.is_empty() {
+                return Ok(());
+            }
+            let paths = want
+                .iter()
+                .map(|(p, _)| format!("'{}'", p))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let out = pct_sh(exec, m.vmid, &format!("sha256sum {} 2>&1", paths), 120)
+                .await
+                .map(|o| o.stdout)
+                .unwrap_or_default();
+            let mut bad: Vec<String> = Vec::new();
+            for (path, hash) in &want {
+                let line = out.lines().find(|l| l.trim_end().ends_with(path.as_str()));
+                match line {
+                    Some(l) if l.split_whitespace().next() == Some(hash.as_str()) => {}
+                    Some(_) => bad.push(format!("{} has different content", path)),
+                    None => bad.push(format!("{} is not there", path)),
+                }
+            }
+            if bad.is_empty() {
+                Ok(())
+            } else {
+                Err(bad.join("; "))
             }
         }
-        Ok(StepOutcome::Changed)
-    });
+    );
 
-    step!(runner, "start apps", {
+    step!(runner, exec, ctx, m, "start apps", {
         // A native-only container has no docker: nothing to network, nothing
         // to start. Without this the deploy created an empty docker network
         // on CT 112 — harmless, and exactly the kind of stray act that makes
@@ -1069,7 +1214,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     // ── B3: no green light without proof. ────────────────────────────────
-    step!(runner, "verify health", {
+    step!(runner, exec, ctx, m, "verify health", {
         exec.sleep_ms(5000).await;
         for app in &m.apps {
             let dir = format!("/opt/{}/{}", m.stack_name, app);
@@ -1108,7 +1253,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
 
     // ── H1: the single allowed cross-stack write. ────────────────────────
     if let Some(route) = &spec.gateway_route {
-        step!(runner, "gateway route", {
+        step!(runner, exec, ctx, m, "gateway route", {
             let dest =
                 safety::check_gateway_route(&ctx.safety, route.gateway_vmid, &route.filename)?;
             // H6 hardening: when the routes dir lives under /appdata/ it is a
@@ -1137,7 +1282,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // Best-effort, like the discovery file — Grafana being down is not a
     // reason to fail a deploy.
     if let Some(dir) = ctx.grafana_dashboards_dir.as_deref() {
-        step!(runner, "grafana dashboard", {
+        step!(runner, exec, ctx, m, "grafana dashboard", {
             let dest = crate::ops::dashboard::dashboard_file(dir, &m.stack_name);
             let body = crate::ops::dashboard::dashboard_json(&m.stack_name, &m.apps);
             match push_content(exec, ctx.safety.gateway_vmid, &dest, &body, "644").await {
@@ -1164,7 +1309,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
 
     // ── D3: garbage-collect apps removed from intent — stop + remove their
     // compose project and /opt dir; /appdata config dirs are kept.
-    step!(runner, "garbage collect", {
+    step!(runner, exec, ctx, m, "garbage collect", {
         // Nor is there anything to garbage-collect: an app directory under
         // /opt on a native-only container was never put there by a deploy.
         if m.native_only {
@@ -1213,7 +1358,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // a running production service is not restarted to take ownership of it.
     // Changing a unit file that is already in place is a deliberate act, not
     // a side effect of a deploy.
-    step!(runner, "native units", {
+    step!(runner, exec, ctx, m, "native units", {
         if m.natives.is_empty() {
             return Ok(StepOutcome::Unchanged);
         }
@@ -1277,7 +1422,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         })
     });
 
-    step!(runner, "record state", {
+    step!(runner, exec, ctx, m, "record state", {
         let store = StateStore::new(exec, &ctx.state_dir);
         let mut state = store.load().await?;
         // Preserve last_backup and the H8 enabled flag across redeploys —
@@ -1325,10 +1470,114 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 enabled,
                 native: prior_native,
                 natives: prior_natives,
+                incomplete_step: None,
             },
         );
         store.save(state).await?;
         Ok(StepOutcome::Changed)
+    });
+
+    // ── S2 · the final reconciliation. Every step above has now said it
+    // succeeded. This asks the container itself whether that is true, and it
+    // asks about the whole stack rather than about one step's own work.
+    //
+    // The reason it is a separate pass and not more assertions inside the
+    // steps: a step can only check what it did. What hurt on 2026-09-01 was
+    // never one step being wrong — it was the deploy stopping halfway and
+    // everything after it silently not happening. Only something that looks
+    // at the finished whole can notice that.
+    step!(runner, exec, ctx, m, "reconcile", {
+        let mut wrong: Vec<String> = Vec::new();
+        let cfg = pct_sh(exec, m.vmid, "true", 30).await;
+        if cfg.is_err() {
+            wrong.push("the container did not answer".into());
+        }
+        let live = run_ok(exec, &Cmd::new("pct", &["config", &vm], 60))
+            .await
+            .map(|o| o.stdout)
+            .unwrap_or_default();
+
+        // Hostname: A2 refuses a mismatch before touching anything, so a
+        // mismatch here means the container was swapped under us.
+        if !live.contains(&format!("hostname: {}", m.hostname)) {
+            wrong.push(format!("hostname is not {}", m.hostname));
+        }
+        // Every declared mount, storage and borrowed alike. F118 lost these
+        // by dropping a field it did not understand, and the deploy reported
+        // success while the downloader came up with no disks.
+        for st in &m.storage {
+            if !live.contains(&format!("{},mp=", st.host_path)) {
+                wrong.push(format!("storage {} is not mounted", st.host_path));
+            }
+        }
+        for dm in &m.data_mounts {
+            if !live.contains(&format!("{},mp={}", dm.host_path, dm.mount_point)) {
+                wrong.push(format!("data mount {} is not mounted", dm.host_path));
+            }
+        }
+        // Boot policy, read with W3's own parser rather than by looking for a
+        // line. `pct config` prints nothing at all when onboot is 0, so a
+        // text match on "onboot: 0" can never succeed and a stack that asks
+        // for onboot: false would be reported wrong forever.
+        // Only when the value can actually be read. W3 leaves an unreadable
+        // boot policy alone, and a check that demands more than the deploy is
+        // willing to enforce turns into a deploy that can never succeed.
+        let live_boot = crate::ops::reconcile::parse(&live);
+        if let Some(on) = live_boot.onboot {
+            if on != m.boot.onboot {
+                wrong.push(format!(
+                    "boot policy is {} where the stack file says {}",
+                    on, m.boot.onboot
+                ));
+            }
+        }
+        // Every app actually running. `docker compose up -d` returning 0 is
+        // not the same as a container that stayed up: a crash loop exits 0
+        // on the way in.
+        if !m.native_only && !m.apps.is_empty() {
+            let ps = pct_sh(exec, m.vmid, "docker ps --format '{{.Names}}'", 120)
+                .await
+                .map(|o| o.stdout)
+                .unwrap_or_default();
+            let running: Vec<&str> = ps.lines().map(|l| l.trim()).collect();
+            for app in &m.apps {
+                if !running.iter().any(|r| r == app) {
+                    wrong.push(format!("app '{}' is not running", app));
+                }
+            }
+        }
+        // Every native unit actually active.
+        for n in &m.natives {
+            let act = pct_sh(
+                exec,
+                m.vmid,
+                &format!("systemctl is-active {} 2>/dev/null || true", n),
+                60,
+            )
+            .await
+            .map(|o| o.stdout)
+            .unwrap_or_default();
+            if !act.trim().starts_with("active") {
+                wrong.push(format!("native unit '{}' is not active", n));
+            }
+        }
+
+        if wrong.is_empty() {
+            log_info(format!(
+                "[reconcile] the container matches the stack file on {} point(s)",
+                2 + m.storage.len() + m.data_mounts.len() + m.apps.len() + m.natives.len()
+            ));
+            Ok(StepOutcome::Unchanged)
+        } else {
+            Err(CoreError::Command {
+                rendered: format!("reconcile {}", m.stack_name),
+                detail: format!(
+                    "the deploy reported success but the container does not match \
+                     the stack file: {}",
+                    wrong.join("; ")
+                ),
+            })
+        }
     });
 
     runner.log(

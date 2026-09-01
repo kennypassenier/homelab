@@ -629,6 +629,7 @@ mod tests {
                 enabled: true,
                 native: None,
                 natives: Vec::new(),
+                incomplete_step: None,
             },
         );
         hs.stacks.insert(
@@ -644,6 +645,7 @@ mod tests {
                 enabled: true,
                 native: None,
                 natives: Vec::new(),
+                incomplete_step: None,
             },
         );
         let (total, used, committed, cores, load1) =

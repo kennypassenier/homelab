@@ -99,6 +99,57 @@ impl<'a> Runner<'a> {
         }
     }
 
+    /// S2 · a step that checks its own work.
+    ///
+    /// `body` does the thing; `verify` then reads the world back and answers
+    /// whether it is actually so. A verify that says no fails the step, with
+    /// wording that names the real problem — the command succeeded and the
+    /// change is not there.
+    ///
+    /// This exists because that combination is the single most common shape
+    /// of defect in this project. Three from one evening: the host dropped a
+    /// manifest field it did not recognise and reported a clean deploy while
+    /// the container came up with no disks; a file was written over a running
+    /// program's own binary and the transcript said "pushed"; and promtail
+    /// ran for months shipping nothing while every check called it healthy.
+    /// An exit code of zero answers "did the command run", which is a
+    /// different question from "is it now true".
+    pub async fn step_verified<F, Fut, V, VFut>(
+        &mut self,
+        name: &str,
+        body: F,
+        verify: V,
+    ) -> Result<StepOutcome, CoreError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<StepOutcome, CoreError>>,
+        V: FnOnce() -> VFut,
+        VFut: std::future::Future<Output = Result<(), String>>,
+    {
+        let outcome = self.step(name, body).await?;
+        // Nothing changed means nothing to check: re-reading the world to
+        // confirm an absence of work costs a command per idempotent step,
+        // and every deploy is mostly idempotent steps.
+        if outcome == StepOutcome::Unchanged {
+            return Ok(outcome);
+        }
+        match verify().await {
+            Ok(()) => Ok(outcome),
+            Err(why) => {
+                self.journal.record(&self.op, name, "unverified");
+                let err = CoreError::Command {
+                    rendered: format!("verify {}", name),
+                    detail: format!(
+                        "the step reported success but the change is not there: {}",
+                        why
+                    ),
+                };
+                self.log(Level::Error, format!("[{}] {}", name, err));
+                Err(err)
+            }
+        }
+    }
+
     pub fn finish_ok(self) -> OperationReport {
         self.journal.record(&self.op, "-", "complete");
         OperationReport {

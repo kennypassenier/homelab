@@ -15,6 +15,7 @@ use homelab_core::sink::VecSink;
 /// git + filesystem = REAL; hypervisor/docker commands = canned success.
 struct HybridExec {
     root: std::path::PathBuf,
+    pushed: std::sync::Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl HybridExec {
@@ -77,8 +78,34 @@ impl Executor for HybridExec {
                 if rendered.contains("--status running --services") {
                     return Ok(CmdOutput::ok("app\n"));
                 }
+                // S2: the deploy now reads its own pushes back, so this fake
+                // has to model the destination side of `pct push` — the file
+                // is staged on disk here, so the hash is real, not invented.
                 if rendered.contains("sha256sum") {
-                    return Ok(CmdOutput::ok(""));
+                    let mut out = String::new();
+                    if let Ok(map) = self.pushed.lock() {
+                        for (dest, hash) in map.iter() {
+                            if rendered.contains(dest.as_str()) {
+                                out.push_str(&format!("{}  {}\n", hash, dest));
+                            }
+                        }
+                    }
+                    return Ok(CmdOutput::ok(&out));
+                }
+                if rendered.contains("docker ps --format") {
+                    return Ok(CmdOutput::ok("app\n"));
+                }
+                if cmd.args.first().map(|a| a.as_str()) == Some("push") {
+                    if let (Some(src), Some(dest)) = (cmd.args.get(2), cmd.args.get(3)) {
+                        if let Ok(content) = std::fs::read_to_string(self.sandbox(src)) {
+                            if let Ok(mut map) = self.pushed.lock() {
+                                map.insert(
+                                    dest.clone(),
+                                    homelab_core::manifest::sha256_hex(content.as_bytes()),
+                                );
+                            }
+                        }
+                    }
                 }
                 Ok(CmdOutput::ok(""))
             }
@@ -168,6 +195,7 @@ async fn r9_intent_history_against_real_git_two_deploys_two_commits_revert_works
     let state_dir = tmp.path().to_str().unwrap().to_string();
     let exec = HybridExec {
         root: tmp.path().to_path_buf(),
+        pushed: Default::default(),
     };
     let sink = VecSink::new();
     let j = NullJournal;
@@ -222,6 +250,7 @@ async fn r9_broken_git_identity_fails_the_deploy_not_silently() {
 
     let exec = HybridExec {
         root: tmp.path().to_path_buf(),
+        pushed: Default::default(),
     };
     let sink = VecSink::new();
     let j = NullJournal;

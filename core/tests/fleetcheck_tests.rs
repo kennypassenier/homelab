@@ -24,6 +24,7 @@ fn stack(vmid: u16, hostname: &str, enabled: bool, last_backup: u64) -> StackSta
         manifest: None,
         native: None,
         natives: Vec::new(),
+        incomplete_step: None,
         enabled,
     }
 }

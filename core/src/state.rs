@@ -48,6 +48,17 @@ pub struct StackState {
     /// `guard_target` re-checks it against the live container.
     #[serde(default)]
     pub natives: Vec<crate::native::NativeServiceManifest>,
+    /// S2: the step a deploy stopped at, or None when it ran to the end.
+    ///
+    /// State used to be written only by the last step, so a deploy that
+    /// stopped earlier left no record at all. On 2026-09-01 the media stack
+    /// failed at "start apps" and therefore did not exist as far as the
+    /// orchestrator was concerned: no drift detection, no retention, and —
+    /// the part that mattered — no nightly backup of 12 GB of application
+    /// configuration, with nothing anywhere saying so. A container that is
+    /// running and unknown is worse than one that is plainly broken.
+    #[serde(default)]
+    pub incomplete_step: Option<String>,
 }
 
 impl StackState {

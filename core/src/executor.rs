@@ -166,6 +166,14 @@ pub struct MockExecutor {
     queue: Mutex<Vec<(String, CmdOutput)>>,
     always: Mutex<Vec<(String, CmdOutput)>>,
     files: Mutex<HashMap<String, (String, u32)>>,
+    /// What `pct push` has landed inside the container, keyed by destination.
+    container_files: Mutex<HashMap<String, String>>,
+    /// What `pct set` has changed about the container, keyed by config key.
+    container_config: Mutex<HashMap<String, String>>,
+    /// What `pct create`/`pct clone` asked for; only fills gaps.
+    container_created: Mutex<HashMap<String, String>>,
+    /// Which app containers `docker compose up -d` has started.
+    container_running: Mutex<std::collections::BTreeSet<String>>,
 }
 
 impl MockExecutor {
@@ -177,6 +185,16 @@ impl MockExecutor {
     /// (consumed once).
     pub fn enqueue(&self, matcher: &str, out: CmdOutput) {
         self.queue.lock().unwrap().push((matcher.to_string(), out));
+    }
+
+    /// Like `respond_always`, but wins over rules registered earlier. Needed
+    /// because the shared test harness now models a HEALTHY container, and a
+    /// test about an unhealthy one has to be able to say so afterwards.
+    pub fn respond_first(&self, matcher: &str, out: CmdOutput) {
+        self.always
+            .lock()
+            .unwrap()
+            .insert(0, (matcher.to_string(), out));
     }
 
     /// Every command whose rendered form contains `matcher` returns `out`
@@ -238,16 +256,152 @@ impl Executor for MockExecutor {
             .lock()
             .unwrap()
             .push((rendered.clone(), cmd.timeout_s));
+        // S2: model the container's filesystem well enough that a step which
+        // reads its own work back gets a truthful answer. `pct push` moves
+        // the staged file to a destination; a later `sha256sum` of that
+        // destination must then agree. Without this the mock answers every
+        // read with silence, and a verified step can only ever fail — which
+        // would make the harness argue against the very check it should be
+        // proving. Scripted responses still win: a test that wants a push to
+        // land wrong says so, and this stays out of its way.
+        // Likewise for `pct set`: a deploy that corrects a container's boot
+        // policy or attaches a missing mount must be able to read that back
+        // afterwards. Recorded as plain `pct config` lines so the scripted
+        // "before" answer and the modelled "after" can be merged below.
+        // `set` takes the vmid then flag/value pairs; `create` and `clone`
+        // take one more positional first. Both describe the container that
+        // exists afterwards, which is what a reconciliation reads back.
+        // `set` is a deliberate later change and outranks whatever a test
+        // scripted; `create`/`clone` only describe the starting state, and a
+        // scripted answer may legitimately know more than the command line
+        // did — Proxmox assigns net0's hwaddr itself, so replacing the
+        // scripted net0 with the one from `pct create` argv would throw the
+        // MAC address away.
+        let cfg_args = match cmd.args.first().map(|a| a.as_str()) {
+            Some("set") if cmd.program == "pct" => Some((2, true)),
+            Some("create") | Some("clone") if cmd.program == "pct" => Some((3, false)),
+            _ => None,
+        };
+        if let Some((skip, authoritative)) = cfg_args {
+            let mut it = cmd.args.iter().skip(skip);
+            while let Some(flag) = it.next() {
+                if !flag.starts_with('-') {
+                    continue;
+                }
+                let Some(value) = it.next() else { break };
+                let key = flag.trim_start_matches('-');
+                let mut target = if authoritative {
+                    self.container_config.lock().unwrap()
+                } else {
+                    self.container_created.lock().unwrap()
+                };
+                target.insert(key.to_string(), value.clone());
+            }
+        }
+        // Which app containers are up. `docker compose up -d` in an app's own
+        // directory starts it; `down` stops it. Modelled because the check
+        // that matters — is it actually running — cannot be answered by the
+        // exit code of the command that started it.
+        if rendered.contains("docker compose") {
+            if let Some(dir) = rendered.split('\'').nth(1) {
+                if let Some(app) = dir.rsplit('/').next() {
+                    let mut up = self.container_running.lock().unwrap();
+                    if rendered.contains("compose up") {
+                        up.insert(app.to_string());
+                    } else if rendered.contains("compose down") {
+                        up.remove(app);
+                    }
+                }
+            }
+        }
+        if rendered.contains("docker ps --format") {
+            let up = self.container_running.lock().unwrap();
+            if !up.is_empty() {
+                let scripted = {
+                    let always = self.always.lock().unwrap();
+                    always.iter().any(|(m, _)| rendered.contains(m))
+                };
+                if !scripted {
+                    let mut out: Vec<&str> = up.iter().map(|s| s.as_str()).collect();
+                    out.sort();
+                    return Ok(CmdOutput::ok(&format!("{}\n", out.join("\n"))));
+                }
+            }
+        }
+        if cmd.program == "pct" && cmd.args.first().map(|a| a.as_str()) == Some("push") {
+            if let (Some(src), Some(dest)) = (cmd.args.get(2), cmd.args.get(3)) {
+                let content = self.files.lock().unwrap().get(src).map(|(c, _)| c.clone());
+                if let Some(c) = content {
+                    self.container_files.lock().unwrap().insert(dest.clone(), c);
+                }
+            }
+        }
         {
             let mut queue = self.queue.lock().unwrap();
             if let Some(pos) = queue.iter().position(|(m, _)| rendered.contains(m)) {
                 return Ok(queue.remove(pos).1);
             }
         }
+        if cmd.program == "pct" && cmd.args.first().map(|a| a.as_str()) == Some("config") {
+            let cfg = self.container_config.lock().unwrap();
+            let created = self.container_created.lock().unwrap();
+            if !cfg.is_empty() || !created.is_empty() {
+                let scripted = {
+                    let always = self.always.lock().unwrap();
+                    always
+                        .iter()
+                        .find(|(m, _)| rendered.contains(m))
+                        .map(|(_, o)| o.stdout.clone())
+                        .unwrap_or_default()
+                };
+                let mut out = scripted;
+                // Additive first: only keys the scripted answer does not
+                // already carry.
+                for (k, v) in created.iter() {
+                    if !out.lines().any(|l| l.starts_with(&format!("{}:", k))) {
+                        if !out.is_empty() && !out.ends_with('\n') {
+                            out.push('\n');
+                        }
+                        out.push_str(&format!("{}: {}\n", k, v));
+                    }
+                }
+                for (k, v) in cfg.iter() {
+                    // A key the scripted answer already carries is REPLACED,
+                    // not appended: a drifted `onboot: 0` that the deploy has
+                    // since corrected must not still be readable.
+                    out = out
+                        .lines()
+                        .filter(|l| !l.starts_with(&format!("{}:", k)))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if !out.is_empty() && !out.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out.push_str(&format!("{}: {}\n", k, v));
+                }
+                return Ok(CmdOutput::ok(&out));
+            }
+        }
         {
             let always = self.always.lock().unwrap();
             if let Some((_, out)) = always.iter().find(|(m, _)| rendered.contains(m)) {
                 return Ok(out.clone());
+            }
+        }
+        if rendered.contains("sha256sum") {
+            let files = self.container_files.lock().unwrap();
+            let mut out = String::new();
+            for (path, content) in files.iter() {
+                if rendered.contains(path.as_str()) {
+                    out.push_str(&format!(
+                        "{}  {}\n",
+                        crate::manifest::sha256_hex(content.as_bytes()),
+                        path
+                    ));
+                }
+            }
+            if !out.is_empty() {
+                return Ok(CmdOutput::ok(&out));
             }
         }
         Ok(CmdOutput::ok(""))

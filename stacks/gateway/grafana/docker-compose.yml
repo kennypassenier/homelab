@@ -20,15 +20,17 @@ services:
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/homelab-overview.json
     volumes:
       - /appdata/gateway/grafana-config:/var/lib/grafana
+      # One mount, not two. The dashboards the ORCHESTRATOR generates live in
+      # `provisioning/dashboards-generated/` — a sibling of the committed
+      # `dashboards/`, so the repository owns one directory and the deploy
+      # owns the other and neither writes the other's files (Kenny, form B3).
+      #
+      # A second bind mount was tried first and cannot work: docker has to
+      # create the mountpoint inside `/etc/grafana/provisioning`, which this
+      # line has just mounted read-only, and it fails with "read-only file
+      # system" at container start. Grafana was down for four minutes finding
+      # that out (F159).
       - ./provisioning:/etc/grafana/provisioning:ro
-      # The dashboards the ORCHESTRATOR generates, one per stack, written
-      # here by every deploy. Deliberately not inside ./provisioning: that
-      # tree comes from the repository, and two writers in one directory is
-      # a collision you only notice when a dashboard changes for no reason
-      # (Kenny, form B3). Read-only here — Grafana reads, the deploy writes,
-      # and the deploy writes on the container's filesystem, not through
-      # this mount.
-      - ./dashboards-generated:/etc/grafana/provisioning/dashboards-generated:ro
     restart: unless-stopped
     labels:
       # grafana.db held 19 dashboards when this was written; on Grafana 13

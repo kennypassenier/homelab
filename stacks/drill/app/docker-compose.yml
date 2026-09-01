@@ -18,3 +18,13 @@ services:
       - -c
       - echo "drill" > /usr/share/nginx/html/index.html && exec nginx -g 'daemon off;'
     restart: unless-stopped
+    networks:
+      - drill_net
+
+# The stack network the deploy creates. Without it each app is its own compose
+# project on its own default network — which is how the gateway's bouncer lost
+# sight of CrowdSec and answered 403 to everything on 2026-09-01.
+networks:
+  drill_net:
+    external: true
+    name: drill_net

@@ -12,9 +12,9 @@ services:
       - ./data:/tmp/positions
     restart: unless-stopped
     networks:
-      - uptime_net
+      - drill_net
 
 networks:
-  uptime_net:
+  drill_net:
     external: true
-    name: uptime_net
+    name: drill_net

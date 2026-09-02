@@ -338,8 +338,13 @@ fn widget_lines(e: &Entry, keys: &std::collections::HashMap<String, String>) -> 
         Some(k) if !k.is_empty() => out.push(format!("  key: {}", k)),
         // No key on disk: fall back to Homepage's own variable, which is
         // how the credentials that no application stores for us arrive.
+        // Quoted, and that is not cosmetic: a YAML value starting with `{`
+        // is a flow mapping, so an unquoted {{HOMEPAGE_VAR_X}} makes the
+        // whole file unparseable and Homepage renders a YAMLException
+        // instead of a page. Kenny's hand-written file had the quotes; the
+        // first generated version did not (F200).
         _ => out.push(format!(
-            "  key: {{{{HOMEPAGE_VAR_{}}}}}",
+            "  key: \"{{{{HOMEPAGE_VAR_{}}}}}\"",
             e.app.to_uppercase().replace('-', "_")
         )),
     }

@@ -357,7 +357,11 @@ fn a_missing_key_still_produces_a_widget() {
         &Default::default(),
     );
     assert!(out.contains("type: sonarr"), "{}", out);
-    assert!(out.contains("key: {{HOMEPAGE_VAR_SONARR}}"), "{}", out);
+    assert!(
+        out.contains(r#"key: "{{HOMEPAGE_VAR_SONARR}}""#),
+        "the fallback must be QUOTED — an unquoted {{ is a YAML flow mapping: {}",
+        out
+    );
 }
 
 /// covers: F195
@@ -500,4 +504,79 @@ fn tiles_follow_the_order_written_in_the_overlay() {
         "the overlay puts Jellyfin above qBittorrent; the stack order must not win:\n{}",
         out
     );
+}
+
+/// covers: F200
+///
+/// The test that should have existed from the first line of this generator.
+/// Two defects shipped because every assertion asked whether some text was
+/// PRESENT: fields emitted at four spaces instead of eight (F197), and an
+/// unquoted `{{HOMEPAGE_VAR_X}}`, which YAML reads as a flow mapping and
+/// which made Homepage render a YAMLException instead of a page. Both are
+/// invisible to `contains()` and obvious to a parser.
+#[test]
+fn the_generated_page_is_valid_yaml() {
+    use homelab_core::ops::homepage::parse_overlay;
+    let ov = parse_overlay(include_str!(
+        "../../stacks/home/homepage/services-overlay.yml"
+    ));
+    let mut keys = std::collections::HashMap::new();
+    keys.insert("jellyfin".to_string(), "deadbeef".to_string());
+
+    let out = services_yaml(
+        &[
+            (
+                "media".into(),
+                vec![
+                    Entry {
+                        app: "jellyfin".into(),
+                        host: "fin.kp-soft.dev".into(),
+                        backend: Some("http://10.10.10.6:8096".into()),
+                    },
+                    // No key on disk: takes the quoted Homepage variable.
+                    Entry {
+                        app: "sonarr".into(),
+                        host: "son.kp-soft.dev".into(),
+                        backend: Some("http://10.10.10.6:8989".into()),
+                    },
+                ],
+            ),
+            (
+                "paperwork".into(),
+                vec![Entry {
+                    app: "paperless".into(),
+                    host: "docs.kp-soft.dev".into(),
+                    backend: Some("http://10.10.10.14:8000".into()),
+                }],
+            ),
+            (
+                "gateway".into(),
+                vec![Entry {
+                    app: "grafana".into(),
+                    host: "grafana.kp-soft.dev".into(),
+                    backend: Some("http://10.10.10.4:3000".into()),
+                }],
+            ),
+        ],
+        Some(&ov),
+        &keys,
+    );
+
+    let parsed: serde_yaml::Value = serde_yaml::from_str(&out)
+        .unwrap_or_else(|e| panic!("Homepage would refuse this file: {}\n---\n{}", e, out));
+
+    // And it has the shape Homepage expects: a sequence of one-key groups,
+    // each holding a sequence of one-key services.
+    let groups = parsed.as_sequence().expect("a list of groups");
+    assert!(!groups.is_empty());
+    for g in groups {
+        let m = g.as_mapping().expect("each group is a mapping");
+        assert_eq!(m.len(), 1, "a group has exactly one name");
+        let items = m.values().next().unwrap();
+        assert!(
+            items.as_sequence().is_some(),
+            "a group holds a list of services, got {:?}",
+            items
+        );
+    }
 }

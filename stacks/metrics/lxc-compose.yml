@@ -50,7 +50,7 @@ storage:
     app: alertmanager
 # alertmanager was deployed by hand on 2026-08-30 and was missing here, so a
 # deploy of this stack would not have started it.
-apps: [prometheus, alertmanager, promtail, pve-exporter]
+apps: [prometheus, alertmanager, pve-exporter]
 latch_secrets: [pve-exporter]
 
 # Pushes traefik-routes.yml to the gateway's watched routes directory.

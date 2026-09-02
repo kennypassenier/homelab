@@ -162,7 +162,7 @@ restic restore latest --target /
 
 - hostname `113-app-metrics`, ip `10.10.10.13/24`
 - resources: 2 core(s), 1024 MiB RAM, 0 MiB swap, 16 GiB disk
-- apps: prometheus, alertmanager, promtail, pve-exporter
+- apps: prometheus, alertmanager, pve-exporter
 - recreate from scratch: `homelab deploy stacks/metrics` (or by hand per Layer 2)
 - data restore from: `…:prometheus-config`, `…:alertmanager-config`
 
@@ -178,7 +178,7 @@ restic restore latest --target /
 
 - hostname `111-app-productivity`, ip `10.10.10.11/24`
 - resources: 2 core(s), 2048 MiB RAM, 0 MiB swap, 8 GiB disk
-- apps: supersync-db, supersync, promtail
+- apps: supersync-db, supersync
 - recreate from scratch: `homelab deploy stacks/productivity` (or by hand per Layer 2)
 - data restore from: `…:supersync-db-config`
 

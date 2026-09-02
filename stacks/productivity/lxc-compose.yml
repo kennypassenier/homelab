@@ -84,7 +84,7 @@ storage:
 
 # supersync-db first: supersync cannot reach a database that is not up yet,
 # and the list is the ordering — `depends_on` cannot cross compose files.
-apps: [supersync-db, supersync, promtail]
+apps: [supersync-db, supersync]
 latch_secrets: [supersync-db, supersync]
 
 gateway_route:

@@ -37,6 +37,24 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // ── Config (AR11) ────────────────────────────────────────────────────────────
 
+/// One externally-made backup to keep an eye on.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct WatchedBackup {
+    /// What the nightly report calls it.
+    name: String,
+    /// An rclone path, e.g. `gdrive:homelab-backups/OPNSense-backups`.
+    rclone_path: String,
+    /// Older than this and it becomes a finding. OPNsense runs its backup
+    /// cron at 01:00 with up to an hour of jitter, so 26 leaves room for a
+    /// late night without crying wolf.
+    #[serde(default = "default_watched_max_age_hours")]
+    max_age_hours: u64,
+}
+
+fn default_watched_max_age_hours() -> u64 {
+    26
+}
+
 #[derive(Debug, serde::Deserialize, Default)]
 struct FileConfig {
     token: Option<String>,
@@ -68,6 +86,12 @@ struct FileConfig {
     no_touch: Option<Vec<u16>>,
     gateway_vmid: Option<u16>,
     gateway_routes_dir: Option<String>,
+    /// O1: backups this orchestrator does not make but does watch. Each is
+    /// a folder on an rclone remote that some device outside the suite
+    /// writes to — today the OPNsense plugin that uploads the router's
+    /// configuration every night. Absent = nothing is watched, which is what
+    /// every fleet had before this existed.
+    watched_backups: Option<Vec<WatchedBackup>>,
     /// E8: ZFS snapshot+replication jobs (replaces the old cron script).
     zfs_jobs: Option<Vec<homelab_core::ops::zfs::ZfsJob>>,
     /// D60: `[registry_cache] host = "10.10.10.17"` plus one `[[registry_cache.upstreams]]`
@@ -153,6 +177,7 @@ struct Config {
     safety: SafetyConfig,
     /// E8: declared ZFS replication jobs; empty = feature off.
     zfs_jobs: Vec<homelab_core::ops::zfs::ZfsJob>,
+    watched_backups: Vec<WatchedBackup>,
     /// Backup target and timeouts, resolved once from host.toml. Callers
     /// clone this and override only `tiers`.
     backup: homelab_core::ops::backup::BackupCfg,
@@ -239,10 +264,12 @@ const KNOWN_TOP: &[&str] = &[
     "kuma_monitors_file",
     "ask_timeout_s",
     "backup_concurrency",
+    "watched_backups",
 ];
 const KNOWN_REGISTRY_CACHE: &[&str] = &["host", "upstreams", "pull_timeout_secs"];
 const KNOWN_UPSTREAM: &[&str] = &["registry", "port"];
 const KNOWN_ZFS_JOB: &[&str] = &["source", "target"];
+const KNOWN_WATCHED_BACKUP: &[&str] = &["name", "rclone_path", "max_age_hours"];
 const KNOWN_RETENTION: &[&str] = &["every_days", "keep", "span_days"];
 
 /// Every key in `raw` that no field of `FileConfig` will ever read, as
@@ -275,6 +302,12 @@ fn unknown_keys(raw: &toml::Table) -> Vec<String> {
     table(&mut out, raw, KNOWN_TOP, "");
     array_of(&mut out, raw.get("zfs_jobs"), KNOWN_ZFS_JOB, "zfs_jobs");
     array_of(&mut out, raw.get("retention"), KNOWN_RETENTION, "retention");
+    array_of(
+        &mut out,
+        raw.get("watched_backups"),
+        KNOWN_WATCHED_BACKUP,
+        "watched_backups",
+    );
     if let Some(rc) = raw.get("registry_cache").and_then(|v| v.as_table()) {
         table(&mut out, rc, KNOWN_REGISTRY_CACHE, "registry_cache");
         array_of(
@@ -378,6 +411,7 @@ fn load_config() -> Config {
             sc
         },
         zfs_jobs: file.zfs_jobs.unwrap_or_default(),
+        watched_backups: file.watched_backups.unwrap_or_default(),
         // D60: absent from host.toml = no cache, which is the same behaviour
         // the fleet had before there was one.
         registry_cache: file.registry_cache,
@@ -753,6 +787,7 @@ port = 5003
     #[test]
     fn settings_render_keeps_every_config_field() {
         let config = Config {
+            watched_backups: vec![],
             token: "0123456789abcdef0123".into(),
             listen: "0.0.0.0:8443".parse().unwrap(),
             state_dir: "/var/lib/homelab".into(),
@@ -2307,8 +2342,58 @@ async fn gather_live_facts(
     stack_files: &[(String, u16)],
 ) -> homelab_core::ops::fleetcheck::LiveFacts {
     use homelab_core::executor::{Cmd, Executor};
+    // O1: what the router (and anything else outside this suite) uploaded
+    // last night. Read through the rclone remote that already exists for the
+    // restic repositories — no new credential, no new timer.
+    let mut watched = Vec::new();
+    for w in &state.config.watched_backups {
+        let out = exec
+            .run(&Cmd::new(
+                "sh",
+                &[
+                    "-c",
+                    &format!(
+                        "rclone lsjson --files-only '{}' 2>&1 | \
+                         sed -n 's/.*\"ModTime\":\"\\([^\"]*\\)\".*/\\1/p' | sort | tail -1",
+                        w.rclone_path
+                    ),
+                ],
+                180,
+            ))
+            .await;
+        let mut fact = homelab_core::ops::fleetcheck::WatchedBackupFact {
+            name: w.name.clone(),
+            max_age_s: w.max_age_hours * 3600,
+            ..Default::default()
+        };
+        match out {
+            Err(e) => fact.error = Some(e.to_string()),
+            Ok(o) if !o.success() => fact.error = Some(o.stderr.trim().to_string()),
+            Ok(o) => {
+                let newest = o.stdout.trim().to_string();
+                if !newest.is_empty() {
+                    // rclone prints RFC3339; the host has `date` and this
+                    // avoids a chrono dependency in a place that has none.
+                    if let Ok(d) = exec
+                        .run(&Cmd::new("date", &["-d", &newest, "+%s"], 30))
+                        .await
+                    {
+                        if let Ok(t) = d.stdout.trim().parse::<u64>() {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|x| x.as_secs())
+                                .unwrap_or(0);
+                            fact.newest_age_s = Some(now.saturating_sub(t));
+                        }
+                    }
+                }
+            }
+        }
+        watched.push(fact);
+    }
     let mut facts = homelab_core::ops::fleetcheck::LiveFacts {
         stack_files: stack_files.to_vec(),
+        watched_backups: watched,
         // F184: the host's own numbers, so a per-container remedy cannot
         // advise memory the machine does not have.
         host_memory: read_host_memory(exec).await,

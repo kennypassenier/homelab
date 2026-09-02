@@ -72,6 +72,7 @@ fn y4_a_healthy_fleet_is_silent() {
         stack(113, "113-app-metrics", true, NOW - 3600),
     )]);
     let live = LiveFacts {
+        watched_backups: vec![],
         containers: vec![(113, "113-app-metrics".into())],
         routes: vec![RouteFact {
             file: "113-app-metrics.yml".into(),
@@ -656,4 +657,61 @@ fn a_swapping_container_on_a_short_host_is_not_told_to_take_more_memory() {
     );
     // The finding itself does not change — the container IS swapping.
     assert!(short[0].what.contains("510 MB of swap"));
+}
+
+/// covers: F198
+///
+/// A backup this suite does not make but does watch. OPNsense is on the
+/// no-touch list and uploads its own configuration every night; nothing here
+/// makes that backup and nothing should. But a backup nobody watches is one
+/// you find broken on the day you need it.
+#[test]
+fn a_watched_backup_that_stopped_is_a_finding() {
+    use homelab_core::ops::fleetcheck::{evaluate_watched_backups, Severity, WatchedBackupFact};
+
+    let fresh = WatchedBackupFact {
+        name: "opnsense-config".into(),
+        newest_age_s: Some(9 * 3600),
+        max_age_s: 26 * 3600,
+        error: None,
+    };
+    assert!(
+        evaluate_watched_backups(&[fresh]).is_empty(),
+        "a backup made nine hours ago is not news"
+    );
+
+    let stale = WatchedBackupFact {
+        name: "opnsense-config".into(),
+        newest_age_s: Some(50 * 3600),
+        max_age_s: 26 * 3600,
+        error: None,
+    };
+    let f = evaluate_watched_backups(&[stale]);
+    assert_eq!(f.len(), 1);
+    assert_eq!(f[0].severity, Severity::Broken);
+    assert!(f[0].what.contains("50 hours old"), "{:?}", f[0]);
+
+    // Nothing there at all is a different sentence, because it means
+    // something else: not "it stopped" but "it never worked".
+    let empty = WatchedBackupFact {
+        name: "opnsense-config".into(),
+        newest_age_s: None,
+        max_age_s: 26 * 3600,
+        error: None,
+    };
+    let f = evaluate_watched_backups(&[empty]);
+    assert_eq!(f.len(), 1);
+    assert!(f[0].what.contains("no files at all"), "{:?}", f[0]);
+
+    // And a listing that could not run says nothing about the backup either
+    // way — which is itself the finding, not silence.
+    let broken = WatchedBackupFact {
+        name: "opnsense-config".into(),
+        newest_age_s: None,
+        max_age_s: 26 * 3600,
+        error: Some("directory not found".into()),
+    };
+    let f = evaluate_watched_backups(&[broken]);
+    assert_eq!(f.len(), 1);
+    assert!(f[0].what.contains("could not be listed"), "{:?}", f[0]);
 }

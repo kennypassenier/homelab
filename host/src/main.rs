@@ -1182,15 +1182,30 @@ port = 5003
         };
         let base = "rclone:gdrive:homelab-backups";
 
-        let agreeing = WatchedBackup {
-            name: "opnsense-config".into(),
-            rclone_path: format!("{}/opnsense-config", base),
-            max_age_hours: 26,
-        };
-        assert!(
-            orphan_watchers(&[agreeing], std::slice::from_ref(&dev), base).is_empty(),
-            "a watcher on the path the writer targets is not an orphan"
-        );
+        for path in [
+            // The repo root, spelled the way restic spells it.
+            format!("{}/opnsense-config", base),
+            // The same repo without restic's remote prefix, which is how
+            // rclone itself must be given it.
+            "gdrive:homelab-backups/opnsense-config".to_string(),
+            // And the shape that actually works: the snapshots directory,
+            // because the repo root holds `config`, written once at init, so
+            // watching the root reports the creation date forever.
+            "gdrive:homelab-backups/opnsense-config/snapshots".to_string(),
+        ] {
+            let w = WatchedBackup {
+                name: "opnsense-config".into(),
+                rclone_path: path.clone(),
+                max_age_hours: 26,
+            };
+            assert!(
+                orphan_watchers(&[w], std::slice::from_ref(&dev), base).is_empty(),
+                "{} is the writer's own repository and must not be called an orphan — \
+                 a guard that cries wolf on a correct config teaches its reader to \
+                 skip the line",
+                path
+            );
+        }
 
         let stray = WatchedBackup {
             name: "opnsense-config".into(),
@@ -2053,13 +2068,36 @@ fn orphan_watchers(
     devices: &[homelab_core::ops::devicebackup::DeviceBackup],
     restic_base: &str,
 ) -> Vec<String> {
+    // Two shapes have to line up before this can compare anything, and both
+    // were got wrong on the first live configuration:
+    //
+    //  * `restic_base` carries an `rclone:` prefix (`rclone:gdrive:...`)
+    //    because that is how restic names a remote; an rclone path does not.
+    //  * a watcher usefully points at `<repo>/snapshots` rather than at the
+    //    repo root, because the root holds `config`, written once at init and
+    //    never again — so watching the root reports the creation date forever
+    //    and goes stale while the backups are running fine.
+    //
+    // So: normalise the prefix, and accept the repo path or anything under
+    // it. A guard that cries wolf on a correct configuration is worse than no
+    // guard, because it teaches its reader to skip the line.
+    let norm = |p: &str| {
+        p.trim_start_matches("rclone:")
+            .trim_end_matches('/')
+            .to_string()
+    };
     let written: Vec<String> = devices
         .iter()
-        .map(|d| format!("{}/{}-config", restic_base, d.name))
+        .map(|d| norm(&format!("{}/{}-config", restic_base, d.name)))
         .collect();
     watched
         .iter()
-        .filter(|w| !written.iter().any(|p| p == &w.rclone_path))
+        .filter(|w| {
+            let path = norm(&w.rclone_path);
+            !written
+                .iter()
+                .any(|repo| path == *repo || path.starts_with(&format!("{}/", repo)))
+        })
         .map(|w| format!("{} → {}", w.name, w.rclone_path))
         .collect()
 }

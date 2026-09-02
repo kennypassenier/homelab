@@ -715,3 +715,113 @@ fn a_watched_backup_that_stopped_is_a_finding() {
     assert_eq!(f.len(), 1);
     assert!(f[0].what.contains("could not be listed"), "{:?}", f[0]);
 }
+
+// ── G21 of the Phase-7 gate: two branches nobody ever ran ───────────────────
+
+/// covers: F211
+///
+/// A stack whose golden template no longer exists on the hypervisor. This
+/// guard was written for the `clone:999` drift — CT 999 is the retired v1
+/// template — and no test had ever executed it.
+#[test]
+fn a_stack_that_clones_a_template_which_is_gone_is_a_finding() {
+    let mut m = boot_manifest(118, true, 50, 512, 1);
+    m.lxc.template = "clone:999".into();
+    let mut st = stack(118, "118-app-drill", true, NOW - 3600);
+    st.manifest = Some(m);
+
+    // The hypervisor has 118 but no 999.
+    let live = LiveFacts {
+        containers: vec![(118, "118-app-drill".into())],
+        ..Default::default()
+    };
+    let found = check(&state(vec![("drill", st)]), &live);
+    let f = found
+        .iter()
+        .find(|f| f.what.contains("clones template 999"))
+        .unwrap_or_else(|| panic!("no finding about the missing template: {:?}", found));
+    assert_eq!(f.severity, Severity::Broken);
+    assert!(
+        f.remedy.contains("template-build"),
+        "the remedy must say how to get one back: {}",
+        f.remedy
+    );
+
+    // And when the template IS there, nothing is said.
+    let live_ok = LiveFacts {
+        containers: vec![(118, "118-app-drill".into()), (999, "999-tmpl".into())],
+        ..Default::default()
+    };
+    let mut m2 = boot_manifest(118, true, 50, 512, 1);
+    m2.lxc.template = "clone:999".into();
+    let mut st2 = stack(118, "118-app-drill", true, NOW - 3600);
+    st2.manifest = Some(m2);
+    assert!(
+        !check(&state(vec![("drill", st2)]), &live_ok)
+            .iter()
+            .any(|f| f.what.contains("clones template")),
+        "a template that exists is not news"
+    );
+}
+
+/// covers: F211
+///
+/// The branch that decides whether "never been backed up" is a fault or a
+/// decision. Invert it and either every reproducible stack starts screaming,
+/// or a genuinely unprotected one goes quiet — so the finding most likely to
+/// be believed becomes the one most likely to be wrong. Only the registry
+/// stack exercises it in production, which is one accident away from none.
+#[test]
+fn a_stack_that_deliberately_keeps_nothing_is_noted_not_broken() {
+    use homelab_core::manifest::MountSpec;
+
+    let mut m = boot_manifest(117, true, 50, 512, 1);
+    m.storage = vec![MountSpec {
+        host_path: "/appdata/registry/registry-config".into(),
+        mount_point: "/appdata/registry/registry-config".into(),
+        no_data: false,
+        no_backup: Some("a pull-through cache: every layer is re-downloadable".into()),
+        host_owner_uid: None,
+        app: Some("registry".into()),
+    }];
+    let mut st = stack(117, "117-app-registry", true, 0); // never backed up
+    st.manifest = Some(m);
+    let live = LiveFacts {
+        containers: vec![(117, "117-app-registry".into())],
+        ..Default::default()
+    };
+
+    let found = check(&state(vec![("registry", st)]), &live);
+    assert!(
+        !found
+            .iter()
+            .any(|f| f.severity == Severity::Broken && f.what.contains("never been backed up")),
+        "a declared decision must not be reported as a fault: {:?}",
+        found
+    );
+    assert!(
+        found.iter().any(|f| f.severity == Severity::Noted),
+        "but it must still be listed, so a deliberate gap never looks like a \
+         forgotten one: {:?}",
+        found
+    );
+
+    // The mirror: no declaration, never backed up → this IS broken.
+    let mut m2 = boot_manifest(117, true, 50, 512, 1);
+    m2.storage = vec![MountSpec {
+        host_path: "/appdata/x/x-config".into(),
+        mount_point: "/appdata/x/x-config".into(),
+        no_data: false,
+        no_backup: None,
+        host_owner_uid: None,
+        app: Some("x".into()),
+    }];
+    let mut st2 = stack(117, "117-app-registry", true, 0);
+    st2.manifest = Some(m2);
+    assert!(
+        check(&state(vec![("registry", st2)]), &live)
+            .iter()
+            .any(|f| f.severity == Severity::Broken && f.what.contains("never been backed up")),
+        "an undeclared stack that was never backed up is a fault"
+    );
+}

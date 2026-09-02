@@ -562,6 +562,12 @@ pub async fn restore(
     // restore walks all of them. Order is the manifest's.
     let groups = owner_groups(m);
 
+    // G5 of the Phase-7 gate: this step was called "validate snapshot" and
+    // never looked at the snapshot. It took the caller's id, asked each
+    // repository whether it answered at all, and returned — so a typo'd id
+    // passed here, the stack was composed down, and restic then failed on
+    // something that does not exist. The name promised the check; only the
+    // name.
     step!(runner, "validate snapshot", {
         for (owner, _) in &groups {
             let out = exec
@@ -569,7 +575,7 @@ pub async fn restore(
                     &cfg.restic_base,
                     owner,
                     &cfg.password_file,
-                    &["snapshots", "--last"],
+                    &["snapshots"],
                     120,
                 ))
                 .await?;
@@ -577,6 +583,31 @@ pub async fn restore(
                 return Err(CoreError::Other(format!(
                     "restic repo for '{}' unreachable",
                     owner
+                )));
+            }
+            // `latest` is restic's own word for "whatever the newest is" and
+            // is always valid as long as the repository holds anything.
+            if snapshot == "latest" {
+                if out.stdout.lines().filter(|l| !l.trim().is_empty()).count() < 2 {
+                    return Err(CoreError::Other(format!(
+                        "repository for '{}' holds no snapshots at all, so \
+                         'latest' means nothing",
+                        owner
+                    )));
+                }
+                continue;
+            }
+            // restic abbreviates ids in its listing, so a prefix match is the
+            // honest comparison — and it is what the user typed anyway.
+            if !out
+                .stdout
+                .split_whitespace()
+                .any(|w| w.starts_with(snapshot) || snapshot.starts_with(w) && w.len() >= 8)
+            {
+                return Err(CoreError::Other(format!(
+                    "snapshot '{}' is not in the repository for '{}' — nothing \
+                     has been stopped",
+                    snapshot, owner
                 )));
             }
         }
@@ -597,22 +628,30 @@ pub async fn restore(
         Ok(StepOutcome::Changed)
     });
 
-    step!(runner, "restore data", {
-        for (owner, _) in &groups {
-            run_ok(
-                exec,
-                &restic(
-                    &cfg.restic_base,
-                    owner,
-                    &cfg.password_file,
-                    &["restore", snapshot, "--target", "/"],
-                    cfg.restore_timeout_s,
-                ),
-            )
-            .await?;
-        }
-        Ok(StepOutcome::Changed)
-    });
+    // G4 of the Phase-7 gate, and the same lesson `backup()` above already
+    // carries in capitals: the restore may fail, but RESUME MUST ALWAYS RUN.
+    // A fail-closed abort here leaves the stack composed down — after a
+    // four-hour timeout on Google Drive, or a dropped connection — until a
+    // human notices. That is a self-inflicted outage on the one operation
+    // you run when something is already wrong.
+    let restore_result = runner
+        .step("restore data", || async {
+            for (owner, _) in &groups {
+                run_ok(
+                    exec,
+                    &restic(
+                        &cfg.restic_base,
+                        owner,
+                        &cfg.password_file,
+                        &["restore", snapshot, "--target", "/"],
+                        cfg.restore_timeout_s,
+                    ),
+                )
+                .await?;
+            }
+            Ok(StepOutcome::Changed)
+        })
+        .await;
 
     step!(runner, "resume stack", {
         for a in &m.apps {
@@ -626,6 +665,10 @@ pub async fn restore(
         }
         Ok(StepOutcome::Changed)
     });
+
+    if let Err(e) = restore_result {
+        return runner.finish_err("restore data", &e);
+    }
 
     step!(runner, "verify health", {
         for a in &m.apps {

@@ -597,8 +597,8 @@ async fn e2_restore_validates_quiesces_restores_resumes_verifies() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
     exec.respond_always(
-        "snapshots --last",
-        CmdOutput::ok("id  time  host\nabc123  today\n"),
+        "snapshots",
+        CmdOutput::ok("ID  Time  Host\nabc123  today  pve\n"),
     );
     exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
     let sink = VecSink::new();
@@ -615,7 +615,7 @@ async fn e2_restore_validates_quiesces_restores_resumes_verifies() {
     let calls = exec.calls();
     let pos = |n: &str| calls.iter().position(|c| c.contains(n)).unwrap();
     assert!(
-        pos("snapshots --last") < pos("compose down"),
+        pos("restic snapshots") < pos("compose down"),
         "validate before quiesce"
     );
     assert!(
@@ -632,7 +632,7 @@ async fn e2_restore_validates_quiesces_restores_resumes_verifies() {
 async fn e2_restore_fails_when_app_not_running_after() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
-    exec.respond_always("snapshots --last", CmdOutput::ok("id\nabc\n"));
+    exec.respond_always("snapshots", CmdOutput::ok("ID  Time\nabc123  today\n"));
     // verify returns empty → app not running.
     exec.respond_always("ps --status running --services", CmdOutput::ok(""));
     let sink = VecSink::new();
@@ -2061,6 +2061,10 @@ async fn f38_restore_honours_the_configured_timeout() {
     let exec = MockExecutor::new();
     exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
     exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test"));
+    // F207: the restore now refuses before it stops anything when the
+    // repository holds no snapshots, so this test has to get past that to
+    // reach the thing it is actually about — the timeout.
+    exec.respond_always("snapshots", CmdOutput::ok("ID  Time\nabc123  today\n"));
     let sink = VecSink::new();
     let j = NullJournal;
     let cfg = BackupCfg {
@@ -2822,5 +2826,96 @@ async fn t69_a_regressed_check_fails_the_deploy_when_nobody_is_watching() {
         "the reason must say nobody was there, not merely that a check fell \
          — those are different stories in a transcript: {}",
         why
+    );
+}
+
+/// covers: F207
+///
+/// G4 of the Phase-7 gate. `backup()` carries a comment in capitals saying
+/// RESUME MUST ALWAYS RUN, because a fail-closed abort leaves quiesced
+/// databases down until a human notices. `restore()` did not carry that
+/// lesson: it composed the stack down, and if the restic restore then failed
+/// — a timeout after four hours on Google Drive, a dropped connection — the
+/// resume step never ran and the stack stayed down.
+///
+/// The one operation you run when things are already bad must not be the one
+/// that makes them worse.
+#[tokio::test]
+async fn e2_a_failed_restore_still_brings_the_stack_back_up() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("snapshots", CmdOutput::ok("id  time\nabc123  today\n"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    // The restore itself dies half way.
+    exec.respond_always(
+        "restic restore",
+        CmdOutput::failed(1, "connection reset by peer"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = restore(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+        "abc123",
+    )
+    .await;
+
+    assert!(!report.ok, "a failed restore must be reported as failed");
+    let calls = exec.calls();
+    assert!(
+        calls.iter().any(|c| c.contains("compose down")),
+        "precondition: the stack was taken down"
+    );
+    assert!(
+        calls.iter().any(|c| c.contains("compose up -d")),
+        "the stack must be brought back up even though the restore failed; \
+         calls were {:?}",
+        calls
+    );
+}
+
+/// covers: F207
+///
+/// G5. The step is called "validate snapshot" and its test name says it
+/// validates — it took the caller's snapshot id and never looked at it,
+/// asking only whether the repository answered at all.
+///
+/// Combined with the bug above that made a typo expensive: the stack went
+/// down, restic then failed on an id that does not exist, and the stack
+/// stayed down.
+#[tokio::test]
+async fn e2_an_unknown_snapshot_id_is_refused_before_anything_is_stopped() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always(
+        "snapshots",
+        CmdOutput::ok("ID        Time\nabc123    2026-09-01\ndef456    2026-09-02\n"),
+    );
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = restore(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+        "76eb861",
+    )
+    .await;
+
+    assert!(
+        !report.ok,
+        "an id that is not in the repository must be refused"
+    );
+    assert!(
+        !exec.calls().iter().any(|c| c.contains("compose down")),
+        "nothing may be stopped before the id is known to exist; calls were {:?}",
+        exec.calls()
+    );
+    let err = report.error.expect("a refusal carries an error");
+    assert!(
+        err.why.contains("76eb861"),
+        "the message must name the id that was not found: {:?}",
+        err
     );
 }

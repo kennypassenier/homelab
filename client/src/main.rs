@@ -33,11 +33,62 @@ fn die(msg: &str) -> ! {
     std::process::exit(1);
 }
 
+/// Fill HOMELAB_HOST/HOMELAB_TOKEN from a config file when they are not
+/// already in the environment.
+///
+/// `~/.config/homelab/env` first, then `./.env` for anybody standing in the
+/// repository. Both are `KEY=value` files; quotes are stripped because a
+/// shell-sourced file usually has them and a token with a quote in it would
+/// otherwise fail in a way that reads like a wrong token.
+fn load_config_env() {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(std::path::PathBuf::from(home).join(".config/homelab/env"));
+    }
+    candidates.push(std::path::PathBuf::from(".env"));
+    for path in candidates {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for line in text.lines() {
+            let t = line.trim();
+            if t.starts_with('#') || t.is_empty() {
+                continue;
+            }
+            let Some((k, v)) = t.split_once('=') else {
+                continue;
+            };
+            let k = k.trim().trim_start_matches("export ").trim();
+            if k != "HOMELAB_HOST" && k != "HOMELAB_TOKEN" {
+                continue;
+            }
+            if std::env::var(k).is_ok() {
+                continue; // the environment already said so
+            }
+            let v = v.trim().trim_matches('"').trim_matches('\'');
+            if !v.is_empty() {
+                std::env::set_var(k, v);
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
+    // Kenny, 2026-09-02: `homelab check` has to work from any directory
+    // without sourcing anything first. Every command in every document here
+    // was written as `homelab <verb>`, and every one of them needed
+    // `set -a; . ./.env` in front of it and a repository to stand in — a
+    // ritual nobody wrote down and nothing enforced.
+    //
+    // Order: the environment wins (so a one-off override still works), then
+    // the user's own config, then the repository's `.env` when standing in
+    // it. Reading, never writing: this file is where the token lives, not a
+    // cache of it.
+    load_config_env();
     let host = std::env::var("HOMELAB_HOST").unwrap_or_else(|_| "10.10.5.250:8443".into());
     let token = std::env::var("HOMELAB_TOKEN").unwrap_or_default();
     let offline = args.iter().any(|a| a == "--offline" || a == "--demo");
@@ -188,13 +239,30 @@ async fn main() {
         "check" => {
             let base = args.get(2).cloned().unwrap_or_else(|| "stacks".into());
             let stack_files = crate::spec::stack_files_with_vmids(&base);
-            println!(
-                "{}▶ fleet check :: {} stack file(s) from {}{}",
-                C_CYAN,
-                stack_files.len(),
-                base,
-                C_RESET
-            );
+            // Kenny ran this from inside `stacks/` on 2026-09-02 and it said
+            // "0 stack file(s)" in passing, then reported the host's half as
+            // if it were the whole answer. Half a check that looks like a
+            // whole one is this project's most-repeated fault; say so.
+            if stack_files.is_empty() {
+                println!(
+                    "{}▶ fleet check :: no stack files under '{}' — checking only what the \
+                     HOST can see{}",
+                    C_YELLOW, base, C_RESET
+                );
+                println!(
+                    "  the half that compares your stack files against the fleet is SKIPPED. \
+                     Run this from the repository root, or pass the path: homelab check \
+                     ~/Projects/homelab/stacks"
+                );
+            } else {
+                println!(
+                    "{}▶ fleet check :: {} stack file(s) from {}{}",
+                    C_CYAN,
+                    stack_files.len(),
+                    base,
+                    C_RESET
+                );
+            }
             rpc(&host, &token, Command::FleetCheck { stack_files }).await;
         }
         "backup-native" => {

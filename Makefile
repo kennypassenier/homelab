@@ -9,7 +9,7 @@
 # TUI when the update badge appears.
 # ============================================================================
 
-.PHONY: help build test gate fmt clippy release host-binary hooks
+.PHONY: help build test gate fmt clippy release host-binary hooks install
 
 help:
 	@echo "make build            debug build of the whole workspace"
@@ -71,3 +71,17 @@ endif
 	@echo "✓ v$(VERSION) tagged and pushed — CI is building the release."
 	@echo "  watch:    gh run watch"
 	@echo "  roll out: homelab release-update   (after the release appears)"
+
+# Kenny, 2026-09-02: `homelab` was never installed anywhere. Every document in
+# this repository writes commands as `homelab <verb>`, and none of them worked
+# from a shell — they only ever ran as `cargo run -q -p homelab-client --`,
+# with the environment sourced first. That gap sat there for the whole project.
+install: ## build the client and put it on PATH (~/.local/bin)
+	@cargo build --release -p homelab-client
+	@mkdir -p $(HOME)/.local/bin $(HOME)/.config/homelab
+	@install -m 755 target/release/homelab $(HOME)/.local/bin/homelab
+	@if [ ! -f $(HOME)/.config/homelab/env ] && [ -f .env ]; then \
+		install -m 600 .env $(HOME)/.config/homelab/env; \
+		echo "  · copied .env to ~/.config/homelab/env (0600)"; \
+	fi
+	@echo "✓ homelab installed to ~/.local/bin — try: homelab status"

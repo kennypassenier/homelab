@@ -138,7 +138,7 @@ restic restore latest --target /
 
 - hostname `116-app-kp-soft`, ip `10.10.10.16/24`
 - resources: 2 core(s), 2048 MiB RAM, 0 MiB swap, 16 GiB disk
-- apps: kp-soft, promtail
+- apps: kp-soft
 - recreate from scratch: `homelab deploy stacks/kp-soft` (or by hand per Layer 2)
 - data restore from: `…:kp-soft-config`
 
@@ -203,7 +203,7 @@ restic restore latest --target /
 
 - hostname `107-app-uptime`, ip `10.10.10.7/24`
 - resources: 1 core(s), 512 MiB RAM, 0 MiB swap, 8 GiB disk
-- apps: uptime-kuma, kuma-seeder, promtail
+- apps: uptime-kuma, kuma-seeder
 - recreate from scratch: `homelab deploy stacks/uptime` (or by hand per Layer 2)
 - data restore from: `…:uptime-kuma-config`, `…:kuma-seeder-config`
 

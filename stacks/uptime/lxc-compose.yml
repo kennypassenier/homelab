@@ -64,7 +64,7 @@ storage:
     host_owner_uid: 100000
     app: kuma-seeder
 
-apps: [uptime-kuma, kuma-seeder, promtail]
+apps: [uptime-kuma, kuma-seeder]
 
 # D12: the seeder logs in to Uptime Kuma as a normal user, so it needs a
 # password. It travels from latch over the TLS line into the host vault and

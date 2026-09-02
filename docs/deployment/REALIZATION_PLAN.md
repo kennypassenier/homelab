@@ -404,6 +404,7 @@ written as part of passing it.
 | Form L1–L9 · key loss | 2026-09-02 | the deploy keeps the copy, the nightly round checks it, Kenny holds the escrow passphrase | F196, F199, F201, D104, D105 |
 | Form O1–O2 · router backup | 2026-09-02 | watch it from the nightly fleet check, declare the path in host.toml | F198 |
 | Form P1 · v1 latch archive | 2026-09-02 | remove it from the secrets repo | D106 |
+| **Phase 7 gate · 23 gaps** | 2026-09-02 | **22 × Dichten, 1 × Later (G6, the fact-gatherer's tests)**. He took none of the two 'accept as known limitation' recommendations: the quarterly restore drill (G14) and the register's 133 untested 'fixed' claims (G19) are both to be closed rather than written down as accepted | this table; per-gap rows below as they land |
 
 ## Scratch resources
 

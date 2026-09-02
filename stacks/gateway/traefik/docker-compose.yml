@@ -65,7 +65,12 @@ services:
       - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.crowdseclapikey=${TRAEFIK_CROWDSEC_BOUNCER_API_KEY}"
       - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.crowdseclapihost=crowdsec:8080"
       - "com.homelab.backup.pause=true"
-      - "com.homelab.update.policy=auto"
+      # Y1/Z1: UPDATE_POLICY.md puts this in the MANUAL class - a silent
+      # failure here is expensive, and the gateway is the one container
+      # whose breakage takes every other name down with it. The label
+      # read auto until 2026-09-02 (F192), so the ratified decision and
+      # the fleet disagreed for as long as both existed.
+      - "com.homelab.update.policy=manual"
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 10s

@@ -109,3 +109,39 @@ pub async fn push_content_staged(
     .await?;
     Ok(true)
 }
+
+/// Write a file the orchestrator generates into a directory that belongs to
+/// a CONTAINER, and leave it owned by whoever owns that directory.
+///
+/// F190: `write_file` runs as host root, and an unprivileged container's
+/// files are owned by a mapped uid — 100000, not 0. A root-owned file inside
+/// a bind-mounted config directory is not merely untidy: Uptime Kuma chowns
+/// everything under `/app/data` at startup, cannot own a host-root file,
+/// exits non-zero and crash-loops. That is how a database backup took the
+/// monitoring down on 2026-09-02, and measuring afterwards showed the
+/// orchestrator had the same habit — `host-monitors.json` and
+/// `services.yaml` were both host-root, and both written by this code.
+///
+/// The owner is taken from the parent directory rather than computed,
+/// because the directory was already given the right owner when the stack
+/// that owns it was deployed (`host_owner_uid`, O5). Copying it needs no
+/// knowledge of which container this is and cannot drift away from it.
+pub async fn write_file_owned_like_dir(
+    exec: &dyn Executor,
+    dest: &str,
+    body: &str,
+    mode: u32,
+) -> Result<(), CoreError> {
+    exec.write_file(dest, body, mode).await?;
+    let dir = std::path::Path::new(dest)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "/".into());
+    // Best-effort on purpose: on a privileged container the reference chown
+    // is a no-op, and a failure here must not fail a deploy over a
+    // convenience file. It is logged by the tracing executor either way.
+    let _ = exec
+        .run(&Cmd::new("chown", &["--reference", &dir, dest], 30))
+        .await;
+    Ok(())
+}

@@ -18,7 +18,6 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         safety: SafetyConfig::default(),
         state_dir: "/var/lib/homelab".into(),
         now_unix: 1_788_000_000,
-        kea: None,
         metrics_targets_dir: None,
         grafana_dashboards_dir: None,
         homepage_services_file: None,

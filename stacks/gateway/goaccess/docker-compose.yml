@@ -41,7 +41,12 @@ services:
       - "7880:7880"
     restart: unless-stopped
     labels:
-      - "com.homelab.update.policy=auto"
+      # Y1/Z1: UPDATE_POLICY.md puts this in the MANUAL class - a silent
+      # failure here is expensive, and the gateway is the one container
+      # whose breakage takes every other name down with it. The label
+      # read auto until 2026-09-02 (F192), so the ratified decision and
+      # the fleet disagreed for as long as both existed.
+      - "com.homelab.update.policy=manual"
 
   # The web server GoAccess does not have. Serves the report GoAccess writes,
   # read-only, on its own port; the route points here.

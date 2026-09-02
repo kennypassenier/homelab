@@ -20,7 +20,12 @@ services:
       # Pinned to 3.0.0 on purpose: promtail on nine stacks is pinned to the
       # same version and the two have to agree. This is one of the eleven
       # services where the `auto` policy could never do anything (form H5).
-      - "com.homelab.update.policy=auto"
+      # Y1/Z1: UPDATE_POLICY.md puts this in the MANUAL class - a silent
+      # failure here is expensive, and the gateway is the one container
+      # whose breakage takes every other name down with it. The label
+      # read auto until 2026-09-02 (F192), so the ratified decision and
+      # the fleet disagreed for as long as both existed.
+      - "com.homelab.update.policy=manual"
 
 # One network for the whole stack, created by the deploy. Without it every app
 # is its own compose project on its own default network, and Traefik cannot

@@ -11,7 +11,6 @@ pub mod fleetcheck;
 pub mod guards;
 pub mod hardware;
 pub mod homepage;
-pub mod kea;
 pub mod mirror;
 pub mod monitors;
 pub mod native;
@@ -93,8 +92,6 @@ pub struct OpCtx<'a> {
     pub state_dir: String,
     /// Unix timestamp supplied by the caller — core never reads clocks.
     pub now_unix: u64,
-    /// H2: OPNsense Kea reservation config; None = feature off.
-    pub kea: Option<kea::KeaCfg>,
     /// T1: directory on the host where per-stack Prometheus discovery files
     /// are written. None = feature off, and the scrape list stays whatever
     /// somebody last typed into prometheus.yml.

@@ -98,3 +98,58 @@ fn rendering_twice_produces_the_same_bytes() {
          deploy reports a change that is not one"
     );
 }
+
+/// covers: F190
+///
+/// A generated file lands in a directory that belongs to a CONTAINER, and
+/// the orchestrator writes it as host root. On an unprivileged container
+/// that is the wrong owner, and Uptime Kuma proves it is not cosmetic: it
+/// chowns everything under `/app/data` at startup, cannot own a host-root
+/// file, exits non-zero and crash-loops. That is how the monitoring went
+/// down on 2026-09-02 — over a backup file, and measuring afterwards found
+/// this code had written two files with exactly the same problem.
+#[tokio::test]
+async fn a_generated_file_takes_the_owner_of_the_directory_it_lands_in() {
+    let exec = homelab_core::executor::MockExecutor::new();
+    homelab_core::ops::util::write_file_owned_like_dir(
+        &exec,
+        "/appdata/home/homepage-config/services.yaml",
+        "- gateway:\n",
+        0o644,
+    )
+    .await
+    .unwrap();
+
+    let chowns = exec.calls_containing("chown");
+    assert_eq!(
+        chowns.len(),
+        1,
+        "expected exactly one chown after the write, got {:?}",
+        exec.calls()
+    );
+    assert!(
+        chowns[0].contains("--reference")
+            && chowns[0].contains("/appdata/home/homepage-config")
+            && chowns[0].contains("/appdata/home/homepage-config/services.yaml"),
+        "the owner must be copied from the parent directory, not computed: {}",
+        chowns[0]
+    );
+}
+
+/// The chown is best-effort: a convenience file must never fail a deploy.
+#[tokio::test]
+async fn a_failing_chown_does_not_fail_the_write() {
+    let exec = homelab_core::executor::MockExecutor::new();
+    exec.enqueue(
+        "chown",
+        homelab_core::executor::CmdOutput::failed(1, "chown: not permitted"),
+    );
+    let r = homelab_core::ops::util::write_file_owned_like_dir(
+        &exec,
+        "/appdata/uptime/kuma-seeder-config/host-monitors.json",
+        "{}",
+        0o644,
+    )
+    .await;
+    assert!(r.is_ok(), "a failed chown must not fail the write");
+}

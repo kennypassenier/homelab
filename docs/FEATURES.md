@@ -361,8 +361,32 @@ One YAML fragment per stack, pushed to the gateway's watched dir; no restarts.
 - **Manual (pilot)**: `curl -H 'Host: sync.kp-soft.dev' http://10.10.10.4`
   routes to syncthing within seconds of deploy.
 
-### H2 · OPNsense Kea DHCP reservations — **Could**
+### H2 · OPNsense Kea DHCP reservations — **Could** *(built, then removed)*
 Static IPs in manifests suffice; old project has reference code.
+
+> **Amendment, 2026-09-02 (mini-round, form V4).** Built anyway, and removed
+> again. Kenny asked the question this entry had already answered — "waarom
+> moet ons systeem afweten van opnsense? dat is in principe toch niet nodig?"
+> — and measuring settled it. A container takes its address statically from
+> its own config (`net0: … ip=10.10.10.14/24`) and never asks DHCP. The
+> Trusted subnet's DHCP pool is `10.10.10.100–10.10.10.200` while containers
+> live on `.4–.17`, so the router cannot hand one of those addresses to
+> anything else; the collision the reservation guards against does not
+> exist. The reservation list held twelve entries and not one was a container
+> this orchestrator built, so the feature never wrote a reservation in
+> production. And the code only ever called the Kea endpoints, so the
+> `Firewall: Rules` privilege on the credential was used by no software at
+> all.
+>
+> It bought a cosmetic row in the router's UI and cost a credential with
+> write access to the router's DHCP and firewall, stored on the Proxmox host,
+> in the host-meta backup and in latch. Removed in D99.
+>
+> The lesson is not "H2 was wrong" — the rating was **Could** and this very
+> line already said static IPs suffice. The lesson is that a *Could* got
+> built without anyone re-asking whether it was still worth it, and the
+> measurement that would have stopped it took four commands. Same shape as
+> H3, which was resolved without software by checking what already existed.
 
 ### H3 · Cloudflare DNS automation — **Won't** *(round 2)*
 Resolved without software: the wildcard record `*.kp-soft.dev → tunnel` is

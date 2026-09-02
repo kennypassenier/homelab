@@ -10,6 +10,14 @@ services:
       - /var/log:/var/log:ro
       - ./promtail-config.yml:/etc/promtail/config.yml:ro
       - ./data:/tmp/positions
+    labels:
+      # Y1 class: automatic. Promtail ships logs and holds nothing; the worst
+      # a bad version costs is a gap in the log, and the rollback restores it.
+      #
+      # This label was missing entirely until 2026-09-02 (F192) — the one
+      # state UPDATE_POLICY.md opens by saying it exists to end: "a stack
+      # whose apps carry none is a stack nobody has decided about".
+      - com.homelab.update.policy=auto
     restart: unless-stopped
     networks:
       - uptime_net

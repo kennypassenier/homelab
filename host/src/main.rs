@@ -65,8 +65,6 @@ struct FileConfig {
     retention: Option<Vec<homelab_proto::RetentionTier>>,
     exec_enabled: Option<bool>,
     mirror_remote: Option<String>,
-    opnsense_url: Option<String>,
-    opnsense_cred_file: Option<String>,
     no_touch: Option<Vec<u16>>,
     gateway_vmid: Option<u16>,
     gateway_routes_dir: Option<String>,
@@ -149,8 +147,6 @@ struct Config {
     logs_window: String,
     /// D5: git remote URL for the offsite intent mirror; None = off.
     mirror_remote: Option<String>,
-    /// H2: OPNsense base url + credential file for Kea reservations.
-    kea: Option<homelab_core::ops::kea::KeaCfg>,
     /// H1 (hardening): safety values configurable via host.toml so M5 can
     /// migrate the gateway / adjust the no-touch list without a release.
     /// Hardcoded DEFAULT_NO_TOUCH remains the default.
@@ -228,8 +224,6 @@ const KNOWN_TOP: &[&str] = &[
     "retention",
     "exec_enabled",
     "mirror_remote",
-    "opnsense_url",
-    "opnsense_cred_file",
     "no_touch",
     "gateway_vmid",
     "gateway_routes_dir",
@@ -360,13 +354,6 @@ fn load_config() -> Config {
         loki_url: file.loki_url.clone(),
         logs_window: file.logs_window.clone().unwrap_or_else(default_logs_window),
         mirror_remote: file.mirror_remote,
-        kea: match (file.opnsense_url, file.opnsense_cred_file) {
-            (Some(base_url), Some(cred_file)) => Some(homelab_core::ops::kea::KeaCfg {
-                base_url,
-                cred_file,
-            }),
-            _ => None,
-        },
         safety: {
             let mut sc = SafetyConfig::default();
             // F8: the file ADDS to the compiled list, it does not replace it.
@@ -457,10 +444,6 @@ fn render_settings_toml(
         #[serde(skip_serializing_if = "Option::is_none")]
         mirror_remote: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        opnsense_url: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        opnsense_cred_file: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
         no_touch: Option<&'a Vec<u16>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         gateway_vmid: Option<u16>,
@@ -506,8 +489,6 @@ fn render_settings_toml(
         loki_url: config.loki_url.as_ref(),
         logs_window: (config.logs_window != default_logs_window()).then_some(&config.logs_window),
         mirror_remote: config.mirror_remote.as_ref(),
-        opnsense_url: config.kea.as_ref().map(|k| &k.base_url),
-        opnsense_cred_file: config.kea.as_ref().map(|k| &k.cred_file),
         no_touch: (config.safety.no_touch != SafetyConfig::default().no_touch)
             .then_some(&config.safety.no_touch),
         gateway_vmid: (config.safety.gateway_vmid != SafetyConfig::default().gateway_vmid)
@@ -608,6 +589,61 @@ fn persist_settings(
 
 #[cfg(test)]
 mod tests {
+    /// V5 (Kenny, 2026-09-02): the two key lists were hand-maintained
+    /// because Rust cannot enumerate its own struct fields, and he asked for
+    /// that cost to go away rather than be accepted. It can: the source is
+    /// available at compile time, so the list can be checked against the
+    /// struct itself.
+    ///
+    /// A field added to `FileConfig` and forgotten in `KNOWN_TOP` used to
+    /// produce a loud false "unknown key" at startup — safe, but only
+    /// noticed by whoever read the log. Now it is a failing test, at build
+    /// time, naming the field.
+    #[test]
+    fn known_top_lists_every_field_of_file_config() {
+        let src = include_str!("main.rs");
+        let start = src
+            .find("struct FileConfig {")
+            .expect("FileConfig struct not found — this test parses it");
+        let body = &src[start..];
+        let end = body.find("\n}").expect("unterminated FileConfig struct");
+        let body = &body[..end];
+
+        let mut fields: Vec<&str> = Vec::new();
+        for line in body.lines().skip(1) {
+            let t = line.trim();
+            if t.starts_with("//") || t.starts_with("#[") || t.is_empty() {
+                continue;
+            }
+            if let Some(name) = t.split(':').next() {
+                let name = name.trim();
+                if !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                    fields.push(name);
+                }
+            }
+        }
+        assert!(
+            fields.len() > 20,
+            "parsed only {} fields — the parser broke, not the list",
+            fields.len()
+        );
+
+        let missing: Vec<&&str> = fields.iter().filter(|f| !KNOWN_TOP.contains(f)).collect();
+        assert!(
+            missing.is_empty(),
+            "FileConfig has field(s) absent from KNOWN_TOP, so host.toml would \
+             report them as unknown settings: {:?}",
+            missing
+        );
+
+        let stale: Vec<&&str> = KNOWN_TOP.iter().filter(|k| !fields.contains(k)).collect();
+        assert!(
+            stale.is_empty(),
+            "KNOWN_TOP names key(s) FileConfig no longer has: {:?}",
+            stale
+        );
+    }
+
     /// F8: host.toml may only ADD to the no-touch list. Assigning used to be
     /// possible, which meant one line in a hand-edited file could drop VM 100
     /// and VM 101 out of protection without a word.
@@ -657,12 +693,13 @@ opnsense_cred_file = "/var/lib/homelab/secrets/opnsense.cred"
 "#;
         let t: toml::Table = toml::from_str(raw).unwrap();
 
-        // Serde's own view: the keys are simply gone.
-        let parsed: FileConfig = t.clone().try_into().unwrap();
-        assert!(
-            parsed.opnsense_url.is_none(),
-            "precondition: this is what made the fault invisible"
-        );
+        // Serde's own view: the file parses cleanly and says nothing. That
+        // silence is what made the fault invisible, and it is still the
+        // behaviour — which is why the check below has to exist. (The two
+        // keys were removed from the daemon altogether on 2026-09-02, form
+        // V4; the fixture stays as it was found, because the trap it
+        // demonstrates belongs to TOML, not to those particular settings.)
+        let _parsed: FileConfig = t.clone().try_into().unwrap();
 
         assert_eq!(
             unknown_keys(&t),
@@ -679,8 +716,6 @@ opnsense_cred_file = "/var/lib/homelab/secrets/opnsense.cred"
     fn correctly_placed_keys_are_clean_and_read() {
         let raw = r#"
 token = "0123456789abcdef0123"
-opnsense_url = "https://10.10.5.1"
-opnsense_cred_file = "/var/lib/homelab/secrets/opnsense.cred"
 kuma_monitors_file = "/appdata/uptime/kuma-seeder-config/host-monitors.json"
 homepage_services_file = "/appdata/home/homepage-config/services.yaml"
 
@@ -695,7 +730,6 @@ port = 5003
         assert!(unknown_keys(&t).is_empty(), "{:?}", unknown_keys(&t));
 
         let parsed: FileConfig = t.try_into().unwrap();
-        assert_eq!(parsed.opnsense_url.as_deref(), Some("https://10.10.5.1"));
         assert!(parsed.kuma_monitors_file.is_some());
         assert!(parsed.homepage_services_file.is_some());
     }
@@ -711,9 +745,11 @@ port = 5003
     use super::*;
 
     /// Round-trip: everything load_config understands must survive a
-    /// settings save. Guards the bug where opnsense_url/opnsense_cred_file
-    /// were silently dropped by the SETTINGS-tab save path (H2 dying on the
-    /// next restart without any warning).
+    /// settings save. Guards the bug where a field the settings tab does not
+    /// know about is silently dropped on save — first found with the OPNsense
+    /// pair, which died on the next restart without any warning. Those two
+    /// are gone (form V4, 2026-09-02); the guard is not, because the class of
+    /// bug belongs to the save path rather than to those fields.
     #[test]
     fn settings_render_keeps_every_config_field() {
         let config = Config {
@@ -727,10 +763,6 @@ port = 5003
             loki_url: Some("http://10.10.10.4:3100".into()),
             logs_window: "6h".into(),
             mirror_remote: Some("git@github.com:k/m.git".into()),
-            kea: Some(homelab_core::ops::kea::KeaCfg {
-                base_url: "https://10.10.10.1".into(),
-                cred_file: "/var/lib/homelab/secrets/opnsense".into(),
-            }),
             safety: SafetyConfig {
                 no_touch: vec![100, 101],
                 gateway_vmid: 112,
@@ -802,10 +834,13 @@ port = 5003
             parsed.mirror_remote.as_deref(),
             Some("git@github.com:k/m.git")
         );
-        assert_eq!(parsed.opnsense_url.as_deref(), Some("https://10.10.10.1"));
         assert_eq!(
-            parsed.opnsense_cred_file.as_deref(),
-            Some("/var/lib/homelab/secrets/opnsense")
+            parsed.prometheus_url.as_deref(),
+            Some("http://10.10.10.13:9090")
+        );
+        assert_eq!(
+            parsed.notify_auth_bearer.as_deref(),
+            Some("a-token-that-must-survive-a-save")
         );
         assert_eq!(parsed.retention.as_ref().map(|r| r.len()), Some(3));
         assert_eq!(parsed.no_touch, Some(vec![100, 101]));
@@ -2152,7 +2187,6 @@ where
         safety: state.config.safety.clone(),
         state_dir: state.config.state_dir.clone(),
         now_unix: now,
-        kea: state.config.kea.clone(),
         metrics_targets_dir: state.config.metrics_targets_dir.clone(),
         grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         homepage_services_file: state.config.homepage_services_file.clone(),

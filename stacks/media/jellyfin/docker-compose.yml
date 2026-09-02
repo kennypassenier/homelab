@@ -20,7 +20,15 @@
 
 services:
   jellyfin:
-    image: jellyfin/jellyfin:latest
+    # F187 / form V7 (Kenny, 2026-09-02): pinned and manual, which is what
+    # UPDATE_POLICY.md has said all along while this file said `auto` on
+    # `:latest`. Hardware transcoding is the reason the policy puts jellyfin
+    # in the pinned class: a bad version does not announce itself, it shows
+    # up hours later when somebody sits down to watch something. 10.11.11 is
+    # the version that was running when this was pinned, verified against
+    # the server's own /System/Info/Public, and the tag was confirmed to
+    # exist upstream before it was written here.
+    image: jellyfin/jellyfin:10.11.11
     container_name: jellyfin
     user: "1000:1000"
     group_add:
@@ -58,7 +66,10 @@ services:
       # The watch-state database is not safe to copy while it is being
       # written to.
       - com.homelab.backup.pause=true
-      - com.homelab.update.policy=auto
+      # Manual: the orchestrator never updates this on its own. Moving to a
+      # new Jellyfin is a deliberate act - bump the tag above, deploy, and
+      # watch something with hardware transcoding before calling it done.
+      - com.homelab.update.policy=manual
     restart: unless-stopped
     networks:
       - media_net

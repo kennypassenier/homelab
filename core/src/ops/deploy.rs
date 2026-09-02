@@ -787,44 +787,6 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         })
     });
 
-    // H2: register the static IP as a Kea reservation (fail-open — a DHCP
-    // nicety must never block a deploy).
-    step!(runner, exec, ctx, m, "dhcp reservation", {
-        let Some(kea_cfg) = ctx.kea.as_ref() else {
-            return Ok(StepOutcome::Unchanged);
-        };
-        if !created {
-            return Ok(StepOutcome::Unchanged);
-        }
-        let cfg_out = exec.run(&Cmd::new("pct", &["config", &vm], 30)).await?;
-        let mac = cfg_out
-            .stdout
-            .lines()
-            .find(|l| l.starts_with("net0:"))
-            .and_then(|l| l.split("hwaddr=").nth(1))
-            .map(|s| s.split(',').next().unwrap_or("").to_string())
-            .unwrap_or_default();
-        let ip = m.network.ip.split('/').next().unwrap_or("").to_string();
-        if mac.is_empty() || ip.is_empty() {
-            log_info("[kea] no mac/ip found — reservation skipped".into());
-            return Ok(StepOutcome::Unchanged);
-        }
-        match crate::ops::kea::reserve(exec, kea_cfg, &ip, &mac, &m.hostname).await {
-            Ok(()) => {
-                log_info(format!("[kea] reserved {} for {}", ip, mac));
-                Ok(StepOutcome::Changed)
-            }
-            Err(e) => {
-                ctx.sink.emit(PipelineEvent::Line {
-                    level: Level::Warn,
-                    source: "HOST".into(),
-                    msg: format!("[kea] reservation FAILED (deploy continues): {}", e),
-                });
-                Ok(StepOutcome::Unchanged)
-            }
-        }
-    });
-
     step!(runner, exec, ctx, m, "wait for systemd", {
         let mut ready = false;
         for _ in 0..30 {
@@ -1553,7 +1515,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             }
             stacks.sort_by(|a, b| a.0.cmp(&b.0));
             let body = crate::ops::homepage::services_yaml(&stacks);
-            match exec.write_file(dest, &body, 0o644).await {
+            match crate::ops::util::write_file_owned_like_dir(exec, dest, &body, 0o644).await {
                 Ok(()) => {
                     log_info(format!(
                         "[t51] {} — {} stack(s) on the front page",
@@ -1606,7 +1568,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             }
             let monitors = crate::ops::monitors::host_monitors(&fleet);
             let body = crate::ops::monitors::monitors_json(&monitors);
-            match exec.write_file(dest, &body, 0o644).await {
+            match crate::ops::util::write_file_owned_like_dir(exec, dest, &body, 0o644).await {
                 Ok(()) => {
                     log_info(format!(
                         "[t49] {} — {} host monitor(s) for the seeder",

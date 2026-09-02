@@ -2315,3 +2315,33 @@ fn the_committed_test_plan_matches_a_fresh_generation() {
         "docs/deployment/TEST_PLAN.md is stale — run `homelab testplan` and read the diff"
     );
 }
+
+/// The help text and the usage message must describe the same command.
+///
+/// They did not: the help said `install-native stacks/<name> <unit>`, as
+/// though the unit were a second argument, while the usage message and the
+/// code say `stacks/<name>[/<unit>] [<tag>]` — the unit is part of the path
+/// and the second positional is the release tag. On 2026-09-03 I followed my
+/// own help text and got "cannot read stacks/almanac/almanac/service.yml".
+/// A help text that disagrees with the code is worse than none, because it
+/// is believed.
+#[test]
+fn the_help_text_and_the_usage_message_agree_about_install_native() {
+    let src = std::fs::read_to_string("src/main.rs").expect("client source");
+    let usage = src
+        .lines()
+        .find(|l| l.contains("usage: homelab install-native"))
+        .expect("the usage message must exist");
+    let help = src
+        .lines()
+        .find(|l| l.contains("homelab install-native stacks/") && !l.contains("usage:"))
+        .expect("the help line must exist");
+    let shape = "stacks/<name>[/<unit>] [<tag>]";
+    assert!(usage.contains(shape), "usage drifted: {}", usage.trim());
+    assert!(
+        help.contains(shape),
+        "the help text describes a different command than the usage message:\n  help:  {}\n  usage: {}",
+        help.trim(),
+        usage.trim()
+    );
+}

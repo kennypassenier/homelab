@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**406 tests across 23 suites.**
+**407 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -562,4 +562,5 @@ Covers: F122, F136, F150, F151, F152, F154, F155, F156, F167, F212, F215
 - `every_cli_verb_appears_in_the_usage_text` — covers: F212  G20 of the Phase-7 gate.
 - `every_app_either_has_checks_or_is_named_as_deliberately_without` — covers: F215  G18 of the Phase-7 gate.
 - `the_committed_test_plan_matches_a_fresh_generation` — The generated test plan must match what the tests actually say, for the same reason the runbook must: a document nobody regenerates is a document that describes last month.
+- `the_help_text_and_the_usage_message_agree_about_install_native` — The help text and the usage message must describe the same command.
 

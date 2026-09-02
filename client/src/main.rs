@@ -892,7 +892,7 @@ async fn main() {
                 "  homelab release-update              fetch the newest release and ship it (H7)"
             );
             println!(
-                "  homelab install-native stacks/<name> <unit>  install a native service (O1)"
+                "  homelab install-native stacks/<name>[/<unit>] [<tag>]  install a native service (O1)"
             );
             println!("  homelab template-build              build a golden template (M3)");
             println!("  homelab templates                   list the golden templates");

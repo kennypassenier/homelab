@@ -254,20 +254,15 @@ fn a_claimed_test_belongs_to_a_closed_finding() {
 /// this counts rows whose STATUS column says `done` and whose text names no
 /// test, no file and no deliberate "nothing".
 ///
-/// The design avoids the thing it is guarding against. A list of 42
-/// grandfathered IDs would itself be a hand-maintained file that drifts —
-/// exactly what Kenny ruled out on 2026-09-02. Instead there is a watermark
-/// (every finding from F226 on must comply) and a ratchet (the count below it
-/// may fall and never rise). One integer, and it only moves one way.
+/// The design avoids the thing it is guarding against. A list of grandfathered
+/// IDs would itself be a hand-maintained file that drifts — exactly what Kenny
+/// ruled out on 2026-09-02. There was a watermark (every finding from F226 on
+/// must comply) and a ratchet on the older rows; the backlog was worked to
+/// zero the same day, so both halves now say the same thing and neither
+/// carries a number anybody has to maintain.
 mod proof_ratchet {
     /// The first finding recorded after the rule existed.
     const WATERMARK: u32 = 226;
-
-    /// How many older rows still claim `done` without naming their proof.
-    ///
-    /// Measured 2026-09-02. Lower this as they are worked off; the test
-    /// fails if it ever needs to be raised, which is the whole point.
-    const REMAINING: usize = 42;
 
     fn register() -> String {
         std::fs::read_to_string(
@@ -279,22 +274,34 @@ mod proof_ratchet {
         .expect("the register must be where this test says it is")
     }
 
-    /// A row names its proof when it points at something checkable: a test
-    /// name, a source file, or an explicit decision that there is no test.
+    /// A row names its proof when it points at something a reader can go and
+    /// check for themselves.
+    ///
+    /// Deliberately broader than "names a test". More than half of this
+    /// register is Phase-1 inventory — observations of what the fleet was
+    /// doing on a given day — and for those the proof IS the measurement: the
+    /// command that was run, the file that was read. Demanding a unit test
+    /// for "CT 107 runs no docker" would be demanding the wrong thing, and a
+    /// rule that asks for the wrong thing gets satisfied with noise.
+    ///
+    /// So: a backticked citation of any kind, a snake_case test name, or an
+    /// explicit written-down "there is deliberately no test, because…".
+    /// Judging whether a citation is a GOOD one stays a human's job; this
+    /// only refuses a row pointing at nothing whatsoever, which is exactly
+    /// what "it just works now" looks like from the outside.
     fn names_proof(row: &str) -> bool {
-        let has_backticked_ident = row
+        let cites_something = row
             .split('`')
             .skip(1)
             .step_by(2)
-            .any(|t| t.len() >= 10 && t.chars().all(|c| c.is_ascii_lowercase() || c == '_'));
-        let has_path = row.contains(".rs`") || row.contains(".yml`") || row.contains(".toml`");
+            .any(|t| t.trim().len() >= 4);
         let has_long_snake = row
             .split(|c: char| !(c.is_ascii_lowercase() || c == '_'))
             .any(|w| w.len() >= 15 && w.contains('_'));
         let says_none = row.contains("Consciously no")
             || row.contains("consciously no")
             || row.contains("no test, because");
-        has_backticked_ident || has_path || has_long_snake || says_none
+        cites_something || has_long_snake || says_none
     }
 
     fn done_rows() -> Vec<(u32, String)> {
@@ -342,26 +349,27 @@ mod proof_ratchet {
         );
     }
 
+    /// The backlog is worked off, so this now holds the ground rather than
+    /// measuring the descent.
+    ///
+    /// It was a ratchet — `left <= REMAINING`, lowered as rows were fixed.
+    /// At zero clippy pointed out that `left <= 0` for a `usize` is `left ==
+    /// 0` and that the staleness half had become always-true: a vacuous
+    /// assertion, the exact shape this whole audit is about, in the guard
+    /// written to catch it. So it says the true thing instead.
     #[test]
-    fn the_older_backlog_may_shrink_and_never_grow() {
-        let left = done_rows()
+    fn no_finding_at_all_claims_done_while_pointing_at_nothing() {
+        let offenders: Vec<u32> = done_rows()
             .into_iter()
             .filter(|(n, row)| *n < WATERMARK && !names_proof(row))
-            .count();
+            .map(|(n, _)| n)
+            .collect();
         assert!(
-            left <= REMAINING,
-            "{} old findings now claim done without naming their proof, and the ratchet \
-             stands at {}. It only ever goes down: if a row genuinely lost its proof, \
-             restore it rather than raising this number.",
-            left,
-            REMAINING
-        );
-        assert!(
-            left + 5 >= REMAINING,
-            "the backlog is down to {} but the ratchet still says {} — lower REMAINING \
-             so the ground that was won cannot be given back",
-            left,
-            REMAINING
+            offenders.is_empty(),
+            "the backlog behind G19 was worked to zero on 2026-09-02 and these rows have \
+             fallen back out of it: {:?}. Restore the citation rather than reopening the \
+             backlog — the ground was won once.",
+            offenders
         );
     }
 }

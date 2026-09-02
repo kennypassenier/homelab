@@ -1301,17 +1301,18 @@ async fn main() {
         let boot_state = state.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(3)).await;
-            let payload = serde_json::json!({
-                "source": "homelab-host",
-                "op": "host-online",
-                "label": "boot",
-                "ok": interrupted.is_empty(),
-                "error": if interrupted.is_empty() { None } else {
-                    Some(format!("interrupted: {}", interrupted.join("; ")))
-                },
-                "version": VERSION,
-            })
-            .to_string();
+            let err = if interrupted.is_empty() {
+                None
+            } else {
+                Some(format!("interrupted: {}", interrupted.join("; ")))
+            };
+            let payload = homelab_core::notify::op_payload(
+                "host-online",
+                "boot",
+                interrupted.is_empty(),
+                err.as_deref(),
+                VERSION,
+            );
             notify_raw(&boot_state, &RealExecutor, payload).await;
         });
     }
@@ -1860,16 +1861,20 @@ async fn scheduler_loop(state: AppState) {
                     );
                     // The finding text is already in the log above; the
                     // webhook exists so it leaves the machine.
+                    // F86: through op_payload like every other event, so the
+                    // report of the day carries `source` and `label` too. It
+                    // used to hand-build its own JSON without either, which
+                    // made it the one event a filter on `source` would drop.
                     notify_raw(
                         &state,
                         &exec,
-                        serde_json::json!({
-                            "op": "fleet-check",
-                            "ok": false,
-                            "error": render_findings(&findings),
-                            "version": env!("CARGO_PKG_VERSION"),
-                        })
-                        .to_string(),
+                        homelab_core::notify::op_payload(
+                            "fleet-check",
+                            "nightly",
+                            false,
+                            Some(&render_findings(&findings)),
+                            VERSION,
+                        ),
                     )
                     .await;
                 }
@@ -1988,7 +1993,7 @@ async fn notify_auto_disabled(state: &AppState, exec: &RealExecutor, stack: &str
     {
         return;
     }
-    let payload = homelab_core::notify::op_payload(&op, stack, false, Some(why));
+    let payload = homelab_core::notify::op_payload(&op, stack, false, Some(why), VERSION);
     notify_raw(state, exec, payload).await;
 }
 
@@ -2018,7 +2023,8 @@ async fn notify(
     {
         return;
     }
-    let payload = homelab_core::notify::op_payload(&report.op, label, report.ok, error.as_deref());
+    let payload =
+        homelab_core::notify::op_payload(&report.op, label, report.ok, error.as_deref(), VERSION);
     notify_raw(state, exec, payload).await;
 }
 

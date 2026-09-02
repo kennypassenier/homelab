@@ -51,6 +51,12 @@ services:
     labels:
       # A live postgres data directory is not safe to copy file-by-file.
       - com.homelab.backup.pause=true
+      # O9: stopped cleanly before an update instead of being replaced
+      # under itself. `docker compose up -d` kills and recreates, and for
+      # Postgres that makes the next start a recovery. The label existed in
+      # the code and on no container in the fleet until 2026-09-02 (F213) —
+      # so the feature written for exactly these two had never once run.
+      - com.homelab.update.stop-first=true
       # Postgres major versions do not read each other's data directory, so
       # a version step here is a migration, never an update.
       - com.homelab.update.policy=manual

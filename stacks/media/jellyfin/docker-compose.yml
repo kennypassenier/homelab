@@ -69,6 +69,13 @@ services:
       # Manual: the orchestrator never updates this on its own. Moving to a
       # new Jellyfin is a deliberate act - bump the tag above, deploy, and
       # watch something with hardware transcoding before calling it done.
+      # O10: before an update replaces Jellyfin, ask whether anybody is
+      # watching. Fail-closed: an answer it cannot read counts as busy.
+      # The label existed in the code and on no container until 2026-09-02
+      # (F213), so the check had never been consulted once — and the reading
+      # it depends on now comes from Jellyfin's own database rather than an
+      # .env that this stack does not have.
+      - com.homelab.update.busy-check=jellyfin
       - com.homelab.update.policy=manual
     restart: unless-stopped
     networks:

@@ -2330,3 +2330,54 @@ fn a_route_filename_may_not_climb_out_of_the_routes_directory() {
         ok
     );
 }
+
+/// covers: F213
+///
+/// G2 of the Phase-7 gate. Two update features were built, tested against
+/// mocks that invented their own labels, and carried by no container in the
+/// fleet — so neither had ever run. This test asks the real stack files.
+///
+/// It is deliberately a fleet test rather than a unit test: the code was
+/// never the problem, the absence was.
+#[test]
+fn the_update_labels_the_code_reads_exist_somewhere_in_the_fleet() {
+    fn compose_files(dir: &std::path::Path, out: &mut Vec<String>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                compose_files(&p, out);
+            } else if p.file_name().is_some_and(|n| n == "docker-compose.yml") {
+                if let Ok(s) = std::fs::read_to_string(&p) {
+                    out.push(s);
+                }
+            }
+        }
+    }
+    let mut files = Vec::new();
+    compose_files(std::path::Path::new("../stacks"), &mut files);
+    assert!(files.len() > 30, "the stack sweep broke: {}", files.len());
+    let all = files.join("\n");
+
+    for (label, why) in [
+        (
+            "com.homelab.update.stop-first",
+            "the Postgres services this was written for - a compose recreate makes \
+             their next start a recovery",
+        ),
+        (
+            "com.homelab.update.busy-check",
+            "Jellyfin, so an update does not replace it while somebody is watching",
+        ),
+    ] {
+        assert!(
+            all.contains(label),
+            "'{}' is read by the code and carried by no container, so the feature \
+             cannot run at all. It belongs on {}",
+            label,
+            why
+        );
+    }
+}

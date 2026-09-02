@@ -183,12 +183,24 @@ pub async fn update(
             if !app_wants_busy_check(exec, vmid, &stack, app).await? {
                 return Ok(StepOutcome::Unchanged);
             }
+            // F213: the key comes from the application itself, not from an
+            // `.env`. The media stack declares no `latch_secrets` and has no
+            // `.env` at all, so this used to source a file that does not
+            // exist and ask with an empty token — the check could never have
+            // answered, which is half of why the label was never switched on.
+            //
+            // Same source the deploy's own checks already use (D102), and the
+            // same reason: a key copied anywhere goes stale without saying
+            // so, and F32 was exactly that — a token in an `.env` that had
+            // been dead for an unknown length of time while everything
+            // reported fine.
             let out = super::util_pct_sh(
                 exec,
                 vmid,
                 &format!(
-                    "cd '/opt/{}/{}' && set -a && . ./.env && set +a && \
-                     curl -sf -m 10 -H \"Authorization: MediaBrowser Token=$JELLYFIN_API_KEY\" \
+                    "K=$(sqlite3 /appdata/{}/{}-config/data/jellyfin.db \
+                       'select AccessToken from ApiKeys limit 1') && \
+                     curl -sf -m 10 -H \"Authorization: MediaBrowser Token=$K\" \
                      http://127.0.0.1:8096/Sessions",
                     stack, app
                 ),

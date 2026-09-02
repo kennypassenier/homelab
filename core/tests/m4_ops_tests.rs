@@ -2994,3 +2994,49 @@ async fn t69_an_operator_who_says_yes_lets_the_deploy_finish() {
         sink.lines()
     );
 }
+
+/// covers: F210
+///
+/// G11 of the Phase-7 gate, third part. Two ways past the backup that
+/// precedes a destroy, and neither was driven by a test. `--no-backup` is
+/// the operator's explicit escape and says so loudly; a stack that declares
+/// no storage used to slip past in complete silence, which reads in the
+/// transcript exactly like a backup that ran. For a native stack that is
+/// precisely backwards — its state lives inside the container being deleted.
+#[tokio::test]
+async fn a_destroy_that_takes_no_backup_always_says_why() {
+    use homelab_core::ops::destroy::destroy;
+
+    // 1 · the explicit escape.
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("pct", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let _ = destroy(&ctx(&exec, &sink, &j), &manifest(108, "test"), "test", true).await;
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("backup SKIPPED") && l.contains("explicit request")),
+        "--no-backup must name itself as the operator's choice: {:?}",
+        sink.lines()
+    );
+
+    // 2 · the quiet one: no storage declared at all.
+    let exec2 = MockExecutor::new();
+    mock_hostname(&exec2, 108, "test");
+    exec2.respond_always("pct", CmdOutput::ok(""));
+    let sink2 = VecSink::new();
+    let mut m = manifest(108, "test");
+    m.storage.clear();
+    let _ = destroy(&ctx(&exec2, &sink2, &j), &m, "test", false).await;
+    assert!(
+        sink2
+            .lines()
+            .iter()
+            .any(|l| l.contains("declares no storage")),
+        "a destroy with nothing to back up must say so rather than look like \
+         a destroy that backed up: {:?}",
+        sink2.lines()
+    );
+}

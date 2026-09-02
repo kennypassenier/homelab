@@ -2268,3 +2268,65 @@ async fn a_declared_path_that_is_not_there_yet_says_deploy_first() {
     // message this replaces.
     assert!(why.contains("/appdata/"), "{}", why);
 }
+
+// ── G11 of the Phase-7 gate: the refusals nobody ever executed ──────────────
+//
+// Three protections were built and reached by no test. A refusal that has
+// never fired is a hope, not a brake (standing rule 7d), and these are the
+// brakes on the two operations that cannot be undone.
+
+/// covers: F210
+///
+/// Every existing test mocks `qm status` as FAILED, so this branch — the one
+/// that refuses to touch a QEMU VM at all — had never been executed. It is
+/// what protects every VM that is NOT on the no-touch list, template 9000
+/// among them: the list names four ids, this names a kind.
+#[tokio::test]
+async fn a_vmid_that_is_a_qemu_vm_is_refused_even_when_it_is_not_on_the_list() {
+    use homelab_core::safety::{check_deploy_target, SafetyConfig};
+    let exec = MockExecutor::new();
+    // 9000 is the Ubuntu template. It is not on the no-touch list.
+    exec.respond_always("qm status", CmdOutput::ok("status: stopped"));
+    let cfg = SafetyConfig::default();
+    assert!(
+        !cfg.no_touch.contains(&9000),
+        "precondition: the list does not name this id, so only the VM check can save it"
+    );
+
+    let err = check_deploy_target(&exec, &cfg, &manifest(9000, "tmpl"))
+        .await
+        .expect_err("a QEMU VM must be refused");
+    let msg = format!("{:?}", err);
+    assert!(msg.contains("9000") && msg.contains("QEMU"), "{}", msg);
+}
+
+/// covers: F210
+///
+/// The path-traversal guard on the ONE sanctioned cross-stack write. Its
+/// input comes from a stack file, which is a file a person edits, and the
+/// only test touching this function covered the wrong-vmid branch instead.
+#[test]
+fn a_route_filename_may_not_climb_out_of_the_routes_directory() {
+    use homelab_core::safety::{check_gateway_route, SafetyConfig};
+    let cfg = SafetyConfig::default();
+    let gw = cfg.gateway_vmid;
+
+    for bad in [
+        "../../etc/cron.d/evil.yml",
+        "sub/dir.yml",
+        "not-a-yaml.txt",
+        "..yml",
+    ] {
+        assert!(
+            check_gateway_route(&cfg, gw, bad).is_err(),
+            "'{}' must be refused as a route filename",
+            bad
+        );
+    }
+    let ok = check_gateway_route(&cfg, gw, "106-app-media.yml").expect("a plain name is fine");
+    assert!(
+        ok.starts_with(&cfg.gateway_routes_dir),
+        "and it lands inside the routes directory: {}",
+        ok
+    );
+}

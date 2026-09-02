@@ -126,6 +126,20 @@ pub async fn destroy(
             return Ok(StepOutcome::Unchanged);
         }
         if manifest.storage.is_empty() {
+            // F210: this used to return in silence, so a stack that declares
+            // no storage was destroyed with no backup and nothing said —
+            // indistinguishable in the transcript from a backup that ran.
+            // For a native stack that is exactly wrong: its state lives
+            // INSIDE the container, which is the thing about to be deleted.
+            runner_warn(
+                ctx,
+                format!(
+                    "[destroy] {} declares no storage, so there is nothing to back up \
+                     from the host — anything this container holds internally goes with \
+                     it",
+                    stack_name
+                ),
+            );
             return Ok(StepOutcome::Unchanged);
         }
         let report = crate::ops::backup::backup(ctx, manifest, &ctx.backup).await;

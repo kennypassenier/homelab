@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     container: rust:1.97-bookworm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -50,6 +50,6 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: "1.88"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check on MSRV (AR17)
         run: cargo check --workspace --locked

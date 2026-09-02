@@ -69,12 +69,18 @@ endif
 	# commit — but "protected" overstated what was true, and a red tip could
 	# have been tagged and shipped to the host with nothing objecting.
 	#
+	# Reads EVERY check on the commit, not `check` and `msrv` by name. The
+	# almanac project sat on four days of red CI across seven releases
+	# because its `gates` job was green and a second job nobody was reading
+	# was not — and a guard that knows two job names by heart would have
+	# missed a third exactly the same way.
+	#
 	# This is the narrow fix that does not require weakening `make release`:
 	# refuse to release from a HEAD whose CI is red. Unknown is allowed and
 	# says so — a commit that was never pushed has no runs, and refusing that
 	# would make the rule unusable offline.
 	@st=$$(gh api "repos/{owner}/{repo}/commits/$$(git rev-parse HEAD)/check-runs" \
-		--jq '[.check_runs[] | select(.name=="check" or .name=="msrv") | .conclusion] | join(",")' \
+		--jq '[.check_runs[] | select(.app.slug != "dependabot") | .conclusion] | join(",")' \
 		2>/dev/null | tr -cd 'a-z_,'); \
 	case ",$$st," in \
 		*,failure,*|*,cancelled,*|*,timed_out,*) \

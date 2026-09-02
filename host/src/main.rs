@@ -2525,8 +2525,16 @@ async fn ws_session(socket: WebSocket, state: AppState) {
     });
 
     while let Some(Ok(Message::Text(text))) = rx.next().await {
-        let Ok(req) = serde_json::from_str::<RpcRequest>(&text) else {
-            continue;
+        let req = match serde_json::from_str::<RpcRequest>(&text) {
+            Ok(r) => r,
+            Err(e) => {
+                // Silence here is why `homelab checks answer` looked like a
+                // hang rather than a bug: the request was dropped and the
+                // client waited for a reply that was never coming. A frame
+                // this end cannot understand is a fault on this end.
+                tracing::error!("unparseable request dropped :: {} :: {}", e, text);
+                continue;
+            }
         };
         let resp = handle_rpc(&state, req).await;
         let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
@@ -3774,7 +3782,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 message: homelab_core::ops::manualchecks::render_listing(&rows, now),
             }
         }
-        Rpc::AnswerManualCheck { id, ok, note } => {
+        Rpc::AnswerManualCheck {
+            check_id: id,
+            ok,
+            note,
+        } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let mut st = store.load().await.unwrap_or_default();
             let now = std::time::SystemTime::now()

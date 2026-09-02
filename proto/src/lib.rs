@@ -184,8 +184,12 @@ pub enum Command {
     /// record. Read-only; the deploy is what puts them there.
     ListManualChecks,
     /// G17: one person's answer to one of those questions.
+    ///
+    /// `check_id`, not `id`: `RpcRequest` flattens this enum into the same
+    /// JSON object as its own `id`, so a field of that name collides with the
+    /// envelope and the whole request stops parsing.
     AnswerManualCheck {
-        id: String,
+        check_id: String,
         ok: bool,
         note: String,
     },
@@ -399,4 +403,48 @@ pub enum ServerMsg {
     /// G8: host settings (reply to GetConfig).
     Config(Box<HostConfigView>),
     RpcDone(RpcResponse),
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+
+    /// Every command must survive the wire, and the wire is an RpcRequest —
+    /// not the bare enum.
+    ///
+    /// `RpcRequest` flattens the command into the same JSON object as its own
+    /// `id`, so a command carrying a field called `id` collides with it: one
+    /// key, two meanings, and `serde_json::from_str::<RpcRequest>` fails. The
+    /// host's read loop skips a request it cannot parse and says nothing, so
+    /// the client waits for a reply that will never come — which is exactly
+    /// what `homelab checks answer <id> ok` did on 2026-09-02.
+    #[test]
+    fn no_command_field_collides_with_the_envelope() {
+        let cases: Vec<Command> = vec![
+            Command::AnswerManualCheck {
+                check_id: "c4bca102".into(),
+                ok: true,
+                note: String::new(),
+            },
+            Command::ListManualChecks,
+            Command::SetStackEnabled {
+                stack: "home".into(),
+                enabled: true,
+            },
+        ];
+        for c in cases {
+            let req = RpcRequest {
+                id: 42,
+                command: c.clone(),
+            };
+            let json = serde_json::to_string(&req).expect("serialise");
+            let back: RpcRequest = serde_json::from_str(&json).unwrap_or_else(|e| {
+                panic!(
+                    "{:?} does not survive the envelope: {}\n  wire: {}",
+                    c, e, json
+                )
+            });
+            assert_eq!(back.id, 42, "the envelope's id must not be overwritten");
+        }
+    }
 }

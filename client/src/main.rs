@@ -319,7 +319,7 @@ async fn main() {
                     &host,
                     &token,
                     Command::AnswerManualCheck {
-                        id: id.clone(),
+                        check_id: id.clone(),
                         ok,
                         note: args[5..].join(" "),
                     },

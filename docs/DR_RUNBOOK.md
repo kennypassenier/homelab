@@ -154,7 +154,7 @@ restic restore latest --target /
 
 - hostname `106-app-media`, ip `10.10.10.6/24`
 - resources: 6 core(s), 8192 MiB RAM, 0 MiB swap, 80 GiB disk
-- apps: jellyfin, sonarr, radarr, prowlarr, bazarr, seerr, flaresolverr, promtail
+- apps: jellyfin, sonarr, radarr, prowlarr, bazarr, seerr, flaresolverr
 - recreate from scratch: `homelab deploy stacks/media` (or by hand per Layer 2)
 - data restore from: `…:jellyfin-config`, `…:sonarr-config`, `…:radarr-config`, `…:prowlarr-config`, `…:bazarr-config`, `…:seerr-config`
 

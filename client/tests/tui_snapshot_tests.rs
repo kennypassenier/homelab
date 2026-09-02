@@ -2265,7 +2265,12 @@ fn every_app_either_has_checks_or_is_named_as_deliberately_without() {
             }
         }
     }
-    assert!(seen > 30, "the app sweep broke: {} found", seen);
+    // A floor, not a count: it exists so a sweep that silently finds nothing
+    // fails instead of passing. Was 30 when every stack carried a promtail
+    // sidecar; the Alloy migration removed eleven of those on 2026-09-02 and
+    // one log shipper per container is now installed by the deploy rather
+    // than declared as an app.
+    assert!(seen > 20, "the app sweep broke: {} found", seen);
     missing.sort();
     assert!(
         missing.is_empty(),

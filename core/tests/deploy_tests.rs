@@ -2428,7 +2428,11 @@ fn the_update_labels_the_code_reads_exist_somewhere_in_the_fleet() {
     }
     let mut files = Vec::new();
     compose_files(std::path::Path::new("../stacks"), &mut files);
-    assert!(files.len() > 30, "the stack sweep broke: {}", files.len());
+    // A floor rather than a count, so a sweep that finds nothing fails
+    // instead of passing quietly. Lowered from 30 on 2026-09-02: the Alloy
+    // migration removed eleven promtail sidecars, and the log shipper is now
+    // installed by the deploy instead of being declared as an app.
+    assert!(files.len() > 20, "the stack sweep broke: {}", files.len());
     let all = files.join("\n");
 
     for (label, why) in [

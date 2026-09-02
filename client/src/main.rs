@@ -59,7 +59,15 @@ fn load_config_env() {
                 continue;
             };
             let k = k.trim().trim_start_matches("export ").trim();
-            if k != "HOMELAB_HOST" && k != "HOMELAB_TOKEN" {
+            // Every HOMELAB_* key, not a hand-picked pair.
+            //
+            // The first version named HOMELAB_HOST and HOMELAB_TOKEN
+            // explicitly and silently left HOMELAB_LATCH_ENV behind, so
+            // `homelab check` worked from anywhere and `homelab deploy` of any
+            // stack with secrets did not — a fix that turned "works from any
+            // directory" into "works for some commands", which is worse than
+            // not fixing it, because it looks done.
+            if !k.starts_with("HOMELAB_") {
                 continue;
             }
             if std::env::var(k).is_ok() {

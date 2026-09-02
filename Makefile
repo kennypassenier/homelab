@@ -73,7 +73,16 @@ endif
 	# refuse to release from a HEAD whose CI is red. Unknown is allowed and
 	# says so — a commit that was never pushed has no runs, and refusing that
 	# would make the rule unusable offline.
-	@st=$$(gh api "repos/{owner}/{repo}/commits/$$(git rev-parse HEAD)/check-runs" 		--jq '[.check_runs[] | select(.name=="check" or .name=="msrv") | .conclusion] | join(",")' 2>/dev/null || echo ""); 	case "$$st" in 		*failure*|*cancelled*|*timed_out*) 			echo "refusing: CI on HEAD is $$st — releasing from a red base"; exit 1 ;; 		"") echo "  · CI has no verdict on HEAD yet (never pushed?) — continuing" ;; 		*) echo "  · CI on HEAD: $$st" ;; 	esac
+	@st=$$(gh api "repos/{owner}/{repo}/commits/$$(git rev-parse HEAD)/check-runs" \
+		--jq '[.check_runs[] | select(.name=="check" or .name=="msrv") | .conclusion] | join(",")' \
+		2>/dev/null | tr -cd 'a-z_,'); \
+	case ",$$st," in \
+		*,failure,*|*,cancelled,*|*,timed_out,*) \
+			echo "refusing: CI on HEAD says $$st — this would tag and ship a red base"; \
+			exit 1 ;; \
+		*,success,*) echo "  · CI on HEAD: $$st" ;; \
+		*) echo "  · no CI verdict on HEAD yet (unpushed, or the API did not answer) — continuing" ;; \
+	esac
 	$(MAKE) gate
 	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml
 	@cargo update --workspace --quiet 2>/dev/null || cargo check --workspace --quiet

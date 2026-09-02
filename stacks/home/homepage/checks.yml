@@ -6,17 +6,32 @@
 # `homepage-config/` contains zero `href` entries and `services.yaml` is 0
 # bytes. The page renders and lists nothing (T51 is the task to generate it
 # from the manifest instead of by hand).
+#
+# 2026-09-02: T51 now writes that file — and the compose mounts a
+# hand-written one read-only over the top of it (F188), so the generated
+# half has never been visible. Which of the two is the truth is Kenny's
+# open decision; this file only measures what the container really reads.
 checks:
   - name: "diensten op de startpagina"
+    # F189: this used to grep the rendered HTML for `href="http` and could
+    # only ever answer 0. Homepage is a Next.js app that draws its tiles in
+    # the browser, so the HTML it serves contains eleven links and every one
+    # of them is a stylesheet, a favicon or the web manifest. Measured
+    # 2026-09-02: the page mentions jellyfin, renders fine, and the check
+    # said zero — for months, on the reading meant to prove the page is not
+    # empty. Now it counts entries in the file the container actually reads,
+    # which is a number that moves when reality does.
     command: >-
-      curl -s -m 15 http://127.0.0.1:3000/ |
-      grep -o 'href="http' | wc -l
+      docker exec homepage sh -c 'grep -c "href:" /app/config/services.yaml'
     expect: never_decreases
     layer: application
     blind_spot: >-
-      Counts links on the rendered page, not whether any of them answers.
-      Homepage draws a tile for a service that is down exactly as it draws
-      one for a service that is up.
+      Counts what the page is configured to show, not what it renders and
+      not whether any of those services answers. Homepage draws a tile for a
+      service that is down exactly as it draws one for a service that is up.
+      It also reads the file at the path the CONTAINER sees, which is the
+      point: a generated file shadowed by another mount at the same path
+      counts zero here, which is how F188 was found.
 
   - name: "de startpagina antwoordt"
     command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/"

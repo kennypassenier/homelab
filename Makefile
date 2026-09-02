@@ -85,17 +85,17 @@ endif
 	esac
 	# DRY=1 stops here: every check has run, nothing has a side effect yet.
 	#
-	# There was no way to try this target without publishing, and on
-	# 2026-09-02 I used it twice to test the CI guard above. Three fake tags
-	# reached GitHub and two release workflows started before I noticed;
-	# tags deleted, runs cancelled, no release published, but the version in
-	# Cargo.toml had been bumped to 9.9.9 on main and had to be reverted.
-	# A target whose only mode is "do it for real" gets rehearsed in
-	# production, which is what happened.
-	@if [ -n "$(DRY)" ]; then \
-		echo "✓ dry run for v$(VERSION): checks passed, nothing tagged or pushed"; \
-		exit 0; \
-	fi
+	# `ifndef`, not a shell `exit 0`. The first version used the latter and
+	# did nothing at all, because every recipe line is its own shell — the
+	# exit ended that line successfully and make carried on to the tag and
+	# the push. That is how a third fake tag reached GitHub while I was
+	# testing the guard that was supposed to prevent exactly this.
+	#
+	# There was no rehearsal mode at all before 2026-09-02, and a target
+	# whose only mode is "do it for real" gets rehearsed in production.
+ifdef DRY
+	@echo "✓ dry run for v$(VERSION): every check passed, nothing tagged or pushed"
+else
 	$(MAKE) gate
 	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml
 	@cargo update --workspace --quiet 2>/dev/null || cargo check --workspace --quiet
@@ -109,6 +109,7 @@ endif
 	@echo "✓ v$(VERSION) tagged and pushed — CI is building the release."
 	@echo "  watch:    gh run watch"
 	@echo "  roll out: homelab release-update   (after the release appears)"
+endif
 
 # Kenny, 2026-09-02: `homelab` was never installed anywhere. Every document in
 # this repository writes commands as `homelab <verb>`, and none of them worked

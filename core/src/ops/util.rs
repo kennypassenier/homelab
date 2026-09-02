@@ -107,6 +107,19 @@ pub async fn push_content_staged(
         ),
     )
     .await?;
+    // F206: the staging copy is where a secret is briefly plaintext on the
+    // HOST, and it used to stay there. Nine of them were lying under
+    // /var/lib/homelab when this was found; none held a secret, but only
+    // because a staging file is written solely when the content CHANGED and
+    // that day's re-commit had produced identical values. The next changed
+    // `.env` would have stayed readable until somebody noticed.
+    //
+    // After the push, not before: `pct push` reads this file, and removing
+    // it earlier would break the thing it exists for. Best-effort on the
+    // removal itself — a push that succeeded must not be reported as failed
+    // because the cleanup could not run, and the file is 0600 under a
+    // root-only directory in the meantime.
+    let _ = exec.run(&Cmd::new("rm", &["-f", tmp], 30)).await;
     Ok(true)
 }
 

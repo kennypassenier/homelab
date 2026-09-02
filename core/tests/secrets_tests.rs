@@ -206,3 +206,42 @@ async fn sec1_shell_metachar_app_name_refused_everywhere() {
         );
     }
 }
+
+/// covers: F206
+///
+/// The staging file is where a secret is briefly plaintext on the HOST, and
+/// it was never removed. No `.env` happened to be sitting there when this
+/// was found on 2026-09-02 — only because a staging file is written solely
+/// when the content CHANGED, and the day's re-commit had produced identical
+/// values. That is luck, not design: the next changed secret stays readable
+/// under /var/lib/homelab until someone notices.
+#[tokio::test]
+async fn the_staging_copy_of_a_secret_does_not_outlive_the_push() {
+    use homelab_core::executor::{CmdOutput, MockExecutor};
+    use homelab_core::ops::util::{push_content, staging_path};
+
+    let exec = MockExecutor::new();
+    // The remote hash differs, so the push actually happens.
+    exec.respond_always("sha256sum", CmdOutput::ok("0000000000000000"));
+    exec.respond_always("mkdir", CmdOutput::ok(""));
+    exec.respond_always("pct push", CmdOutput::ok(""));
+    exec.respond_always("rm", CmdOutput::ok(""));
+
+    push_content(&exec, 115, "/opt/home/homepage/.env", "TOKEN=shhh\n", "600")
+        .await
+        .expect("push");
+
+    let staging = staging_path(115, "/opt/home/homepage/.env");
+    let calls = exec.calls();
+    assert!(
+        calls.iter().any(|c| c.contains("pct push")),
+        "precondition: the push must have happened"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.starts_with("rm ") && c.contains(&staging)),
+        "the plaintext staging copy must be removed after the push; calls were {:?}",
+        calls
+    );
+}

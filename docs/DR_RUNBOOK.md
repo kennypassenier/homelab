@@ -122,7 +122,7 @@ restic restore latest --target /
 
 - hostname `104-app-gateway`, ip `10.10.10.4/24`
 - resources: 4 core(s), 5120 MiB RAM, 0 MiB swap, 30 GiB disk
-- apps: traefik, cloudflared, crowdsec, grafana, loki, goaccess, promtail
+- apps: traefik, cloudflared, crowdsec, grafana, loki, goaccess
 - recreate from scratch: `homelab deploy stacks/gateway` (or by hand per Layer 2)
 - data restore from: `…:traefik-config`, `…:crowdsec-config`, `…:grafana-config`, `…:loki-config`, `…:goaccess-config`
 

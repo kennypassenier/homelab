@@ -116,7 +116,7 @@ data_mounts:
     mount_point: /mnt/traefik-logs
     note: "Traefik access + rotated logs. Regenerable, deliberately outside the backup."
 
-apps: [traefik, cloudflared, crowdsec, grafana, loki, goaccess, promtail]
+apps: [traefik, cloudflared, crowdsec, grafana, loki, goaccess]
 
 latch_secrets: [traefik, cloudflared, grafana]
 

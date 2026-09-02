@@ -3,7 +3,7 @@ resolver = "3"
 members = ["core", "proto", "host", "client", "tui-preview"]
 
 [workspace.package]
-version = "9.9.9"
+version = "9.9.8"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 edition = "2021"

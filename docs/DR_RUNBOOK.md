@@ -105,7 +105,7 @@ restic restore latest --target /
 ### almanac (vmid 112)
 
 - hostname `112-app-almanac`, ip `10.10.10.12/24`
-- resources: 1 core(s), 512 MiB RAM, 256 MiB swap, 4 GiB disk
+- resources: 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk
 - apps: none — native services under systemd, not compose
 - recreate from scratch: `homelab adopt stacks/almanac` — native services; the unit files and binaries come from the service's own release, not from a compose pull
 - data restore from: `…:almanac-config`
@@ -113,7 +113,7 @@ restic restore latest --target /
 ### downloader (vmid 105)
 
 - hostname `105-app-downloader`, ip `10.10.10.5/24`
-- resources: 2 core(s), 2048 MiB RAM, 512 MiB swap, 10 GiB disk
+- resources: 2 core(s), 2048 MiB RAM, 0 MiB swap, 10 GiB disk
 - apps: qbittorrent, promtail
 - recreate from scratch: `homelab deploy stacks/downloader` (or by hand per Layer 2)
 - data restore from: `…:qbittorrent-config`
@@ -121,7 +121,7 @@ restic restore latest --target /
 ### gateway (vmid 104)
 
 - hostname `104-app-gateway`, ip `10.10.10.4/24`
-- resources: 4 core(s), 5120 MiB RAM, 1024 MiB swap, 30 GiB disk
+- resources: 4 core(s), 5120 MiB RAM, 0 MiB swap, 30 GiB disk
 - apps: traefik, cloudflared, crowdsec, grafana, loki, goaccess, promtail
 - recreate from scratch: `homelab deploy stacks/gateway` (or by hand per Layer 2)
 - data restore from: `…:traefik-config`, `…:crowdsec-config`, `…:grafana-config`, `…:loki-config`, `…:goaccess-config`
@@ -129,7 +129,7 @@ restic restore latest --target /
 ### home (vmid 115)
 
 - hostname `115-app-home`, ip `10.10.10.15/24`
-- resources: 2 core(s), 1024 MiB RAM, 512 MiB swap, 8 GiB disk
+- resources: 2 core(s), 1024 MiB RAM, 0 MiB swap, 8 GiB disk
 - apps: homepage, promtail
 - recreate from scratch: `homelab deploy stacks/home` (or by hand per Layer 2)
 - data restore from: `…:homepage-config`
@@ -137,7 +137,7 @@ restic restore latest --target /
 ### kp-soft (vmid 116)
 
 - hostname `116-app-kp-soft`, ip `10.10.10.16/24`
-- resources: 2 core(s), 2048 MiB RAM, 512 MiB swap, 16 GiB disk
+- resources: 2 core(s), 2048 MiB RAM, 0 MiB swap, 16 GiB disk
 - apps: kp-soft, promtail
 - recreate from scratch: `homelab deploy stacks/kp-soft` (or by hand per Layer 2)
 - data restore from: `…:kp-soft-config`
@@ -145,7 +145,7 @@ restic restore latest --target /
 ### kyu (vmid 109)
 
 - hostname `109-app-kyu`, ip `10.10.10.9/24`
-- resources: 1 core(s), 256 MiB RAM, 128 MiB swap, 2 GiB disk
+- resources: 1 core(s), 256 MiB RAM, 0 MiB swap, 2 GiB disk
 - apps: none — native services under systemd, not compose
 - recreate from scratch: `homelab adopt stacks/kyu` — native services; the unit files and binaries come from the service's own release, not from a compose pull
 - data restore from: `…:kyu-config`, `…:kyu-runner-config`, `…:http-switchboard-config`
@@ -153,7 +153,7 @@ restic restore latest --target /
 ### media (vmid 106)
 
 - hostname `106-app-media`, ip `10.10.10.6/24`
-- resources: 6 core(s), 8192 MiB RAM, 512 MiB swap, 80 GiB disk
+- resources: 6 core(s), 8192 MiB RAM, 0 MiB swap, 80 GiB disk
 - apps: jellyfin, sonarr, radarr, prowlarr, bazarr, seerr, flaresolverr, promtail
 - recreate from scratch: `homelab deploy stacks/media` (or by hand per Layer 2)
 - data restore from: `…:jellyfin-config`, `…:sonarr-config`, `…:radarr-config`, `…:prowlarr-config`, `…:bazarr-config`, `…:seerr-config`
@@ -161,7 +161,7 @@ restic restore latest --target /
 ### metrics (vmid 113)
 
 - hostname `113-app-metrics`, ip `10.10.10.13/24`
-- resources: 2 core(s), 1024 MiB RAM, 512 MiB swap, 16 GiB disk
+- resources: 2 core(s), 1024 MiB RAM, 0 MiB swap, 16 GiB disk
 - apps: prometheus, alertmanager, promtail, pve-exporter
 - recreate from scratch: `homelab deploy stacks/metrics` (or by hand per Layer 2)
 - data restore from: `…:prometheus-config`, `…:alertmanager-config`
@@ -169,7 +169,7 @@ restic restore latest --target /
 ### paperwork (vmid 114)
 
 - hostname `114-app-paperwork`, ip `10.10.10.14/24`
-- resources: 4 core(s), 4096 MiB RAM, 512 MiB swap, 32 GiB disk
+- resources: 4 core(s), 4096 MiB RAM, 0 MiB swap, 32 GiB disk
 - apps: actual, stirling, paperless-db, paperless, promtail
 - recreate from scratch: `homelab deploy stacks/paperwork` (or by hand per Layer 2)
 - data restore from: `…:actual-config`, `…:stirling-config`, `…:paperless-config`, `…:paperless-db-config`
@@ -177,7 +177,7 @@ restic restore latest --target /
 ### productivity (vmid 111)
 
 - hostname `111-app-productivity`, ip `10.10.10.11/24`
-- resources: 2 core(s), 2048 MiB RAM, 512 MiB swap, 8 GiB disk
+- resources: 2 core(s), 2048 MiB RAM, 0 MiB swap, 8 GiB disk
 - apps: supersync-db, supersync, promtail
 - recreate from scratch: `homelab deploy stacks/productivity` (or by hand per Layer 2)
 - data restore from: `…:supersync-db-config`
@@ -185,7 +185,7 @@ restic restore latest --target /
 ### registry (vmid 117)
 
 - hostname `117-app-registry`, ip `10.10.10.17/24`
-- resources: 2 core(s), 1024 MiB RAM, 512 MiB swap, 32 GiB disk
+- resources: 2 core(s), 1024 MiB RAM, 0 MiB swap, 32 GiB disk
 - apps: registry, promtail
 - recreate from scratch: `homelab deploy stacks/registry` (or by hand per Layer 2)
 - data restore from: no /appdata paths — nothing to restore
@@ -194,7 +194,7 @@ restic restore latest --target /
 ### syncthing (vmid 108)
 
 - hostname `108-app-syncthing`, ip `10.10.10.8/24`
-- resources: 2 core(s), 1024 MiB RAM, 256 MiB swap, 4 GiB disk
+- resources: 2 core(s), 1024 MiB RAM, 0 MiB swap, 4 GiB disk
 - apps: syncthing, promtail
 - recreate from scratch: `homelab deploy stacks/syncthing` (or by hand per Layer 2)
 - data restore from: `…:syncthing-config`
@@ -202,7 +202,7 @@ restic restore latest --target /
 ### uptime (vmid 107)
 
 - hostname `107-app-uptime`, ip `10.10.10.7/24`
-- resources: 1 core(s), 512 MiB RAM, 256 MiB swap, 8 GiB disk
+- resources: 1 core(s), 512 MiB RAM, 0 MiB swap, 8 GiB disk
 - apps: uptime-kuma, kuma-seeder, promtail
 - recreate from scratch: `homelab deploy stacks/uptime` (or by hand per Layer 2)
 - data restore from: `…:uptime-kuma-config`, `…:kuma-seeder-config`

@@ -27,7 +27,19 @@ resources:
   # Swap matches the rest of the fleet for now. It goes when G2 does: Kenny
   # asked to avoid swap so memory pressure fails loudly instead of degrading
   # quietly, but the fleet-wide removal waits on a week of Prometheus data.
-  swap_mb: 512
+  # W1 (Kenny, 2026-09-02): none. Measured that night, the container's own
+
+  # programs used between 4% and 37% of this limit — nothing here has ever
+
+  # been short of memory. What filled the swap was page cache reaching the
+
+  # limit during heavy reads, and the kernel then evicting the PROGRAM to
+
+  # keep the cache, which is exactly backwards. At zero it drops the cache
+
+  # instead, and that costs a re-read. Was 512 MB.
+
+  swap_mb: 0
   # Larger than any other stack because the images are: stirling-pdf carries
   # LibreOffice and its fonts, paperless carries the OCR toolchain. Measured
   # headroom on local-lvm at build time: 657 GB free, thin-provisioned.

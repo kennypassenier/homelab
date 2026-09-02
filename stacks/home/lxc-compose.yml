@@ -26,7 +26,19 @@ network:
 resources:
   cores: 2
   memory_mb: 1024
-  swap_mb: 512
+  # W1 (Kenny, 2026-09-02): none. Measured that night, the container's own
+
+  # programs used between 4% and 37% of this limit — nothing here has ever
+
+  # been short of memory. What filled the swap was page cache reaching the
+
+  # limit during heavy reads, and the kernel then evicting the PROGRAM to
+
+  # keep the cache, which is exactly backwards. At zero it drops the cache
+
+  # instead, and that costs a re-read. Was 512 MB.
+
+  swap_mb: 0
   disk_gb: 8
   storage: local-lvm
 

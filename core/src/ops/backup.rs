@@ -535,6 +535,41 @@ fn humantime_to_unix(s: &str) -> Option<u64> {
 
 /// E2: restore a stack's /appdata from a snapshot (default: latest).
 /// validate → quiesce → restore → resume → verify.
+/// G14: pull one repository's newest snapshot into a scratch directory.
+///
+/// Deliberately NOT the `restore` below: that one quiesces the stack's
+/// containers, writes over live paths and is the operation you run when
+/// something is broken. A drill must prove the backup without touching
+/// anything that is working, so it restores somewhere harmless and the caller
+/// throws the result away.
+pub async fn restore_into(
+    exec: &dyn Executor,
+    cfg: &BackupCfg,
+    app: &str,
+    target: &str,
+) -> Result<(), CoreError> {
+    let out = exec
+        .run(&restic_cmd(
+            cfg,
+            app,
+            &["restore", "latest", "--target", target],
+            cfg.restore_timeout_s,
+        ))
+        .await?;
+    if out.code != 0 {
+        return Err(CoreError::Command {
+            rendered: format!("restic restore latest --target {}", target),
+            detail: format!(
+                "restic restore of {} exited {}: {}",
+                app,
+                out.code,
+                out.stderr.trim()
+            ),
+        });
+    }
+    Ok(())
+}
+
 pub async fn restore(
     ctx: &OpCtx<'_>,
     m: &StackManifest,

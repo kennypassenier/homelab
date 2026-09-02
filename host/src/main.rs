@@ -68,6 +68,10 @@ struct FileConfig {
     /// warning survives HA being the thing that is broken — and the hub
     /// requires a token where the HA webhook did not.
     notify_auth_bearer: Option<String>,
+    /// G14: how long a passed restore drill counts for. B3 says quarterly;
+    /// the default is 90 days. Kenny's, not the author's — a house that
+    /// changes little wants it longer, one being rebuilt wants it shorter.
+    restore_drill_interval_s: Option<u64>,
     /// G16: the second route, tried when the first one does not answer 2xx.
     ///
     /// Y2 sends notifications through kyu so an HA outage cannot lose them.
@@ -177,6 +181,10 @@ struct Config {
     /// that view is the settings the CLIENT can read back, and a secret does
     /// not belong in a screen. ssh-edited only, like exec_enabled.
     notify_auth_bearer: Option<String>,
+    /// G14: how long a passed restore drill counts for. B3 says quarterly;
+    /// the default is 90 days. Kenny's, not the author's — a house that
+    /// changes little wants it longer, one being rebuilt wants it shorter.
+    restore_drill_interval_s: u64,
     /// G16: the second route, tried when the first one does not answer 2xx.
     ///
     /// Y2 sends notifications through kyu so an HA outage cannot lose them.
@@ -270,6 +278,7 @@ const KNOWN_TOP: &[&str] = &[
     "backup_hour",
     "notify_webhook",
     "notify_auth_bearer",
+    "restore_drill_interval_s",
     "notify_fallback_webhook",
     "notify_fallback_auth_bearer",
     "prometheus_url",
@@ -420,6 +429,9 @@ fn load_config() -> Config {
         config_path: path,
         exec_enabled: file.exec_enabled.unwrap_or(false),
         notify_auth_bearer: file.notify_auth_bearer.clone(),
+        restore_drill_interval_s: file
+            .restore_drill_interval_s
+            .unwrap_or(homelab_core::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S),
         notify_fallback_webhook: file.notify_fallback_webhook.clone(),
         notify_fallback_auth_bearer: file.notify_fallback_auth_bearer.clone(),
         prometheus_url: file.prometheus_url.clone(),
@@ -514,6 +526,11 @@ fn render_settings_toml(
         // reasoning as the line above, one step further: losing the fallback
         // silently would leave exactly the window Y2 carved out — kyu being
         // restarted by the very operation whose failure you need to hear.
+        // G14: Kenny's interval for the restore drill. A save that dropped
+        // it would quietly reset the rehearsal to the default — not
+        // dangerous, and exactly the kind of silent revert F208 was about.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        restore_drill_interval_s: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         notify_fallback_webhook: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -577,6 +594,7 @@ fn render_settings_toml(
         retention: &settings.retention,
         exec_enabled: config.exec_enabled,
         notify_auth_bearer: config.notify_auth_bearer.as_ref(),
+        restore_drill_interval_s: Some(config.restore_drill_interval_s),
         notify_fallback_webhook: config.notify_fallback_webhook.as_ref(),
         notify_fallback_auth_bearer: config.notify_fallback_auth_bearer.as_ref(),
         prometheus_url: config.prometheus_url.as_ref(),
@@ -907,6 +925,7 @@ port = 5003
     #[test]
     fn settings_render_keeps_every_config_field() {
         let config = Config {
+            restore_drill_interval_s: 90 * 24 * 3600,
             notify_fallback_webhook: Some("http://10.10.5.101:8123/api/webhook/homelab".into()),
             notify_fallback_auth_bearer: None,
             // F208: with real values, so the round-trip proves they SURVIVE
@@ -1100,6 +1119,35 @@ port = 5003
         assert!(backup_due(4, 4, 0, now), "never backed up");
     }
 
+    /// G14: the drill rides the backup hour and only when it is due.
+    #[test]
+    fn g14_the_restore_drill_is_planned_only_in_the_backup_hour_and_only_when_due() {
+        let never = NightlyState {
+            last_host_meta: 0,
+            last_zfs: 0,
+            last_restore_drill: 0,
+            restore_drill_interval_s: 90 * 24 * 3600,
+            zfs_configured: false,
+            devices_configured: false,
+        };
+        assert!(
+            nightly_plan(4, 4, 1_000_000, &[], &never).contains(&NightlyTask::RestoreDrill),
+            "never drilled, and it is the hour: it must be planned"
+        );
+        assert!(
+            !nightly_plan(4, 5, 1_000_000, &[], &never).contains(&NightlyTask::RestoreDrill),
+            "a restore pulls a whole snapshot back — not outside the backup hour"
+        );
+        let fresh = NightlyState {
+            last_restore_drill: 1_000_000 - 3600,
+            ..never
+        };
+        assert!(
+            !nightly_plan(4, 4, 1_000_000, &[], &fresh).contains(&NightlyTask::RestoreDrill),
+            "drilled an hour ago: not again tonight"
+        );
+    }
+
     #[test]
     fn h10_nightly_plan_always_includes_host_meta() {
         // The bug this test was written for: the host-meta backup existed as
@@ -1117,6 +1165,8 @@ port = 5003
             now,
             &[("a".into(), true, fresh)],
             &NightlyState {
+                last_restore_drill: now,
+                restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: 0,
                 last_zfs: now,
                 zfs_configured: false,
@@ -1132,6 +1182,8 @@ port = 5003
             now,
             &[("a".into(), true, stale), ("b".into(), true, stale)],
             &NightlyState {
+                last_restore_drill: now,
+                restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: 0,
                 last_zfs: now,
                 zfs_configured: false,
@@ -1154,6 +1206,8 @@ port = 5003
             now,
             &[("a".into(), true, fresh)],
             &NightlyState {
+                last_restore_drill: now,
+                restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: fresh,
                 last_zfs: now,
                 zfs_configured: false,
@@ -1169,6 +1223,8 @@ port = 5003
             now,
             &[("a".into(), true, stale)],
             &NightlyState {
+                last_restore_drill: now,
+                restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: 0,
                 last_zfs: now,
                 zfs_configured: false,
@@ -1185,6 +1241,8 @@ port = 5003
             now,
             &[("a".into(), false, stale)],
             &NightlyState {
+                last_restore_drill: now,
+                restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: 0,
                 last_zfs: now,
                 zfs_configured: false,
@@ -1205,6 +1263,8 @@ port = 5003
             now,
             &[],
             &NightlyState {
+                last_restore_drill: now,
+                restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: stale,
                 last_zfs: stale,
                 zfs_configured: false,
@@ -1219,6 +1279,8 @@ port = 5003
             now,
             &[],
             &NightlyState {
+                last_restore_drill: now,
+                restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: stale,
                 last_zfs: stale,
                 zfs_configured: true,
@@ -1233,6 +1295,8 @@ port = 5003
             now,
             &[],
             &NightlyState {
+                last_restore_drill: now,
+                restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: stale,
                 last_zfs: now - 3600,
                 zfs_configured: true,
@@ -1781,6 +1845,14 @@ enum NightlyTask {
     HostMeta,
     /// E8: ZFS snapshots + replication of the declared jobs.
     Zfs,
+    /// G14: rehearse a restore from one repository, in turn.
+    ///
+    /// B3 asked for a quarterly trial restore and it was never built. Kenny
+    /// declined "write it down as a known limitation" at the Phase-7 gate, so
+    /// it rides the round that already runs — a backup nobody has restored is
+    /// a hypothesis, and one done by hand on a day somebody thought of it is
+    /// a hypothesis with a date on it.
+    RestoreDrill,
     /// Route A: ask a device that is on the no-touch list for its own
     /// configuration and store the answer. Rides with the host-meta slot
     /// rather than a slot of its own — it is one small GET, and a device
@@ -1799,6 +1871,10 @@ struct NightlyState {
     last_host_meta: u64,
     last_zfs: u64,
     zfs_configured: bool,
+    /// G14: when the last restore drill proved something, and how long a
+    /// passed drill counts for.
+    last_restore_drill: u64,
+    restore_drill_interval_s: u64,
     devices_configured: bool,
 }
 
@@ -1825,7 +1901,66 @@ fn nightly_plan(
     if st.devices_configured && backup_due(cfg_hour, local_hour, st.last_host_meta, now) {
         plan.push(NightlyTask::DeviceConfig);
     }
+    // G14: at most one per round, and only in the backup hour — a restore
+    // pulls a whole snapshot back over the same link the backups just used.
+    if local_hour == cfg_hour
+        && homelab_core::ops::restoredrill::due(
+            st.last_restore_drill,
+            now,
+            st.restore_drill_interval_s,
+        )
+    {
+        plan.push(NightlyTask::RestoreDrill);
+    }
     plan
+}
+
+/// G14: restore one repository into a scratch directory and say what came
+/// back. The judgement lives in core (`restoredrill::verdict`); this is the
+/// shell that fetches the numbers and always cleans up after itself.
+async fn run_restore_drill(
+    exec: &RealExecutor,
+    cfg: &homelab_core::ops::backup::BackupCfg,
+    repo: &str,
+    target: &str,
+) -> homelab_core::ops::restoredrill::Outcome {
+    use homelab_core::ops::restoredrill::{verdict, Outcome};
+    let _ = exec.run(&Cmd::new("rm", &["-rf", target], 120)).await;
+    let restored = homelab_core::ops::backup::restore_into(exec, cfg, repo, target).await;
+    let outcome = match restored {
+        Err(e) => Outcome::Failed(format!("the restore itself failed: {}", e)),
+        Ok(()) => {
+            let count = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &["-c", &format!("find {} -type f | wc -l", target)],
+                    120,
+                ))
+                .await
+                .map(|o| o.stdout.trim().parse::<usize>().unwrap_or(0))
+                .unwrap_or(0);
+            let largest = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &[
+                        "-c",
+                        &format!(
+                            "find {} -type f -printf '%s\\n' 2>/dev/null | sort -n | tail -1",
+                            target
+                        ),
+                    ],
+                    120,
+                ))
+                .await
+                .map(|o| o.stdout.trim().parse::<u64>().unwrap_or(0))
+                .unwrap_or(0);
+            verdict(count, largest)
+        }
+    };
+    // Always: a drill that leaves a full restore behind fills the disk the
+    // backups need.
+    let _ = exec.run(&Cmd::new("rm", &["-rf", target], 300)).await;
+    outcome
 }
 
 /// H12: bearer check, extracted for testing.
@@ -1974,6 +2109,12 @@ async fn scheduler_loop(state: AppState) {
             .iter()
             .map(|(n, st)| (n.clone(), st.enabled, st.last_backup))
             .collect();
+        // G14: taken before the loop below consumes `snapshot.stacks`.
+        let drill_repos: Vec<String> = snapshot
+            .stacks
+            .values()
+            .flat_map(|st| st.apps.iter().cloned())
+            .collect();
         let plan = nightly_plan(
             hour,
             local_hour,
@@ -1982,6 +2123,8 @@ async fn scheduler_loop(state: AppState) {
             &NightlyState {
                 last_host_meta: snapshot.last_host_meta,
                 last_zfs: snapshot.last_zfs,
+                last_restore_drill: snapshot.last_restore_drill,
+                restore_drill_interval_s: state.config.restore_drill_interval_s,
                 zfs_configured: !state.config.zfs_jobs.is_empty(),
                 devices_configured: !state.config.device_backups.is_empty(),
             },
@@ -2164,6 +2307,49 @@ async fn scheduler_loop(state: AppState) {
                 tracing::error!(
                     "scheduler: host-meta backup FAILED — the vault/state/TLS snapshot is the recovery path for a lost host disk; investigate now"
                 );
+            }
+        }
+
+        // G14: one restore, rehearsed for real, in turn.
+        //
+        // Restores into a temporary directory and judges what came back by
+        // its LARGEST file rather than its first. That is not fussiness: on
+        // 2026-09-02 a hand-run drill declared a restore identical to live by
+        // comparing two md5 sums that both belonged to a zero-byte file, and
+        // a drill that can be satisfied by empty files rehearses nothing.
+        if plan.contains(&NightlyTask::RestoreDrill) {
+            if let Some((repo, next)) = homelab_core::ops::restoredrill::next_repo(
+                &drill_repos,
+                snapshot.restore_drill_index,
+            ) {
+                let cfg = homelab_core::ops::backup::BackupCfg {
+                    tiers: tiers.clone(),
+                    ..state.config.backup.clone()
+                };
+                let target = format!("{}/restore-drill", state.config.state_dir);
+                let outcome = run_restore_drill(&exec, &cfg, &repo, &target).await;
+                if let Ok(mut sn) = store.load().await {
+                    sn.restore_drill_index = next;
+                    sn.last_restore_drill_repo = repo.clone();
+                    match &outcome {
+                        homelab_core::ops::restoredrill::Outcome::Passed {
+                            files,
+                            largest_bytes,
+                        } => {
+                            sn.last_restore_drill = now;
+                            sn.last_restore_drill_error = None;
+                            info!(
+                                "restore drill: {} came back with {} file(s), largest {} bytes",
+                                repo, files, largest_bytes
+                            );
+                        }
+                        homelab_core::ops::restoredrill::Outcome::Failed(why) => {
+                            sn.last_restore_drill_error = Some(why.clone());
+                            tracing::error!("restore drill: {} proved nothing :: {}", repo, why);
+                        }
+                    }
+                    let _ = store.save(sn).await;
+                }
             }
         }
 

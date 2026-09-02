@@ -37,9 +37,21 @@ fn state(entries: Vec<(&str, StackState)>) -> HostState {
     s
 }
 
+/// The round as the tests below use it, with G14's restore drill counted as
+/// recently passed.
+///
+/// Not a fudge: a fleet that has never rehearsed a restore genuinely is a
+/// finding now, and every fixture here would carry it. These tests are about
+/// other things, so the drill is set aside — the one test that IS about it
+/// calls `evaluate` directly, and would still fail if the round stopped
+/// running it.
 fn check(state: &HostState, live: &LiveFacts) -> Vec<homelab_core::ops::fleetcheck::Finding> {
+    let mut s = state.clone();
+    if s.last_restore_drill == 0 {
+        s.last_restore_drill = NOW;
+    }
     evaluate(
-        state,
+        &s,
         live,
         NOW,
         homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
@@ -1044,4 +1056,25 @@ mod notification_health {
             findings
         );
     }
+}
+
+/// G14: the drill's verdict has to ride the round that already reaches Kenny.
+#[test]
+fn the_full_round_carries_the_restore_drill() {
+    let st = HostState {
+        last_restore_drill: 0,
+        ..Default::default()
+    };
+    let findings = evaluate(
+        &st,
+        &LiveFacts::default(),
+        NOW,
+        homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+        GrowthLimits::default(),
+    );
+    assert!(
+        findings.iter().any(|f| f.subject == "restore drill"),
+        "or it is another mechanism wired to nothing: {:?}",
+        findings
+    );
 }

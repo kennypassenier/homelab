@@ -119,6 +119,19 @@ pub struct HostState {
     /// rather than say "something went wrong".
     #[serde(default)]
     pub last_notify_error: Option<String>,
+    /// G14: unix time of the last restore drill that PROVED something.
+    #[serde(default)]
+    pub last_restore_drill: u64,
+    /// Which repository that was, so the finding can name it.
+    #[serde(default)]
+    pub last_restore_drill_repo: String,
+    /// Why the last drill proved nothing. None = it did.
+    #[serde(default)]
+    pub last_restore_drill_error: Option<String>,
+    /// Round-robin cursor, so a year of drills covers every repository
+    /// instead of proving the same one twelve times.
+    #[serde(default)]
+    pub restore_drill_index: usize,
 }
 
 /// One thing only a person can confirm, and the last word on it.

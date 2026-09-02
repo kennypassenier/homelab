@@ -20,6 +20,7 @@ pub mod patch;
 pub mod reconcile;
 pub mod registry_cache;
 pub mod resize;
+pub mod restoredrill;
 pub mod selfupdate;
 pub mod template;
 pub mod update;

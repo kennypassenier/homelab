@@ -403,6 +403,11 @@ pub fn evaluate(
     out.extend(evaluate_watched_backups(&live.watched_backups));
     out.extend(evaluate_incomplete(state));
     out.extend(evaluate_notify(state, now_unix));
+    out.extend(crate::ops::restoredrill::evaluate_drill(
+        state,
+        now_unix,
+        crate::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S,
+    ));
     out.extend(crate::ops::manualchecks::evaluate_manual(
         state,
         now_unix,

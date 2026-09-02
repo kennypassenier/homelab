@@ -47,7 +47,7 @@ Migration order, least consequential first, ending where Loki itself runs:
 **Status 2026-09-02 evening.** Native done and verified: kyu (CT 109),
 almanac (CT 112) — both shipped nothing at all before. Compose stacks
 migrated and verified in Loki: **registry, syncthing, home, uptime, kp-soft,
-productivity, metrics**. Remaining: **paperwork, downloader, media, gateway**
+productivity, metrics, paperwork, downloader**. Remaining: **media, gateway**
 — gateway last on purpose, Loki itself runs there.
 
 Per stack the work is: drop `promtail` from `apps:` in `lxc-compose.yml`,

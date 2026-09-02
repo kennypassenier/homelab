@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**377 tests across 22 suites.**
+**384 tests across 22 suites.**
 
 ## Accepted limitations
 
@@ -190,6 +190,13 @@ Covers: F149, F184, F198, F211, F214, F79
 - `a_path_that_never_worked_says_that_rather_than_a_misleading_zero`
 - `the_full_round_carries_it`
 - `the_full_round_carries_the_restore_drill` — G14: the drill's verdict has to ride the round that already reaches Kenny.
+- `a_recent_run_with_nothing_stale_says_nothing`
+- `a_monitor_for_a_stack_that_is_gone_is_named` — The case Kenny found by noticing ping errors on a Grafana panel: a drill container destroyed hours earlier, still pinged every minute.
+- `a_seeder_that_stopped_running_is_broken_not_quiet`
+- `one_that_has_never_run_says_so_rather_than_looking_healthy`
+- `a_run_that_judged_nothing_does_not_read_as_all_clear` — F175's lesson, kept: without a list to compare against, "nothing stale" is not an all-clear.
+- `an_unreadable_status_file_is_a_finding_not_a_silence`
+- `the_full_round_carries_it`
 
 ### `core/tests/homepage_tests.rs`
 

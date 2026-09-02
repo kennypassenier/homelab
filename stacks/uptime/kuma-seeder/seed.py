@@ -157,6 +157,32 @@ def seed_once(api, host_monitors, have_generated_list):
     print(f"[seed] {added} added, {skipped} already existed, "
           f"{len(stale)} stale", flush=True)
 
+    # The verdict, written where something other than a human reading
+    # container logs can find it.
+    #
+    # Kenny found the first real stale monitor on 2026-09-02 by noticing ping
+    # errors on a Grafana dashboard — a drill container that had been
+    # destroyed hours earlier and was still being pinged every minute. The
+    # seeder had been saying so in its own log since the moment it happened,
+    # and nothing read that log. A warning nobody reads is the same as no
+    # warning; the nightly fleet check reads this file instead.
+    status = {
+        "at": int(time.time()),
+        "added": added,
+        "skipped": skipped,
+        "stale": stale,
+        "judged": bool(have_generated_list),
+    }
+    try:
+        path = env("STATUS_FILE", "/config/last-seed.json")
+        tmp = path + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(status, fh)
+        os.replace(tmp, path)
+    except OSError as exc:
+        # Never fatal: this file is a report about the run, not part of it.
+        print(f"[seed] WARN: could not write the status file: {exc}", flush=True)
+
 
 def main():
     url = env("KUMA_URL")

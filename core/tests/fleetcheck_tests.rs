@@ -50,9 +50,17 @@ fn check(state: &HostState, live: &LiveFacts) -> Vec<homelab_core::ops::fleetche
     if s.last_restore_drill == 0 {
         s.last_restore_drill = NOW;
     }
+    // Same treatment for the seeder: a fixture that says nothing about it
+    // would otherwise report "never ran" in every test here. The tests that
+    // ARE about it call `evaluate_seed` directly.
+    let mut l = live.clone();
+    if l.seed.age_s.is_none() && l.seed.error.is_none() {
+        l.seed.age_s = Some(0);
+        l.seed.judged = true;
+    }
     evaluate(
         &s,
-        live,
+        &l,
         NOW,
         homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
         GrowthLimits::default(),
@@ -84,6 +92,7 @@ fn y4_a_healthy_fleet_is_silent() {
         stack(113, "113-app-metrics", true, NOW - 3600),
     )]);
     let live = LiveFacts {
+        seed: Default::default(),
         watched_backups: vec![],
         containers: vec![(113, "113-app-metrics".into())],
         routes: vec![RouteFact {
@@ -1077,4 +1086,110 @@ fn the_full_round_carries_the_restore_drill() {
         "or it is another mechanism wired to nothing: {:?}",
         findings
     );
+}
+
+/// T49 · a monitor that outlives its stack, reported where somebody sees it.
+mod seeder_verdict {
+    use super::*;
+    use homelab_core::ops::fleetcheck::{evaluate_seed, SeedFact, Severity};
+
+    const DAY: u64 = 86400;
+
+    fn ran(age: u64) -> SeedFact {
+        SeedFact {
+            age_s: Some(age),
+            judged: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_recent_run_with_nothing_stale_says_nothing() {
+        assert!(evaluate_seed(&ran(600), 26 * 3600).is_empty());
+    }
+
+    /// The case Kenny found by noticing ping errors on a Grafana panel: a
+    /// drill container destroyed hours earlier, still pinged every minute.
+    #[test]
+    fn a_monitor_for_a_stack_that_is_gone_is_named() {
+        let f = SeedFact {
+            stale: vec!["host · drill".into()],
+            ..ran(600)
+        };
+        let out = evaluate_seed(&f, 26 * 3600);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].severity, Severity::Drift);
+        assert!(out[0].what.contains("host · drill"), "{}", out[0].what);
+        assert!(
+            out[0].remedy.contains("never deletes"),
+            "H2b is why this can only tell you: {}",
+            out[0].remedy
+        );
+    }
+
+    #[test]
+    fn a_seeder_that_stopped_running_is_broken_not_quiet() {
+        let f = evaluate_seed(&ran(3 * DAY), 26 * 3600);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].severity, Severity::Broken);
+        assert!(f[0].what.contains("72 h ago"), "{}", f[0].what);
+    }
+
+    #[test]
+    fn one_that_has_never_run_says_so_rather_than_looking_healthy() {
+        let f = evaluate_seed(&SeedFact::default(), 26 * 3600);
+        assert!(f.iter().any(|x| x.what.contains("never recorded a run")));
+    }
+
+    /// F175's lesson, kept: without a list to compare against, "nothing
+    /// stale" is not an all-clear.
+    #[test]
+    fn a_run_that_judged_nothing_does_not_read_as_all_clear() {
+        let f = SeedFact {
+            age_s: Some(60),
+            judged: false,
+            ..Default::default()
+        };
+        let out = evaluate_seed(&f, 26 * 3600);
+        assert_eq!(out.len(), 1);
+        assert!(
+            out[0].what.contains("judged nothing stale"),
+            "{}",
+            out[0].what
+        );
+    }
+
+    #[test]
+    fn an_unreadable_status_file_is_a_finding_not_a_silence() {
+        let f = SeedFact {
+            error: Some("no such file".into()),
+            ..Default::default()
+        };
+        let out = evaluate_seed(&f, 26 * 3600);
+        assert_eq!(out[0].severity, Severity::Broken);
+        assert!(out[0].what.contains("no such file"), "{}", out[0].what);
+    }
+
+    #[test]
+    fn the_full_round_carries_it() {
+        let live = LiveFacts {
+            seed: SeedFact {
+                stale: vec!["host · drill".into()],
+                ..ran(600)
+            },
+            ..Default::default()
+        };
+        let findings = evaluate(
+            &HostState::default(),
+            &live,
+            NOW,
+            homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+            GrowthLimits::default(),
+        );
+        assert!(
+            findings.iter().any(|f| f.subject == "uptime kuma"),
+            "or the reader is wired to nothing again: {:?}",
+            findings
+        );
+    }
 }

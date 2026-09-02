@@ -1470,6 +1470,27 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     if changed {
                         log_info(format!("[t2] {} (provisioning watcher reloads)", dest));
                     }
+                    // Kenny, 2026-09-02: two dashboards with the same uid, one
+                    // generated and one a stale copy of an earlier generation,
+                    // and Grafana keeps whichever provider loaded first. That
+                    // is why six stacks appeared in "Homelab (generated)" and
+                    // seven did not — nondeterministically. The generated one
+                    // is the truth, so its predecessor goes with it.
+                    if let Some(parent) = dest.rsplit_once('/').map(|(d, _)| d) {
+                        if let Some(grandparent) = parent.rsplit_once('/').map(|(d, _)| d) {
+                            let old =
+                                format!("{}/dashboards/homelab-{}.json", grandparent, m.stack_name);
+                            if old != dest {
+                                let _ = pct_sh(
+                                    exec,
+                                    ctx.safety.gateway_vmid,
+                                    &format!("rm -f {}", crate::ops::util::shq(&old)),
+                                    30,
+                                )
+                                .await;
+                            }
+                        }
+                    }
                     Ok(if changed {
                         StepOutcome::Changed
                     } else {

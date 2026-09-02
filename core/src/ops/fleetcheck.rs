@@ -72,6 +72,8 @@ pub struct LiveFacts {
     /// today the router's own nightly upload to Google Drive. Empty = none
     /// declared, which is what every fleet had before this existed.
     pub watched_backups: Vec<WatchedBackupFact>,
+    /// T49: the seeder's last verdict about the watch list.
+    pub seed: SeedFact,
 }
 
 /// W3: the configured shape of a container that exists, next to the stack
@@ -403,6 +405,9 @@ pub fn evaluate(
     out.extend(evaluate_watched_backups(&live.watched_backups));
     out.extend(evaluate_incomplete(state));
     out.extend(evaluate_notify(state, now_unix));
+    // A seeder that ran more than a day ago has stopped keeping the watch
+    // list in step, which is the same window the backups use.
+    out.extend(evaluate_seed(&live.seed, 26 * 3600));
     out.extend(crate::ops::restoredrill::evaluate_drill(
         state,
         now_unix,
@@ -652,6 +657,83 @@ pub fn evaluate_notify(state: &HostState, now: u64) -> Vec<Finding> {
                  including this one"
             .into(),
     }]
+}
+
+/// T49: what the Uptime Kuma seeder concluded on its last run.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SeedFact {
+    /// Monitors watching a stack the fleet no longer has.
+    pub stale: Vec<String>,
+    /// How long ago the seeder last ran, in seconds. None = never, or the
+    /// status file could not be read.
+    pub age_s: Option<u64>,
+    /// Whether it had a generated list to judge against. Without one it
+    /// judges nothing, which is right and must not read as "all clear".
+    pub judged: bool,
+    /// The file could not be read or understood.
+    pub error: Option<String>,
+}
+
+/// A monitor that outlives its stack, reported where somebody sees it.
+///
+/// The seeder has always said this in its own log — it is deliberately
+/// report-only, because deleting somebody's monitor is the irreversible
+/// direction (Kenny, form H2b). What it did not have was a reader. On
+/// 2026-09-02 Kenny found a monitor still pinging a drill container that had
+/// been destroyed hours earlier, and he found it by noticing ping errors on a
+/// Grafana panel. The seeder had been saying so every minute since.
+pub fn evaluate_seed(fact: &SeedFact, max_age_s: u64) -> Vec<Finding> {
+    let mut out = Vec::new();
+    if let Some(e) = &fact.error {
+        out.push(Finding {
+            severity: Severity::Broken,
+            subject: "uptime seeder".into(),
+            what: format!("said nothing about the watch list ({})", e),
+            remedy: "check the kuma-seeder container on the uptime stack — while this \
+                     stands, a monitor can outlive its stack with nothing saying so"
+                .into(),
+        });
+        return out;
+    }
+    match fact.age_s {
+        None => out.push(Finding {
+            severity: Severity::Broken,
+            subject: "uptime seeder".into(),
+            what: "has never recorded a run".into(),
+            remedy: "the watch list is not being kept in step with the fleet".into(),
+        }),
+        Some(age) if age > max_age_s => out.push(Finding {
+            severity: Severity::Broken,
+            subject: "uptime seeder".into(),
+            what: format!("last ran {} h ago", age / 3600),
+            remedy: "a new stack arrives unwatched until this runs again".into(),
+        }),
+        _ => {}
+    }
+    if !fact.judged {
+        out.push(Finding {
+            severity: Severity::Drift,
+            subject: "uptime seeder".into(),
+            what: "ran without a generated monitor list, so it judged nothing stale".into(),
+            remedy: "absent data is not an empty fleet (F175) — check that the deploy is \
+                     writing the host-monitors file"
+                .into(),
+        });
+    } else if !fact.stale.is_empty() {
+        out.push(Finding {
+            severity: Severity::Drift,
+            subject: "uptime kuma".into(),
+            what: format!(
+                "{} monitor(s) watch a stack the fleet no longer has: {}",
+                fact.stale.len(),
+                fact.stale.join(", ")
+            ),
+            remedy: "remove them in Uptime Kuma if that is right — this suite never deletes \
+                     somebody's monitor (form H2b), so it can only tell you"
+                .into(),
+        });
+    }
+    out
 }
 
 pub fn evaluate_incomplete(state: &HostState) -> Vec<Finding> {

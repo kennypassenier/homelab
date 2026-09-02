@@ -2950,7 +2950,52 @@ async fn gather_live_facts(
         }
         watched.push(fact);
     }
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // T49: the seeder's verdict, read from the file it writes beside the
+    // generated monitor list. Same directory, so there is no second setting
+    // to keep in step with the first.
+    let seed = match state.config.kuma_monitors_file.as_deref() {
+        None => homelab_core::ops::fleetcheck::SeedFact {
+            judged: true,
+            age_s: Some(0),
+            ..Default::default()
+        },
+        Some(monitors) => {
+            let dir = monitors.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
+            let path = format!("{}/last-seed.json", dir);
+            match exec.read_file(&path).await {
+                Err(e) => homelab_core::ops::fleetcheck::SeedFact {
+                    error: Some(format!("{}: {}", path, e)),
+                    ..Default::default()
+                },
+                Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+                    Err(e) => homelab_core::ops::fleetcheck::SeedFact {
+                        error: Some(format!("{} is not JSON: {}", path, e)),
+                        ..Default::default()
+                    },
+                    Ok(v) => homelab_core::ops::fleetcheck::SeedFact {
+                        stale: v["stale"]
+                            .as_array()
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|x| x.as_str().map(str::to_string))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        age_s: v["at"].as_u64().map(|at| now_unix.saturating_sub(at)),
+                        judged: v["judged"].as_bool().unwrap_or(false),
+                        error: None,
+                    },
+                },
+            }
+        }
+    };
+
     let mut facts = homelab_core::ops::fleetcheck::LiveFacts {
+        seed,
         stack_files: stack_files.to_vec(),
         watched_backups: watched,
         // F184: the host's own numbers, so a per-container remedy cannot

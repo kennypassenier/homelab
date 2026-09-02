@@ -198,12 +198,135 @@ struct Config {
     initial_settings: homelab_proto::HostConfigView,
 }
 
+/// ── F186: keys the daemon would otherwise ignore in silence. ──────────
+///
+/// `host.toml` is hand-edited, and TOML's rule that bare keys belong to the
+/// table header above them makes one specific mistake invisible: append a
+/// setting at the end of the file and it becomes a field of whatever table
+/// happened to be last. That is not hypothetical. On 2026-09-02 the two
+/// OPNsense keys sat under the final `[[registry_cache.upstreams]]` entry,
+/// so `kea` was None and the whole static-address feature was off, on a host
+/// whose operator had every reason to believe it was on. The file's own
+/// comment warns about the trap; the warning was written after the first
+/// time and did not prevent the second.
+///
+/// Serde ignores unknown fields by default, which is what makes it silent.
+/// These lists are hand-maintained because Rust has no reflection, and the
+/// failure direction is deliberately the safe one: a field added to
+/// `FileConfig` but forgotten here produces a loud false "unknown key",
+/// never a silently swallowed real one.
+const KNOWN_TOP: &[&str] = &[
+    "token",
+    "listen",
+    "state_dir",
+    "backup_hour",
+    "notify_webhook",
+    "notify_auth_bearer",
+    "prometheus_url",
+    "loki_url",
+    "logs_window",
+    "retention",
+    "exec_enabled",
+    "mirror_remote",
+    "opnsense_url",
+    "opnsense_cred_file",
+    "no_touch",
+    "gateway_vmid",
+    "gateway_routes_dir",
+    "zfs_jobs",
+    "registry_cache",
+    "restic_base",
+    "restic_password_file",
+    "restic_snapshot_timeout_s",
+    "restic_restore_timeout_s",
+    "metrics_targets_dir",
+    "grafana_dashboards_dir",
+    "homepage_services_file",
+    "kuma_monitors_file",
+    "ask_timeout_s",
+    "backup_concurrency",
+];
+const KNOWN_REGISTRY_CACHE: &[&str] = &["host", "upstreams", "pull_timeout_secs"];
+const KNOWN_UPSTREAM: &[&str] = &["registry", "port"];
+const KNOWN_ZFS_JOB: &[&str] = &["source", "target"];
+const KNOWN_RETENTION: &[&str] = &["every_days", "keep", "span_days"];
+
+/// Every key in `raw` that no field of `FileConfig` will ever read, as
+/// dotted paths. An empty result means the file says exactly what it looks
+/// like it says.
+fn unknown_keys(raw: &toml::Table) -> Vec<String> {
+    fn table(out: &mut Vec<String>, t: &toml::Table, known: &[&str], path: &str) {
+        for k in t.keys() {
+            if !known.contains(&k.as_str()) {
+                out.push(if path.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{}.{}", path, k)
+                });
+            }
+        }
+    }
+    fn array_of(out: &mut Vec<String>, v: Option<&toml::Value>, known: &[&str], path: &str) {
+        let Some(arr) = v.and_then(|v| v.as_array()) else {
+            return;
+        };
+        for (i, item) in arr.iter().enumerate() {
+            if let Some(t) = item.as_table() {
+                table(out, t, known, &format!("{}[{}]", path, i));
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    table(&mut out, raw, KNOWN_TOP, "");
+    array_of(&mut out, raw.get("zfs_jobs"), KNOWN_ZFS_JOB, "zfs_jobs");
+    array_of(&mut out, raw.get("retention"), KNOWN_RETENTION, "retention");
+    if let Some(rc) = raw.get("registry_cache").and_then(|v| v.as_table()) {
+        table(&mut out, rc, KNOWN_REGISTRY_CACHE, "registry_cache");
+        array_of(
+            &mut out,
+            rc.get("upstreams"),
+            KNOWN_UPSTREAM,
+            "registry_cache.upstreams",
+        );
+    }
+    out.sort();
+    out
+}
+
 fn load_config() -> Config {
     let path = std::env::var("HOMELAB_CONFIG").unwrap_or_else(|_| "/etc/homelab/host.toml".into());
-    let file: FileConfig = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|raw| toml::from_str(&raw).ok())
-        .unwrap_or_default();
+    // A missing file is legal — every field has a default. A file that
+    // exists but does not parse is not: the old code answered that with
+    // `FileConfig::default()`, so a single typo turned every configured
+    // feature off at once and said nothing (F186).
+    let file: FileConfig = match std::fs::read_to_string(&path) {
+        Err(_) => FileConfig::default(),
+        Ok(raw) => {
+            let parsed: toml::Table = match toml::from_str(&raw) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("FATAL: {} does not parse as TOML: {}", path, e);
+                    std::process::exit(1);
+                }
+            };
+            for key in unknown_keys(&parsed) {
+                eprintln!(
+                    "WARNING: {}: '{}' is not a setting this daemon reads and is being \
+                     ignored. A key written after a [table] header belongs to that table \
+                     - move it above the first one.",
+                    path, key
+                );
+            }
+            match toml::Table::try_into::<FileConfig>(parsed) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("FATAL: {} is not a valid host config: {}", path, e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    };
 
     let token = std::env::var("HOMELAB_TOKEN")
         .ok()
@@ -475,6 +598,84 @@ fn persist_settings(
 
 #[cfg(test)]
 mod tests {
+    /// F186: the exact file that was live on 2026-09-02. Two OPNsense keys
+    /// were appended after the last `[[registry_cache.upstreams]]` table, so
+    /// TOML made them fields of the lscr.io mirror and serde dropped them —
+    /// the daemon ran with `kea: None` and nobody could see why.
+    #[test]
+    fn misplaced_keys_are_reported_not_swallowed() {
+        let raw = r#"
+token = "0123456789abcdef0123"
+metrics_targets_dir = "/appdata/metrics/prometheus-config/targets"
+
+[[zfs_jobs]]
+source = "HDD2TB"
+target = "HDD18TB/replica/HDD2TB"
+
+[registry_cache]
+host = "10.10.10.17"
+pull_timeout_secs = 180
+
+[[registry_cache.upstreams]]
+registry = "lscr.io"
+port = 5003
+
+opnsense_url = "https://10.10.5.1"
+opnsense_cred_file = "/var/lib/homelab/secrets/opnsense.cred"
+"#;
+        let t: toml::Table = toml::from_str(raw).unwrap();
+
+        // Serde's own view: the keys are simply gone.
+        let parsed: FileConfig = t.clone().try_into().unwrap();
+        assert!(
+            parsed.opnsense_url.is_none(),
+            "precondition: this is what made the fault invisible"
+        );
+
+        assert_eq!(
+            unknown_keys(&t),
+            vec![
+                "registry_cache.upstreams[0].opnsense_cred_file".to_string(),
+                "registry_cache.upstreams[0].opnsense_url".to_string(),
+            ]
+        );
+    }
+
+    /// The same settings written in the right place: nothing to report, and
+    /// the daemon actually gets them.
+    #[test]
+    fn correctly_placed_keys_are_clean_and_read() {
+        let raw = r#"
+token = "0123456789abcdef0123"
+opnsense_url = "https://10.10.5.1"
+opnsense_cred_file = "/var/lib/homelab/secrets/opnsense.cred"
+kuma_monitors_file = "/appdata/uptime/kuma-seeder-config/host-monitors.json"
+homepage_services_file = "/appdata/home/homepage-config/services.yaml"
+
+[registry_cache]
+host = "10.10.10.17"
+
+[[registry_cache.upstreams]]
+registry = "lscr.io"
+port = 5003
+"#;
+        let t: toml::Table = toml::from_str(raw).unwrap();
+        assert!(unknown_keys(&t).is_empty(), "{:?}", unknown_keys(&t));
+
+        let parsed: FileConfig = t.try_into().unwrap();
+        assert_eq!(parsed.opnsense_url.as_deref(), Some("https://10.10.5.1"));
+        assert!(parsed.kuma_monitors_file.is_some());
+        assert!(parsed.homepage_services_file.is_some());
+    }
+
+    /// A plain typo is loud too — the direction that costs a warning rather
+    /// than a silence.
+    #[test]
+    fn a_typo_is_reported() {
+        let t: toml::Table = toml::from_str("kuma_monitor_file = \"/x\"\n").unwrap();
+        assert_eq!(unknown_keys(&t), vec!["kuma_monitor_file".to_string()]);
+    }
+
     use super::*;
 
     /// Round-trip: everything load_config understands must survive a

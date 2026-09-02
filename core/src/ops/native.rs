@@ -9,6 +9,7 @@ use crate::native::NativeServiceManifest;
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 
+use super::util::shq;
 use super::{util_pct_sh, OpCtx};
 
 macro_rules! step {
@@ -388,10 +389,6 @@ pub async fn install_native(
         ),
     );
     runner.finish_ok()
-}
-
-fn shq(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// C7 nightly backup for a native stack. The data lives INSIDE the

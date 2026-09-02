@@ -86,6 +86,10 @@ struct FileConfig {
     no_touch: Option<Vec<u16>>,
     gateway_vmid: Option<u16>,
     gateway_routes_dir: Option<String>,
+    /// Route A (Kenny, form J1, 2026-09-02): devices this suite may not
+    /// touch, that can nevertheless hand over their own configuration. One
+    /// GET per night, straight into restic. Absent = nothing is fetched.
+    device_backups: Option<Vec<homelab_core::ops::devicebackup::DeviceBackup>>,
     /// O1: backups this orchestrator does not make but does watch. Each is
     /// a folder on an rclone remote that some device outside the suite
     /// writes to — today the OPNsense plugin that uploads the router's
@@ -178,6 +182,7 @@ struct Config {
     /// E8: declared ZFS replication jobs; empty = feature off.
     zfs_jobs: Vec<homelab_core::ops::zfs::ZfsJob>,
     watched_backups: Vec<WatchedBackup>,
+    device_backups: Vec<homelab_core::ops::devicebackup::DeviceBackup>,
     /// Backup target and timeouts, resolved once from host.toml. Callers
     /// clone this and override only `tiers`.
     backup: homelab_core::ops::backup::BackupCfg,
@@ -265,11 +270,13 @@ const KNOWN_TOP: &[&str] = &[
     "ask_timeout_s",
     "backup_concurrency",
     "watched_backups",
+    "device_backups",
 ];
 const KNOWN_REGISTRY_CACHE: &[&str] = &["host", "upstreams", "pull_timeout_secs"];
 const KNOWN_UPSTREAM: &[&str] = &["registry", "port"];
 const KNOWN_ZFS_JOB: &[&str] = &["source", "target"];
 const KNOWN_WATCHED_BACKUP: &[&str] = &["name", "rclone_path", "max_age_hours"];
+const KNOWN_DEVICE_BACKUP: &[&str] = &["name", "url", "cred_file", "filename", "ca_file"];
 const KNOWN_RETENTION: &[&str] = &["every_days", "keep", "span_days"];
 
 /// Every key in `raw` that no field of `FileConfig` will ever read, as
@@ -307,6 +314,12 @@ fn unknown_keys(raw: &toml::Table) -> Vec<String> {
         raw.get("watched_backups"),
         KNOWN_WATCHED_BACKUP,
         "watched_backups",
+    );
+    array_of(
+        &mut out,
+        raw.get("device_backups"),
+        KNOWN_DEVICE_BACKUP,
+        "device_backups",
     );
     if let Some(rc) = raw.get("registry_cache").and_then(|v| v.as_table()) {
         table(&mut out, rc, KNOWN_REGISTRY_CACHE, "registry_cache");
@@ -412,6 +425,7 @@ fn load_config() -> Config {
         },
         zfs_jobs: file.zfs_jobs.unwrap_or_default(),
         watched_backups: file.watched_backups.unwrap_or_default(),
+        device_backups: file.device_backups.unwrap_or_default(),
         // D60: absent from host.toml = no cache, which is the same behaviour
         // the fleet had before there was one.
         registry_cache: file.registry_cache,
@@ -788,6 +802,7 @@ port = 5003
     fn settings_render_keeps_every_config_field() {
         let config = Config {
             watched_backups: vec![],
+            device_backups: vec![],
             token: "0123456789abcdef0123".into(),
             listen: "0.0.0.0:8443".parse().unwrap(),
             state_dir: "/var/lib/homelab".into(),
@@ -949,7 +964,18 @@ port = 5003
         let stale = now - 25 * 3600;
 
         // No stack is due — the host's own crown jewels still get a snapshot.
-        let plan = nightly_plan(4, 4, now, &[("a".into(), true, fresh)], 0, now, false);
+        let plan = nightly_plan(
+            4,
+            4,
+            now,
+            &[("a".into(), true, fresh)],
+            &NightlyState {
+                last_host_meta: 0,
+                last_zfs: now,
+                zfs_configured: false,
+                devices_configured: false,
+            },
+        );
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
 
         // Due stacks come first, host-meta closes the run.
@@ -958,9 +984,12 @@ port = 5003
             4,
             now,
             &[("a".into(), true, stale), ("b".into(), true, stale)],
-            0,
-            now,
-            false,
+            &NightlyState {
+                last_host_meta: 0,
+                last_zfs: now,
+                zfs_configured: false,
+                devices_configured: false,
+            },
         );
         assert_eq!(
             plan,
@@ -972,15 +1001,49 @@ port = 5003
         );
 
         // Already snapshotted this run — not repeated on the next 20-min tick.
-        let plan = nightly_plan(4, 4, now, &[("a".into(), true, fresh)], fresh, now, false);
+        let plan = nightly_plan(
+            4,
+            4,
+            now,
+            &[("a".into(), true, fresh)],
+            &NightlyState {
+                last_host_meta: fresh,
+                last_zfs: now,
+                zfs_configured: false,
+                devices_configured: false,
+            },
+        );
         assert!(plan.is_empty());
 
         // Wrong hour: nothing at all.
-        assert!(nightly_plan(4, 5, now, &[("a".into(), true, stale)], 0, now, false).is_empty());
+        assert!(nightly_plan(
+            4,
+            5,
+            now,
+            &[("a".into(), true, stale)],
+            &NightlyState {
+                last_host_meta: 0,
+                last_zfs: now,
+                zfs_configured: false,
+                devices_configured: false,
+            }
+        )
+        .is_empty());
 
         // H8: a parked stack sits out, but the host-meta backup does not
         // depend on any stack being active.
-        let plan = nightly_plan(4, 4, now, &[("a".into(), false, stale)], 0, now, false);
+        let plan = nightly_plan(
+            4,
+            4,
+            now,
+            &[("a".into(), false, stale)],
+            &NightlyState {
+                last_host_meta: 0,
+                last_zfs: now,
+                zfs_configured: false,
+                devices_configured: false,
+            },
+        );
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
     }
 
@@ -989,13 +1052,46 @@ port = 5003
         let now = 1_800_000_000u64;
         let stale = now - 25 * 3600;
         // No jobs declared → the feature is simply off.
-        let plan = nightly_plan(4, 4, now, &[], stale, stale, false);
+        let plan = nightly_plan(
+            4,
+            4,
+            now,
+            &[],
+            &NightlyState {
+                last_host_meta: stale,
+                last_zfs: stale,
+                zfs_configured: false,
+                devices_configured: false,
+            },
+        );
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
         // Declared → runs once a night, after the host-meta snapshot.
-        let plan = nightly_plan(4, 4, now, &[], stale, stale, true);
+        let plan = nightly_plan(
+            4,
+            4,
+            now,
+            &[],
+            &NightlyState {
+                last_host_meta: stale,
+                last_zfs: stale,
+                zfs_configured: true,
+                devices_configured: false,
+            },
+        );
         assert_eq!(plan, vec![NightlyTask::HostMeta, NightlyTask::Zfs]);
         // Already ran this cycle → not repeated on the next 20-min tick.
-        let plan = nightly_plan(4, 4, now, &[], stale, now - 3600, true);
+        let plan = nightly_plan(
+            4,
+            4,
+            now,
+            &[],
+            &NightlyState {
+                last_host_meta: stale,
+                last_zfs: now - 3600,
+                zfs_configured: true,
+                devices_configured: false,
+            },
+        );
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
     }
 
@@ -1538,19 +1634,33 @@ enum NightlyTask {
     HostMeta,
     /// E8: ZFS snapshots + replication of the declared jobs.
     Zfs,
+    /// Route A: ask a device that is on the no-touch list for its own
+    /// configuration and store the answer. Rides with the host-meta slot
+    /// rather than a slot of its own — it is one small GET, and a device
+    /// whose config changed today is exactly a night the vault changed too.
+    DeviceConfig,
 }
 
 /// H12 pattern: the whole nightly decision as a pure function, so "does the
 /// host-meta backup actually run?" is a test instead of an assumption.
 /// `stacks` is (name, enabled, last_backup).
+/// What the night needs to know beyond the clock and the stacks: when the
+/// host-wide jobs last ran, and which of them exist at all. Grouped because
+/// the argument list had grown past the point where a caller could get the
+/// order right by reading it.
+struct NightlyState {
+    last_host_meta: u64,
+    last_zfs: u64,
+    zfs_configured: bool,
+    devices_configured: bool,
+}
+
 fn nightly_plan(
     cfg_hour: u8,
     local_hour: u8,
     now: u64,
     stacks: &[(String, bool, u64)],
-    last_host_meta: u64,
-    last_zfs: u64,
-    zfs_configured: bool,
+    st: &NightlyState,
 ) -> Vec<NightlyTask> {
     let mut plan = Vec::new();
     for (name, enabled, last_backup) in stacks {
@@ -1559,11 +1669,14 @@ fn nightly_plan(
             plan.push(NightlyTask::Stack(name.clone()));
         }
     }
-    if backup_due(cfg_hour, local_hour, last_host_meta, now) {
+    if backup_due(cfg_hour, local_hour, st.last_host_meta, now) {
         plan.push(NightlyTask::HostMeta);
     }
-    if zfs_configured && backup_due(cfg_hour, local_hour, last_zfs, now) {
+    if st.zfs_configured && backup_due(cfg_hour, local_hour, st.last_zfs, now) {
         plan.push(NightlyTask::Zfs);
+    }
+    if st.devices_configured && backup_due(cfg_hour, local_hour, st.last_host_meta, now) {
+        plan.push(NightlyTask::DeviceConfig);
     }
     plan
 }
@@ -1719,9 +1832,12 @@ async fn scheduler_loop(state: AppState) {
             local_hour,
             now,
             &stack_inputs,
-            snapshot.last_host_meta,
-            snapshot.last_zfs,
-            !state.config.zfs_jobs.is_empty(),
+            &NightlyState {
+                last_host_meta: snapshot.last_host_meta,
+                last_zfs: snapshot.last_zfs,
+                zfs_configured: !state.config.zfs_jobs.is_empty(),
+                devices_configured: !state.config.device_backups.is_empty(),
+            },
         );
         // Y1: every due backup runs first, several at a time, under one
         // hold of the global lock. Then the loop below does the updates one
@@ -1901,6 +2017,33 @@ async fn scheduler_loop(state: AppState) {
                 tracing::error!(
                     "scheduler: host-meta backup FAILED — the vault/state/TLS snapshot is the recovery path for a lost host disk; investigate now"
                 );
+            }
+        }
+
+        // Route A: the devices this suite may not touch, asked for their own
+        // configuration. Best-effort per device — one router refusing does
+        // not fail the night for the others, and the failure is a finding
+        // rather than a silence.
+        if plan.contains(&NightlyTask::DeviceConfig) {
+            for dev in state.config.device_backups.clone() {
+                let cfg = homelab_core::ops::backup::BackupCfg {
+                    tiers: tiers.clone(),
+                    ..state.config.backup.clone()
+                };
+                let name = dev.name.clone();
+                let report = run_mutating_op(&state, &exec, 0, "device-backup", |ctx| {
+                    Box::pin(async move {
+                        homelab_core::ops::devicebackup::backup_device(ctx, &dev, &cfg).await
+                    })
+                })
+                .await;
+                if !report.ok {
+                    tracing::error!(
+                        "scheduler: device backup for {} FAILED — its configuration is not \
+                         being kept",
+                        name
+                    );
+                }
             }
         }
 

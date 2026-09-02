@@ -5,6 +5,7 @@ pub mod busy;
 pub mod dashboard;
 pub mod deploy;
 pub mod destroy;
+pub mod devicebackup;
 pub mod discovery;
 pub mod enable;
 pub mod fleetcheck;

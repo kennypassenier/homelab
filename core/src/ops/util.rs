@@ -145,3 +145,11 @@ pub async fn write_file_owned_like_dir(
         .await;
     Ok(())
 }
+
+/// Single-quote a string for `sh -c`, escaping any quote it contains.
+///
+/// One definition on purpose: `native.rs` grew its own copy, and two
+/// quoting helpers are two places to get quoting subtly different.
+pub(crate) fn shq(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}

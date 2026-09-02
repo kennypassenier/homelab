@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use homelab_core::checks::ServiceChecks;
 use homelab_core::manifest::{validate_manifest, StackManifest};
 
 fn stacks_dir() -> PathBuf {
@@ -234,5 +235,98 @@ fn every_template_is_one_of_the_golden_ones_that_exist() {
             name,
             t
         );
+    }
+}
+
+/// The one that should have existed before F215 shipped.
+///
+/// On 2026-09-02 I added a `layer: container` to eleven promtail check files.
+/// There is no such layer — the enum has network, process, application and
+/// user_visible — so every one of those files failed to parse, and eleven of
+/// the thirteen stacks could not be deployed at all. The whole suite was
+/// green, CI was green, and the fault was found only because a drill deploy
+/// refused to start. A check file is code that runs on the machine; it
+/// belongs under the same test as the manifest beside it.
+#[test]
+fn every_check_file_on_disk_parses_as_the_deploy_would_read_it() {
+    let dir = stacks_dir();
+    let mut seen = 0usize;
+    for (name, _) in compose_stacks() {
+        let stack_dir = dir.join(&name);
+        for e in std::fs::read_dir(&stack_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+        {
+            let f = e.path().join("checks.yml");
+            if !f.is_file() {
+                continue;
+            }
+            seen += 1;
+            let text = std::fs::read_to_string(&f).unwrap();
+            let parsed: Result<ServiceChecks, _> = serde_yaml::from_str(&text);
+            parsed.unwrap_or_else(|err| {
+                panic!(
+                    "stacks/{}/{}/checks.yml does not parse — this stack cannot be \
+                     deployed at all: {}",
+                    name,
+                    e.path().file_name().unwrap().to_string_lossy(),
+                    err
+                )
+            });
+        }
+    }
+    assert!(
+        seen >= 20,
+        "found only {} check files — this test is looking in the wrong place",
+        seen
+    );
+}
+
+/// A systemd key in the wrong section is silently ignored, and the guarantee
+/// it was written for simply is not there.
+///
+/// Found on 2026-09-02 by a drill: `StartLimitIntervalSec=0` sat in
+/// `[Service]` in kyu's unit, where systemd prints "Unknown key … ignoring"
+/// and carries on. The live hub was measured the same minute running
+/// systemd's defaults instead — give up after 5 restarts in 10 s — which is
+/// the opposite of what the comment above the line asked for, and exactly how
+/// newsflash lost two hours of production the day before.
+///
+/// The three `StartLimit*` keys are the ones that move between sections
+/// between systemd versions, so they are the ones worth pinning.
+#[test]
+fn no_unit_file_puts_a_start_limit_key_where_systemd_ignores_it() {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().map(|x| x == "service").unwrap_or(false) {
+                out.push(p);
+            }
+        }
+    }
+    let mut units = Vec::new();
+    walk(&stacks_dir(), &mut units);
+    assert!(!units.is_empty(), "no unit files found — wrong directory");
+    for u in units {
+        let text = std::fs::read_to_string(&u).unwrap();
+        let mut section = String::new();
+        for (i, line) in text.lines().enumerate() {
+            let t = line.trim();
+            if t.starts_with('[') {
+                section = t.to_string();
+            }
+            if t.starts_with("StartLimit") && section != "[Unit]" {
+                panic!(
+                    "{}:{} puts {} in {} — systemd reads StartLimit* only in [Unit] and \
+                     ignores it silently everywhere else, so the guarantee is not there",
+                    u.display(),
+                    i + 1,
+                    t.split('=').next().unwrap_or(t),
+                    section
+                );
+            }
+        }
     }
 }

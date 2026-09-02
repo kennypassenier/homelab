@@ -3,6 +3,18 @@ Description=kyu — durable message hub
 Documentation=https://github.com/kennypassenier/kyu
 After=network-online.target
 Wants=network-online.target
+# Never give up. systemd's default is to stop trying after a few restarts in
+# a short window, which turns a transient fault into a permanent outage —
+# exactly what this service is here to avoid.
+#
+# It sat in [Service] until 2026-09-02, where systemd ignores it: the drill
+# on CT 118 printed "Unknown key 'StartLimitIntervalSec' in section
+# [Service], ignoring", and the LIVE hub on CT 109 was measured the same
+# minute at systemd's defaults — StartLimitIntervalUSec=10s, StartLimitBurst=5.
+# So the hub every notification travels through would have given up
+# permanently after five restarts in ten seconds, which is exactly how
+# newsflash lost two hours of production on 2026-09-01.
+StartLimitIntervalSec=0
 
 [Service]
 # kyu 2.1.0 handles SIGTERM: in-flight requests finish, the write-ahead log
@@ -26,10 +38,6 @@ ExecStart=/usr/local/bin/kyu
 # with a short pause so a crash loop cannot spin the CPU.
 Restart=always
 RestartSec=2s
-# Never give up. systemd's default is to stop trying after a few restarts in
-# a short window, which turns a transient fault into a permanent outage —
-# exactly what this service is here to avoid.
-StartLimitIntervalSec=0
 
 # The hub needs nothing but its data directory and a socket.
 NoNewPrivileges=true

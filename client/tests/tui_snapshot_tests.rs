@@ -1868,11 +1868,25 @@ fn every_stack_manifest_agrees_with_the_directories_beside_it() {
                 );
             }
         }
+        // A stack may run compose apps and native systemd units side by side
+        // (the validator allows a mount owned by either), and this test used
+        // to know only about `apps` — so a mixed stack failed here with a
+        // message about an app that was never meant to be one.
+        let natives: Vec<String> = manifest
+            .get("natives")
+            .and_then(|v| v.as_sequence())
+            .map(|s| {
+                s.iter()
+                    .filter_map(|x| x.as_str().map(|t| t.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
         for found in &on_disk {
             assert!(
-                declared.contains(found),
-                "stack '{}' has a directory '{}' that is not in its apps list — \
-                 it is never started, which is indistinguishable from being down",
+                declared.contains(found) || natives.contains(found),
+                "stack '{}' has a directory '{}' that is in neither its apps nor its \
+                 natives list — it is never started, which is indistinguishable from \
+                 being down",
                 stack,
                 found
             );

@@ -31,7 +31,7 @@ checks:
     # container is genuinely running, and an empty answer fails.
     command: "docker inspect -f '{{.State.Running}}' promtail 2>/dev/null | grep -x true"
     expect: must_be_present
-    layer: container
+    layer: process
     blind_spot: >-
       Running is not shipping. This is exactly the reading that said Up for
       three hours while nothing reached Loki, and it is here only so the two

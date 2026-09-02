@@ -221,6 +221,10 @@ pub struct OverlayBlock {
     pub href: String,
     pub group: Option<String>,
     pub name: Option<String>,
+    /// Keep this route off the front page. Not every route is a front door:
+    /// `uptime-kuma-alt` is a second name for a service already listed, and
+    /// `homepage` is the page you are looking at.
+    pub hide: bool,
     pub extra: Vec<String>,
 }
 
@@ -288,6 +292,8 @@ pub fn parse_overlay(text: &str) -> Overlay {
             b.group = Some(v.trim().to_string());
         } else if let Some(v) = t.strip_prefix("name:") {
             b.name = Some(v.trim().to_string());
+        } else if let Some(v) = t.strip_prefix("hide:") {
+            b.hide = v.trim() == "true";
         } else if t == "extra: |" {
             in_extra = true;
         }
@@ -393,10 +399,23 @@ pub fn services_yaml(
     };
 
     let mut used: Vec<String> = Vec::new();
+    // Two routers may forward to the same door — `almanac` and
+    // `almanac-block-metrics` both answer on almanac.kp-soft.dev. The page
+    // lists destinations, not routers, so the second one is not a second
+    // tile.
+    let mut seen_href: Vec<String> = Vec::new();
     for (stack, entries) in stacks {
         for e in entries {
             let href = format!("https://{}/", e.host);
+            if seen_href.contains(&href_key(&href)) {
+                continue;
+            }
+            seen_href.push(href_key(&href));
             let blk = ov.blocks.iter().find(|b| b.href == href_key(&href));
+            if blk.is_some_and(|b| b.hide) {
+                used.push(href_key(&href));
+                continue;
+            }
             if let Some(b) = blk {
                 used.push(b.href.clone());
             }
@@ -446,7 +465,7 @@ pub fn services_yaml(
     // service that has no page of its own. Dropping them because no route
     // matched would delete a decision, not a stale entry.
     for b in &ov.blocks {
-        if used.contains(&b.href) {
+        if used.contains(&b.href) || b.hide {
             continue;
         }
         let group = b.group.clone().unwrap_or_else(|| "Overig".into());

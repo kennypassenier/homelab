@@ -183,7 +183,13 @@ fn the_overlay_supplies_what_a_route_cannot_and_nothing_else() {
     let ov = parse_overlay(include_str!(
         "../../stacks/home/homepage/services-overlay.yml"
     ));
-    assert_eq!(ov.blocks.len(), 24, "the real overlay has 24 entries");
+    assert_eq!(ov.blocks.len(), 27, "the real overlay has 27 entries");
+    assert_eq!(
+        ov.blocks.iter().filter(|b| b.hide).count(),
+        2,
+        "two routes are deliberately kept off the page: the page itself, and \
+         a second name for a service already listed"
+    );
     assert_eq!(ov.group_order.first().map(String::as_str), Some("Media"));
 
     let out = services_yaml(
@@ -352,4 +358,66 @@ fn a_missing_key_still_produces_a_widget() {
     );
     assert!(out.contains("type: sonarr"), "{}", out);
     assert!(out.contains("key: {{HOMEPAGE_VAR_SONARR}}"), "{}", out);
+}
+
+/// covers: F195
+///
+/// Not every route is a front door. Two routers may forward to the same
+/// address (`almanac` and `almanac-block-metrics`), and some routes exist
+/// for a reason that is not "put me on the page" — a second name for a
+/// service already listed, and the page you are looking at.
+#[test]
+fn a_second_route_to_the_same_door_is_not_a_second_tile() {
+    use homelab_core::ops::homepage::parse_overlay;
+    let ov = parse_overlay(
+        "group_order: [Huis]\n\
+         \n\
+         - href: https://almanac.kp-soft.dev/\n\
+         \x20 group: Huis\n\
+         \x20 name: Almanac\n\
+         \n\
+         - href: https://home.kp-soft.dev/\n\
+         \x20 hide: true\n",
+    );
+    let out = services_yaml(
+        &[(
+            "almanac".into(),
+            vec![
+                Entry {
+                    app: "almanac".into(),
+                    host: "almanac.kp-soft.dev".into(),
+                    backend: None,
+                },
+                Entry {
+                    app: "almanac-block-metrics".into(),
+                    host: "almanac.kp-soft.dev".into(),
+                    backend: None,
+                },
+                Entry {
+                    app: "homepage".into(),
+                    host: "home.kp-soft.dev".into(),
+                    backend: None,
+                },
+            ],
+        )],
+        Some(&ov),
+        &Default::default(),
+    );
+
+    assert_eq!(
+        out.matches("almanac.kp-soft.dev").count(),
+        2,
+        "one tile, so href + siteMonitor — not two tiles: {}",
+        out
+    );
+    assert!(
+        !out.contains("almanac-block-metrics"),
+        "the second router to the same door must not become a tile: {}",
+        out
+    );
+    assert!(
+        !out.contains("home.kp-soft.dev"),
+        "a hidden route must not appear at all: {}",
+        out
+    );
 }

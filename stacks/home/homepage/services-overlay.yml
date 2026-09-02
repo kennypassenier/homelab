@@ -1,32 +1,29 @@
 # Homepage overlay — what the orchestrator cannot derive from a route file.
 #
-# The generated list (T51) knows every service that has a gateway route, and
-# nothing else: no icon, no description, no widget, and no opinion about
-# which services belong together. This file supplies exactly that, and the
-# two are joined on `href`, which both sides already have. An exact key on
-# purpose: matching display names would have guessed wrong eight times out
-# of twenty-six when this was measured on 2026-09-02.
+# The generated list (T51) knows every service that has a gateway route and
+# nothing else. This file supplies the four things no machine can know:
+# which services belong together, what you want them called, which icon, and
+# one line of Dutch. The two are joined on `href`, which both sides already
+# carry — an exact key, because matching display names was measured against
+# the real pair of files and would have guessed wrong eight times out of
+# twenty-six.
 #
-# A routed service with no block here still appears — grouped under its
-# stack name, with a plain link. That is the point: a new service shows up
-# by itself, and you decide later where it belongs.
+# NOT here any more (D102): the widgets. Their type comes from the app's
+# name, their address from the route's own backend, and their API key is
+# read from the application itself on every deploy. Only grafana and proxmox
+# still spell theirs out, because those take a username and password that no
+# application hands out for us.
 #
-# A block here whose href has no route is kept as a deliberate manual link
-# (kp-soft and Loki below). Everything under `extra:` is passed through to
-# Homepage verbatim, so any field Homepage supports works here without this
-# orchestrator needing to know about it.
+# A routed service with no block here still appears — under its stack name,
+# with a plain link. That is the point: a new service reaches the page by
+# itself and you decide later where it belongs.
 #
-# 2026-09-02, second pass: the WIDGETS are gone from this file. Kenny asked
-# whether the live tiles - what is streaming, how many films - could be
-# automatic, and all three parts of a widget turned out to be readable:
-# the type from the app name, the address from the route's own backend, and
-# the API key from the application itself (see KNOWN_WIDGETS in
-# core/src/ops/homepage.rs). Only grafana and proxmox still spell theirs out
-# here, because those take a username and password that no application hands
-# out for us.
+# How to change anything here: docs/USER_GUIDE.md, "The front page".
 
-group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
+group_order: [Media, Papierwerk, Huis, Eigen, Infrastructuur]
 
+# ── Media ────────────────────────────────────────────────────────────────
+# First on the page because it is what Kenny opens most (2026-09-02).
 
 - href: https://fin.kp-soft.dev/
   group: Media
@@ -40,7 +37,7 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
   name: Seerr
   extra: |
     icon: jellyseerr.svg
-    description: Aanvragen
+    description: Aanvragen doen
 
 - href: https://son.kp-soft.dev/
   group: Media
@@ -70,16 +67,18 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
     icon: bazarr.svg
     description: Ondertitels
 
-# No widget: qBittorrent's WebUI password is hashed and unreadable, and
-# its API key answered 403 to every header shape tried on 2026-08-31.
-# Giving it a widget needs either the password or a LAN whitelist entry,
-# and weakening its auth is Kenny's call, not a detail to slip in here.
+# No widget: qBittorrent's WebUI password is hashed and unreadable, and its
+# API key answered 403 to every header shape tried on 2026-08-31. Giving it
+# one needs either the password or a LAN whitelist entry, and weakening its
+# auth is Kenny's call, not a detail to slip in here.
 - href: https://qbit.kp-soft.dev/
   group: Media
   name: qBittorrent
   extra: |
     icon: qbittorrent.svg
     description: Downloads
+
+# ── Papierwerk ───────────────────────────────────────────────────────────
 
 - href: https://docs.kp-soft.dev/
   group: Papierwerk
@@ -102,18 +101,7 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
     icon: stirling-pdf.svg
     description: PDF-gereedschap
 
-# The one deliberate http:// link on this page, and the reason is worth
-# keeping: kp-soft has no gateway route at all while it is being built.
-# Putting it on a *.kp-soft.dev name puts it behind Cloudflare Access,
-# and Access answers 401 to every write — no setting, no role, no passkey
-# could be saved. It goes back to an https name when it moves to the bare
-# kp-soft.dev; see docs/deployment/KP_SOFT_MIGRATION.md.
-- href: http://10.10.10.16:8080/
-  group: Eigen
-  name: kp-soft
-  extra: |
-    icon: mdi-web
-    description: Eigen site (in aanbouw, alleen thuis)
+# ── Huis ─────────────────────────────────────────────────────────────────
 
 - href: https://ha.kp-soft.dev/
   group: Huis
@@ -150,6 +138,30 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
     icon: mdi-monitor
     description: E-ink dashboard
 
+# ── Eigen ────────────────────────────────────────────────────────────────
+
+# The one deliberate http:// link on this page, and the reason is worth
+# keeping: kp-soft has no gateway route at all while it is being built.
+# Putting it on a *.kp-soft.dev name puts it behind Cloudflare Access, and
+# Access answers 401 to every write — no setting, no role, no passkey could
+# be saved. It goes back to an https name when it moves to the bare
+# kp-soft.dev; see docs/deployment/KP_SOFT_MIGRATION.md.
+- href: http://10.10.10.16:8080/
+  group: Eigen
+  name: kp-soft
+  extra: |
+    icon: mdi-web
+    description: Eigen site (in aanbouw, alleen thuis)
+
+- href: https://kyu.kp-soft.dev/
+  group: Eigen
+  name: Kyu
+  extra: |
+    icon: mdi-mailbox
+    description: Berichtenhub
+
+# ── Infrastructuur ───────────────────────────────────────────────────────
+
 - href: https://prox.kp-soft.dev/
   group: Infrastructuur
   name: Proxmox
@@ -175,6 +187,20 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
       username: "{{HOMEPAGE_VAR_GF_ADMIN_USER}}"
       password: "{{HOMEPAGE_VAR_GF_ADMIN_PASSWORD}}"
 
+- href: https://traefik.kp-soft.dev/
+  group: Infrastructuur
+  name: Traefik
+  extra: |
+    icon: traefik.svg
+    description: Router en certificaten
+
+- href: https://opn.kp-soft.dev/
+  group: Infrastructuur
+  name: OPNsense
+  extra: |
+    icon: opnsense.svg
+    description: Firewall en netwerk
+
 - href: https://kuma.kp-soft.dev/
   group: Infrastructuur
   name: Uptime Kuma
@@ -196,25 +222,22 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
     icon: mdi-bell-alert
     description: Meldingen
 
-# Loki has no interface of its own — /ready is a health probe, not a page.
-# Its data is read through Grafana, so the link goes there.
+# Loki has no page of its own; this points at Grafana where its data is
+# actually read. No route matches, so it is kept as a manual link.
 - href: https://grafana.kp-soft.dev/explore
   group: Infrastructuur
   name: Loki
   extra: |
     icon: mdi-text-box-search
-    description: Logs (via Grafana)
+    description: Logboeken
 
-- href: https://kyu.kp-soft.dev/
-  group: Infrastructuur
-  name: kyu
-  extra: |
-    icon: mdi-mailbox
-    description: Berichtenhub
+# ── Niet op de voorpagina ────────────────────────────────────────────────
+# Routes that exist for a reason but are not front doors.
 
-- href: https://opn.kp-soft.dev/
-  group: Infrastructuur
-  name: OPNsense
-  extra: |
-    icon: opnsense.svg
-    description: Router
+# The page you are looking at.
+- href: https://home.kp-soft.dev/
+  hide: true
+
+# A second name for Uptime Kuma, which is already listed above.
+- href: https://uptime.kp-soft.dev/
+  hide: true

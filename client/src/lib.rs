@@ -4,6 +4,7 @@
 pub mod release;
 pub mod scaffold;
 pub mod spec;
+pub mod testplan;
 pub mod tls;
 pub mod tui;
 pub mod version;

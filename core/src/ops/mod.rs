@@ -22,7 +22,6 @@ pub mod registry_cache;
 pub mod resize;
 pub mod restoredrill;
 pub mod selfupdate;
-pub mod streamguard;
 pub mod template;
 pub mod update;
 pub mod util;

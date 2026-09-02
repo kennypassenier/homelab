@@ -662,6 +662,25 @@ async fn main() {
                 homelab_core::ops::dashboard::dashboard_json(stack, &apps)
             );
         }
+        // Phase 7's output document, derived from the tests rather than kept
+        // beside them — the same reasoning as `runbook`.
+        "testplan" => {
+            let out = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| "docs/deployment/TEST_PLAN.md".into());
+            match homelab_client::testplan::generate_test_plan(
+                &[Path::new("core/tests"), Path::new("client/tests")],
+                Path::new("docs/deployment/REALIZATION_PLAN.md"),
+                Path::new(&out),
+            ) {
+                Ok(n) => println!(
+                    "{}✓ test plan written{} — {} ({} suite(s))",
+                    C_GREEN, C_RESET, out, n
+                ),
+                Err(e) => die(&e),
+            }
+        }
         "runbook" => {
             // E7: generate the disaster-recovery runbook from the local stacks
             // directory — a document that works when everything else is down.
@@ -800,6 +819,9 @@ async fn main() {
             println!("  homelab templates                   list the golden templates");
             println!("  homelab resize stacks/<name>        apply changed resources (H4)");
             println!("  homelab config                      show the host's settings (G8)");
+            println!(
+                "  homelab testplan                    regenerate docs/deployment/TEST_PLAN.md"
+            );
             println!(
                 "  homelab checks                      the questions only a person can answer (G17)"
             );

@@ -184,8 +184,11 @@ update during a stream is skipped with a readable reason.
 **Status 2026-08-31: two of three.** The policy is written down and applied
 (`UPDATE_POLICY.md`), and O9's clean shutdown is built with the order asserted
 — pull, stop, up — so the downtime is the swap rather than the download.
-O10 is blocked: the Jellyfin API key on CT 106 is refused, measured three
-ways (F32). The check cannot be built against an API that will not answer.
+O10 is DONE since 2026-09-02 (F213): the key comes out of Jellyfin's own
+database rather than an `.env`, `ops/busy.rs` fails closed, and Jellyfin's
+compose carries the `com.homelab.update.busy-check` label that arms it. This
+paragraph said "blocked" for half a day after that stopped being true, and a
+whole duplicate implementation got built from the stale sentence (F233).
 
 ### M6 · The full backup and its drills
 Kenny's own gate: nothing is integrated before this is green.
@@ -426,7 +429,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | G10 | the real stack files are validated by nothing (8 of 13 need latch) | dicht · F224 (structureel; de latch-helft blijft buiten de tests) |
 | G11 | three brakes that had never been pressed, and one silent skip | dicht · F210 |
 | G12 | cloning CT 997 and seeing it arrive in Prometheus + Loki | dicht · F225 (live gedrild 2026-09-02) |
-| G13 | the M2 and M5 drills | M2 gedrild · F228 → gedicht door F232; M5's derde punt gebouwd · F233 |
+| G13 | the M2 and M5 drills | M2 gedrild · F228 → gedicht door F232; M5's derde punt was al klaar sinds F213 (zie F233) |
 | G14 | no recurring restore drill exists | dicht · F229 |
 | G15 | the nightly check skipped the nights it mattered most | dicht · F214 |
 | G16 | the notification fallback, and Y2's exception to it | dicht · F222 (F223 wacht op een HA-webhook van Kenny) |

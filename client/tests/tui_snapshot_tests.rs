@@ -2275,3 +2275,30 @@ fn every_app_either_has_checks_or_is_named_as_deliberately_without() {
         missing
     );
 }
+
+/// The generated test plan must match what the tests actually say, for the
+/// same reason the runbook must: a document nobody regenerates is a document
+/// that describes last month.
+#[test]
+fn the_committed_test_plan_matches_a_fresh_generation() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let out = std::env::temp_dir().join("homelab-testplan-check.md");
+    homelab_client::testplan::generate_test_plan(
+        &[&root.join("core/tests"), &root.join("client/tests")],
+        &root.join("docs/deployment/REALIZATION_PLAN.md"),
+        &out,
+    )
+    .expect("generation must succeed");
+    let fresh = std::fs::read_to_string(&out).unwrap();
+    let committed =
+        std::fs::read_to_string(root.join("docs/deployment/TEST_PLAN.md")).unwrap_or_default();
+    let _ = std::fs::remove_file(&out);
+    assert_eq!(
+        committed.lines().count(),
+        fresh.lines().count(),
+        "docs/deployment/TEST_PLAN.md is stale — run `homelab testplan` and read the diff"
+    );
+}

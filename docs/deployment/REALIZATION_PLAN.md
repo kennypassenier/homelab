@@ -455,6 +455,19 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | A6 · 133 findings marked fixed with no test | **Bewaker eerst, dan opruimen** | a guard so no new row can claim "done" without naming its proof; the 133 old ones become a worked list |
 | A7 · skip an update while something is streaming | **Bouwen, gesloten falen** | no answer from Jellyfin means no update, and the reason travels with the notification |
 
+### Phase 7 · what the gate produced
+
+Closed 2026-09-02. Twenty-two of the twenty-three gaps closed, G6 deferred by
+Kenny at the gate itself. `TEST_PLAN.md` is generated from the suites
+(`homelab testplan`) rather than written, so it cannot drift; the one accepted
+limitation is lifted out of the gap table above so the two documents cannot
+disagree.
+
+The three mechanisms built here are visible in the fleet check as of that
+evening — a watched backup that has never written a file, a restore drill that
+has never run, and two questions only a person can answer. All three used to
+be silence.
+
 ## Scratch resources
 
 `199` for recipe rehearsals (M2, M7), created and destroyed per drill.

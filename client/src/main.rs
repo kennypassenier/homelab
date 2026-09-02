@@ -747,6 +747,23 @@ async fn main() {
                 "  homelab exec <vmid> <cmd...>        remote exec (A6, requires exec_enabled)"
             );
             println!("  homelab self-update <binary>        replace HOST binary w/ rollback (H5)");
+            // G20 of the Phase-7 gate: eight verbs existed and appeared in no
+            // help text at all, `install-native` and `release-update` among
+            // them — the one that installs your own services and the one that
+            // updates the host. A command nobody can discover is a command
+            // that does not exist.
+            println!(
+                "  homelab release-update              fetch the newest release and ship it (H7)"
+            );
+            println!(
+                "  homelab install-native stacks/<name> <unit>  install a native service (O1)"
+            );
+            println!("  homelab template-build              build a golden template (M3)");
+            println!("  homelab templates                   list the golden templates");
+            println!("  homelab resize stacks/<name>        apply changed resources (H4)");
+            println!("  homelab config                      show the host's settings (G8)");
+            println!("  homelab export|import <file>        move state between hosts");
+            println!("  homelab tui                         the terminal interface (G1)");
             println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");
             println!("cert pin: ~/.config/homelab/pin (auto on first connect)");
         }

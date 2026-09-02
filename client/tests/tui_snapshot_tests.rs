@@ -2128,3 +2128,59 @@ fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
         m.outbox.first()
     );
 }
+
+/// covers: F212
+///
+/// G20 of the Phase-7 gate. The CLI is a hand-rolled string match, and its
+/// usage text is a separate list of `println!`s — two lists that nothing held
+/// against each other. Eight verbs were in the first and not the second,
+/// `install-native` and `release-update` among them: the command that
+/// installs one of Kenny's own services, and the command that updates the
+/// host. A verb nobody can discover is a verb that does not exist.
+#[test]
+fn every_cli_verb_appears_in_the_usage_text() {
+    let src = include_str!("../src/main.rs");
+
+    // The verbs the matcher answers to.
+    let mut verbs: Vec<String> = Vec::new();
+    for line in src.lines() {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix('"') {
+            if let Some(name) = rest.split('"').next() {
+                if t.contains("=>")
+                    && !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c == '-' || c.is_ascii_digit())
+                {
+                    verbs.push(name.to_string());
+                }
+            }
+        }
+    }
+    verbs.sort();
+    verbs.dedup();
+    assert!(
+        verbs.len() > 25,
+        "the verb scan broke, not the help: found {:?}",
+        verbs
+    );
+
+    // The usage block, which starts at the version line.
+    let start = src
+        .find("— usage:")
+        .expect("the usage block moved; this test parses it");
+    let usage = &src[start..];
+    let usage = &usage[..usage.find("env: HOMELAB_HOST").unwrap_or(usage.len())];
+
+    // `enable`/`disable` are documented as one line; accept either spelling.
+    let missing: Vec<&String> = verbs
+        .iter()
+        .filter(|v| !usage.contains(&format!("homelab {}", v)) && !usage.contains(v.as_str()))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "these commands exist and are documented nowhere: {:?}",
+        missing
+    );
+}

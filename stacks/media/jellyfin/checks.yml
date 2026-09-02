@@ -15,6 +15,32 @@
 # asking the application which keys it accepts is the only reading that
 # cannot go stale.
 checks:
+  # G22 of the Phase-7 gate. The CT 106 replacement recorded "the device node
+  # is present in the LXC and in the container, encoding.xml still says vaapi,
+  # the transcode directory is sized". None of that is a completed transcode,
+  # and the bar was "the service returns with its settings — for Jellyfin
+  # INCLUDING hardware transcoding". F110 was a wrong render group id that
+  # every one of those three readings would have shown as fine.
+  #
+  # So this asks Jellyfin's own ffmpeg to encode 25 frames through VAAPI.
+  # Measured 2026-09-02: it succeeds on /dev/dri/renderD128 and fails on a
+  # device that does not exist, so the reading can move in both directions.
+  # It costs about a second and touches nothing in the library.
+  - name: "hardware-transcodering werkt echt"
+    command: >-
+      docker exec jellyfin /usr/lib/jellyfin-ffmpeg/ffmpeg -hide_banner -loglevel error
+      -init_hw_device vaapi=va:/dev/dri/renderD128 -filter_hw_device va
+      -f lavfi -i testsrc=size=320x240:rate=25 -frames:v 25
+      -vf format=nv12,hwupload -c:v h264_vaapi -f null - >/dev/null 2>&1
+      && echo hardware-ok
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      Proves the card, the driver and the permissions line up for an encode
+      Jellyfin's own binary can do. It does not prove Jellyfin CHOOSES
+      hardware for a real file — that is a settings question, and the manual
+      check below is where it belongs.
+
   - name: "films in de bibliotheek"
     command: >-
       K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");

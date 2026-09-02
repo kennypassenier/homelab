@@ -3459,6 +3459,43 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
             resp
         }
+        Rpc::ListManualChecks => {
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            let st = store.load().await.unwrap_or_default();
+            let rows = homelab_core::ops::manualchecks::listing(&st);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: homelab_core::ops::manualchecks::render_listing(&rows, now),
+            }
+        }
+        Rpc::AnswerManualCheck { id, ok, note } => {
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            let mut st = store.load().await.unwrap_or_default();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let found = homelab_core::ops::manualchecks::answer(&mut st, &id, ok, &note, now);
+            let message = if found {
+                let _ = store.save(st).await;
+                format!("{} recorded as {}", id, if ok { "ok" } else { "NOT ok" })
+            } else {
+                format!(
+                    "no manual check has id {} — run `homelab checks` for the list",
+                    id
+                )
+            };
+            RpcResponse {
+                id: req.id,
+                ok: found,
+                message,
+            }
+        }
         Rpc::SetStackEnabled { stack, enabled } => {
             run_mutating_op(state, &exec, req.id, "set-enabled", |ctx| {
                 Box::pin(async move {

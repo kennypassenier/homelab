@@ -225,6 +225,44 @@ async fn main() {
         }
         // H10: on-demand snapshot of vault/state/TLS/intent repo.
         "backup-host-meta" => rpc(&host, &token, Command::BackupHostMeta).await,
+        // G17: the questions only a person can answer. `homelab checks` lists
+        // them with their ids; `homelab checks answer <id> ok|nok [note]`
+        // records one. They used to be printed at the end of a deploy and
+        // stored nowhere, which is not asking anybody anything.
+        "checks" => match args.get(2).map(|s| s.as_str()) {
+            None | Some("list") => rpc(&host, &token, Command::ListManualChecks).await,
+            Some("answer") => {
+                let id = args
+                    .get(3)
+                    .unwrap_or_else(|| die("usage: homelab checks answer <id> ok|nok [note]"));
+                let verdict = args
+                    .get(4)
+                    .unwrap_or_else(|| die("usage: homelab checks answer <id> ok|nok [note]"));
+                let yes = ["ok", "yes", "ja"];
+                let no = ["nok", "no", "nee"];
+                let ok = if yes.contains(&verdict.as_str()) {
+                    true
+                } else if no.contains(&verdict.as_str()) {
+                    false
+                } else {
+                    die(&format!("answer must be ok or nok, not {}", verdict))
+                };
+                rpc(
+                    &host,
+                    &token,
+                    Command::AnswerManualCheck {
+                        id: id.clone(),
+                        ok,
+                        note: args[5..].join(" "),
+                    },
+                )
+                .await;
+            }
+            Some(other) => die(&format!(
+                "unknown: homelab checks {} — try `list` or `answer`",
+                other
+            )),
+        },
         // H8 (light): park / unpark a stack for the nightly scheduler.
         "enable" | "disable" => {
             let stack = args
@@ -762,6 +800,10 @@ async fn main() {
             println!("  homelab templates                   list the golden templates");
             println!("  homelab resize stacks/<name>        apply changed resources (H4)");
             println!("  homelab config                      show the host's settings (G8)");
+            println!(
+                "  homelab checks                      the questions only a person can answer (G17)"
+            );
+            println!("  homelab checks answer <id> ok|nok [note]   record one of those answers");
             println!("  homelab export|import <file>        move state between hosts");
             println!("  homelab tui                         the terminal interface (G1)");
             println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");

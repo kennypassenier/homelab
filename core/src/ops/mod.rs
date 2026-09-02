@@ -12,6 +12,7 @@ pub mod fleetcheck;
 pub mod guards;
 pub mod hardware;
 pub mod homepage;
+pub mod manualchecks;
 pub mod mirror;
 pub mod monitors;
 pub mod native;

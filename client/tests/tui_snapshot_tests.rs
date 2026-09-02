@@ -847,6 +847,17 @@ const CLI_ONLY: &[(&str, &str)] = &[
          comfortable interface and typing the stack name out (Kenny, form H2b)",
     ),
     (
+        "ListManualChecks",
+        "G17: the answering happens at the keyboard right after a deploy, and the \
+         asking happens in the nightly notification that already reaches Kenny — a \
+         screen he has to go and find is the thing form I2 was against",
+    ),
+    (
+        "AnswerManualCheck",
+        "G17: same reason as ListManualChecks — answering is one line, and putting \
+         it in the TUI would mean navigating to it to say 'yes the picture is fine'",
+    ),
+    (
         "DestroyStack",
         "deliberate friction: destroying a container should mean leaving the \
          comfortable interface and typing it out (Kenny's C2 gate)",

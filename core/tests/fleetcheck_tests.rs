@@ -931,3 +931,24 @@ mod incomplete_deploys {
         );
     }
 }
+
+/// G17: the unanswered question has to ride the round that already reaches
+/// Kenny, or it is a record nobody reads — the fault this whole audit is about.
+#[test]
+fn the_full_round_carries_the_manual_checks() {
+    let mut st = HostState::default();
+    homelab_core::ops::manualchecks::register(
+        &mut st,
+        "media",
+        &[("jellyfin".to_string(), "is the sound in sync".to_string())],
+        100,
+    );
+    let findings = check(&st, &LiveFacts::default());
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.what.contains("is the sound in sync")),
+        "evaluate() must fan out to it: {:?}",
+        findings
+    );
+}

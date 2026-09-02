@@ -402,6 +402,11 @@ pub fn evaluate(
     out.extend(evaluate_boot(state, &live.boot));
     out.extend(evaluate_watched_backups(&live.watched_backups));
     out.extend(evaluate_incomplete(state));
+    out.extend(crate::ops::manualchecks::evaluate_manual(
+        state,
+        now_unix,
+        crate::ops::manualchecks::DEFAULT_ANSWER_MAX_AGE_S,
+    ));
 
     for r in &live.routes {
         if !r.answered {

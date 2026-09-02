@@ -2082,18 +2082,37 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
 
     // The list no measurement can settle. It goes out as a notification Kenny
     // has to acknowledge (form I2) rather than a page he has to go and find.
-    let manual: Vec<String> = spec
-        .checks
-        .values()
-        .flat_map(|sc| sc.manual.iter().cloned())
-        .collect();
-    if !manual.is_empty() {
+    // G17: registering them is the half that was missing. Printing a
+    // question at the end of a transcript is not asking anybody anything.
+    let questions = crate::ops::manualchecks::questions_of(&spec.checks);
+    if !questions.is_empty() {
+        let store = StateStore::new(ctx.exec, &ctx.state_dir);
+        if let Ok(mut st) = store.load().await {
+            crate::ops::manualchecks::register(
+                &mut st,
+                &spec.manifest.stack_name,
+                &questions,
+                ctx.now_unix,
+            );
+            let _ = store.save(st).await;
+        }
+        let lines: Vec<String> = questions
+            .iter()
+            .map(|(app, text)| {
+                format!(
+                    "{}  {}",
+                    crate::ops::manualchecks::id_for(&spec.manifest.stack_name, app, text),
+                    text
+                )
+            })
+            .collect();
         runner.log(
             Level::Warn,
             format!(
-                "[check] {} thing(s) only a person can confirm:\n  - {}",
-                manual.len(),
-                manual.join("\n  - ")
+                "[check] {} thing(s) only a person can confirm — answer one with \
+                 `homelab checks answer <id> ok|nok`:\n  - {}",
+                lines.len(),
+                lines.join("\n  - ")
             ),
         );
     }

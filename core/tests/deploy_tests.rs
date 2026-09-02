@@ -2449,3 +2449,46 @@ fn the_update_labels_the_code_reads_exist_somewhere_in_the_fleet() {
         );
     }
 }
+
+/// G17 · a deploy that prints a manual check must also register it.
+///
+/// Printing a question at the end of a transcript is not asking anybody
+/// anything. This is the half that was missing: 94 questions across 28 files,
+/// answered by nobody and recorded nowhere.
+#[tokio::test]
+async fn a_deploy_registers_the_questions_only_a_person_can_answer() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    let sc = homelab_core::checks::ServiceChecks {
+        manual: vec!["does the vault actually sync to the phone".into()],
+        ..Default::default()
+    };
+    sp.checks.insert("syncthing".into(), sc);
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "the deploy itself must succeed");
+
+    let id = homelab_core::ops::manualchecks::id_for(
+        "syncthing",
+        "syncthing",
+        "does the vault actually sync to the phone",
+    );
+    let state = exec.file("/var/lib/homelab/state.json").expect("state");
+    let parsed: serde_json::Value = serde_json::from_str(&state).unwrap();
+    assert!(
+        !parsed["manual_checks"][&id].is_null(),
+        "the question must be on record, not only in the transcript: {}",
+        state
+    );
+    assert!(
+        parsed["manual_checks"][&id]["answered_at"].is_null(),
+        "and it starts unanswered"
+    );
+    assert!(
+        sink.lines().iter().any(|l| l.contains(&id)),
+        "the transcript must print the id, or there is no way to answer it"
+    );
+}

@@ -180,6 +180,15 @@ pub enum Command {
         stack: String,
         enabled: bool,
     },
+    /// G17: the questions only a person can answer, as the host has them on
+    /// record. Read-only; the deploy is what puts them there.
+    ListManualChecks,
+    /// G17: one person's answer to one of those questions.
+    AnswerManualCheck {
+        id: String,
+        ok: bool,
+        note: String,
+    },
 }
 
 /// G8: the host settings the TUI may inspect and edit. Token/listen/state_dir

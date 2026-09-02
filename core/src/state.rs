@@ -95,6 +95,40 @@ pub struct HostState {
     /// E8: unix time of the last successful ZFS snapshot+replication run.
     #[serde(default)]
     pub last_zfs: u64,
+    /// G17: the checks only a person can answer, and whether anyone did.
+    ///
+    /// They were printed at the end of every deploy and stored nowhere, so
+    /// "did anybody ever look at the front page after a deploy" had no answer
+    /// — 94 of them across 28 files, measured 2026-09-02, and one of them is
+    /// exactly the check that would have caught the empty homepage months
+    /// earlier. The deploy that prints them now also registers them here, so
+    /// the record is written by the thing that already knows.
+    ///
+    /// Keyed by `manualchecks::id_for`, which is stable across deploys as
+    /// long as the wording does not change. If it does, the check is a
+    /// different question and the old answer no longer applies.
+    #[serde(default)]
+    pub manual_checks: BTreeMap<String, ManualCheckRecord>,
+}
+
+/// One thing only a person can confirm, and the last word on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualCheckRecord {
+    pub stack: String,
+    pub app: String,
+    /// The question, verbatim from `checks.yml`.
+    pub text: String,
+    /// First time a deploy printed it.
+    pub registered_at: u64,
+    /// Unix time of the last answer. None = nobody has ever answered.
+    #[serde(default)]
+    pub answered_at: Option<u64>,
+    /// What the answer was. None while unanswered.
+    #[serde(default)]
+    pub ok: Option<bool>,
+    /// Whatever the person wanted to add. Empty is normal.
+    #[serde(default)]
+    pub note: String,
 }
 
 pub struct StateStore<'a> {

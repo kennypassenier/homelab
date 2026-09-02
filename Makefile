@@ -58,6 +58,22 @@ endif
 	esac
 	@test -z "$$(git status --porcelain)" || { echo "working tree not clean — commit first"; exit 1; }
 	@git rev-parse "v$(VERSION)" >/dev/null 2>&1 && { echo "tag v$(VERSION) already exists"; exit 1; } || true
+	# Release only from a base CI has actually passed.
+	#
+	# Branch protection on main requires the `check` and `msrv` jobs, but
+	# `enforce_admins` is off so `make release` can push directly — which
+	# means those required checks do not apply to a direct push at all. The
+	# almanac project hit the same thing on 2026-09-02 and flagged it. On this
+	# repository it has never been exercised (every pushed tip on main that
+	# day was green), and the local gate below runs the full suite on every
+	# commit — but "protected" overstated what was true, and a red tip could
+	# have been tagged and shipped to the host with nothing objecting.
+	#
+	# This is the narrow fix that does not require weakening `make release`:
+	# refuse to release from a HEAD whose CI is red. Unknown is allowed and
+	# says so — a commit that was never pushed has no runs, and refusing that
+	# would make the rule unusable offline.
+	@st=$$(gh api "repos/{owner}/{repo}/commits/$$(git rev-parse HEAD)/check-runs" 		--jq '[.check_runs[] | select(.name=="check" or .name=="msrv") | .conclusion] | join(",")' 2>/dev/null || echo ""); 	case "$$st" in 		*failure*|*cancelled*|*timed_out*) 			echo "refusing: CI on HEAD is $$st — releasing from a red base"; exit 1 ;; 		"") echo "  · CI has no verdict on HEAD yet (never pushed?) — continuing" ;; 		*) echo "  · CI on HEAD: $$st" ;; 	esac
 	$(MAKE) gate
 	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml
 	@cargo update --workspace --quiet 2>/dev/null || cargo check --workspace --quiet

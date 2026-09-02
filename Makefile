@@ -76,12 +76,18 @@ endif
 # this repository writes commands as `homelab <verb>`, and none of them worked
 # from a shell — they only ever ran as `cargo run -q -p homelab-client --`,
 # with the environment sourced first. That gap sat there for the whole project.
-install: ## build the client and put it on PATH (~/.local/bin)
-	@cargo build --release -p homelab-client
-	@mkdir -p $(HOME)/.local/bin $(HOME)/.config/homelab
-	@install -m 755 target/release/homelab $(HOME)/.local/bin/homelab
+#
+# `cargo install` rather than a copy into ~/.local/bin, and the reason is
+# measured: ~/.local/bin reaches Kenny's PATH through /etc/profile, which only
+# LOGIN shells read. The terminal inside Claude Desktop is not one, so the
+# first version of this target installed a binary he still could not run.
+# ~/.cargo/bin is exported by his own ~/.bashrc and is on fish's PATH too, so
+# it holds in every shell he actually types in.
+install: ## build the client and put it on PATH (~/.cargo/bin)
+	@cargo install --path client --quiet
+	@mkdir -p $(HOME)/.config/homelab
 	@if [ ! -f $(HOME)/.config/homelab/env ] && [ -f .env ]; then \
 		install -m 600 .env $(HOME)/.config/homelab/env; \
 		echo "  · copied .env to ~/.config/homelab/env (0600)"; \
 	fi
-	@echo "✓ homelab installed to ~/.local/bin — try: homelab status"
+	@echo "✓ homelab installed to ~/.cargo/bin — try: homelab status"

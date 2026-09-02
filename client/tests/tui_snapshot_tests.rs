@@ -1908,17 +1908,23 @@ fn every_native_service_in_the_repository_is_found_with_its_unit_file() {
         );
     }
 
-    // Measured 2026-09-02: three of the four publish a release we can install
-    // from, and kyu does not (F168). The count is asserted so that a service
-    // silently losing its release source fails here rather than at a rebuild.
-    let with_release = kyu
+    // Every native service must be installable from a verified release.
+    // Measured 2026-09-02: three of four could, and the hub could not (F168)
+    // — which mattered because it is the one the other two on CT 109 talk
+    // to. The kyu project published v2.1.0 with `kyu` + `SHA256SUMS` the same
+    // night, so the answer is now all four. Asserted as a count so that a
+    // service silently LOSING its release source fails here rather than at a
+    // rebuild, when it is too late to notice.
+    let all: Vec<_> = kyu.iter().chain(almanac.iter()).collect();
+    let without: Vec<&str> = all
         .iter()
-        .chain(almanac.iter())
-        .filter(|(m, _)| m.release_repo.is_some())
-        .count();
-    assert_eq!(
-        with_release, 3,
-        "almanac, kyu-runner and http-switchboard declare a release source; kyu cannot (F168)"
+        .filter(|(m, _)| m.release_repo.is_none())
+        .map(|(m, _)| m.unit.as_str())
+        .collect();
+    assert!(
+        without.is_empty(),
+        "these native services cannot be installed from a release: {:?}",
+        without
     );
 }
 
@@ -2006,8 +2012,9 @@ fn a_native_stack_gets_the_native_operation_from_the_same_key() {
     m.focus = None;
 
     // I: the download cannot happen on the event loop, so the key only
-    // records the request — and it must skip kyu, which publishes no release
-    // asset at all (F168).
+    // records the request. All three of CT 109's services are asked for now
+    // — the hub published a verifiable release on 2026-09-02 (F168), and
+    // before that it was skipped here for want of one.
     update(
         &mut m,
         Msg::Key(KeyEvent::new(KeyCode::Char('I'), KeyModifiers::SHIFT)),
@@ -2023,7 +2030,8 @@ fn a_native_stack_gets_the_native_operation_from_the_same_key() {
         .collect();
     assert_eq!(
         requested,
-        vec!["http-switchboard", "kyu-runner"],
-        "kyu has no release to install from and must be skipped, not attempted"
+        vec!["http-switchboard", "kyu", "kyu-runner"],
+        "every service that declares a release source is requested; one that \
+         does not is skipped rather than attempted"
     );
 }

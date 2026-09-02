@@ -20,10 +20,14 @@ data_dirs:
 # each other. Ownership is Kenny's call (form pending); until then the
 # nightly run backs up only.
 
-# T11: NO release_repo, and that is a finding rather than an omission (F168).
-# Measured 2026-09-02: release v2.0.0 of kennypassenier/kyu carries no assets
-# at all — no binary, no SHA256SUMS. The hub that every other service on this
-# container talks to is the one service whose binary cannot be reinstalled
-# from its own release; the copy running on CT 109 was built and placed by
-# hand, and nothing written down says how. Its own repository has to publish a
-# release artefact before `homelab install-native` can finish a rebuild here.
+# T11: the hub publishes a verifiable release since v2.1.0 (2026-09-02), so
+# this stack can be finished by the orchestrator like the other three. The
+# asset is named `kyu`, the same as the unit, so no `release_asset` override
+# is needed. Verified independently before this line was written: downloaded,
+# `sha256sum -c` gave `kyu: OK`, and the binary reported `kyu 2.1.0`.
+#
+# Worth knowing: the release workflow lifts the binary out of the docker image
+# it just built rather than compiling a second time, and the kyu session
+# measured the two as byte-for-byte identical. What lands here is literally
+# what runs in the container.
+release_repo: kennypassenier/kyu

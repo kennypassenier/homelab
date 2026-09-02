@@ -12,6 +12,7 @@ pub mod fleetcheck;
 pub mod guards;
 pub mod hardware;
 pub mod homepage;
+pub mod logshipper;
 pub mod manualchecks;
 pub mod mirror;
 pub mod monitors;
@@ -114,6 +115,10 @@ pub struct OpCtx<'a> {
     /// monitor came to spend eight hours reporting Uptime Kuma itself as
     /// down from an address it had left that morning.
     pub kuma_monitors_file: Option<String>,
+    /// C1/C2: where the log shipper pushes. Unset means no shipper is
+    /// installed at all, which is deliberate — a deploy that cannot know
+    /// where Loki is must not guess an address and report success.
+    pub loki_url: Option<String>,
     /// Where restic lives, for the operations that read the repository
     /// without being a backup themselves — E3 auto-restore and the
     /// `last_backup` recovery in deploy. Both used to build their own

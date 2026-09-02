@@ -2785,6 +2785,9 @@ where
         grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         homepage_services_file: state.config.homepage_services_file.clone(),
         kuma_monitors_file: state.config.kuma_monitors_file.clone(),
+        // C1/C2: the same Loki the coverage check already asks about, so
+        // there is not a second address to keep in step with the first.
+        loki_url: state.config.loki_url.clone(),
         backup: state.config.backup.clone(),
         registry_cache: state.config.registry_cache.clone(),
         asker: &asker,

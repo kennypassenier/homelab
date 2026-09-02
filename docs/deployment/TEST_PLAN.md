@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**388 tests across 22 suites.**
+**396 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -217,6 +217,19 @@ Covers: F166, F188, F190, F195, F197, F200
 - `overlay_lines_sit_under_their_service_not_beside_it` — covers: F197  The bug this catches shipped once and no test saw it: every assertion asked whether a line was PRESENT, not where it sat.
 - `tiles_follow_the_order_written_in_the_overlay` — covers: F197  Media is first because Kenny asked for it, and within Media Jellyfin is first for the same reason.
 - `the_generated_page_is_valid_yaml` — covers: F200  The test that should have existed from the first line of this generator.
+
+### `core/tests/logshipper_tests.rs`
+
+C1/C2 · the replacement for a log shipper that reached end of life.
+
+- `every_label_promtail_set_is_still_set` — The labels are the contract.
+- `the_container_name_is_read_from_tag_and_not_from_name` — F72, pinned: docker puts the container's name in `attrs.tag`, and reading `attrs.name` instead is what left three dashboards empty for months.
+- `the_journal_is_read_because_on_a_native_container_that_is_the_log` — The half promtail never had on these containers.
+- `it_points_at_the_loki_it_was_given_and_nowhere_else`
+- `installing_is_idempotent_and_says_so_without_doing_anything` — A deploy runs this every time.
+- `the_package_comes_from_a_signed_repository` — The apt route is the point: it is what keeps the shipper patched, which is the whole reason for leaving promtail behind.
+- `alloy_is_given_read_access_to_all_three_sources` — A shipper that cannot read the files it is pointed at delivers nothing and reports itself healthy — the fault this whole migration exists to escape.
+- `the_config_goes_where_the_packaged_unit_already_looks`
 
 ### `core/tests/m4_ops_tests.rs`
 

@@ -86,6 +86,7 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
         grafana_dashboards_dir: None,
         homepage_services_file: None,
         kuma_monitors_file: None,
+        loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,

@@ -1800,6 +1800,71 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // a running production service is not restarted to take ownership of it.
     // Changing a unit file that is already in place is a deliberate act, not
     // a side effect of a deploy.
+    // C1/C2 (Kenny, 2026-09-02): one log shipper per container, and it is
+    // Alloy, because promtail reached end of life on 2026-03-02.
+    //
+    // Runs for EVERY stack, native or compose. The old arrangement gave a
+    // promtail sidecar to stacks that run containers and nothing at all to
+    // the two that do not — so kyu, the hub every notification travels
+    // through, shipped no logs for as long as it has existed (F245).
+    if let Some(loki) = ctx.loki_url.as_deref() {
+        step!(runner, exec, ctx, m, "log shipper", {
+            let out = pct_sh(exec, m.vmid, &crate::ops::logshipper::install_script(), 900).await?;
+            if !out.success() {
+                // Not fatal: a stack that cannot install a log shipper is
+                // still a stack that should come up. Silence about it would
+                // be the fault this whole migration is about, so it is loud.
+                log_warn(format!(
+                    "[logs] Alloy could not be installed on {} ({}) — this container \
+                     is shipping NO logs until that is fixed",
+                    m.hostname,
+                    out.stderr.trim()
+                ));
+                return Ok(StepOutcome::Unchanged);
+            }
+            let fresh = out.stdout.contains("installed") && !out.stdout.contains("already");
+            let body = crate::ops::logshipper::config(&m.stack_name, &m.hostname, loki);
+            let changed = push_content(
+                exec,
+                m.vmid,
+                crate::ops::logshipper::CONFIG_PATH,
+                &body,
+                "644",
+            )
+            .await?;
+            if fresh || changed {
+                pct_sh(
+                    exec,
+                    m.vmid,
+                    &crate::ops::logshipper::permissions_script(),
+                    60,
+                )
+                .await?;
+                let r = pct_sh(
+                    exec,
+                    m.vmid,
+                    "systemctl enable alloy >/dev/null 2>&1; systemctl restart alloy",
+                    120,
+                )
+                .await?;
+                if !r.success() {
+                    log_warn(format!(
+                        "[logs] Alloy did not start on {} ({})",
+                        m.hostname,
+                        r.stderr.trim()
+                    ));
+                    return Ok(StepOutcome::Unchanged);
+                }
+                log_info(format!("[logs] Alloy shipping {} → Loki", m.stack_name));
+            }
+            Ok(if fresh || changed {
+                StepOutcome::Changed
+            } else {
+                StepOutcome::Unchanged
+            })
+        });
+    }
+
     // A5 (Kenny, 2026-09-02): prepare, then start — in that order.
     //
     // The G13 drill measured what the old order did: it ran

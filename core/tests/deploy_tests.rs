@@ -98,6 +98,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         grafana_dashboards_dir: None,
         homepage_services_file: None,
         kuma_monitors_file: None,
+        loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,

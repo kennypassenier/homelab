@@ -34,7 +34,15 @@ fn dev(ca: Option<&str>) -> DeviceBackup {
         url: "https://10.10.10.1/api/core/backup/download/this".into(),
         cred_file: "/var/lib/homelab/secrets/opnsense-backup.conf".into(),
         filename: "config.xml".into(),
+        pin: None,
         ca_file: ca.map(String::from),
+    }
+}
+
+fn pinned(pin: &str) -> DeviceBackup {
+    DeviceBackup {
+        pin: Some(pin.into()),
+        ..dev(None)
     }
 }
 
@@ -138,5 +146,43 @@ async fn an_unverified_certificate_is_used_but_never_quietly() {
     assert!(
         !sink2.lines().iter().any(|l| l.contains("NOT verified")),
         "no warning when verification is on"
+    );
+}
+
+/// covers: F205
+///
+/// The pin is what verifies this connection, and it must reach curl exactly.
+/// Measured against the live router on 2026-09-02: the right pin returns
+/// 200, a wrong one returns curl exit 90 and no connection — so a typo here
+/// fails loudly rather than falling back to trusting anything.
+#[tokio::test]
+async fn a_pinned_public_key_is_what_verifies_the_connection() {
+    let exec = MockExecutor::new();
+    exec.respond_always("restic stats", CmdOutput::ok("{\"total_size\":114688}"));
+    exec.respond_always("curl", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let c = ctx(&exec, &sink, &j);
+
+    let _ = backup_device(
+        &c,
+        &pinned("sha256//oZKgUOWR56fT3HYG68aGVn7s1saleArMf75StP1KaUE="),
+        &BackupCfg::default(),
+    )
+    .await;
+
+    let curl = exec
+        .calls()
+        .into_iter()
+        .find(|c| c.contains("curl"))
+        .expect("no curl call");
+    assert!(
+        curl.contains("--pinnedpubkey 'sha256//oZKgUOWR56fT3HYG68aGVn7s1saleArMf75StP1KaUE='"),
+        "the pin must reach curl verbatim: {}",
+        curl
+    );
+    assert!(
+        !sink.lines().iter().any(|l| l.contains("NOT verified")),
+        "a pinned connection is verified — the warning is for the unpinned case"
     );
 }

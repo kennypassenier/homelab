@@ -276,7 +276,7 @@ const KNOWN_REGISTRY_CACHE: &[&str] = &["host", "upstreams", "pull_timeout_secs"
 const KNOWN_UPSTREAM: &[&str] = &["registry", "port"];
 const KNOWN_ZFS_JOB: &[&str] = &["source", "target"];
 const KNOWN_WATCHED_BACKUP: &[&str] = &["name", "rclone_path", "max_age_hours"];
-const KNOWN_DEVICE_BACKUP: &[&str] = &["name", "url", "cred_file", "filename", "ca_file"];
+const KNOWN_DEVICE_BACKUP: &[&str] = &["name", "url", "cred_file", "filename", "pin", "ca_file"];
 const KNOWN_RETENTION: &[&str] = &["every_days", "keep", "span_days"];
 
 /// Every key in `raw` that no field of `FileConfig` will ever read, as

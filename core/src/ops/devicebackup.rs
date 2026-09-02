@@ -56,13 +56,23 @@ pub struct DeviceBackup {
     pub cred_file: String,
     /// What the downloaded file is called inside the snapshot.
     pub filename: String,
-    /// A CA bundle to verify the device's certificate against. None = the
-    /// certificate is not verified, which is a conscious acceptance and NOT
-    /// a default anyone should keep by accident: this request carries a
-    /// credential that can download a router's entire configuration, and it
-    /// crosses a VLAN that also hosts the one container strangers can reach
-    /// (F183). Configuration-dependent, per standing rule 24 — the code
-    /// cannot enforce it, so it says so out loud in the log.
+    /// An SPKI pin — `--pinnedpubkey sha256//<base64>` — which is what
+    /// actually verifies this connection.
+    ///
+    /// Preferred over a CA bundle here for a measured reason: OPNsense's web
+    /// certificate is self-signed with `CN=OPNsense.internal` and a SAN that
+    /// lists only that name, no IP. `--cacert` against `https://10.10.10.1`
+    /// therefore fails on a name mismatch and needs a `--resolve` alias to
+    /// work at all; a public-key pin does not care what the host is called.
+    /// Measured 2026-09-02: the right pin returns 200, a wrong one returns
+    /// curl exit 90 and no connection at all.
+    ///
+    /// **A pin outlives nothing.** That certificate expires 2027-04-12, and
+    /// renewing it changes this value. The failure then is `curl (90)`,
+    /// which is a different and much clearer error than a 403 or a timeout.
+    pub pin: Option<String>,
+    /// A CA bundle, for a device whose certificate can be verified by name.
+    /// Needs the URL to use a hostname the certificate actually carries.
     pub ca_file: Option<String>,
 }
 
@@ -85,9 +95,13 @@ pub async fn backup_device(
         format!("[device] asking {} for its configuration", dev.name),
     );
 
-    let verify = match &dev.ca_file {
-        Some(ca) => format!("--cacert {}", crate::ops::util::shq(ca)),
-        None => {
+    let verify = match (&dev.pin, &dev.ca_file) {
+        // `-k` beside a pin is not a contradiction: it turns off the NAME
+        // check, which cannot succeed against an IP, while the pin does the
+        // verifying. curl enforces --pinnedpubkey regardless of -k.
+        (Some(pin), _) => format!("-k --pinnedpubkey {}", crate::ops::util::shq(pin)),
+        (None, Some(ca)) => format!("--cacert {}", crate::ops::util::shq(ca)),
+        (None, None) => {
             runner.log(
                 Level::Warn,
                 format!(

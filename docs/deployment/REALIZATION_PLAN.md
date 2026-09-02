@@ -440,6 +440,18 @@ that says how far Phase 7 actually is. Written as each gap lands.
 
 **19 of 23 closed, 3 open, 1 deferred by Kenny.**
 
+### Form A1-A7 · the four remaining gaps, answered 2026-09-02
+
+| Item | Kenny's answer | What it set in motion |
+|---|---|---|
+| A1 · only one backup target, SCOPE S4 wants two | **Later** | S4 stays recorded as not met; no second repository is built |
+| A2 · three zero-byte shadowed config files | **Opruimen** | removed, with a test that keeps them gone |
+| A3 · the notification fallback has no destination | **Claude maakt de automation** | I create the HA automation over the API, test it with a real message, and put its webhook id in host.toml |
+| A4 · kyu's unit gives up after five restarts | **Nu uitrollen** | the corrected unit goes to CT 109 and the effective value is measured afterwards |
+| A5 · a native stack cannot be built from zero | **Volledig bouwen** | the deploy creates the user, places the binary and the env file, then starts — and the drill is repeated until green |
+| A6 · 133 findings marked fixed with no test | **Bewaker eerst, dan opruimen** | a guard so no new row can claim "done" without naming its proof; the 133 old ones become a worked list |
+| A7 · skip an update while something is streaming | **Bouwen, gesloten falen** | no answer from Jellyfin means no update, and the reason travels with the notification |
+
 ## Scratch resources
 
 `199` for recipe rehearsals (M2, M7), created and destroyed per drill.

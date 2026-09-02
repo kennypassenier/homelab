@@ -1776,6 +1776,62 @@ async fn f129_a_cache_that_cannot_serve_falls_back_to_the_real_registry() {
     );
 }
 
+/// S2b · a stack ALREADY on record whose redeploy stops half-way.
+///
+/// G8: the sibling test below covers a stack the orchestrator had never seen.
+/// This covers the case that actually happens more often — the stack exists,
+/// has a manifest that once applied cleanly, and a later deploy dies. The
+/// contract is narrow and easy to get wrong: mark where it stopped, and leave
+/// the rest alone. The manifest on record must stay the last one that FULLY
+/// applied, because that is what is running; overwriting it with the attempt
+/// that just failed would make drift detection compare the container against
+/// something that never ran.
+#[tokio::test]
+async fn s2_a_failed_redeploy_marks_the_step_without_rewriting_what_applied() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let sp = spec(110, "syncthing");
+
+    // First deploy: clean. This is what is running.
+    let first = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(
+        first.ok,
+        "the first deploy must succeed to set the baseline"
+    );
+    let before: serde_json::Value =
+        serde_json::from_str(&exec.file("/var/lib/homelab/state.json").unwrap()).unwrap();
+    let applied_hash = before["stacks"]["syncthing"]["applied_hash"].clone();
+    assert!(
+        before["stacks"]["syncthing"]["incomplete_step"].is_null(),
+        "a clean deploy leaves no incomplete marker: {}",
+        before
+    );
+
+    // Second deploy: dies at the pull.
+    exec.respond_always("docker compose pull", CmdOutput::failed(1, "boom"));
+    let second = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(!second.ok, "this deploy is meant to fail");
+
+    let after: serde_json::Value =
+        serde_json::from_str(&exec.file("/var/lib/homelab/state.json").unwrap()).unwrap();
+    let step = after["stacks"]["syncthing"]["incomplete_step"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the failed redeploy must name its step: {}", after));
+    assert!(!step.is_empty(), "the recorded step must say something");
+    assert_eq!(
+        after["stacks"]["syncthing"]["applied_hash"], applied_hash,
+        "the hash on record must still be the one that fully applied: {}",
+        after
+    );
+    assert!(
+        !after["stacks"]["syncthing"]["manifest"].is_null(),
+        "and the manifest must survive, or the stack goes invisible again: {}",
+        after
+    );
+}
+
 /// S2a · a deploy that stops half-way must still leave a record.
 ///
 /// The case, 2026-09-01: the media stack failed at "start apps", so the
@@ -1798,9 +1854,21 @@ async fn s2_a_failed_deploy_still_records_the_stack() {
     let state = exec
         .file("/var/lib/homelab/state.json")
         .expect("state was written even though the deploy failed");
+    // G8: the old version of this asserted `state.contains("incomplete_step")`,
+    // which the serialiser writes for every stack ever recorded — including as
+    // `null` — so it could not fail. Read the VALUE.
+    let parsed: serde_json::Value = serde_json::from_str(&state).expect("state must be valid json");
+    let step = parsed["stacks"]["syncthing"]["incomplete_step"]
+        .as_str()
+        .unwrap_or_else(|| {
+            panic!(
+                "the stack must exist in state and name the step it stopped at: {}",
+                state
+            )
+        });
     assert!(
-        state.contains("\"syncthing\"") && state.contains("incomplete_step"),
-        "the stack must exist in state and say where it stopped: {}",
+        !step.is_empty(),
+        "the recorded step must say something: {}",
         state
     );
     assert!(

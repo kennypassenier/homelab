@@ -406,6 +406,40 @@ written as part of passing it.
 | Form P1 · v1 latch archive | 2026-09-02 | remove it from the secrets repo | D106 |
 | **Phase 7 gate · 23 gaps** | 2026-09-02 | **22 × Dichten, 1 × Later (G6, the fact-gatherer's tests)**. He took none of the two 'accept as known limitation' recommendations: the quarterly restore drill (G14) and the register's 133 untested 'fixed' claims (G19) are both to be closed rather than written down as accepted | this table; per-gap rows below as they land |
 
+### The 23 gaps, one row each
+
+Kept here rather than in a chat log, because a list that only exists in a
+conversation is gone at the next compaction — and because this is the table
+that says how far Phase 7 actually is. Written as each gap lands.
+
+| Gap | What was missing | Status |
+|---|---|---|
+| G1 | saving one TUI setting silently wiped the others | dicht · F208 |
+| G2 | two update features that had never once run | dicht · F213 |
+| G3 | Kuma keyword monitors and the seeder had no tests | open |
+| G4 | a restore could quiesce a stack and leave it down | dicht · F207 |
+| G5 | the same restore never validated the snapshot id first | dicht · F207 |
+| G6 | the 325-line fact-gatherer feeding every nightly finding has no test | **later** (Kenny: closing it means rebuilding it to take an executor) |
+| G7 | a test whose comment described a test that did not exist | dicht · F209 |
+| G8 | `incomplete_step` written by the deploy, read by nobody | dicht · F220 |
+| G9 | `install_native` creates no container and places no secrets | open |
+| G10 | the real stack files are validated by nothing (8 of 13 need latch) | open |
+| G11 | three brakes that had never been pressed, and one silent skip | dicht · F210 |
+| G12 | cloning CT 997 and seeing it arrive in Prometheus + Loki | open |
+| G13 | the M2 and M5 drills | open |
+| G14 | no recurring restore drill exists | open — Kenny declined "accept as limitation" |
+| G15 | the nightly check skipped the nights it mattered most | dicht · F214 |
+| G16 | the notification fallback, and Y2's exception to it | open |
+| G17 | 94 manual checks printed at every deploy, answered by nobody | open · raised as F203 |
+| G18 | 16 of 46 apps were verified by nothing | dicht · F215 |
+| G19 | 133 register findings marked fixed with no test claim | open — Kenny declined "accept as limitation" |
+| G20 | eight commands existed and were documented nowhere | dicht · F212 |
+| G21 | two fleet-check branches nobody had ever run | dicht · F211 |
+| G22 | Jellyfin's hardware transcoding was verified by inspection only | dicht · F216 |
+| G23 | two measurements the register asserted and nobody had made | dicht · F217 |
+
+**13 of 23 closed, 9 open, 1 deferred by Kenny.**
+
 ## Scratch resources
 
 `199` for recipe rehearsals (M2, M7), created and destroyed per drill.

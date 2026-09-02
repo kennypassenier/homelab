@@ -875,3 +875,59 @@ fn a_deliberate_decision_never_raises_the_alarm_but_is_never_hidden_either() {
         "and the decision is not smuggled into the alarm to pad it out"
     );
 }
+
+/// G8: a half-applied stack is only useful if somebody is told. The field has
+/// been written since S2; until now nothing read it.
+mod incomplete_deploys {
+    use super::*;
+    use homelab_core::ops::fleetcheck::{evaluate_incomplete, Severity};
+
+    fn state_with(step: Option<&str>) -> HostState {
+        let mut st = HostState::default();
+        let s = homelab_core::state::StackState {
+            vmid: 118,
+            hostname: "118-app-drill".into(),
+            apps: Vec::new(),
+            applied_at: 0,
+            last_backup: 0,
+            applied_hash: String::new(),
+            manifest: None,
+            enabled: true,
+            native: None,
+            natives: Vec::new(),
+            incomplete_step: step.map(|x| x.to_string()),
+        };
+        st.stacks.insert("drill".into(), s);
+        st
+    }
+
+    #[test]
+    fn a_finished_deploy_says_nothing() {
+        assert!(evaluate_incomplete(&state_with(None)).is_empty());
+    }
+
+    #[test]
+    fn a_deploy_that_stopped_halfway_is_reported_with_the_step_it_stopped_at() {
+        let f = evaluate_incomplete(&state_with(Some("start apps")));
+        assert_eq!(f.len(), 1, "one stack, one finding");
+        assert_eq!(f[0].severity, Severity::Broken);
+        assert_eq!(f[0].subject, "drill");
+        assert!(
+            f[0].what.contains("start apps"),
+            "naming the step is the whole point: {}",
+            f[0].what
+        );
+        assert!(!f[0].remedy.is_empty(), "standing rule 11");
+    }
+
+    #[test]
+    fn the_full_round_carries_it_so_the_nightly_report_does_too() {
+        let st = state_with(Some("bootstrap"));
+        let findings = check(&st, &LiveFacts::default());
+        assert!(
+            findings.iter().any(|f| f.what.contains("bootstrap")),
+            "evaluate() must fan out to it, or the reader is wired to nothing again: {:?}",
+            findings
+        );
+    }
+}

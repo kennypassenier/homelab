@@ -401,6 +401,7 @@ pub fn evaluate(
     out.extend(evaluate_coverage(&live.coverage));
     out.extend(evaluate_boot(state, &live.boot));
     out.extend(evaluate_watched_backups(&live.watched_backups));
+    out.extend(evaluate_incomplete(state));
 
     for r in &live.routes {
         if !r.answered {
@@ -583,6 +584,40 @@ pub fn evaluate_watched_backups(facts: &[WatchedBackupFact]) -> Vec<Finding> {
             Some(_) => {}
         }
     }
+    out
+}
+
+/// G8: a stack whose last deploy stopped halfway, reported out loud.
+///
+/// `incomplete_step` has been written since S2 and read by nobody. That is
+/// the exact shape this whole audit keeps finding: a mechanism that runs,
+/// records the truth, and is wired to nothing. The record was added because
+/// the media stack failed at "start apps" and therefore did not exist as far
+/// as the orchestrator was concerned — 12 GB of configuration with no nightly
+/// backup, and nothing anywhere saying so. Writing the field fixed the
+/// backup; it did not make anyone aware. This does.
+///
+/// Severity is Broken rather than Drift on purpose: a half-applied stack is
+/// not a container that will bite later, it is one whose running state nobody
+/// has claimed. The remedy names the step, because "the deploy failed" a week
+/// ago is not something Kenny can act on and "it stopped at start apps" is.
+pub fn evaluate_incomplete(state: &HostState) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for (name, st) in &state.stacks {
+        let Some(step) = st.incomplete_step.as_ref() else {
+            continue;
+        };
+        out.push(Finding {
+            severity: Severity::Broken,
+            subject: name.clone(),
+            what: format!("its last deploy stopped at \"{}\" and never finished", step),
+            remedy: "run the deploy again and watch that step — until it completes, what runs \
+                     on the container and what the orchestrator has on record are two different \
+                     things, and only the record drives drift detection and retention"
+                .into(),
+        });
+    }
+    out.sort_by(|a, b| a.subject.cmp(&b.subject));
     out
 }
 

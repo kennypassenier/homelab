@@ -298,9 +298,14 @@ mod proof_ratchet {
         let has_long_snake = row
             .split(|c: char| !(c.is_ascii_lowercase() || c == '_'))
             .any(|w| w.len() >= 15 && w.contains('_'));
-        let says_none = row.contains("Consciously no")
-            || row.contains("consciously no")
-            || row.contains("no test, because");
+        // Case-insensitive on purpose: the sentence starts a clause as often
+        // as it starts a cell, and a guard that misses "No test, because"
+        // while accepting "no test, because" teaches people to phrase around
+        // it rather than to answer it.
+        let lower = row.to_lowercase();
+        let says_none = lower.contains("consciously no")
+            || lower.contains("no test, because")
+            || lower.contains("superseded");
         cites_something || has_long_snake || says_none
     }
 

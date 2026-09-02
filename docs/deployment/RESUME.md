@@ -73,11 +73,14 @@ says about itself.
 
 ## Fleet state after the migration, 2026-09-02 21:00
 
-`homelab check` reports exactly one **broken** finding across the whole
-fleet: `opnsense-config — holds no files at all`, which waits on Kenny adding
-"Diagnostics: Configuration History" to the `homelab-opnsense-backup` user.
-Everything else is drift from unanswered manual checks, which is the G17
-mechanism doing its job, plus one deliberate `noted` about the registry cache.
+**2026-09-03: `homelab check` reports NO broken findings at all.** The
+OPNsense backup works — Kenny put the privilege on the right user and four
+faults on our side were fixed after it (F259). Everything left is drift from
+unanswered manual checks, which is the G17 mechanism doing its job, plus one
+deliberate `noted` about the registry cache.
+
+Run the router backup on demand with `homelab backup-devices`; it also rides
+the nightly round in the host-meta slot.
 
 ## Also queued, in this order
 
@@ -91,8 +94,6 @@ mechanism doing its job, plus one deliberate `noted` about the registry cache.
 
 ## Waiting on Kenny (not on us)
 
-- **OPNsense**: add "Diagnostics: Configuration History" to user
-  `homelab-opnsense-backup`, or the router's own backup keeps failing (F205).
 - **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his command.
 - **Correction form** for the Jellyfin stream-check duplication, queued in
   `QUEUED_MINI_ROUNDS.md`.

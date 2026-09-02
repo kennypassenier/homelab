@@ -45,7 +45,7 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — v3.41.0 live on the host | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
+| Phase | 9 · Released — v3.42.2 live on the host | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
 
@@ -56,7 +56,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.41.0** (2026-09-02); 432 tests, CI green — and green now
+- **Released and live at v3.42.2** (2026-09-03); 433 tests, CI green — and green now
   means something: CI ran without `--locked` until that day, so it built
   whatever crates.io served rather than what the lockfile pins (F235).
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.
@@ -148,6 +148,9 @@ it is the resume point and is kept current as part of the work, not afterwards.
   failure (F222), half-deployed stacks (F220), and the Uptime Kuma seeder's
   verdict about monitors that outlived their stack (F243).
 - **almanac v1.5.0** live (F257).
+- **The router's own configuration is backed up** (F259), which it never was.
+  `homelab backup-devices` runs it on demand; it also rides the nightly round.
+  `homelab check` now reports no broken findings across the whole fleet.
 
 ## Project documents
 

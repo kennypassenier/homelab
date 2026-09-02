@@ -91,7 +91,7 @@ storage:
 
 # Order matters: apps start in this order, so the database precedes the
 # service that needs it.
-apps: [actual, stirling, paperless-db, paperless, promtail]
+apps: [actual, stirling, paperless-db, paperless]
 latch_secrets: [paperless, paperless-db, stirling]
 
 # Pushes traefik-routes.yml to the gateway's watched routes directory.

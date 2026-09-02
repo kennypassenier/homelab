@@ -114,7 +114,7 @@ restic restore latest --target /
 
 - hostname `105-app-downloader`, ip `10.10.10.5/24`
 - resources: 2 core(s), 2048 MiB RAM, 0 MiB swap, 10 GiB disk
-- apps: qbittorrent, promtail
+- apps: qbittorrent
 - recreate from scratch: `homelab deploy stacks/downloader` (or by hand per Layer 2)
 - data restore from: `…:qbittorrent-config`
 
@@ -170,7 +170,7 @@ restic restore latest --target /
 
 - hostname `114-app-paperwork`, ip `10.10.10.14/24`
 - resources: 4 core(s), 4096 MiB RAM, 0 MiB swap, 32 GiB disk
-- apps: actual, stirling, paperless-db, paperless, promtail
+- apps: actual, stirling, paperless-db, paperless
 - recreate from scratch: `homelab deploy stacks/paperwork` (or by hand per Layer 2)
 - data restore from: `…:actual-config`, `…:stirling-config`, `…:paperless-config`, `…:paperless-db-config`
 

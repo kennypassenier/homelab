@@ -87,7 +87,7 @@ data_mounts:
     mount_point: /mnt/data/12TB
     note: "CT 103's dataset; unused by this stack today, carried for parity"
 
-apps: [qbittorrent, promtail]
+apps: [qbittorrent]
 latch_secrets: [qbittorrent]
 
 gateway_route:

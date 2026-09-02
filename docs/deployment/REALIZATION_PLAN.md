@@ -378,13 +378,32 @@ notification.
 ## What waits for Kenny, and what for another project
 
 Named here so it is visible rather than discovered at execution time.
+Two rows left on 2026-09-02: the Jellyfin API key (T36) stopped being
+needed when D102 started reading it out of `jellyfin.db` on every deploy,
+and the OPNsense credentials went with the integration itself (D99).
 
 | Blocked on | What |
 |---|---|
-| Kenny | a Jellyfin API key (T36) · Cloudflare access (R5) · the D5 mirror deploy key · H2 OPNsense credentials |
+| Kenny | Cloudflare access (R5) · the D5 mirror deploy key |
 | the kyu project | release binaries, so the orchestrator can update it (T35, filed in the vault) |
 | the kyu-runner project | two config corrections (T44) |
 | notification-pipeline-v2 | releasing scratch container 191 (E5) |
+
+## Gate log (Phase 7 onward)
+
+Standing rule 5: from Phase 7 the outcome of every gate and mini-round
+lands here, not in a chat log and not in `CLAUDE.md`. One row per gate,
+written as part of passing it.
+
+| Gate / round | Date | What Kenny decided | Where it landed |
+|---|---|---|---|
+| Phase 6 → 7 | 2026-09-02 | — (no decision needed: M0–M9 all report DONE, so the loop is closed) | this table; `CLAUDE.md` phase row |
+| Form W1–W3 · swap | 2026-09-02 | swap to zero on all managed containers, one at a time with a check after each; investigate the host but change nothing | D95, F185, `HOST_SWAP.md` |
+| Form V1–V7 + C1–C9 · config fault | 2026-09-02 | apply the host.toml repair; keep the warning non-fatal; guard the key list with a test; merge the front page; pin Jellyfin | D96–D103, F186–F195 |
+| Form K1–K9 · file ownership | 2026-09-02 | generated files take their directory's owner; backups never inside a mounted config dir | F190, measured closed in M1 |
+| Form L1–L9 · key loss | 2026-09-02 | the deploy keeps the copy, the nightly round checks it, Kenny holds the escrow passphrase | F196, F199, F201, D104, D105 |
+| Form O1–O2 · router backup | 2026-09-02 | watch it from the nightly fleet check, declare the path in host.toml | F198 |
+| Form P1 · v1 latch archive | 2026-09-02 | remove it from the secrets repo | D106 |
 
 ## Scratch resources
 

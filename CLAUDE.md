@@ -45,9 +45,9 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — v3.34.0 live on the host | **5 · Realization plan — M8 DONE; the whole fleet is orchestrator-managed** |
+| Phase | 9 · Released — v3.38.0 live on the host | **7 · Hardening — all nine milestones M0–M9 done; the loop is closed, the audit is not** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
-| Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there |
+| Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
 
 **The deployment project is the active work.** It brings the whole fleet under
 the orchestrator: one inventory, one target layout, one proven backup, then

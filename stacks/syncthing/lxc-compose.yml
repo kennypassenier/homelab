@@ -51,9 +51,7 @@ storage:
     # renamed to `syncthing` in M8 without abandoning its backup history.
     app: syncthing
 
-apps:
-  - syncthing
-  - promtail
+apps: [syncthing]
 
 # Web GUI behind the existing traefik on CT 104 (Cloudflare Access gates it).
 # The sync protocol itself (22000/21027) stays LAN-only, per the vault note.

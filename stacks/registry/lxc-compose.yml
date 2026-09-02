@@ -73,7 +73,7 @@ storage:
       Measured 2026-09-02: backing it up cost 1381 MB and 457 s per night,
       a fifth of the whole round, for data that protects nothing
 
-apps: [registry, promtail]
+apps: [registry]
 
 # No route: this is spoken to by Docker daemons on the LAN, never by a
 # browser from outside, and it holds no secrets worth reaching for.

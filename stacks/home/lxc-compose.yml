@@ -64,7 +64,7 @@ storage:
     host_owner_uid: 100000
     app: homepage
 
-apps: [homepage, promtail]
+apps: [homepage]
 latch_secrets: [homepage]
 
 gateway_route:

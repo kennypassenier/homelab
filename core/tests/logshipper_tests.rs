@@ -137,3 +137,98 @@ fn alloy_is_given_read_access_to_all_three_sources() {
 fn the_config_goes_where_the_packaged_unit_already_looks() {
     assert_eq!(CONFIG_PATH, "/etc/alloy/config.alloy");
 }
+
+/// The fault the first live deploy produced: Alloy started, said nothing was
+/// wrong, the deploy reported success, and Loki answered 404 to every batch.
+mod push_endpoint {
+    use homelab_core::ops::logshipper::{config, push_url};
+
+    #[test]
+    fn the_base_address_becomes_the_push_endpoint() {
+        assert_eq!(
+            push_url("http://10.10.10.4:3100"),
+            "http://10.10.10.4:3100/loki/api/v1/push",
+            "host.toml holds the base address, and pushing there is a 404"
+        );
+        assert_eq!(
+            push_url("http://10.10.10.4:3100/"),
+            "http://10.10.10.4:3100/loki/api/v1/push"
+        );
+    }
+
+    #[test]
+    fn an_address_that_already_names_the_path_is_left_alone() {
+        let full = "http://10.10.10.4:3100/loki/api/v1/push";
+        assert_eq!(push_url(full), full, "never second-guess an explicit one");
+    }
+
+    #[test]
+    fn the_generated_config_carries_the_push_path_and_not_the_base() {
+        let c = config("kyu", "109-app-kyu", "http://10.10.10.4:3100");
+        assert!(
+            c.contains("url = \"http://10.10.10.4:3100/loki/api/v1/push\""),
+            "{}",
+            c
+        );
+    }
+}
+
+/// "The service started" is not "the logs are shipping".
+mod delivery_verdict {
+    use homelab_core::ops::logshipper::{delivery, Delivery};
+
+    const DROPPING: &str = r#"
+# HELP loki_write_sent_bytes_total
+loki_write_sent_bytes_total{component_id="loki.write.default"} 0
+loki_write_dropped_bytes_total{component_id="loki.write.default"} 48213
+"#;
+    const SHIPPING: &str = r#"
+loki_write_sent_bytes_total{component_id="loki.write.default"} 91240
+loki_write_dropped_bytes_total{component_id="loki.write.default"} 0
+"#;
+    const QUIET: &str = r#"
+loki_write_sent_bytes_total{component_id="loki.write.default"} 0
+loki_write_dropped_bytes_total{component_id="loki.write.default"} 0
+"#;
+
+    /// The exact state the first live deploy was in while reporting success.
+    #[test]
+    fn dropped_bytes_mean_the_far_end_refused_them() {
+        assert_eq!(delivery(DROPPING), Delivery::Dropping { dropped: 48213 });
+    }
+
+    #[test]
+    fn sent_bytes_with_none_dropped_is_the_only_good_answer() {
+        assert_eq!(delivery(SHIPPING), Delivery::Shipping { sent: 91240 });
+    }
+
+    /// Nothing sent and nothing dropped is genuinely ambiguous, and saying so
+    /// beats picking the flattering reading.
+    #[test]
+    fn nothing_either_way_is_reported_as_nothing_either_way() {
+        assert_eq!(delivery(QUIET), Delivery::Quiet);
+    }
+
+    #[test]
+    fn no_answer_is_not_a_healthy_answer() {
+        assert!(matches!(delivery(""), Delivery::Unknown(_)));
+        assert!(matches!(delivery("   \n"), Delivery::Unknown(_)));
+    }
+
+    /// Dropping wins over sending: a shipper that delivered something and
+    /// then started losing batches is broken, not fine.
+    #[test]
+    fn dropping_outranks_sending() {
+        let both = "loki_write_sent_bytes_total{a=\"1\"} 100\n\
+                    loki_write_dropped_bytes_total{a=\"1\"} 5\n";
+        assert_eq!(delivery(both), Delivery::Dropping { dropped: 5 });
+    }
+
+    #[test]
+    fn several_endpoints_are_summed_rather_than_the_first_one_taken() {
+        let two = "loki_write_sent_bytes_total{a=\"1\"} 10\n\
+                   loki_write_sent_bytes_total{a=\"2\"} 32\n\
+                   loki_write_dropped_bytes_total{a=\"1\"} 0\n";
+        assert_eq!(delivery(two), Delivery::Shipping { sent: 42 });
+    }
+}

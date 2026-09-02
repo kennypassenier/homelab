@@ -1855,7 +1855,41 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     ));
                     return Ok(StepOutcome::Unchanged);
                 }
-                log_info(format!("[logs] Alloy shipping {} → Loki", m.stack_name));
+                // "It started" is not "it is shipping". The first live run
+                // of this step printed exactly that line while every batch
+                // was dropped with a 404 and nothing reached Loki, so the
+                // step now asks Alloy what it managed to deliver.
+                exec.sleep_ms(12_000).await;
+                let metrics = pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!(
+                        "curl -s -m 5 {} 2>/dev/null || true",
+                        crate::ops::logshipper::METRICS_URL
+                    ),
+                    30,
+                )
+                .await?;
+                match crate::ops::logshipper::delivery(&metrics.stdout) {
+                    crate::ops::logshipper::Delivery::Shipping { sent } => log_info(format!(
+                        "[logs] Alloy delivered {} bytes to Loki for {}",
+                        sent, m.stack_name
+                    )),
+                    crate::ops::logshipper::Delivery::Dropping { dropped } => log_warn(format!(
+                        "[logs] Alloy is DROPPING {}'s logs ({} bytes) — Loki refused them; \
+                         check loki_url in host.toml and `journalctl -u alloy` on {}",
+                        m.stack_name, dropped, m.hostname
+                    )),
+                    crate::ops::logshipper::Delivery::Quiet => log_info(format!(
+                        "[logs] Alloy started on {} and has shipped nothing yet — normal on a \
+                         quiet container, wrong on a busy one; check Loki for stack=\"{}\"",
+                        m.hostname, m.stack_name
+                    )),
+                    crate::ops::logshipper::Delivery::Unknown(why) => log_warn(format!(
+                        "[logs] Alloy on {} could not be asked whether it is shipping ({})",
+                        m.hostname, why
+                    )),
+                }
             }
             Ok(if fresh || changed {
                 StepOutcome::Changed

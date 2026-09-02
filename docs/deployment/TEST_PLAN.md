@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**396 tests across 23 suites.**
+**405 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -230,6 +230,15 @@ C1/C2 · the replacement for a log shipper that reached end of life.
 - `the_package_comes_from_a_signed_repository` — The apt route is the point: it is what keeps the shipper patched, which is the whole reason for leaving promtail behind.
 - `alloy_is_given_read_access_to_all_three_sources` — A shipper that cannot read the files it is pointed at delivers nothing and reports itself healthy — the fault this whole migration exists to escape.
 - `the_config_goes_where_the_packaged_unit_already_looks`
+- `the_base_address_becomes_the_push_endpoint`
+- `an_address_that_already_names_the_path_is_left_alone`
+- `the_generated_config_carries_the_push_path_and_not_the_base`
+- `dropped_bytes_mean_the_far_end_refused_them` — The exact state the first live deploy was in while reporting success.
+- `sent_bytes_with_none_dropped_is_the_only_good_answer`
+- `nothing_either_way_is_reported_as_nothing_either_way` — Nothing sent and nothing dropped is genuinely ambiguous, and saying so beats picking the flattering reading.
+- `no_answer_is_not_a_healthy_answer`
+- `dropping_outranks_sending` — Dropping wins over sending: a shipper that delivered something and then started losing batches is broken, not fine.
+- `several_endpoints_are_summed_rather_than_the_first_one_taken`
 
 ### `core/tests/m4_ops_tests.rs`
 

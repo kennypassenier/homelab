@@ -68,10 +68,13 @@ boot:
   onboot: true
   order: 50
 
-# No /appdata: adoption never bind-mounts, because it must not restart a
-# running service to take ownership of it. The services' state lives inside
-# the container at /var/lib/kyu and /etc/kyu, and C7's nightly run reaches it
-# with `pct exec tar | restic --stdin`.
+# Obsolete text removed 2026-09-02 (F204): the block that stood here said
+# "No /appdata: adoption never bind-mounts" and named /var/lib/kyu and
+# /etc/kyu as where the state lives. The migration of 2026-09-01 moved it and
+# added the paragraph below without deleting the one above, so the file
+# contradicted itself in consecutive lines. Measured before removing:
+# /var/lib/kyu and /etc/kyu do not exist inside CT 109, the state is 6.5 MB
+# under /appdata/kyu/kyu-config, and `pct config 109` shows all three mounts.
 # Data and configuration on the host, bind-mounted in, so destroying this
 # container costs nothing and the normal backup reaches them — the same
 # protection every docker stack has (Kenny, P1 2026-08-31). One directory per

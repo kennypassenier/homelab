@@ -232,3 +232,21 @@ loki_write_dropped_bytes_total{component_id="loki.write.default"} 0
         assert_eq!(delivery(two), Delivery::Shipping { sent: 42 });
     }
 }
+
+/// Alloy names a job after the component that produced it, so the journal
+/// arrived as `job="loki.source.journal.journal"` on the first live run.
+/// The dashboards filter on `job`, so the label has to be forced.
+#[test]
+fn the_journal_job_label_is_forced_and_not_left_to_alloy() {
+    let c = config("kyu", "109-app-kyu", "http://10.10.10.4:3100");
+    let relabel = c
+        .split("loki.relabel \"journal\"")
+        .nth(1)
+        .expect("the journal relabel block must exist");
+    assert!(
+        relabel.contains("target_label = \"job\"")
+            && relabel.contains("replacement  = \"systemd-journal\""),
+        "without this the job label is the component's name:\n{}",
+        relabel
+    );
+}

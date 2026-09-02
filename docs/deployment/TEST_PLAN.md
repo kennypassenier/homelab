@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**405 tests across 23 suites.**
+**406 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -239,6 +239,7 @@ C1/C2 · the replacement for a log shipper that reached end of life.
 - `no_answer_is_not_a_healthy_answer`
 - `dropping_outranks_sending` — Dropping wins over sending: a shipper that delivered something and then started losing batches is broken, not fine.
 - `several_endpoints_are_summed_rather_than_the_first_one_taken`
+- `the_journal_job_label_is_forced_and_not_left_to_alloy` — Alloy names a job after the component that produced it, so the journal arrived as `job="loki.source.journal.journal"` on the first live run.
 
 ### `core/tests/m4_ops_tests.rs`
 

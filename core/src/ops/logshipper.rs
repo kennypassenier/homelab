@@ -139,6 +139,14 @@ loki.relabel "journal" {{
     source_labels = ["__journal__systemd_unit"]
     target_label  = "unit"
   }}
+  // Forced, not passed as a label: Alloy names the job after the component
+  // that produced it, so `loki.source.journal.journal` lands where the
+  // dashboards expect `systemd-journal`. Measured on the first live run
+  // (F255) — everything else was right and this one label was not.
+  rule {{
+    target_label = "job"
+    replacement  = "systemd-journal"
+  }}
 }}
 
 // ── The system log file, as promtail read it ─────────────────────────────

@@ -59,6 +59,19 @@ pub fn host_monitors(stacks: &[(String, String)]) -> Vec<Monitor> {
 /// same reasoning as the orphan FILES a deploy reports and never removes
 /// (Kenny, form H2b).
 pub fn stale_monitors(existing: &[String], stacks: &[(String, String)]) -> Vec<String> {
+    // F175, second site. An empty fleet list is almost never "the fleet has
+    // no containers" — it is "the fleet could not be read". Judging against
+    // it declares every host monitor stale, which is what the Python seeder
+    // did on its first live run: eleven warnings about stacks that all
+    // exist, because the generated file had not been written yet.
+    //
+    // A genuinely empty fleet would make every host monitor stale too, and
+    // that answer would be correct — but it is so much rarer than the
+    // failure that refusing to judge is the better trade. Nothing is lost by
+    // waiting for a reading: this function only ever reports.
+    if stacks.is_empty() {
+        return Vec::new();
+    }
     existing
         .iter()
         .filter(|name| name.starts_with("host · "))

@@ -105,3 +105,31 @@ fn a_stack_name_with_a_quote_in_it_cannot_break_the_file() {
         .expect("an operator-typed stack name must not produce unparseable JSON");
     assert_eq!(v["host_monitors"][0]["name"], "host · we\"ird\\one");
 }
+
+/// F175, the second site of the same fault.
+///
+/// The Python seeder read a missing generated file as an empty fleet and
+/// reported eleven live stacks as stale on its first real run. This function
+/// had the identical shape and was not found until the correction form asked
+/// where else the fault sat — which is exactly what that field is for.
+///
+/// covers: F175
+#[test]
+fn an_unreadable_fleet_makes_nothing_stale() {
+    let existing = vec![
+        "host · media".to_string(),
+        "host · gateway".to_string(),
+        "media · jellyfin".to_string(),
+    ];
+    assert!(
+        stale_monitors(&existing, &[]).is_empty(),
+        "an empty fleet list means the fleet could not be read, not that \
+         every container disappeared"
+    );
+    // With a real reading it still judges — the guard must not have turned
+    // the function off.
+    assert_eq!(
+        stale_monitors(&existing, &[("gateway".into(), "10.10.10.4/24".into())]),
+        vec!["host · media".to_string()]
+    );
+}

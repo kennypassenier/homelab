@@ -426,7 +426,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | G10 | the real stack files are validated by nothing (8 of 13 need latch) | dicht · F224 (structureel; de latch-helft blijft buiten de tests) |
 | G11 | three brakes that had never been pressed, and one silent skip | dicht · F210 |
 | G12 | cloning CT 997 and seeing it arrive in Prometheus + Loki | dicht · F225 (live gedrild 2026-09-02) |
-| G13 | the M2 and M5 drills | M2 gedrild · F228 (gefaald, en dat is het resultaat); M5 open |
+| G13 | the M2 and M5 drills | M2 gedrild · F228 → gedicht door F232; M5's derde punt gebouwd · F233 |
 | G14 | no recurring restore drill exists | dicht · F229 |
 | G15 | the nightly check skipped the nights it mattered most | dicht · F214 |
 | G16 | the notification fallback, and Y2's exception to it | dicht · F222 (F223 wacht op een HA-webhook van Kenny) |
@@ -438,7 +438,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | G22 | Jellyfin's hardware transcoding was verified by inspection only | dicht · F216 |
 | G23 | two measurements the register asserted and nobody had made | dicht · F217 |
 
-**20 of 23 closed, 2 open, 1 deferred by Kenny.**
+**21 of 23 closed, 1 open, 1 deferred by Kenny.**
 
 ### Form A1-A7 · the four remaining gaps, answered 2026-09-02
 

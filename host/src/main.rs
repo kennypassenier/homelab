@@ -68,6 +68,12 @@ struct FileConfig {
     /// warning survives HA being the thing that is broken — and the hub
     /// requires a token where the HA webhook did not.
     notify_auth_bearer: Option<String>,
+    /// A7: stacks whose automatic update waits for the television.
+    ///
+    /// Kenny chose fail closed (form A7): a media server that does not answer
+    /// means the update is skipped, not that nobody is watching.
+    #[serde(default)]
+    stream_guards: Vec<StreamGuard>,
     /// G14: how long a passed restore drill counts for. B3 says quarterly;
     /// the default is 90 days. Kenny's, not the author's — a house that
     /// changes little wants it longer, one being rebuilt wants it shorter.
@@ -181,6 +187,11 @@ struct Config {
     /// that view is the settings the CLIENT can read back, and a secret does
     /// not belong in a screen. ssh-edited only, like exec_enabled.
     notify_auth_bearer: Option<String>,
+    /// A7: stacks whose automatic update waits for the television.
+    ///
+    /// Kenny chose fail closed (form A7): a media server that does not answer
+    /// means the update is skipped, not that nobody is watching.
+    stream_guards: Vec<StreamGuard>,
     /// G14: how long a passed restore drill counts for. B3 says quarterly;
     /// the default is 90 days. Kenny's, not the author's — a house that
     /// changes little wants it longer, one being rebuilt wants it shorter.
@@ -278,6 +289,7 @@ const KNOWN_TOP: &[&str] = &[
     "backup_hour",
     "notify_webhook",
     "notify_auth_bearer",
+    "stream_guards",
     "restore_drill_interval_s",
     "notify_fallback_webhook",
     "notify_fallback_auth_bearer",
@@ -429,6 +441,7 @@ fn load_config() -> Config {
         config_path: path,
         exec_enabled: file.exec_enabled.unwrap_or(false),
         notify_auth_bearer: file.notify_auth_bearer.clone(),
+        stream_guards: file.stream_guards.clone(),
         restore_drill_interval_s: file
             .restore_drill_interval_s
             .unwrap_or(homelab_core::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S),
@@ -529,6 +542,10 @@ fn render_settings_toml(
         // G14: Kenny's interval for the restore drill. A save that dropped
         // it would quietly reset the rehearsal to the default — not
         // dangerous, and exactly the kind of silent revert F208 was about.
+        // A7: losing this in a settings save would let an update restart
+        // Jellyfin mid-episode and nothing would say why. F208's lesson.
+        #[serde(skip_serializing_if = "<[_]>::is_empty")]
+        stream_guards: &'a [StreamGuard],
         #[serde(skip_serializing_if = "Option::is_none")]
         restore_drill_interval_s: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -594,6 +611,7 @@ fn render_settings_toml(
         retention: &settings.retention,
         exec_enabled: config.exec_enabled,
         notify_auth_bearer: config.notify_auth_bearer.as_ref(),
+        stream_guards: &config.stream_guards,
         restore_drill_interval_s: Some(config.restore_drill_interval_s),
         notify_fallback_webhook: config.notify_fallback_webhook.as_ref(),
         notify_fallback_auth_bearer: config.notify_fallback_auth_bearer.as_ref(),
@@ -925,6 +943,12 @@ port = 5003
     #[test]
     fn settings_render_keeps_every_config_field() {
         let config = Config {
+            stream_guards: vec![StreamGuard {
+                stack: "media".into(),
+                url: "http://10.10.10.6:8096/Sessions".into(),
+                token_file: "/var/lib/homelab/secrets/media/jellyfin-sessions.token".into(),
+                header: "X-Emby-Token".into(),
+            }],
             restore_drill_interval_s: 90 * 24 * 3600,
             notify_fallback_webhook: Some("http://10.10.5.101:8123/api/webhook/homelab".into()),
             notify_fallback_auth_bearer: None,
@@ -1002,6 +1026,12 @@ port = 5003
         assert_eq!(
             parsed.notify_fallback_webhook.as_deref(),
             Some("http://10.10.5.101:8123/api/webhook/homelab")
+        );
+        // A7: and the stream guard, or the first settings save lets an update
+        // restart Jellyfin mid-episode with nothing saying why.
+        assert_eq!(
+            parsed.stream_guards.first().map(|g| g.url.as_str()),
+            Some("http://10.10.10.6:8096/Sessions")
         );
         assert_eq!(parsed.backup_hour, Some(4));
         // E8: settings saves must not drop the zfs jobs (same class of bug
@@ -1963,6 +1993,76 @@ async fn run_restore_drill(
     outcome
 }
 
+/// A7: one stack's "is anybody watching" question.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct StreamGuard {
+    /// Which stack's automatic update this holds back.
+    stack: String,
+    /// The sessions endpoint, e.g. `http://10.10.10.6:8096/Sessions`.
+    url: String,
+    /// File holding the API token, 0600 in the vault. A path rather than the
+    /// token itself, for the same reason the router backup takes one: a
+    /// secret in `host.toml` is a secret in every settings save and every
+    /// screenshot of it.
+    token_file: String,
+    /// Header the token goes in. Jellyfin uses `X-Emby-Token`.
+    #[serde(default = "default_stream_header")]
+    header: String,
+}
+
+fn default_stream_header() -> String {
+    "X-Emby-Token".into()
+}
+
+/// Ask the media server, and answer the way form A7 decided: closed.
+async fn stream_gate(exec: &RealExecutor, g: &StreamGuard) -> homelab_core::ops::streamguard::Gate {
+    use homelab_core::ops::streamguard::{gate, parse_sessions, StreamFact};
+    let token = match exec.read_file(&g.token_file).await {
+        Ok(t) if !t.trim().is_empty() => t.trim().to_string(),
+        _ => {
+            return gate(&StreamFact {
+                error: Some(format!("no token in {}", g.token_file)),
+                ..Default::default()
+            })
+        }
+    };
+    // The header goes through a file so the token never appears in argv,
+    // which /proc makes world-readable (the same reasoning as the router
+    // backup's `curl -K`).
+    let hdr = format!(
+        "header = \"{}: {}\"\nurl = \"{}\"\n",
+        g.header, token, g.url
+    );
+    let cfg = "/run/homelab-streamguard.conf";
+    if exec.write_file(cfg, &hdr, 0o600).await.is_err() {
+        return gate(&StreamFact {
+            error: Some("could not stage the request".into()),
+            ..Default::default()
+        });
+    }
+    let out = exec
+        .run(&Cmd::new("curl", &["-s", "-m", "8", "-K", cfg], 20))
+        .await;
+    let _ = exec.run(&Cmd::new("rm", &["-f", cfg], 10)).await;
+    match out {
+        Ok(o) if o.success() => match parse_sessions(&o.stdout) {
+            Ok(f) => gate(&f),
+            Err(e) => gate(&StreamFact {
+                error: Some(e),
+                ..Default::default()
+            }),
+        },
+        Ok(o) => gate(&StreamFact {
+            error: Some(format!("curl exited {}", o.code)),
+            ..Default::default()
+        }),
+        Err(e) => gate(&StreamFact {
+            error: Some(e.to_string()),
+            ..Default::default()
+        }),
+    }
+}
+
 /// H12: bearer check, extracted for testing.
 fn bearer_ok(header: Option<&str>, token: &str) -> bool {
     header
@@ -2243,6 +2343,26 @@ async fn scheduler_loop(state: AppState) {
                         rec.last_backup = now;
                     }
                     let _ = store.save(s).await;
+                }
+            }
+            // A7: ask the television first.
+            if let Some(g) = state.config.stream_guards.iter().find(|g| g.stack == name) {
+                if let homelab_core::ops::streamguard::Gate::Skip(why) = stream_gate(&exec, g).await
+                {
+                    tracing::warn!("scheduled update for {} skipped :: {}", name, why);
+                    notify_raw(
+                        &state,
+                        &exec,
+                        homelab_core::notify::op_payload(
+                            "scheduled-update",
+                            &name,
+                            true,
+                            Some(&format!("skipped: {}", why)),
+                            VERSION,
+                        ),
+                    )
+                    .await;
+                    continue;
                 }
             }
             let m2 = manifest.clone();

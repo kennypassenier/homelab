@@ -8,6 +8,12 @@ Two separate pieces of work need this key, and they need different
 privileges. **Both are listed so the choice of how much to grant is a real
 choice**, not a single take-it-or-leave-it bundle.
 
+> **Note, 2026-09-02.** The orchestrator no longer uses this key at all: form
+> V4 removed the OPNsense integration (D99) after measuring that it bought
+> nothing. This page stays as a reference for how such a key is created and
+> which privilege does what — the `homelab-api` account itself is Kenny's and
+> serves other purposes.
+
 ## What the key is used for
 
 ### 1 · H2 — static addresses, already built and switched off

@@ -78,15 +78,15 @@ This layer did not exist until 2026-09-02. The runbook named the
 per-stack repositories and never mentioned the one holding the keys
 to all of them, and `host.toml` was in no backup at all.
 
-**One path is not on the root disk, and the ORDER matters.**
-`/appdata/paperwork/paperless-config` is a separate ZFS dataset
-(`HDD2TB/paperless-config`) mounted at that path; every other
-`/appdata/<stack>` is a plain directory on `pve-root`. Mount that
-dataset BEFORE restoring anything into it. Restore first and the
-files land on the root disk, and mounting afterwards hides them —
-you would be looking at a mount that came from somewhere else and
-believe the restore worked. It also already has a ZFS snapshot and
-an E8 replica, so check those before reaching for Google Drive.
+Every `/appdata/<stack>` is a plain directory on `pve-root`, so a
+single restic restore covers all of them and the order does not
+matter. That was NOT true until 2026-09-02:
+`/appdata/paperwork/paperless-config` was a mounted ZFS dataset, and
+restoring into it before mounting would have hidden the result
+(F182). Kenny levelled it with the rest; the old dataset is frozen at
+`/HDD2TB/paperless-config-frozen` with `canmount=off` so it can never
+come back over that path.
+
 
 ## Layer 4 — Restore a stack's data
 

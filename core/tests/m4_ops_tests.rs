@@ -2919,3 +2919,78 @@ async fn e2_an_unknown_snapshot_id_is_refused_before_anything_is_stopped() {
         err
     );
 }
+
+/// covers: F209
+///
+/// G7 of the Phase-7 gate. There was a test whose comment said it "drives
+/// the real deploy step with an asker that says yes, and again with one that
+/// says nothing". It did neither: it defined two little types, asked them
+/// directly, and asserted on a literal it had written three lines earlier.
+/// `deploy` was never called, so the `Answer::Allow` branch — the one that
+/// runs when Kenny is sitting there and says go ahead — was executed by no
+/// test at all. Folding it into the error arm would have broken nothing.
+///
+/// This is that test's twin, and it drives the deploy for real.
+#[tokio::test]
+async fn t69_an_operator_who_says_yes_lets_the_deploy_finish() {
+    use homelab_core::ask::{Answer, Asker, Question};
+    use homelab_core::ops::deploy::deploy;
+
+    struct Yes;
+    #[async_trait::async_trait]
+    impl Asker for Yes {
+        async fn ask(&self, _q: &Question) -> Answer {
+            Answer::Allow
+        }
+    }
+
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.respond_always("pct config 108", CmdOutput::ok("hostname: 108-app-test\n"));
+    exec.respond_always("pct config 999", CmdOutput::ok("unprivileged: 1"));
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always("test -d", CmdOutput::ok("yes\n"));
+    // The same fall Kenny described: 29 to the baseline, 28 afterwards.
+    exec.enqueue("echo 28", CmdOutput::ok("29\n"));
+    exec.respond_always("echo 28", CmdOutput::ok("28\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut c = ctx(&exec, &sink, &j);
+    c.asker = &Yes;
+
+    let mut sp = deploy_spec(manifest(108, "test"));
+    let mut checks = std::collections::BTreeMap::new();
+    checks.insert(
+        "app".to_string(),
+        homelab_core::checks::ServiceChecks {
+            checks: vec![homelab_core::checks::Check {
+                name: "routes".into(),
+                command: "echo 28".into(),
+                expect: homelab_core::checks::Expect::NeverDecreases,
+                layer: homelab_core::checks::Layer::Application,
+                blind_spot: Some("counts routes, not whether any of them answers".into()),
+            }],
+            manual: Vec::new(),
+        },
+    );
+    sp.checks = checks;
+
+    let report = deploy(&c, &sp).await;
+
+    assert!(
+        report.ok,
+        "an operator who says yes must not fail the deploy: {:?}",
+        report.error
+    );
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("allowed by the operator")),
+        "and the deploy must say out loud that a human allowed it, so the new \
+         baseline is not a silent change: {:?}",
+        sink.lines()
+    );
+}

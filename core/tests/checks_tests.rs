@@ -241,10 +241,16 @@ async fn a_question_nobody_answers_never_reads_as_permission() {
 /// T69, the half that matters: the mechanism is actually wired to the case
 /// Kenny named.
 ///
-/// A test that only proves `Unattended` answers correctly would leave a
-/// question nobody ever asks — which is the fault shape this whole project
-/// keeps finding. So this drives the real deploy step with an asker that
-/// says yes, and again with one that says nothing.
+/// **What this test does and does not do** (corrected 2026-09-02, F209). It
+/// checks the three answers in isolation: yes continues, no does not, and
+/// silence is not a yes. That last one is the one that matters at 04:00.
+///
+/// It does NOT drive a deploy, and its comment used to claim it did — which
+/// meant the `Answer::Allow` branch of the real deploy was executed by no
+/// test at all, while a reader of this file would have concluded otherwise.
+/// The deploy-driving twins live in `m4_ops_tests.rs`:
+/// `t69_a_regressed_check_fails_the_deploy_when_nobody_is_watching` and
+/// `t69_an_operator_who_says_yes_lets_the_deploy_finish`.
 ///
 /// covers: F156
 #[tokio::test]

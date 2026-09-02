@@ -421,3 +421,83 @@ fn a_second_route_to_the_same_door_is_not_a_second_tile() {
         out
     );
 }
+
+/// covers: F197
+///
+/// The bug this catches shipped once and no test saw it: every assertion
+/// asked whether a line was PRESENT, not where it sat. The overlay's lines
+/// were emitted at four spaces where a service's fields belong at eight, so
+/// the file was invalid YAML that read fine to a human.
+#[test]
+fn overlay_lines_sit_under_their_service_not_beside_it() {
+    use homelab_core::ops::homepage::parse_overlay;
+    let ov = parse_overlay(include_str!(
+        "../../stacks/home/homepage/services-overlay.yml"
+    ));
+    let out = services_yaml(
+        &[(
+            "media".into(),
+            vec![Entry {
+                app: "jellyfin".into(),
+                host: "fin.kp-soft.dev".into(),
+                backend: Some("http://10.10.10.6:8096".into()),
+            }],
+        )],
+        Some(&ov),
+        &Default::default(),
+    );
+    for line in out.lines() {
+        let t = line.trim_start();
+        if t.starts_with("icon:") || t.starts_with("description:") || t.starts_with("widget:") {
+            let indent = line.len() - t.len();
+            assert_eq!(
+                indent, 8,
+                "a service's fields belong at eight spaces, got {}: {:?}",
+                indent, line
+            );
+        }
+    }
+}
+
+/// covers: F197
+///
+/// Media is first because Kenny asked for it, and within Media Jellyfin is
+/// first for the same reason. Without an explicit order the tiles follow
+/// whichever stack sorted first, which put qBittorrent (stack `downloader`)
+/// above Jellyfin (stack `media`).
+#[test]
+fn tiles_follow_the_order_written_in_the_overlay() {
+    use homelab_core::ops::homepage::parse_overlay;
+    let ov = parse_overlay(include_str!(
+        "../../stacks/home/homepage/services-overlay.yml"
+    ));
+    let out = services_yaml(
+        &[
+            (
+                "downloader".into(),
+                vec![Entry {
+                    app: "qbittorrent".into(),
+                    host: "qbit.kp-soft.dev".into(),
+                    backend: None,
+                }],
+            ),
+            (
+                "media".into(),
+                vec![Entry {
+                    app: "jellyfin".into(),
+                    host: "fin.kp-soft.dev".into(),
+                    backend: None,
+                }],
+            ),
+        ],
+        Some(&ov),
+        &Default::default(),
+    );
+    let jf = out.find("- Jellyfin:").expect("jellyfin missing");
+    let qb = out.find("- qBittorrent:").expect("qbittorrent missing");
+    assert!(
+        jf < qb,
+        "the overlay puts Jellyfin above qBittorrent; the stack order must not win:\n{}",
+        out
+    );
+}

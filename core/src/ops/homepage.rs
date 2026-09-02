@@ -389,14 +389,18 @@ pub fn services_yaml(
     };
 
     // group -> rendered service blocks, in the order they are produced.
-    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
-    let push = |groups: &mut Vec<(String, Vec<String>)>, group: &str, body: String| match groups
-        .iter_mut()
-        .find(|(g, _)| g == group)
-    {
-        Some((_, v)) => v.push(body),
-        None => groups.push((group.to_string(), vec![body])),
-    };
+    // Within a group, the order is the overlay's — the order Kenny wrote
+    // and therefore reads. Without this the order is whichever stack came
+    // first alphabetically, which put qBittorrent above Jellyfin in Media
+    // because `downloader` sorts before `media`.
+    let mut groups: Vec<(String, Vec<(usize, String)>)> = Vec::new();
+    let push =
+        |groups: &mut Vec<(String, Vec<(usize, String)>)>, group: &str, body: (usize, String)| {
+            match groups.iter_mut().find(|(g, _)| g == group) {
+                Some((_, v)) => v.push(body),
+                None => groups.push((group.to_string(), vec![body])),
+            }
+        };
 
     let mut used: Vec<String> = Vec::new();
     // Two routers may forward to the same door — `almanac` and
@@ -411,6 +415,11 @@ pub fn services_yaml(
                 continue;
             }
             seen_href.push(href_key(&href));
+            let rank = ov
+                .blocks
+                .iter()
+                .position(|b| b.href == href_key(&href))
+                .unwrap_or(usize::MAX);
             let blk = ov.blocks.iter().find(|b| b.href == href_key(&href));
             if blk.is_some_and(|b| b.hide) {
                 used.push(href_key(&href));
@@ -438,7 +447,12 @@ pub fn services_yaml(
                         if l.trim().is_empty() {
                             continue;
                         }
-                        body.push_str(&format!("    {}\n", l));
+                        // Eight spaces: a service's fields sit two levels in
+                        // under `    - Name:`. Emitted at four this was
+                        // invalid YAML that no test caught, because every
+                        // assertion asked whether the text was PRESENT
+                        // rather than where it sat.
+                        body.push_str(&format!("        {}\n", l));
                     }
                     if !hand_widget {
                         for l in &w {
@@ -456,7 +470,7 @@ pub fn services_yaml(
                     }
                 }
             }
-            push(&mut groups, &group, body);
+            push(&mut groups, &group, (rank, body));
         }
     }
 
@@ -464,7 +478,7 @@ pub fn services_yaml(
     // one http:// entry on the page, and a deep link into Grafana for a
     // service that has no page of its own. Dropping them because no route
     // matched would delete a decision, not a stale entry.
-    for b in &ov.blocks {
+    for (rank, b) in ov.blocks.iter().enumerate() {
         if used.contains(&b.href) || b.hide {
             continue;
         }
@@ -475,9 +489,9 @@ pub fn services_yaml(
             if l.trim().is_empty() {
                 continue;
             }
-            body.push_str(&format!("    {}\n", l));
+            body.push_str(&format!("        {}\n", l));
         }
-        push(&mut groups, &group, body);
+        push(&mut groups, &group, (rank, body));
     }
 
     // Named groups first in the order the overlay gives, then the rest
@@ -491,9 +505,10 @@ pub fn services_yaml(
             g.clone(),
         )
     });
-    for (g, bodies) in groups {
+    for (g, mut bodies) in groups {
+        bodies.sort_by_key(|(rank, _)| *rank);
         out.push_str(&format!("\n- {}:\n", g));
-        for b in bodies {
+        for (_, b) in bodies {
             out.push_str(&b);
         }
     }

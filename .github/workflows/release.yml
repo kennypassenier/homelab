@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     container: rust:1-bookworm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Test gate (AR9 — releases are never exempt)
         run: |
           rustup component add rustfmt clippy

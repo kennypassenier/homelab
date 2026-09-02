@@ -58,3 +58,64 @@ findings from 2026-08-31 are this item in miniature:
    NOT backed up.
 
 **Status:** queued, not built, not started. Waiting on Kenny.
+
+---
+
+## Correctieformulier · ik heb O10 een tweede keer gebouwd (F233, F239)
+
+Queued 2026-09-02 while Kenny was away, per the AFK rule: the fault is
+recorded and the area quarantined, the form is presented on his return.
+FORM_PROTOCOL §8 says every live-found fault ends in a correction form with
+nine fields filled in. These are the nine; Kenny answers each with
+Klopt · Aanpassen · Schrappen.
+
+1. **Wat ging er mis.** I built `ops/streamguard.rs`, a `stream_guards`
+   config surface, host.toml entries and a second copy of the Jellyfin token
+   on disk — a complete second implementation of O10, which had been finished
+   and armed since that morning (`core/src/ops/busy.rs`, wired at
+   `core/src/ops/update.rs:210`, label `com.homelab.update.busy-check` on
+   Jellyfin's compose, tests in `core/tests/busy_tests.rs`). It was released
+   as v3.39.0 and rolled out to the host before it was caught.
+
+2. **Welke poort liet het door.** None existed. The gate that should have
+   caught it is the one before building anything: *measure the code, do not
+   read a plan sentence about it.* `REALIZATION_PLAN.md` said M5's third item
+   was "blocked on a working API key (F32)". That was true when written and
+   F213 had made it false hours earlier — in this same session.
+
+3. **Waar zit dezelfde fout nog.** Measured after the fact: the same "still
+   says blocked" shape sat in the M5 paragraph only. But the CLASS is
+   everywhere — this register has 239 findings and the plan has narrative
+   paragraphs beside them, and a paragraph is not regenerated when the code
+   changes. The generated `TEST_PLAN.md` is now the counterweight, and it is
+   what caught this one.
+
+4. **Hoe voorkomen we herhaling.** The measure is already built: Phase 7's
+   output document is generated from the tests rather than written
+   (`homelab testplan`, F239). Before building a feature the plan calls
+   blocked, grep the test plan for it first. Proposed as a habit, not a hook —
+   a hook that ran on every build would be noise.
+
+5. **Wat kost het.** Almost nothing: one grep. The document regenerates in
+   under a second and a test refuses a stale copy.
+
+6. **Wie handhaaft het.** Code-enforced for the document
+   (`the_committed_test_plan_matches_a_fresh_generation`); discipline-enforced
+   for the habit of reading it. Standing rule 24 says to mark the difference,
+   and this is the honest split: nothing can force somebody to look.
+
+7. **Hoe en wanneer meten we dat het werkt.** At the next feature the plan
+   describes as blocked or missing: the first action is a grep of
+   `TEST_PLAN.md` for the feature's ID, and the result goes in the register
+   before any code is written. Not a date — that moment.
+
+8. **Fallback als het niet werkt.** If a second duplicate is ever built,
+   the plan's narrative paragraphs stop being trusted at all: every
+   "blocked"/"missing"/"not yet" claim in `REALIZATION_PLAN.md` gets a dated
+   measurement line beside it or is deleted.
+
+9. **Wanneer herzien we de maatregel.** At the Phase-10 retro of this
+   project, together with the other generated-document decisions (runbook,
+   test plan, homepage services list).
+
+**Status:** queued, not presented. The revert is already done and pushed.

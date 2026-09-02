@@ -7,8 +7,10 @@ Wants=network-online.target
 [Service]
 # kyu 2.1.0 handles SIGTERM: in-flight requests finish, the write-ahead log
 # is folded back, and it exits 0 — bounded by its own KYU_SHUTDOWN_TIMEOUT_MS
-# (default 10s). This is systemd's outer bound and sits comfortably above it,
-# so the escape hatch is never the thing that cuts a clean shutdown short.
+# (default 10s). This is systemd's outer bound and is COUPLED to that budget:
+# raise KYU_SHUTDOWN_TIMEOUT_MS and this has to rise with it, or systemd's
+# patience becomes what ends the shutdown and the clean stop is back to
+# square one (the kyu project's warning, 2026-09-02).
 # Read off the running unit on 2026-09-02 and written here so the repository
 # and the machine agree.
 TimeoutStopSec=30

@@ -44,6 +44,20 @@ Migration order, least consequential first, ending where Loki itself runs:
     registry · syncthing · home · uptime · kp-soft · productivity
     metrics · paperwork · downloader · media · gateway
 
+**Status 2026-09-02 evening.** Native done and verified: kyu (CT 109),
+almanac (CT 112) — both shipped nothing at all before. Compose stacks
+migrated and verified in Loki: **registry, syncthing, home, uptime, kp-soft,
+productivity, metrics**. Remaining: **paperwork, downloader, media, gateway**
+— gateway last on purpose, Loki itself runs there.
+
+Per stack the work is: drop `promtail` from `apps:` in `lxc-compose.yml`,
+`git rm -r stacks/<name>/promtail`, `homelab deploy stacks/<name>`, then query
+Loki. The deploy's own garbage collect stops and removes the promtail
+container when it leaves the apps list, so `prune-orphans` has nothing to do.
+Watch for a manifest whose `apps:` is a block sequence rather than a flow list
+(syncthing was) — editing it wrongly leaves promtail listed with its directory
+already gone.
+
 **Verification after each stack** (this is the whole point — a shipper that
 runs and delivers nothing is the fault this project keeps finding):
 

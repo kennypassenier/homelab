@@ -369,8 +369,18 @@ fn load_config() -> Config {
         },
         safety: {
             let mut sc = SafetyConfig::default();
+            // F8: the file ADDS to the compiled list, it does not replace it.
+            // It used to assign, so `no_touch = [200]` in host.toml would
+            // have quietly dropped Home Assistant and the router out of
+            // protection — a typo away from making the two machines this
+            // project may never touch touchable. The list is law and its home
+            // is `core/src/safety.rs`; config can only widen it.
             if let Some(list) = file.no_touch {
-                sc.no_touch = list;
+                for vmid in list {
+                    if !sc.no_touch.contains(&vmid) {
+                        sc.no_touch.push(vmid);
+                    }
+                }
             }
             if let Some(gw) = file.gateway_vmid {
                 sc.gateway_vmid = gw;
@@ -598,6 +608,28 @@ fn persist_settings(
 
 #[cfg(test)]
 mod tests {
+    /// F8: host.toml may only ADD to the no-touch list. Assigning used to be
+    /// possible, which meant one line in a hand-edited file could drop VM 100
+    /// and VM 101 out of protection without a word.
+    #[test]
+    fn the_config_can_widen_the_no_touch_list_but_never_shrink_it() {
+        let raw = "token = \"0123456789abcdef0123\"\nno_touch = [200, 201]\n";
+        std::fs::write("/tmp/homelab-f8-test.toml", raw).unwrap();
+        std::env::set_var("HOMELAB_CONFIG", "/tmp/homelab-f8-test.toml");
+        let cfg = load_config();
+        std::env::remove_var("HOMELAB_CONFIG");
+
+        for compiled in homelab_core::safety::DEFAULT_NO_TOUCH {
+            assert!(
+                cfg.safety.no_touch.contains(compiled),
+                "config dropped {} out of the no-touch list",
+                compiled
+            );
+        }
+        assert!(cfg.safety.no_touch.contains(&200));
+        assert!(cfg.safety.no_touch.contains(&201));
+    }
+
     /// F186: the exact file that was live on 2026-09-02. Two OPNsense keys
     /// were appended after the last `[[registry_cache.upstreams]]` table, so
     /// TOML made them fields of the lscr.io mirror and serde dropped them —

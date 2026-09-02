@@ -83,6 +83,19 @@ endif
 		*,success,*) echo "  · CI on HEAD: $$st" ;; \
 		*) echo "  · no CI verdict on HEAD yet (unpushed, or the API did not answer) — continuing" ;; \
 	esac
+	# DRY=1 stops here: every check has run, nothing has a side effect yet.
+	#
+	# There was no way to try this target without publishing, and on
+	# 2026-09-02 I used it twice to test the CI guard above. Three fake tags
+	# reached GitHub and two release workflows started before I noticed;
+	# tags deleted, runs cancelled, no release published, but the version in
+	# Cargo.toml had been bumped to 9.9.9 on main and had to be reverted.
+	# A target whose only mode is "do it for real" gets rehearsed in
+	# production, which is what happened.
+	@if [ -n "$(DRY)" ]; then \
+		echo "✓ dry run for v$(VERSION): checks passed, nothing tagged or pushed"; \
+		exit 0; \
+	fi
 	$(MAKE) gate
 	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml
 	@cargo update --workspace --quiet 2>/dev/null || cargo check --workspace --quiet

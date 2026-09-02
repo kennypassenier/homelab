@@ -423,7 +423,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | G7 | a test whose comment described a test that did not exist | dicht · F209 |
 | G8 | `incomplete_step` written by the deploy, read by nobody | dicht · F220 |
 | G9 | `install_native` creates no container and places no secrets | open |
-| G10 | the real stack files are validated by nothing (8 of 13 need latch) | open |
+| G10 | the real stack files are validated by nothing (8 of 13 need latch) | dicht · F224 (structureel; de latch-helft blijft buiten de tests) |
 | G11 | three brakes that had never been pressed, and one silent skip | dicht · F210 |
 | G12 | cloning CT 997 and seeing it arrive in Prometheus + Loki | open |
 | G13 | the M2 and M5 drills | open |
@@ -438,7 +438,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | G22 | Jellyfin's hardware transcoding was verified by inspection only | dicht · F216 |
 | G23 | two measurements the register asserted and nobody had made | dicht · F217 |
 
-**15 of 23 closed, 7 open, 1 deferred by Kenny.**
+**16 of 23 closed, 6 open, 1 deferred by Kenny.**
 
 ## Scratch resources
 

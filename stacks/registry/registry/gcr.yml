@@ -1,20 +1,23 @@
 # Pull-through cache for https://gcr.io.
 #
-# Z1 (Kenny, 2026-09-02): the reason this file exists at all is `proxy.ttl`.
-# There was no expiry of any kind before it — REGISTRY_STORAGE_DELETE_ENABLED
-# grants permission to delete and nothing ever deleted, so the cache grew
-# without limit: 1.3 GB in two days, on a 32 GB disk, with nothing that would
-# ever stop it.
+# Z1 (Kenny, 2026-09-02), and the comment is a correction of what this file
+# first said. Claude claimed there was "no cleanup policy of any kind"
+# because REGISTRY_STORAGE_DELETE_ENABLED only grants permission and nothing
+# in the compose file set an expiry. That was wrong: registry applies a
+# DEFAULT proxy ttl of 168h, and reading `scheduler-state.json` on the live
+# caches proved it — all 137 entries carried an expiry exactly seven days
+# after they were cached. An absence was asserted without checking for a
+# default, and a first version of this file then set 720h, which would have
+# made the cache live four times LONGER than it already did.
 #
-# It has to be a FILE. Measured 2026-09-02: setting REGISTRY_PROXY_TTL as an
-# environment variable makes registry 2.8.3 answer
-# "Ignoring unrecognized environment variable REGISTRY_PROXY_TTL" and start
-# with no expiry at all — a setting that looks applied and is not. With this
-# file the log says "Starting cached object TTL expiration scheduler...",
-# which is the line that proves it.
+# So the value here is the one that was already in force. What changed is
+# that it is now written down instead of inherited invisibly, which is the
+# part worth having: the number can be found, argued with and changed.
 #
-# 720h is a month: a layer nobody has asked for in a month costs one slow
-# pull to get back, and a cache is exactly the thing that may be slow once.
+# It still has to be a FILE. Measured 2026-09-02: REGISTRY_PROXY_TTL as an
+# environment variable makes registry 2.8.3 answer "Ignoring unrecognized
+# environment variable" and fall back to the default — a setting that looks
+# applied and is not.
 version: 0.1
 log:
   level: warn
@@ -38,4 +41,4 @@ health:
     threshold: 3
 proxy:
   remoteurl: https://gcr.io
-  ttl: 720h
+  ttl: 168h

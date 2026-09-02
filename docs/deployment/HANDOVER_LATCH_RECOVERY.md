@@ -41,7 +41,21 @@ Per project:
   `/appdata/almanac/almanac-config/`, which the almanac stack's own restic
   backup covers. Nothing operational depends on this file.
 - **hub-clients** (linked to `~/Projects/newsflash`) — one file,
-  `hub-clients/dev/.env.enc`. Also `dev`.
+  `hub-clients/dev/.env.enc`. **This one was production, and this document
+  said otherwise.** Corrected by the newsflash session on 2026-09-02: that
+  project only ever had ONE environment, which happens to be named `dev`, and
+  it carried the `KYU_TOKEN` its live systemd unit injects. The unit
+  crash-looped from 11:42, hit `StartLimitBurst=5` at 11:44:30 and stayed
+  stopped for roughly two hours until that session recovered it. Four queued
+  messages rendered on restart; none were lost.
+
+  The mistake worth carrying: I read the environment NAME and concluded
+  "dev, therefore disposable", instead of asking what consumed the file. An
+  environment is called whatever somebody typed once. **Before deciding a
+  latch file is disposable, find its consumer** — `systemctl show <unit> -p
+  EnvironmentFiles` on whatever machine actually runs it. Note *whatever
+  machine*: a sweep of the Proxmox containers would not have found this one,
+  because newsflash runs on the workstation.
 - **homelab** — 13 files, all `dev`, and all describing the **v1
   architecture**: `stacks/gateway/nginx-proxy-manager`, `stacks/todo/vikunja`,
   `stacks/cloudflared`, plus a `stacks-backup/` tree. NPM was replaced by
@@ -50,8 +64,10 @@ Per project:
 - **latch-rs** — 10 files, every one `tests.fixtures.*`. Test fixtures for
   latch's own suite, not secrets.
 
-So: no running service lost a credential it needs. What was lost is the
-ability to open two `dev` archives.
+So: one running service DID lose a credential it needed (hub-clients, above),
+and it was down for two hours before anyone knew. The rest is archives. The
+first version of this paragraph said no service was affected, which was an
+inference from environment names rather than a measurement of consumers.
 
 ## How the homelab recovered (the recipe that worked)
 

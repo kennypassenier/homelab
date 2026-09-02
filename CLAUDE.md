@@ -45,7 +45,7 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — v3.38.0 live on the host | **7 · Hardening — all nine milestones M0–M9 done; the loop is closed, the audit is not** |
+| Phase | 9 · Released — v3.39.0 live on the host | **7 · Hardening — 21 of the 23 gate gaps closed; G19's backlog is the work in flight, G6 deferred by Kenny** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
 
@@ -56,7 +56,9 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.34.0** (2026-09-01); 270 tests, CI green.
+- **Released and live at v3.39.0** (2026-09-02); 408 tests, CI green — and green now
+  means something: CI ran without `--locked` until that day, so it built
+  whatever crates.io served rather than what the lockfile pins (F235).
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.
   M7 is done: CT 115 destroyed and rebuilt end to end, 653 s of outage of
   which 573 s was one stalled image pull (F108). W1-W3 built straight after

@@ -2035,3 +2035,96 @@ fn a_native_stack_gets_the_native_operation_from_the_same_key() {
          does not is skipped rather than attempted"
     );
 }
+
+/// T69: a waiting step reaches the operator where they are already looking,
+/// and both keys say what they do.
+///
+/// Kenny's form H1: "twee knoppen die het ofwel toelaten ofwel stoppen".
+/// The case that raised it: a service check reporting a DELIBERATE drop —
+/// routes 29 → 28 after a route was removed on purpose — where the honest
+/// answer is allow rather than a failed deploy and an incident nobody
+/// needed.
+#[test]
+fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use homelab_client::tui::model::{update, Msg, PendingAsk};
+    use homelab_proto::Command;
+
+    let mut m = ready_model();
+    m.focus = Some(homelab_client::tui::model::Focus {
+        title: "DEPLOY gateway :: vmid 104".into(),
+        feed: Vec::new(),
+        scroll: 0,
+        done: false,
+        ok: false,
+        result: String::new(),
+    });
+    m.pending_ask = Some(PendingAsk {
+        id: 7,
+        op: "deploy-gateway".into(),
+        step: "service checks".into(),
+        what: "routes went 29 → 28".into(),
+        if_allowed: "de uitrol gaat door en legt het nieuwe aantal vast".into(),
+        if_stopped: "de uitrol faalt en bundelt een incident".into(),
+    });
+
+    // It is drawn where the operator is already reading — over the feed, not
+    // somewhere else on the screen.
+    let out = render(&m);
+    assert!(out.contains("service checks"), "the step must be named");
+    assert!(out.contains("routes went 29"), "and what happened");
+    assert!(
+        out.contains("toelaten") && out.contains("stoppen"),
+        "both keys visible: {}",
+        out
+    );
+    assert!(
+        out.contains("de uitrol gaat door"),
+        "each key says what it DOES, not just its label (D82)"
+    );
+    assert!(
+        out.contains("onbeheerd"),
+        "and that not answering is its own outcome"
+    );
+
+    // `a` allows and sends the answer with the question's own id.
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+    );
+    assert!(
+        matches!(
+            m.outbox.first(),
+            Some(Command::Answer { id: 7, allow: true })
+        ),
+        "{:?}",
+        m.outbox.first()
+    );
+    assert!(m.pending_ask.is_none(), "the question stops being shown");
+
+    // `s` stops.
+    m.outbox.clear();
+    m.pending_ask = Some(PendingAsk {
+        id: 8,
+        op: "deploy-gateway".into(),
+        step: "service checks".into(),
+        what: "routes went 29 → 28".into(),
+        if_allowed: "door".into(),
+        if_stopped: "stop".into(),
+    });
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)),
+    );
+    assert!(
+        matches!(
+            m.outbox.first(),
+            Some(Command::Answer {
+                id: 8,
+                allow: false
+            })
+        ),
+        "{:?}",
+        m.outbox.first()
+    );
+}

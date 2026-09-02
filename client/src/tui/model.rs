@@ -79,6 +79,19 @@ pub enum Msg {
 
 /// Focus mode (mockup-approved): a near-fullscreen task window showing only
 /// this operation's feed while it runs.
+/// T69: one question a suspended step is waiting on. It carries what each
+/// answer sets in motion, not only the labels — a bare allow/stop pair is
+/// vocabulary, and the operator is being asked to decide, not to guess.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAsk {
+    pub id: u64,
+    pub op: String,
+    pub step: String,
+    pub what: String,
+    pub if_allowed: String,
+    pub if_stopped: String,
+}
+
 pub struct Focus {
     pub title: String,
     pub feed: Vec<LogRow>,
@@ -235,6 +248,8 @@ pub struct Model {
     pub latest_release: Option<String>,
     /// H7: set by the U key; the run loop picks it up, downloads+verifies
     /// the release off-thread and ships it over the line.
+    /// T69: the question a step is waiting on, when there is one.
+    pub pending_ask: Option<PendingAsk>,
     pub release_update_requested: Option<String>,
     /// T71: native services whose binaries the operator asked to install.
     /// Drained by `tui::run`, which stages each release off-thread — the
@@ -300,6 +315,7 @@ impl Model {
             plan: None,
             plan_pending: None,
             latest_release: None,
+            pending_ask: None,
             release_update_requested: None,
             native_install_requested: Vec::new(),
             confirm: None,
@@ -426,6 +442,28 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 }
                 model.push_log(level, source, msg);
             }
+            // T69: a step has stopped and is waiting. It goes into the open
+            // focus window, because that is where the operator is already
+            // looking — a question in a separate place is a question missed.
+            ServerMsg::Ask {
+                id,
+                op,
+                step,
+                what,
+                if_allowed,
+                if_stopped,
+            } => {
+                model.pending_ask = Some(PendingAsk {
+                    id,
+                    op,
+                    step,
+                    what,
+                    if_allowed,
+                    if_stopped,
+                });
+                model.status_line =
+                    "the host is waiting for an answer — a to allow, s to stop".into();
+            }
             ServerMsg::Transfer {
                 label, done, total, ..
             } => {
@@ -527,6 +565,20 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
     }
     if model.palette_open {
         palette_key(model, key);
+        return;
+    }
+    // T69: a waiting step outranks everything the focus window does with
+    // keys. It is checked here rather than in the general match because the
+    // question appears WHILE that window has the keyboard — the operator is
+    // reading the feed, which is the whole point of putting it there.
+    if model.pending_ask.is_some() {
+        match key.code {
+            KeyCode::Char('a') => answer_ask(model, true),
+            KeyCode::Char('s') => answer_ask(model, false),
+            // Everything else is ignored on purpose: the step is parked and
+            // scrolling past the question is how it gets missed.
+            _ => {}
+        }
         return;
     }
     if let Some(focus) = model.focus.as_mut() {
@@ -1380,6 +1432,24 @@ fn start_native_install(model: &mut Model) {
         result: String::new(),
     });
     model.native_install_requested = installable;
+}
+
+/// T69: send the operator's decision and stop showing the question.
+///
+/// The answer goes as an ordinary command; the host is parked on a channel
+/// inside the operation, not on the connection. If it has already timed out
+/// the host says so and nothing here breaks — a late answer is ordinary,
+/// not an error.
+fn answer_ask(model: &mut Model, allow: bool) {
+    let Some(ask) = model.pending_ask.take() else {
+        return;
+    };
+    model.outbox.push(Command::Answer { id: ask.id, allow });
+    model.status_line = if allow {
+        format!("allowed: {} :: {}", ask.step, ask.if_allowed)
+    } else {
+        format!("stopped: {} :: {}", ask.step, ask.if_stopped)
+    };
 }
 
 fn start_stack_op(model: &mut Model, op: StackOp) {

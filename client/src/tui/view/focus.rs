@@ -104,6 +104,53 @@ pub fn draw(f: &mut Frame, model: &Model, focus: &Focus) {
         .collect();
     f.render_widget(Paragraph::new(lines), rows[0]);
 
+    // T69: a step is waiting for a decision. It is drawn over the feed
+    // rather than beside it, because the feed is exactly what the operator
+    // is reading and a question elsewhere is a question missed. It carries
+    // what each answer DOES, not only the two words — the same reason
+    // Kenny's forms carry a consequences box (D82).
+    if let Some(ask) = &model.pending_ask {
+        let h = 9.min(rows[0].height);
+        let box_rect = Rect {
+            x: rows[0].x,
+            y: rows[0].y + rows[0].height.saturating_sub(h),
+            width: rows[0].width,
+            height: h,
+        };
+        f.render_widget(Clear, box_rect);
+        let inner_ask = Block::bordered()
+            .border_type(BorderType::Double)
+            .border_style(THEME.border_danger())
+            .title(Line::from(Span::styled(
+                format!(" ? {} :: {} ", ask.op, ask.step),
+                THEME.warn().add_modifier(Modifier::BOLD),
+            )))
+            .style(Style::new().bg(THEME.elevated));
+        let body = inner_ask.inner(box_rect);
+        f.render_widget(inner_ask, box_rect);
+        let q = vec![
+            Line::from(Span::styled(
+                format!("  {}", ask.what),
+                Style::new().fg(THEME.text).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  [a] toelaten  ", THEME.ok().add_modifier(Modifier::BOLD)),
+                Span::styled(ask.if_allowed.clone(), Style::new().fg(THEME.muted)),
+            ]),
+            Line::from(vec![
+                Span::styled("  [s] stoppen   ", THEME.err().add_modifier(Modifier::BOLD)),
+                Span::styled(ask.if_stopped.clone(), Style::new().fg(THEME.muted)),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  geen antwoord = onbeheerd; de stap gaat niet door",
+                Style::new().fg(THEME.faint),
+            )),
+        ];
+        f.render_widget(Paragraph::new(q), body);
+    }
+
     // Transfer visuals for this deploy (G6).
     if let Some(t) = model.transfers.last() {
         let name: String = t

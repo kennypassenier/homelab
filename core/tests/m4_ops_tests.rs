@@ -69,6 +69,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         grafana_dashboards_dir: None,
         homepage_services_file: None,
         kuma_monitors_file: None,
+        asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
     }
@@ -2473,6 +2474,7 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             grafana_dashboards_dir: None,
             homepage_services_file: None,
             kuma_monitors_file: None,
+            asker: &homelab_core::ask::NOBODY,
             backup: Default::default(),
             registry_cache: None,
         },
@@ -2516,6 +2518,7 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             grafana_dashboards_dir: None,
             homepage_services_file: None,
             kuma_monitors_file: None,
+            asker: &homelab_core::ask::NOBODY,
             backup: Default::default(),
             registry_cache: None,
         },
@@ -2912,5 +2915,90 @@ async fn t66_destroy_removes_the_dashboard_the_deploy_wrote() {
             .count(),
         1,
         "the Prometheus target is still removed"
+    );
+}
+
+// ── T69: the deploy must OBEY the answer, not merely know it ───────────────
+
+/// A reading that fell, with nobody watching: the deploy fails.
+///
+/// This test exists because the first attempt at it passed a sabotage.
+/// `Answer::may_continue()` was tested and correct, and nothing checked that
+/// the deploy step honoured it — folding `Unattended` in with `Allow` inside
+/// `deploy.rs` broke no test at all. The second attempt was worse: it lived
+/// in a file whose harness could not even reach the checks step, so it
+/// passed while the deploy stopped at `validate`. A mechanism proven in
+/// isolation and unwired in practice is the exact fault this project keeps
+/// finding, and it twice nearly shipped inside the fix for it.
+///
+/// covers: F156
+#[tokio::test]
+async fn t69_a_regressed_check_fails_the_deploy_when_nobody_is_watching() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    // The container must already EXIST, or the baseline step returns early
+    // and there is nothing for the reading to fall from — which is how
+    // attempt four passed while the deploy quietly succeeded.
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
+    exec.respond_always("pct config 108", CmdOutput::ok("hostname: 108-app-test\n"));
+    exec.respond_always("pct config 999", CmdOutput::ok("unprivileged: 1"));
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always("test -d", CmdOutput::ok("yes\n"));
+    // 29 to the baseline, 28 afterwards: the fall Kenny described.
+    exec.enqueue("echo 28", CmdOutput::ok("29\n"));
+    exec.respond_always("echo 28", CmdOutput::ok("28\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut c = ctx(&exec, &sink, &j);
+    c.asker = &homelab_core::ask::NOBODY;
+
+    let mut sp = deploy_spec(manifest(108, "test"));
+    let mut checks = std::collections::BTreeMap::new();
+    checks.insert(
+        "app".to_string(),
+        homelab_core::checks::ServiceChecks {
+            checks: vec![homelab_core::checks::Check {
+                name: "routes".into(),
+                command: "echo 28".into(),
+                expect: homelab_core::checks::Expect::NeverDecreases,
+                layer: homelab_core::checks::Layer::Application,
+                blind_spot: Some("counts routes, not whether any of them answers".into()),
+            }],
+            manual: Vec::new(),
+        },
+    );
+    sp.checks = checks;
+
+    let report = deploy(&c, &sp).await;
+
+    // Worthless unless the step actually ran, and a FAILED step is not in
+    // report.steps — only successful ones are, which is how attempt five
+    // looked like a skip when it was a correct failure. The error names the
+    // step, so that is the honest place to look.
+    let why = format!("{:?}", report.error);
+    assert!(
+        why.contains("step 'service checks' failed"),
+        "the service-checks step must have RUN and failed there, or this test \
+         proves nothing: ok={} err={}",
+        report.ok,
+        why
+    );
+    assert!(
+        !report.ok,
+        "a fallen reading with nobody watching must fail the deploy"
+    );
+    assert!(
+        why.contains("fell from 29 to 28"),
+        "and the reason must carry the actual reading, not a generic failure: {}",
+        why
+    );
+    assert!(
+        why.contains("no operator") || why.contains("nobody"),
+        "the reason must say nobody was there, not merely that a check fell \
+         — those are different stories in a transcript: {}",
+        why
     );
 }

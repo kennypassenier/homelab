@@ -1994,12 +1994,50 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         }
         let bad = crate::checks::regressions(&verdicts);
         if bad.is_empty() {
-            Ok(StepOutcome::Unchanged)
-        } else {
-            Err(CoreError::Command {
-                rendered: format!("service checks {}", m.stack_name),
-                detail: bad.join("; "),
+            return Ok(StepOutcome::Unchanged);
+        }
+        // T69 (Kenny, form H1). A reading that went down is not always
+        // damage. The case that raised this: routes 29 → 28 after a route
+        // was removed on purpose — where failing the deploy and bundling an
+        // incident is the wrong answer, and nobody learns anything from it.
+        //
+        // So the step stops and asks, instead of deciding for the operator.
+        // If nobody is watching — the nightly round at 04:00 — the answer is
+        // `Unattended` and the deploy fails exactly as it did before. Silence
+        // never reads as permission.
+        let answer = ctx
+            .asker
+            .ask(&crate::ask::Question {
+                op: format!("deploy-{}", m.stack_name),
+                step: "service checks".into(),
+                what: bad.join("; "),
+                if_allowed: "de uitrol gaat door en legt de nieuwe waarde vast als de \
+                             normale stand"
+                    .into(),
+                if_stopped: "de uitrol faalt hier en bundelt een incident".into(),
             })
+            .await;
+        match answer {
+            crate::ask::Answer::Allow => {
+                log_info(format!(
+                    "[check] {} :: allowed by the operator — the new reading is now the \
+                     baseline",
+                    bad.join("; ")
+                ));
+                Ok(StepOutcome::Changed)
+            }
+            other => Err(CoreError::Command {
+                rendered: format!("service checks {}", m.stack_name),
+                detail: format!(
+                    "{}{}",
+                    bad.join("; "),
+                    match other {
+                        crate::ask::Answer::Stop => " :: stopped by the operator".to_string(),
+                        crate::ask::Answer::Unattended(why) => format!(" :: {}", why),
+                        crate::ask::Answer::Allow => String::new(),
+                    }
+                ),
+            }),
         }
     });
 

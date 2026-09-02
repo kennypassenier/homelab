@@ -124,6 +124,12 @@ pub struct OpCtx<'a> {
     /// directory. Not optional on purpose — the caller has to say which
     /// repository it means.
     pub backup: backup::BackupCfg,
+    /// T69: how an operation reaches whoever is watching, when a step finds
+    /// something only a person can judge. `Unattended` everywhere there is
+    /// nobody — the nightly scheduler, a test — and that is not a stub but
+    /// the honest answer: a question asked into an empty room must not hang
+    /// the night, and must not pretend to have been answered either.
+    pub asker: &'a dyn crate::ask::Asker,
     /// D60: the pull-through cache in the house, when there is one. None =
     /// every image keeps naming its own origin, which is also what happens
     /// when the cache is configured but does not answer.

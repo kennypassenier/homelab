@@ -810,6 +810,20 @@ async fn rpc(host: &str, token: &str, command: Command) {
             continue;
         };
         match server_msg {
+            // T69: the command line is not a place to answer a question —
+            // there is no prompt to draw and the operator may not even be
+            // watching. Print it and let the host's timeout do the rest,
+            // which lands on Unattended rather than on a guess.
+            ServerMsg::Ask { op, step, what, .. } => {
+                eprintln!(
+                    "{}? {} :: {} is waiting for a decision — {}{}",
+                    C_YELLOW, op, step, what, C_RESET
+                );
+                eprintln!(
+                    "  no answer from here: run this from the TUI to decide, \
+                     or it times out as unattended"
+                );
+            }
             ServerMsg::Hello { version, proto } => {
                 println!(
                     "{}● HOST v{} (proto {}) — link up{}",

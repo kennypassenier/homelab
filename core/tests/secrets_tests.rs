@@ -97,6 +97,7 @@ async fn run_deploy(exec: &MockExecutor, sink: &VecSink) -> homelab_core::runner
         grafana_dashboards_dir: None,
         homepage_services_file: None,
         kuma_monitors_file: None,
+        asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
     };
@@ -190,6 +191,7 @@ async fn sec1_shell_metachar_app_name_refused_everywhere() {
             grafana_dashboards_dir: None,
             homepage_services_file: None,
             kuma_monitors_file: None,
+            asker: &homelab_core::ask::NOBODY,
             backup: Default::default(),
             registry_cache: None,
         };

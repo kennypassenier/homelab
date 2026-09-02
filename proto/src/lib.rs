@@ -121,6 +121,13 @@ pub enum Command {
     UpdateNative {
         stack: String,
     },
+    /// T69: the operator's answer to a suspended step. `allow` false means
+    /// stop; a question that is never answered times out on the host into
+    /// `Unattended`, which is not the same thing and says so.
+    Answer {
+        id: u64,
+        allow: bool,
+    },
     /// E8: run the configured ZFS snapshot + replication jobs now.
     ZfsReplicate,
     /// G1: apply the runaway guards to a container. They exist and are
@@ -356,6 +363,20 @@ pub enum ServerMsg {
         level: LogLevel,
         source: String,
         msg: String,
+    },
+    /// T69: an operation has stopped and is waiting for a person.
+    ///
+    /// The host sends this and suspends that step. It carries what happened
+    /// AND what each answer sets in motion, because a bare allow/stop pair
+    /// is vocabulary rather than an answer to "what happens if I press
+    /// this" — the same reasoning as the consequences box on Kenny's forms.
+    Ask {
+        id: u64,
+        op: String,
+        step: String,
+        what: String,
+        if_allowed: String,
+        if_stopped: String,
     },
     /// Real byte counters for transfer visuals (G6).
     Transfer {

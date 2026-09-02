@@ -102,6 +102,13 @@ struct FileConfig {
     /// which is how a monitor came to report Uptime Kuma itself as down from
     /// an address it had left that morning (F157).
     kuma_monitors_file: Option<String>,
+    /// T69: how long a suspended step waits for an operator before giving
+    /// up and answering `Unattended`. Long enough that Kenny can read the
+    /// question and decide, short enough that a forgotten window does not
+    /// hold the global op lock all night — the lock is held for the whole
+    /// operation, so a question nobody answers blocks every other one.
+    #[serde(default = "default_ask_timeout_s")]
+    ask_timeout_s: u64,
     /// Y1: how many stack backups the nightly round runs at once. Measured
     /// 2026-09-02: a full round took ~38 minutes for thirteen stacks, of
     /// which only ~6 minutes was writing data — the rest was small questions
@@ -169,6 +176,12 @@ struct Config {
     /// which is how a monitor came to report Uptime Kuma itself as down from
     /// an address it had left that morning (F157).
     kuma_monitors_file: Option<String>,
+    /// T69: how long a suspended step waits for an operator before giving
+    /// up and answering `Unattended`. Long enough that Kenny can read the
+    /// question and decide, short enough that a forgotten window does not
+    /// hold the global op lock all night — the lock is held for the whole
+    /// operation, so a question nobody answers blocks every other one.
+    ask_timeout_s: u64,
     /// Y1: how many stack backups the nightly round runs at once. Measured
     /// 2026-09-02: a full round took ~38 minutes for thirteen stacks, of
     /// which only ~6 minutes was writing data — the rest was small questions
@@ -265,6 +278,7 @@ fn load_config() -> Config {
         homepage_services_file: file.homepage_services_file,
         kuma_monitors_file: file.kuma_monitors_file,
         backup_concurrency: file.backup_concurrency,
+        ask_timeout_s: file.ask_timeout_s,
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -342,6 +356,8 @@ fn render_settings_toml(
         kuma_monitors_file: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         backup_concurrency: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ask_timeout_s: Option<u64>,
     }
     let bdef = homelab_core::ops::backup::BackupCfg::default();
     let out = Out {
@@ -381,6 +397,8 @@ fn render_settings_toml(
         kuma_monitors_file: config.kuma_monitors_file.as_ref(),
         backup_concurrency: (config.backup_concurrency != default_backup_concurrency())
             .then_some(config.backup_concurrency),
+        ask_timeout_s: (config.ask_timeout_s != default_ask_timeout_s())
+            .then_some(config.ask_timeout_s),
     };
     toml::to_string_pretty(&out).map_err(|e| e.to_string())
 }
@@ -395,6 +413,12 @@ fn render_settings_toml(
 /// silent is not.
 fn effective_concurrency(configured: usize) -> usize {
     configured.max(1)
+}
+
+/// Two minutes: long enough to read a question and decide, short enough
+/// that a window left open does not hold the global op lock all night.
+fn default_ask_timeout_s() -> u64 {
+    120
 }
 
 /// Kenny's choice (form Y4, 2026-09-02): three at a time. About a third of
@@ -496,6 +520,7 @@ mod tests {
                 "/appdata/uptime/kuma-seeder-config/host-monitors.json".into(),
             ),
             backup_concurrency: 3,
+            ask_timeout_s: 120,
             initial_settings: homelab_proto::HostConfigView {
                 backup_hour: Some(4),
                 notify_webhook: Some("http://ha/webhook/x".into()),
@@ -948,6 +973,66 @@ struct AppState {
     settings: Arc<std::sync::RwLock<homelab_proto::HostConfigView>>,
     /// H13: failure-repeat damping for F3 notifications.
     damper: Arc<std::sync::Mutex<homelab_core::notify::NotifyDamper>>,
+    /// T69: questions a step is waiting on, by id. The client's answer
+    /// arrives as an ordinary RPC and is delivered through one of these.
+    pending_asks:
+        Arc<std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::oneshot::Sender<bool>>>>,
+    /// Monotonic id for those questions. Not a clock: two questions in the
+    /// same second must still be distinguishable.
+    next_ask_id: Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// T69: the asker that reaches a watching operator over the live line.
+///
+/// Two things make it safe to use from code that also runs unattended.
+/// First, it checks whether ANYONE is subscribed before it waits at all —
+/// the nightly round at 04:00 has no client, so it answers immediately
+/// instead of burning a timeout per question. Second, when somebody is
+/// listening but nobody answers, it gives up after a bounded wait and says
+/// `Unattended`, which is deliberately not the same answer as `Stop`.
+struct LiveAsker<'a> {
+    state: &'a AppState,
+    timeout_s: u64,
+}
+
+#[async_trait::async_trait]
+impl homelab_core::ask::Asker for LiveAsker<'_> {
+    async fn ask(&self, q: &homelab_core::ask::Question) -> homelab_core::ask::Answer {
+        use homelab_core::ask::Answer;
+        if self.state.log_tx.receiver_count() == 0 {
+            return Answer::Unattended("no client is connected to answer".into());
+        }
+        let id = self
+            .state
+            .next_ask_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if let Ok(mut g) = self.state.pending_asks.lock() {
+            g.insert(id, tx);
+        }
+        let _ = self.state.log_tx.send(ServerMsg::Ask {
+            id,
+            op: q.op.clone(),
+            step: q.step.clone(),
+            what: q.what.clone(),
+            if_allowed: q.if_allowed.clone(),
+            if_stopped: q.if_stopped.clone(),
+        });
+        let answer = match tokio::time::timeout(Duration::from_secs(self.timeout_s), rx).await {
+            Ok(Ok(true)) => Answer::Allow,
+            Ok(Ok(false)) => Answer::Stop,
+            // The sender was dropped: the client disconnected mid-question.
+            Ok(Err(_)) => Answer::Unattended("the client went away before answering".into()),
+            Err(_) => Answer::Unattended(format!(
+                "nobody answered within {}s — the operation did not guess",
+                self.timeout_s
+            )),
+        };
+        if let Ok(mut g) = self.state.pending_asks.lock() {
+            g.remove(&id);
+        }
+        answer
+    }
 }
 
 /// B7: minimal sd_notify — tell systemd we're alive without pulling in a
@@ -987,6 +1072,8 @@ async fn main() {
         config: config.clone(),
         log_tx,
         op_lock: Arc::new(Mutex::new(())),
+        pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
         damper: Arc::new(std::sync::Mutex::new(
             homelab_core::notify::NotifyDamper::new(20 * 3600),
@@ -1815,6 +1902,10 @@ where
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    let asker = LiveAsker {
+        state,
+        timeout_s: state.config.ask_timeout_s,
+    };
     let ctx = OpCtx {
         exec,
         sink: &sink,
@@ -1829,6 +1920,7 @@ where
         kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         backup: state.config.backup.clone(),
         registry_cache: state.config.registry_cache.clone(),
+        asker: &asker,
     };
     let report = op(&ctx).await;
     notify(state, exec, label, &report).await; // F3, best-effort
@@ -2679,6 +2771,32 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: findings.is_empty(),
                 message: render_findings(&findings),
+            }
+        }
+        // T69: the operator answered a suspended step. Delivering it is all
+        // that happens here — the step itself is parked on a channel inside
+        // the operation, not on this task.
+        Rpc::Answer { id, allow } => {
+            let delivered = state
+                .pending_asks
+                .lock()
+                .ok()
+                .and_then(|mut g| g.remove(&id))
+                .map(|tx| tx.send(allow).is_ok())
+                .unwrap_or(false);
+            RpcResponse {
+                id: req.id,
+                ok: delivered,
+                message: if delivered {
+                    format!("answer delivered to question {}", id)
+                } else {
+                    // Not an error worth an incident: a question times out on
+                    // its own, so an answer arriving late is ordinary.
+                    format!(
+                        "question {} is no longer waiting — it timed out or was answered",
+                        id
+                    )
+                },
             }
         }
         Rpc::ZfsReplicate => {

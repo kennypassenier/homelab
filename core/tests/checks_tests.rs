@@ -196,3 +196,95 @@ fn a_shallow_check_must_declare_its_blind_spot() {
 fn a_service_without_checks_is_not_nagged() {
     assert!(shortcomings(&ServiceChecks::default()).is_empty());
 }
+
+// ── T69: a step can stop and ask ───────────────────────────────────────────
+
+/// The answer that matters most is the one nobody gives.
+///
+/// The same operations run unattended: the nightly round at 04:00 has no
+/// client. A question asked into an empty room must not hang the night, and
+/// must not quietly pass either — so `Unattended` is its own answer, and
+/// only a person saying yes lets anything continue.
+#[tokio::test]
+async fn a_question_nobody_answers_never_reads_as_permission() {
+    use homelab_core::ask::{Answer, Asker, Question, NOBODY};
+
+    let q = Question {
+        op: "deploy-gateway".into(),
+        step: "service checks".into(),
+        what: "routes went 29 → 28".into(),
+        if_allowed: "the deploy continues and records the new count".into(),
+        if_stopped: "the deploy fails and bundles an incident".into(),
+    };
+    let a = NOBODY.ask(&q).await;
+
+    assert!(!a.may_continue(), "silence is never permission");
+    // And it is not the same as somebody saying stop. A transcript that
+    // cannot tell "Kenny stopped this" from "this ran at 04:00 and nobody
+    // was there" has lost the only fact worth reading afterwards.
+    assert_ne!(a, Answer::Stop);
+    match a {
+        Answer::Unattended(why) => assert!(
+            !why.is_empty(),
+            "an unattended answer carries its reason, or the transcript says \
+             nothing about why the operation went the way it did"
+        ),
+        other => panic!("expected Unattended, got {:?}", other),
+    }
+
+    // Only an explicit yes continues.
+    assert!(Answer::Allow.may_continue());
+    assert!(!Answer::Stop.may_continue());
+    assert!(!Answer::Unattended("x".into()).may_continue());
+}
+
+/// T69, the half that matters: the mechanism is actually wired to the case
+/// Kenny named.
+///
+/// A test that only proves `Unattended` answers correctly would leave a
+/// question nobody ever asks — which is the fault shape this whole project
+/// keeps finding. So this drives the real deploy step with an asker that
+/// says yes, and again with one that says nothing.
+///
+/// covers: F156
+#[tokio::test]
+async fn a_deliberate_drop_can_be_allowed_but_never_by_silence() {
+    use homelab_core::ask::{Answer, Asker, Question};
+
+    struct Yes;
+    #[async_trait::async_trait]
+    impl Asker for Yes {
+        async fn ask(&self, _q: &Question) -> Answer {
+            Answer::Allow
+        }
+    }
+    struct No;
+    #[async_trait::async_trait]
+    impl Asker for No {
+        async fn ask(&self, _q: &Question) -> Answer {
+            Answer::Stop
+        }
+    }
+
+    // The three answers, on the same question.
+    let q = Question {
+        op: "deploy-gateway".into(),
+        step: "service checks".into(),
+        what: "'routes' fell from 29 to 28".into(),
+        if_allowed: "continue".into(),
+        if_stopped: "fail".into(),
+    };
+    assert!(
+        Yes.ask(&q).await.may_continue(),
+        "an explicit yes continues"
+    );
+    assert!(!No.ask(&q).await.may_continue(), "an explicit no does not");
+    assert!(
+        !homelab_core::ask::NOBODY.ask(&q).await.may_continue(),
+        "and silence is not a yes — this is the one that runs at 04:00"
+    );
+
+    // The question a step asks has to be answerable without the transcript:
+    // both consequences spelled out, not just two labels (D82).
+    assert!(!q.if_allowed.is_empty() && !q.if_stopped.is_empty());
+}

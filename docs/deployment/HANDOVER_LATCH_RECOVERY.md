@@ -3,16 +3,49 @@
 *Hand this to the session of the project it concerns. Written from the
 homelab (`stacks`) project, which hit this first and recovered from it.*
 
+## READ THIS FIRST — check whether the key is still there
+
+**Corrected 2026-09-02, after two projects had already acted on the wrong
+version of this document.** latch's keys do NOT live in the KDE wallet. latch
+2.2.0 builds against `keyring` 3.6.3 with the `linux-keyutils` backend, so
+they live in the **kernel** keyring. `secret-tool` and `kwallet-query` will
+tell you there is no latch anything, and that is not evidence of loss.
+
+Before you re-mint anything:
+
+```bash
+keyctl show                      # session keyring
+keyctl get_persistent @s         # relink the persistent one
+keyctl show | grep latch         # keyring-rs:key:<project>@latch
+```
+
+The persistent keyring (`_persistent.1000`) survives a session change. On
+2026-09-02 it still held every key that was believed lost, and Almanac
+recovered from it without re-minting at all. **Re-minting when the old key is
+still retrievable throws away the secrets' version history for nothing**, and
+it invalidates copies of the key that live elsewhere — a service holding the
+old key in its own environment keeps running until its next restart, which
+turns a visible failure into a delayed one.
+
+The persistent keyring has an expiry and does not survive a reboot, so it is
+a rescue hatch, not durability. The escrow step at the end is still the real
+fix.
+
 ## What happened
 
 At 11:41 a full system upgrade ran on Kenny's workstation (dozens of
-packages). One minute later the KDE wallet file was rewritten and the entire
-`Secret Service` folder was gone — with it the latch keys, the GitHub
-tokens, the copilot token, IntelliJ and zed. `kwallet` itself was **not**
-updated that day; the last version bump was 2026-08-27. The exact mechanism
-is unproven and nobody should invent one. What is established: a daemon
-holding the only copy of every key, through an in-place library swap of that
-size, is a hazard Kenny's own notes already warn about.
+packages). Two separate things went, and this document originally ran them
+together:
+
+- **The KDE wallet** was rewritten one minute later and its entire
+  `Secret Service` folder disappeared — the GitHub tokens, the copilot
+  token, IntelliJ, zed. `kwallet` itself was **not** updated that day; the
+  last version bump was 2026-08-27.
+- **The kernel session keyring** stopped presenting latch's keys. A session
+  keyring empties on a session change, which fits a workstation mid-upgrade.
+  The keys themselves were still in the persistent keyring the whole time.
+
+The exact mechanism for either is unproven and nobody should invent one.
 
 The lesson, stated plainly: **a keyring protects against being READ, not
 against being LOST.** Confidentiality is not durability.

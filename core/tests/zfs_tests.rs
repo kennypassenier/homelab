@@ -240,3 +240,50 @@ async fn e8_no_jobs_is_an_error_not_a_silent_success() {
     .await;
     assert!(!report.ok, "an empty job list must never read as success");
 }
+
+/// F177: a replica must never arrive claiming the path its source is
+/// mounted at.
+///
+/// `zfs send -R` carries the source's properties and `receive` applies them.
+/// Found live on 2026-09-02 while following the disaster-recovery runbook:
+/// `HDD18TB/replica/HDD2TB/paperless-config` and the real
+/// `HDD2TB/paperless-config` both had
+/// `mountpoint=/appdata/paperwork/paperless-config`, both `canmount=on`, and
+/// nothing anywhere decides which of the two wins after a reboot. If the
+/// copy wins, paperless serves stale data, writes land in the replica, and
+/// the next replication run overwrites them — silently, in both directions.
+///
+/// covers: F177
+#[tokio::test]
+async fn a_replica_never_inherits_the_path_its_source_lives_at() {
+    // A source and a target that share a snapshot: the incremental path.
+    let exec = MockExecutor::new();
+    exec.respond_always("zfs list -H -o name HDD2TB", CmdOutput::ok("HDD2TB\n"));
+    exec.respond_always("-r HDD2TB", CmdOutput::ok("HDD2TB@homelab-20260901-0400\n"));
+    exec.respond_always(
+        "-r HDD18TB/REPLICA_2TB",
+        CmdOutput::ok("HDD18TB/REPLICA_2TB@homelab-20260901-0400\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let _ = replicate(
+        &ctx(&exec, &sink, &j),
+        &[job("HDD2TB", "HDD18TB/REPLICA_2TB")],
+        &homelab_core::retention::default_tiers(),
+    )
+    .await;
+
+    let receives = exec.calls_containing("zfs receive");
+    assert!(
+        !receives.is_empty(),
+        "the test must actually reach a receive, or it proves nothing"
+    );
+    for call in &receives {
+        assert!(
+            call.contains("-x mountpoint"),
+            "every receive must exclude the mountpoint, or the replica claims \
+             the live path: {}",
+            call
+        );
+    }
+}

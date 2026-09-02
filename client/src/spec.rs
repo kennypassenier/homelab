@@ -320,11 +320,23 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          shell on the Proxmox host (root) unless stated otherwise.\n\n\
          ## Layer 0 — What runs where\n\n\
          - Proxmox host `10.10.5.250` (ssh root, key auth).\n\
-         - The 12TB and 18TB data disks are attached to the **Proxmox host**\n\
-           (`/HDD12TB`, `/HDD18TB`) and bind-mounted into CT 103\n\
-           (infra-fileserver), which shares them over Samba; CT 105/106 also\n\
-           bind-mount the 18TB subvolume. Losing a container never loses this\n\
-           data; losing the host means re-attaching these disks first.\n\
+         - **Four** ZFS pools are attached to the Proxmox host, not two. This\n\
+           line said two until 2026-09-02, and following it after a host loss\n\
+           would have re-attached half the storage. Read off the machine that\n\
+           day: `HDD12TB` (10.9T), `HDD18TB` (16.4T), `HDD4TB` (3.62T),\n\
+           `HDD2TB` (1.81T).\n\
+         - CT 103 (infra-fileserver), which shares everything over Samba, has\n\
+           a subvolume on **three** of them: `HDD12TB/subvol-103-disk-0`\n\
+           (8.40T), `HDD18TB/subvol-103-disk-0` (4.78T) and\n\
+           `HDD4TB/subvol-103-disk-0` (45.3G) — 13.2 TB in total. `HDD2TB`\n\
+           carries paperless's media and consume datasets. Losing a container\n\
+           never loses this data; losing the host means re-attaching **all\n\
+           four** pools first.\n\
+         - `HDD18TB/replica/...` holds the E8 replicas of the 2TB and 4TB\n\
+           pools; `HDD18TB/REPLICA_*` the frozen ones from the retired cron\n\
+           script. A replica is a COPY and is never the thing to mount at a\n\
+           live path — one of them was set to do exactly that (F177), so\n\
+           check `canmount` before mounting any of them.\n\
          - App config data lives on the host under `/appdata/<stack>/…`,\n\
            bind-mounted into each container — it survives container recreation\n\
            and is what restic backs up.\n\

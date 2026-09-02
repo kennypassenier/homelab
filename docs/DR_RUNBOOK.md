@@ -9,11 +9,23 @@ shell on the Proxmox host (root) unless stated otherwise.
 ## Layer 0 — What runs where
 
 - Proxmox host `10.10.5.250` (ssh root, key auth).
-- The 12TB and 18TB data disks are attached to the **Proxmox host**
-(`/HDD12TB`, `/HDD18TB`) and bind-mounted into CT 103
-(infra-fileserver), which shares them over Samba; CT 105/106 also
-bind-mount the 18TB subvolume. Losing a container never loses this
-data; losing the host means re-attaching these disks first.
+- **Four** ZFS pools are attached to the Proxmox host, not two. This
+line said two until 2026-09-02, and following it after a host loss
+would have re-attached half the storage. Read off the machine that
+day: `HDD12TB` (10.9T), `HDD18TB` (16.4T), `HDD4TB` (3.62T),
+`HDD2TB` (1.81T).
+- CT 103 (infra-fileserver), which shares everything over Samba, has
+a subvolume on **three** of them: `HDD12TB/subvol-103-disk-0`
+(8.40T), `HDD18TB/subvol-103-disk-0` (4.78T) and
+`HDD4TB/subvol-103-disk-0` (45.3G) — 13.2 TB in total. `HDD2TB`
+carries paperless's media and consume datasets. Losing a container
+never loses this data; losing the host means re-attaching **all
+four** pools first.
+- `HDD18TB/replica/...` holds the E8 replicas of the 2TB and 4TB
+pools; `HDD18TB/REPLICA_*` the frozen ones from the retired cron
+script. A replica is a COPY and is never the thing to mount at a
+live path — one of them was set to do exactly that (F177), so
+check `canmount` before mounting any of them.
 - App config data lives on the host under `/appdata/<stack>/…`,
 bind-mounted into each container — it survives container recreation
 and is what restic backs up.

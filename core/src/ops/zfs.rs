@@ -242,8 +242,24 @@ pub async fn replicate(
                 Some(base) => {
                     // Incremental: only the delta crosses the wire.
                     let from = format!("{}@{}", src, base);
+                    // F177: `-x mountpoint`. `zfs send -R` carries the
+                    // source's properties, and `receive` applies them — so a
+                    // replica arrives claiming the LIVE path its source is
+                    // mounted at. Found 2026-09-02 while following the DR
+                    // runbook: `HDD18TB/replica/HDD2TB/paperless-config` and
+                    // the real `HDD2TB/paperless-config` both had
+                    // mountpoint=/appdata/paperwork/paperless-config with
+                    // canmount=on. Which one wins after a reboot is not
+                    // decided anywhere. If the copy wins, paperless runs on
+                    // stale data, writes into the replica, and the next
+                    // replication run overwrites those writes — with nothing
+                    // anywhere saying so.
+                    //
+                    // Excluding the property rather than forcing canmount=off
+                    // leaves the replica mountable under the replica tree,
+                    // where reading it is safe and deliberate.
                     let script = format!(
-                        "zfs send -RI {} {} | zfs receive -F {}",
+                        "zfs send -RI {} {} | zfs receive -F -x mountpoint {}",
                         shell_quote(&from),
                         shell_quote(&snap),
                         shell_quote(&tgt)
@@ -253,8 +269,9 @@ pub async fn replicate(
                 }
                 None if !target_exists || subtree_snaps == 0 => {
                     // First-time seed: nothing on the target to lose.
+                    // F177, same reason as the incremental branch above.
                     let script = format!(
-                        "zfs send -R {} | zfs receive -F {}",
+                        "zfs send -R {} | zfs receive -F -x mountpoint {}",
                         shell_quote(&snap),
                         shell_quote(&tgt)
                     );

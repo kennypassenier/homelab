@@ -38,7 +38,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 // ── Config (AR11) ────────────────────────────────────────────────────────────
 
 /// One externally-made backup to keep an eye on.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct WatchedBackup {
     /// What the nightly report calls it.
     name: String,
@@ -499,6 +499,16 @@ fn render_settings_toml(
         gateway_routes_dir: Option<&'a String>,
         #[serde(skip_serializing_if = "<[_]>::is_empty")]
         zfs_jobs: &'a [homelab_core::ops::zfs::ZfsJob],
+        // F208: these three were absent, so every settings save silently
+        // wiped them — the pull-through cache the media deploy leans on, the
+        // router-backup watch, and the device backups. A struct that renders
+        // the whole file must know the whole file.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        registry_cache: Option<&'a homelab_core::ops::registry_cache::CacheCfg>,
+        #[serde(skip_serializing_if = "<[_]>::is_empty")]
+        watched_backups: &'a [WatchedBackup],
+        #[serde(skip_serializing_if = "<[_]>::is_empty")]
+        device_backups: &'a [homelab_core::ops::devicebackup::DeviceBackup],
         // Written back only when they differ from the compiled defaults, but
         // written back they must be: a settings save that drops them would
         // silently move the backup target, which is the same class of bug the
@@ -545,6 +555,9 @@ fn render_settings_toml(
             != SafetyConfig::default().gateway_routes_dir)
             .then_some(&config.safety.gateway_routes_dir),
         zfs_jobs: &config.zfs_jobs,
+        registry_cache: config.registry_cache.as_ref(),
+        watched_backups: &config.watched_backups,
+        device_backups: &config.device_backups,
         restic_base: (config.backup.restic_base != bdef.restic_base)
             .then_some(&config.backup.restic_base),
         restic_password_file: (config.backup.password_file != bdef.password_file)
@@ -637,6 +650,63 @@ fn persist_settings(
 
 #[cfg(test)]
 mod tests {
+    /// covers: F208
+    ///
+    /// G1 of the Phase-7 gate. Saving a setting from the TUI rewrites the
+    /// whole of host.toml from the `Out` struct, so a field `Out` does not
+    /// know is a field that DISAPPEARS on save. Three were missing when this
+    /// was measured: the pull-through cache the media deploy leans on, the
+    /// router-backup watch, and the device backups.
+    ///
+    /// The old guard test could not catch it — it set those fields to empty
+    /// in its own fixture and never asserted them afterwards, so it passed
+    /// on exactly this bug. This one reads both structs out of the source,
+    /// which is the same trick `known_top_lists_every_field_of_file_config`
+    /// uses, and cannot drift.
+    #[test]
+    fn the_settings_writer_knows_every_field_the_config_has() {
+        let src = include_str!("main.rs");
+        fn fields(src: &str, marker: &str, end: &str) -> Vec<String> {
+            let start = src
+                .find(marker)
+                .unwrap_or_else(|| panic!("{} not found", marker));
+            let body = &src[start..];
+            let body = &body[..body.find(end).expect("unterminated struct")];
+            let mut out = Vec::new();
+            for line in body.lines().skip(1) {
+                let t = line.trim();
+                if t.starts_with("//") || t.starts_with("#[") || t.is_empty() {
+                    continue;
+                }
+                if let Some(name) = t.split(':').next() {
+                    let name = name.trim();
+                    if !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+                    {
+                        out.push(name.to_string());
+                    }
+                }
+            }
+            out
+        }
+
+        let file_cfg = fields(src, "struct FileConfig {", "\n}");
+        let written = fields(src, "    struct Out<'a> {", "\n    }");
+        assert!(
+            file_cfg.len() > 20 && written.len() > 20,
+            "the parser broke, not the code: {} vs {}",
+            file_cfg.len(),
+            written.len()
+        );
+
+        let dropped: Vec<&String> = file_cfg.iter().filter(|f| !written.contains(f)).collect();
+        assert!(
+            dropped.is_empty(),
+            "these settings would be WIPED from host.toml the next time Kenny \
+             saves anything from the TUI: {:?}",
+            dropped
+        );
+    }
+
     /// V5 (Kenny, 2026-09-02): the two key lists were hand-maintained
     /// because Rust cannot enumerate its own struct fields, and he asked for
     /// that cost to go away rather than be accepted. It can: the source is
@@ -801,8 +871,21 @@ port = 5003
     #[test]
     fn settings_render_keeps_every_config_field() {
         let config = Config {
-            watched_backups: vec![],
-            device_backups: vec![],
+            // F208: with real values, so the round-trip proves they SURVIVE
+            // rather than only that the struct knows their names.
+            watched_backups: vec![WatchedBackup {
+                name: "opnsense-config".into(),
+                rclone_path: "gdrive:homelab-backups/OPNSense-backups".into(),
+                max_age_hours: 26,
+            }],
+            device_backups: vec![homelab_core::ops::devicebackup::DeviceBackup {
+                name: "opnsense".into(),
+                url: "https://10.10.10.1/api/core/backup/download/this".into(),
+                cred_file: "/var/lib/homelab/secrets/opnsense-backup.conf".into(),
+                filename: "config.xml".into(),
+                pin: Some("sha256//abc".into()),
+                ca_file: None,
+            }],
             token: "0123456789abcdef0123".into(),
             listen: "0.0.0.0:8443".parse().unwrap(),
             state_dir: "/var/lib/homelab".into(),
@@ -818,7 +901,11 @@ port = 5003
                 gateway_vmid: 112,
                 gateway_routes_dir: "/appdata/platform/traefik-config/routes".into(),
             },
-            registry_cache: None,
+            registry_cache: Some(homelab_core::ops::registry_cache::CacheCfg {
+                host: "10.10.10.17".into(),
+                upstreams: vec![],
+                pull_timeout_secs: 180,
+            }),
             zfs_jobs: vec![homelab_core::ops::zfs::ZfsJob {
                 source: "HDD2TB".into(),
                 target: "HDD18TB/REPLICA_2TB".into(),
@@ -891,6 +978,21 @@ port = 5003
         assert_eq!(
             parsed.notify_auth_bearer.as_deref(),
             Some("a-token-that-must-survive-a-save")
+        );
+        // F208: the three that a settings save used to wipe.
+        assert!(
+            parsed.registry_cache.is_some(),
+            "the pull-through cache must survive a settings save"
+        );
+        assert_eq!(
+            parsed.watched_backups.as_ref().map(|w| w.len()),
+            Some(1),
+            "the router-backup watch must survive a settings save"
+        );
+        assert_eq!(
+            parsed.device_backups.as_ref().map(|d| d.len()),
+            Some(1),
+            "the device backups must survive a settings save"
         );
         assert_eq!(parsed.retention.as_ref().map(|r| r.len()), Some(3));
         assert_eq!(parsed.no_touch, Some(vec![100, 101]));

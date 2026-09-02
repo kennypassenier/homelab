@@ -71,10 +71,21 @@ curl -s -G "http://10.10.10.4:3100/loki/api/v1/query_range" \
 Zero streams after a migration = that stack is broken, whatever the container
 says about itself.
 
+## Fleet state after the migration, 2026-09-02 21:00
+
+`homelab check` reports exactly one **broken** finding across the whole
+fleet: `opnsense-config — holds no files at all`, which waits on Kenny adding
+"Diagnostics: Configuration History" to the `homelab-opnsense-backup` user.
+Everything else is drift from unanswered manual checks, which is the G17
+mechanism doing its job, plus one deliberate `noted` about the registry cache.
+
 ## Also queued, in this order
 
-2. **G19 backlog** — 42 findings claim `done` and name no proof. The ratchet in
-   `register_tests.rs` stops new ones; lower `REMAINING` as they are worked off.
+1. **G19 backlog** — down from 42 to **18**. The ratchet in
+   `register_tests.rs` stops new ones and refuses to sit stale. What is left
+   are real code findings that need their test named (F4, F16, F189, F191,
+   F204, F207, F210, F212, F216, F225, F240, F241, F252 …) rather than the
+   Phase-1 observations, which are annotated as deliberately untestable.
 3. **F247** — nothing in the house sends almanac anything (zero events in 48 h).
    Kenny's call whether that is a pipeline still to build or a service to retire.
 

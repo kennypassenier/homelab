@@ -45,7 +45,7 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — v3.39.1 live on the host | **7 · Hardening — 22 of 23 gate gaps closed; only G6 remains, deferred by Kenny. `TEST_PLAN.md` is generated (`homelab testplan`)** |
+| Phase | 9 · Released — v3.40.2 live on the host | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
 
@@ -56,7 +56,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.39.1** (2026-09-02); 402 tests, CI green — and green now
+- **Released and live at v3.40.2** (2026-09-02); 432 tests, CI green — and green now
   means something: CI ran without `--locked` until that day, so it built
   whatever crates.io served rather than what the lockfile pins (F235).
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.
@@ -126,6 +126,28 @@ it is the resume point and is kept current as part of the work, not afterwards.
   verified facts in the vault note "Homelab HTTPSwitchboard Deployment".
 - **Awaiting Kenny**: D5 mirror remote+deploy-key, H2 OPNsense API creds,
   F4 PVE token.
+
+### 2026-09-02 evening — what changed on the machines
+
+- **The whole fleet left promtail** (F249, F256). It reached end of life on
+  2026-03-02. All thirteen containers now run Grafana Alloy, installed with
+  apt from Grafana's signed repository so unattended-upgrades keeps it
+  patched. The two native containers (kyu CT 109, almanac CT 112) shipped
+  **no logs at all** before this. Every stack was verified by querying Loki
+  afterwards, not by reading its deploy transcript — which is how three
+  faults were found that no deploy reported (F254, F255).
+- **`homelab` is installed** at `~/.cargo/bin/homelab` (`make install`) and
+  reads `~/.config/homelab/env`. Before this every `homelab <verb>` in every
+  document here was a command nobody could run (F240, F253).
+- **`make release` has `DRY=1`** and refuses to ship from a red base (F251,
+  F252). Branch protection does not cover direct pushes and that is Kenny's
+  call, not a defect to fix behind his back.
+- **The nightly round gained readers**: a restore drill that refuses to be
+  satisfied by empty files (F229), the manual checks Kenny answers with
+  `homelab checks answer` (F221), a notification path that notices its own
+  failure (F222), half-deployed stacks (F220), and the Uptime Kuma seeder's
+  verdict about monitors that outlived their stack (F243).
+- **almanac v1.5.0** live (F257).
 
 ## Project documents
 

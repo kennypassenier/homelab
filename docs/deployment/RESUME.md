@@ -73,11 +73,6 @@ says about itself.
 
 ## Also queued, in this order
 
-1. **almanac v1.5.0** — CT 112 runs 1.4.0. Released and signed; the almanac
-   session verified the signature. Rolls out with
-   `homelab install-native stacks/almanac/almanac`. It was held back only
-   because a form was open (standing rule: no new live action while Kenny has
-   an unanswered form).
 2. **G19 backlog** — 42 findings claim `done` and name no proof. The ratchet in
    `register_tests.rs` stops new ones; lower `REMAINING` as they are worked off.
 3. **F247** — nothing in the house sends almanac anything (zero events in 48 h).

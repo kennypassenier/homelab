@@ -57,16 +57,19 @@ fn a_route_fragment_yields_its_hostnames_and_not_its_backends() {
 
 #[test]
 fn a_stack_without_routes_is_skipped_rather_than_rendered_empty() {
-    let out = services_yaml(&[
-        ("registry".into(), vec![]),
-        (
-            "media".into(),
-            vec![Entry {
-                app: "jellyfin".into(),
-                host: "fin.kp-soft.dev".into(),
-            }],
-        ),
-    ]);
+    let out = services_yaml(
+        &[
+            ("registry".into(), vec![]),
+            (
+                "media".into(),
+                vec![Entry {
+                    app: "jellyfin".into(),
+                    host: "fin.kp-soft.dev".into(),
+                }],
+            ),
+        ],
+        None,
+    );
     assert!(
         !out.contains("registry"),
         "an empty heading reads as 'broken' when it means 'no front door': {}",
@@ -92,8 +95,8 @@ fn rendering_twice_produces_the_same_bytes() {
         ],
     )];
     assert_eq!(
-        services_yaml(&stacks),
-        services_yaml(&stacks),
+        services_yaml(&stacks, None),
+        services_yaml(&stacks, None),
         "a deploy that changes nothing must write an identical file, or every \
          deploy reports a change that is not one"
     );
@@ -152,4 +155,115 @@ async fn a_failing_chown_does_not_fail_the_write() {
     )
     .await;
     assert!(r.is_ok(), "a failed chown must not fail the write");
+}
+
+/// covers: F188
+///
+/// The real overlay, verbatim from the repo, joined with routes shaped like
+/// the ones the gateway actually holds. The join key is `href` because
+/// display names were measured against the real pair of files and would
+/// have guessed wrong eight times out of twenty-six.
+#[test]
+fn the_overlay_supplies_what_a_route_cannot_and_nothing_else() {
+    use homelab_core::ops::homepage::parse_overlay;
+    let ov = parse_overlay(include_str!(
+        "../../stacks/home/homepage/services-overlay.yml"
+    ));
+    assert_eq!(ov.blocks.len(), 24, "the real overlay has 24 entries");
+    assert_eq!(ov.group_order.first().map(String::as_str), Some("Media"));
+
+    let out = services_yaml(
+        &[
+            (
+                "media".into(),
+                vec![
+                    Entry {
+                        app: "jellyfin".into(),
+                        host: "fin.kp-soft.dev".into(),
+                    },
+                    // No overlay entry: a service nobody has described yet.
+                    Entry {
+                        app: "flaresolverr".into(),
+                        host: "flare.kp-soft.dev".into(),
+                    },
+                ],
+            ),
+            (
+                "gateway".into(),
+                vec![Entry {
+                    app: "grafana".into(),
+                    host: "grafana.kp-soft.dev".into(),
+                }],
+            ),
+        ],
+        Some(&ov),
+    );
+
+    // Kenny's name, group, icon and widget survive the merge.
+    assert!(out.contains("- Media:"), "{}", out);
+    assert!(out.contains("    - Jellyfin:"), "{}", out);
+    assert!(out.contains("icon: jellyfin.svg"), "{}", out);
+    assert!(out.contains("type: jellyfin"), "{}", out);
+    assert!(out.contains("enableNowPlaying: true"), "{}", out);
+
+    // A routed service with no overlay entry still appears — under its
+    // stack, with the plain link. That is the whole point: a new service
+    // shows up by itself.
+    assert!(
+        out.contains("- media:"),
+        "unknown service keeps its stack: {}",
+        out
+    );
+    assert!(out.contains("    - flaresolverr:"), "{}", out);
+    assert!(
+        out.contains("siteMonitor: https://flare.kp-soft.dev/"),
+        "{}",
+        out
+    );
+
+    // Grafana is Kenny's, and he filed it under Infrastructuur rather than
+    // under the gateway stack it happens to run in.
+    assert!(out.contains("    - Grafana:"), "{}", out);
+    let infra = out.find("- Infrastructuur:").expect("group missing");
+    let graf = out.find("    - Grafana:").unwrap();
+    assert!(
+        graf > infra,
+        "Grafana must land in the group the overlay names"
+    );
+
+    // Two overlay entries have no route at all and are deliberate: the one
+    // http:// link on the page, and a deep link into Grafana for a service
+    // with no page of its own. Dropping them would delete a decision.
+    assert!(
+        out.contains("    - kp-soft:"),
+        "manual link dropped: {}",
+        out
+    );
+    assert!(out.contains("http://10.10.10.16:8080/"), "{}", out);
+    assert!(out.contains("    - Loki:"), "manual link dropped: {}", out);
+
+    // The named groups come first, in the overlay's order.
+    let media = out.find("- Media:").unwrap();
+    assert!(media < infra, "group_order must be honoured");
+}
+
+/// Same input, same bytes — a deploy that changes nothing must report
+/// "unchanged" rather than rewrite the file every night.
+#[test]
+fn merging_twice_produces_the_same_bytes() {
+    use homelab_core::ops::homepage::parse_overlay;
+    let ov = parse_overlay(include_str!(
+        "../../stacks/home/homepage/services-overlay.yml"
+    ));
+    let stacks = vec![(
+        "media".into(),
+        vec![Entry {
+            app: "jellyfin".into(),
+            host: "fin.kp-soft.dev".into(),
+        }],
+    )];
+    assert_eq!(
+        services_yaml(&stacks, Some(&ov)),
+        services_yaml(&stacks, Some(&ov))
+    );
 }

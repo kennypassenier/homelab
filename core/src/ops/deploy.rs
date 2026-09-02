@@ -1514,7 +1514,40 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 }
             }
             stacks.sort_by(|a, b| a.0.cmp(&b.0));
-            let body = crate::ops::homepage::services_yaml(&stacks);
+            // V6: the overlay is intent, not runtime config, so it lives in
+            // the intent repo next to the stack file that ships it — where
+            // `git log` records who changed the front page and why. Found by
+            // its name rather than by a new setting: there is exactly one,
+            // and a config knob for it would be one more line nobody
+            // remembers to add (which is how T51 sat switched off for two
+            // days — F186).
+            let found = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &[
+                        "-c",
+                        &format!(
+                            "ls -1 {}/repo/stacks/*/*/services-overlay.yml 2>/dev/null | head -1",
+                            ctx.state_dir
+                        ),
+                    ],
+                    30,
+                ))
+                .await?;
+            let overlay_path = found.stdout.trim().to_string();
+            let overlay = match exec.read_file(&overlay_path).await {
+                Ok(text) => {
+                    let ov = crate::ops::homepage::parse_overlay(&text);
+                    log_info(format!(
+                        "[t51] overlay: {} entr(y/ies) from {}",
+                        ov.blocks.len(),
+                        overlay_path
+                    ));
+                    Some(ov)
+                }
+                Err(_) => None,
+            };
+            let body = crate::ops::homepage::services_yaml(&stacks, overlay.as_ref());
             match crate::ops::util::write_file_owned_like_dir(exec, dest, &body, 0o644).await {
                 Ok(()) => {
                     log_info(format!(

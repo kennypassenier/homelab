@@ -1,0 +1,241 @@
+# Homepage overlay — what the orchestrator cannot derive from a route file.
+#
+# The generated list (T51) knows every service that has a gateway route, and
+# nothing else: no icon, no description, no widget, and no opinion about
+# which services belong together. This file supplies exactly that, and the
+# two are joined on `href`, which both sides already have. An exact key on
+# purpose: matching display names would have guessed wrong eight times out
+# of twenty-six when this was measured on 2026-09-02.
+#
+# A routed service with no block here still appears — grouped under its
+# stack name, with a plain link. That is the point: a new service shows up
+# by itself, and you decide later where it belongs.
+#
+# A block here whose href has no route is kept as a deliberate manual link
+# (kp-soft and Loki below). Everything under `extra:` is passed through to
+# Homepage verbatim, so any field Homepage supports works here without this
+# orchestrator needing to know about it.
+
+group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
+
+
+- href: https://fin.kp-soft.dev/
+  group: Media
+  name: Jellyfin
+  extra: |
+    icon: jellyfin.svg
+    description: Films en series
+    widget:
+      type: jellyfin
+      url: http://10.10.10.6:8096
+      key: "{{HOMEPAGE_VAR_JELLYFIN}}"
+      enableNowPlaying: true
+      enableBlocks: true
+
+- href: https://seerr.kp-soft.dev/
+  group: Media
+  name: Seerr
+  extra: |
+    icon: jellyseerr.svg
+    description: Aanvragen
+    widget:
+      type: jellyseerr
+      url: http://10.10.10.6:5055
+      key: "{{HOMEPAGE_VAR_SEERR}}"
+
+- href: https://son.kp-soft.dev/
+  group: Media
+  name: Sonarr
+  extra: |
+    icon: sonarr.svg
+    description: Series
+    widget:
+      type: sonarr
+      url: http://10.10.10.6:8989
+      key: "{{HOMEPAGE_VAR_SONARR}}"
+
+- href: https://rad.kp-soft.dev/
+  group: Media
+  name: Radarr
+  extra: |
+    icon: radarr.svg
+    description: Films
+    widget:
+      type: radarr
+      url: http://10.10.10.6:7878
+      key: "{{HOMEPAGE_VAR_RADARR}}"
+
+- href: https://prowl.kp-soft.dev/
+  group: Media
+  name: Prowlarr
+  extra: |
+    icon: prowlarr.svg
+    description: Indexeerders
+    widget:
+      type: prowlarr
+      url: http://10.10.10.6:9696
+      key: "{{HOMEPAGE_VAR_PROWLARR}}"
+
+- href: https://baz.kp-soft.dev/
+  group: Media
+  name: Bazarr
+  extra: |
+    icon: bazarr.svg
+    description: Ondertitels
+    widget:
+      type: bazarr
+      url: http://10.10.10.6:6767
+      key: "{{HOMEPAGE_VAR_BAZARR}}"
+
+# No widget: qBittorrent's WebUI password is hashed and unreadable, and
+# its API key answered 403 to every header shape tried on 2026-08-31.
+# Giving it a widget needs either the password or a LAN whitelist entry,
+# and weakening its auth is Kenny's call, not a detail to slip in here.
+- href: https://qbit.kp-soft.dev/
+  group: Media
+  name: qBittorrent
+  extra: |
+    icon: qbittorrent.svg
+    description: Downloads
+
+- href: https://docs.kp-soft.dev/
+  group: Papierwerk
+  name: Paperless
+  extra: |
+    icon: paperless.svg
+    description: Documentarchief
+    widget:
+      type: paperlessngx
+      url: http://10.10.10.14:8000
+      key: "{{HOMEPAGE_VAR_PAPERLESS}}"
+
+- href: https://budget.kp-soft.dev/
+  group: Papierwerk
+  name: Actual Budget
+  extra: |
+    icon: actual-budget.svg
+    description: Huishoudboekje
+
+- href: https://pdf.kp-soft.dev/
+  group: Papierwerk
+  name: Stirling PDF
+  extra: |
+    icon: stirling-pdf.svg
+    description: PDF-gereedschap
+
+# The one deliberate http:// link on this page, and the reason is worth
+# keeping: kp-soft has no gateway route at all while it is being built.
+# Putting it on a *.kp-soft.dev name puts it behind Cloudflare Access,
+# and Access answers 401 to every write — no setting, no role, no passkey
+# could be saved. It goes back to an https name when it moves to the bare
+# kp-soft.dev; see docs/deployment/KP_SOFT_MIGRATION.md.
+- href: http://10.10.10.16:8080/
+  group: Eigen
+  name: kp-soft
+  extra: |
+    icon: mdi-web
+    description: Eigen site (in aanbouw, alleen thuis)
+
+- href: https://ha.kp-soft.dev/
+  group: Huis
+  name: Home Assistant
+  extra: |
+    icon: home-assistant.svg
+    description: Domotica
+
+- href: https://almanac.kp-soft.dev/
+  group: Huis
+  name: Almanac
+  extra: |
+    icon: mdi-calendar-clock
+    description: Agenda-hub
+
+- href: https://sync.kp-soft.dev/
+  group: Huis
+  name: Syncthing
+  extra: |
+    icon: syncthing.svg
+    description: Obsidian-kluis
+
+- href: https://sp.kp-soft.dev/
+  group: Huis
+  name: SuperSync
+  extra: |
+    icon: mdi-sync
+    description: Super Productivity
+
+- href: https://trmnl.kp-soft.dev/
+  group: Huis
+  name: Terminus
+  extra: |
+    icon: mdi-monitor
+    description: E-ink dashboard
+
+- href: https://prox.kp-soft.dev/
+  group: Infrastructuur
+  name: Proxmox
+  extra: |
+    icon: proxmox.svg
+    description: Hypervisor
+    widget:
+      type: proxmox
+      url: https://10.10.5.250:8006
+      username: "{{HOMEPAGE_VAR_PVE_USER}}!{{HOMEPAGE_VAR_PVE_TOKEN_NAME}}"
+      password: "{{HOMEPAGE_VAR_PVE_TOKEN_VALUE}}"
+      node: proxmox
+
+- href: https://grafana.kp-soft.dev/
+  group: Infrastructuur
+  name: Grafana
+  extra: |
+    icon: grafana.svg
+    description: Grafieken
+    widget:
+      type: grafana
+      url: http://10.10.10.4:3000
+      username: "{{HOMEPAGE_VAR_GF_ADMIN_USER}}"
+      password: "{{HOMEPAGE_VAR_GF_ADMIN_PASSWORD}}"
+
+- href: https://kuma.kp-soft.dev/
+  group: Infrastructuur
+  name: Uptime Kuma
+  extra: |
+    icon: uptime-kuma.svg
+    description: Bereikbaarheid
+
+- href: https://prom.kp-soft.dev/
+  group: Infrastructuur
+  name: Prometheus
+  extra: |
+    icon: prometheus.svg
+    description: Metingen
+
+- href: https://alerts.kp-soft.dev/
+  group: Infrastructuur
+  name: Alertmanager
+  extra: |
+    icon: mdi-bell-alert
+    description: Meldingen
+
+# Loki has no interface of its own — /ready is a health probe, not a page.
+# Its data is read through Grafana, so the link goes there.
+- href: https://grafana.kp-soft.dev/explore
+  group: Infrastructuur
+  name: Loki
+  extra: |
+    icon: mdi-text-box-search
+    description: Logs (via Grafana)
+
+- href: https://kyu.kp-soft.dev/
+  group: Infrastructuur
+  name: kyu
+  extra: |
+    icon: mdi-mailbox
+    description: Berichtenhub
+
+- href: https://opn.kp-soft.dev/
+  group: Infrastructuur
+  name: OPNsense
+  extra: |
+    icon: opnsense.svg
+    description: Router

@@ -25,7 +25,14 @@ services:
     volumes:
       - /appdata/home/homepage-config:/app/config
       - ./settings.yaml:/app/config/settings.yaml:ro
-      - ./services.yaml:/app/config/services.yaml:ro
+      # V6 (2026-09-02): services.yaml is NOT mounted from here any more.
+      # It used to be, read-only, over the top of the same path the mount
+      # above provides — so the file the orchestrator generated could never
+      # be seen by Homepage, not even after its config knob was switched on
+      # (F188). What Kenny had written by hand now lives in
+      # services-overlay.yml beside this file, joined to the generated list
+      # on href, so the list stays current and his icons, descriptions,
+      # widgets and grouping stay his.
       - ./widgets.yaml:/app/config/widgets.yaml:ro
       - ./bookmarks.yaml:/app/config/bookmarks.yaml:ro
     ports:

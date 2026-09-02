@@ -1464,7 +1464,14 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     if let Some(dir) = ctx.grafana_dashboards_dir.as_deref() {
         step!(runner, exec, ctx, m, "grafana dashboard", {
             let dest = crate::ops::dashboard::dashboard_file(dir, &m.stack_name);
-            let body = crate::ops::dashboard::dashboard_json(&m.stack_name, &m.apps);
+            // B3: a stack with no compose apps runs systemd units, and the
+            // cadvisor panels can only ever be empty there.
+            let native = m.apps.is_empty() && !m.natives.is_empty();
+            let body = crate::ops::dashboard::dashboard_json_for(
+                &m.stack_name,
+                if native { &m.natives } else { &m.apps },
+                native,
+            );
             match push_content(exec, ctx.safety.gateway_vmid, &dest, &body, "644").await {
                 Ok(changed) => {
                     if changed {

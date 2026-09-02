@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**384 tests across 22 suites.**
+**388 tests across 22 suites.**
 
 ## Accepted limitations
 
@@ -338,6 +338,10 @@ Covers: F158, F175
 - `an_empty_fleet_still_renders_a_file_the_seeder_can_parse`
 - `a_stack_name_with_a_quote_in_it_cannot_break_the_file`
 - `an_unreadable_fleet_makes_nothing_stale` — F175, the second site of the same fault.
+- `a_docker_stack_still_asks_cadvisor`
+- `a_native_stack_asks_node_exporter_instead` — The case Kenny found: three empty graphs on a container that runs no docker at all, because cadvisor has nothing there to measure.
+- `both_shapes_ask_about_the_disk_because_that_question_is_the_same`
+- `both_shapes_are_valid_json`
 
 ### `core/tests/native_tests.rs`
 

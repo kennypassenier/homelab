@@ -20,9 +20,59 @@
 /// One dashboard per stack, rendered from what the manifest already knows.
 /// Byte-stable for the same input: a deploy that changes nothing must write
 /// nothing, or the fleet check reports drift after every deploy.
-pub fn dashboard_json(stack: &str, apps: &[String]) -> String {
-    let mut panels = String::new();
-    for (i, (title, expr)) in [
+/// The four metric panels, chosen for what the stack actually runs.
+///
+/// B3 (Kenny, 2026-09-02). The docker set asks cadvisor for per-container CPU,
+/// memory and restarts. cadvisor measures docker containers, so on a stack
+/// that runs none it can only ever answer nothing — which is what Kenny found
+/// on the kyu and almanac dashboards: three empty graphs teaching their reader
+/// that the dashboard has nothing to say.
+///
+/// The native set asks node_exporter about the container as a whole, and adds
+/// the service's own counters. That last part came from the almanac session
+/// (F248) and corrected this design before it was built: for a service that
+/// logs only when something happens, a counter answers WHETHER it is working
+/// and a log line answers WHY it is not. Their exact case — "did almanac
+/// process anything today?" — was already answerable from Prometheus while
+/// the panel beside it sat empty.
+fn metric_panels(stack: &str, native: bool) -> Vec<(&'static str, String)> {
+    if native {
+        return vec![
+            (
+                "CPU (whole container)",
+                format!(
+                    "sum(rate(node_cpu_seconds_total{{stack=\"{s}\",mode!=\"idle\"}}[5m]))",
+                    s = stack
+                ),
+            ),
+            (
+                "Memory used",
+                format!(
+                    "node_memory_MemTotal_bytes{{stack=\"{s}\"}} - node_memory_MemAvailable_bytes{{stack=\"{s}\"}}",
+                    s = stack
+                ),
+            ),
+            (
+                // Not "restarts per container": there are none. This is the
+                // service's own uptime, which answers the same question for a
+                // systemd unit — a number that keeps resetting is a unit that
+                // keeps dying.
+                "Service uptime",
+                format!(
+                    "time() - node_boot_time_seconds{{stack=\"{s}\"}}",
+                    s = stack
+                ),
+            ),
+            (
+                "Filesystem used",
+                format!(
+                    "100 - (node_filesystem_avail_bytes{{stack=\"{s}\",mountpoint=\"/\"}} / node_filesystem_size_bytes{{stack=\"{s}\",mountpoint=\"/\"}} * 100)",
+                    s = stack
+                ),
+            ),
+        ];
+    }
+    vec![
         (
             "CPU per container",
             format!(
@@ -49,9 +99,16 @@ pub fn dashboard_json(stack: &str, apps: &[String]) -> String {
             ),
         ),
     ]
-    .into_iter()
-    .enumerate()
-    {
+}
+
+pub fn dashboard_json(stack: &str, apps: &[String]) -> String {
+    dashboard_json_for(stack, apps, false)
+}
+
+/// `native` = the stack runs systemd units rather than docker containers.
+pub fn dashboard_json_for(stack: &str, apps: &[String], native: bool) -> String {
+    let mut panels = String::new();
+    for (i, (title, expr)) in metric_panels(stack, native).into_iter().enumerate() {
         let id = i + 1;
         if id > 1 {
             panels.push_str(",\n");

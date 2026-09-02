@@ -133,3 +133,50 @@ fn an_unreadable_fleet_makes_nothing_stale() {
         vec!["host · media".to_string()]
     );
 }
+
+/// B3 · a native stack gets panels it can actually fill.
+mod native_dashboard {
+    use homelab_core::ops::dashboard::{dashboard_json, dashboard_json_for};
+
+    #[test]
+    fn a_docker_stack_still_asks_cadvisor() {
+        let d = dashboard_json("media", &["jellyfin".to_string()]);
+        assert!(d.contains("container_cpu_usage_seconds_total"), "{}", d);
+        assert!(d.contains("Restarts per container"));
+    }
+
+    /// The case Kenny found: three empty graphs on a container that runs no
+    /// docker at all, because cadvisor has nothing there to measure.
+    #[test]
+    fn a_native_stack_asks_node_exporter_instead() {
+        let d = dashboard_json_for("kyu", &["kyu".to_string()], true);
+        assert!(
+            !d.contains("container_cpu_usage_seconds_total"),
+            "cadvisor cannot answer for a stack with no containers: {}",
+            d
+        );
+        assert!(d.contains("node_cpu_seconds_total"), "{}", d);
+        assert!(d.contains("node_memory_MemTotal_bytes"), "{}", d);
+    }
+
+    #[test]
+    fn both_shapes_ask_about_the_disk_because_that_question_is_the_same() {
+        for native in [false, true] {
+            let d = dashboard_json_for("kyu", &["kyu".to_string()], native);
+            assert!(
+                d.contains("node_filesystem_avail_bytes"),
+                "native={}",
+                native
+            );
+        }
+    }
+
+    #[test]
+    fn both_shapes_are_valid_json() {
+        for native in [false, true] {
+            let d = dashboard_json_for("kyu", &["kyu".to_string()], native);
+            serde_json::from_str::<serde_json::Value>(&d)
+                .unwrap_or_else(|e| panic!("native={} does not parse: {}\n{}", native, e, d));
+        }
+    }
+}

@@ -216,6 +216,24 @@ pub struct RouteFact {
 /// number about patience belongs in configuration, and this is its default).
 pub const DEFAULT_BACKUP_MAX_AGE_S: u64 = 48 * 3600;
 
+/// Which findings are worth waking somebody for.
+///
+/// Z3: a `Noted` finding is a decision, not a fault — the registry cache
+/// that is deliberately not backed up, a mount declared unkept. Letting one
+/// raise the alarm trains the reader to ignore the notification, and that
+/// notification is the one that has to be believed when it IS real.
+///
+/// Extracted from the nightly loop on 2026-09-02 (G15 of the Phase-7 gate).
+/// It lived inside a 340-line async function that no test could reach, which
+/// meant the rule deciding what counts as an alarm was itself unguarded.
+pub fn alarming(findings: &[Finding]) -> Vec<Finding> {
+    findings
+        .iter()
+        .filter(|f| f.severity != Severity::Noted)
+        .cloned()
+        .collect()
+}
+
 /// The whole comparison, as one pure function.
 pub fn evaluate(
     state: &HostState,

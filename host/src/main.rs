@@ -2172,7 +2172,18 @@ async fn scheduler_loop(state: AppState) {
         // hostname drifted, a backup that quietly stopped, a route that leads
         // nowhere. Stack-file facts are the client's to supply, so the
         // nightly pass runs without them.
-        if !plan.is_empty() {
+        // G15 of the Phase-7 gate: this used to run only when the night had
+        // work to do. Backwards — the findings this check exists for are
+        // precisely the ones that produce no failure of their own, so a night
+        // where nothing was due is a night where nothing was watched either.
+        // A hostname that drifted, a route that leads nowhere and a template
+        // that no longer exists do not wait for a backup to be due.
+        {
+            // The stack-file half is deliberately empty here and it is not an
+            // oversight: those files live in the CLIENT's repository, not on
+            // the host, so "does this file target a vmid somebody else owns"
+            // is a question `homelab check` asks from the workstation. The
+            // host answers everything it can actually see.
             let live = gather_live_facts(&exec, &state, &[]).await;
             if let Ok(snapshot) = store.load().await {
                 let findings = homelab_core::ops::fleetcheck::evaluate(
@@ -2182,15 +2193,9 @@ async fn scheduler_loop(state: AppState) {
                     homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
                     homelab_core::ops::fleetcheck::GrowthLimits::default(),
                 );
-                // Z3: a `Noted` finding is a decision, not a fault. Letting
-                // one raise the alarm would train the reader to ignore this
-                // notification — and it is the one that has to be believed
-                // when it IS real.
-                let problems: Vec<_> = findings
-                    .iter()
-                    .filter(|f| f.severity != homelab_core::ops::fleetcheck::Severity::Noted)
-                    .cloned()
-                    .collect();
+                // Z3, now a tested function in core rather than a filter
+                // buried in this loop (G15).
+                let problems = homelab_core::ops::fleetcheck::alarming(&findings);
                 if problems.is_empty() {
                     info!(
                         "fleet check: repo and reality agree{}",

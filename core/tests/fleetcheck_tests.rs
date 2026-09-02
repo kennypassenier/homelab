@@ -825,3 +825,53 @@ fn a_stack_that_deliberately_keeps_nothing_is_noted_not_broken() {
         "an undeclared stack that was never backed up is a fault"
     );
 }
+
+/// covers: F214
+///
+/// G15 of the Phase-7 gate, the testable half. The rule that decides what is
+/// worth waking Kenny for lived inside a 340-line async loop that no test
+/// could reach — so the rule deciding what counts as an alarm was itself
+/// unguarded.
+///
+/// Z3 in one line: a `Noted` finding is a decision, not a fault. Let one
+/// raise the alarm and the reader learns to ignore the notification, and
+/// that notification is the one that has to be believed when it IS real.
+#[test]
+fn a_deliberate_decision_never_raises_the_alarm_but_is_never_hidden_either() {
+    use homelab_core::ops::fleetcheck::{alarming, Finding};
+
+    let noted = Finding {
+        severity: Severity::Noted,
+        subject: "registry".into(),
+        what: "deliberately not backed up — a pull-through cache".into(),
+        remedy: "nothing to do".into(),
+    };
+    let broken = Finding {
+        severity: Severity::Broken,
+        subject: "gateway".into(),
+        what: "has never been backed up".into(),
+        remedy: "run a backup now".into(),
+    };
+    let drift = Finding {
+        severity: Severity::Drift,
+        subject: "media".into(),
+        what: "78 MB of swap in use".into(),
+        remedy: "give it more memory".into(),
+    };
+
+    assert!(
+        alarming(std::slice::from_ref(&noted)).is_empty(),
+        "a decision alone is a quiet night"
+    );
+    assert_eq!(
+        alarming(&[noted.clone(), broken.clone(), drift.clone()]).len(),
+        2,
+        "a real fault beside a decision still wakes somebody"
+    );
+    assert!(
+        !alarming(&[noted.clone(), broken])
+            .iter()
+            .any(|f| f.severity == Severity::Noted),
+        "and the decision is not smuggled into the alarm to pad it out"
+    );
+}

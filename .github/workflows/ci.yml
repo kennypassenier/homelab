@@ -31,9 +31,15 @@ jobs:
           rustup component add rustfmt clippy
           cargo fmt --all --check
       - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        # --locked: without it CI resolves dependencies fresh on every run, so
+        # an upstream release can turn main red with nobody having committed
+        # anything. That is what happened on 2026-09-02 (F235): a newer
+        # tokio-tungstenite changed Message::Text to take Utf8Bytes, and the
+        # same commit that was green at 14:50 was red at 14:52. CI must test
+        # the versions we actually ship, which is what Cargo.lock records.
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
   msrv:
     runs-on: ubuntu-latest
@@ -46,4 +52,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check on MSRV (AR17)
-        run: cargo check --workspace
+        run: cargo check --workspace --locked

@@ -2,41 +2,51 @@
 #
 # It runs in a loop and swallows its own errors on purpose — a loop that dies
 # stops watching the fleet entirely. That makes "the container is up" a
-# useless reading here: it is up whether it seeded anything or spent the last
-# day printing the same login failure. These readings ask what it actually
-# did.
+# useless reading: it is up whether it seeded anything or spent the day
+# printing the same login failure.
+#
+# The first version of this file got its expectations wrong, which is worth
+# recording because it produced two failed deploys and two notifications on
+# Kenny's phone at half past two. One check counted matching log lines in a
+# ROLLING two-hour window and demanded the number never change — a window
+# that empties as time passes cannot promise that. Another used
+# `must_be_present` on a `grep -c`, which always prints a number and can
+# therefore never fail. A check that cannot fail is not a check.
 checks:
-  - name: "de seeder heeft zijn ronde afgemaakt"
+  - name: "de laatste ronde is zonder fouten afgelopen"
     command: >-
-      docker logs --since 2h kuma-seeder 2>&1
-      | grep -c 'already existed'
+      docker logs --tail 40 kuma-seeder 2>&1 | grep -c 'ERROR' || true
     expect: must_match
     layer: application
     blind_spot: >-
-      Says a round finished, not that the round was right. A seeder logged in
-      against an empty Uptime Kuma would report the same line while adding
-      everything from scratch.
+      Reads the last forty lines, so a failure older than one round has
+      already scrolled past. It says the most recent attempt went cleanly,
+      not that every attempt did.
 
-  - name: "de gegenereerde lijst bestaat en is leesbaar"
+  - name: "de laatste ronde heeft een uitkomst gemeld"
+    command: >-
+      docker logs --tail 40 kuma-seeder 2>&1
+      | grep -oE '[0-9]+ added, [0-9]+ already existed' | tail -1
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      An empty answer here means no round has finished in the last forty log
+      lines, which is the real failure this app can have. It does not say the
+      round was RIGHT: a seeder logged in against an empty Uptime Kuma would
+      print the same sentence while adding everything from scratch.
+
+  - name: "de gegenereerde lijst telt evenveel of meer containers"
     command: >-
       python3 -c "import json;print(len(json.load(open(
       '/appdata/uptime/kuma-seeder-config/host-monitors.json'))['host_monitors']))"
+      2>/dev/null || echo 0
     expect: never_decreases
     layer: application
     blind_spot: >-
       Counts what the orchestrator wrote, not what Uptime Kuma has. If the
-      seeder cannot log in, this number keeps rising while the board stays
-      unchanged — the check above is the one that notices.
-
-  - name: "geen foutregels in het laatste etmaal"
-    command: >-
-      docker logs --since 24h kuma-seeder 2>&1 | grep -c 'ERROR' || true
-    expect: must_match
-    layer: application
-    blind_spot: >-
-      A count, so it needs a reading to compare against. Zero is the answer
-      that means nothing went wrong; anything else names its own cause on the
-      same log line.
+      seeder cannot log in this number keeps rising while the board stays
+      unchanged — the two readings above are the ones that notice. Zero is
+      the honest answer while the host is too old to write the file at all.
 
 manual:
   - "Kijk in de logregels van kuma-seeder of er WARN-regels staan over een bewaking die naar een stack wijst die niet meer bestaat. Die worden met opzet nooit automatisch weggegooid — iemand moet beslissen of ze echt weg mogen (F158)."

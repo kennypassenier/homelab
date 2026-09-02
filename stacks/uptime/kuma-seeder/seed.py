@@ -84,6 +84,9 @@ def env(name, default=None):
 
 
 def load_host_monitors(path):
+    """Returns (monitors, had_a_list). The second value matters: an empty
+    list because the file said so is a fleet with no containers; an empty
+    list because the file is missing is no information at all."""
     """The generated half. A missing or broken file is reported and skipped,
     never guessed around: seeding the application half is still worth doing,
     and inventing host monitors would create ones that are red forever."""
@@ -94,20 +97,20 @@ def load_host_monitors(path):
         print(f"[seed] WARN: {path} does not exist — the orchestrator has "
               "not written the host monitors yet; skipping that half",
               flush=True)
-        return []
+        return [], False
     except (OSError, ValueError) as e:
         print(f"[seed] WARN: {path} is unreadable ({e}) — skipping the host "
               "monitors rather than guessing them", flush=True)
-        return []
+        return [], False
     out = []
     for entry in data.get("host_monitors", []):
         name, hostname = entry.get("name"), entry.get("hostname")
         if name and hostname:
             out.append((name, hostname))
-    return out
+    return out, True
 
 
-def seed_once(api, host_monitors):
+def seed_once(api, host_monitors, have_generated_list):
     have = {m["name"] for m in api.get_monitors()}
     added = skipped = 0
 
@@ -133,9 +136,20 @@ def seed_once(api, host_monitors):
     # Reported, never deleted (H2b). A monitor named for a stack the fleet no
     # longer has is the F158 shape: it stays green forever, or red forever,
     # and either way it is furniture rather than information.
-    fleet = {n for n, _ in host_monitors}
-    stale = sorted(n for n in have
-                   if n.startswith("host · ") and n not in fleet)
+    #
+    # But ONLY when there is a list to compare against. Without the generated
+    # file, "not in the fleet" means "the file was missing", and on the first
+    # live run that produced eleven warnings about stacks that all exist
+    # (F175). Absent data is not the same as an empty answer — deciding
+    # otherwise is exactly the failure shape this whole project keeps finding.
+    stale = []
+    if have_generated_list:
+        fleet = {n for n, _ in host_monitors}
+        stale = sorted(n for n in have
+                       if n.startswith("host · ") and n not in fleet)
+    else:
+        print("[seed] WARN: no generated host-monitor list, so nothing is "
+              "judged stale — a missing file is not an empty fleet", flush=True)
     for name in stale:
         print(f"[seed] WARN: '{name}' watches a stack the fleet does not "
               "have — remove it in Uptime Kuma if that is right", flush=True)
@@ -156,7 +170,8 @@ def main():
             api = UptimeKumaApi(url)
             try:
                 api.login(user, password)
-                seed_once(api, load_host_monitors(monitors_file))
+                monitors, had_list = load_host_monitors(monitors_file)
+                seed_once(api, monitors, had_list)
             finally:
                 api.disconnect()
         except Exception as e:  # noqa: BLE001 — a loop that dies stops watching

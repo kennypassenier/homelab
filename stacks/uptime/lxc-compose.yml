@@ -54,5 +54,11 @@ storage:
 
 apps: [uptime-kuma, kuma-seeder, promtail]
 
+# D12: the seeder logs in to Uptime Kuma as a normal user, so it needs a
+# password. It travels from latch over the TLS line into the host vault and
+# never lands in this repository — `stacks/uptime/kuma-seeder/env.example`
+# names the two keys and holds no values.
+latch_secrets: [kuma-seeder]
+
 gateway_route:
   filename: 107-app-uptime.yml

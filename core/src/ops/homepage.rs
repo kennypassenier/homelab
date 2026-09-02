@@ -14,11 +14,22 @@
 //! than internal addresses. A service without a route is not on the front
 //! page, which is correct: the front page is the front door.
 
-/// One entry: the app it belongs to and the hostname its route matches.
+/// One entry: the app it belongs to, the hostname its route matches, and
+/// the LAN address the route forwards to.
+///
+/// The backend was deliberately dropped when this was first written — the
+/// front page shows the names Kenny types, not internal addresses. A WIDGET
+/// needs the internal one though, and for the reason he wrote in his own
+/// file: a widget that goes out through Cloudflare Access gets the login
+/// page instead of an answer. So the backend is carried, and used for
+/// widgets only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub app: String,
     pub host: String,
+    /// e.g. `http://10.10.10.6:8096` — None when the fragment names no
+    /// server for this router.
+    pub backend: Option<String>,
 }
 
 /// Pull `(router-name, hostname)` out of a Traefik route fragment.
@@ -27,6 +38,38 @@ pub struct Entry {
 /// `/appdata` check next to it is one: these files are written by this
 /// program from a template, and the two agree about what a route looks like.
 pub fn entries_from_route(content: &str) -> Vec<Entry> {
+    // Two passes: the routers give (name, hostname), the services give
+    // (name, backend url). A router names its service explicitly, and in
+    // every fragment this orchestrator writes the two share a name.
+    let mut backends: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut current = String::new();
+    let mut in_services = false;
+    for line in content.lines() {
+        let t = line.trim();
+        if t == "services:" {
+            in_services = true;
+            continue;
+        }
+        if t == "routers:" {
+            in_services = false;
+            continue;
+        }
+        if !in_services || t.starts_with('#') || t.is_empty() {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        if indent == 4 && t.ends_with(':') && !t.contains(' ') {
+            current = t.trim_end_matches(':').to_string();
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("- url:") {
+            let url = rest.trim().trim_matches('"').trim_matches('\'').to_string();
+            if !current.is_empty() && !url.is_empty() {
+                backends.entry(current.clone()).or_insert(url);
+            }
+        }
+    }
+
     let mut out = Vec::new();
     let mut app = String::new();
     for line in content.lines() {
@@ -46,12 +89,106 @@ pub fn entries_from_route(content: &str) -> Vec<Entry> {
                     out.push(Entry {
                         app: app.clone(),
                         host: h.to_string(),
+                        backend: backends.get(&app).cloned(),
                     });
                 }
             }
         }
     }
     out
+}
+
+/// V6b (Kenny, 2026-09-02): "kan dat niet automatisch?"
+///
+/// A Homepage widget needs three things, and all three turned out to be
+/// readable without anyone typing them:
+///
+/// * **type** — what Homepage calls the app. Equal to the route name for
+///   seven of the nine widgets Kenny had; the other two are aliases and are
+///   spelled out below.
+/// * **url** — the LAN address. It is the backend the route already
+///   forwards to, which is exactly the address a widget must use: through
+///   the public name it would meet Cloudflare Access and get a login page.
+/// * **key** — an API key. NOT a thing to store beside the app: every one
+///   of these applications already keeps its own key on disk, in the config
+///   directory this orchestrator mounts and backs up. Reading it there is
+///   also the only reading that cannot go stale — the same lesson as F32,
+///   where a key copied into an `.env` had been dead for an unknown length
+///   of time while everything reported fine.
+///
+/// This table is knowledge about third-party software rather than a second
+/// copy of anything in this fleet, which is why it is allowed to be written
+/// down (Kenny's rule, 2026-09-02: never write what the system already
+/// knows). It sits in code so a test can reach it.
+pub struct WidgetSpec {
+    /// The route name, which is also the container's service name.
+    pub app: &'static str,
+    /// What Homepage calls this widget.
+    pub kind: &'static str,
+    /// Shell that prints the API key and nothing else, run INSIDE the
+    /// container that owns the app. `{dir}` is its config directory.
+    /// None = the widget needs a credential the application does not store
+    /// for us, and it comes from latch through Homepage's own `.env`.
+    pub key_cmd: Option<&'static str>,
+    /// Extra lines for the widget block, verbatim.
+    pub extra: &'static [&'static str],
+}
+
+pub const KNOWN_WIDGETS: &[WidgetSpec] = &[
+    WidgetSpec {
+        app: "jellyfin",
+        kind: "jellyfin",
+        // The same reading the busy check already does, for the same reason:
+        // ask the application which keys it accepts.
+        key_cmd: Some("sqlite3 {dir}/data/jellyfin.db 'select AccessToken from ApiKeys limit 1'"),
+        extra: &["enableNowPlaying: true", "enableBlocks: true"],
+    },
+    WidgetSpec {
+        app: "sonarr",
+        kind: "sonarr",
+        key_cmd: Some("sed -n 's|.*<ApiKey>\\(.*\\)</ApiKey>.*|\\1|p' {dir}/config.xml"),
+        extra: &[],
+    },
+    WidgetSpec {
+        app: "radarr",
+        kind: "radarr",
+        key_cmd: Some("sed -n 's|.*<ApiKey>\\(.*\\)</ApiKey>.*|\\1|p' {dir}/config.xml"),
+        extra: &[],
+    },
+    WidgetSpec {
+        app: "prowlarr",
+        kind: "prowlarr",
+        key_cmd: Some("sed -n 's|.*<ApiKey>\\(.*\\)</ApiKey>.*|\\1|p' {dir}/config.xml"),
+        extra: &[],
+    },
+    WidgetSpec {
+        app: "bazarr",
+        kind: "bazarr",
+        key_cmd: Some("sed -n 's/^ *apikey: *//p' {dir}/config/config.yaml | head -1"),
+        extra: &[],
+    },
+    // Route name and widget name differ: the route is `seerr`, the software
+    // Homepage knows is `jellyseerr`.
+    WidgetSpec {
+        app: "seerr",
+        kind: "jellyseerr",
+        key_cmd: Some(
+            "sed -n 's/.*\"apiKey\": *\"\\([^\"]*\\)\".*/\\1/p' {dir}/settings.json | head -1",
+        ),
+        extra: &[],
+    },
+    WidgetSpec {
+        app: "paperless",
+        kind: "paperlessngx",
+        // Paperless issues tokens per user through its API rather than
+        // keeping one on disk; Homepage reads it from its own .env.
+        key_cmd: None,
+        extra: &[],
+    },
+];
+
+pub fn widget_for(app: &str) -> Option<&'static WidgetSpec> {
+    KNOWN_WIDGETS.iter().find(|w| w.app == app)
 }
 
 /// V6 (Kenny, 2026-09-02): what the orchestrator cannot derive from a route.
@@ -173,7 +310,44 @@ pub fn parse_overlay(text: &str) -> Overlay {
 /// A stack with no routes is skipped entirely rather than rendered as an
 /// empty group: an empty heading on a dashboard reads as "this is broken"
 /// when it means "this has no front door".
-pub fn services_yaml(stacks: &[(String, Vec<Entry>)], overlay: Option<&Overlay>) -> String {
+/// The widget block for one entry, or nothing when this app has none.
+///
+/// A widget without its key is emitted anyway: Homepage then draws the tile
+/// and reports its own error, which is visible. Leaving the widget out
+/// entirely would look exactly like an app that has no widget, and that is
+/// the difference between "broken" and "nothing to show" disappearing again.
+fn widget_lines(e: &Entry, keys: &std::collections::HashMap<String, String>) -> Vec<String> {
+    let Some(spec) = widget_for(&e.app) else {
+        return Vec::new();
+    };
+    let Some(url) = e.backend.as_deref() else {
+        return Vec::new();
+    };
+    let mut out = vec![
+        "widget:".to_string(),
+        format!("  type: {}", spec.kind),
+        format!("  url: {}", url),
+    ];
+    match keys.get(&e.app) {
+        Some(k) if !k.is_empty() => out.push(format!("  key: {}", k)),
+        // No key on disk: fall back to Homepage's own variable, which is
+        // how the credentials that no application stores for us arrive.
+        _ => out.push(format!(
+            "  key: {{{{HOMEPAGE_VAR_{}}}}}",
+            e.app.to_uppercase().replace('-', "_")
+        )),
+    }
+    for x in spec.extra {
+        out.push(format!("  {}", x));
+    }
+    out
+}
+
+pub fn services_yaml(
+    stacks: &[(String, Vec<Entry>)],
+    overlay: Option<&Overlay>,
+    widget_keys: &std::collections::HashMap<String, String>,
+) -> String {
     let mut out = String::from(
         "# Generated by the homelab orchestrator — every stack that has a\n\
          # gateway route appears here, joined on href with the overlay in\n\
@@ -200,6 +374,9 @@ pub fn services_yaml(stacks: &[(String, Vec<Entry>)], overlay: Option<&Overlay>)
                     "    - {}:\n        href: https://{}/\n        siteMonitor: https://{}/\n",
                     e.app, e.host, e.host
                 ));
+                for l in widget_lines(e, widget_keys) {
+                    out.push_str(&format!("        {}\n", l));
+                }
             }
         }
         return out;
@@ -230,19 +407,35 @@ pub fn services_yaml(stacks: &[(String, Vec<Entry>)], overlay: Option<&Overlay>)
                 .and_then(|b| b.name.clone())
                 .unwrap_or_else(|| e.app.clone());
             let mut body = format!("    - {}:\n        href: {}\n", name, href);
+            let w = widget_lines(e, widget_keys);
             match blk {
                 Some(b) if !b.extra.is_empty() => {
+                    // The overlay's own lines first — icon, description and
+                    // anything Homepage understands that this code does not.
+                    // A widget it spells out by hand wins: that is a choice,
+                    // and a generated one must not silently overrule it.
+                    let hand_widget = b.extra.iter().any(|l| l.trim() == "widget:");
                     for l in &b.extra {
                         if l.trim().is_empty() {
                             continue;
                         }
                         body.push_str(&format!("    {}\n", l));
                     }
+                    if !hand_widget {
+                        for l in &w {
+                            body.push_str(&format!("        {}\n", l));
+                        }
+                    }
                 }
                 // No overlay entry: a plain link plus the reachability dot,
                 // which is all the orchestrator can honestly say about a
                 // service nobody has described yet.
-                _ => body.push_str(&format!("        siteMonitor: https://{}/\n", e.host)),
+                _ => {
+                    body.push_str(&format!("        siteMonitor: https://{}/\n", e.host));
+                    for l in &w {
+                        body.push_str(&format!("        {}\n", l));
+                    }
+                }
             }
             push(&mut groups, &group, body);
         }

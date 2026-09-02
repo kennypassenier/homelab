@@ -15,6 +15,15 @@
 # (kp-soft and Loki below). Everything under `extra:` is passed through to
 # Homepage verbatim, so any field Homepage supports works here without this
 # orchestrator needing to know about it.
+#
+# 2026-09-02, second pass: the WIDGETS are gone from this file. Kenny asked
+# whether the live tiles - what is streaming, how many films - could be
+# automatic, and all three parts of a widget turned out to be readable:
+# the type from the app name, the address from the route's own backend, and
+# the API key from the application itself (see KNOWN_WIDGETS in
+# core/src/ops/homepage.rs). Only grafana and proxmox still spell theirs out
+# here, because those take a username and password that no application hands
+# out for us.
 
 group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
 
@@ -25,12 +34,6 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
   extra: |
     icon: jellyfin.svg
     description: Films en series
-    widget:
-      type: jellyfin
-      url: http://10.10.10.6:8096
-      key: "{{HOMEPAGE_VAR_JELLYFIN}}"
-      enableNowPlaying: true
-      enableBlocks: true
 
 - href: https://seerr.kp-soft.dev/
   group: Media
@@ -38,10 +41,6 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
   extra: |
     icon: jellyseerr.svg
     description: Aanvragen
-    widget:
-      type: jellyseerr
-      url: http://10.10.10.6:5055
-      key: "{{HOMEPAGE_VAR_SEERR}}"
 
 - href: https://son.kp-soft.dev/
   group: Media
@@ -49,10 +48,6 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
   extra: |
     icon: sonarr.svg
     description: Series
-    widget:
-      type: sonarr
-      url: http://10.10.10.6:8989
-      key: "{{HOMEPAGE_VAR_SONARR}}"
 
 - href: https://rad.kp-soft.dev/
   group: Media
@@ -60,10 +55,6 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
   extra: |
     icon: radarr.svg
     description: Films
-    widget:
-      type: radarr
-      url: http://10.10.10.6:7878
-      key: "{{HOMEPAGE_VAR_RADARR}}"
 
 - href: https://prowl.kp-soft.dev/
   group: Media
@@ -71,10 +62,6 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
   extra: |
     icon: prowlarr.svg
     description: Indexeerders
-    widget:
-      type: prowlarr
-      url: http://10.10.10.6:9696
-      key: "{{HOMEPAGE_VAR_PROWLARR}}"
 
 - href: https://baz.kp-soft.dev/
   group: Media
@@ -82,10 +69,6 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
   extra: |
     icon: bazarr.svg
     description: Ondertitels
-    widget:
-      type: bazarr
-      url: http://10.10.10.6:6767
-      key: "{{HOMEPAGE_VAR_BAZARR}}"
 
 # No widget: qBittorrent's WebUI password is hashed and unreadable, and
 # its API key answered 403 to every header shape tried on 2026-08-31.
@@ -104,10 +87,6 @@ group_order: [Media, Papierwerk, Eigen, Huis, Infrastructuur]
   extra: |
     icon: paperless.svg
     description: Documentarchief
-    widget:
-      type: paperlessngx
-      url: http://10.10.10.14:8000
-      key: "{{HOMEPAGE_VAR_PAPERLESS}}"
 
 - href: https://budget.kp-soft.dev/
   group: Papierwerk

@@ -151,6 +151,94 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   `/var/lib/homelab/repo`; set `mirror_remote` in host.toml for an
   automatic offsite push (never blocks a deploy).
 
+## The front page
+
+`home.kp-soft.dev` is the page with a tile per service. It is **generated**:
+every service that has a gateway route is on it, and a new one appears by
+itself on the next deploy. You never add a service to it by hand.
+
+### What is automatic, and what is yours
+
+| On a tile | Where it comes from |
+|---|---|
+| Whether the service is there at all | its route file, `stacks/<stack>/traefik-routes.yml` |
+| The link | the hostname in that route |
+| The live widget — what is streaming, how many films | derived: the type from the app's name, the address from the route's backend, the API key read from the application itself |
+| The heading it sits under | **you**, in `services-overlay.yml` |
+| Its display name and icon | **you**, same file (both have sensible defaults) |
+| The grey line under the name | **you**, same file |
+
+So the only thing you maintain is what a machine cannot know: which
+services belong together in your head, and what you want them called.
+
+### The file you edit
+
+`stacks/home/homepage/services-overlay.yml`. One block per service, keyed by
+its link:
+
+```yaml
+- href: https://fin.kp-soft.dev/
+  group: Media
+  name: Jellyfin
+  extra: |
+    icon: jellyfin.svg
+    description: Films en series
+```
+
+`href` is the key — it is what this file and the generated list have in
+common, so it must match the route exactly. Everything under `extra:` is
+handed to Homepage untouched, so any field Homepage supports works here even
+if this orchestrator has never heard of it.
+
+At the top, `group_order:` decides which headings come first. Groups you do
+not name there follow alphabetically.
+
+### Recipes
+
+**Change what a tile says.** Find the block by its link, edit the
+`description:` line, `homelab deploy stacks/home`.
+
+**Move a service to another heading.** Change its `group:`. If the heading is
+new, add it to `group_order:` too, or it lands at the bottom.
+
+**A service appears under a lowercase heading with no icon.** That is a
+routed service with no block here yet — the system found it, you have not
+described it. Add a block with its `href` and give it a group.
+
+**Change an icon.** `icon: something.svg` uses the Homepage icon set;
+`icon: mdi-calendar-clock` uses a Material icon, which is what you want for
+software the world has no logo for. Leaving it out gives a plain tile.
+
+**Add a link to something with no route at all.** Add a block whose `href`
+matches nothing — it is kept and rendered as you wrote it. Two exist today:
+the LAN link to kp-soft, and a deep link into Grafana for Loki, which has no
+page of its own.
+
+**Add a widget for an app that has none.** Most widgets are automatic. If the
+app is not in `KNOWN_WIDGETS` (`core/src/ops/homepage.rs`) you can write one
+by hand under `extra:` and it wins over anything generated — that is how
+Grafana and Proxmox work, because they take a username and password rather
+than a key. If the app DOES keep an API key on disk, adding it to
+`KNOWN_WIDGETS` is better: then it is read fresh on every deploy and cannot
+go stale.
+
+### When it looks wrong
+
+Deploy prints two numbers worth reading:
+
+```
+[t51] widget keys read from the applications themselves: 5
+[check] homepage · diensten op de startpagina :: 24 → 26
+```
+
+The first is how many API keys were found; a drop means an application moved
+its config. The second counts entries in the file the CONTAINER reads — not
+the one on the host, on purpose, because a file shadowed by another mount at
+the same path counts zero here. That is how F188 was found.
+
+Never edit `/appdata/home/homepage-config/services.yaml`. It is generated and
+overwritten on the next deploy.
+
 ## Safety model (always on)
 
 - **A1** hardcoded no-touch list (HA, OPNsense, k3s, omada, fileserver, and

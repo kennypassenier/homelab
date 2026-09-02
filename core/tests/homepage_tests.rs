@@ -28,31 +28,41 @@ http:
 
 /// covers: F166
 #[test]
-fn a_route_fragment_yields_its_hostnames_and_not_its_backends() {
+fn a_route_fragment_yields_its_hostnames_and_its_backends() {
     let got = entries_from_route(MEDIA_ROUTE);
     assert_eq!(
         got,
         vec![
             Entry {
                 app: "jellyfin".into(),
-                host: "fin.kp-soft.dev".into()
+                host: "fin.kp-soft.dev".into(),
+                backend: Some("http://10.10.10.6:8096".into()),
             },
             Entry {
                 app: "sonarr".into(),
-                host: "son.kp-soft.dev".into()
+                host: "son.kp-soft.dev".into(),
+                backend: None,
             },
         ],
-        "only the routers' hostnames belong on the front page"
+        "the hostname is the front door, the backend is what a widget must call"
     );
-    // The `services:` block below carries an internal address and a name that
-    // repeats the router's. Picking that up would put http://10.10.10.6:8096
-    // on the front page — reachable from the house only, and not the door
-    // Kenny uses.
-    assert!(
-        !format!("{:?}", got).contains("10.10.10.6"),
-        "an internal backend address must never reach the page: {:?}",
-        got
-    );
+
+    // The original rule still holds and is the one that matters: the
+    // internal address may never become a LINK. It was excluded from the
+    // parser entirely until 2026-09-02, which also made widgets impossible —
+    // a widget going out through the public name meets Cloudflare Access and
+    // gets a login page instead of an answer (Kenny's own note in the file
+    // this replaced). So it is carried, and used for widgets only.
+    let page = services_yaml(&[("media".into(), got)], None, &Default::default());
+    for line in page.lines() {
+        if line.trim_start().starts_with("href:") || line.trim_start().starts_with("siteMonitor:") {
+            assert!(
+                !line.contains("10.10.10.6"),
+                "an internal address must never become a link: {}",
+                line
+            );
+        }
+    }
 }
 
 #[test]
@@ -65,10 +75,12 @@ fn a_stack_without_routes_is_skipped_rather_than_rendered_empty() {
                 vec![Entry {
                     app: "jellyfin".into(),
                     host: "fin.kp-soft.dev".into(),
+                    backend: None,
                 }],
             ),
         ],
         None,
+        &Default::default(),
     );
     assert!(
         !out.contains("registry"),
@@ -87,16 +99,18 @@ fn rendering_twice_produces_the_same_bytes() {
             Entry {
                 app: "jellyfin".into(),
                 host: "fin.kp-soft.dev".into(),
+                backend: None,
             },
             Entry {
                 app: "sonarr".into(),
                 host: "son.kp-soft.dev".into(),
+                backend: None,
             },
         ],
     )];
     assert_eq!(
-        services_yaml(&stacks, None),
-        services_yaml(&stacks, None),
+        services_yaml(&stacks, None, &Default::default()),
+        services_yaml(&stacks, None, &Default::default()),
         "a deploy that changes nothing must write an identical file, or every \
          deploy reports a change that is not one"
     );
@@ -180,11 +194,13 @@ fn the_overlay_supplies_what_a_route_cannot_and_nothing_else() {
                     Entry {
                         app: "jellyfin".into(),
                         host: "fin.kp-soft.dev".into(),
+                        backend: Some("http://10.10.10.6:8096".into()),
                     },
                     // No overlay entry: a service nobody has described yet.
                     Entry {
                         app: "flaresolverr".into(),
                         host: "flare.kp-soft.dev".into(),
+                        backend: None,
                     },
                 ],
             ),
@@ -193,13 +209,16 @@ fn the_overlay_supplies_what_a_route_cannot_and_nothing_else() {
                 vec![Entry {
                     app: "grafana".into(),
                     host: "grafana.kp-soft.dev".into(),
+                    backend: None,
                 }],
             ),
         ],
         Some(&ov),
+        &Default::default(),
     );
 
-    // Kenny's name, group, icon and widget survive the merge.
+    // Kenny's name, group and icon survive the merge, and the widget is
+    // generated beside them rather than written by him (V6b).
     assert!(out.contains("- Media:"), "{}", out);
     assert!(out.contains("    - Jellyfin:"), "{}", out);
     assert!(out.contains("icon: jellyfin.svg"), "{}", out);
@@ -260,10 +279,77 @@ fn merging_twice_produces_the_same_bytes() {
         vec![Entry {
             app: "jellyfin".into(),
             host: "fin.kp-soft.dev".into(),
+            backend: None,
         }],
     )];
     assert_eq!(
-        services_yaml(&stacks, Some(&ov)),
-        services_yaml(&stacks, Some(&ov))
+        services_yaml(&stacks, Some(&ov), &Default::default()),
+        services_yaml(&stacks, Some(&ov), &Default::default())
     );
+}
+
+/// covers: F195
+///
+/// Kenny asked whether the live tiles — what is streaming, how many films —
+/// could be automatic. All three parts of a widget turned out to be
+/// readable: the type from the app name, the address from the route's own
+/// backend, and the key from the application itself.
+#[test]
+fn a_widget_is_derived_from_the_route_and_the_application() {
+    use homelab_core::ops::homepage::{parse_overlay, widget_for};
+    let mut keys = std::collections::HashMap::new();
+    keys.insert("jellyfin".to_string(), "THEKEY".to_string());
+
+    let ov = parse_overlay(include_str!(
+        "../../stacks/home/homepage/services-overlay.yml"
+    ));
+    let out = services_yaml(
+        &[(
+            "media".into(),
+            vec![Entry {
+                app: "jellyfin".into(),
+                host: "fin.kp-soft.dev".into(),
+                backend: Some("http://10.10.10.6:8096".into()),
+            }],
+        )],
+        Some(&ov),
+        &keys,
+    );
+
+    assert!(out.contains("widget:"), "no widget generated: {}", out);
+    assert!(out.contains("type: jellyfin"), "{}", out);
+    // The LAN address, not the public name: through Cloudflare Access a
+    // widget gets a login page instead of an answer.
+    assert!(out.contains("url: http://10.10.10.6:8096"), "{}", out);
+    assert!(out.contains("key: THEKEY"), "{}", out);
+    assert!(out.contains("enableNowPlaying: true"), "{}", out);
+    // And Kenny's own lines are still there, above it.
+    assert!(out.contains("icon: jellyfin.svg"), "{}", out);
+    assert!(out.contains("description: Films en series"), "{}", out);
+
+    // The route name and the widget name differ for seerr, and the table is
+    // where that lives rather than in anybody's config file.
+    assert_eq!(widget_for("seerr").map(|w| w.kind), Some("jellyseerr"));
+    assert!(widget_for("qbittorrent").is_none(), "no widget invented");
+}
+
+/// A key that cannot be read must fail visibly rather than vanish: the tile
+/// still gets a widget, pointing at Homepage's own variable, so Homepage
+/// reports the problem instead of the widget quietly not being there.
+#[test]
+fn a_missing_key_still_produces_a_widget() {
+    let out = services_yaml(
+        &[(
+            "media".into(),
+            vec![Entry {
+                app: "sonarr".into(),
+                host: "son.kp-soft.dev".into(),
+                backend: Some("http://10.10.10.6:8989".into()),
+            }],
+        )],
+        None,
+        &Default::default(),
+    );
+    assert!(out.contains("type: sonarr"), "{}", out);
+    assert!(out.contains("key: {{HOMEPAGE_VAR_SONARR}}"), "{}", out);
 }

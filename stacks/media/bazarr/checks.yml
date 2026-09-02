@@ -1,0 +1,34 @@
+# Bazarr hunts subtitles for what Sonarr and Radarr bring in, which makes its
+# real failure mode a broken link DOWNWARD rather than a dead web server: a
+# Bazarr that cannot reach the arr services answers 200 on its own port and
+# finds nothing, forever.
+#
+# So the first reading asks its status endpoint how many arr services it can
+# see. Measured 2026-09-02 against the live container: two. The key comes
+# from Bazarr's own config on /appdata, the same source the Homepage widget
+# uses — not a copy that can go stale (F32).
+checks:
+  - name: "bereikbare arr-diensten"
+    command: >-
+      K=$(sed -n 's/^ *apikey: *//p' /appdata/media/bazarr-config/config/config.yaml | head -1);
+      curl -sf -m 10 -H "X-API-KEY: $K" http://127.0.0.1:6767/api/system/status
+      | grep -oE '"(sonarr|radarr)_version": "[0-9][^"]*"' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Proves Bazarr asked Sonarr and Radarr and got a version back — not that
+      any subtitle provider still works. A provider list that has gone empty
+      leaves this at two while nothing is ever found again, which is what the
+      manual check below is for.
+
+  - name: "bazarr antwoordt"
+    command: "curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:6767/"
+    expect: must_match
+    layer: network
+    blind_spot: >-
+      A status code from a web server. It is here only so the two readings
+      together separate "the container is gone" from "the container is up and
+      blind" — on its own it says almost nothing.
+
+manual:
+  - "Kijk in Bazarr of er providers actief zijn. Een lege providerlijst vindt nul ondertitels omdat er niet meer gezocht wordt, niet omdat alles gevonden is."

@@ -2184,3 +2184,67 @@ fn every_cli_verb_appears_in_the_usage_text() {
         missing
     );
 }
+
+/// covers: F215
+///
+/// G18 of the Phase-7 gate. Sixteen of the fleet's forty-six apps carried no
+/// `checks.yml` at all, and `shortcomings()` deliberately does not nag about
+/// a service without checks — so their absence was silent by design.
+///
+/// Ten of the sixteen were promtail, which is the path every other
+/// observation travels through. A deploy that silently breaks the log
+/// shipper was verified green on every stack in the fleet.
+#[test]
+fn every_app_either_has_checks_or_is_named_as_deliberately_without() {
+    // Apps that genuinely have nothing worth checking beyond "it is there".
+    // Named rather than inferred, so adding one is a decision somebody makes
+    // on purpose.
+    const NO_CHECKS_BY_DECISION: &[&str] = &[
+        // Sidecars whose only job is to render a file another app produced.
+        "goaccess-report",
+        // The pull-through cache mirrors: four containers of the same image,
+        // and the registry stack's own checks already ask whether the cache
+        // answers.
+        "cache-dockerhub",
+        "cache-ghcr",
+        "cache-gcr",
+        "cache-lscr",
+    ];
+
+    let mut missing = Vec::new();
+    let Ok(stacks) = std::fs::read_dir("../stacks") else {
+        panic!("the stacks tree moved");
+    };
+    let mut seen = 0;
+    for stack in stacks.flatten() {
+        if !stack.path().is_dir() {
+            continue;
+        }
+        let Ok(apps) = std::fs::read_dir(stack.path()) else {
+            continue;
+        };
+        for app in apps.flatten() {
+            let p = app.path();
+            if !p.is_dir() || !p.join("docker-compose.yml").exists() {
+                continue;
+            }
+            seen += 1;
+            let name = app.file_name().to_string_lossy().to_string();
+            if NO_CHECKS_BY_DECISION.contains(&name.as_str()) {
+                continue;
+            }
+            if !p.join("checks.yml").exists() {
+                missing.push(format!("{}/{}", stack.file_name().to_string_lossy(), name));
+            }
+        }
+    }
+    assert!(seen > 30, "the app sweep broke: {} found", seen);
+    missing.sort();
+    assert!(
+        missing.is_empty(),
+        "these apps are deployed and verified by nothing — a deploy that \
+         breaks them is reported green. Write a checks.yml, or add the app to \
+         NO_CHECKS_BY_DECISION with a reason: {:?}",
+        missing
+    );
+}

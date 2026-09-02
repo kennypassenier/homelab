@@ -1,0 +1,26 @@
+# The database under Paperless. It carries the tags, correspondents and dates
+# that were lost once before (F61) and that the documents on disk cannot
+# reconstruct — so "it accepts connections" is the floor, not the ceiling.
+checks:
+  - name: "database accepteert verbindingen"
+    command: "docker exec paperless-db pg_isready | grep -o 'accepting connections'"
+    expect: must_be_present
+    layer: process
+    blind_spot: >-
+      Postgres answering is not Postgres holding your data. A restored-empty
+      database accepts connections exactly as happily; the row count below is
+      the reading that would notice.
+
+  - name: "documenten in de database"
+    command: >-
+      docker exec paperless-db psql -U paperless -d paperless -tAc
+      'select count(*) from documents_document' 2>/dev/null || echo 0
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts rows, not their contents. It is here because F61 lost exactly
+      this table's metadata while every file survived on disk, and nothing
+      noticed until somebody looked for a tag.
+
+manual:
+  - "Open Paperless en zoek op een correspondent. Documenten zonder metadata zijn vindbaar op tekst en onvindbaar op alles wat je erover wist."

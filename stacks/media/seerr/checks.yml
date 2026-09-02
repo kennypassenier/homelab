@@ -1,0 +1,17 @@
+# Seerr is where requests come in. Its status endpoint carries the version,
+# which is the one thing that must not change silently on a stack whose
+# policy is automatic.
+checks:
+  - name: "seerr versie"
+    command: >-
+      curl -sf -m 10 http://127.0.0.1:5055/api/v1/status
+      | grep -oE '"version":"[^"]+"' | head -1
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      Proves Seerr answered its own API, not that it can still reach Jellyfin
+      or the arr services behind it. A Seerr with dead downstream credentials
+      returns this line unchanged.
+
+manual:
+  - "Doe één aanvraag in Seerr en kijk of Sonarr of Radarr hem oppikt. De koppeling naar beneden is het enige dat deze meting niet ziet."

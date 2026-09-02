@@ -1,0 +1,16 @@
+# FlareSolverr answers challenges for Prowlarr's indexers. It has one honest
+# reading and it is a good one: its own health endpoint says ok only when the
+# browser it drives actually started.
+checks:
+  - name: "flaresolverr gezond"
+    command: >-
+      curl -sf -m 15 http://127.0.0.1:8191/health | grep -o '"status": "ok"'
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      `ok` means the service and its browser are up, not that any indexer
+      challenge succeeds — Cloudflare changes what it asks for, and the first
+      sign of that is Prowlarr failing rather than this endpoint.
+
+manual:
+  - "Draai een test-zoekopdracht in Prowlarr op een indexeerder die Cloudflare gebruikt. Dat is de enige controle die de hele keten raakt."

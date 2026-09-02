@@ -1,0 +1,17 @@
+# pve-exporter is how Prometheus sees the hypervisor. It is a proxy: it
+# answers on its own port and then asks Proxmox. Both halves can fail
+# separately, which is why there are two readings.
+checks:
+  - name: "hypervisor-metingen geleverd"
+    command: >-
+      curl -sf -m 20 'http://127.0.0.1:9221/pve?target=10.10.5.250'
+      | grep -c '^pve_up'
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts metric lines, not whether their values are right. It does prove
+      the exporter reached Proxmox and got an answer, which the port alone
+      does not — a bad token gives a 200 with an empty body.
+
+manual:
+  - "Kijk in Grafana of de hypervisor-grafieken nog data hebben. Deze meting bewijst dat er cijfers uit komen, niet dat Prometheus ze ophaalt."

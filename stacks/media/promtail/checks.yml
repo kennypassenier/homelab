@@ -1,0 +1,41 @@
+# Promtail ships this stack's docker logs to Loki, and it is the path every
+# other observation travels through — so a promtail that quietly stops takes
+# the fleet's visibility with it and reports itself healthy the whole time.
+# That happened on 2026-08-31: three hours of silence behind a container
+# `docker ps` called Up (F126), and again earlier through a mis-read label
+# that meant three Loki dashboards had never shown anything (F72).
+#
+# The reading below is promtail's own positions file: a byte offset per log
+# file it follows. It advances only when promtail actually reads, which is
+# the property a status endpoint does not have. Its metrics port is not
+# published and the container carries no HTTP client, so this is also the
+# only number reachable without changing ten compose files.
+checks:
+  - name: "gelezen logbytes"
+    command: >-
+      grep -oE '"[0-9]+"' /opt/media/promtail/data/positions.yaml
+      | tr -d '"' | awk '{s+=$1} END {print s+0}'
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts what promtail has READ, not what Loki received. A promtail that
+      reads happily while its push fails advances this number all the same —
+      the coverage check in the nightly round is the one that asks whether
+      labelled lines actually arrive.
+
+  - name: "promtail draait"
+    # must_be_present, not must_match: `must_match` compares against the
+    # baseline, so a container that was already stopped would keep passing —
+    # the exact shape of F176, where two checks were written that could only
+    # ever answer the same thing. `grep -x true` prints nothing unless the
+    # container is genuinely running, and an empty answer fails.
+    command: "docker inspect -f '{{.State.Running}}' promtail 2>/dev/null | grep -x true"
+    expect: must_be_present
+    layer: container
+    blind_spot: >-
+      Running is not shipping. This is exactly the reading that said Up for
+      three hours while nothing reached Loki, and it is here only so the two
+      readings together can tell a stopped container from a stalled one.
+
+manual:
+  - "Open Grafana en kijk of deze stack de laatste dagen logregels heeft. Een lege grafiek naast een groene controle is precies het geval waar deze twee metingen te weinig voor zijn."

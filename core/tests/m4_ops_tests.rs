@@ -2405,6 +2405,7 @@ async fn h7_newer_schema_refused_missing_file_is_fresh() {
     );
 }
 
+/// covers: F180
 #[tokio::test]
 async fn h10_host_meta_backup_snapshots_vault_state_tls() {
     use homelab_core::ops::backup::backup_host_meta;
@@ -2415,7 +2416,21 @@ async fn h10_host_meta_backup_snapshots_vault_state_tls() {
     assert!(report.ok, "{:?}", report.error);
     let snap = exec.calls_containing("restic backup");
     assert_eq!(snap.len(), 1);
-    for path in ["/var/lib/homelab/secrets", "state.json", "tls-key.pem"] {
+    // F180: `/etc/homelab/host.toml` was missing from this list until
+    // 2026-09-02. A repo called the host's crown jewels held the keys, the
+    // history and the TLS material — and not the file with the API token and
+    // every configuration knob in it, so a rebuilt host still needed that
+    // typed back from memory before anything could talk to it. Found by
+    // walking the disaster-recovery runbook against what is really on
+    // Google Drive, not by reading this code.
+    for path in [
+        "/var/lib/homelab/secrets",
+        "state.json",
+        "tls-key.pem",
+        "tls-cert.pem",
+        "/var/lib/homelab/repo",
+        "/etc/homelab/host.toml",
+    ] {
         assert!(
             snap[0].contains(path),
             "missing {} in host-meta snapshot",

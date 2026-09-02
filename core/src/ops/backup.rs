@@ -668,6 +668,17 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
     // history — cheap to include, and it turns "restore the host" into
     // "restore the host AND know what ran on it".
     let repo = format!("{}/repo", ctx.state_dir);
+    // F180: the daemon's own configuration file. It was NOT in this backup
+    // until 2026-09-02, which was found by walking the disaster-recovery
+    // runbook and comparing what it promises against what is on Google
+    // Drive. This repo is called the host's crown jewels and did not contain
+    // the file holding the API token, the notify bearer, the OPNsense
+    // credential path, the ZFS jobs and every other knob — so a rebuilt host
+    // would have had its keys and its history back, and still needed that
+    // file retyped from memory before anything could talk to it.
+    //
+    // Not under `state_dir`, so it is named separately rather than swept up.
+    let host_config = "/etc/homelab/host.toml".to_string();
 
     step!(runner, "init repo", {
         let _ = exec
@@ -689,7 +700,15 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
                 &cfg.restic_base,
                 "host-meta",
                 &cfg.password_file,
-                &["backup", &secrets, &state_file, &tls_cert, &tls_key, &repo],
+                &[
+                    "backup",
+                    &secrets,
+                    &state_file,
+                    &tls_cert,
+                    &tls_key,
+                    &repo,
+                    &host_config,
+                ],
                 600,
             ),
         )

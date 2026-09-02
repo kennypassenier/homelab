@@ -361,17 +361,40 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          ```\n\
          The exact files the daemon deployed are in git: `/var/lib/homelab/repo`.\n\n\
          ## Layer 3 — Restore data from backup\n\n\
+         ## Layer 3 — Restore the HOST itself\n\
+         \n\
+         Do this one FIRST when the host is gone, because everything below\n\
+         needs it. The repository is `host-meta-config` and it holds:\n\
+         \n\
+         ```sh\n\
+         /var/lib/homelab/repo        # every applied compose file + its history\n\
+         /var/lib/homelab/secrets     # the vault, INCLUDING restic.pw\n\
+         /var/lib/homelab/state.json  # what was deployed where\n\
+         /var/lib/homelab/tls-*.pem   # keep these to keep the client pin\n\
+         /etc/homelab/host.toml       # the token and every setting\n\
+         ```\n\
+         \n\
+         **The chicken and egg, and it is real:** `restic.pw` lives INSIDE this\n\
+         repository, so it cannot be used to open it. The offline copy is in\n\
+         Kenny's Bitwarden. Without that, nothing below can be read either —\n\
+         every repository uses the same password.\n\
+         \n\
+         This layer did not exist until 2026-09-02. The runbook named the\n\
+         per-stack repositories and never mentioned the one holding the keys\n\
+         to all of them, and `host.toml` was in no backup at all.\n\
+         \n\
+         ## Layer 4 — Restore a stack's data\n\
+         \n\
          Restic repos are per OWNING APP, not per stack:\n\
-         `rclone:gdrive:homelab-backups/<app>-config` — the exact names per stack are\n\
-         listed below. Password\n\
-         file `/var/lib/homelab/secrets/restic.pw` (keep an offline copy of this\n\
-         password — without it backups are unreadable!).\n\
+         `rclone:gdrive:homelab-backups/<app>-config` — the exact names per\n\
+         stack are listed below. Verified 2026-09-02: every repository this\n\
+         document names does exist.\n\
          ```sh\n\
          export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<app>-config\n\
          export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw\n\
          restic snapshots\n\
          restic restore latest --target /\n\
-         ```\n\n\
+         ```\n\
          ## Stacks\n\n",
     );
     let mut included = 0usize;

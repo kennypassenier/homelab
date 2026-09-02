@@ -56,18 +56,40 @@ The exact files the daemon deployed are in git: `/var/lib/homelab/repo`.
 
 ## Layer 3 — Restore data from backup
 
+## Layer 3 — Restore the HOST itself
+
+Do this one FIRST when the host is gone, because everything below
+needs it. The repository is `host-meta-config` and it holds:
+
+```sh
+/var/lib/homelab/repo        # every applied compose file + its history
+/var/lib/homelab/secrets     # the vault, INCLUDING restic.pw
+/var/lib/homelab/state.json  # what was deployed where
+/var/lib/homelab/tls-*.pem   # keep these to keep the client pin
+/etc/homelab/host.toml       # the token and every setting
+```
+
+**The chicken and egg, and it is real:** `restic.pw` lives INSIDE this
+repository, so it cannot be used to open it. The offline copy is in
+Kenny's Bitwarden. Without that, nothing below can be read either —
+every repository uses the same password.
+
+This layer did not exist until 2026-09-02. The runbook named the
+per-stack repositories and never mentioned the one holding the keys
+to all of them, and `host.toml` was in no backup at all.
+
+## Layer 4 — Restore a stack's data
+
 Restic repos are per OWNING APP, not per stack:
-`rclone:gdrive:homelab-backups/<app>-config` — the exact names per stack are
-listed below. Password
-file `/var/lib/homelab/secrets/restic.pw` (keep an offline copy of this
-password — without it backups are unreadable!).
+`rclone:gdrive:homelab-backups/<app>-config` — the exact names per
+stack are listed below. Verified 2026-09-02: every repository this
+document names does exist.
 ```sh
 export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<app>-config
 export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
 restic snapshots
 restic restore latest --target /
 ```
-
 ## Stacks
 
 ### almanac (vmid 112)

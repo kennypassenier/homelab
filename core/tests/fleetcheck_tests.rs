@@ -82,6 +82,7 @@ fn y4_a_healthy_fleet_is_silent() {
         growth: Vec::new(),
         coverage: Vec::new(),
         boot: Vec::new(),
+        host_memory: None,
     };
     assert!(check(&st, &live).is_empty(), "{:?}", check(&st, &live));
 }
@@ -142,6 +143,7 @@ fn y4_finds_a_stack_file_aimed_at_someone_elses_container() {
         growth: Vec::new(),
         coverage: Vec::new(),
         boot: Vec::new(),
+        host_memory: None,
         ..Default::default()
     };
     let found = check(&st, &live);
@@ -222,7 +224,7 @@ fn y4_probe_address_covers_every_route_shape_in_the_house() {
 /// limit produces nothing at all.
 #[test]
 fn healthy_container_reports_no_growth_findings() {
-    let out = evaluate_growth(&[healthy_growth(114)], GrowthLimits::default());
+    let out = evaluate_growth(&[healthy_growth(114)], GrowthLimits::default(), None);
     assert!(out.is_empty(), "expected silence, got {:?}", out);
 }
 
@@ -232,7 +234,7 @@ fn healthy_container_reports_no_growth_findings() {
 fn missing_guards_are_reported() {
     let mut g = healthy_growth(104);
     g.guards = false;
-    let out = evaluate_growth(&[g], GrowthLimits::default());
+    let out = evaluate_growth(&[g], GrowthLimits::default(), None);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].severity, Severity::Drift);
     assert!(out[0].what.contains("no runaway guards"));
@@ -249,13 +251,13 @@ fn missing_guards_are_reported() {
 fn docker_logs_and_journal_are_checked_separately() {
     let mut logs = healthy_growth(104);
     logs.docker_logs_mb = 908;
-    let out = evaluate_growth(&[logs], GrowthLimits::default());
+    let out = evaluate_growth(&[logs], GrowthLimits::default(), None);
     assert_eq!(out.len(), 1, "only the docker log finding: {:?}", out);
     assert!(out[0].what.contains("908 MB"));
 
     let mut journal = healthy_growth(104);
     journal.journal_mb = 397;
-    let out = evaluate_growth(&[journal], GrowthLimits::default());
+    let out = evaluate_growth(&[journal], GrowthLimits::default(), None);
     assert_eq!(out.len(), 1, "only the journal finding: {:?}", out);
     assert!(out[0].what.contains("397 MB"));
 }
@@ -266,13 +268,13 @@ fn docker_logs_and_journal_are_checked_separately() {
 fn a_nearly_full_disk_is_broken_not_drift() {
     let mut g = healthy_growth(106);
     g.disk_used_pct = 91;
-    let out = evaluate_growth(&[g], GrowthLimits::default());
+    let out = evaluate_growth(&[g], GrowthLimits::default(), None);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].severity, Severity::Broken);
 
     let mut g = healthy_growth(106);
     g.disk_used_pct = 75;
-    let out = evaluate_growth(&[g], GrowthLimits::default());
+    let out = evaluate_growth(&[g], GrowthLimits::default(), None);
     assert_eq!(out.len(), 1);
     assert_eq!(
         out[0].severity,
@@ -288,7 +290,7 @@ fn a_nearly_full_disk_is_broken_not_drift() {
 fn swap_in_use_is_reported() {
     let mut g = healthy_growth(106);
     g.swap_used_mb = 1028;
-    let out = evaluate_growth(&[g], GrowthLimits::default());
+    let out = evaluate_growth(&[g], GrowthLimits::default(), None);
     assert_eq!(out.len(), 1);
     assert!(out[0].what.contains("1028 MB of swap"));
     assert!(
@@ -304,14 +306,14 @@ fn limits_are_honoured_rather_than_hardcoded() {
     let mut g = healthy_growth(114);
     g.journal_mb = 120;
     assert!(
-        evaluate_growth(&[g.clone()], GrowthLimits::default()).is_empty(),
+        evaluate_growth(&[g.clone()], GrowthLimits::default(), None).is_empty(),
         "120 MB is under the default 150"
     );
     let strict = GrowthLimits {
         journal_mb: 100,
         ..GrowthLimits::default()
     };
-    assert_eq!(evaluate_growth(&[g], strict).len(), 1);
+    assert_eq!(evaluate_growth(&[g], strict, None).len(), 1);
 }
 
 /// The check runs over the whole fleet, and one loud container must not
@@ -324,7 +326,7 @@ fn every_container_is_reported_independently() {
     let b = healthy_growth(112);
     let mut c = healthy_growth(106);
     c.swap_used_mb = 1028;
-    let out = evaluate_growth(&[a, b, c], GrowthLimits::default());
+    let out = evaluate_growth(&[a, b, c], GrowthLimits::default(), None);
     assert_eq!(out.len(), 3, "two for 104, none for 112, one for 106");
     assert!(out.iter().all(|f| !f.subject.contains("112")));
 }
@@ -608,4 +610,50 @@ fn w3_the_repair_touches_boot_policy_and_nothing_else() {
     // Nothing to do when they agree.
     let same = parse("onboot: 1\nstartup: order=80\nmemory: 1024\ncores: 2\n");
     assert!(boot_set_args(&m, &same).is_empty());
+}
+
+/// F184: a remedy that cannot be carried out is not a remedy.
+///
+/// On 2026-09-02 the fleet check reported swap on EIGHT containers at once
+/// and told Kenny, eight times, to give each one more memory. The host has
+/// 31 GB of RAM with 47 GB promised to guests and 7 of its 8 GB of swap
+/// already in use — so following that advice even once takes memory from
+/// another container, and following it eight times makes the machine worse
+/// while the check keeps saying the same thing.
+///
+/// covers: F184
+#[test]
+fn a_swapping_container_on_a_short_host_is_not_told_to_take_more_memory() {
+    let mut g = healthy_growth(114);
+    g.swap_used_mb = 510;
+
+    // Host fine: the original advice stands, because raising this one
+    // container's memory is something the machine can actually do.
+    let roomy = evaluate_growth(&[g.clone()], GrowthLimits::default(), None);
+    assert_eq!(roomy.len(), 1);
+    assert!(
+        roomy[0].remedy.contains("give the container more memory"),
+        "{}",
+        roomy[0].remedy
+    );
+
+    // Host short: the remedy names the real cause instead.
+    let short = evaluate_growth(
+        &[g],
+        GrowthLimits::default(),
+        Some("the host has 31744 MB of RAM with 47360 MB promised to guests"),
+    );
+    assert_eq!(short.len(), 1);
+    assert!(
+        !short[0].remedy.contains("give the container more memory"),
+        "it must not repeat advice the machine cannot follow: {}",
+        short[0].remedy
+    );
+    assert!(
+        short[0].remedy.contains("47360") && short[0].remedy.contains("another one"),
+        "and it must name the numbers and the trade-off: {}",
+        short[0].remedy
+    );
+    // The finding itself does not change — the container IS swapping.
+    assert!(short[0].what.contains("510 MB of swap"));
 }

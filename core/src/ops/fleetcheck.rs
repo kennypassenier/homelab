@@ -63,6 +63,11 @@ pub struct LiveFacts {
     /// W3: what `pct config` says about boot policy and resources, per
     /// managed container.
     pub boot: Vec<BootFact>,
+    /// F184: what the HOST itself has, so a per-container remedy cannot
+    /// advise something the machine cannot give. `(total_mb, committed_mb,
+    /// swap_used_mb, swap_total_mb)`, or None when it could not be read —
+    /// which is not the same as a healthy host and is treated as unknown.
+    pub host_memory: Option<(u32, u32, u32, u32)>,
 }
 
 /// W3: the configured shape of a container that exists, next to the stack
@@ -217,6 +222,20 @@ pub fn evaluate(
 ) -> Vec<Finding> {
     let mut out = Vec::new();
 
+    // F184: is the HOST itself short? Read once, so every per-container
+    // remedy below can say something the machine can actually do.
+    let host_short: Option<String> = live.host_memory.and_then(|(total, committed, su, st)| {
+        let oversubscribed = committed > total;
+        let swap_pressed = st > 0 && su * 100 / st.max(1) >= 50;
+        (oversubscribed || swap_pressed).then(|| {
+            format!(
+                "the host has {} MB of RAM with {} MB promised to guests, and {} of its {} MB \
+                 of swap in use",
+                total, committed, su, st
+            )
+        })
+    });
+
     // A stack that clones a template which is not there rebuilds into
     // nothing — and it fails at the moment you need the rebuild most. The
     // shape this guards against was found on 2026-09-01: the scaffold default
@@ -352,7 +371,11 @@ pub fn evaluate(
         }
     }
 
-    out.extend(evaluate_growth(&live.growth, growth_limits));
+    out.extend(evaluate_growth(
+        &live.growth,
+        growth_limits,
+        host_short.as_deref(),
+    ));
     out.extend(evaluate_coverage(&live.coverage));
     out.extend(evaluate_boot(state, &live.boot));
 
@@ -376,7 +399,15 @@ pub fn evaluate(
 /// Every finding here is Drift rather than Broken except a nearly-full disk,
 /// because that is the honest reading: nothing is failing yet. The point is
 /// to see it while it is still cheap.
-pub fn evaluate_growth(facts: &[GrowthFact], lim: GrowthLimits) -> Vec<Finding> {
+/// F184: `host_short` is why the host itself cannot help — Some when the
+/// machine is oversubscribed or already swapping hard. Passed in rather than
+/// read here, because a per-guest judgement that silently reads global state
+/// is a judgement nobody can test.
+pub fn evaluate_growth(
+    facts: &[GrowthFact],
+    lim: GrowthLimits,
+    host_short: Option<&str>,
+) -> Vec<Finding> {
     let mut out = Vec::new();
     for g in facts {
         let who = format!("{} (CT {})", g.hostname, g.vmid);
@@ -408,7 +439,27 @@ pub fn evaluate_growth(facts: &[GrowthFact], lim: GrowthLimits) -> Vec<Finding> 
                 severity: Severity::Drift,
                 subject: who.clone(),
                 what: format!("{} MB of swap in use", g.swap_used_mb),
-                remedy: "swap turns memory pressure into slow degradation instead of a loud failure — give the container more memory rather than more swap".into(),
+                // F184: the old remedy said "give the container more memory"
+                // unconditionally. On 2026-09-02 eight containers reported
+                // this at once on a host with 31 GB of RAM, 47 GB committed
+                // to guests, and 7 of its 8 GB of swap already used. Following
+                // that advice eight times would have made the machine worse,
+                // and the check would have kept saying it. A remedy that
+                // cannot be carried out is not a remedy.
+                remedy: host_short
+                    .map(|why| {
+                        format!(
+                            "the container is not the problem: {} — reduce what is promised \
+                             to guests, or give the host more RAM. Raising this container's \
+                             memory takes it from another one",
+                            why
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        "swap turns memory pressure into slow degradation instead of a loud \
+                         failure — give the container more memory rather than more swap"
+                            .into()
+                    }),
             });
         }
         if g.journal_mb >= lim.journal_mb {

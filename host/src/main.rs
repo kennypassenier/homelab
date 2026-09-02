@@ -1999,6 +1999,35 @@ async fn native_from_state(
 
 /// Y4: read off the machine what the pure comparison needs. Kept separate so
 /// the judgement stays testable without a fleet.
+/// F184: total RAM, memory promised to guests, and swap in use — the three
+/// numbers that decide whether "give this container more memory" is advice
+/// or nonsense. None when any of them cannot be read, which is deliberately
+/// not the same as a healthy host.
+async fn read_host_memory(exec: &RealExecutor) -> Option<(u32, u32, u32, u32)> {
+    let out = exec
+        .run(&Cmd::new(
+            "sh",
+            &[
+                "-c",
+                // free gives total and swap; pct/qm give what is promised.
+                "free -m | awk '/^Mem:/{print $2} /^Swap:/{print $3\" \"$2}'; \
+                 pct list 2>/dev/null | awk 'NR>1{print $1}' | \
+                   xargs -r -n1 pct config 2>/dev/null | awk '/^memory:/{s+=$2} END{print s+0}'; \
+                 qm list 2>/dev/null | awk 'NR>1{s+=$4} END{print s+0}'",
+            ],
+            60,
+        ))
+        .await
+        .ok()?;
+    let n: Vec<&str> = out.stdout.split_whitespace().collect();
+    // total, swap_used, swap_total, lxc_committed, vm_committed
+    if n.len() < 5 {
+        return None;
+    }
+    let p = |i: usize| n.get(i)?.parse::<u32>().ok();
+    Some((p(0)?, p(3)? + p(4)?, p(1)?, p(2)?))
+}
+
 async fn gather_live_facts(
     exec: &RealExecutor,
     state: &AppState,
@@ -2007,6 +2036,9 @@ async fn gather_live_facts(
     use homelab_core::executor::{Cmd, Executor};
     let mut facts = homelab_core::ops::fleetcheck::LiveFacts {
         stack_files: stack_files.to_vec(),
+        // F184: the host's own numbers, so a per-container remedy cannot
+        // advise memory the machine does not have.
+        host_memory: read_host_memory(exec).await,
         ..Default::default()
     };
     if let Ok(out) = exec.run(&Cmd::new("pct", &["list"], 30)).await {

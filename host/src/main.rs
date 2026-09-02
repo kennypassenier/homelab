@@ -3816,6 +3816,43 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
             resp
         }
+        Rpc::BackupDevices => {
+            let devices = state.config.device_backups.clone();
+            if devices.is_empty() {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: "no device_backups configured in host.toml".into(),
+                };
+            }
+            let tiers = state.settings.read().unwrap().retention.clone();
+            let mut lines = Vec::new();
+            let mut ok = true;
+            for dev in devices {
+                let cfg = homelab_core::ops::backup::BackupCfg {
+                    tiers: tiers.clone(),
+                    ..state.config.backup.clone()
+                };
+                let name = dev.name.clone();
+                let report = run_mutating_op(state, &exec, req.id, "device-backup", |ctx| {
+                    Box::pin(async move {
+                        homelab_core::ops::devicebackup::backup_device(ctx, &dev, &cfg).await
+                    })
+                })
+                .await;
+                ok &= report.ok;
+                lines.push(format!(
+                    "{}: {}",
+                    name,
+                    if report.ok { "ok" } else { &report.message }
+                ));
+            }
+            RpcResponse {
+                id: req.id,
+                ok,
+                message: lines.join("\n"),
+            }
+        }
         Rpc::ListManualChecks => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let st = store.load().await.unwrap_or_default();

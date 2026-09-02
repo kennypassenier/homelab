@@ -180,6 +180,13 @@ pub enum Command {
         stack: String,
         enabled: bool,
     },
+    /// Route A: fetch every configured device's own configuration now.
+    ///
+    /// It only ever ran inside the nightly round, which meant the only way to
+    /// find out whether it worked was to wait until 04:00 and look afterwards
+    /// — and on 2026-09-03 it turned out it had never worked at all (F205,
+    /// F258). A backup you cannot run is a backup nobody verifies.
+    BackupDevices,
     /// G17: the questions only a person can answer, as the host has them on
     /// record. Read-only; the deploy is what puts them there.
     ListManualChecks,

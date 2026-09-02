@@ -848,6 +848,14 @@ const CLI_ONLY: &[(&str, &str)] = &[
          comfortable interface and typing the stack name out (Kenny, form H2b)",
     ),
     (
+        "BackupDevices",
+        "route A: the nightly round already does this, and this is the button \
+         that proves it works without waiting until 04:00 — the reason it went \
+         unnoticed for weeks that it had never worked at all (F205, F258). A \
+         TUI tile would suggest it is something you do rather than something \
+         you check",
+    ),
+    (
         "ListManualChecks",
         "G17: the answering happens at the keyboard right after a deploy, and the \
          asking happens in the nightly notification that already reaches Kenny — a \

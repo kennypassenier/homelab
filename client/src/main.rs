@@ -299,6 +299,9 @@ async fn main() {
             )
             .await;
         }
+        // Route A: ask every configured device for its own configuration now,
+        // instead of waiting for 04:00 to find out whether it works.
+        "backup-devices" => rpc(&host, &token, Command::BackupDevices).await,
         // H10: on-demand snapshot of vault/state/TLS/intent repo.
         "backup-host-meta" => rpc(&host, &token, Command::BackupHostMeta).await,
         // G17: the questions only a person can answer. `homelab checks` lists
@@ -895,6 +898,7 @@ async fn main() {
             println!("  homelab templates                   list the golden templates");
             println!("  homelab resize stacks/<name>        apply changed resources (H4)");
             println!("  homelab config                      show the host's settings (G8)");
+            println!("  homelab backup-devices              fetch each device's own config now");
             println!(
                 "  homelab testplan                    regenerate docs/deployment/TEST_PLAN.md"
             );

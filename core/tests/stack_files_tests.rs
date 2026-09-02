@@ -330,3 +330,129 @@ fn no_unit_file_puts_a_start_limit_key_where_systemd_ignores_it() {
         }
     }
 }
+
+/// G3 · the seeder's hand-written half, checked against the fleet.
+///
+/// The mechanical half of the watch list is generated and tested
+/// (`monitors.rs`). The application half is a Python list in
+/// `stacks/uptime/kuma-seeder/seed.py` — deliberately hand-written, because
+/// whether a service answers on `/health` or `/ping` or `?strict=1` is
+/// knowledge no manifest holds. What a manifest DOES hold is the address, and
+/// that is exactly what went stale on 2026-09-01: a monitor reported Uptime
+/// Kuma itself as down for eight hours because it still named the address
+/// the service had left that morning (F157), and another named a stack that
+/// no longer existed (F158).
+///
+/// So this does not try to test the seeder's knowledge. It tests the one
+/// thing the repository can check: every internal address it points at
+/// belongs to a stack that exists, at the IP that stack actually has, and the
+/// name in front of the `·` is that stack.
+mod kuma_seeder {
+    use super::*;
+
+    fn application_monitors() -> Vec<(String, String)> {
+        let src = std::fs::read_to_string(
+            stacks_dir()
+                .join("uptime")
+                .join("kuma-seeder")
+                .join("seed.py"),
+        )
+        .expect("the seeder must be where this test says it is");
+        let start = src
+            .find("APPLICATION_MONITORS = [")
+            .expect("the hand-written list must still be called APPLICATION_MONITORS");
+        let body = &src[start..];
+        let body = &body[..body.find("\n]").expect("unterminated list")];
+        let mut out = Vec::new();
+        for line in body.lines() {
+            let t = line.trim();
+            if !t.starts_with("(\"") {
+                continue;
+            }
+            let mut parts = t.split('"').skip(1);
+            let (Some(name), Some(_), Some(url)) = (parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            out.push((name.to_string(), url.to_string()));
+        }
+        assert!(
+            out.len() >= 20,
+            "parsed only {} monitors — the list changed shape and this test is reading \
+             nothing, which is worse than failing",
+            out.len()
+        );
+        out
+    }
+
+    #[test]
+    fn every_internal_monitor_points_at_a_stack_that_exists_at_the_address_it_has() {
+        let stacks = compose_stacks();
+        for (name, url) in application_monitors() {
+            let Some(rest) = url.strip_prefix("http://") else {
+                continue; // external checks go through Cloudflare, not a stack
+            };
+            let host = rest.split(['/', ':']).next().unwrap_or("");
+            if !host.starts_with("10.10.10.") {
+                continue;
+            }
+            let owner = stacks
+                .iter()
+                .find(|(_, m)| m.network.ip.split('/').next() == Some(host));
+            let (stack_dir, m) = owner.unwrap_or_else(|| {
+                panic!(
+                    "the seeder monitors '{}' at {}, and no stack in this repository has \
+                     that address — this is exactly the shape of F157",
+                    name, host
+                )
+            });
+            let prefix = name.split(" · ").next().unwrap_or("");
+            assert_eq!(
+                prefix, m.stack_name,
+                "the seeder calls {} '{}', but {} belongs to stack {} (directory {})",
+                host, name, host, m.stack_name, stack_dir
+            );
+        }
+    }
+
+    /// A stack with no monitor at all is not automatically wrong — the
+    /// mechanical half already pings every container. But a stack running
+    /// services that answer on the network, with nothing in the application
+    /// half, is worth knowing about, so the list of deliberate omissions is
+    /// written down rather than assumed.
+    #[test]
+    fn every_stack_without_an_application_monitor_is_one_we_named() {
+        const NO_APPLICATION_MONITOR: &[(&str, &str)] = &[
+            (
+                "registry",
+                "a pull-through cache: the mechanical monitor covers reachability, and \
+                 there is no application answer that means more than that",
+            ),
+            (
+                "productivity",
+                "supersync speaks its own protocol to its clients and has no health \
+                 endpoint that answers without one",
+            ),
+            (
+                "drill",
+                "a throwaway container, created and destroyed in the same sitting",
+            ),
+        ];
+        let watched: Vec<String> = application_monitors()
+            .into_iter()
+            .map(|(n, _)| n.split(" · ").next().unwrap_or("").to_string())
+            .collect();
+        for (name, m) in compose_stacks() {
+            if watched.contains(&m.stack_name) {
+                continue;
+            }
+            assert!(
+                NO_APPLICATION_MONITOR.iter().any(|(s, _)| *s == name),
+                "stack '{}' has no application monitor in the seeder and is not in the \
+                 list of stacks we decided not to watch — add the monitor, or add the \
+                 stack here with the reason",
+                name
+            );
+        }
+    }
+}

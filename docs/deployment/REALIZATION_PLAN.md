@@ -416,7 +416,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 |---|---|---|
 | G1 | saving one TUI setting silently wiped the others | dicht · F208 |
 | G2 | two update features that had never once run | dicht · F213 |
-| G3 | Kuma keyword monitors and the seeder had no tests | open |
+| G3 | Kuma keyword monitors and the seeder had no tests | dicht · F231 |
 | G4 | a restore could quiesce a stack and leave it down | dicht · F207 |
 | G5 | the same restore never validated the snapshot id first | dicht · F207 |
 | G6 | the 325-line fact-gatherer feeding every nightly finding has no test | **later** (Kenny: closing it means rebuilding it to take an executor) |
@@ -438,7 +438,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | G22 | Jellyfin's hardware transcoding was verified by inspection only | dicht · F216 |
 | G23 | two measurements the register asserted and nobody had made | dicht · F217 |
 
-**18 of 23 closed, 4 open, 1 deferred by Kenny.**
+**19 of 23 closed, 3 open, 1 deferred by Kenny.**
 
 ## Scratch resources
 

@@ -115,6 +115,31 @@ pub async fn backup_device(
         }
     };
 
+    // The repository has to exist before anything is piped into it.
+    //
+    // Missing until 2026-09-03, and it stayed missing because this whole path
+    // had never once run: the first real execution died with "repository does
+    // not exist" AFTER curl had already read 16 KB off the router (F259).
+    // Every other backup in this project inits first; this one was written
+    // without that step and nothing noticed, because nothing ran it.
+    step!(runner, "init repo", {
+        let script = format!(
+            "env RESTIC_REPOSITORY={base}/{name}-config \
+             RESTIC_PASSWORD_FILE={pw} RESTIC_CACHE_DIR={cache} \
+             restic cat config >/dev/null 2>&1 \
+             || env RESTIC_REPOSITORY={base}/{name}-config \
+                RESTIC_PASSWORD_FILE={pw} RESTIC_CACHE_DIR={cache} restic init",
+            base = cfg.restic_base,
+            name = dev.name,
+            pw = cfg.password_file,
+            cache = RESTIC_CACHE_DIR,
+        );
+        // Idempotent: `restic cat config` succeeds on a repository that is
+        // already there, so init only runs the first time.
+        run_ok(exec, &Cmd::new("sh", &["-c", &script], 300)).await?;
+        Ok(StepOutcome::Changed)
+    });
+
     step!(runner, "fetch and store", {
         // pipefail is load-bearing, the same lesson as the native backup: a
         // dead curl otherwise yields a "successful" empty snapshot, and a

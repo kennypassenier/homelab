@@ -422,7 +422,7 @@ fn load_config() -> Config {
         .ok()
         .or(file.state_dir)
         .unwrap_or_else(|| "/var/lib/homelab".into());
-    Config {
+    let cfg = Config {
         token,
         listen,
         state_dir,
@@ -492,7 +492,22 @@ fn load_config() -> Config {
                 .retention
                 .unwrap_or_else(homelab_core::retention::default_tiers),
         },
+    };
+    // F259: a watcher whose path no writer targets watches nothing — it
+    // reports "holds no files at all" forever while looking like a working
+    // check. Said out loud at load, where every other config fault is said.
+    for w in orphan_watchers(
+        &cfg.watched_backups,
+        &cfg.device_backups,
+        &cfg.backup.restic_base,
+    ) {
+        tracing::warn!(
+            "watched_backups entry {} matches no device_backups writer — it will report \
+             'holds no files at all' whatever happens",
+            w
+        );
     }
+    cfg
 }
 
 /// G8: persist the mutable settings back to host.toml, atomically, keeping
@@ -1146,6 +1161,61 @@ port = 5003
             !nightly_plan(4, 4, 1_000_000, &[], &fresh).contains(&NightlyTask::RestoreDrill),
             "drilled an hour ago: not again tonight"
         );
+    }
+
+    /// F259 · a watcher pointed at a path no writer writes to.
+    ///
+    /// The live config had exactly this on 2026-09-03: the watcher looked at
+    /// `OPNSense-backups` while the device backup wrote to `opnsense-config`,
+    /// so it would have gone on reporting "holds no files at all" even after
+    /// the backup started working — and whoever read that would have
+    /// concluded the fix had failed.
+    #[test]
+    fn f259_a_watcher_that_matches_no_writer_is_named() {
+        let dev = homelab_core::ops::devicebackup::DeviceBackup {
+            name: "opnsense".into(),
+            url: "https://10.10.10.1/api/core/backup/download/this".into(),
+            cred_file: "/var/lib/homelab/secrets/opnsense-backup.conf".into(),
+            filename: "config.xml".into(),
+            pin: Some("sha256//abc".into()),
+            ca_file: None,
+        };
+        let base = "rclone:gdrive:homelab-backups";
+
+        let agreeing = WatchedBackup {
+            name: "opnsense-config".into(),
+            rclone_path: format!("{}/opnsense-config", base),
+            max_age_hours: 26,
+        };
+        assert!(
+            orphan_watchers(&[agreeing], std::slice::from_ref(&dev), base).is_empty(),
+            "a watcher on the path the writer targets is not an orphan"
+        );
+
+        let stray = WatchedBackup {
+            name: "opnsense-config".into(),
+            rclone_path: format!("{}/OPNSense-backups", base),
+            max_age_hours: 26,
+        };
+        let out = orphan_watchers(&[stray], std::slice::from_ref(&dev), base);
+        assert_eq!(out.len(), 1, "the live misconfiguration must be named");
+        assert!(out[0].contains("OPNSense-backups"), "{:?}", out);
+
+        // With nothing configured to write, every watcher is an orphan and
+        // saying so is the point — that was the state for weeks.
+        assert_eq!(
+            orphan_watchers(&[stray_clone()], &[], base).len(),
+            1,
+            "no writers at all means the watcher watches nothing"
+        );
+    }
+
+    fn stray_clone() -> WatchedBackup {
+        WatchedBackup {
+            name: "opnsense-config".into(),
+            rclone_path: "rclone:gdrive:homelab-backups/OPNSense-backups".into(),
+            max_age_hours: 26,
+        }
     }
 
     #[test]
@@ -1964,6 +2034,36 @@ async fn run_restore_drill(
 }
 
 /// H12: bearer check, extracted for testing.
+/// F259: a watcher pointed at a path no writer writes to watches nothing.
+///
+/// `watched_backups` checks that files keep arriving somewhere;
+/// `device_backups` is what puts them there, at
+/// `<restic_base>/<name>-config`. On 2026-09-03 the two disagreed — the
+/// watcher looked at `gdrive:homelab-backups/OPNSense-backups` while the
+/// writer targeted `.../opnsense-config` — so the watcher would have gone on
+/// reporting "holds no files at all" even after the backup started working,
+/// and whoever read it would have concluded the fix had failed.
+///
+/// Returns the watchers whose path matches no configured writer. Deliberately
+/// a warning rather than a refusal: a watcher may legitimately point at
+/// something written by a machine this suite does not manage, and refusing to
+/// start over that would be worse than saying so.
+fn orphan_watchers(
+    watched: &[WatchedBackup],
+    devices: &[homelab_core::ops::devicebackup::DeviceBackup],
+    restic_base: &str,
+) -> Vec<String> {
+    let written: Vec<String> = devices
+        .iter()
+        .map(|d| format!("{}/{}-config", restic_base, d.name))
+        .collect();
+    watched
+        .iter()
+        .filter(|w| !written.iter().any(|p| p == &w.rclone_path))
+        .map(|w| format!("{} → {}", w.name, w.rclone_path))
+        .collect()
+}
+
 fn bearer_ok(header: Option<&str>, token: &str) -> bool {
     header
         .map(|v| v == format!("Bearer {}", token))

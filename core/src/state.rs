@@ -109,6 +109,16 @@ pub struct HostState {
     /// different question and the old answer no longer applies.
     #[serde(default)]
     pub manual_checks: BTreeMap<String, ManualCheckRecord>,
+    /// G16: unix time of the last notification that actually arrived.
+    #[serde(default)]
+    pub last_notify_ok: u64,
+    /// G16: unix time of the last one that reached no route at all.
+    #[serde(default)]
+    pub last_notify_failed: u64,
+    /// G16: what the last failure said. Kept so the finding can quote it
+    /// rather than say "something went wrong".
+    #[serde(default)]
+    pub last_notify_error: Option<String>,
 }
 
 /// One thing only a person can confirm, and the last word on it.

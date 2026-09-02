@@ -402,6 +402,7 @@ pub fn evaluate(
     out.extend(evaluate_boot(state, &live.boot));
     out.extend(evaluate_watched_backups(&live.watched_backups));
     out.extend(evaluate_incomplete(state));
+    out.extend(evaluate_notify(state, now_unix));
     out.extend(crate::ops::manualchecks::evaluate_manual(
         state,
         now_unix,
@@ -606,6 +607,48 @@ pub fn evaluate_watched_backups(facts: &[WatchedBackupFact]) -> Vec<Finding> {
 /// not a container that will bite later, it is one whose running state nobody
 /// has claimed. The remedy names the step, because "the deploy failed" a week
 /// ago is not something Kenny can act on and "it stopped at start apps" is.
+/// G16: is the path by which Kenny learns anything still working?
+///
+/// The circularity is the point and cannot be engineered away: if every
+/// notification route is down, this finding cannot reach him by notification
+/// either. What it can do is be there in `homelab check` and the TUI, so the
+/// question "why has it been so quiet" has an answer other than a guess.
+pub fn evaluate_notify(state: &HostState, now: u64) -> Vec<Finding> {
+    if state.last_notify_failed <= state.last_notify_ok {
+        return Vec::new();
+    }
+    let ago = now.saturating_sub(state.last_notify_failed) / 60;
+    let last_ok = if state.last_notify_ok == 0 {
+        "and none has ever arrived".to_string()
+    } else {
+        format!(
+            "the last one that arrived was {} h earlier",
+            state
+                .last_notify_failed
+                .saturating_sub(state.last_notify_ok)
+                / 3600
+        )
+    };
+    vec![Finding {
+        severity: Severity::Broken,
+        subject: "notifications".into(),
+        what: format!(
+            "no route accepted the last notification ({} min ago{}){}",
+            ago,
+            state
+                .last_notify_error
+                .as_ref()
+                .map(|e| format!(": {}", e))
+                .unwrap_or_default(),
+            format_args!(" — {}", last_ok)
+        ),
+        remedy: "check kyu on 10.10.10.9 and `notify_fallback_webhook` in host.toml — \
+                 while this stands, every warning this host produces is going nowhere, \
+                 including this one"
+            .into(),
+    }]
+}
+
 pub fn evaluate_incomplete(state: &HostState) -> Vec<Finding> {
     let mut out = Vec::new();
     for (name, st) in &state.stacks {

@@ -68,6 +68,17 @@ struct FileConfig {
     /// warning survives HA being the thing that is broken — and the hub
     /// requires a token where the HA webhook did not.
     notify_auth_bearer: Option<String>,
+    /// G16: the second route, tried when the first one does not answer 2xx.
+    ///
+    /// Y2 sends notifications through kyu so an HA outage cannot lose them.
+    /// Its one carved-out exception was "kyu itself is down" — which is
+    /// exactly what happens while the orchestrator is updating kyu, and the
+    /// message lost in that window is the one saying the update failed. Point
+    /// this straight at Home Assistant.
+    notify_fallback_webhook: Option<String>,
+    /// Credential for that second route, when it needs one. The HA webhook
+    /// does not; something else might.
+    notify_fallback_auth_bearer: Option<String>,
     /// Where the coverage check asks whether a stack is measured and whether
     /// its logs arrive. Unset means the question is not asked at all, which
     /// is deliberate: an unasked question must never become a finding.
@@ -166,6 +177,17 @@ struct Config {
     /// that view is the settings the CLIENT can read back, and a secret does
     /// not belong in a screen. ssh-edited only, like exec_enabled.
     notify_auth_bearer: Option<String>,
+    /// G16: the second route, tried when the first one does not answer 2xx.
+    ///
+    /// Y2 sends notifications through kyu so an HA outage cannot lose them.
+    /// Its one carved-out exception was "kyu itself is down" — which is
+    /// exactly what happens while the orchestrator is updating kyu, and the
+    /// message lost in that window is the one saying the update failed. Point
+    /// this straight at Home Assistant.
+    notify_fallback_webhook: Option<String>,
+    /// Credential for that second route, when it needs one. The HA webhook
+    /// does not; something else might.
+    notify_fallback_auth_bearer: Option<String>,
     /// Where the coverage check asks whether a stack is measured and whether
     /// its logs arrive. Unset means the question is not asked at all, which
     /// is deliberate: an unasked question must never become a finding.
@@ -248,6 +270,8 @@ const KNOWN_TOP: &[&str] = &[
     "backup_hour",
     "notify_webhook",
     "notify_auth_bearer",
+    "notify_fallback_webhook",
+    "notify_fallback_auth_bearer",
     "prometheus_url",
     "loki_url",
     "logs_window",
@@ -396,6 +420,8 @@ fn load_config() -> Config {
         config_path: path,
         exec_enabled: file.exec_enabled.unwrap_or(false),
         notify_auth_bearer: file.notify_auth_bearer.clone(),
+        notify_fallback_webhook: file.notify_fallback_webhook.clone(),
+        notify_fallback_auth_bearer: file.notify_fallback_auth_bearer.clone(),
         prometheus_url: file.prometheus_url.clone(),
         loki_url: file.loki_url.clone(),
         logs_window: file.logs_window.clone().unwrap_or_else(default_logs_window),
@@ -484,6 +510,14 @@ fn render_settings_toml(
         // notification, and the first thing you would not hear about is that.
         #[serde(skip_serializing_if = "Option::is_none")]
         notify_auth_bearer: Option<&'a String>,
+        // G16: the second notification route and its credential. Same
+        // reasoning as the line above, one step further: losing the fallback
+        // silently would leave exactly the window Y2 carved out — kyu being
+        // restarted by the very operation whose failure you need to hear.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notify_fallback_webhook: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notify_fallback_auth_bearer: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         prometheus_url: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -543,6 +577,8 @@ fn render_settings_toml(
         retention: &settings.retention,
         exec_enabled: config.exec_enabled,
         notify_auth_bearer: config.notify_auth_bearer.as_ref(),
+        notify_fallback_webhook: config.notify_fallback_webhook.as_ref(),
+        notify_fallback_auth_bearer: config.notify_fallback_auth_bearer.as_ref(),
         prometheus_url: config.prometheus_url.as_ref(),
         loki_url: config.loki_url.as_ref(),
         logs_window: (config.logs_window != default_logs_window()).then_some(&config.logs_window),
@@ -871,6 +907,8 @@ port = 5003
     #[test]
     fn settings_render_keeps_every_config_field() {
         let config = Config {
+            notify_fallback_webhook: Some("http://10.10.5.101:8123/api/webhook/homelab".into()),
+            notify_fallback_auth_bearer: None,
             // F208: with real values, so the round-trip proves they SURVIVE
             // rather than only that the struct knows their names.
             watched_backups: vec![WatchedBackup {
@@ -938,6 +976,13 @@ port = 5003
         assert_eq!(
             parsed.notify_auth_bearer.as_deref(),
             Some("a-token-that-must-survive-a-save")
+        );
+        // G16: and so must the second route, or a save re-opens the exact
+        // window Y2 carved out — kyu down while the orchestrator is the one
+        // restarting it.
+        assert_eq!(
+            parsed.notify_fallback_webhook.as_deref(),
+            Some("http://10.10.5.101:8123/api/webhook/homelab")
         );
         assert_eq!(parsed.backup_hour, Some(4));
         // E8: settings saves must not drop the zfs jobs (same class of bug
@@ -2381,32 +2426,102 @@ async fn notify(
 }
 
 /// Lower-level webhook POST used by notify() and the boot notification.
+///
+/// G16: this used to be `let _ = exec.run(...)` — a fire-and-forget curl with
+/// the body discarded, so the one path by which Kenny learns that anything is
+/// wrong could itself be broken with nothing anywhere saying so. It now reads
+/// the status, falls back to the second route when the first fails, and
+/// records the outcome in state so an unreachable notification path becomes a
+/// finding instead of a silence.
 async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
-    let url = match state.settings.read().unwrap().notify_webhook.clone() {
-        Some(u) => u,
-        None => return,
-    };
-    let bearer = state.config.notify_auth_bearer.clone();
-    let auth = bearer.map(|t| format!("authorization: Bearer {}", t));
-    let mut args: Vec<&str> = vec![
-        "-m",
-        "5",
-        "-s",
-        "-o",
-        "/dev/null",
-        "-X",
-        "POST",
-        "-H",
-        "Content-Type: application/json",
-    ];
-    if let Some(a) = auth.as_deref() {
-        args.push("-H");
-        args.push(a);
+    let primary = state.settings.read().unwrap().notify_webhook.clone();
+    let fallback = state.config.notify_fallback_webhook.clone();
+    let urls = homelab_core::notify::route(primary.as_deref(), fallback.as_deref());
+    if urls.is_empty() {
+        return;
     }
-    args.push("-d");
-    args.push(&payload);
-    args.push(&url);
-    let _ = exec.run(&Cmd::new("curl", &args, 10)).await;
+    let mut last = String::new();
+    let mut delivered = false;
+    for (i, url) in urls.iter().enumerate() {
+        // Each route carries its own credential: kyu takes a bearer token,
+        // Home Assistant's webhook takes none.
+        let bearer = if i == 0 {
+            state.config.notify_auth_bearer.clone()
+        } else {
+            state.config.notify_fallback_auth_bearer.clone()
+        };
+        let auth = bearer.map(|t| format!("authorization: Bearer {}", t));
+        let mut args: Vec<&str> = vec![
+            "-m",
+            "5",
+            "-s",
+            "-o",
+            "/dev/null",
+            // The status is the whole point: -o /dev/null throws the body
+            // away, and without this the exit code alone cannot tell a 200
+            // from a 404 on a topic that no longer exists.
+            "-w",
+            "%{http_code}",
+            "-X",
+            "POST",
+            "-H",
+            "Content-Type: application/json",
+        ];
+        if let Some(a) = auth.as_deref() {
+            args.push("-H");
+            args.push(a);
+        }
+        args.push("-d");
+        args.push(&payload);
+        args.push(url);
+        let out = exec.run(&Cmd::new("curl", &args, 10)).await;
+        let (ran, code) = match &out {
+            Ok(o) => (true, o.stdout.clone()),
+            Err(_) => (false, String::new()),
+        };
+        match homelab_core::notify::verdict(ran, &code) {
+            homelab_core::notify::Delivery::Delivered => {
+                if i > 0 {
+                    tracing::warn!(
+                        "notification took the fallback route: the primary said {}",
+                        last
+                    );
+                }
+                delivered = true;
+                break;
+            }
+            homelab_core::notify::Delivery::Failed(why) => {
+                last = why;
+                tracing::warn!("notification route {} failed: {}", url, last);
+            }
+        }
+    }
+    record_notify_outcome(state, exec, delivered, &last).await;
+}
+
+/// Keep the last word on whether notifications are arriving, so a broken
+/// notification path is visible somewhere other than in a notification.
+///
+/// That circularity is real and worth stating: if every route is down, this
+/// record is what `homelab check` and the TUI read, because the report saying
+/// so cannot reach him by the path that is broken.
+async fn record_notify_outcome(state: &AppState, exec: &RealExecutor, delivered: bool, why: &str) {
+    let store = homelab_core::state::StateStore::new(exec, &state.config.state_dir);
+    let Ok(mut st) = store.load().await else {
+        return;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if delivered {
+        st.last_notify_ok = now;
+        st.last_notify_error = None;
+    } else {
+        st.last_notify_failed = now;
+        st.last_notify_error = Some(why.to_string());
+    }
+    let _ = store.save(st).await;
 }
 
 /// Run any mutating operation under the op-lock (AR12) with uniform incident

@@ -429,7 +429,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | G13 | the M2 and M5 drills | open |
 | G14 | no recurring restore drill exists | open — Kenny declined "accept as limitation" |
 | G15 | the nightly check skipped the nights it mattered most | dicht · F214 |
-| G16 | the notification fallback, and Y2's exception to it | open |
+| G16 | the notification fallback, and Y2's exception to it | dicht · F222 (F223 wacht op een HA-webhook van Kenny) |
 | G17 | 94 manual checks printed at every deploy, answered by nobody | dicht · F221 |
 | G18 | 16 of 46 apps were verified by nothing | dicht · F215 |
 | G19 | 133 register findings marked fixed with no test claim | open — Kenny declined "accept as limitation" |
@@ -438,7 +438,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | G22 | Jellyfin's hardware transcoding was verified by inspection only | dicht · F216 |
 | G23 | two measurements the register asserted and nobody had made | dicht · F217 |
 
-**14 of 23 closed, 8 open, 1 deferred by Kenny.**
+**15 of 23 closed, 7 open, 1 deferred by Kenny.**
 
 ## Scratch resources
 

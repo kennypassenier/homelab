@@ -952,3 +952,96 @@ fn the_full_round_carries_the_manual_checks() {
         findings
     );
 }
+
+/// G16 · the notification path can be broken, and until now nothing said so.
+mod notification_health {
+    use super::*;
+    use homelab_core::notify::{route, verdict, Delivery};
+    use homelab_core::ops::fleetcheck::{evaluate_notify, Severity};
+
+    #[test]
+    fn only_a_2xx_counts_as_delivered() {
+        assert_eq!(verdict(true, "200"), Delivery::Delivered);
+        assert_eq!(verdict(true, "204\n"), Delivery::Delivered);
+        // kyu answers 404 on a topic that does not exist, and a rotated token
+        // gives 401. Both used to look exactly like success.
+        assert!(matches!(verdict(true, "404"), Delivery::Failed(_)));
+        assert!(matches!(verdict(true, "401"), Delivery::Failed(_)));
+        assert!(matches!(verdict(true, "500"), Delivery::Failed(_)));
+        assert!(matches!(verdict(true, "000"), Delivery::Failed(_)));
+        assert!(matches!(verdict(false, ""), Delivery::Failed(_)));
+    }
+
+    #[test]
+    fn the_fallback_is_tried_after_the_primary_and_never_twice() {
+        assert_eq!(route(Some("a"), Some("b")), vec!["a", "b"]);
+        assert_eq!(route(Some("a"), None), vec!["a"]);
+        assert_eq!(route(None, Some("b")), vec!["b"]);
+        assert!(
+            route(None, None).is_empty(),
+            "nothing configured, nothing sent"
+        );
+        assert_eq!(
+            route(Some("a"), Some("a")),
+            vec!["a"],
+            "the same url twice is one route, not a retry"
+        );
+    }
+
+    #[test]
+    fn a_working_notification_path_is_not_a_finding() {
+        let st = HostState {
+            last_notify_ok: 1_000,
+            last_notify_failed: 900,
+            ..Default::default()
+        };
+        assert!(evaluate_notify(&st, 2_000).is_empty());
+    }
+
+    #[test]
+    fn a_notification_that_reached_no_route_is_reported_with_what_it_said() {
+        let st = HostState {
+            last_notify_ok: 1_000,
+            last_notify_failed: 4_600,
+            last_notify_error: Some("HTTP 404".into()),
+            ..Default::default()
+        };
+
+        let f = evaluate_notify(&st, 4_900);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].severity, Severity::Broken);
+        assert_eq!(f[0].subject, "notifications");
+        assert!(f[0].what.contains("HTTP 404"), "{}", f[0].what);
+        assert!(f[0].what.contains("5 min ago"), "{}", f[0].what);
+        assert!(
+            f[0].remedy.contains("including this one"),
+            "the circularity has to be said out loud: {}",
+            f[0].remedy
+        );
+    }
+
+    #[test]
+    fn a_path_that_never_worked_says_that_rather_than_a_misleading_zero() {
+        let st = HostState {
+            last_notify_failed: 4_600,
+            ..Default::default()
+        };
+        let f = evaluate_notify(&st, 4_900);
+        assert!(f[0].what.contains("none has ever arrived"), "{}", f[0].what);
+    }
+
+    #[test]
+    fn the_full_round_carries_it() {
+        let st = HostState {
+            last_notify_failed: 100,
+            last_notify_error: Some("no answer".into()),
+            ..Default::default()
+        };
+        let findings = check(&st, &LiveFacts::default());
+        assert!(
+            findings.iter().any(|f| f.subject == "notifications"),
+            "or the reader is wired to nothing again: {:?}",
+            findings
+        );
+    }
+}

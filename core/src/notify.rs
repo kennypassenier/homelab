@@ -122,3 +122,64 @@ mod tests {
         assert_eq!(v["label"], "nightly");
     }
 }
+
+/// G16 · did the POST actually arrive?
+///
+/// It used to be `let _ = exec.run(...)`: a fire-and-forget curl with the
+/// body thrown away. Every notification this project sends — including
+/// "rollback also failed, this needs hands now" — travelled a path that could
+/// be broken without anybody being able to tell. The counter-argument in
+/// TARGET_LAYOUT names the window that makes it concrete: the orchestrator
+/// restarting kyu, which is the container the notification travels through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Delivery {
+    /// The far end answered 2xx.
+    Delivered,
+    /// It did not, and this is what curl said about it.
+    Failed(String),
+}
+
+/// Read curl's verdict off its exit status and the code it printed.
+///
+/// Deliberately strict: only 2xx counts. A 401 from a rotated bearer token
+/// and a 404 from a renamed topic are both "the message did not arrive", and
+/// treating them as success is how a notification path rots unnoticed — kyu
+/// answers 200 on a topic that exists and 404 on one that does not, so this
+/// is the difference between routing and dropping.
+pub fn verdict(ran: bool, http_code: &str) -> Delivery {
+    if !ran {
+        return Delivery::Failed("curl did not run or timed out".into());
+    }
+    match http_code.trim().parse::<u16>() {
+        Ok(c) if (200..300).contains(&c) => Delivery::Delivered,
+        Ok(0) => Delivery::Failed("no answer (connection refused, DNS, or timeout)".into()),
+        Ok(c) => Delivery::Failed(format!("HTTP {}", c)),
+        Err(_) => Delivery::Failed(format!("unreadable status {:?}", http_code.trim())),
+    }
+}
+
+/// Where a notification goes, in order, and why there is a second entry.
+///
+/// The primary is kyu (Y2): a durable hub, so an HA outage no longer loses
+/// the message. The fallback is Home Assistant directly, for the one case Y2
+/// carved out — kyu itself being down, which is exactly what happens while
+/// the orchestrator is updating it.
+///
+/// This replaces the static "operations targeting the messaging stack use the
+/// direct path" rule with something strictly stronger: a list to keep up to
+/// date cannot know that kyu is down for a reason nobody wrote down, and
+/// trying the second path when the first one fails covers that case and every
+/// other one. Kenny's standing rule about hand-maintained lists, applied to a
+/// list that had not been written yet.
+pub fn route<'a>(primary: Option<&'a str>, fallback: Option<&'a str>) -> Vec<&'a str> {
+    let mut v = Vec::new();
+    if let Some(p) = primary {
+        v.push(p);
+    }
+    if let Some(f) = fallback {
+        if Some(f) != primary {
+            v.push(f);
+        }
+    }
+    v
+}

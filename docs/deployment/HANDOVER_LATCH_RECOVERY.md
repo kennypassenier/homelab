@@ -24,7 +24,7 @@ against being LOST.** Confidentiality is not durability.
 | | files | meaning |
 |---|---|---|
 | `ok` — **stacks** | 13 | recovered, fully readable |
-| `format` — **homelab** | 13 | latch v1 format, "missing LATCH2 magic" |
+| `format` — ~~**homelab**~~ | ~~13~~ | removed from the repo 2026-09-02, form P1 |
 | `format` — **latch-rs** | 10 | latch v1 format |
 | `no-key` — **almanac** | 1 | genuinely key-locked |
 | `no-key` — **hub-clients** | 1 | genuinely key-locked |
@@ -56,8 +56,8 @@ Per project:
   EnvironmentFiles` on whatever machine actually runs it. Note *whatever
   machine*: a sweep of the Proxmox containers would not have found this one,
   because newsflash runs on the workstation.
-- **homelab** — 13 files, all `dev`, and all describing the **v1
-  architecture**: `stacks/gateway/nginx-proxy-manager`, `stacks/todo/vikunja`,
+- **homelab** — REMOVED on 2026-09-02 (Kenny, form P1). It held 13 files,
+  all `dev`, all describing the **v1 architecture**: `stacks/gateway/nginx-proxy-manager`, `stacks/todo/vikunja`,
   `stacks/cloudflared`, plus a `stacks-backup/` tree. NPM was replaced by
   Traefik, `todo` no longer exists. This is a historical archive of a system
   that has been gone for months, and it was already format-locked.

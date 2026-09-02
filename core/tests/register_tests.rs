@@ -244,3 +244,124 @@ fn a_claimed_test_belongs_to_a_closed_finding() {
         open_claims
     );
 }
+
+/// A6 · no new finding may claim "done" without saying what proves it.
+///
+/// Kenny chose *bewaker eerst, dan opruimen* at the A6 gate: stop the debt
+/// growing, then work off what is there. The Phase-7 audit reported 133 rows
+/// marked fixed with no test claim; measuring it here with a stated
+/// definition gives a different number, and the definition is the reason —
+/// this counts rows whose STATUS column says `done` and whose text names no
+/// test, no file and no deliberate "nothing".
+///
+/// The design avoids the thing it is guarding against. A list of 42
+/// grandfathered IDs would itself be a hand-maintained file that drifts —
+/// exactly what Kenny ruled out on 2026-09-02. Instead there is a watermark
+/// (every finding from F226 on must comply) and a ratchet (the count below it
+/// may fall and never rise). One integer, and it only moves one way.
+mod proof_ratchet {
+    /// The first finding recorded after the rule existed.
+    const WATERMARK: u32 = 226;
+
+    /// How many older rows still claim `done` without naming their proof.
+    ///
+    /// Measured 2026-09-02. Lower this as they are worked off; the test
+    /// fails if it ever needs to be raised, which is the whole point.
+    const REMAINING: usize = 42;
+
+    fn register() -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .join("docs/deployment/REGISTER.md"),
+        )
+        .expect("the register must be where this test says it is")
+    }
+
+    /// A row names its proof when it points at something checkable: a test
+    /// name, a source file, or an explicit decision that there is no test.
+    fn names_proof(row: &str) -> bool {
+        let has_backticked_ident = row
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .any(|t| t.len() >= 10 && t.chars().all(|c| c.is_ascii_lowercase() || c == '_'));
+        let has_path = row.contains(".rs`") || row.contains(".yml`") || row.contains(".toml`");
+        let has_long_snake = row
+            .split(|c: char| !(c.is_ascii_lowercase() || c == '_'))
+            .any(|w| w.len() >= 15 && w.contains('_'));
+        let says_none = row.contains("Consciously no")
+            || row.contains("consciously no")
+            || row.contains("no test, because");
+        has_backticked_ident || has_path || has_long_snake || says_none
+    }
+
+    fn done_rows() -> Vec<(u32, String)> {
+        let mut out = Vec::new();
+        for line in register().lines() {
+            let Some(rest) = line.strip_prefix("| F") else {
+                continue;
+            };
+            let Some((num, _)) = rest.split_once(' ') else {
+                continue;
+            };
+            let Ok(n) = num.parse::<u32>() else { continue };
+            // The status is the last non-empty cell.
+            let status = line
+                .rsplit('|')
+                .map(str::trim)
+                .find(|c| !c.is_empty())
+                .unwrap_or("");
+            if status.starts_with("done") {
+                out.push((n, line.to_string()));
+            }
+        }
+        assert!(
+            out.len() > 50,
+            "found only {} finished findings — this test is reading the register wrong, \
+             which is worse than failing",
+            out.len()
+        );
+        out
+    }
+
+    #[test]
+    fn no_finding_recorded_since_the_rule_may_claim_done_without_naming_its_proof() {
+        let offenders: Vec<u32> = done_rows()
+            .into_iter()
+            .filter(|(n, row)| *n >= WATERMARK && !names_proof(row))
+            .map(|(n, _)| n)
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "these findings say they are done and name nothing that proves it: {:?}. \
+             Name the test, the file, or write down that there is deliberately none \
+             and why — a row that claims a fix nobody can check is how F226 shipped.",
+            offenders
+        );
+    }
+
+    #[test]
+    fn the_older_backlog_may_shrink_and_never_grow() {
+        let left = done_rows()
+            .into_iter()
+            .filter(|(n, row)| *n < WATERMARK && !names_proof(row))
+            .count();
+        assert!(
+            left <= REMAINING,
+            "{} old findings now claim done without naming their proof, and the ratchet \
+             stands at {}. It only ever goes down: if a row genuinely lost its proof, \
+             restore it rather than raising this number.",
+            left,
+            REMAINING
+        );
+        assert!(
+            left + 5 >= REMAINING,
+            "the backlog is down to {} but the ratchet still says {} — lower REMAINING \
+             so the ground that was won cannot be given back",
+            left,
+            REMAINING
+        );
+    }
+}

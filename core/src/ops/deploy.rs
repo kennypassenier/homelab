@@ -161,6 +161,16 @@ pub async fn orphan_files(
         .collect()
 }
 
+/// A5: the vault filename for a file a unit reads.
+///
+/// `/appdata/kyu/kyu-config/kyu.env` becomes `kyu.env`, so the vault holds
+/// `<state_dir>/secrets/<stack>/kyu.env` beside the per-app `.env` copies
+/// that compose stacks already get. Flat on purpose: two units on one stack
+/// cannot name the same file, because the paths are `<unit>-config/...`.
+fn vault_key(path: &str) -> String {
+    path.rsplit('/').next().unwrap_or(path).to_string()
+}
+
 pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let m = &spec.manifest;
     let op = format!("deploy-{}", m.stack_name);
@@ -185,6 +195,17 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let log_info = |msg: String| {
         ctx.sink.emit(PipelineEvent::Line {
             level: Level::Info,
+            source: "HOST".into(),
+            msg,
+        })
+    };
+    // A5: the same, at a level that reaches the notification. A native unit
+    // left unstarted because its program or its secret is missing is not a
+    // detail in a transcript — it is the difference between a container that
+    // was rebuilt and one that only looks rebuilt.
+    let log_warn = |msg: String| {
+        ctx.sink.emit(PipelineEvent::Line {
+            level: Level::Warn,
             source: "HOST".into(),
             msg,
         })
@@ -1751,6 +1772,14 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // a running production service is not restarted to take ownership of it.
     // Changing a unit file that is already in place is a deliberate act, not
     // a side effect of a deploy.
+    // A5 (Kenny, 2026-09-02): prepare, then start — in that order.
+    //
+    // The G13 drill measured what the old order did: it ran
+    // `systemctl enable --now kyu` on a container where /usr/local/bin was
+    // empty, the user did not exist and the env file was not there, and
+    // systemd tried thirteen times before giving up. That worked everywhere
+    // else only because every native container had been built by hand and
+    // adopted afterwards — which means a lost one could not be rebuilt.
     step!(runner, exec, ctx, m, "native units", {
         if m.natives.is_empty() {
             return Ok(StepOutcome::Unchanged);
@@ -1775,8 +1804,146 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
                 changed = true;
             }
+
+            let need = crate::native::unit_prereqs(&blob.content);
+
+            // 1 · the account systemd will run it as.
+            if let Some(user) = &need.user {
+                let has = pct_sh(exec, m.vmid, &format!("id -u {} 2>/dev/null", user), 30).await?;
+                if has.stdout.trim().is_empty() {
+                    log_info(format!("[native] creating system user {}", user));
+                    pct_sh(
+                        exec,
+                        m.vmid,
+                        &format!(
+                            "useradd --system --no-create-home --shell /usr/sbin/nologin {}",
+                            crate::ops::util::shq(user)
+                        ),
+                        60,
+                    )
+                    .await?;
+                    changed = true;
+                }
+            }
+
+            // 2 · the program. Staged by the client from the service's own
+            // release; absent when the stack has no release_repo or GitHub
+            // could not be reached, and that is reported rather than fatal.
+            if let Some(b64) = spec.native_binaries.get(unit) {
+                let path = need
+                    .binary
+                    .clone()
+                    .unwrap_or_else(|| format!("/usr/local/bin/{}", unit));
+                let b64_path = format!("{}.homelab-b64", path);
+                // Staged beside the target, then moved: a transfer that dies
+                // half way must never leave a truncated program in place.
+                if push_content(exec, m.vmid, &b64_path, b64, "600").await? {
+                    let script = format!(
+                        "base64 -d {b} > {p}.new && chmod 755 {p}.new && rm -f {b} \
+                         && test -s {p}.new && mv {p}.new {p}",
+                        b = crate::ops::util::shq(&b64_path),
+                        p = crate::ops::util::shq(&path)
+                    );
+                    let out = pct_sh(exec, m.vmid, &script, 300).await?;
+                    if !out.success() {
+                        return Err(CoreError::Other(format!(
+                            "could not place {} on the container ({}) — nothing was replaced",
+                            path,
+                            out.stderr.trim()
+                        )));
+                    }
+                    log_info(format!("[native] {} installed", path));
+                    changed = true;
+                }
+            }
+
+            // 3 · the files systemd reads before the first line of the
+            // program runs. They cannot be invented: what the vault holds
+            // from an earlier deploy is restored, and anything else is named.
+            let mut missing: Vec<String> = Vec::new();
+            for f in need.env_files.iter().chain(need.credentials.iter()) {
+                let there = pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!("test -s {} && echo yes || true", crate::ops::util::shq(f)),
+                    30,
+                )
+                .await?;
+                if there.stdout.trim() == "yes" {
+                    continue;
+                }
+                let vault = format!(
+                    "{}/secrets/{}/{}",
+                    ctx.state_dir,
+                    m.stack_name,
+                    vault_key(f)
+                );
+                match exec.read_file(&vault).await {
+                    Ok(content) if !content.trim().is_empty() => {
+                        push_content(exec, m.vmid, f, &content, "600").await?;
+                        log_info(format!("[native] {} restored from the vault", f));
+                        changed = true;
+                    }
+                    _ => missing.push(f.clone()),
+                }
+            }
+
+            // 4 · does the program exist at all?
+            if let Some(bin) = &need.binary {
+                let there = pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!("test -x {} && echo yes || true", crate::ops::util::shq(bin)),
+                    30,
+                )
+                .await?;
+                if there.stdout.trim() != "yes" {
+                    missing.push(bin.clone());
+                }
+            }
+
+            // 5 · only now. Starting a unit whose prerequisites are absent
+            // produces a restart loop and an error about "resources" that
+            // says nothing about the actual cause.
+            if !missing.is_empty() {
+                log_warn(format!(
+                    "[native] {} NOT started — these are missing on the container: {}. \
+                     A binary comes from `homelab install-native stacks/{}/{}`; an env or \
+                     credential file has never been on this host and cannot be invented.",
+                    unit,
+                    missing.join(", "),
+                    m.stack_name,
+                    unit
+                ));
+                continue;
+            }
+
             let active = pct_sh(exec, m.vmid, &format!("systemctl is-active {}", unit), 30).await?;
             if active.stdout.trim() == "active" {
+                // 6 · keep the vault current, so the NEXT rebuild can restore
+                // what this container has. The same reasoning as the per-app
+                // .env copies: a file that exists in exactly one place is one
+                // disk failure from being gone.
+                for f in need.env_files.iter().chain(need.credentials.iter()) {
+                    let got = pct_sh(
+                        exec,
+                        m.vmid,
+                        &format!("cat {} 2>/dev/null || true", crate::ops::util::shq(f)),
+                        60,
+                    )
+                    .await;
+                    if let Ok(out) = got {
+                        if !out.stdout.trim().is_empty() {
+                            let vault = format!(
+                                "{}/secrets/{}/{}",
+                                ctx.state_dir,
+                                m.stack_name,
+                                vault_key(f)
+                            );
+                            let _ = exec.write_file(&vault, &out.stdout, 0o600).await;
+                        }
+                    }
+                }
                 continue;
             }
             log_info(format!(

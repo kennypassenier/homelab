@@ -54,6 +54,7 @@ fn spec_with_secret() -> DeploySpec {
     let mut env = std::collections::BTreeMap::new();
     env.insert("app".into(), format!("API_KEY={}\n", SECRET));
     DeploySpec {
+        native_binaries: Default::default(),
         manifest,
         files: vec![FileBlob {
             path: "app/docker-compose.yml".into(),

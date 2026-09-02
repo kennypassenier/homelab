@@ -57,6 +57,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
 
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
+        native_binaries: Default::default(),
         manifest: manifest(vmid, stack),
         files: vec![FileBlob {
             path: "syncthing/docker-compose.yml".into(),
@@ -2491,4 +2492,169 @@ async fn a_deploy_registers_the_questions_only_a_person_can_answer() {
         sink.lines().iter().any(|l| l.contains(&id)),
         "the transcript must print the id, or there is no way to answer it"
     );
+}
+
+/// A5 · a native unit is prepared before it is started, and not started at all
+/// when something it needs is absent.
+mod native_from_zero {
+    use super::*;
+
+    fn native_spec() -> DeploySpec {
+        let mut sp = spec(118, "drill");
+        sp.manifest.apps = Vec::new();
+        sp.manifest.native_only = true;
+        sp.manifest.natives = vec!["kyu".into()];
+        sp.manifest.storage = vec![homelab_core::manifest::MountSpec {
+            host_path: "/appdata/drill/kyu-config".into(),
+            mount_point: "/appdata/drill/kyu-config".into(),
+            app: Some("kyu".into()),
+            no_backup: None,
+            host_owner_uid: Some(100000),
+            no_data: false,
+        }];
+        sp.files.retain(|f| !f.path.contains("docker-compose"));
+        sp.files.push(FileBlob {
+            path: "kyu/kyu.service".into(),
+            content: "[Unit]\nDescription=kyu\n\n[Service]\nUser=kyu\n\
+                      EnvironmentFile=/appdata/drill/kyu-config/kyu.env\n\
+                      ExecStart=/usr/local/bin/kyu\n\n[Install]\nWantedBy=multi-user.target\n"
+                .into(),
+            mode: None,
+        });
+        sp
+    }
+
+    #[tokio::test]
+    async fn the_missing_account_is_created_before_anything_starts() {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        // No such user yet, and everything else is in place.
+        exec.respond_always("id -u kyu", CmdOutput::ok(""));
+        exec.respond_always(
+            "test -s '/appdata/drill/kyu-config/kyu.env'",
+            CmdOutput::ok("yes"),
+        );
+        exec.respond_always("test -x '/usr/local/bin/kyu'", CmdOutput::ok("yes"));
+        exec.enqueue("systemctl is-active kyu", CmdOutput::ok("inactive"));
+        exec.respond_always("systemctl is-active kyu", CmdOutput::ok("active"));
+        let sink = VecSink::new();
+        let journal = NullJournal;
+
+        let report = deploy(&ctx(&exec, &sink, &journal), &native_spec()).await;
+        assert!(report.ok, "the deploy must succeed: {:?}", report.error);
+
+        let useradd = exec.calls_containing("useradd --system");
+        assert_eq!(useradd.len(), 1, "the account must be created exactly once");
+        let start = exec.calls_containing("systemctl enable --now kyu");
+        assert!(!start.is_empty(), "and then the unit starts");
+    }
+
+    #[tokio::test]
+    async fn a_unit_whose_program_is_absent_is_not_started_and_the_reason_is_named() {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        exec.respond_always("id -u kyu", CmdOutput::ok("998"));
+        exec.respond_always(
+            "test -s '/appdata/drill/kyu-config/kyu.env'",
+            CmdOutput::ok("yes"),
+        );
+        // The binary is not there — the exact state the G13 drill found.
+        exec.respond_always("test -x '/usr/local/bin/kyu'", CmdOutput::ok(""));
+        let sink = VecSink::new();
+        let journal = NullJournal;
+
+        let report = deploy(&ctx(&exec, &sink, &journal), &native_spec()).await;
+        // It fails — at `reconcile`, which compares the container against the
+        // stack file, and not at `native units` after thirteen restarts. That
+        // is the change: the same verdict, arrived at without a crash loop and
+        // with a line saying exactly which file is absent.
+        assert!(!report.ok);
+        assert!(
+            report
+                .error
+                .as_ref()
+                .map(|e| e.what.contains("reconcile"))
+                .unwrap_or(false),
+            "{:?}",
+            report.error
+        );
+        assert!(
+            exec.calls_containing("systemctl enable --now kyu")
+                .is_empty(),
+            "starting it would produce a restart loop and an error about 'resources' \
+             that says nothing about the cause"
+        );
+        assert!(
+            sink.lines()
+                .iter()
+                .any(|l| l.contains("NOT started") && l.contains("/usr/local/bin/kyu")),
+            "and the transcript must name what is missing: {:?}",
+            sink.lines()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_env_file_is_restored_from_the_vault_rather_than_invented() {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        exec.respond_always("id -u kyu", CmdOutput::ok("998"));
+        exec.respond_always(
+            "test -s '/appdata/drill/kyu-config/kyu.env'",
+            CmdOutput::ok(""),
+        );
+        exec.respond_always("test -x '/usr/local/bin/kyu'", CmdOutput::ok("yes"));
+        exec.seed_file("/var/lib/homelab/secrets/drill/kyu.env", "KYU_PORT=8080\n");
+        exec.enqueue("systemctl is-active kyu", CmdOutput::ok("inactive"));
+        exec.respond_always("systemctl is-active kyu", CmdOutput::ok("active"));
+        let sink = VecSink::new();
+        let journal = NullJournal;
+
+        let report = deploy(&ctx(&exec, &sink, &journal), &native_spec()).await;
+        assert!(report.ok, "{:?}", report.error);
+        assert!(
+            sink.lines()
+                .iter()
+                .any(|l| l.contains("restored from the vault")),
+            "{:?}",
+            sink.lines()
+        );
+        assert!(
+            !exec
+                .calls_containing("systemctl enable --now kyu")
+                .is_empty(),
+            "and with the file in place it starts"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_secret_that_exists_nowhere_stops_the_start_instead_of_looping() {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        exec.respond_always("id -u kyu", CmdOutput::ok("998"));
+        exec.respond_always(
+            "test -s '/appdata/drill/kyu-config/kyu.env'",
+            CmdOutput::ok(""),
+        );
+        exec.respond_always("test -x '/usr/local/bin/kyu'", CmdOutput::ok("yes"));
+        let sink = VecSink::new();
+        let journal = NullJournal;
+
+        let report = deploy(&ctx(&exec, &sink, &journal), &native_spec()).await;
+        assert!(
+            !report.ok,
+            "a stack that cannot start is not a successful deploy"
+        );
+        assert!(
+            exec.calls_containing("systemctl enable --now kyu")
+                .is_empty(),
+            "systemd would have retried thirteen times and then given up"
+        );
+        assert!(
+            sink.lines()
+                .iter()
+                .any(|l| l.contains("kyu.env") && l.contains("cannot be invented")),
+            "{:?}",
+            sink.lines()
+        );
+    }
 }

@@ -92,13 +92,65 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
         None => None,
     };
 
+    // A5 (Kenny, 2026-09-02): a native stack carries its programs.
+    //
+    // Staged here rather than on the host because only the client can reach
+    // GitHub — the same reason `install-native` ships bytes over the line.
+    // A release that cannot be fetched is a warning, never a failed deploy:
+    // GitHub being down must not stop a running stack from being reconciled,
+    // and the host refuses to START a unit whose program is absent anyway.
+    let native_binaries = stage_native_binaries(dir, &stack_file.manifest.natives);
+
     Ok(DeploySpec {
         manifest: stack_file.manifest,
         files,
         env,
         gateway_route,
         checks,
+        native_binaries,
     })
+}
+
+/// Fetch each native unit's binary from its own release, verified.
+fn stage_native_binaries(dir: &Path, natives: &[String]) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for unit in natives {
+        let svc = dir.join(unit).join("service.yml");
+        let Ok(raw) = std::fs::read_to_string(&svc) else {
+            continue;
+        };
+        let Ok(m) = serde_yaml::from_str::<homelab_proto::NativeServiceManifest>(&raw) else {
+            continue;
+        };
+        // No release_repo is a deliberate state, not an oversight: the
+        // service is adopt-only and where its binary comes from is not
+        // written down. Saying so is more useful than a silent skip.
+        let Some(repo) = m.release_repo.clone() else {
+            eprintln!(
+                "  · {} declares no release_repo — its binary is not shipped with this deploy",
+                unit
+            );
+            continue;
+        };
+        let Some(tag) = crate::release::latest_tag_of(&repo) else {
+            eprintln!(
+                "  · {}: no release found in {} — binary not shipped",
+                unit, repo
+            );
+            continue;
+        };
+        match crate::release::stage_asset(&repo, &tag, m.asset_name()) {
+            Ok(b64) => {
+                println!(
+                    "  · {} {} staged from {} (checksum verified)",
+                    unit, tag, repo
+                );
+                out.insert(unit.clone(), b64);
+            }
+            Err(e) => eprintln!("  · {}: {} — binary not shipped", unit, e),
+        }
+    }
+    out
 }
 
 fn collect(

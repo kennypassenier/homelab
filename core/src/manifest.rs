@@ -285,6 +285,16 @@ pub struct DeploySpec {
     /// than something the service needs to be told.
     #[serde(default)]
     pub checks: BTreeMap<String, crate::checks::ServiceChecks>,
+    /// A5: the binary for each native unit, base64, keyed by unit name.
+    ///
+    /// Staged by the CLIENT because only it can reach GitHub — the host has
+    /// no credentials there, which is why `install-native` ships bytes over
+    /// the line rather than fetching them. Empty is normal and not an error:
+    /// a stack with no natives, or a release that could not be reached, both
+    /// arrive this way and the deploy then refuses to START a unit whose
+    /// program is missing rather than failing the whole run.
+    #[serde(default)]
+    pub native_binaries: BTreeMap<String, String>,
 }
 
 // ── Validation (D10) ─────────────────────────────────────────────────────────

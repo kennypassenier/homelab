@@ -422,7 +422,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | G6 | the 325-line fact-gatherer feeding every nightly finding has no test | **later** (Kenny: closing it means rebuilding it to take an executor) |
 | G7 | a test whose comment described a test that did not exist | dicht · F209 |
 | G8 | `incomplete_step` written by the deploy, read by nobody | dicht · F220 |
-| G9 | `install_native` creates no container and places no secrets | gemeten · F228 — groter dan gedacht: een native stack kan helemaal niet vanaf nul |
+| G9 | `install_native` creates no container and places no secrets | dicht · F232 (A5: voorbereiden, dan pas starten) |
 | G10 | the real stack files are validated by nothing (8 of 13 need latch) | dicht · F224 (structureel; de latch-helft blijft buiten de tests) |
 | G11 | three brakes that had never been pressed, and one silent skip | dicht · F210 |
 | G12 | cloning CT 997 and seeing it arrive in Prometheus + Loki | dicht · F225 (live gedrild 2026-09-02) |
@@ -438,7 +438,7 @@ that says how far Phase 7 actually is. Written as each gap lands.
 | G22 | Jellyfin's hardware transcoding was verified by inspection only | dicht · F216 |
 | G23 | two measurements the register asserted and nobody had made | dicht · F217 |
 
-**19 of 23 closed, 3 open, 1 deferred by Kenny.**
+**20 of 23 closed, 2 open, 1 deferred by Kenny.**
 
 ### Form A1-A7 · the four remaining gaps, answered 2026-09-02
 

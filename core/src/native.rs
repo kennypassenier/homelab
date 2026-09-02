@@ -136,3 +136,87 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
         Err(problems)
     }
 }
+
+/// A5 · what a unit file needs before it can start.
+///
+/// The G13 drill measured what happens without this: the deploy ran
+/// `systemctl enable --now kyu` on a container where `/usr/local/bin` was
+/// empty, the user `kyu` did not exist and the env file was not there. Three
+/// things nothing created, started in an order that gave them no chance —
+/// and thirteen restarts before systemd gave up. It worked everywhere else
+/// only because every native container had been built by hand and adopted
+/// afterwards, so a lost container could not be rebuilt at all.
+///
+/// Read off the unit file rather than the manifest on purpose: the unit is
+/// what systemd obeys, and a manifest that disagrees with it would be a
+/// second source of truth to keep in step.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UnitPrereqs {
+    /// `User=` — the account systemd runs it as. `DynamicUser=yes` means
+    /// systemd makes one per start, so there is nothing to create.
+    pub user: Option<String>,
+    /// `EnvironmentFile=` paths. A leading `-` makes the file optional to
+    /// systemd, and that is kept: an optional file missing is not a fault.
+    pub env_files: Vec<String>,
+    /// `LoadCredential=id:path` — systemd copies these into a private
+    /// directory before the service starts, so a missing one fails the start
+    /// exactly like a missing env file.
+    pub credentials: Vec<String>,
+    /// The program `ExecStart=` runs, with its arguments stripped.
+    pub binary: Option<String>,
+}
+
+/// Parse the prerequisites out of a unit file.
+///
+/// Only `[Service]` keys are read. A key in the wrong section is invisible to
+/// systemd — which this project learned the expensive way on 2026-09-02, when
+/// `StartLimitIntervalSec` sat in `[Service]` and was silently ignored while
+/// the comment above it promised the opposite (F227).
+pub fn unit_prereqs(text: &str) -> UnitPrereqs {
+    let mut out = UnitPrereqs::default();
+    let mut section = String::new();
+    let mut dynamic_user = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            section = t.to_string();
+            continue;
+        }
+        if section != "[Service]" || t.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = t.split_once('=') else {
+            continue;
+        };
+        let (k, v) = (k.trim(), v.trim());
+        match k {
+            "User" => out.user = Some(v.to_string()),
+            "DynamicUser" => dynamic_user = matches!(v, "yes" | "true" | "1"),
+            "EnvironmentFile" => {
+                // A leading '-' is systemd's own "may be absent".
+                if let Some(p) = v.strip_prefix('-') {
+                    let _ = p;
+                } else {
+                    out.env_files.push(v.to_string());
+                }
+            }
+            "LoadCredential" => {
+                if let Some((_id, path)) = v.split_once(':') {
+                    out.credentials.push(path.to_string());
+                }
+            }
+            "ExecStart" => {
+                let cmd = v.trim_start_matches(['-', '+', '!', '@']);
+                if let Some(first) = cmd.split_whitespace().next() {
+                    out.binary = Some(first.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    if dynamic_user {
+        // systemd invents the account per start; creating one would be wrong.
+        out.user = None;
+    }
+    out
+}

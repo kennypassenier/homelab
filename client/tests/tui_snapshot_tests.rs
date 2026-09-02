@@ -251,6 +251,7 @@ fn plan_modal_previews_changes() {
             (' ', "  ✓ no-touch list protects 100-107,111,201-203".into()),
         ],
         spec: Box::new(DeploySpec {
+            native_binaries: Default::default(),
             manifest,
             files: vec![],
             env: Default::default(),
@@ -1286,6 +1287,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
     };
     m.hostname = "108-app-test".into();
     let spec = DeploySpec {
+        native_binaries: Default::default(),
         manifest: m,
         files: vec![
             mk(

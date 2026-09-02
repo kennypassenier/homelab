@@ -1293,6 +1293,10 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
     };
     Ok((
         homelab_proto::DeploySpec {
+            // The TUI never stages release binaries: a wizard preview is not
+            // a deploy, and downloading megabytes to draw a screen would be
+            // wrong. `homelab deploy` is what carries them.
+            native_binaries: Default::default(),
             manifest,
             files: vec![],
             env: Default::default(),

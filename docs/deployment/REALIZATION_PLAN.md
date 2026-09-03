@@ -475,6 +475,27 @@ be silence.
 | E1 · test the new calendar button | **Jij probeert het** | he presses it himself; pressing it creates a real calendar in his Google account, which is an act on his account rather than a check. What to watch: a calendar that appears in HIS list as **owner** means creating and sharing both worked; one that does not appear means the sharing broke and not the creation — the distinction the almanac project asked for, because it has gone wrong twice |
 | E2 · the spare OPNsense key | **Laten staan** | kept as a spare, and documented where it lives: `opnsense-new.conf` now opens with a comment block saying what it is, that it is NOT the one in use, and how to ask the router what it may do. A curl config file takes `#` comments, so the explanation travels with the file instead of only living in this register |
 
+### Form F1 · almanac's fixture profiles, answered 2026-09-03
+
+Kenny: **alle drie weghalen.** `grafana.toml`, `uptime-kuma.toml` and
+`home-assistant.toml` go; `job-tracker.toml` is reduced to the 2.0.0 shape
+(`schema_version = 2`, `source_id`, `target_calendar_id`).
+
+**Not done yet, and the trigger is explicit.** Two conditions, either of which
+releases the work:
+
+1. almanac 2.0.0 is released and rolled out — under it, an old-shape profile
+   is skipped with an ERROR line per file at every start, so three of them
+   would be three error lines per restart about sources nothing feeds; or
+2. the almanac project confirms its regression tests read fixtures from its
+   own repository and not from the running container on CT 112. I asked; if
+   they read the live file, deleting it breaks their suite, and raising that
+   question and then acting before the answer would make raising it pointless.
+
+The files are under `/appdata/almanac/almanac-config/profiles/`, which the
+nightly restic run covers, so the removal is recoverable without staging a
+copy first.
+
 ## Scratch resources
 
 `199` for recipe rehearsals (M2, M7), created and destroyed per drill.

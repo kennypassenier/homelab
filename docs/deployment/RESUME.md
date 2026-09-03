@@ -92,6 +92,12 @@ the nightly round in the host-meta slot.
 3. **F247** — nothing in the house sends almanac anything (zero events in 48 h).
    Kenny's call whether that is a pipeline still to build or a service to retire.
 
+## Queued: almanac's fixture profiles (form F1, 2026-09-03)
+
+Kenny chose to remove all three. Waits on almanac 2.0.0 landing, or on that
+project confirming its tests do not read the live files. See the gate log in
+`REALIZATION_PLAN.md` for the exact trigger.
+
 ## Waiting on Kenny (not on us)
 
 - **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his command.

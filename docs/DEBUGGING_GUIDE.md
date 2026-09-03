@@ -4,6 +4,15 @@ The system is built to fail loudly, stop early, and leave evidence. This is
 the map to that evidence, ordered from "an operation failed" to "the host is
 gone" (for the latter, switch to [DR_RUNBOOK.md](DR_RUNBOOK.md)).
 
+**Where to run these.** Anything starting `homelab` runs from anywhere on
+Kenny's workstation — the client finds its own configuration. Everything
+else here (`journalctl`, `systemctl`, `pct`, `restic`, `curl` at
+`127.0.0.1`) is on the **Proxmox host**: `ssh root@10.10.5.250` first, or
+wrap it — `ssh root@10.10.5.250 'journalctl -u homelab-host -n 50'`.
+Kenny lost a minute on 2026-09-03 to a command from this project that did
+not say which machine it belonged to, and a command without its machine is
+a command that works for whoever wrote it.
+
 ## 1. An operation failed — read the error first
 
 Every failure ends with the same shape:

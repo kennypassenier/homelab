@@ -5,6 +5,11 @@ in [V2_PILOT_HANDOFF.md](V2_PILOT_HANDOFF.md); disaster recovery is in
 [DR_RUNBOOK.md](DR_RUNBOOK.md); failures in
 [DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md).
 
+**Where to run these.** `homelab …` runs from anywhere on the workstation.
+Anything else — `restic`, `rclone`, `pct`, `systemctl`, `journalctl` — is on
+the **Proxmox host** (`ssh root@10.10.5.250`), because that is where the
+daemon, the vault and the containers are.
+
 ## Routine: nothing (that's the point)
 
 The nightly scheduler (04:00, adjustable in SETTINGS) backs up every managed

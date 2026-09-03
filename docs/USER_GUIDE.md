@@ -2,8 +2,12 @@
 
 What each feature does and how you use it, in the order you'll meet them.
 IDs refer to [FEATURES.md](FEATURES.md); test steps live in
-[TEST_PLAN.md](TEST_PLAN.md). Commands assume the repo root as working
-directory with `HOMELAB_HOST`/`HOMELAB_TOKEN` in `.env`.
+[TEST_PLAN.md](TEST_PLAN.md).
+
+**Where to run these.** `homelab …` works from any directory: `make install`
+puts it in `~/.cargo/bin` and it reads `~/.config/homelab/env` itself. That
+was not true before 2026-09-02 — every command in this guide needed the repo
+root and a sourced `.env`, which is a ritual nobody had written down (F240).
 
 ## Daily driver
 

@@ -468,6 +468,13 @@ evening — a watched backup that has never written a file, a restore drill that
 has never run, and two questions only a person can answer. All three used to
 be silence.
 
+### Form E1-E2 · after almanac 1.6.0, answered 2026-09-03
+
+| Item | Kenny's answer | What it set in motion |
+|---|---|---|
+| E1 · test the new calendar button | **Jij probeert het** | he presses it himself; pressing it creates a real calendar in his Google account, which is an act on his account rather than a check. What to watch: a calendar that appears in HIS list as **owner** means creating and sharing both worked; one that does not appear means the sharing broke and not the creation — the distinction the almanac project asked for, because it has gone wrong twice |
+| E2 · the spare OPNsense key | **Laten staan** | kept as a spare, and documented where it lives: `opnsense-new.conf` now opens with a comment block saying what it is, that it is NOT the one in use, and how to ask the router what it may do. A curl config file takes `#` comments, so the explanation travels with the file instead of only living in this register |
+
 ## Scratch resources
 
 `199` for recipe rehearsals (M2, M7), created and destroyed per drill.

@@ -92,6 +92,29 @@ the nightly round in the host-meta slot.
 3. **F247** — nothing in the house sends almanac anything (zero events in 48 h).
    Kenny's call whether that is a pipeline still to build or a service to retire.
 
+## In flight: the Recyclarr repair (form J1, 2026-09-03)
+
+Kenny answered **Claude repareert en toont dan**, and then on 2026-09-04:
+*"Ik wil gewoon het eindresultaat … let me know als het af is."* So this runs
+to completion rather than stopping at a preview.
+
+What is decided and measured so far (F275, F279):
+
+- `:latest` does not exist as a Recyclarr tag — pin a real one (7.4.0 is
+  newest).
+- The config in `presets/recyclarr/` is written for an older Recyclarr and
+  fails on the current template layout.
+- `quality_definition` must be left OUT: R2/R3/R11's size caps are already
+  set and measured in both applications.
+- Radarr and Sonarr each have profile **id=4 "1080p"** — 961 films and 210
+  series point at it — and id=5 "Ultra-HD" with nothing on it. TRaSH's
+  templates create profiles under their own names, so matching the existing
+  one is the open design question. A **rename** is safe (items point by id,
+  never by name); the pre-change export is in `captured/media-profiles/`.
+- API keys are readable from each app's `config.xml`; the env goes to
+  `/var/lib/homelab/secrets/media/recyclarr.env` on the host, which the
+  deploy pushes — no latch, no secret in the repo.
+
 ## Waiting on Kenny (not on us)
 
 - **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his command.

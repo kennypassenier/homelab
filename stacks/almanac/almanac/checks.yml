@@ -11,5 +11,30 @@ checks:
       the calendar depends on a Google token that can expire without anything
       here changing.
 
+  # The almanac project pointed this out on 2026-09-04, and measuring
+  # confirmed it: `/healthz` answers `{"status":"ok","version":"2.3.0"}` and
+  # says nothing whatsoever about the store. A source sending nonsense keeps
+  # almanac healthy, and so does a journal almanac cannot reach — the check
+  # above would stay green through both.
+  #
+  # Of the two counters they named, this is the one that is OURS. A growing
+  # `almanac_dead_letter_total` means a SOURCE is sending something that will
+  # never land, which is that source's problem and deliberately not checked
+  # here. `almanac_journal_readable` dropping to 0 means almanac cannot get at
+  # its own store on a container this suite provisions and backs up — disk,
+  # permissions, a mount — and that is ours to fix.
+  - name: "journaal bereikbaar"
+    command: >-
+      n=$(wget -q -O - -T 8 http://127.0.0.1:8080/metrics
+      | awk '/^almanac_journal_readable /{print $2}');
+      [ "$n" = "1" ] && echo ok
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      Readable is not the same as correct: it says almanac can open its store,
+      not that what it wrote there is right. And it says nothing about events
+      that were never accepted — a source sending a shape almanac refuses gets
+      a 422 and never reaches the journal at all, so nothing here moves.
+
 manual:
   - "Maak een testafspraak via almanac en kijk of hij in Google Calendar verschijnt. Een verlopen token laat de dienst gezond ogen en levert niets af."

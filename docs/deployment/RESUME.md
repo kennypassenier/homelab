@@ -92,13 +92,6 @@ the nightly round in the host-meta slot.
 3. **F247** — nothing in the house sends almanac anything (zero events in 48 h).
    Kenny's call whether that is a pipeline still to build or a service to retire.
 
-## Queued: almanac 2.0.0
-
-The three fixture profiles are **already removed** (F265); almanac runs on
-`sources=["job-tracker"]`. What is left for 2.0.0: roll it out, reduce
-`job-tracker.toml` to `schema_version = 2` + `source_id` +
-`target_calendar_id`, and check almanac starts with no skipped profiles.
-
 ## Waiting on Kenny (not on us)
 
 - **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his command.

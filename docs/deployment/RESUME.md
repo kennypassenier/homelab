@@ -10,10 +10,9 @@ only says what is IN FLIGHT.
 
 ## Where the project stands
 
-- Phase 7 hardening: **21 of 23 gaps closed**, 1 deferred by Kenny (G6), G19's
-  guard built and its backlog being worked off. Per-gap table in
-  `REALIZATION_PLAN.md`.
-- Host runs **v3.39.2**; repo version matches. 414 tests, CI green.
+- Phase 7 hardening: **22 of 23 gaps closed**, 1 deferred by Kenny (G6).
+  Per-gap table in `REALIZATION_PLAN.md`.
+- Host runs **v3.42.2**; repo version matches. 434 tests, CI green.
 - `homelab` is installed at `~/.cargo/bin/homelab` (`make install`) and reads
   `~/.config/homelab/env`, so it works from any directory with no sourcing.
 
@@ -84,11 +83,12 @@ the nightly round in the host-meta slot.
 
 ## Also queued, in this order
 
-1. **G19 backlog** — down from 42 to **18**. The ratchet in
-   `register_tests.rs` stops new ones and refuses to sit stale. What is left
-   are real code findings that need their test named (F4, F16, F189, F191,
-   F204, F207, F210, F212, F216, F225, F240, F241, F252 …) rather than the
-   Phase-1 observations, which are annotated as deliberately untestable.
+1. **G19 backlog — closed.** Measured 2026-09-03 under the rule F237 settled:
+   107 finished rows, **0** pointing at nothing. The guard in
+   `register_tests.rs` is an absolute assertion rather than a ratchet, so it
+   holds the ground instead of measuring a descent. A "42 down to 18" figure
+   I reported on 2026-09-02 came from a superseded matcher and was wrong
+   (F272).
 3. **F247** — nothing in the house sends almanac anything (zero events in 48 h).
    Kenny's call whether that is a pipeline still to build or a service to retire.
 

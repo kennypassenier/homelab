@@ -41,5 +41,29 @@ checks:
       A status code from the web server. It says nothing about whether any
       check is actually being run — the two readings above ask that.
 
-manual:
-  - "Open Uptime Kuma en kijk of er rode regels staan die er al dagen staan. Een permanent rode regel is geen storing meer, het is meubilair — en dan leest niemand het bord nog (F157)."
+  # Was a manual check until 2026-09-03 (form G1): "open Uptime Kuma and see
+  # whether rows have been red for days". Nobody opens a board to answer a
+  # question, and a permanently red row is furniture rather than a fault —
+  # which is the point F157 made. This asks the database instead.
+  #
+  # Counts ACTIVE monitors with no successful heartbeat in 24 hours. A brief
+  # red during the nightly round (containers are paused to snapshot) does not
+  # register: measured 2026-09-03, 71 red beats between 02:22 and 02:23 and
+  # every monitor green by morning.
+  - name: "bewakingen die al een dag rood staan"
+    command: >-
+      n=$(sqlite3 /appdata/uptime/uptime-kuma-config/kuma.db "select count(*)
+      from monitor m where m.active=1 and not exists (select 1 from heartbeat h
+      where h.monitor_id=m.id and h.status=1 and h.time >
+      datetime('now','-24 hours'));" 2>/dev/null);
+      [ -n "$n" ] && [ "$n" -eq 0 ] && echo ok
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      Says nothing about a monitor that is green but pointed at the wrong
+      thing, and nothing about one somebody deactivated to silence it —
+      inactive monitors are excluded on purpose, because a paused monitor is
+      a decision rather than a fault. An unreadable database prints nothing
+      and fails, which is the intended answer to "the question could not be
+      asked".
+

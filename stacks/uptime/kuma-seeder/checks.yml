@@ -48,5 +48,10 @@ checks:
       unchanged — the two readings above are the ones that notice. Zero is
       the honest answer while the host is too old to write the file at all.
 
-manual:
-  - "Kijk in de logregels van kuma-seeder of er WARN-regels staan over een bewaking die naar een stack wijst die niet meer bestaat. Die worden met opzet nooit automatisch weggegooid — iemand moet beslissen of ze echt weg mogen (F158)."
+# The manual check that stood here until 2026-09-03 asked somebody to read
+# the seeder's log for WARN lines about a monitor watching a stack that no
+# longer exists. Nobody read it — Kenny found the first real one by noticing
+# ping errors on a Grafana panel instead (F243). The seeder now writes its
+# verdict to last-seed.json and the nightly fleet check reads it, naming each
+# stale monitor. Removed rather than converted: the reader already exists,
+# and a second one asking the same question would only disagree eventually.

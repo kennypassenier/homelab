@@ -13,5 +13,19 @@ checks:
       the exporter reached Proxmox and got an answer, which the port alone
       does not — a bad token gives a 200 with an empty body.
 
-manual:
-  - "Kijk in Grafana of de hypervisor-grafieken nog data hebben. Deze meting bewijst dat er cijfers uit komen, niet dat Prometheus ze ophaalt."
+  # Was a manual check until 2026-09-03 (form G1): "look in Grafana whether
+  # the hypervisor graphs still have data". A graph with data is a claim
+  # about Prometheus, and Prometheus can be asked directly.
+  - name: "hypervisor-cijfers staan in Prometheus"
+    command: >-
+      n=$(curl -s -m 10 -G http://127.0.0.1:9090/api/v1/query
+      --data-urlencode 'query=count(pve_up)'
+      | grep -oE '"[0-9]+"\]' | grep -oE '[0-9]+');
+      [ -n "$n" ] && [ "$n" -gt 0 ] && echo ok
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      Counts series, not their freshness: a Prometheus that stopped scraping
+      an hour ago still answers this until the series ages out. The nightly
+      coverage check is the one that asks whether each target is up.
+

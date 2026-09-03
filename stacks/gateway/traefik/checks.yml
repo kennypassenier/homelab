@@ -58,6 +58,26 @@ checks:
       it — the fleet check asks that, per stack.
 
 # What no measurement settles here.
+  # Was a manual check until 2026-09-03 (form G1). B2c took the GoAccess
+  # report off the internet deliberately; that the name still answers 302 or
+  # 404 is normal, because the ingress is still in the Cloudflare dashboard
+  # and that is tidying rather than risk. Seeing the report itself is the
+  # fault, and one request settles it.
+  #
+  # Requires a real answer first: a curl that fails returns nothing, and
+  # "no GoAccess in an empty body" would otherwise pass forever.
+  - name: "goaccess niet meer publiek"
+    command: >-
+      b=$(curl -sk -m 10 https://go.kp-soft.dev/ -w "|%{http_code}");
+      case "$b" in *"|000") ;; *) echo "$b" | grep -qi goaccess || echo ok ;; esac
+    expect: must_be_present
+    layer: user_visible
+    blind_spot: >-
+      Reads what Cloudflare serves this container, which is what a stranger
+      gets — but a body that happens not to contain the word while still
+      being the report would pass. It is a marker check, not a rendering
+      check.
+
 manual:
-  - "Open een route van buitenaf (bv. son.kp-soft.dev) en kijk of Cloudflare Access je binnenlaat — dat stuk kan van binnen niet gemeten worden."
-  - "go.kp-soft.dev hoort geen RAPPORT meer te tonen — dat is met opzet van het internet gehaald (form B2c). Dat de naam nog 302 of 404 geeft is normaal: de ingang staat nog in het Cloudflare-dashboard en dat is opruimwerk, geen risico. Zie je de GoAccess-pagina, dan is er wel iets mis."
+  - >-
+    Open een route van buitenaf (bv. son.kp-soft.dev) en kijk of Cloudflare Access je binnenlaat — dat stuk kan van binnen niet gemeten worden.

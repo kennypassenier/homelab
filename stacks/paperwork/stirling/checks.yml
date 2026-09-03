@@ -13,5 +13,17 @@ checks:
       is the reading that would, and it is in the manual list because getting
       it wrong would be a false alarm on a service that is behaving.
 
-manual:
-  - "Open Stirling zonder in te loggen en probeer een bewerking. Hij hoort je naar de aanmeldpagina te sturen: zonder het security-profiel draait Stirling volledig open (F62), en dat verschil is van buitenaf niet te zien aan de startpagina."
+  # Was a manual check until 2026-09-03 (form G1). F62: without the security
+  # profile Stirling runs wide open, and from the outside that is invisible —
+  # the front page looks identical either way. One request answers it.
+  - name: "weigert een aanvraag zonder aanmelden"
+    command: >-
+      c=$(curl -s -o /dev/null -m 8 -w "%{http_code}" http://127.0.0.1:8080/);
+      [ "$c" = "401" ] && echo ok
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      Proves the gate is there, not that the credentials behind it are
+      strong. A curl that cannot connect at all prints nothing and fails,
+      which is right: "could not ask" is not "the door is locked".
+

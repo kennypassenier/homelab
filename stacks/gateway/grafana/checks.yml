@@ -32,5 +32,21 @@ checks:
       Counts datasources, not datasources that answer. A Loki entry pointing
       at a dead address counts the same as a working one.
 
-manual:
-  - "Open het homelab-overview dashboard en kijk of de grafieken data tonen — een dashboard dat bestaat is niet hetzelfde als een dashboard dat iets laat zien."
+  # Was a manual check until 2026-09-03 (form G1): "open the overview
+  # dashboard and see whether the graphs show data". A dashboard that exists
+  # is not a dashboard that shows something — and the thing it would show is
+  # a Prometheus query, which can be asked directly.
+  - name: "de vloot levert cijfers aan Prometheus"
+    command: >-
+      n=$(curl -s -m 10 -G http://10.10.10.13:9090/api/v1/query
+      --data-urlencode 'query=count(up{job="node"} == 1)'
+      | grep -oE '"[0-9]+"\]' | grep -oE '[0-9]+');
+      [ -n "$n" ] && [ "$n" -ge 10 ] && echo ok
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      Says the exporters answer, not that a dashboard renders them: a panel
+      pointed at a metric nobody writes stays empty while this passes. Ten is
+      a floor rather than a count, so one container being down does not cry
+      wolf while a collapse still does.
+

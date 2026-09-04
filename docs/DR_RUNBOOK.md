@@ -138,9 +138,9 @@ restic restore latest --target /
 
 - hostname `116-app-kp-soft`, ip `10.10.10.16/24`
 - resources: 2 core(s), 2048 MiB RAM, 0 MiB swap, 16 GiB disk
-- apps: kp-soft
+- apps: kp-soft, jobtracker
 - recreate from scratch: `homelab deploy stacks/kp-soft` (or by hand per Layer 2)
-- data restore from: `…:kp-soft-config`
+- data restore from: `…:kp-soft-config`, `…:jobtracker-config`
 
 ### kyu (vmid 109)
 

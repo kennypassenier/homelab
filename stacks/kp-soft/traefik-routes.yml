@@ -1,0 +1,20 @@
+# Traefik route fragment for the kp-soft stack.
+#
+# One name for now: JobTracker. kp-soft.dev itself is still served from the
+# gateway's hand-written `manual-routes.yml` — moving it here would be a
+# change to the live public site and is a separate decision.
+#
+# Behind Cloudflare Access like every *.kp-soft.dev name, and the application
+# asks for its own login on top of that.
+http:
+  routers:
+    jobtracker:
+      rule: "Host(`job.kp-soft.dev`)"
+      entryPoints: [web]
+      service: jobtracker
+
+  services:
+    jobtracker:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.16:8787"

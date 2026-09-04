@@ -7,12 +7,26 @@ checks:
     layer: application
 
   - name: "de startpagina levert inhoud"
-    command: "curl -s -m 15 http://127.0.0.1:8080/ | wc -c"
-    expect: never_decreases
+    # A FLOOR, not a byte count. The count was `never_decreases` until
+    # 2026-09-04, when a deploy that had not touched this application at all
+    # stopped on it: the page had "fallen" from 30929 to 30854 bytes. Measured
+    # three times in a row it answered 30859, 30846, 30849 — the page carries
+    # something of varying length (a session token, a rendered timestamp), so
+    # the reading drifts by tens of bytes on its own.
+    #
+    # A check that fails at random teaches everyone to wave it through, which
+    # is worse than not having it. What is worth knowing is that the page is
+    # not a stub or an error card: those are hundreds of bytes, not tens of
+    # thousands. So the reading is a verdict rather than a number.
+    command: >-
+      n=$(curl -s -m 15 http://127.0.0.1:8080/ | wc -c);
+      if [ "$n" -gt 20000 ]; then echo ok; else echo "THIN:$n"; fi
+    expect: must_match
     layer: application
     blind_spot: >-
-      Counts bytes, not correctness. A page that renders an error nicely is
-      as large as one that works.
+      Counts bytes, not correctness — a page that renders an error nicely is
+      as large as one that works. And the floor is arbitrary in the sense that
+      only a large collapse trips it: a page that lost a section stays "ok".
 
 manual:
   - "Open kp-soft.dev van buiten het huisnetwerk. Dit is de enige stack die strangers kunnen bereiken, en van binnen meten zegt niets over wat zij zien."

@@ -160,6 +160,18 @@ group_order: [Media, Papierwerk, Huis, Eigen, Infrastructuur]
     icon: mdi-mailbox
     description: Berichtenhub
 
+# JobTracker, live since 2026-09-04 beside kp-soft on CT 116. `/healthz` is
+# the only endpoint that answers without logging in — it says the process is
+# alive and nothing more, which is exactly what a ping widget can use. The
+# richer `/api/readiness` (git, root, launcher, Almanac) sits behind the
+# login, so it is not an option here.
+- href: https://job.kp-soft.dev/
+  group: Eigen
+  name: JobTracker
+  extra: |
+    icon: mdi-briefcase-search
+    description: Sollicitatiedossiers
+
 # ── Infrastructuur ───────────────────────────────────────────────────────
 
 - href: https://prox.kp-soft.dev/

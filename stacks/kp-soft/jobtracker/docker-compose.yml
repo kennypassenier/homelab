@@ -1,0 +1,71 @@
+# JobTracker — Kenny's dashboard over his own job applications. First
+# container this application has ever had; v0.1.0 was released without one.
+#
+# It lives beside kp-soft rather than in its own container: Kenny's answer to
+# form J1 (2026-09-04). That is one LXC saved and one thing to know — the two
+# share a fate. A container that has to be rebuilt takes both with it.
+#
+# The image is PRIVATE on GHCR, which the handover did not say and an
+# anonymous pull proves (`docker manifest inspect` finds nothing). It needs no
+# credential of its own: `registry_login:` in this stack's lxc-compose.yml
+# already signs the container in to ghcr.io using kp-soft's token, and a
+# `docker login` is per daemon, not per image. Verified 2026-09-04 that the
+# same token reaches both packages (HTTP 200 for kp-soft and for jobtracker).
+services:
+  jobtracker:
+    # `:latest` with an `auto` policy, which is Kenny's answer to form J4 and
+    # deliberately unlike its neighbour kp-soft. kp-soft is pinned because its
+    # entrypoint migrates on every start and migrations are one-way. This one
+    # has no such step, and a pinned tag with an auto policy would report a
+    # successful update every night while changing nothing.
+    image: ghcr.io/kennypassenier/jobtracker:latest
+    container_name: jobtracker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # The application's own root INSIDE the container. The bind mount below
+      # is what makes it survive a rebuild; `.jobtracker/` within the checkout
+      # holds the queue, the configuration and the passkeys, so one mount
+      # carries the whole state.
+      JOBTRACKER_ROOT: /appdata/jobtracker/repo
+      JOBTRACKER_SERVER_BIND: 0.0.0.0
+      JOBTRACKER_SERVER_PORT: "8787"
+      JOBTRACKER_GIT_ROLE: hosted
+      JOBTRACKER_GIT_PULL_INTERVAL_S: "300"
+      JOBTRACKER_GIT_USER_NAME: JobTracker hosted
+      JOBTRACKER_GIT_USER_EMAIL: jobtracker@kp-soft.dev
+      JOBTRACKER_AUTH_REQUIRED: "true"
+      TZ: Europe/Brussels
+    volumes:
+      - /appdata/kp-soft/jobtracker-config:/appdata/jobtracker
+    ports:
+      # 8787 kept from the handover's proposal, and kept on purpose: measured
+      # 2026-09-04 against every published port in the fleet, nothing else
+      # uses it. Changing a working number to match a scheme is churn.
+      - "8787:8787"
+    # The process finishes in-flight git and queue writes within its own
+    # 10-second stop timeout; the grace period sits above it so docker does
+    # not pull the plug halfway through a commit.
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "node", "packages/server/bin/jobtracker.js", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      # The state lives in a git checkout; `.git` is not safe to copy while it
+      # is being written to.
+      - com.homelab.backup.pause=true
+      # Stop cleanly before a recreate, so the 10-second drain above actually
+      # gets its ten seconds.
+      - com.homelab.update.stop-first=true
+      - com.homelab.update.policy=auto
+    networks:
+      - kp-soft_net
+
+networks:
+  kp-soft_net:
+    external: true
+    name: kp-soft_net

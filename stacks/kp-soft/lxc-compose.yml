@@ -76,8 +76,20 @@ storage:
     # unprivileged LXC.
     host_owner_uid: 100000
     app: kp-soft
+  # JobTracker's whole state: the data repository it clones for itself, with
+  # `.jobtracker/` (queue, configuration, passkeys) inside the checkout.
+  #
+  # 110001, not 10001. The application runs as uid 10001 inside, and this is
+  # an UNPRIVILEGED container, so on the host that is 100000 + 10001. Getting
+  # it wrong does not fail loudly: the directory exists, the container cannot
+  # read it, and the error reads "Permission denied" as though the problem
+  # were inside. Measured the same day on another service (F286).
+  - host_path: /appdata/kp-soft/jobtracker-config
+    mount_point: /appdata/kp-soft/jobtracker-config
+    host_owner_uid: 110001
+    app: jobtracker
 
-apps: [kp-soft]
+apps: [kp-soft, jobtracker]
 latch_secrets: [kp-soft]
 
 # The image is private on GHCR, so the deploy signs in before it pulls.
@@ -86,6 +98,17 @@ latch_secrets: [kp-soft]
 # failed at the pull with nothing to say why. The credentials ride in the
 # app's own .env — REGISTRY_USER and REGISTRY_TOKEN, from latch — so there is
 # no second secrets path to keep alive.
+# One login for the whole container: `docker login` is per daemon, so the
+# credential named here also pulls JobTracker's private image. Verified
+# 2026-09-04 that this token reaches both packages.
 registry_login:
   registry: ghcr.io
   app: kp-soft
+
+# job.kp-soft.dev, behind Cloudflare Access like the rest (Kenny, form J2).
+# kp-soft's own name still comes from the gateway's hand-written
+# `manual-routes.yml`; this fragment is managed and is deliberately not an
+# attempt to move that one as well.
+gateway_route:
+  filename: 116-app-kp-soft.yml
+  gateway_vmid: 104

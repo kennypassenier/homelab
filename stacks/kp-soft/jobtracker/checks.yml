@@ -1,0 +1,67 @@
+# What "JobTracker is doing its job" means.
+#
+# The application had never run in a container before this deploy, so every
+# reading below is a first. That is also why none of them asks whether the
+# process is up: `/healthz` says the process lives and nothing more — it knows
+# nothing about git, about Almanac, or about whether a single dossier is
+# readable. The richer answer is behind the login, where a check cannot go.
+#
+# So the checks read the CHECKOUT on disk instead. That is the state: the app
+# clones its own data repository and keeps its queue, configuration and
+# passkeys in `.jobtracker/` inside it. A JobTracker that lost its clone
+# answers `/healthz` exactly the same as a healthy one.
+checks:
+  - name: "healthz antwoordt"
+    command: >-
+      curl -s -o /dev/null -m 20 -w '%{http_code}' http://127.0.0.1:8787/healthz
+    expect: must_match
+    layer: process
+    blind_spot: >-
+      Says the process is alive and listening. It does not say the git remote
+      is reachable, that Almanac answers, or that any dossier can be read —
+      the endpoint that knows those things sits behind the login.
+
+  - name: "de datarepo is uitgecheckt"
+    command: >-
+      test -d /appdata/kp-soft/jobtracker-config/repo/.git && echo ok || echo MISSING
+    expect: must_match
+    layer: application
+    blind_spot: >-
+      Only that a git checkout exists there. A checkout that is behind, or
+      whose remote credential expired, looks identical from here.
+
+  - name: "dossiers in de bibliotheek"
+    command: >-
+      find /appdata/kp-soft/jobtracker-config/repo -maxdepth 3 -name '*.md' -not -path '*/.git/*'
+      2>/dev/null | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts the files the checkout holds, not whether the application parses
+      them or shows them. A drop means something removed dossiers, which is
+      the case worth catching.
+
+  - name: "eigen staat van de app"
+    command: >-
+      test -d /appdata/kp-soft/jobtracker-config/repo/.jobtracker && echo ok || echo MISSING
+    expect: must_match
+    layer: application
+    blind_spot: >-
+      The directory holding the queue, the configuration and the registered
+      passkeys. Present is not the same as intact — but absent means a login
+      has to be set up again from scratch, and that is worth noticing before
+      Kenny does.
+
+  - name: "laatste uur zonder fout"
+    command: >-
+      docker logs --since 1h jobtracker 2>&1 | grep -ciE '"level":"(error|fatal)"' || true
+    expect: must_match
+    layer: application
+    blind_spot: >-
+      Counts what the application called an error in the last hour. A run that
+      silently did nothing produces the same zero as a healthy one; the four
+      readings above are what separate those two.
+
+manual:
+  - "Log één keer in op job.kp-soft.dev en kijk of je dossiers er staan. De metingen zien de bestanden, niet het scherm."
+  - "Registreer een passkey na je eerste wachtwoord-login, anders blijft het wachtwoord de enige sleutel."

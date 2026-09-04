@@ -183,7 +183,27 @@ fn the_overlay_supplies_what_a_route_cannot_and_nothing_else() {
     let ov = parse_overlay(include_str!(
         "../../stacks/home/homepage/services-overlay.yml"
     ));
-    assert_eq!(ov.blocks.len(), 27, "the real overlay has 27 entries");
+    // Not a fixed count. It was 27 until a service was added, and a test that
+    // has to be edited every time the fleet grows teaches people to edit it
+    // without reading it. What the overlay must hold is a PROPERTY: every
+    // block joins on an href, and it either says where the service belongs or
+    // says to hide it — nothing else is the overlay's business.
+    assert!(
+        ov.blocks.len() >= 20,
+        "the real overlay carries the whole front page; {} entries is not it",
+        ov.blocks.len()
+    );
+    for b in &ov.blocks {
+        assert!(
+            !b.href.trim().is_empty(),
+            "a block without an href joins nothing"
+        );
+        assert!(
+            b.hide || b.group.as_deref().is_some_and(|g| !g.trim().is_empty()),
+            "{} is neither hidden nor placed in a group",
+            b.href
+        );
+    }
     assert_eq!(
         ov.blocks.iter().filter(|b| b.hide).count(),
         2,

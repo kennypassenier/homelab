@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**407 tests across 23 suites.**
+**418 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -29,6 +29,13 @@ O10: the check that keeps an update out of somebody's evening.
 - `o10_nobody_connected_allows_the_update`
 - `o10_every_uncertain_answer_blocks_the_update` — The heart of it.
 - `o10_the_v1_field_is_not_what_decides` — A field that does not exist cannot be a test.
+- `o10_an_app_that_does_not_ask_is_not_questioned` — An app that carries no label is never asked — one call, not two.
+- `o10_dockers_word_for_absent_is_not_a_check_name` — `docker inspect` prints `<no value>` for a label that is not there, and a non-empty string that means "absent" is exactly the kind of value that reads as present.
+- `o10_an_unknown_check_name_counts_as_in_use` — A label naming a check nobody implemented fails closed rather than silently allowing the stop.
+- `o10_a_watching_session_is_seen_through_the_shared_probe`
+- `a_deferred_night_neither_parks_the_stack_nor_records_a_backup`
+- `a_real_failure_still_parks_and_a_good_night_still_records`
+- `the_worst_service_decides_the_stacks_night` — T5: services sharing one container share a fate.
 
 ### `core/tests/checks_tests.rs`
 
@@ -330,6 +337,10 @@ Covers: F105, F153, F154, F156, F162, F180, F207, F209, F210, F36, F75
 - `e2_an_unknown_snapshot_id_is_refused_before_anything_is_stopped` — covers: F207  G5.
 - `t69_an_operator_who_says_yes_lets_the_deploy_finish` — covers: F209  G7 of the Phase-7 gate.
 - `a_destroy_that_takes_no_backup_always_says_why` — covers: F210  G11 of the Phase-7 gate, third part.
+- `f280_a_backup_does_not_stop_a_container_somebody_is_watching` — The film wins.
+- `f280_an_unanswerable_stack_is_left_alone_as_well` — Fail closed here too: a Jellyfin that cannot answer is treated as watched.
+- `f280_an_idle_stack_is_backed_up_exactly_as_before` — And the other side of it: an idle evening backs up exactly as before.
+- `f280_a_stack_that_never_asks_is_backed_up_without_a_question` — A stack whose apps carry no busy-check label is not asked at all — no second command per app, and certainly no stack left un-backed-up because a question nobody asked could not be answered.
 
 ### `core/tests/manualchecks_tests.rs`
 

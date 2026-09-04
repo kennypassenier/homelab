@@ -121,6 +121,7 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
                                     id: 0,
                                     ok: false,
                                     message: format!("release staging failed: {}", e),
+                                    deferred: None,
                                 }),
                             )))
                             .await;
@@ -154,6 +155,7 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
                             id: 0,
                             ok: false,
                             message: m,
+                            deferred: None,
                         }),
                     ))
                 };

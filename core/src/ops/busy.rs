@@ -16,6 +16,9 @@
 //! they carry `NowPlayingItem` and `PlayState.IsPaused`). So its one positive
 //! test could never fire either. It could not have stopped a single update.
 
+use crate::error::CoreError;
+use crate::executor::Executor;
+
 /// What a busy-check concluded. `Unknown` is not `Idle` — that distinction is
 /// the whole point.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,7 +90,89 @@ pub fn jellyfin_busy(sessions_json: &str) -> Busy {
     }
 }
 
-/// After this many consecutive skips the orchestrator reports instead of
-/// quietly deferring forever — a service that is never idle would otherwise
-/// simply stop being updated and nothing would say so.
-pub const MAX_CONSECUTIVE_SKIPS: u32 = 7;
+/// Which named check an app wants, from the `com.homelab.update.busy-check`
+/// label on its running container. `None` means the app never asks — which is
+/// every app but one.
+///
+/// The label lives on the container rather than in the manifest because that
+/// is where the running truth is: a container that is not up cannot be busy,
+/// and this returns `None` for it without a second call.
+pub async fn wanted_check(
+    exec: &dyn Executor,
+    vmid: u16,
+    stack: &str,
+    app: &str,
+) -> Result<Option<String>, CoreError> {
+    let out = crate::ops::util_pct_sh(
+        exec,
+        vmid,
+        &format!(
+            "cd '/opt/{}/{}' && docker compose ps -q | head -1 | xargs -r docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.busy-check\"}}}}'",
+            stack, app
+        ),
+        60,
+    )
+    .await?;
+    let v = out.stdout.trim();
+    Ok(if v.is_empty() || v == "<no value>" {
+        None
+    } else {
+        Some(v.to_string())
+    })
+}
+
+/// Ask one app whether it is in use. `None` when it carries no busy-check
+/// label; otherwise a verdict that fails closed.
+///
+/// Both callers go through here on purpose. The update path had this check
+/// and the backup path did not, and the backup path is the one that stops
+/// containers every single night: at 04:17 on 2026-09-04 it stopped Jellyfin
+/// while Kenny was watching, which is the one thing the check was written to
+/// prevent (F280). One question, asked from both places, cannot drift apart.
+pub async fn app_busy(
+    exec: &dyn Executor,
+    vmid: u16,
+    stack: &str,
+    app: &str,
+) -> Result<Option<Busy>, CoreError> {
+    let Some(kind) = wanted_check(exec, vmid, stack, app).await? else {
+        return Ok(None);
+    };
+    if kind != "jellyfin" {
+        return Ok(Some(Busy::Unknown(format!(
+            "the container asks for a busy-check named `{}`, and no such check exists",
+            kind
+        ))));
+    }
+    // F213: the key comes from the application itself, not from an `.env`.
+    // The media stack declares no `latch_secrets` and has no `.env` at all,
+    // so this used to source a file that does not exist and ask with an empty
+    // token — the check could never have answered, which is half of why the
+    // label was never switched on. Same source the deploy's own checks use
+    // (D102), and for the same reason: a key copied anywhere goes stale
+    // without saying so, and F32 was exactly that.
+    let out = crate::ops::util_pct_sh(
+        exec,
+        vmid,
+        &format!(
+            "K=$(sqlite3 /appdata/{}/{}-config/data/jellyfin.db \
+               'select AccessToken from ApiKeys limit 1') && \
+             curl -sf -m 10 -H \"Authorization: MediaBrowser Token=$K\" \
+             http://127.0.0.1:8096/Sessions",
+            stack, app
+        ),
+        30,
+    )
+    .await?;
+    Ok(Some(jellyfin_busy(&out.stdout)))
+}
+
+/// The sentence a caller shows when it stands aside. Kept here so the update
+/// path and the backup path phrase it identically.
+pub fn reason(verdict: &Busy) -> String {
+    match verdict {
+        Busy::Yes(who) => format!("in use — {}", who),
+        Busy::Unknown(why) => format!("could not tell ({}), so treating it as in use", why),
+        Busy::No => "not in use".to_string(),
+    }
+}

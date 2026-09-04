@@ -661,6 +661,11 @@ use homelab_core::ops::update::update;
 async fn d9_update_capture_pull_verify_order() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
+    // The busy-check label is read with `docker inspect --format` too, so it
+    // is answered first and separately: a blanket mock for that command hands
+    // the O10 check an image id where it expects a check name, and — failing
+    // closed, correctly — the update then skips the app it was meant to test.
+    exec.respond_first("busy-check", CmdOutput::ok("<no value>\n"));
     exec.respond_always(
         "docker inspect --format",
         CmdOutput::ok("sha256:aaa myimg:latest\n"),
@@ -704,6 +709,9 @@ async fn d9_auto_update_skips_non_auto_policy() {
 async fn b6_failed_update_rolls_back_to_captured_image() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
+    // See d9 above: the O10 label is read with the same command, so it gets
+    // its own answer before the blanket one.
+    exec.respond_first("busy-check", CmdOutput::ok("<no value>\n"));
     exec.respond_always(
         "docker inspect --format",
         CmdOutput::ok("sha256:oldimg myimg:latest\n"),
@@ -3049,4 +3057,131 @@ async fn a_destroy_that_takes_no_backup_always_says_why() {
          a destroy that backed up: {:?}",
         sink2.lines()
     );
+}
+
+// ── F280: a backup asks before it stops anything ───────────────────────────
+//
+// The nightly backup quiesces by label: it stops every container carrying
+// `com.homelab.backup.pause=true`, snapshots, and starts them again. On CT 106
+// that label is on all six media containers. At 04:17 on 2026-09-04 it stopped
+// Jellyfin while Kenny was watching an episode, and his player skipped to the
+// next one when it came back.
+//
+// The check that prevents exactly this had existed for two days, correct and
+// armed — on the update path. The backup path stops the same containers every
+// single night and never asked. So the question now comes from one place and
+// both callers ask it.
+
+/// The film wins. Nothing is stopped, nothing is snapshotted, and the report
+/// says why in words Kenny can read.
+#[tokio::test]
+async fn f280_a_backup_does_not_stop_a_container_somebody_is_watching() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("com.homelab.update.busy-check", CmdOutput::ok("jellyfin\n"));
+    exec.respond_always(
+        "jellyfin.db",
+        CmdOutput::ok(
+            r#"[{"UserName":"kenny","NowPlayingItem":{"Name":"Arrival"},
+                 "PlayState":{"IsPaused":false}}]"#,
+        ),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+    )
+    .await;
+
+    assert!(
+        !report.ok,
+        "nothing ran, so the report may not claim success"
+    );
+    let why = report
+        .deferred
+        .expect("a deferral must be distinguishable from a failure");
+    assert!(
+        why.contains("kenny") && why.contains("Arrival"),
+        "the reason has to name what is being watched: {}",
+        why
+    );
+    assert!(
+        exec.calls_containing("docker stop").is_empty(),
+        "this is the whole finding: {:?}",
+        exec.calls_containing("docker stop")
+    );
+    assert!(
+        exec.calls_containing("restic").is_empty()
+            || exec.calls_containing("backup /appdata").is_empty(),
+        "no snapshot may be taken of a stack that was left alone"
+    );
+}
+
+/// Fail closed here too: a Jellyfin that cannot answer is treated as watched.
+/// The v1 check did the opposite, and the conditions under which you cannot
+/// tell were exactly the conditions in which it said go ahead.
+#[tokio::test]
+async fn f280_an_unanswerable_stack_is_left_alone_as_well() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("com.homelab.update.busy-check", CmdOutput::ok("jellyfin\n"));
+    exec.respond_always("jellyfin.db", CmdOutput::ok("<html>502</html>"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.deferred.is_some(), "{:?}", report.error);
+    assert!(exec.calls_containing("docker stop").is_empty());
+}
+
+/// And the other side of it: an idle evening backs up exactly as before. A
+/// guard that also stops the backups on quiet nights would be worse than none.
+#[tokio::test]
+async fn f280_an_idle_stack_is_backed_up_exactly_as_before() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("com.homelab.update.busy-check", CmdOutput::ok("jellyfin\n"));
+    exec.respond_always("jellyfin.db", CmdOutput::ok("[]"));
+    exec.respond_always("backup.pause=true --format", CmdOutput::ok("jellyfin\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(report.deferred.is_none());
+    assert_eq!(exec.calls_containing("docker stop jellyfin").len(), 1);
+    assert_eq!(exec.calls_containing("docker start jellyfin").len(), 1);
+}
+
+/// A stack whose apps carry no busy-check label is not asked at all — no
+/// second command per app, and certainly no stack left un-backed-up because
+/// a question nobody asked could not be answered.
+#[tokio::test]
+async fn f280_a_stack_that_never_asks_is_backed_up_without_a_question() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always(
+        "com.homelab.update.busy-check",
+        CmdOutput::ok("<no value>\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(exec.calls_containing("jellyfin.db").is_empty());
 }

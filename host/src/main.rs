@@ -2133,12 +2133,14 @@ fn bearer_ok(header: Option<&str>, token: &str) -> bool {
 /// containers to take a clean snapshot, so the number is also "how much of
 /// the house may be briefly still at 04:00" — which is Kenny's call, not the
 /// author's (he chose three).
+use homelab_core::ops::backup::NightBackup;
+
 async fn run_backup_batch(
     state: &AppState,
     exec: &RealExecutor,
     jobs: Vec<BackupJob>,
     limit: usize,
-) -> std::collections::HashMap<String, bool> {
+) -> std::collections::HashMap<String, NightBackup> {
     use futures_util::stream::StreamExt;
     if jobs.is_empty() {
         return std::collections::HashMap::new();
@@ -2150,19 +2152,19 @@ async fn run_backup_batch(
         limit
     );
     let _guard = state.op_lock.lock().await;
-    let results: Vec<(String, bool)> = futures_util::stream::iter(jobs)
+    let results: Vec<(String, NightBackup)> = futures_util::stream::iter(jobs)
         .map(|job| async move {
             let name = job.stack.clone();
-            let ok = match job.what {
+            let outcome = match job.what {
                 BackupWhat::Compose(manifest) => {
                     let cfg = job.cfg.clone();
-                    run_op_locked(state, exec, 0, "scheduled-backup", |ctx| {
+                    let r = run_op_locked(state, exec, 0, "scheduled-backup", |ctx| {
                         Box::pin(async move {
                             homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await
                         })
                     })
-                    .await
-                    .ok
+                    .await;
+                    NightBackup::of(r.ok, r.deferred.as_deref())
                 }
                 // T5: several services share one container, so all of them are
                 // backed up and one failure fails the night for the stack —
@@ -2170,7 +2172,7 @@ async fn run_backup_batch(
                 // stack: they are on the same container, so overlapping their
                 // pauses would stop that container twice over.
                 BackupWhat::Native(services) => {
-                    let mut ok = true;
+                    let mut worst = NightBackup::Done;
                     for native in services {
                         let cfg = job.cfg.clone();
                         let r = run_op_locked(state, exec, 0, "scheduled-backup-native", |ctx| {
@@ -2179,12 +2181,15 @@ async fn run_backup_batch(
                             })
                         })
                         .await;
-                        ok &= r.ok;
+                        worst = worst.worse_of(NightBackup::of(r.ok, r.deferred.as_deref()));
                     }
-                    ok
+                    worst
                 }
             };
-            (name, ok)
+            if let NightBackup::Deferred(why) = &outcome {
+                info!("scheduler: backup for {} stood aside — {}", name, why);
+            }
+            (name, outcome)
         })
         .buffer_unordered(limit)
         .collect()
@@ -2320,7 +2325,10 @@ async fn scheduler_loop(state: AppState) {
                 // for the stack — the H8 auto-disable below is deliberately
                 // per stack, because they share a container and a fate.
                 // Y1: the backup already ran in the batch above.
-                let backup_ok = backup_done.get(&name).copied().unwrap_or(false);
+                let backup = backup_done
+                    .get(&name)
+                    .cloned()
+                    .unwrap_or(NightBackup::Failed);
                 let mut update_ok = true;
                 for native in st.natives.clone() {
                     let n2 = native.clone();
@@ -2332,7 +2340,7 @@ async fn scheduler_loop(state: AppState) {
                     .await;
                     update_ok &= r.ok;
                 }
-                if backup_ok {
+                if backup.records_a_timestamp() {
                     if let Ok(mut s) = store.load().await {
                         if let Some(rec) = s.stacks.get_mut(&name) {
                             rec.last_backup = now;
@@ -2340,7 +2348,10 @@ async fn scheduler_loop(state: AppState) {
                         let _ = store.save(s).await;
                     }
                 }
-                if !backup_ok || !update_ok {
+                // A deferred backup is deliberately absent from this
+                // condition: it is not a failed night, and parking the stack
+                // for it would punish the house for using its own services.
+                if backup.parks_the_stack(update_ok) {
                     let mut parked = false;
                     if let Ok(mut s) = store.load().await {
                         if let Some(rec) = s.stacks.get_mut(&name) {
@@ -2373,8 +2384,11 @@ async fn scheduler_loop(state: AppState) {
             };
             info!("scheduler: nightly run for {}", name);
             // Y1: the backup already ran in the batch above.
-            let backup_ok = backup_done.get(&name).copied().unwrap_or(false);
-            if backup_ok {
+            let backup = backup_done
+                .get(&name)
+                .cloned()
+                .unwrap_or(NightBackup::Failed);
+            if backup.records_a_timestamp() {
                 // Record last_backup so tomorrow's check is accurate.
                 if let Ok(mut s) = store.load().await {
                     if let Some(rec) = s.stacks.get_mut(&name) {
@@ -2394,7 +2408,7 @@ async fn scheduler_loop(state: AppState) {
             // then silence instead of a fresh failure every night. State-only:
             // onboot and the running containers are untouched, so a transient
             // failure can never keep a stack from surviving a host reboot.
-            if !backup_ok || !update_report.ok {
+            if backup.parks_the_stack(update_report.ok) {
                 let mut parked = false;
                 if let Ok(mut s) = store.load().await {
                     if let Some(rec) = s.stacks.get_mut(&name) {
@@ -2945,6 +2959,19 @@ where
                 report.steps.len(),
                 report.steps.iter().filter(|s| s.changed).count()
             ),
+            deferred: None,
+        }
+    } else if let Some(why) = report.deferred.clone() {
+        // Stood aside on purpose. No incident bundle, no `error!`, no
+        // failure count: nothing broke and nothing changed. `ok` stays false
+        // because nothing ran either, so no caller records work that did not
+        // happen (F280).
+        info!("{} stood aside: {}", label, why);
+        RpcResponse {
+            id: req_id,
+            ok: false,
+            message: format!("{} deferred — {}", label, why),
+            deferred: Some(why),
         }
     } else {
         let err = report
@@ -2977,6 +3004,7 @@ where
                 "{} :: {} :: remedy: {}{}",
                 err.what, err.why, err.remedy, bundle_note
             ),
+            deferred: None,
         }
     }
 }
@@ -3500,6 +3528,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             id: req.id,
             ok: true,
             message: "pong".into(),
+            deferred: None,
         },
         Rpc::Status => {
             let out = exec.run(&Cmd::new("pct", &["list"], 30)).await;
@@ -3512,6 +3541,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: true,
                 message: format!("pct list:\n{}\nmanaged state:\n{}", listing, managed),
+                deferred: None,
             }
         }
         Rpc::DeployStack(spec) => {
@@ -3653,6 +3683,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         id: req.id,
                         ok: true,
                         message: format!("no services on stack '{}'", stack),
+                        deferred: None,
                     };
                     for m in services {
                         let cfg = cfg.clone();
@@ -3679,6 +3710,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     id: req.id,
                     ok: false,
                     message: msg,
+                    deferred: None,
                 },
             }
         }
@@ -3689,6 +3721,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         id: req.id,
                         ok: true,
                         message: format!("no services on stack '{}'", stack),
+                        deferred: None,
                     };
                     for m in services {
                         let r = run_mutating_op(state, &exec, req.id, "update-native", |ctx| {
@@ -3711,6 +3744,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     id: req.id,
                     ok: false,
                     message: msg,
+                    deferred: None,
                 },
             }
         }
@@ -3727,6 +3761,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         "confirmation '{}' does not match stack '{}' — nothing removed",
                         confirm, manifest.stack_name
                     ),
+                    deferred: None,
                 };
             }
             // A1/A2: the same gate every mutating operation passes. Removing
@@ -3740,6 +3775,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     id: req.id,
                     ok: false,
                     message: format!("{}", e),
+                    deferred: None,
                 };
             }
             let orphans = homelab_core::ops::deploy::orphan_files(&exec, &manifest, &spec).await;
@@ -3751,6 +3787,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         "nothing to remove — everything under /opt/{} is in the repository",
                         manifest.stack_name
                     ),
+                    deferred: None,
                 };
             }
             let mut removed = 0usize;
@@ -3776,6 +3813,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: removed == orphans.len(),
                 message: format!("removed {} of {} orphan file(s)", removed, orphans.len()),
+                deferred: None,
             }
         }
         Rpc::ForgetStack { stack } => {
@@ -3788,6 +3826,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         id: req.id,
                         ok: false,
                         message: format!("state unreadable: {}", e),
+                        deferred: None,
                     }
                 }
             };
@@ -3796,6 +3835,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     id: req.id,
                     ok: false,
                     message: format!("no stack '{}' in host state", stack),
+                    deferred: None,
                 };
             };
             // The safety rule: only a record whose container no longer
@@ -3817,6 +3857,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         "'{}' still names a live container ({}) :: this record is current, not stale — destroy the stack or rename it first",
                         stack, entry.hostname
                     ),
+                    deferred: None,
                 };
             }
             snapshot.stacks.remove(&stack);
@@ -3828,11 +3869,13 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         "forgot '{}' (was vmid {} as {}) — the container was not touched",
                         stack, entry.vmid, entry.hostname
                     ),
+                    deferred: None,
                 },
                 Err(e) => RpcResponse {
                     id: req.id,
                     ok: false,
                     message: format!("could not write state: {}", e),
+                    deferred: None,
                 },
             }
         }
@@ -3847,6 +3890,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         "vmid {} is on the no-touch list :: this list is the one thing that is never worked around",
                         vmid
                     ),
+                    deferred: None,
                 };
             }
             run_mutating_op(state, &exec, req.id, "apply-guards", |ctx| {
@@ -3889,6 +3933,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                             id: req.id,
                             ok: false,
                             message: format!("state unreadable: {}", e),
+                            deferred: None,
                         }
                     }
                 };
@@ -3906,6 +3951,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: findings.is_empty(),
                 message: render_findings(&findings),
+                deferred: None,
             }
         }
         // T69: the operator answered a suspended step. Delivering it is all
@@ -3932,6 +3978,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         id
                     )
                 },
+                deferred: None,
             }
         }
         Rpc::ZfsReplicate => {
@@ -3961,6 +4008,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     id: req.id,
                     ok: false,
                     message: "no device_backups configured in host.toml".into(),
+                    deferred: None,
                 };
             }
             let tiers = state.settings.read().unwrap().retention.clone();
@@ -3989,6 +4037,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok,
                 message: lines.join("\n"),
+                deferred: None,
             }
         }
         Rpc::ListManualChecks => {
@@ -4003,6 +4052,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: true,
                 message: homelab_core::ops::manualchecks::render_listing(&rows, now),
+                deferred: None,
             }
         }
         Rpc::AnswerManualCheck {
@@ -4030,6 +4080,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: found,
                 message,
+                deferred: None,
             }
         }
         Rpc::SetStackEnabled { stack, enabled } => {
@@ -4073,6 +4124,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: true,
                 message: msg,
+                deferred: None,
             }
         }
         Rpc::BuildTemplate {
@@ -4103,6 +4155,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     id: req.id,
                     ok: false,
                     message: format!("{}", e),
+                    deferred: None,
                 };
             }
             // A6: audit every invocation before running it.
@@ -4135,11 +4188,13 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                             format!("--- stderr ---\n{}", out.stderr)
                         }
                     ),
+                    deferred: None,
                 },
                 Err(e) => RpcResponse {
                     id: req.id,
                     ok: false,
                     message: format!("{}", e),
+                    deferred: None,
                 },
             }
         }
@@ -4155,6 +4210,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     id: req.id,
                     ok: false,
                     message: "invalid stack name".into(),
+                    deferred: None,
                 };
             }
             let dir = format!("{}/repo/stacks/{}", state.config.state_dir, stack);
@@ -4188,6 +4244,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: true,
                 message: serde_json::to_string(&files).unwrap_or_else(|_| "[]".into()),
+                deferred: None,
             }
         }
         Rpc::GetConfig => {
@@ -4197,6 +4254,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: true,
                 message: "config".into(),
+                deferred: None,
             }
         }
         Rpc::SetConfig(view) => {
@@ -4207,6 +4265,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         id: req.id,
                         ok: false,
                         message: "backup_hour must be 0-23".into(),
+                        deferred: None,
                     };
                 }
             }
@@ -4215,6 +4274,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     id: req.id,
                     ok: false,
                     message: "retention needs at least one tier".into(),
+                    deferred: None,
                 };
             }
             match persist_settings(&state.config, &view) {
@@ -4225,12 +4285,14 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         id: req.id,
                         ok: true,
                         message: "settings saved and applied".into(),
+                        deferred: None,
                     }
                 }
                 Err(e) => RpcResponse {
                     id: req.id,
                     ok: false,
                     message: format!("persist settings: {}", e),
+                    deferred: None,
                 },
             }
         }
@@ -4243,6 +4305,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         id: req.id,
                         ok: false,
                         message: format!("bad binary payload: {}", e),
+                        deferred: None,
                     }
                 }
             };
@@ -4257,6 +4320,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     id: req.id,
                     ok: false,
                     message: format!("stage binary: {}", e),
+                    deferred: None,
                 };
             }
             info!("self-update requested: staged {} bytes", bytes.len());
@@ -4290,6 +4354,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: overall != homelab_core::doctor::Health::Fail,
                 message: msg,
+                deferred: None,
             }
         }
         Rpc::GetState => {
@@ -4380,6 +4445,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: true,
                 message: "state".into(),
+                deferred: None,
             }
         }
         Rpc::Incidents => {
@@ -4402,6 +4468,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 } else {
                     format!("incidents:\n  {}", list.join("\n  "))
                 },
+                deferred: None,
             }
         }
     }

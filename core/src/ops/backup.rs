@@ -31,6 +31,60 @@ macro_rules! step {
 /// full index fetch per repository, of which the gateway alone has six.
 pub const RESTIC_CACHE_DIR: &str = "/var/lib/homelab/restic-cache";
 
+/// What one stack's nightly backup did.
+///
+/// The third state is the point. A backup that stood aside because somebody
+/// was watching television did not run — so no timestamp may be recorded, or
+/// the staleness check goes quiet about a backup that never happened — and
+/// did not fail — so H8 must not park the stack, or the house gets punished
+/// for using its own services. A `bool` can only say one of those two wrong
+/// things, which is why the deferral needed a state of its own (F280).
+///
+/// The verdicts live here rather than in the scheduler because they are the
+/// decision, and the scheduler is the I/O around it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NightBackup {
+    Done,
+    Deferred(String),
+    Failed,
+}
+
+impl NightBackup {
+    /// Read an operation's outcome. `deferred` is only ever set together with
+    /// a false `ok`, but this does not depend on that: a report claiming both
+    /// counts as done, because something did run.
+    pub fn of(ok: bool, deferred: Option<&str>) -> Self {
+        if ok {
+            NightBackup::Done
+        } else if let Some(why) = deferred {
+            NightBackup::Deferred(why.to_string())
+        } else {
+            NightBackup::Failed
+        }
+    }
+
+    /// H8: does this night park the stack? Only a real failure does.
+    pub fn parks_the_stack(&self, update_ok: bool) -> bool {
+        matches!(self, NightBackup::Failed) || !update_ok
+    }
+
+    /// May a `last_backup` timestamp be written? Only for work that happened.
+    pub fn records_a_timestamp(&self) -> bool {
+        matches!(self, NightBackup::Done)
+    }
+
+    /// T5: services sharing one container share a fate — the stack's night is
+    /// as bad as its worst service. A failure outranks a deferral outranks a
+    /// completed backup.
+    pub fn worse_of(self, other: NightBackup) -> NightBackup {
+        match (self, other) {
+            (NightBackup::Failed, _) | (_, NightBackup::Failed) => NightBackup::Failed,
+            (d @ NightBackup::Deferred(_), _) => d,
+            (_, other) => other,
+        }
+    }
+}
+
 /// Build a Cmd that runs restic with the repo env inline (via `env`).
 fn restic(base: &str, stack: &str, password_ref: &str, args: &[&str], timeout: u64) -> Cmd {
     // The host wraps this so RESTIC_PASSWORD comes from its secret store; here
@@ -181,6 +235,47 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     step!(runner, "safety gates", {
         crate::manifest::validate_manifest(m)?;
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    // O10, second caller: ask before stopping anything.
+    //
+    // On 2026-09-04 at 04:17 the nightly round ran `docker stop bazarr
+    // prowlarr jellyfin seerr radarr sonarr` on CT 106 while Kenny was
+    // watching an episode. It came back thirty seconds later and his player
+    // skipped to the next one. The check that exists to prevent exactly this
+    // was already written, already correct and already armed — on the UPDATE
+    // path. The backup path stops the same containers every single night and
+    // never asked (F280).
+    //
+    // Standing aside is not a failure and not a success. It returns
+    // `CoreError::Deferred`, which leaves `ok` false so no backup timestamp
+    // is recorded for work that did not happen, and carries `deferred` so the
+    // nightly round does not count it as a failed night and park the stack.
+    // Tomorrow it runs. If it keeps standing aside, the backup staleness
+    // check in `fleetcheck` is what says so — that escalation already exists
+    // and does not need a counter here.
+    //
+    // It is the whole stack that defers, not one app: the apps share a
+    // container and the snapshot is taken of the stack's paths in one pass.
+    // Backing up five of six configs while the sixth is live would be a
+    // partial snapshot nobody asked for.
+    step!(runner, "in use?", {
+        for app in &m.apps {
+            let Some(verdict) =
+                crate::ops::busy::app_busy(exec, m.vmid, &m.stack_name, app).await?
+            else {
+                continue;
+            };
+            if verdict.may_update() {
+                continue;
+            }
+            return Err(CoreError::Deferred(format!(
+                "{} is in use, so nothing was stopped and no snapshot was taken: {}",
+                app,
+                crate::ops::busy::reason(&verdict)
+            )));
+        }
         Ok(StepOutcome::Unchanged)
     });
 

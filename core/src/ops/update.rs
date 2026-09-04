@@ -29,29 +29,6 @@ struct CapturedImage {
     repo_tag: String,
 }
 
-/// O10: does this app ask to be left alone while it is in use? A named check
-/// rather than a command in the label — there is exactly one service that
-/// needs this, and a label carrying a shell command is a place for one to
-/// appear that nobody reviewed.
-async fn app_wants_busy_check(
-    exec: &dyn Executor,
-    vmid: u16,
-    stack: &str,
-    app: &str,
-) -> Result<bool, CoreError> {
-    let out = super::util_pct_sh(
-        exec,
-        vmid,
-        &format!(
-            "cd '/opt/{}/{}' && docker compose ps -q | head -1 | xargs -r docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.busy-check\"}}}}'",
-            stack, app
-        ),
-        60,
-    )
-    .await?;
-    Ok(out.stdout.trim() == "jellyfin")
-}
-
 async fn capture_app(
     exec: &dyn Executor,
     vmid: u16,
@@ -180,44 +157,13 @@ pub async fn update(
         let busy_step = format!("{} :: busy check", app);
         let mut skip_app: Option<String> = None;
         step!(runner, &busy_step, {
-            if !app_wants_busy_check(exec, vmid, &stack, app).await? {
+            let Some(verdict) = crate::ops::busy::app_busy(exec, vmid, &stack, app).await? else {
                 return Ok(StepOutcome::Unchanged);
-            }
-            // F213: the key comes from the application itself, not from an
-            // `.env`. The media stack declares no `latch_secrets` and has no
-            // `.env` at all, so this used to source a file that does not
-            // exist and ask with an empty token — the check could never have
-            // answered, which is half of why the label was never switched on.
-            //
-            // Same source the deploy's own checks already use (D102), and the
-            // same reason: a key copied anywhere goes stale without saying
-            // so, and F32 was exactly that — a token in an `.env` that had
-            // been dead for an unknown length of time while everything
-            // reported fine.
-            let out = super::util_pct_sh(
-                exec,
-                vmid,
-                &format!(
-                    "K=$(sqlite3 /appdata/{}/{}-config/data/jellyfin.db \
-                       'select AccessToken from ApiKeys limit 1') && \
-                     curl -sf -m 10 -H \"Authorization: MediaBrowser Token=$K\" \
-                     http://127.0.0.1:8096/Sessions",
-                    stack, app
-                ),
-                30,
-            )
-            .await?;
-            let verdict = crate::ops::busy::jellyfin_busy(&out.stdout);
+            };
             if verdict.may_update() {
                 return Ok(StepOutcome::Unchanged);
             }
-            skip_app = Some(match &verdict {
-                crate::ops::busy::Busy::Yes(who) => format!("in use — {}", who),
-                crate::ops::busy::Busy::Unknown(why) => {
-                    format!("could not tell ({}), so treating it as in use", why)
-                }
-                crate::ops::busy::Busy::No => unreachable!(),
-            });
+            skip_app = Some(crate::ops::busy::reason(&verdict));
             Ok(StepOutcome::Unchanged)
         });
         if let Some(why) = skip_app {

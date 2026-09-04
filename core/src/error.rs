@@ -22,6 +22,15 @@ pub enum CoreError {
     #[error("state error: {0}")]
     State(String),
 
+    /// Not a fault: the operation deliberately did not run, and this says
+    /// why. It exists because the two states an `ok: bool` can carry are both
+    /// wrong for a backup that was skipped because somebody was watching
+    /// television — "succeeded" would record a backup that never happened and
+    /// silence the staleness check, and "failed" would trip H8's auto-disable
+    /// and park the whole media stack for the crime of being in use.
+    #[error("deferred: {0}")]
+    Deferred(String),
+
     #[error("{0}")]
     Other(String),
 }
@@ -66,6 +75,14 @@ impl OperatorError {
             CoreError::State(msg) => (
                 msg.clone(),
                 "Run doctor (F6) to compare recorded state with reality.".to_string(),
+            ),
+            CoreError::Deferred(msg) => (
+                msg.clone(),
+                "Nothing is broken and nothing was changed. The operation \
+                 stands aside while the service is in use and runs on the \
+                 next nightly round; if it keeps standing aside, the backup \
+                 staleness check reports it."
+                    .to_string(),
             ),
             CoreError::Other(msg) => (msg.clone(), "See transcript for context.".to_string()),
         };

@@ -764,6 +764,7 @@ fn g4_shell_tab_sends_exec_and_shows_output() {
             id: 9,
             ok: true,
             message: "exit 0\nup 4 hours".into(),
+            deferred: None,
         }))),
     );
     assert!(!m.shell_waiting);

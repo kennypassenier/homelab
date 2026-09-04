@@ -212,6 +212,7 @@ impl Backend for DemoBackend {
                                         id: 0,
                                         ok: true,
                                         message: DEMO_DOCTOR.into(),
+                                        deferred: None,
                                     },
                                 ))).await;
                             }
@@ -232,7 +233,12 @@ impl Backend for DemoBackend {
                             }
                             Some(_) => {
                                 let _ = evt_tx.send(BackendEvent::Server(ServerMsg::RpcDone(
-                                    homelab_proto::RpcResponse { id: 0, ok: true, message: "ok (demo)".into() },
+                                    homelab_proto::RpcResponse {
+                                        id: 0,
+                                        ok: true,
+                                        message: "ok (demo)".into(),
+                                        deferred: None,
+                                    },
                                 ))).await;
                             }
                         }
@@ -390,6 +396,7 @@ async fn play_demo_deploy(evt_tx: &mpsc::Sender<BackendEvent>, stack: &str) {
                 id: 0,
                 ok: true,
                 message: format!("Sync complete — {} deployed (demo)", stack),
+                deferred: None,
             },
         )))
         .await;

@@ -292,6 +292,13 @@ pub struct RpcResponse {
     pub id: u64,
     pub ok: bool,
     pub message: String,
+    /// Set when the operation deliberately did not run: `ok` is false because
+    /// nothing happened, and this says it was a decision rather than a fault.
+    /// A caller that treats every `!ok` as broken would park a media stack
+    /// for the crime of being watched (F280). `serde(default)` keeps an older
+    /// client able to read a newer host.
+    #[serde(default)]
+    pub deferred: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

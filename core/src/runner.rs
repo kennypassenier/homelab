@@ -29,6 +29,12 @@ pub struct OperationReport {
     pub steps: Vec<StepReport>,
     pub ok: bool,
     pub error: Option<OperatorError>,
+    /// Set when the operation deliberately did not run (`CoreError::Deferred`).
+    /// `ok` is false — nothing happened — but a caller that treats every
+    /// `!ok` as a fault would be wrong here, so it can tell the two apart.
+    /// `serde(default)` keeps an older client able to read a newer report.
+    #[serde(default)]
+    pub deferred: Option<String>,
 }
 
 /// Outcome of a step body: did it change anything? (Feeds B1's
@@ -157,16 +163,28 @@ impl<'a> Runner<'a> {
             steps: self.steps,
             ok: true,
             error: None,
+            deferred: None,
         }
     }
 
     pub fn finish_err(self, step: &str, err: &CoreError) -> OperationReport {
-        self.journal.record(&self.op, "-", "failed");
+        self.journal.record(
+            &self.op,
+            "-",
+            match err {
+                CoreError::Deferred(_) => "deferred",
+                _ => "failed",
+            },
+        );
         OperationReport {
             op: self.op,
             steps: self.steps,
             ok: false,
             error: Some(OperatorError::from_core(step, err)),
+            deferred: match err {
+                CoreError::Deferred(why) => Some(why.clone()),
+                _ => None,
+            },
         }
     }
 }

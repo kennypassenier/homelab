@@ -177,6 +177,52 @@ worth carrying forward:
 
 Host v3.44.2, 455 tests.
 
+## Done 2026-09-04 · the four loose ends (N1-N4) and what N1 uncovered
+
+Kenny's answers: N1 Onmisbaar, N2/N3/N4 Gewenst.
+
+- **N1 · the G13 native drill passed** (F286). CT 118 from nothing: container
+  from template 998, bind mount, unit file, binary staged from the GitHub
+  release with its checksum, then — as designed — `NOT started — missing:
+  token.env, config.toml`. With both in the vault: restored, started,
+  `is-active` = active, reconcile matched on 4 points. CT 118 destroyed, its
+  `/appdata` and vault entry removed. F228 closed.
+- **N3 · the SMART collector rides the host-meta snapshot** (F274). Proven:
+  `restic ls latest` on `host-meta-config` names all three files. Absent
+  extras are skipped rather than fatal — restic refuses a whole snapshot over
+  one missing source.
+- **N4 · six orphaned `.bak` files removed** from CT 113, after checking the
+  live `prometheus.yml` is byte-identical to the repo's.
+- **N2 · all thirteen stacks deployed.** Every one "deploy complete", and not
+  one container restarted — jellyfin still `Up 10 hours` afterwards. The repo
+  and the machines agree.
+
+**And the drill found a real fault (F285).** The throwaway stack declared a
+native unit named `http-switchboard` — also a live service. Repositories are
+named after the owning app (D25), so its backup-before-destroy wrote into the
+LIVE repository and its retention then deleted that service's snapshot from
+that night. Fixed by hand (`restic forget`), guarded by `conflicting_owner`
+as the first step of every backup, and a correction form is open with Kenny.
+
+Five older findings were measured rather than relayed and turned out to be
+closed already: F165 (gateway repos), F179 (kyu's own backup), F59 (Loki's
+logs), F186 (host.toml), F126 (promtail, gone with the fleet).
+
+Host v3.45.0, 459 tests.
+
+## Queued, needs Kenny's own go: JobTracker
+
+The JobTracker session asked (2026-09-04) to deploy `ghcr.io/kennypassenier/
+jobtracker:latest` here and add it to Homepage. Preset ready at
+`~/Projects/JobTracker/deploy/homelab-preset/`. It is NOT started: a new
+stack, a Cloudflare Access route and three secrets are Kenny's to approve, and
+a peer session's relay is not his approval. Two secrets only he can make:
+`JOBTRACKER_PASSWORD_HASH` and `JOBTRACKER_GIT_TOKEN`; the Almanac token is in
+latch. Watch the uid: the container runs as 10001, and on an unprivileged LXC
+the host-side chown must use the mapped uid (110001), not 10001 — measured
+today via the drill, where a hand-placed root-owned file was unreadable inside
+the container.
+
 ## Waiting on Kenny (not on us)
 
 - **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his

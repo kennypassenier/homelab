@@ -3117,6 +3117,20 @@ async fn f280_a_backup_does_not_stop_a_container_somebody_is_watching() {
             || exec.calls_containing("backup /appdata").is_empty(),
         "no snapshot may be taken of a stack that was left alone"
     );
+
+    // The answer is six kilobytes of what the household is watching, down to
+    // the file path and the episode summary, and the transcript goes to Loki.
+    // The verdict carries everything an operator needs; the body carries
+    // somebody's viewing history, nightly.
+    let transcript = format!("{:?}", sink.events());
+    assert!(
+        !transcript.contains("NowPlayingItem"),
+        "Jellyfin's session body reached the transcript"
+    );
+    assert!(
+        transcript.contains("Arrival"),
+        "...but the readable reason must still be in it"
+    );
 }
 
 /// Fail closed here too: a Jellyfin that cannot answer is treated as watched.

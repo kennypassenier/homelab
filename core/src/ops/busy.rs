@@ -124,6 +124,13 @@ pub async fn wanted_check(
 /// Ask one app whether it is in use. `None` when it carries no busy-check
 /// label; otherwise a verdict that fails closed.
 ///
+/// **Pass the plain executor, not the tracing one.** Jellyfin's `/Sessions`
+/// answer is roughly six kilobytes of what the household is watching, down to
+/// the file path and the episode summary, and a traced call puts all of it in
+/// the transcript — which goes to Loki — every night, twice. The verdict says
+/// everything an operator needs ("Kenny is paused on …"); the body says
+/// nothing more and costs somebody's viewing history.
+///
 /// Both callers go through here on purpose. The update path had this check
 /// and the backup path did not, and the backup path is the one that stops
 /// containers every single night: at 04:17 on 2026-09-04 it stopped Jellyfin

@@ -263,7 +263,8 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     step!(runner, "in use?", {
         for app in &m.apps {
             let Some(verdict) =
-                crate::ops::busy::app_busy(exec, m.vmid, &m.stack_name, app).await?
+                // ctx.exec, not the tracing one: see `busy::app_busy`.
+                crate::ops::busy::app_busy(ctx.exec, m.vmid, &m.stack_name, app).await?
             else {
                 continue;
             };

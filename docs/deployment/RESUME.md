@@ -210,7 +210,38 @@ logs), F186 (host.toml), F126 (promtail, gone with the fleet).
 
 Host v3.45.0, 459 tests.
 
-## Queued, needs Kenny's own go: JobTracker
+## Done 2026-09-04 · the restore drill (F293), and JobTracker is live
+
+Kenny's form H1: one drill, two proofs. Both passed.
+
+- **The F285 guard, live-proven.** The drill stack deliberately declared the
+  app `jobtracker`, which kp-soft owns. The backup refused at `owner conflict`
+  with **zero restic commands executed** — read off the transcript. The
+  measurement that kept the entry in `QUEUED_MINI_ROUNDS.md` open has
+  happened; that loop is closed.
+- **Restore from zero.** Snapshot `32af9e22` (264 files) restored into a fresh
+  CT 118, a container built around it, JobTracker 0.2.0 started on the
+  restored data: healthz 200, and against the live copy **23 dossiers and 199
+  files on both sides with an empty diff**. Container, data and the temporary
+  repository removed.
+
+Two new findings the drill produced:
+
+- **F291** — `homelab backup` built the whole deploy spec, secrets included,
+  and threw all but the manifest away. With the latch key detached it refused
+  a backup it did not need a secret for, mid-drill. `spec::build_manifest` now
+  serves backup and destroy.
+- **F292 (open, T82)** — the owner guard is symmetric and knows no seniority,
+  so the drill stack blocked kp-soft's own backup for six minutes. The stack
+  that already owns the repository should keep it; only the newcomer refused.
+
+JobTracker itself is live beside kp-soft on CT 116, on `job.kp-soft.dev`
+behind Access, at 0.2.0 with Almanac configured through environment overrides
+(D104, and the fix that followed Kenny hitting a "Not configured" error).
+
+Host v3.47.0, 464 tests.
+
+## Done — was: queued, needs Kenny's own go: JobTracker
 
 The JobTracker session asked (2026-09-04) to deploy `ghcr.io/kennypassenier/
 jobtracker:latest` here and add it to Homepage. Preset ready at

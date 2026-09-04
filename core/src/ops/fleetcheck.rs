@@ -74,6 +74,10 @@ pub struct LiveFacts {
     pub watched_backups: Vec<WatchedBackupFact>,
     /// T49: the seeder's last verdict about the watch list.
     pub seed: SeedFact,
+    /// R13: how full the pools are that the stacks keep their data on. Empty
+    /// when no stack declares a data mount, which is what every fleet looked
+    /// like before this existed.
+    pub pools: Vec<PoolFact>,
 }
 
 /// W3: the configured shape of a container that exists, next to the stack
@@ -183,6 +187,10 @@ pub struct GrowthLimits {
     pub journal_mb: u32,
     /// Docker logs past this are not being rotated effectively.
     pub docker_logs_mb: u32,
+    /// A data pool this full is one where the next import can fail.
+    pub pool_broken_pct: u8,
+    /// A data pool trending toward that.
+    pub pool_drift_pct: u8,
 }
 
 impl Default for GrowthLimits {
@@ -202,8 +210,91 @@ impl Default for GrowthLimits {
             // 10m x 3 files per container: 250 MB is roughly eight busy
             // containers' worth, or one that is not being rotated.
             docker_logs_mb: 250,
+            // R13: nothing in this suite looked at the pools the libraries
+            // actually live on — `disk_*_pct` above is the container's own
+            // rootfs, which on CT 106 is 80 GB while the films sit on 16.4 TB
+            // of ZFS beside it.
+            //
+            // HIGHER than the rootfs thresholds, and the first draft had that
+            // backwards on the reasoning that freeing a media pool takes days
+            // rather than seconds — true, and served by warning at drift long
+            // before broken, not by a lower percentage. At the rootfs's 70%
+            // this pool would report 4.9 TB free as a problem.
+            //
+            // A percentage rather than "warn under 2 TB", which is what Kenny
+            // asked for in R13 and is the wrong shape once measured: HDD2TB
+            // holds 1798 GB free while being 1% used, so an absolute rule
+            // would open with a finding about a pool that is empty. The free
+            // space he wants to see is in the message instead, beside the
+            // percentage. Measured 2026-09-04: 30% / 79% / 1% / 1% across the
+            // four declared pools, so this opens silent and HDD12TB is the
+            // one to cross first.
+            pool_broken_pct: 90,
+            pool_drift_pct: 80,
         }
     }
+}
+
+/// R13 · how full is a pool a stack keeps its data on.
+///
+/// It exists because the answer used to be nobody's business. Every disk
+/// number this suite reads is a container's own rootfs; the libraries live on
+/// ZFS pools bind-mounted in beside it, and those were measured by no check at
+/// all. That was tolerable while the profiles said "any 1080p file is done".
+/// It stopped being tolerable when Recyclarr started replacing 27 MB/min
+/// releases with ones near Kenny's 95 MB/min preference (R13): the same 943
+/// films go from 4.1 TB to roughly 10 TB, and the only thing standing between
+/// that and a full pool was somebody happening to look.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PoolFact {
+    /// The filesystem, as `df` names it — the key, because two stacks that
+    /// declare different paths on the same pool are one pool, not two.
+    pub filesystem: String,
+    /// A declared path that lives on it, for a message that names something
+    /// Kenny recognises rather than a dataset name.
+    pub path: String,
+    /// Which stacks keep data there.
+    pub stacks: Vec<String>,
+    pub used_pct: u8,
+    pub free_gb: u64,
+}
+
+/// R13: a finding per pool that is filling up. Deduplicated by filesystem by
+/// the caller — this only judges.
+pub fn evaluate_pools(facts: &[PoolFact], lim: GrowthLimits) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for p in facts {
+        let who = if p.stacks.is_empty() {
+            p.path.clone()
+        } else {
+            format!("{} ({})", p.path, p.stacks.join(", "))
+        };
+        // Free space is in the message on purpose, next to the percentage.
+        // A percentage scales across a 2 TB pool and an 18 TB one; "1.6 TB
+        // left" is the number somebody actually reasons with.
+        let size = format!("{}% full, {} GB free", p.used_pct, p.free_gb);
+        if p.used_pct >= lim.pool_broken_pct {
+            out.push(Finding {
+                severity: Severity::Broken,
+                subject: who,
+                what: format!("data pool {}", size),
+                remedy: "an import lands here and there is no room for it — free space, or \
+                         stop the upgrades that are filling it (`upgrade.until_score` in \
+                         `stacks/media/recyclarr/recyclarr.yml`)"
+                    .into(),
+            });
+        } else if p.used_pct >= lim.pool_drift_pct {
+            out.push(Finding {
+                severity: Severity::Drift,
+                subject: who,
+                what: format!("data pool {}", size),
+                remedy: "still fine, and worth knowing which way it is going before it is \
+                         urgent — `zfs list -o name,used,avail` on the host"
+                    .into(),
+            });
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -400,6 +491,7 @@ pub fn evaluate(
         growth_limits,
         host_short.as_deref(),
     ));
+    out.extend(evaluate_pools(&live.pools, growth_limits));
     out.extend(evaluate_coverage(&live.coverage));
     out.extend(evaluate_boot(state, &live.boot));
     out.extend(evaluate_watched_backups(&live.watched_backups));

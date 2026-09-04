@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**419 tests across 23 suites.**
+**424 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -204,6 +204,11 @@ Covers: F149, F184, F198, F211, F214, F79
 - `a_run_that_judged_nothing_does_not_read_as_all_clear` — F175's lesson, kept: without a list to compare against, "nothing stale" is not an all-clear.
 - `an_unreadable_status_file_is_a_finding_not_a_silence`
 - `the_full_round_carries_it`
+- `r13_a_pool_with_room_says_nothing` — The state on the night this was written: 30% full, 11.5 TB free.
+- `r13_a_filling_pool_is_drift_and_a_nearly_full_one_is_broken`
+- `r13_the_finding_carries_the_percentage_and_the_free_space` — Both numbers, always.
+- `r13_one_pool_shared_by_two_stacks_is_reported_once` — Two stacks on one pool are one pool.
+- `r13_the_defaults_are_quiet_on_the_fleet_as_it_stands` — The thresholds are configuration, not the author's taste (standing rule 27), and the defaults have to open SILENT on this fleet — a check that arrives with findings about pools that are fine teaches everyone to skip the section it lives in.
 
 ### `core/tests/homepage_tests.rs`
 

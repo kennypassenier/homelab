@@ -3172,6 +3172,91 @@ async fn gather_live_facts(
         host_memory: read_host_memory(exec).await,
         ..Default::default()
     };
+    // R13: how full are the pools the libraries actually live on.
+    //
+    // Every other disk number in this suite is a container's own rootfs. CT
+    // 106's is 80 GB; the films beside it are on 16.4 TB of ZFS that nothing
+    // measured. Recyclarr replacing 27 MB/min releases with ones near Kenny's
+    // 95 MB/min preference takes the same 943 films from 4.1 TB to roughly
+    // 10 TB, so "somebody will notice" stopped being a plan.
+    //
+    // The paths come from the stacks' own `data_mounts` — the borrowed
+    // datasets each manifest declares — so this watches what is declared
+    // rather than a list somebody has to keep in step by hand. One `df` for
+    // all of them, keyed by filesystem: two stacks that name different paths
+    // on one pool are one pool.
+    if let Ok(snapshot) =
+        homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir)
+            .load()
+            .await
+    {
+        let mut declared: Vec<(String, String)> = Vec::new();
+        for (name, st) in &snapshot.stacks {
+            if let Some(m) = &st.manifest {
+                for dm in &m.data_mounts {
+                    declared.push((dm.host_path.clone(), name.clone()));
+                }
+            }
+        }
+        if !declared.is_empty() {
+            // Each line carries the path we ASKED about, printed by us, not
+            // df's own first column. Reading df's rows positionally looks
+            // simpler and is wrong: a path that does not exist produces no
+            // row at all, every later row shifts up one, and the pool of one
+            // stack gets reported under the name of another — silently, with
+            // plausible numbers.
+            let script = declared
+                .iter()
+                .map(|(p, _)| {
+                    format!(
+                        "printf '%s ' '{}'; df -Pk '{}' 2>/dev/null | tail -n +2 | head -1; echo",
+                        p, p
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 60)).await {
+                let mut by_fs: std::collections::BTreeMap<
+                    String,
+                    homelab_core::ops::fleetcheck::PoolFact,
+                > = std::collections::BTreeMap::new();
+                for line in out.stdout.lines() {
+                    let c: Vec<&str> = line.split_whitespace().collect();
+                    // path + df's six columns; anything shorter is a path df
+                    // could not answer for, which is a missing mount and not
+                    // a full pool — evaluate_boot and the deploy's own path
+                    // check are what report that.
+                    if c.len() < 7 {
+                        continue;
+                    }
+                    let path = c[0];
+                    let (Ok(used), Ok(avail)) = (c[3].parse::<u64>(), c[4].parse::<u64>()) else {
+                        continue;
+                    };
+                    let total = used + avail;
+                    if total == 0 {
+                        continue;
+                    }
+                    let Some((_, stack)) = declared.iter().find(|(p, _)| p == path) else {
+                        continue;
+                    };
+                    let e = by_fs.entry(c[1].to_string()).or_insert_with(|| {
+                        homelab_core::ops::fleetcheck::PoolFact {
+                            filesystem: c[1].to_string(),
+                            path: path.to_string(),
+                            used_pct: (used * 100 / total) as u8,
+                            free_gb: avail / 1024 / 1024,
+                            ..Default::default()
+                        }
+                    });
+                    if !e.stacks.contains(stack) {
+                        e.stacks.push(stack.clone());
+                    }
+                }
+                facts.pools = by_fs.into_values().collect();
+            }
+        }
+    }
     if let Ok(out) = exec.run(&Cmd::new("pct", &["list"], 30)).await {
         for line in out.stdout.lines().skip(1) {
             let mut cols = line.split_whitespace();

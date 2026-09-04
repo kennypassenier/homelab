@@ -93,6 +93,7 @@ fn y4_a_healthy_fleet_is_silent() {
     )]);
     let live = LiveFacts {
         seed: Default::default(),
+        pools: vec![],
         watched_backups: vec![],
         containers: vec![(113, "113-app-metrics".into())],
         routes: vec![RouteFact {
@@ -1192,4 +1193,121 @@ mod seeder_verdict {
             findings
         );
     }
+}
+
+// ── R13: the pools the libraries actually live on ──────────────────────────
+//
+// Every other disk number this suite reads is a container's own rootfs. CT
+// 106's is 80 GB; the films beside it are on 16.4 TB of ZFS that nothing
+// measured. That was survivable while Radarr treated any 1080p file as done.
+// It stopped being survivable when Recyclarr began replacing 27 MB/min
+// releases with ones near Kenny's 95 MB/min preference: the same 943 films go
+// from 4.1 TB to roughly 10 TB, and nothing would have said a word.
+
+use homelab_core::ops::fleetcheck::{evaluate_pools, PoolFact};
+
+fn pool(pct: u8, free_gb: u64) -> PoolFact {
+    PoolFact {
+        filesystem: "HDD18TB/subvol-103-disk-0".into(),
+        path: "/HDD18TB/subvol-103-disk-0".into(),
+        stacks: vec!["media".into()],
+        used_pct: pct,
+        free_gb,
+    }
+}
+
+/// The state on the night this was written: 30% full, 11.5 TB free. A check
+/// that fires here would be noise, and noise is how a board stops being read.
+#[test]
+fn r13_a_pool_with_room_says_nothing() {
+    assert!(evaluate_pools(&[pool(30, 11493)], GrowthLimits::default()).is_empty());
+}
+
+#[test]
+fn r13_a_filling_pool_is_drift_and_a_nearly_full_one_is_broken() {
+    let drift = evaluate_pools(&[pool(82, 2900)], GrowthLimits::default());
+    assert_eq!(drift.len(), 1);
+    assert_eq!(drift[0].severity, Severity::Drift);
+
+    let broken = evaluate_pools(&[pool(93, 1100)], GrowthLimits::default());
+    assert_eq!(broken.len(), 1);
+    assert_eq!(broken[0].severity, Severity::Broken);
+}
+
+/// Both numbers, always. The percentage is what scales between a 2 TB pool
+/// and an 18 TB one; the free space is what somebody actually reasons with
+/// when deciding whether tonight's imports fit.
+#[test]
+fn r13_the_finding_carries_the_percentage_and_the_free_space() {
+    let f = evaluate_pools(&[pool(93, 1100)], GrowthLimits::default());
+    assert!(f[0].what.contains("93%"), "{}", f[0].what);
+    assert!(f[0].what.contains("1100 GB"), "{}", f[0].what);
+    assert!(
+        f[0].subject.contains("media") && f[0].subject.contains("/HDD18TB"),
+        "the subject must name both the stack and the path: {}",
+        f[0].subject
+    );
+    // The remedy names the lever that is filling it, because on this fleet it
+    // is a known one — R13 chose to let the library grow.
+    assert!(
+        f[0].remedy.contains("until_score"),
+        "the remedy should name the upgrade setting: {}",
+        f[0].remedy
+    );
+}
+
+/// Two stacks on one pool are one pool. The caller keys by filesystem; this
+/// asserts the shape it produces reads correctly rather than reporting the
+/// same 11 TB twice under two names.
+#[test]
+fn r13_one_pool_shared_by_two_stacks_is_reported_once() {
+    let mut p = pool(91, 1400);
+    p.stacks = vec!["media".into(), "downloader".into()];
+    let f = evaluate_pools(&[p], GrowthLimits::default());
+    assert_eq!(f.len(), 1);
+    assert!(
+        f[0].subject.contains("media, downloader"),
+        "{}",
+        f[0].subject
+    );
+}
+
+/// The thresholds are configuration, not the author's taste (standing rule
+/// 27), and the defaults have to open SILENT on this fleet — a check that
+/// arrives with findings about pools that are fine teaches everyone to skip
+/// the section it lives in.
+///
+/// The four numbers below were read off the host on 2026-09-04. HDD2TB is the
+/// one that settled the design: 1798 GB free while 1% used, so "warn under
+/// 2 TB" — what Kenny asked for in R13 — would have opened with a finding
+/// about an empty pool. The free space he wants to see is in the message.
+#[test]
+fn r13_the_defaults_are_quiet_on_the_fleet_as_it_stands() {
+    let lim = homelab_core::ops::fleetcheck::GrowthLimits::default();
+    assert!(lim.pool_drift_pct < lim.pool_broken_pct);
+    let today = [
+        (30u8, 11493u64, "HDD18TB, where the films are"),
+        (79, 2421, "HDD12TB, the one that will cross first"),
+        (1, 3409, "HDD4TB, jellyfin's artwork"),
+        (
+            1,
+            1798,
+            "HDD2TB — 1% used and under 2 TB free at the same time",
+        ),
+    ];
+    for (pct, free, what) in today {
+        let mut p = pool(pct, free);
+        p.path = what.into();
+        assert!(
+            evaluate_pools(&[p], lim).is_empty(),
+            "{} must not produce a finding today",
+            what
+        );
+    }
+    // And it is a knob, not a constant: tighten it and the same pool reports.
+    let strict = homelab_core::ops::fleetcheck::GrowthLimits {
+        pool_drift_pct: 25,
+        ..lim
+    };
+    assert_eq!(evaluate_pools(&[pool(30, 11493)], strict).len(), 1);
 }

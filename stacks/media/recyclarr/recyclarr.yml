@@ -45,7 +45,11 @@
 # "never download this", uses a negative score, and uses the guide's -10000.
 
 radarr:
-  main:
+  # Instance names are unique across BOTH services, not per service — two
+  # blocks both called `main` are refused with "Duplicate Instances", and
+  # refused with exit code 0 (measured 2026-09-04), so nothing but reading the
+  # output tells you it did not run.
+  films:
     # Same docker network, so this is the container's own name. It does not go
     # out through Traefik: the public name meets Cloudflare Access and would
     # get a login page rather than an API (D102).
@@ -116,7 +120,7 @@ radarr:
             score: -10000
 
 sonarr:
-  main:
+  series:
     base_url: http://sonarr:8989
     api_key: !env_var SONARR_API_KEY
     delete_old_custom_formats: true

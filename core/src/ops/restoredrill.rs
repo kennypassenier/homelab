@@ -34,6 +34,48 @@ pub fn due(last: u64, now: u64, interval_s: u64) -> bool {
 ///
 /// Returns None when there is nothing to drill, which is not an error: a host
 /// with no backups configured has no restore to rehearse.
+/// G14: which repositories the nightly drill should rotate over.
+///
+/// It used to be each stack's `apps` list, and that is the wrong list in two
+/// directions at once — found on 2026-09-04 while answering whether a newly
+/// deployed service was covered:
+///
+/// * **It misses every native service.** A native stack has an EMPTY `apps`
+///   list by design; its services live in `natives`. So `kyu`, `kyu-runner`,
+///   `http-switchboard` and `almanac` were never rehearsed — the four whose
+///   backups had silently been broken until two days earlier (F179).
+/// * **It includes apps that have no repository at all.** `flaresolverr`,
+///   `recyclarr` and `registry` keep nothing under `/appdata`, so their
+///   `-config` repository does not exist and a drill night spent on one of
+///   them proves nothing while looking like a failure.
+///
+/// The right list is the one the BACKUP uses: the owning apps of the mounts
+/// it actually snapshots, plus the native units, which back themselves up
+/// under their own names.
+pub fn drill_repos(
+    stacks: &[(Vec<crate::manifest::MountSpec>, String, Vec<String>)],
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (mounts, stack, natives) in stacks {
+        for m in mounts {
+            if m.no_data || m.no_backup.is_some() {
+                continue;
+            }
+            let owner = m.owner(stack).to_string();
+            if !out.contains(&owner) {
+                out.push(owner);
+            }
+        }
+        for n in natives {
+            if !out.contains(n) {
+                out.push(n.clone());
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 pub fn next_repo(repos: &[String], index: usize) -> Option<(String, usize)> {
     if repos.is_empty() {
         return None;

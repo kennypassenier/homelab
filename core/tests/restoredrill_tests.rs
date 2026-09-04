@@ -116,3 +116,84 @@ fn a_recent_passing_drill_is_not_a_finding() {
     };
     assert!(evaluate_drill(&st, 101 * DAY, DEFAULT_DRILL_INTERVAL_S).is_empty());
 }
+
+// ── F290: the drill rotated over the wrong list ────────────────────────────
+
+use homelab_core::manifest::MountSpec;
+use homelab_core::ops::restoredrill::drill_repos;
+
+fn mount(host_path: &str, app: Option<&str>) -> MountSpec {
+    MountSpec {
+        host_path: host_path.into(),
+        mount_point: host_path.into(),
+        no_data: false,
+        no_backup: None,
+        host_owner_uid: None,
+        app: app.map(|s| s.to_string()),
+    }
+}
+
+/// A native stack has an EMPTY `apps` list by design — its services are in
+/// `natives`. The old list came from `apps`, so the four services on CT 109
+/// and CT 112 were never rehearsed: exactly the backups that had silently
+/// been broken until two days before this was found (F179).
+#[test]
+fn f290_the_native_services_are_in_the_rotation() {
+    let stacks = vec![
+        (
+            vec![],
+            "kyu".to_string(),
+            vec![
+                "kyu".to_string(),
+                "kyu-runner".into(),
+                "http-switchboard".into(),
+            ],
+        ),
+        (vec![], "almanac".to_string(), vec!["almanac".to_string()]),
+    ];
+    let repos = drill_repos(&stacks);
+    for want in ["kyu", "kyu-runner", "http-switchboard", "almanac"] {
+        assert!(
+            repos.contains(&want.to_string()),
+            "{} is missing: {:?}",
+            want,
+            repos
+        );
+    }
+}
+
+/// The other direction: an app that keeps nothing has no repository, and a
+/// drill night spent on one proves nothing while looking like a failure.
+#[test]
+fn f290_an_app_without_a_repository_is_not_in_the_rotation() {
+    let mut nothing = mount("/appdata/media/flaresolverr-config", Some("flaresolverr"));
+    nothing.no_data = true;
+    let mut declared_reproducible = mount("/appdata/registry/registry-config", Some("registry"));
+    declared_reproducible.no_backup = Some("a pull-through cache".into());
+    let stacks = vec![(
+        vec![
+            mount("/appdata/media/jellyfin-config", Some("jellyfin")),
+            nothing,
+            declared_reproducible,
+        ],
+        "media".to_string(),
+        vec![],
+    )];
+    assert_eq!(drill_repos(&stacks), vec!["jellyfin".to_string()]);
+}
+
+/// The owner is what names the repository, not the stack — and an owner two
+/// mounts share is one repository, not two.
+#[test]
+fn f290_the_list_is_owners_deduplicated_not_mounts() {
+    let stacks = vec![(
+        vec![
+            mount("/appdata/kyu/kyu-config", Some("kyu")),
+            mount("/appdata/kyu/kyu-extra", Some("kyu")),
+            mount("/appdata/home/homepage-config", None),
+        ],
+        "home".to_string(),
+        vec![],
+    )];
+    assert_eq!(drill_repos(&stacks), vec!["home".to_string(), "kyu".into()]);
+}

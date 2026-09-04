@@ -2253,11 +2253,25 @@ async fn scheduler_loop(state: AppState) {
             .map(|(n, st)| (n.clone(), st.enabled, st.last_backup))
             .collect();
         // G14: taken before the loop below consumes `snapshot.stacks`.
-        let drill_repos: Vec<String> = snapshot
-            .stacks
-            .values()
-            .flat_map(|st| st.apps.iter().cloned())
-            .collect();
+        let drill_repos: Vec<String> = homelab_core::ops::restoredrill::drill_repos(
+            &snapshot
+                .stacks
+                .iter()
+                .map(|(name, st)| {
+                    (
+                        st.manifest
+                            .as_ref()
+                            .map(|m| m.storage.clone())
+                            .unwrap_or_default(),
+                        name.clone(),
+                        st.natives
+                            .iter()
+                            .map(|n| n.unit.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
         let plan = nightly_plan(
             hour,
             local_hour,

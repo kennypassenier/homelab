@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**434 tests across 23 suites.**
+**437 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -462,6 +462,9 @@ G14 · the recurring restore drill, and the rule that a drill which can be satis
 - `a_failed_drill_stays_a_finding_until_one_succeeds`
 - `a_drill_that_never_ran_says_never_rather_than_a_misleading_zero`
 - `a_recent_passing_drill_is_not_a_finding`
+- `f290_the_native_services_are_in_the_rotation` — A native stack has an EMPTY `apps` list by design — its services are in `natives`.
+- `f290_an_app_without_a_repository_is_not_in_the_rotation` — The other direction: an app that keeps nothing has no repository, and a drill night spent on one proves nothing while looking like a failure.
+- `f290_the_list_is_owners_deduplicated_not_mounts` — The owner is what names the repository, not the stack — and an owner two mounts share is one repository, not two.
 
 ### `core/tests/secrets_tests.rs`
 

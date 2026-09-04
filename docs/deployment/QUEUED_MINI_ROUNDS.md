@@ -119,3 +119,33 @@ Klopt · Aanpassen · Schrappen.
    test plan, homepage services list).
 
 **Status:** queued, not presented. The revert is already done and pushed.
+
+---
+
+## F285 · a throwaway stack wrote into a live backup repository
+
+**Status: PRESENTED AND RATIFIED 2026-09-04.** Kenny answered all nine fields
+with *Klopt*. Recorded here only because field 7's measurement has not
+happened yet, and standing rule 29 keeps the loop open until it has.
+
+The fault, the gate, the measure and the cost are in `REGISTER.md` under F285.
+What is outstanding is exactly one thing:
+
+7. **How and when we measure it works.** At the NEXT drill on a throwaway
+   container. That drill deliberately opens with an app name a live stack
+   already owns, and the backup must refuse before a single restic command
+   runs — read off the transcript, not off the error message alone. Only then
+   is the name changed and the drill continued.
+
+8. **Fallback if that measurement fails.** The likely cause would be that
+   `state.json` did not know the other stack — a stack never deployed is not
+   in it. The check then moves to the CLIENT, which sees every stack file on
+   disk. That is a weaker place (the client can be bypassed by talking to the
+   host directly), so it only moves there if the cheap place demonstrably
+   falls short.
+
+9. **When we review it.** The first time it refuses a backup that was wanted.
+   A fail-closed rule that never gets in the way has no price; one that does
+   has put itself up for discussion at that moment.
+
+**The loop closes when the drill above has run.** Until then this entry stays.

@@ -142,6 +142,41 @@ If Recyclarr work resumes, the thing to know first: **`minFormatScore` is 0 on
 every profile**, so a small negative score does not deprioritise a release, it
 refuses it. Preferences are expressed as positive scores on what should win.
 
+## Done 2026-09-04 · R12/R13 and the pools (D103, F283, F284)
+
+Kenny looked at the synced profiles and read them as *"bijna alles is er
+precies uitgesloopt"*. Measured: the quality list was 26 rows before and 26
+after; two ticks fewer (HDTV-1080p, Remux-1080p). The work moved from five
+ticks to 59 custom formats with 25 scores. `quality_sort: top` puts the
+allowed qualities at the top and everything disabled below, which is what
+makes it look stripped.
+
+**Whether it is measurably better is now actually measured** — the LQ custom
+format's own regexes run against his release groups: **273 of 943 films** come
+from YIFY (180), RARBG (53), Tigole (15), YTS (10), LAMA (8), PSA (7), all at
+−10000. Of his fifteen most common sources (544 films) **not one** scores
+positively.
+
+**R12**: the stopscore stays at 10000 — Radarr keeps looking for better
+releases instead of calling every film done. **R13**: the library may grow
+from 4.1 TB toward ~10 TB (median 27 MB/min today against his own 95 MB/min
+preference), with the space check built alongside. 11.5 TB free on
+`/data/18TB/Movies` where 942 of the 943 films live.
+
+The check itself is `PoolFact` + `evaluate_pools` + `pool_facts_from_df`,
+reading the pools each stack declares in its own `data_mounts`. Two things
+worth carrying forward:
+
+- **A percentage, not "warn under 2 TB"** — which is what R13 asked for and is
+  the wrong shape once measured: HDD2TB has 1798 GB free at 1% used. The free
+  space is in the message instead. Drift 80, broken 90, both configurable.
+- **It logs what it measured, not only what is wrong** (F283), and that line
+  paid for itself in five minutes: it showed the 18 TB pool attributed to the
+  downloader alone when media mounts it too (F284). A silent check cannot be
+  told apart from a check that reads nothing.
+
+Host v3.44.2, 455 tests.
+
 ## Waiting on Kenny (not on us)
 
 - **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his

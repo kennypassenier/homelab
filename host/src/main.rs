@@ -3254,6 +3254,29 @@ async fn gather_live_facts(
                     }
                 }
                 facts.pools = by_fs.into_values().collect();
+                // Say what was measured, even when nothing is wrong.
+                //
+                // A pool check that only speaks up when a pool is filling is
+                // indistinguishable from a pool check that reads nothing at
+                // all — which is F263, the fault this project keeps finding:
+                // an assertion about existence passes on the wrong value. The
+                // silence has to be provably the good kind.
+                info!(
+                    "fleet check: {} data pool(s) measured — {}",
+                    facts.pools.len(),
+                    facts
+                        .pools
+                        .iter()
+                        .map(|p| format!(
+                            "{} {}% full, {} GB free ({})",
+                            p.path,
+                            p.used_pct,
+                            p.free_gb,
+                            p.stacks.join(", ")
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                );
             }
         }
     }

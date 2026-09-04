@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**424 tests across 23 suites.**
+**428 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -209,6 +209,10 @@ Covers: F149, F184, F198, F211, F214, F79
 - `r13_the_finding_carries_the_percentage_and_the_free_space` — Both numbers, always.
 - `r13_one_pool_shared_by_two_stacks_is_reported_once` — Two stacks on one pool are one pool.
 - `r13_the_defaults_are_quiet_on_the_fleet_as_it_stands` — The thresholds are configuration, not the author's taste (standing rule 27), and the defaults have to open SILENT on this fleet — a check that arrives with findings about pools that are fine teaches everyone to skip the section it lives in.
+- `it_reads_the_real_numbers`
+- `a_pool_two_stacks_share_names_both_of_them` — The bug this test exists for: CT 105 and CT 106 both mount the 18 TB dataset.
+- `a_missing_mount_does_not_shift_every_reading_after_it` — A path that does not exist yields a line with the path and nothing else.
+- `a_path_nobody_declared_is_ignored`
 
 ### `core/tests/homepage_tests.rs`
 

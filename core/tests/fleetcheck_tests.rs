@@ -1311,3 +1311,75 @@ fn r13_the_defaults_are_quiet_on_the_fleet_as_it_stands() {
     };
     assert_eq!(evaluate_pools(&[pool(30, 11493)], strict).len(), 1);
 }
+
+/// The `df` transcript, parsed. Every fixture below is the real shape read off
+/// the Proxmox host on 2026-09-04, not one imagined from the manual page.
+mod r13_df {
+    use homelab_core::ops::fleetcheck::pool_facts_from_df;
+
+    fn declared() -> Vec<(String, String)> {
+        vec![
+            ("/HDD18TB/subvol-103-disk-0".into(), "downloader".into()),
+            ("/HDD12TB/subvol-103-disk-0".into(), "downloader".into()),
+            ("/HDD18TB/subvol-103-disk-0".into(), "media".into()),
+            ("/HDD12TB/subvol-103-disk-0".into(), "media".into()),
+            ("/HDD4TB/jellyfin-metadata".into(), "media".into()),
+        ]
+    }
+
+    const REAL: &str = "\
+/HDD18TB/subvol-103-disk-0 HDD18TB/subvol-103-disk-0 17205910784 5154404224 12051506560 30% /HDD18TB/subvol-103-disk-0
+/HDD12TB/subvol-103-disk-0 HDD12TB/subvol-103-disk-0 11566110720 9027928064 2538182656 79% /HDD12TB/subvol-103-disk-0
+/HDD4TB/jellyfin-metadata HDD4TB/jellyfin-metadata 3576525184 44384 3576480800 1% /HDD4TB/jellyfin-metadata";
+
+    #[test]
+    fn it_reads_the_real_numbers() {
+        let f = pool_facts_from_df(REAL, &declared());
+        assert_eq!(f.len(), 3);
+        let big = f
+            .iter()
+            .find(|p| p.path.contains("HDD18TB"))
+            .expect("the pool the films are on");
+        assert_eq!(big.used_pct, 29);
+        assert_eq!(big.free_gb, 11493);
+    }
+
+    /// The bug this test exists for: CT 105 and CT 106 both mount the 18 TB
+    /// dataset. Taking the first declaration that matches named only the
+    /// downloader — measured on the live host, in the log line the check
+    /// itself prints — and would have sent somebody to the wrong container.
+    #[test]
+    fn a_pool_two_stacks_share_names_both_of_them() {
+        let f = pool_facts_from_df(REAL, &declared());
+        let big = f.iter().find(|p| p.path.contains("HDD18TB")).unwrap();
+        assert_eq!(big.stacks, vec!["downloader".to_string(), "media".into()]);
+        let small = f.iter().find(|p| p.path.contains("HDD4TB")).unwrap();
+        assert_eq!(small.stacks, vec!["media".to_string()]);
+    }
+
+    /// A path that does not exist yields a line with the path and nothing
+    /// else. Every later reading must still land on its own path — reading
+    /// these rows positionally is what breaks here, silently and plausibly.
+    #[test]
+    fn a_missing_mount_does_not_shift_every_reading_after_it() {
+        let with_hole = format!(
+            "/HDD18TB/subvol-103-disk-0\n{}",
+            REAL.lines().skip(1).collect::<Vec<_>>().join("\n")
+        );
+        let f = pool_facts_from_df(&with_hole, &declared());
+        assert_eq!(f.len(), 2, "the unreadable one is simply absent");
+        let twelve = f.iter().find(|p| p.path.contains("HDD12TB")).unwrap();
+        assert_eq!(twelve.used_pct, 78);
+        assert_eq!(
+            twelve.stacks,
+            vec!["downloader".to_string(), "media".into()],
+            "the 12 TB reading must still be the 12 TB reading"
+        );
+    }
+
+    #[test]
+    fn a_path_nobody_declared_is_ignored() {
+        let stray = "/tmp/elsewhere ext4 100 50 50 50% /tmp";
+        assert!(pool_facts_from_df(stray, &declared()).is_empty());
+    }
+}

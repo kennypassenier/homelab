@@ -3205,9 +3205,14 @@ async fn gather_live_facts(
             // row at all, every later row shifts up one, and the pool of one
             // stack gets reported under the name of another — silently, with
             // plausible numbers.
-            let script = declared
+            // Unique paths: two stacks that declare the same mount are one
+            // question for df, and `pool_facts_from_df` attributes it to both.
+            let mut paths: Vec<&String> = declared.iter().map(|(p, _)| p).collect();
+            paths.sort();
+            paths.dedup();
+            let script = paths
                 .iter()
-                .map(|(p, _)| {
+                .map(|p| {
                     format!(
                         "printf '%s ' '{}'; df -Pk '{}' 2>/dev/null | tail -n +2 | head -1; echo",
                         p, p
@@ -3216,44 +3221,9 @@ async fn gather_live_facts(
                 .collect::<Vec<_>>()
                 .join("; ");
             if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 60)).await {
-                let mut by_fs: std::collections::BTreeMap<
-                    String,
-                    homelab_core::ops::fleetcheck::PoolFact,
-                > = std::collections::BTreeMap::new();
-                for line in out.stdout.lines() {
-                    let c: Vec<&str> = line.split_whitespace().collect();
-                    // path + df's six columns; anything shorter is a path df
-                    // could not answer for, which is a missing mount and not
-                    // a full pool — evaluate_boot and the deploy's own path
-                    // check are what report that.
-                    if c.len() < 7 {
-                        continue;
-                    }
-                    let path = c[0];
-                    let (Ok(used), Ok(avail)) = (c[3].parse::<u64>(), c[4].parse::<u64>()) else {
-                        continue;
-                    };
-                    let total = used + avail;
-                    if total == 0 {
-                        continue;
-                    }
-                    let Some((_, stack)) = declared.iter().find(|(p, _)| p == path) else {
-                        continue;
-                    };
-                    let e = by_fs.entry(c[1].to_string()).or_insert_with(|| {
-                        homelab_core::ops::fleetcheck::PoolFact {
-                            filesystem: c[1].to_string(),
-                            path: path.to_string(),
-                            used_pct: (used * 100 / total) as u8,
-                            free_gb: avail / 1024 / 1024,
-                            ..Default::default()
-                        }
-                    });
-                    if !e.stacks.contains(stack) {
-                        e.stacks.push(stack.clone());
-                    }
-                }
-                facts.pools = by_fs.into_values().collect();
+                facts.pools =
+                    homelab_core::ops::fleetcheck::pool_facts_from_df(&out.stdout, &declared);
+
                 // Say what was measured, even when nothing is wrong.
                 //
                 // A pool check that only speaks up when a pool is filling is

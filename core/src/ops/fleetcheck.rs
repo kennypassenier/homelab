@@ -259,6 +259,67 @@ pub struct PoolFact {
     pub free_gb: u64,
 }
 
+/// R13: turn one `df` transcript into pool facts.
+///
+/// Pure, and in core rather than beside the command that produces it, because
+/// two things about it are easy to get wrong and impossible to see once wrong:
+///
+/// * **The path has to come from the line, not from the position.** A path
+///   that does not exist produces no `df` row at all, so reading rows
+///   positionally shifts every later one up and reports one stack's pool under
+///   another stack's name — with entirely plausible numbers. The caller
+///   prints the path it asked about at the start of each line for exactly this
+///   reason.
+/// * **A path can be declared by several stacks.** CT 105 and CT 106 both
+///   mount `/HDD18TB/subvol-103-disk-0`. Taking the first declaration that
+///   matches names one of them and silently drops the other, which is how a
+///   finding sends somebody to the wrong container.
+///
+/// Line shape, as the caller emits it: `<path> <fs> <1k-blocks> <used>
+/// <avail> <pct> <mountpoint>`. Anything shorter is a path `df` could not
+/// answer for — a missing mount, which is a different check's business.
+pub fn pool_facts_from_df(transcript: &str, declared: &[(String, String)]) -> Vec<PoolFact> {
+    let mut by_fs: std::collections::BTreeMap<String, PoolFact> = std::collections::BTreeMap::new();
+    for line in transcript.lines() {
+        let c: Vec<&str> = line.split_whitespace().collect();
+        if c.len() < 7 {
+            continue;
+        }
+        let path = c[0];
+        let (Ok(used), Ok(avail)) = (c[3].parse::<u64>(), c[4].parse::<u64>()) else {
+            continue;
+        };
+        let total = used + avail;
+        if total == 0 {
+            continue;
+        }
+        let owners: Vec<&String> = declared
+            .iter()
+            .filter(|(p, _)| p == path)
+            .map(|(_, s)| s)
+            .collect();
+        if owners.is_empty() {
+            continue;
+        }
+        let e = by_fs.entry(c[1].to_string()).or_insert_with(|| PoolFact {
+            filesystem: c[1].to_string(),
+            path: path.to_string(),
+            used_pct: (used * 100 / total) as u8,
+            free_gb: avail / 1024 / 1024,
+            ..Default::default()
+        });
+        for owner in owners {
+            if !e.stacks.contains(owner) {
+                e.stacks.push(owner.clone());
+            }
+        }
+    }
+    for f in by_fs.values_mut() {
+        f.stacks.sort();
+    }
+    by_fs.into_values().collect()
+}
+
 /// R13: a finding per pool that is filling up. Deduplicated by filesystem by
 /// the caller — this only judges.
 pub fn evaluate_pools(facts: &[PoolFact], lim: GrowthLimits) -> Vec<Finding> {

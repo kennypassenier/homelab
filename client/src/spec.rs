@@ -41,6 +41,25 @@ fn default_gw() -> u16 {
     104
 }
 
+/// Just the intent — no files, no secrets, no latch.
+///
+/// The backup and destroy verbs need the manifest and nothing else: they run
+/// entirely on the host against `/appdata` paths. They used to call
+/// `build_spec` and throw everything but the manifest away, which made both
+/// of them depend on a credential they never use. Measured 2026-09-04: with
+/// the latch key detached from this session's kernel keyring,
+/// `homelab backup stacks/kp-soft` refused with a message about secrets —
+/// during a restore drill, which is exactly the moment a backup must not be
+/// the thing that is broken (F291).
+pub fn build_manifest(dir: &Path) -> Result<homelab_core::manifest::StackManifest, String> {
+    let manifest_path = dir.join("lxc-compose.yml");
+    let raw = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("cannot read {}: {}", manifest_path.display(), e))?;
+    let stack_file: StackFile =
+        serde_yaml::from_str(&raw).map_err(|e| format!("manifest parse: {}", e))?;
+    Ok(stack_file.manifest)
+}
+
 pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
     let manifest_path = dir.join("lxc-compose.yml");
     let raw = std::fs::read_to_string(&manifest_path)

@@ -623,8 +623,10 @@ async fn main() {
             let dir = args
                 .get(2)
                 .unwrap_or_else(|| die("usage: homelab backup stacks/<name>"));
-            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
-            rpc(&host, &token, Command::BackupStack(Box::new(spec.manifest))).await;
+            // F291: the manifest alone. A backup runs on the host against
+            // /appdata paths and needs no file and no secret from here.
+            let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            rpc(&host, &token, Command::BackupStack(Box::new(manifest))).await;
         }
         "restore" => {
             let dir = args

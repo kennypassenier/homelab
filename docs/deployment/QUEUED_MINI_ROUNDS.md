@@ -148,4 +148,11 @@ What is outstanding is exactly one thing:
    A fail-closed rule that never gets in the way has no price; one that does
    has put itself up for discussion at that moment.
 
-**The loop closes when the drill above has run.** Until then this entry stays.
+**CLOSED 2026-09-04.** The drill ran (F293). The drill stack declared the app
+`jobtracker`, which kp-soft owns, and the backup refused at the `owner conflict`
+step with **zero restic commands executed** — read off the transcript, as field 7
+required. The measurement that kept this entry open has happened.
+
+It also produced a new finding the ratified measure did not anticipate: the
+guard is symmetric, so the drill blocked kp-soft's own backup until the drill
+stack was destroyed (F292, task T82).

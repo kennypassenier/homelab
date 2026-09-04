@@ -92,6 +92,19 @@ the nightly round in the host-meta slot.
 3. **F247** — nothing in the house sends almanac anything (zero events in 48 h).
    Kenny's call whether that is a pipeline still to build or a service to retire.
 
+## In flight: the backup must ask before it quiesces (2026-09-04)
+
+Kenny was streaming at 04:17 when the nightly round ran `docker stop` on all
+six media containers to take a clean snapshot, then started them again. His
+episode skipped; every media tile on the front page went to ECONNREFUSED.
+Correct for backup integrity, and nothing asked whether anybody was using it.
+
+Two faults, both mine (F280): `stream_guards` was built for A7 and **never
+put in host.toml**, so the guard has been dormant since it shipped; and even
+configured it only gates the scheduled UPDATE, while it was the BACKUP that
+cut him off. Fix: wire the setting, and ask the same question before the
+quiesce — a stack in use skips its backup tonight and says so.
+
 ## In flight: the Recyclarr repair (form J1, 2026-09-03)
 
 Kenny answered **Claude repareert en toont dan**, and then on 2026-09-04:

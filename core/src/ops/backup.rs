@@ -192,6 +192,39 @@ pub(crate) async fn newest_snapshot_unix(
 /// repositories are `jellyfin-config`, `sonarr-config`, `radarr-config` and
 /// three more. That document is read exactly once — when everything else is
 /// gone — and it would have said the backups were not there.
+/// D25 names a restic repository after the OWNING APP, not the stack — so an
+/// app that moves between stacks keeps its history. The other side of that
+/// coin: two stacks that name the same owner share one repository, and
+/// nothing said so.
+///
+/// Found by running the G13 drill (F285). A throwaway stack called `drill`
+/// declared a native unit `http-switchboard`, which is also the name of a live
+/// service on CT 109. Its destroy took the mandatory backup-before-destroy —
+/// into `http-switchboard-config`, the live repository — and then applied that
+/// throwaway stack's retention to it, which DELETED the real service's most
+/// recent snapshot. The drill's own snapshot was then `latest`, so a restore
+/// of the real service would have handed back the drill's fake configuration.
+///
+/// Returns the first conflict as `(owner, the other stack)`. Nothing is
+/// reported for the stack's own name, nor for an owner no other stack claims.
+pub fn conflicting_owner(
+    stack: &str,
+    owners: &[String],
+    others: &[(String, Vec<String>)],
+) -> Option<(String, String)> {
+    for owner in owners {
+        for (other_stack, other_owners) in others {
+            if other_stack == stack {
+                continue;
+            }
+            if other_owners.iter().any(|o| o == owner) {
+                return Some((owner.clone(), other_stack.clone()));
+            }
+        }
+    }
+    None
+}
+
 pub fn owner_groups(m: &StackManifest) -> Vec<(String, Vec<String>)> {
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     for mount in &m.storage {
@@ -235,6 +268,48 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     step!(runner, "safety gates", {
         crate::manifest::validate_manifest(m)?;
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    // F285: does another stack already own one of these repositories?
+    //
+    // The repository is named after the owning APP (D25), so two stacks that
+    // name the same owner write into one repository — and the retention pass
+    // that follows a snapshot then applies THIS stack's tiers to the other
+    // stack's history. The G13 drill did exactly that and deleted a live
+    // service's most recent backup.
+    //
+    // Fail closed and before anything runs: a backup that quietly writes into
+    // somebody else's repository is worse than no backup, because the
+    // repository still looks healthy afterwards.
+    step!(runner, "owner conflict", {
+        let store = crate::state::StateStore::new(ctx.exec, &ctx.state_dir);
+        let Ok(snapshot) = store.load().await else {
+            // No state file is a first deploy, not a conflict.
+            return Ok(StepOutcome::Unchanged);
+        };
+        let others: Vec<(String, Vec<String>)> = snapshot
+            .stacks
+            .iter()
+            .filter_map(|(name, st)| {
+                let man = st.manifest.as_ref()?;
+                Some((
+                    name.clone(),
+                    owner_groups(man).into_iter().map(|(o, _)| o).collect(),
+                ))
+            })
+            .collect();
+        let owners: Vec<String> = groups.iter().map(|(o, _)| o.clone()).collect();
+        if let Some((owner, other)) = conflicting_owner(&m.stack_name, &owners, &others) {
+            return Err(CoreError::SafetyAbort(format!(
+                "stack '{}' would back up into the repository '{}-config', which stack '{}' \
+                 already owns :: repositories are named after the owning app (D25), so both \
+                 stacks write into ONE history and the retention pass afterwards applies this \
+                 stack's tiers to the other stack's snapshots. Rename the app in one of the \
+                 two stack files",
+                m.stack_name, owner, other
+            )));
+        }
         Ok(StepOutcome::Unchanged)
     });
 
@@ -854,6 +929,25 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
     // Not under `state_dir`, so it is named separately rather than swept up.
     let host_config = "/etc/homelab/host.toml".to_string();
 
+    // F274: the pieces of the Proxmox host that this suite installed and that
+    // live nowhere under `state_dir` either. They are in `captured/pve-host/`
+    // in the repository and their checksums match the live files, so they do
+    // survive a host loss — but by a different route from every other piece
+    // of host configuration, and a restore that follows this runbook would
+    // put back everything except these three.
+    //
+    // Absent paths are skipped rather than fatal: a host that never had the
+    // SMART collector is not a broken backup, and restic refuses the whole
+    // snapshot if any source is missing.
+    let host_extras: Vec<String> = [
+        "/usr/local/bin/smart-textfile-collector.py",
+        "/etc/systemd/system/smart-collector.service",
+        "/etc/systemd/system/smart-collector.timer",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+
     step!(runner, "init repo", {
         let _ = exec
             .run(&restic(
@@ -867,6 +961,50 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
         Ok(StepOutcome::Unchanged)
     });
 
+    // Which of the extras this host actually has. Read once, here, so the
+    // snapshot step gets a list that cannot fail on a missing path.
+    let mut present: Vec<String> = Vec::new();
+    step!(runner, "host extras", {
+        for p in &host_extras {
+            let out = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &["-c", &format!("test -e '{}' && echo yes || true", p)],
+                    30,
+                ))
+                .await?;
+            if out.stdout.trim() == "yes" {
+                present.push(p.clone());
+            }
+        }
+        ctx.sink.emit(PipelineEvent::Line {
+            level: Level::Info,
+            source: "HOST".into(),
+            msg: format!(
+                "[host-meta] {} of {} host extra(s) present: {}",
+                present.len(),
+                host_extras.len(),
+                if present.is_empty() {
+                    "—".to_string()
+                } else {
+                    present.join(", ")
+                }
+            ),
+        });
+        Ok(StepOutcome::Unchanged)
+    });
+
+    let mut args: Vec<&str> = vec![
+        "backup",
+        &secrets,
+        &state_file,
+        &tls_cert,
+        &tls_key,
+        &repo,
+        &host_config,
+    ];
+    args.extend(present.iter().map(|s| s.as_str()));
+
     step!(runner, "snapshot", {
         run_ok(
             exec,
@@ -874,15 +1012,7 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
                 &cfg.restic_base,
                 "host-meta",
                 &cfg.password_file,
-                &[
-                    "backup",
-                    &secrets,
-                    &state_file,
-                    &tls_cert,
-                    &tls_key,
-                    &repo,
-                    &host_config,
-                ],
+                &args,
                 600,
             ),
         )

@@ -3199,3 +3199,160 @@ async fn f280_a_stack_that_never_asks_is_backed_up_without_a_question() {
     assert!(report.ok, "{:?}", report.error);
     assert!(exec.calls_containing("jellyfin.db").is_empty());
 }
+
+// ── F285: a backup may not write into another stack's repository ───────────
+//
+// Repositories are named after the owning APP (D25), so an app that moves
+// between stacks keeps its history. The other side of that, which nothing
+// said out loud: two stacks naming the same owner share ONE repository.
+//
+// Found by running the G13 drill on 2026-09-04. A throwaway stack `drill`
+// declared a native unit `http-switchboard` — also a live service on CT 109.
+// Its destroy took the mandatory backup-before-destroy into the LIVE
+// `http-switchboard-config` repository and then applied the throwaway stack's
+// retention to it, deleting the real service's most recent snapshot. The
+// drill's own snapshot was then `latest`, so restoring the real service would
+// have handed back the drill's fake configuration.
+
+use homelab_core::ops::backup::conflicting_owner;
+
+#[test]
+fn f285_an_owner_another_stack_already_has_is_a_conflict() {
+    let others = vec![
+        (
+            "kyu".to_string(),
+            vec!["http-switchboard".to_string(), "kyu".into()],
+        ),
+        ("media".to_string(), vec!["jellyfin".to_string()]),
+    ];
+    let hit = conflicting_owner("drill", &["http-switchboard".into()], &others);
+    assert_eq!(
+        hit,
+        Some(("http-switchboard".into(), "kyu".into())),
+        "the drill's owner is kyu's owner"
+    );
+}
+
+#[test]
+fn f285_a_stack_does_not_conflict_with_itself() {
+    let others = vec![("kyu".to_string(), vec!["http-switchboard".to_string()])];
+    assert_eq!(
+        conflicting_owner("kyu", &["http-switchboard".into()], &others),
+        None,
+        "redeploying a stack must not read as a conflict with itself"
+    );
+}
+
+#[test]
+fn f285_an_owner_nobody_else_claims_is_fine() {
+    let others = vec![("kyu".to_string(), vec!["kyu".to_string()])];
+    assert_eq!(conflicting_owner("drill", &["drill".into()], &others), None);
+    // And an empty fleet — a first deploy — is not a conflict either.
+    assert_eq!(conflicting_owner("drill", &["drill".into()], &[]), None);
+}
+
+/// End to end: the backup refuses before it initialises a repository, so the
+/// other stack's history is never opened at all.
+#[tokio::test]
+async fn f285_the_backup_stops_before_it_touches_the_other_repository() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    // State says stack `other` already owns the app this manifest owns.
+    let other = {
+        let mut m = manifest(109, "other");
+        m.hostname = "109-app-other".into();
+        m.storage[0].host_path = "/appdata/other/test-config".into();
+        m.storage[0].mount_point = "/appdata/other/test-config".into();
+        m.storage[0].app = Some("test".into());
+        m
+    };
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "other": {
+                    "vmid": 109,
+                    "hostname": "109-app-other",
+                    "apps": ["test"],
+                    "applied_at": 0,
+                    "manifest": other,
+                }
+            }
+        })
+        .to_string(),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(!report.ok, "it must refuse");
+    let why = report.error.unwrap().why;
+    assert!(why.contains("already owns"), "{}", why);
+    assert!(
+        exec.calls_containing("restic").is_empty(),
+        "not one restic call may reach the other stack's repository: {:?}",
+        exec.calls_containing("restic")
+    );
+}
+
+// ── F274: the host's own pieces that live outside state_dir ────────────────
+
+/// The SMART collector is installed by this suite on the Proxmox host and
+/// lives nowhere under `state_dir`, so the nightly host-meta snapshot walked
+/// straight past it. It survives a host loss through `captured/pve-host/` in
+/// the repository — a different route from every other piece of host
+/// configuration, and a restore that follows the runbook would put back
+/// everything except these three files.
+#[tokio::test]
+async fn f274_the_host_meta_snapshot_carries_the_smart_collector() {
+    let exec = MockExecutor::new();
+    exec.respond_always("test -e", CmdOutput::ok("yes\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report =
+        homelab_core::ops::backup::backup_host_meta(&ctx(&exec, &sink, &j), &BackupCfg::default())
+            .await;
+    assert!(report.ok, "{:?}", report.error);
+    let snap = exec
+        .calls_containing("restic backup")
+        .into_iter()
+        .next()
+        .expect("a snapshot command");
+    for p in [
+        "/usr/local/bin/smart-textfile-collector.py",
+        "/etc/systemd/system/smart-collector.service",
+        "/etc/systemd/system/smart-collector.timer",
+        // and everything it already carried
+        "/var/lib/homelab/secrets",
+        "/etc/homelab/host.toml",
+    ] {
+        assert!(snap.contains(p), "{} is not in the snapshot: {}", p, snap);
+    }
+}
+
+/// A host that never had the collector is not a broken backup. restic refuses
+/// the WHOLE snapshot when one source path is missing, so an absent extra has
+/// to be dropped from the list rather than passed and hoped for.
+#[tokio::test]
+async fn f274_a_host_without_the_collector_still_gets_its_snapshot() {
+    let exec = MockExecutor::new();
+    exec.respond_always("test -e", CmdOutput::ok("\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report =
+        homelab_core::ops::backup::backup_host_meta(&ctx(&exec, &sink, &j), &BackupCfg::default())
+            .await;
+    assert!(report.ok, "{:?}", report.error);
+    let snap = exec
+        .calls_containing("restic backup")
+        .into_iter()
+        .next()
+        .expect("a snapshot command");
+    assert!(!snap.contains("smart-"), "{}", snap);
+    assert!(snap.contains("/var/lib/homelab/state.json"), "{}", snap);
+}

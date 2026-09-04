@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**428 tests across 23 suites.**
+**434 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -350,6 +350,12 @@ Covers: F105, F153, F154, F156, F162, F180, F207, F209, F210, F36, F75
 - `f280_an_unanswerable_stack_is_left_alone_as_well` — Fail closed here too: a Jellyfin that cannot answer is treated as watched.
 - `f280_an_idle_stack_is_backed_up_exactly_as_before` — And the other side of it: an idle evening backs up exactly as before.
 - `f280_a_stack_that_never_asks_is_backed_up_without_a_question` — A stack whose apps carry no busy-check label is not asked at all — no second command per app, and certainly no stack left un-backed-up because a question nobody asked could not be answered.
+- `f285_an_owner_another_stack_already_has_is_a_conflict`
+- `f285_a_stack_does_not_conflict_with_itself`
+- `f285_an_owner_nobody_else_claims_is_fine`
+- `f285_the_backup_stops_before_it_touches_the_other_repository` — End to end: the backup refuses before it initialises a repository, so the other stack's history is never opened at all.
+- `f274_the_host_meta_snapshot_carries_the_smart_collector` — The SMART collector is installed by this suite on the Proxmox host and lives nowhere under `state_dir`, so the nightly host-meta snapshot walked straight past it.
+- `f274_a_host_without_the_collector_still_gets_its_snapshot` — A host that never had the collector is not a broken backup.
 
 ### `core/tests/manualchecks_tests.rs`
 

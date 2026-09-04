@@ -36,6 +36,19 @@ services:
       JOBTRACKER_GIT_USER_NAME: JobTracker hosted
       JOBTRACKER_GIT_USER_EMAIL: jobtracker@kp-soft.dev
       JOBTRACKER_AUTH_REQUIRED: "true"
+      # Almanac, added 2026-09-04 after Kenny hit "Not configured: set
+      # almanac.url ...". `init` writes a fresh config with Almanac empty, so
+      # a hosted instance has to be told. Every config key has a
+      # JOBTRACKER_<SECTION>_<KEY> counterpart that overrides the file, which
+      # is the cleaner half of the answer: editing the file inside the mount
+      # would put configuration somewhere the repository cannot see.
+      #
+      # One source and one token since Almanac 2.x — the version that asked
+      # for `source_id_interview` and `..._TOKEN_INTERVIEW` is older than the
+      # image running today, which is why the error named things that no
+      # longer exist. The token itself is already in the .env.
+      JOBTRACKER_ALMANAC_URL: "http://10.10.10.12:8080"
+      JOBTRACKER_ALMANAC_SOURCE_ID: "job-tracker"
       TZ: Europe/Brussels
     volumes:
       - /appdata/kp-soft/jobtracker-config:/appdata/jobtracker

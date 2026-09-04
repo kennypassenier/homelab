@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**418 tests across 23 suites.**
+**419 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -565,7 +565,8 @@ Covers: F122, F136, F150, F151, F152, F154, F155, F156, F167, F212, F215
 - `the_runbook_names_the_repositories_restic_actually_uses` — The runbook must name the repositories restic actually writes to.
 - `the_scaffold_default_template_is_one_the_fleet_uses` — The template a new stack is scaffolded from must be one the fleet actually uses.
 - `every_shipped_preset_scaffolds_a_valid_stack` — T7: every preset that ships in this repository must scaffold into a stack that is actually deployable — not just the two the other tests happen to name.
-- `the_recyclarr_preset_keeps_its_two_deliberate_absences` — T7: the Recyclarr configuration carries two absences that are DECISIONS, and both of them look like something a helpful hand would fill in.
+- `the_recyclarr_config_keeps_its_deliberate_absences_and_names_every_id` — T7: the Recyclarr configuration carries two absences that are DECISIONS, and both of them look like something a helpful hand would fill in.
+- `the_recyclarr_image_is_pinned_to_a_real_tag` — `:latest` for this image is not a moving target, it is a 404 — the tag has never been published.
 - `every_stack_manifest_agrees_with_the_directories_beside_it` — T49: a stack file and the directories beside it have to agree.
 - `every_native_service_in_the_repository_is_found_with_its_unit_file` — The two shapes a native stack takes on this fleet are both read.
 - `a_native_stack_gets_the_native_operation_from_the_same_key` — A native stack must not be sent a compose operation.

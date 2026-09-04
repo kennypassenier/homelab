@@ -104,7 +104,7 @@ data_mounts:
     mount_point: /mnt/jellyfin-metadata
     note: "Jellyfin's artwork — regenerable, deliberately outside the backup (Kenny, M1)"
 
-apps: [jellyfin, sonarr, radarr, prowlarr, bazarr, seerr, flaresolverr]
+apps: [jellyfin, sonarr, radarr, prowlarr, bazarr, seerr, flaresolverr, recyclarr]
 
 gateway_route:
   filename: 106-app-media.yml

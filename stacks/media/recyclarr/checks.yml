@@ -1,0 +1,66 @@
+# What "Recyclarr is doing its job" means.
+#
+# The distinction this file is built around: Recyclarr running is not
+# Recyclarr working. It is a cron container — it sits idle 23 hours a day, and
+# a config it cannot parse, an API key that has gone stale or a guide it
+# cannot reach all leave it running exactly the same. So nothing here asks
+# whether the container is up; every check reads what it PUT in Sonarr and
+# Radarr, which is the only evidence that it ran and was believed.
+checks:
+  - name: "custom formats in Radarr"
+    command: >-
+      K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
+      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:7878/api/v3/customformat |
+      grep -oE '"id":' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts the formats, not their scores. A sync that created every format
+      and assigned none of them to a profile passes this.
+
+  - name: "custom formats in Sonarr"
+    command: >-
+      K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
+      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:8989/api/v3/customformat |
+      grep -oE '"id":' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Same blind spot as its Radarr twin.
+
+  - name: "scores toegekend in het 1080p-profiel van Radarr"
+    command: >-
+      K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
+      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:7878/api/v3/qualityprofile/4 |
+      grep -oE '"score":-?[1-9][0-9]*' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts how many formats have a score that is not zero in the profile the
+      961 films point at. It says the sync reached the profile; it does not
+      say the scores are the ones this repository asked for.
+
+  - name: "scores toegekend in het 1080p-profiel van Sonarr"
+    command: >-
+      K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
+      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:8989/api/v3/qualityprofile/4 |
+      grep -oE '"score":-?[1-9][0-9]*' | wc -l
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Same as above, for the profile the 210 series point at.
+
+  - name: "laatste sync zonder fout afgesloten"
+    command: >-
+      docker logs --since 26h recyclarr 2>&1 | grep -c 'ERR\]' || true
+    expect: must_match
+    layer: application
+    blind_spot: >-
+      Reads what the container said in the last 26 hours — a window wider than
+      its daily schedule, so one skipped night still shows the previous run
+      rather than reading as clean. 0 is a clean run. It cannot tell a clean
+      run from no run at all; the four checks above are what notice that,
+      because a Recyclarr that never ran leaves the scores where they were.
+
+manual:
+  - "Kijk in Radarr bij Settings › Profiles of het 1080p-profiel er nog uitziet zoals je wil, één keer na de eerste sync."

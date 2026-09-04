@@ -35,7 +35,7 @@ services:
       # it costs one git clone and a sync that finds the profiles by name.
       #
       # So it is deliberately NOT an `/appdata` bind mount: that would need a
-      # seventh mountpoint on the container, and the orchestrator numbers mountpoints
+      # seventh mountpoint on CT 106, and the orchestrator numbers mountpoints
       # by position — inserting one renumbers the three media libraries that
       # come after it, on a container that is streaming. A cache is not worth
       # that.
@@ -43,7 +43,7 @@ services:
       # The configuration itself comes from the repository and is read-only to
       # the container: what Recyclarr writes lives in Sonarr and Radarr, and
       # what Recyclarr is TOLD lives in git.
-      - /opt/__STACK__/recyclarr/recyclarr.yml:/config/recyclarr.yml:ro
+      - /opt/media/recyclarr/recyclarr.yml:/config/recyclarr.yml:ro
     restart: unless-stopped
     labels:
       # A pinned tag with an auto policy is a lie: the nightly pull would find
@@ -55,12 +55,12 @@ services:
       # label anyway would add one more container to the nightly stop list for
       # no backup at all.
     networks:
-      - __STACK___net
+      - media_net
 
 volumes:
   recyclarr-config:
 
 networks:
-  __STACK___net:
+  media_net:
     external: true
-    name: __STACK___net
+    name: media_net

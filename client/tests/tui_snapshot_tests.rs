@@ -1734,10 +1734,19 @@ fn every_shipped_preset_scaffolds_a_valid_stack() {
 ///
 /// Neither absence is visible by reading the file, which is why it is a test.
 #[test]
-fn the_recyclarr_preset_keeps_its_two_deliberate_absences() {
-    let cfg = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+fn the_recyclarr_config_keeps_its_deliberate_absences_and_names_every_id() {
+    let stack = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stacks/media/recyclarr/recyclarr.yml");
+    let preset = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../presets/recyclarr/recyclarr/recyclarr.yml");
-    let body = std::fs::read_to_string(&cfg).expect("recyclarr preset config");
+    let body = std::fs::read_to_string(&stack).expect("recyclarr stack config");
+    assert_eq!(
+        body,
+        std::fs::read_to_string(&preset).expect("recyclarr preset config"),
+        "the preset and the deployed configuration have drifted apart — the \
+         preset is what a second instance would be scaffolded from, so a fix \
+         made in one and not the other is a fix that only half exists"
+    );
 
     let live: String = body
         .lines()
@@ -1751,25 +1760,87 @@ fn the_recyclarr_preset_keeps_its_two_deliberate_absences() {
          size caps R2/R3/R11 with a single scaling ratio"
     );
 
-    // A TRaSH id is 32 lowercase hex characters. Outside a comment, one can
-    // only have come from memory: the resolved ones are pasted at deploy time
-    // from `recyclarr list custom-formats`.
+    // Every raw TRaSH id must carry the name it stands for, in a comment on
+    // its own line.
+    //
+    // The rule this replaces banned ids outright, on the reasoning that an id
+    // on an active line could only have been written from memory. That was
+    // true while R4, R5 and R6 were unimplemented comments, and it stopped
+    // being true the moment they were implemented — those three decisions
+    // cannot be expressed without ids. A guard that forbids the correct
+    // implementation of a decision is asking the wrong question: what matters
+    // is not that an id is absent but that a reader can see WHAT it is, and
+    // that the file says where the ids were read.
+    let mut ids = std::collections::BTreeSet::new();
     for line in live.lines() {
-        let squashed: String = line.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-        let mut run = 0usize;
-        for c in squashed.chars() {
-            if c.is_ascii_hexdigit() && !c.is_ascii_uppercase() {
-                run += 1;
-                assert!(
-                    run < 32,
-                    "recyclarr.yml carries a raw trash_id on an active line — \
-                     resolve it with `recyclarr list custom-formats` instead: {}",
-                    line.trim()
-                );
-            } else {
-                run = 0;
-            }
-        }
+        let Some(id) = line.split_whitespace().find(|w| {
+            w.len() == 32
+                && w.chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+        }) else {
+            continue;
+        };
+        assert!(
+            line.contains('#'),
+            "trash id {} has no comment saying what it is: {}",
+            id,
+            line.trim()
+        );
+        assert!(
+            ids.insert(id.to_string()),
+            "trash id {} appears twice — the later one silently wins: {}",
+            id,
+            line.trim()
+        );
+    }
+    assert!(
+        ids.len() >= 12,
+        "R4, R5 and R6 need ids to exist at all; found only {}",
+        ids.len()
+    );
+    assert!(
+        body.contains("list custom-formats"),
+        "the file must say where its ids were read, or the next reader has to \
+         trust them"
+    );
+}
+
+/// `:latest` for this image is not a moving target, it is a 404 — the tag has
+/// never been published. The first version of the preset asked for it and
+/// could not have started (F275).
+#[test]
+fn the_recyclarr_image_is_pinned_to_a_real_tag() {
+    for rel in [
+        "../stacks/media/recyclarr/docker-compose.yml",
+        "../presets/recyclarr/recyclarr/docker-compose.yml",
+    ] {
+        let body =
+            std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel))
+                .expect("recyclarr compose");
+        let image = body
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with("image:"))
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            image.contains("ghcr.io/recyclarr/recyclarr:"),
+            "{}: unexpected image line {:?}",
+            rel,
+            image
+        );
+        assert!(
+            !image.ends_with(":latest"),
+            "{}: :latest does not exist for this image — it is a pull failure, \
+             not a rolling tag",
+            rel
+        );
+        assert!(
+            image.contains("update.policy=manual") || body.contains("update.policy=manual"),
+            "{}: a pinned tag with an auto update policy reports a successful \
+             update every night and never changes anything",
+            rel
+        );
     }
 }
 

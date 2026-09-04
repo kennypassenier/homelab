@@ -1,4 +1,4 @@
-# Resume point — 2026-09-02, evening
+# Resume point — 2026-09-04, early morning
 
 Written so a new session can pick this up without reading a chat log. Kenny's
 standing instruction that day: *"ga door tot je niet meer kan, houdt er
@@ -92,44 +92,62 @@ the nightly round in the host-meta slot.
 3. **F247** — nothing in the house sends almanac anything (zero events in 48 h).
    Kenny's call whether that is a pipeline still to build or a service to retire.
 
-## In flight: the backup must ask before it quiesces (2026-09-04)
+## Done 2026-09-04 · the backup asks before it quiesces (F280, F282)
 
 Kenny was streaming at 04:17 when the nightly round ran `docker stop` on all
-six media containers to take a clean snapshot, then started them again. His
-episode skipped; every media tile on the front page went to ECONNREFUSED.
-Correct for backup integrity, and nothing asked whether anybody was using it.
+six media containers to take a clean snapshot and started them again thirty
+seconds later. His episode skipped to the next one; every media tile on the
+front page went to ECONNREFUSED.
 
-Two faults, both mine (F280): `stream_guards` was built for A7 and **never
-put in host.toml**, so the guard has been dormant since it shipped; and even
-configured it only gates the scheduled UPDATE, while it was the BACKUP that
-cut him off. Fix: wire the setting, and ask the same question before the
-quiesce — a stack in use skips its backup tonight and says so.
+The check that prevents exactly this had been armed for two days — on the
+UPDATE path. The backup path stops the same containers every single night and
+never asked. (An earlier note here blamed a dormant `stream_guards` setting;
+that was wrong — F233 withdrew that mechanism on 2026-09-02 because O10
+already existed and worked. The real gap was the second caller.)
 
-## In flight: the Recyclarr repair (form J1, 2026-09-03)
+The question now lives in `busy::app_busy` and both paths ask it. A backup of
+a stack in use returns `CoreError::Deferred`, a third state that is neither
+success nor failure: no `last_backup` timestamp is written for work that did
+not happen, and H8 does not park the stack for being watched. Tomorrow it runs.
 
-Kenny answered **Claude repareert en toont dan**, and then on 2026-09-04:
-*"Ik wil gewoon het eindresultaat … let me know als het af is."* So this runs
-to completion rather than stopping at a preview.
+**Live-proven the same night**: `homelab backup stacks/media` while Kenny was
+paused on an episode returned *"backup deferred — jellyfin is in use: Kenny is
+paused on You Must Be Caspian"*, and nothing was stopped. Host v3.43.1.
 
-What is decided and measured so far (F275, F279):
+## Done 2026-09-04 · Recyclarr manages the profiles (F281)
 
-- `:latest` does not exist as a Recyclarr tag — pin a real one (7.4.0 is
-  newest).
-- The config in `presets/recyclarr/` is written for an older Recyclarr and
-  fails on the current template layout.
-- `quality_definition` must be left OUT: R2/R3/R11's size caps are already
-  set and measured in both applications.
-- Radarr and Sonarr each have profile **id=4 "1080p"** — 961 films and 210
-  series point at it — and id=5 "Ultra-HD" with nothing on it. TRaSH's
-  templates create profiles under their own names, so matching the existing
-  one is the open design question. A **rename** is safe (items point by id,
-  never by name); the pre-change export is in `captured/media-profiles/`.
-- API keys are readable from each app's `config.xml`; the env goes to
-  `/var/lib/homelab/secrets/media/recyclarr.env` on the host, which the
-  deploy pushes — no latch, no secret in the repo.
+Kenny: *"Ik wil gewoon het eindresultaat … let me know als het af is."* It is
+running, it has synced, and the result was read back out of both APIs rather
+than out of its own log.
+
+- Image pinned to **8.7.2**; `:latest` has never been published, which is why
+  the preset could not start. Policy `manual`, because a pinned tag with an
+  auto policy reports a successful update every night and changes nothing.
+- It lives in the media stack (`stacks/media/recyclarr/`) and reaches the
+  applications by container name. `/config` is a docker volume, not an
+  `/appdata` mount: it holds only a cache, and a seventh mountpoint on CT 106
+  would have renumbered the three media libraries after it.
+- The API keys are in `/var/lib/homelab/secrets/media/recyclarr.env` on the
+  host. Nothing in git holds them.
+- **R7 is solved without renaming anything**: `name:` overrides the guide's
+  profile name, so Radarr id=4 and Sonarr id=4 — the profiles 961 films and
+  210 series already point at — are managed in place. The pre-change export
+  stays in `captured/media-profiles/`.
+- The one place the guide is contradicted: TRaSH's Sonarr WEB-1080p allows WEB
+  and nothing else, which would have stopped 210 series from grabbing a Bluray
+  release at all. R1 says the ceiling is Bluray-1080p, so the qualities come
+  from R1 and only the scores from the guide.
+
+If Recyclarr work resumes, the thing to know first: **`minFormatScore` is 0 on
+every profile**, so a small negative score does not deprioritise a release, it
+refuses it. Preferences are expressed as positive scores on what should win.
 
 ## Waiting on Kenny (not on us)
 
-- **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his command.
+- **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his
+  command. Checked 2026-09-04: the newest `.age` is from 14:12 on 2026-09-02,
+  three hours older than the key activity that day.
+- **The 28 manual checks** (`homelab checks`), including one new one: look at
+  Radarr's 1080p profile once, now that Recyclarr writes it.
 - **Correction form** for the Jellyfin stream-check duplication, queued in
   `QUEUED_MINI_ROUNDS.md`.

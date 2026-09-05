@@ -243,10 +243,11 @@ async fn c7_supervised_update_rolls_back_when_new_version_stays_down() {
     exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
     // Health loop after restart fails; the rollback script (cp back +
     // restart) succeeds.
-    exec.respond_always(
-        "for i in 1 2 3 4 5",
-        CmdOutput::failed(1, "unit stays down"),
-    );
+    // Matches the settle window of health_script (F300). Keyed on NRestarts
+    // because that is the reading which cannot be fooled by sampling, and it
+    // only appears in the new script — the old one would not match, so this
+    // test cannot silently pass against a reverted fix.
+    exec.respond_always("NRestarts", CmdOutput::failed(1, "DIED_IN_WINDOW"));
     exec.respond_always("cp -p '/usr/local/bin/kyu.homelab-prev'", CmdOutput::ok(""));
     adopt_mocks(&exec);
     let sink = VecSink::new();
@@ -841,5 +842,62 @@ async fn c7_adopt_leaves_its_own_description_alone() {
         exec.calls_containing("--description").is_empty(),
         "a description this suite already owns must not be rewritten: {:?}",
         exec.calls_containing("--description")
+    );
+}
+
+/// F300, the fault the chassis-rs architecture critic found by reading this
+/// file: the health check asked "did it start", not "is it still running".
+#[test]
+fn f300_the_health_check_watches_a_window_not_a_moment() {
+    use homelab_core::ops::native::health_script;
+    let s = health_script("kyu.service");
+
+    // The reading that cannot be fooled by sampling. A service crash-looping
+    // on a 5s timer IS active for part of every cycle, so polling alone can
+    // land on the good moments; a restart counter cannot be timed around.
+    assert!(
+        s.contains("NRestarts"),
+        "the settle window must compare systemd's restart counter: {}",
+        s
+    );
+    // The old script's shape: exit 0 on the first `active`. Its return had to
+    // stop being reachable, not merely be joined by better checks.
+    assert!(
+        !s.contains("= active ] && exit 0"),
+        "no early exit on a single active reading: {}",
+        s
+    );
+    // Each failure says which of the three things went wrong, because an
+    // operator reading this at 04:00 needs "it never came up" and "it came up
+    // and died" to be different sentences.
+    for token in ["NEVER_ACTIVE", "DIED_IN_WINDOW", "RESTART_LOOP"] {
+        assert!(s.contains(token), "missing diagnosis {}: {}", token, s);
+    }
+}
+
+/// F300's second half: the rollback wrote over a binary systemd was busy
+/// re-executing every five seconds, and lost the race as "ROLLBACK ALSO
+/// FAILED" rather than as ETXTBSY.
+#[test]
+fn f300_the_rollback_stops_the_unit_before_overwriting_its_binary() {
+    use homelab_core::ops::native::rollback_script;
+    let s = rollback_script(
+        "kyu.service",
+        "/usr/local/bin/kyu.homelab-prev",
+        "/usr/local/bin/kyu",
+    );
+
+    let stop = s
+        .find("systemctl stop")
+        .unwrap_or_else(|| panic!("must stop first: {}", s));
+    let cp = s.find("cp -p").expect("must copy the preserved binary");
+    assert!(stop < cp, "the stop must precede the copy: {}", s);
+
+    // `;` and not `&&`: stopping a unit that is already dead is not a
+    // failure and must not abort the restore.
+    assert!(
+        s.contains("systemctl stop kyu.service;"),
+        "a failed stop must not abort the restore: {}",
+        s
     );
 }

@@ -552,6 +552,81 @@ pub async fn backup_native(
 /// the homelab preserves the running binary, restarts into the new one only
 /// when the binary actually changed, verifies health, and rolls back from
 /// OUTSIDE the app when the new version does not come up.
+/// F300: does the new version STAY up, rather than merely come up.
+///
+/// The check this replaces exited 0 on the first `is-active` that said
+/// `active`, and took that reading immediately after `systemctl restart`
+/// returned. For `Type=exec` the unit is active the moment the binary has
+/// been exec'd, so the five iterations were very nearly dead code: it asked
+/// "did it start", not "is it still running". A binary that binds, signals
+/// ready and dies three seconds later passed it — and then, under the
+/// `StartLimitIntervalSec=0` this project recommends for native units,
+/// systemd restarts it forever while the update is recorded as healthy and
+/// the armed rollback never fires. Found by the chassis-rs architecture
+/// critic reading this file, not by it happening.
+///
+/// Two readings, because one of them can be fooled and the other cannot:
+///
+/// - **Still active**, sampled across a settle window. Necessary, not
+///   sufficient — a service crash-looping on a 5-second timer is genuinely
+///   `active` for part of every cycle, so sampling alone can land on the
+///   good moments and see nothing wrong.
+/// - **`NRestarts` unchanged**, which is a counter and not a sample. If
+///   systemd restarted the unit even once during the window, the number
+///   moved, and no amount of lucky timing hides it. The baseline is taken
+///   AFTER the unit first reports active, so a manual restart's own effect
+///   on the counter cannot matter.
+///
+/// The wait-for-active phase comes first and is generous (20 s): a
+/// `Type=notify` service that takes a moment to signal readiness must not be
+/// mistaken for one that failed.
+pub fn health_script(unit: &str) -> String {
+    format!(
+        "systemctl restart {u} || exit 1; \
+         i=0; while [ $i -lt 10 ]; do \
+           [ \"$(systemctl is-active {u})\" = active ] && break; \
+           sleep 2; i=$((i+1)); \
+         done; \
+         [ \"$(systemctl is-active {u})\" = active ] || {{ echo NEVER_ACTIVE; exit 1; }}; \
+         n0=$(systemctl show {u} -p NRestarts --value); \
+         i=0; while [ $i -lt 5 ]; do \
+           sleep 2; \
+           [ \"$(systemctl is-active {u})\" = active ] || {{ echo DIED_IN_WINDOW; exit 1; }}; \
+           [ \"$(systemctl show {u} -p NRestarts --value)\" = \"$n0\" ] || \
+             {{ echo RESTART_LOOP; exit 1; }}; \
+           i=$((i+1)); \
+         done; \
+         exit 0",
+        u = unit
+    )
+}
+
+/// F300: stop the unit before writing over its binary.
+///
+/// The rollback used to `cp -p` straight onto the running program's path.
+/// Writing to a file that is currently being executed gives ETXTBSY, and
+/// `Restart=always` with a 5-second timer means the broken binary is being
+/// executed again every five seconds — so the copy races the restarts, and a
+/// lost race is reported as "ROLLBACK ALSO FAILED — service needs hands NOW"
+/// when the rollback was simply never allowed to write.
+///
+/// `stop` is separated by `;` rather than `&&` on purpose: stopping a unit
+/// that is already dead is not a failure, and must not abort the restore.
+///
+/// No settle window here, unlike the health check above. This binary was
+/// running before the update, so the question is whether the restore took
+/// effect — not whether an unproven version is stable. Doubling the worst
+/// case for that would delay the loud failure report the operator needs.
+pub fn rollback_script(unit: &str, prev: &str, binary: &str) -> String {
+    format!(
+        "systemctl stop {u}; cp -p {prev} {bin} && systemctl start {u} && sleep 2 && \
+         [ \"$(systemctl is-active {u})\" = active ]",
+        u = unit,
+        prev = shq(prev),
+        bin = shq(binary)
+    )
+}
+
 pub async fn update_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
     let op = format!("update-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
@@ -626,25 +701,13 @@ pub async fn update_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Operat
             // Already current: no restart, no nightly service blip.
             return Ok(StepOutcome::Unchanged);
         }
-        let health = format!(
-            "systemctl restart {u} && for i in 1 2 3 4 5; do \
-             [ \"$(systemctl is-active {u})\" = active ] && exit 0; sleep 2; done; exit 1",
-            u = unit
-        );
-        let out = util_pct_sh(exec, m.vmid, &health, 120).await?;
+        let out = util_pct_sh(exec, m.vmid, &health_script(&unit), 180).await?;
         if out.success() {
             return Ok(StepOutcome::Changed);
         }
         // The armed rollback: restore the preserved binary from OUTSIDE the
         // (dead) app, restart, and report the failure loudly either way.
-        let rollback = format!(
-            "cp -p {prev} {bin} && systemctl restart {u} && sleep 2 && \
-             [ \"$(systemctl is-active {u})\" = active ]",
-            prev = shq(&prev),
-            bin = shq(&m.binary),
-            u = unit
-        );
-        let rb = util_pct_sh(exec, m.vmid, &rollback, 120).await?;
+        let rb = util_pct_sh(exec, m.vmid, &rollback_script(&unit, &prev, &m.binary), 180).await?;
         Err(CoreError::Other(format!(
             "new {} version did not come up healthy — rolled back to the previous binary ({}); \
              investigate before the next nightly run",

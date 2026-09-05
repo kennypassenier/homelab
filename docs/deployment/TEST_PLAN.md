@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**440 tests across 23 suites.**
+**442 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -421,6 +421,8 @@ Covers: F117, F171
 - `the_native_backup_uses_the_same_restic_cache_as_every_other` — F171: the native backup builds its restic environment by hand, and the hand-built copy had drifted from the one every compose stack gets.
 - `c7_adopt_rewrites_a_description_that_names_something_else` — The description CT 109 actually carried on 2026-09-05: a program that had not run there for days, and two paths that no longer existed.
 - `c7_adopt_leaves_its_own_description_alone` — Three native services share CT 109 (T5), so adoption runs three times over the same container.
+- `f300_the_health_check_watches_a_window_not_a_moment` — F300, the fault the chassis-rs architecture critic found by reading this file: the health check asked "did it start", not "is it still running".
+- `f300_the_rollback_stops_the_unit_before_overwriting_its_binary` — F300's second half: the rollback wrote over a binary systemd was busy re-executing every five seconds, and lost the race as "ROLLBACK ALSO FAILED" rather than as ETXTBSY.
 
 ### `core/tests/real_deps_tests.rs`
 

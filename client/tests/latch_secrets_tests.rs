@@ -1,7 +1,12 @@
-//! D12: secrets from latch instead of plaintext files. The "latch" here is
-//! a stub executable on PATH — a real subprocess, so argv, cwd, exit codes
-//! and stdout/stderr plumbing are all exercised for real; only latch's
-//! crypto is out of scope (that project tests its own).
+//! D12 and its 2026-09-05 amendment (MR1): where an app's secrets come from,
+//! and which source wins when there are two. The "latch" here is a stub
+//! executable on PATH — a real subprocess, so argv, cwd, exit codes and
+//! stdout/stderr plumbing are all exercised for real; only latch's crypto is
+//! out of scope (that project tests its own).
+//!
+//! The stub's call log carries most of the weight: "latch was not consulted"
+//! is a claim about a subprocess that did not run, and counting its lines is
+//! the only way to assert it.
 
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -103,11 +108,33 @@ fn d12_latch_sourced_secrets() {
         "no plaintext .env may be written"
     );
 
-    // 3. Both sources for one app → refused, not silently preferred.
+    // 3. MR1 (Kenny, 2026-09-05): both sources for one app → the LOCAL file
+    //    wins and latch is not consulted for that app at all. This was a hard
+    //    refusal until that day. What changed the decision was a measurement:
+    //    the repository held two local .env files against thirteen
+    //    latch-backed apps, and the refusal had never once fired on a real
+    //    collision — the only time it ever fired, it blocked a real deploy.
+    //
+    //    The stub is put in `fail` mode for this step deliberately: if latch
+    //    were still invoked for this app, build_spec would error instead of
+    //    returning the on-disk value, so "skipped" is proven twice over — by
+    //    the value that comes back AND by the unchanged call log.
+    std::env::set_var("LATCH_STUB_MODE", "fail");
     write(&dir.join("kyu").join(".env"), "KYU_TOKEN=plain\n");
-    let err = homelab_client::spec::build_spec(&dir).unwrap_err();
-    assert!(err.contains("BOTH"), "{}", err);
+    let before = std::fs::read_to_string(&log).unwrap().lines().count();
+    let spec = homelab_client::spec::build_spec(&dir).unwrap();
+    assert_eq!(
+        spec.env.get("kyu").map(|s| s.as_str()),
+        Some("KYU_TOKEN=plain\n"),
+        "the local file wins over latch"
+    );
+    let after = std::fs::read_to_string(&log).unwrap().lines().count();
+    assert_eq!(
+        before, after,
+        "latch must not be invoked for an app that already has a local .env"
+    );
     std::fs::remove_file(dir.join("kyu/.env")).unwrap();
+    std::env::remove_var("LATCH_STUB_MODE");
 
     // 4. latch fails → its stderr (which carries the remedy) reaches the user.
     std::env::set_var("LATCH_STUB_MODE", "fail");
@@ -197,4 +224,40 @@ apps: [app]
         err
     );
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// MR1's second half: precedence is safe only because the deploy says which
+/// source answered. The report is the measure, so it is a pure function and
+/// gets its own test rather than living in an eprintln nobody can assert on.
+#[test]
+fn mr1_every_app_reports_where_its_secrets_came_from() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut env = BTreeMap::new();
+    env.insert("kp-soft".to_string(), "A=1\n".to_string());
+    env.insert("jobtracker".to_string(), "B=2\n".to_string());
+    env.insert("homepage".to_string(), "C=3\n".to_string());
+
+    // kp-soft: on disk AND declared in latch — the case MR1 decides.
+    // jobtracker: on disk, never declared in latch.
+    // homepage: not on disk, so it can only have come from latch.
+    let from_disk: BTreeSet<String> = ["kp-soft", "jobtracker"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let latch: Vec<String> = ["kp-soft", "homepage"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    let lines = homelab_client::spec::env_sources(&from_disk, &latch, &env);
+    assert_eq!(
+        lines,
+        vec![
+            "[env] homepage <- latch",
+            "[env] jobtracker <- local .env",
+            "[env] kp-soft <- local .env (latch skipped)",
+        ],
+        "every app names its source, and the shadowed one says so explicitly"
+    );
 }

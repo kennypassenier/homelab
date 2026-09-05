@@ -159,7 +159,9 @@ IP already, which matches scope constraint C3.
 | 109 | `/etc/kyu/kyu.env` | hub tokens |
 | 112 | `/etc/almanac/…` | latch key + Google credentials |
 
-Only CT 113's and CT 108's secrets travel through latch today (D12). Every
+Only CT 113's and CT 108's secrets travel through latch today (D12; amended
+2026-09-05 by D110 — a local `.env` beside an app now wins over latch, and
+the deploy names the source per app). Every
 ansible-era `.env` is a plaintext file on a container disk with no other copy.
 
 ## 7 · Findings

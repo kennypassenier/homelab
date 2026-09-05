@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**439 tests across 23 suites.**
+**440 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -529,10 +529,11 @@ Covers: F177
 
 ### `client/tests/latch_secrets_tests.rs`
 
-D12: secrets from latch instead of plaintext files. The "latch" here is a stub executable on PATH — a real subprocess, so argv, cwd, exit codes and stdout/stderr plumbing are all exercised for real; only latch's crypto is out of scope (that project tests its own).
+D12 and its 2026-09-05 amendment (MR1): where an app's secrets come from, and which source wins when there are two. The "latch" here is a stub executable on PATH — a real subprocess, so argv, cwd, exit codes and stdout/stderr plumbing are all exercised for real; only latch's crypto is out of scope (that project tests its own).
 
 - `d12_latch_sourced_secrets` — One test fn on purpose: PATH and HOMELAB_LATCH_ENV are process-global, and parallel tests would race on them.
 - `a_misspelled_key_in_a_stack_file_is_refused` — A typo in a stack file must be refused, not ignored.
+- `mr1_every_app_reports_where_its_secrets_came_from` — MR1's second half: precedence is safe only because the deploy says which source answered.
 
 ### `client/tests/tls_pin_tests.rs`
 

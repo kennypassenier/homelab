@@ -90,29 +90,30 @@ storage:
     app: jobtracker
 
 apps: [kp-soft, jobtracker]
-# Empty on purpose since 2026-09-05, and this is a temporary shape, not a
-# change of model. Kenny's instruction that morning: work from local `.env`
-# files (gitignored via `*.env`) and push those into latch, rather than being
-# blocked whenever latch cannot be read.
+# Declared, and answered from disk today — which is now a supported state
+# rather than a refused one (MR1, Kenny 2026-09-05).
 #
-# What was actually missing, measured rather than assumed: NOT a single value.
-# `latch state` reports `key MISSING` for all four projects and `PAT MISSING`;
-# the ciphertexts are all present and the plaintext lives in the host vault as
-# well. The file beside this one was copied byte-exact from
-# /var/lib/homelab/secrets/kp-soft/kp-soft.env — sha256 2231f824… on both
-# sides — so nothing was reconstructed or guessed.
+# This line says where kp-soft's secrets LIVE: in latch. Beside it sits
+# stacks/kp-soft/kp-soft/.env, gitignored via `*.env`, which is what the
+# deploy actually reads while this machine has no latch key. The deploy says
+# so on every run — `[env] kp-soft <- local .env (latch skipped)` — because
+# precedence is only safe when it is visible.
 #
-# Why this list is empty rather than keeping both: `build_spec` refuses an app
-# that has a plaintext .env AND a latch_secrets entry, deliberately, because a
-# stale plaintext file silently shadowing latch is the exact failure D12 was
-# built to kill. So it is one or the other until the key is back.
+# For a while this list was empty instead, because build_spec refused an app
+# carrying both. What retired that refusal was a measurement: across the whole
+# repository there were TWO local .env files against thirteen latch-backed
+# apps, and the refusal had never once fired on a real collision — the only
+# time it ever fired, it blocked a real deploy. It was asking "do both exist?"
+# where the question that matters is "which one did you use?".
 #
 # ↳ D12 = the decision that stack secrets travel through latch.
+# ↳ MR1 = the mini-round that gave a local file precedence over latch.
 #
-# Putting it back is one line, the moment `latch state` reports a key and a
-# PAT for project `stacks`: restore `[kp-soft]` here and delete
-# stacks/kp-soft/kp-soft/.env in the same commit.
-latch_secrets: []
+# The local file was copied byte-exact from
+# /var/lib/homelab/secrets/kp-soft/kp-soft.env — sha256 2231f824… on both
+# sides — so nothing here was reconstructed or guessed. Deleting it hands the
+# app back to latch with no other change.
+latch_secrets: [kp-soft]
 
 # The image is private on GHCR, so the deploy signs in before it pulls.
 # Until 2026-08-31 that sign-in was a `docker login` run by hand on the

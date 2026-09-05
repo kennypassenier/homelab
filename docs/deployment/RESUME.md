@@ -277,14 +277,25 @@ working copy, latch stays the store, and they get pushed back into latch.
 
 So kp-soft's env was copied byte-exact out of the host vault
 (`/var/lib/homelab/secrets/kp-soft/kp-soft.env`, sha256 `2231f824…` both
-sides) into `stacks/kp-soft/kp-soft/.env`, and `latch_secrets` was emptied —
-`build_spec` refuses an app carrying both, deliberately, because a stale
-plaintext shadowing latch is what D12 exists to prevent.
+sides) into `stacks/kp-soft/kp-soft/.env`.
+
+**That first attempt had to empty `latch_secrets`**, because `build_spec`
+refused an app carrying both a local `.env` and a latch entry. Kenny read that
+refusal and asked the right question — *"latch beheert .env files dus als die
+file er is, dan moet die toch prioriteit krijgen?"* — which opened a
+mini-round on D12 and retired the refusal (**D110**). A local file now wins,
+every app reports its source on every deploy, and `latch_secrets: [kp-soft]`
+is back in the stack file: that line says where the secrets LIVE, the file
+beside it says what is being read today.
+
+**All thirteen latch-backed apps now have a local `.env`** (Kenny's MR2
+answer), pulled from the host vault with a sha256 compared on both sides for
+each, all fourteen confirmed gitignored. `homelab plan stacks/gateway` runs
+without a latch key and says `[env] traefik <- local .env (latch skipped)`.
 
 **Not done: `latch commit` without a key.** That mints a new one, which is
-what cost the project's history on 2026-09-02 (D104). Restoring the latch path
-is one line — put `[kp-soft]` back and delete the local `.env` in the same
-commit — the moment `latch state` reports a key and a PAT.
+what cost the project's history on 2026-09-02 (D104). Handing an app back to
+latch is one deletion — remove its local `.env`, change nothing else.
 
 **F294 came out of this** and is fixed: `update` and `restore` both built the
 whole deploy spec — every secret out of latch — and then sent only the

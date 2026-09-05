@@ -71,12 +71,31 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
     let mut env: BTreeMap<String, String> = BTreeMap::new();
     let mut checks: BTreeMap<String, homelab_core::checks::ServiceChecks> = BTreeMap::new();
     collect(dir, dir, &mut files, &mut env, &mut checks)?;
+    // MR1 (Kenny, 2026-09-05): which source wins, and saying so out loud.
+    //
+    // A local `.env` beats latch. The rule it replaces refused the deploy
+    // outright when an app had both, on the reasoning that a stale plaintext
+    // file silently shadowing latch is what D12 exists to kill. Measured
+    // before changing it: the whole repository held TWO local .env files
+    // against thirteen latch-backed apps, and the guard had never once fired
+    // on a real collision — the only time it ever fired was on a file put
+    // there deliberately to get a blocked deploy moving.
+    //
+    // So the guard was asking "do both exist?" when the question that matters
+    // is "which one did you use?" — F263's shape exactly. Precedence is not
+    // the danger; silence is. Hence the report below: every app says where
+    // its secrets came from, on every deploy, whether or not latch was
+    // involved.
+    let from_disk: std::collections::BTreeSet<String> = env.keys().cloned().collect();
     fetch_latch_secrets(
         dir,
         &stack_file.latch_secrets,
         &stack_file.manifest.apps,
         &mut env,
     )?;
+    for line in env_sources(&from_disk, &stack_file.latch_secrets, &env) {
+        eprintln!("{}", line);
+    }
 
     let gateway_route = match stack_file.gateway_route.as_ref() {
         Some(g) => {
@@ -243,6 +262,30 @@ fn collect(
 /// deliberate: docker compose does its own ${VAR} interpolation on .env
 /// content, so raw latch templates would collide with it — latch resolves
 /// them first or fails hard.
+/// One line per app saying where its secrets came from (MR1).
+///
+/// Pure on purpose: the report IS the measure Kenny chose, so it has to be
+/// testable without capturing stderr. `deploy` used to print a count of env
+/// blobs, which says nothing about their origin — and origin is the whole
+/// question once a local file may win over latch.
+pub fn env_sources(
+    from_disk: &std::collections::BTreeSet<String>,
+    latch_secrets: &[String],
+    env: &BTreeMap<String, String>,
+) -> Vec<String> {
+    env.keys()
+        .map(|app| {
+            let source = match (from_disk.contains(app), latch_secrets.contains(app)) {
+                // The case MR1 is about: declared in latch, answered on disk.
+                (true, true) => "local .env (latch skipped)",
+                (true, false) => "local .env",
+                (false, _) => "latch",
+            };
+            format!("[env] {} <- {}", app, source)
+        })
+        .collect()
+}
+
 fn fetch_latch_secrets(
     dir: &Path,
     apps: &[String],
@@ -276,15 +319,12 @@ fn fetch_latch_secrets(
         .ok_or_else(|| "stack dir has no name".to_string())?;
     let project_root = dir.parent().unwrap_or(dir);
     for app in apps {
-        // Two sources for the same app is ambiguity, not convenience: a
-        // stale plaintext file silently shadowing latch (or the reverse)
-        // is exactly the failure mode D12 exists to kill.
+        // MR1: a local file wins, and the caller reports it. Skipping here
+        // rather than letting latch overwrite is deliberate — this map is
+        // filled from disk first, so removing the refusal without skipping
+        // would silently give latch precedence, the opposite of the decision.
         if env.contains_key(app) {
-            return Err(format!(
-                "app '{}' has BOTH a plaintext .env and latch_secrets :: \
-                 delete stacks/{}/{}/.env or drop '{}' from latch_secrets",
-                app, stack, app, app
-            ));
+            continue;
         }
         let rel = format!("{}/{}/.env", stack, app);
         let out = std::process::Command::new("latch")

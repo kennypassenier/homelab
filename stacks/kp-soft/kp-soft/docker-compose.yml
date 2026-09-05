@@ -14,7 +14,7 @@
 
 services:
   kp-soft:
-    image: ghcr.io/kennypassenier/kp-soft:v0.2.0
+    image: ghcr.io/kennypassenier/kp-soft:v0.3.0
     container_name: kp-soft
     restart: unless-stopped
     # The .env is NOT passed through wholesale. Its names are prefixed in

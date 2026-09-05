@@ -633,16 +633,17 @@ async fn main() {
                 .get(2)
                 .unwrap_or_else(|| die("usage: homelab restore stacks/<name> [snapshot]"));
             let snapshot = args.get(3).cloned().unwrap_or_else(|| "latest".into());
-            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            // F294: the manifest alone, for the same reason as F291 above.
+            let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
             println!(
                 "{}▶ restore {} from '{}'{}",
-                C_YELLOW, spec.manifest.stack_name, snapshot, C_RESET
+                C_YELLOW, manifest.stack_name, snapshot, C_RESET
             );
             rpc(
                 &host,
                 &token,
                 Command::RestoreStack {
-                    manifest: Box::new(spec.manifest),
+                    manifest: Box::new(manifest),
                     snapshot,
                 },
             )
@@ -653,11 +654,17 @@ async fn main() {
                 .get(2)
                 .unwrap_or_else(|| die("usage: homelab update stacks/<name> [app]"));
             let app = args.get(3).cloned();
-            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            // F294: an update pulls an image and recreates a container on the
+            // host; the files and secrets it used to build here were thrown
+            // away one line later. Demanding them meant a machine without the
+            // latch key could not update a stack whose secrets had not
+            // changed — the same fault F291 closed for `backup`, still open in
+            // the two verbs beside it.
+            let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
             println!(
                 "{}▶ update {} :: {}{}",
                 C_CYAN,
-                spec.manifest.stack_name,
+                manifest.stack_name,
                 app.as_deref().unwrap_or("all apps"),
                 C_RESET
             );
@@ -665,7 +672,7 @@ async fn main() {
                 &host,
                 &token,
                 Command::UpdateStack {
-                    manifest: Box::new(spec.manifest),
+                    manifest: Box::new(manifest),
                     app,
                 },
             )

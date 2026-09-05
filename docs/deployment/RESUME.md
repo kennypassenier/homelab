@@ -254,6 +254,35 @@ the host-side chown must use the mapped uid (110001), not 10001 — measured
 today via the drill, where a hand-placed root-owned file was unreadable inside
 the container.
 
+## The work in flight: four releases rolled out (2026-09-05, 04:30)
+
+Kenny's instruction: *"Er zijn vier projecten die een nieuwe release kregen en
+uitgerold moeten worden door jou: kyu, almanac, kp-soft.dev en JobTracker"*,
+followed by *"ga voor de nieuwste release en/of image"*. Full account in
+**D108**; three of the four are live.
+
+| Project | Was | Now | How |
+|---|---|---|---|
+| kyu (CT 109, native) | 2.2.0 | **2.4.1** | `install-native` |
+| almanac (CT 112, native) | 2.3.0 | **2.4.0** | the nightly round did it at 04:17 |
+| JobTracker (CT 116, docker) | 0.2.0 | **0.3.0** | `update`, after F294 |
+| kp-soft (CT 116, docker) | v0.2.0 | v0.2.0 | **blocked, B8** |
+
+**kp-soft is the one that did not land.** The pin in
+`stacks/kp-soft/kp-soft/docker-compose.yml` says v0.3.0 and the deploy needs
+the stack's `.env` out of latch, whose key this machine does not have. Not
+re-minted — that costs the project's history (D104). What was already tried:
+`keyctl get_persistent @s` attaches an EMPTY persistent keyring, so the key
+lives in a session keyring this session does not inherit. `update` is not a
+way around it: the new version sits in the compose file, and only `deploy`
+puts that file on the container.
+
+**F294 came out of this** and is fixed: `update` and `restore` both built the
+whole deploy spec — every secret out of latch — and then sent only the
+manifest. The same fault F291 closed for `backup` a day earlier, still open in
+the two verbs beside it. JobTracker uses no latch secret at all and was
+blocked anyway; with the fix it updated without a key.
+
 ## Waiting on Kenny (not on us)
 
 - **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his

@@ -303,6 +303,29 @@ manifest. The same fault F291 closed for `backup` a day earlier, still open in
 the two verbs beside it. JobTracker uses no latch secret at all and was
 blocked anyway; with the fix it updated without a key.
 
+## Live state after this session (2026-09-05, 05:40)
+
+Host and client both **v3.48.0**. `homelab check`: 0 broken.
+
+| What | State |
+|---|---|
+| kyu (CT 109) | 2.4.1, healthz ok, `kyu-backup.service` success |
+| almanac (CT 112) | 2.4.0, healthz ok |
+| JobTracker (CT 116) | 0.3.0, healthy, HTTP 200 |
+| kp-soft (CT 116) | v0.3.0, healthy, `/up` 200 |
+| Secrets | 14 local `.env` files, all gitignored; deploys name their source |
+| CT 109 + CT 112 descriptions | derived, no longer hand-written (F297) |
+
+**The `.env` files are the working copy, latch is the store.** Refresh one
+from the vault with
+`ssh root@10.10.5.250 'cat /var/lib/homelab/secrets/<stack>/<app>.env' > stacks/<stack>/<app>/.env`
+and compare the sha256 on both sides. Handing an app back to latch is one
+deletion: remove its local `.env`, change nothing else — the `latch_secrets:`
+line stays, because it says where the secrets live.
+
+Still open on latch itself: this machine has no key and no PAT for project
+`stacks`, so nothing can be pushed back INTO latch yet. Not re-minted (D104).
+
 ## Waiting on Kenny (not on us)
 
 - **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his

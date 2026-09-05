@@ -106,9 +106,22 @@ registry_login:
   app: kp-soft
 
 # job.kp-soft.dev, behind Cloudflare Access like the rest (Kenny, form J2).
-# kp-soft's own name still comes from the gateway's hand-written
-# `manual-routes.yml`; this fragment is managed and is deliberately not an
-# attempt to move that one as well.
+#
+# The bare `kp-soft.dev` has NO route — not here, not in the gateway's
+# hand-written `manual-routes.yml`, not anywhere. This comment used to claim
+# that manual file served it; measured 2026-09-05, that file holds exactly two
+# routers, `opn.kp-soft.dev` and `prox.kp-soft.dev`, and a grep for the bare
+# host rule across every live route file finds nothing. The name resolves to
+# Cloudflare and answers 404.
+#
+# That is Kenny's own decision, not a gap: mini-round M1 (2026-08-31) took the
+# site off the edge because every *.kp-soft.dev name sits behind Cloudflare
+# Access, which answers 401 to writes. What the move to the bare name needs is
+# written out in docs/deployment/KP_SOFT_MIGRATION.md.
+#
+# The practical consequence for anyone deploying this stack: a new version
+# lands on 10.10.10.16:8080 and is visible from the LAN only. Nothing outside
+# the house changes, and no route here is meant to change that yet.
 gateway_route:
   filename: 116-app-kp-soft.yml
   gateway_vmid: 104

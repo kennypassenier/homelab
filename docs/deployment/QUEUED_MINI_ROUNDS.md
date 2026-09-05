@@ -156,3 +156,46 @@ required. The measurement that kept this entry open has happened.
 It also produced a new finding the ratified measure did not anticipate: the
 guard is symmetric, so the drill blocked kp-soft's own backup until the drill
 stack was destroyed (F292, task T82).
+
+---
+
+## QUEUED · Correction form — two sessions nearly put the same decision to Kenny twice
+
+**Not opened as a form yet, deliberately.** The fault is "a second form on top
+of an open form"; opening a correction form while B8's form is unanswered
+would commit it again. This entry is the queue, per FORM_PROTOCOL §8 field 7:
+the loop stays open until the form has actually been put and answered.
+
+↳ *B8 = the register row for kp-soft v0.3.0 being blocked on the latch key.*
+
+**What happened (2026-09-05).** This session measured the latch blockage, wrote
+it up as B8 and rendered ONE form with two options for Kenny. It then reported
+to the kp-soft session and, in that report, wrote out the decision including
+its option list: *"Ik leg Kenny zo de keuze voor: hij draait de deploy zelf, of
+hij zet de sleutel hier terug."* That session read it as a status message
+carrying a choice, built the same choice into a form of its own, and rendered
+it to Kenny. They withdrew it on request and queued their own process
+correction (kp-soft queue item 30).
+
+**Where the fault sits on THIS side.** The message handed over a fully shaped
+decision — both options, the recommendation, the reasoning — which is exactly
+the material a session builds a form from, with the ownership stated in a
+subordinate clause. A peer reading it had everything needed to act and one
+easily-missed word saying not to.
+
+**The measure to propose.** When telling a peer session that a decision is
+going to Kenny, say who owns the form in its own sentence, and send the
+measurement rather than the option list. The peer's mirror-image measure —
+"if a peer says it will put a decision to Kenny, that is their form; supply
+the measurement, write nothing out" — is theirs to ratify, not ours.
+
+**What is NOT ours to decide.** Whether this becomes a rule in
+`~/Projects/dev-procedure/STANDING_RULES.md` is Kenny's call. It looks like it
+holds for every project — this is the second cross-session coordination fault
+after F279 — but the shared procedure is not edited on a peer session's
+suggestion, and the §8 landing rule puts a lesson there only when it holds
+everywhere. That question goes in the correction form as its own item.
+
+↳ *F279 = a cross-session message displaced work in progress and nothing
+brought it back.*
+

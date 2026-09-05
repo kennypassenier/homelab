@@ -183,11 +183,30 @@ the material a session builds a form from, with the ownership stated in a
 subordinate clause. A peer reading it had everything needed to act and one
 easily-missed word saying not to.
 
-**The measure to propose.** When telling a peer session that a decision is
-going to Kenny, say who owns the form in its own sentence, and send the
-measurement rather than the option list. The peer's mirror-image measure —
-"if a peer says it will put a decision to Kenny, that is their form; supply
-the measurement, write nothing out" — is theirs to ratify, not ours.
+**The measure to propose — rewritten once, and the rewrite is the point.**
+
+The first version read: *when telling a peer that a decision is going to Kenny,
+say who owns the form in its own sentence, and send the measurement rather than
+the option list.* That is written against the sentence this fault happened to
+be in, which is exactly what FORM_PROTOCOL §8 field 3 warns about — a measure
+shaped like the place you found it meets you again somewhere else.
+
+The property underneath: **a worked-out option list travelling between sessions
+reads as a specification, whatever the sentence around it says.** Ownership in
+a subordinate clause is not what makes it dangerous; the shaped list is. So the
+measure has to hold in the case that will actually bite next — the one where
+nobody says anything about ownership at all. Both directions:
+
+- *Sending.* A peer gets the measurement and the register number. If the option
+  list goes too, the message opens by naming the session that renders.
+- *Receiving.* Before rendering a form built on anything a peer sent, name the
+  session that owns the decision. If a peer message carries options and does not
+  say who renders, ask — a sibling session answers in minutes, which is
+  FORM_PROTOCOL §5.6a's own reasoning applied to ownership instead of behaviour.
+
+The kp-soft session found the property (their commit `4f08d45`) after this
+entry was first written; the sharpening is theirs and the receiving half is
+adopted here on its merits, not because a peer proposed it.
 
 **What is NOT ours to decide.** Whether this becomes a rule in
 `~/Projects/dev-procedure/STANDING_RULES.md` is Kenny's call. It looks like it

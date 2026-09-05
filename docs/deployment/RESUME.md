@@ -266,16 +266,25 @@ followed by *"ga voor de nieuwste release en/of image"*. Full account in
 | kyu (CT 109, native) | 2.2.0 | **2.4.1** | `install-native` |
 | almanac (CT 112, native) | 2.3.0 | **2.4.0** | the nightly round did it at 04:17 |
 | JobTracker (CT 116, docker) | 0.2.0 | **0.3.0** | `update`, after F294 |
-| kp-soft (CT 116, docker) | v0.2.0 | v0.2.0 | **blocked, B8** |
+| kp-soft (CT 116, docker) | v0.2.0 | **v0.3.0** | `deploy`, after D109 |
 
-**kp-soft is the one that did not land.** The pin in
-`stacks/kp-soft/kp-soft/docker-compose.yml` says v0.3.0 and the deploy needs
-the stack's `.env` out of latch, whose key this machine does not have. Not
-re-minted — that costs the project's history (D104). What was already tried:
-`keyctl get_persistent @s` attaches an EMPTY persistent keyring, so the key
-lives in a session keyring this session does not inherit. `update` is not a
-way around it: the new version sits in the compose file, and only `deploy`
-puts that file on the container.
+**kp-soft landed last, along a different road (D109).** The deploy needs the
+stack's `.env`, and no agent session on this machine holds the latch key —
+`latch state` says `key MISSING` for all four projects and `PAT MISSING` too;
+the kp-soft session measured the same from its side. Kenny's answer was to
+stop working around latch: local `.env` files (gitignored via `*.env`) are the
+working copy, latch stays the store, and they get pushed back into latch.
+
+So kp-soft's env was copied byte-exact out of the host vault
+(`/var/lib/homelab/secrets/kp-soft/kp-soft.env`, sha256 `2231f824…` both
+sides) into `stacks/kp-soft/kp-soft/.env`, and `latch_secrets` was emptied —
+`build_spec` refuses an app carrying both, deliberately, because a stale
+plaintext shadowing latch is what D12 exists to prevent.
+
+**Not done: `latch commit` without a key.** That mints a new one, which is
+what cost the project's history on 2026-09-02 (D104). Restoring the latch path
+is one line — put `[kp-soft]` back and delete the local `.env` in the same
+commit — the moment `latch state` reports a key and a PAT.
 
 **F294 came out of this** and is fixed: `update` and `restore` both built the
 whole deploy spec — every secret out of latch — and then sent only the

@@ -90,7 +90,29 @@ storage:
     app: jobtracker
 
 apps: [kp-soft, jobtracker]
-latch_secrets: [kp-soft]
+# Empty on purpose since 2026-09-05, and this is a temporary shape, not a
+# change of model. Kenny's instruction that morning: work from local `.env`
+# files (gitignored via `*.env`) and push those into latch, rather than being
+# blocked whenever latch cannot be read.
+#
+# What was actually missing, measured rather than assumed: NOT a single value.
+# `latch state` reports `key MISSING` for all four projects and `PAT MISSING`;
+# the ciphertexts are all present and the plaintext lives in the host vault as
+# well. The file beside this one was copied byte-exact from
+# /var/lib/homelab/secrets/kp-soft/kp-soft.env — sha256 2231f824… on both
+# sides — so nothing was reconstructed or guessed.
+#
+# Why this list is empty rather than keeping both: `build_spec` refuses an app
+# that has a plaintext .env AND a latch_secrets entry, deliberately, because a
+# stale plaintext file silently shadowing latch is the exact failure D12 was
+# built to kill. So it is one or the other until the key is back.
+#
+# ↳ D12 = the decision that stack secrets travel through latch.
+#
+# Putting it back is one line, the moment `latch state` reports a key and a
+# PAT for project `stacks`: restore `[kp-soft]` here and delete
+# stacks/kp-soft/kp-soft/.env in the same commit.
+latch_secrets: []
 
 # The image is private on GHCR, so the deploy signs in before it pulls.
 # Until 2026-08-31 that sign-in was a `docker login` run by hand on the

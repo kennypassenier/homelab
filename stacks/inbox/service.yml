@@ -1,0 +1,18 @@
+# The homelab's stack file for a native service (AR18; `homelab adopt`).
+# vmid and hostname are filled in at adoption: the hostname MUST be
+# <vmid>-app-<stack>, the homelab validates it. update_cmd reproduces the
+# unit line for line — same user, working directory and EnvironmentFile —
+# and waits for the result (critic #7), so "already current" is exit 0
+# without a restart and a failure carries its stderr.
+stack_name: inbox
+vmid: 118
+hostname: 118-app-inbox
+unit: inbox
+binary: /opt/inbox/bin/inbox
+env_file: /etc/inbox/inbox.env
+data_dirs:
+  - /var/lib/inbox
+# update_cmd deliberately absent until chassis-rs has a real release pipeline
+# (the drill server on Kenny's PC is not a release host); the nightly run backs up only.
+release_repo: kennypassenier/chassis-rs
+release_asset: inbox

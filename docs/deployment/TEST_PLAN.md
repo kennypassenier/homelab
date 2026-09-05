@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**437 tests across 23 suites.**
+**439 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -419,6 +419,8 @@ Covers: F117, F171
 - `a_reinstall_that_fails_returns_to_the_binary_that_was_running` — A RE-install that does not come up returns to the binary that was running.
 - `a_release_source_that_is_half_declared_is_refused` — The release source is part of the stack file or it is nowhere.
 - `the_native_backup_uses_the_same_restic_cache_as_every_other` — F171: the native backup builds its restic environment by hand, and the hand-built copy had drifted from the one every compose stack gets.
+- `c7_adopt_rewrites_a_description_that_names_something_else` — The description CT 109 actually carried on 2026-09-05: a program that had not run there for days, and two paths that no longer existed.
+- `c7_adopt_leaves_its_own_description_alone` — Three native services share CT 109 (T5), so adoption runs three times over the same container.
 
 ### `core/tests/real_deps_tests.rs`
 

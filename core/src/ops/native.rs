@@ -131,6 +131,53 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
         Ok(StepOutcome::Changed)
     });
 
+    // The description is the tag's fault one field over. `pct set
+    // --description` runs where a container is CREATED (deploy.rs), so an
+    // adopted container keeps whatever it had — and what CT 109 had was
+    // "mailbox 1.0.0 — durable message hub", naming a program that no longer
+    // runs and two paths that no longer exist (`/var/lib/mailbox`,
+    // `/etc/mailbox/mailbox.env`; the store moved to /appdata on 2026-09-01).
+    //
+    // Both hand-written descriptions in the fleet had drifted by the time
+    // this was measured, which is the argument against fixing them by hand:
+    // almanac's still pointed at `/etc/almanac/latch.env` while its service
+    // file had moved to `/appdata/almanac/almanac-config/latch.env`. A
+    // description nobody derives is a description nobody keeps true.
+    //
+    // So it says the one thing that stays true — which stack owns this
+    // container — and points at the file that carries the detail, instead of
+    // copying facts that will move again. Idempotent by construction: every
+    // service in a shared container renders the same string (T5), so the
+    // three natives on CT 109 do not fight over it.
+    step!(runner, "describe", {
+        let vm = m.vmid.to_string();
+        let desc = format!(
+            "managed by homelab v2 :: stack {} :: native service(s) under systemd. \
+             Authoritative detail — units, binaries, data and env paths — lives in \
+             stacks/{}/service.yml in the intent repo, not here.",
+            m.stack_name, m.stack_name
+        );
+        let cfg = exec.run(&Cmd::new("pct", &["config", &vm], 30)).await?;
+        let current = cfg
+            .stdout
+            .lines()
+            .find_map(|l| l.strip_prefix("description:"))
+            .map(|v| v.trim().to_string())
+            .unwrap_or_default();
+        // pct reports the description percent-encoded; compare on the marker
+        // rather than round-tripping the encoding.
+        let marker = format!("stack%20{}%20", m.stack_name);
+        if current.contains(&marker) || current.contains(&format!("stack {} ", m.stack_name)) {
+            return Ok(StepOutcome::Unchanged);
+        }
+        run_ok(
+            exec,
+            &Cmd::new("pct", &["set", &vm, "--description", &desc], 30),
+        )
+        .await?;
+        Ok(StepOutcome::Changed)
+    });
+
     step!(runner, "record state", {
         let store = crate::state::StateStore::new(exec, &ctx.state_dir);
         let mut state = store.load().await?;

@@ -777,3 +777,69 @@ async fn the_native_backup_uses_the_same_restic_cache_as_every_other() {
         snapshot
     );
 }
+
+/// The description CT 109 actually carried on 2026-09-05: a program that had
+/// not run there for days, and two paths that no longer existed. `pct set
+/// --description` runs only where a container is CREATED, so adoption — the
+/// other way in — left it standing. Same shape as the `homelab` tag before it.
+#[tokio::test]
+async fn c7_adopt_rewrites_a_description_that_names_something_else() {
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "pct config 109",
+        CmdOutput::ok(
+            "hostname: 109-app-kyu\n\
+             description: mailbox 1.0.0 %E2%80%94 durable message hub. Data%3A /var/lib/mailbox\n",
+        ),
+    );
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let written = exec.calls_containing("--description");
+    assert_eq!(
+        written.len(),
+        1,
+        "adoption must rewrite a foreign description: {:?}",
+        written
+    );
+    assert!(
+        written[0].contains("stack kyu"),
+        "the new description names the owning stack: {}",
+        written[0]
+    );
+    assert!(
+        !written[0].contains("mailbox"),
+        "the stale program name must not survive: {}",
+        written[0]
+    );
+}
+
+/// Three native services share CT 109 (T5), so adoption runs three times over
+/// the same container. Each must render the same string and only the first may
+/// write it — otherwise the nightly round rewrites a container every night and
+/// every run reports a change that changed nothing.
+#[tokio::test]
+async fn c7_adopt_leaves_its_own_description_alone() {
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "pct config 109",
+        CmdOutput::ok(
+            "hostname: 109-app-kyu\n\
+             description: managed by homelab v2 %3A%3A stack%20kyu%20%3A%3A native service(s)\n",
+        ),
+    );
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    assert!(
+        exec.calls_containing("--description").is_empty(),
+        "a description this suite already owns must not be rewritten: {:?}",
+        exec.calls_containing("--description")
+    );
+}

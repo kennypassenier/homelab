@@ -149,15 +149,38 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
     })
 }
 
+/// Every native manifest a stack directory holds, keyed by unit name.
+///
+/// Pure and public so the layout question has one answer and a test can ask
+/// it without a network: see F301 for what two readers of the same layout
+/// cost.
+pub fn native_manifests_for(dir: &Path) -> BTreeMap<String, homelab_proto::NativeServiceManifest> {
+    native_services(dir)
+        .into_iter()
+        .map(|(m, _unit_file)| (m.unit.clone(), m))
+        .collect()
+}
+
 /// Fetch each native unit's binary from its own release, verified.
 fn stage_native_binaries(dir: &Path, natives: &[String]) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
+    // F301: resolved through `native_services`, which knows BOTH layouts, and
+    // not by guessing `<unit>/service.yml`. A stack with one native keeps its
+    // file at the top (`stacks/almanac/service.yml`); a stack with several
+    // gives each a directory. kyu is both at once — three natives, with its
+    // own file still at the top from when it was the only one — so this loop
+    // silently skipped the hub itself. Every deploy staged kyu-runner and
+    // http-switchboard and never once the program the container exists for,
+    // with nothing in the transcript to say so. Two readers of the same
+    // layout is what let them disagree; there is one now.
+    let resolved = native_manifests_for(dir);
     for unit in natives {
-        let svc = dir.join(unit).join("service.yml");
-        let Ok(raw) = std::fs::read_to_string(&svc) else {
-            continue;
-        };
-        let Ok(m) = serde_yaml::from_str::<homelab_proto::NativeServiceManifest>(&raw) else {
+        let Some(m) = resolved.get(unit).cloned() else {
+            eprintln!(
+                "  · {} is declared in natives but no service.yml describes it — \
+                 binary not shipped",
+                unit
+            );
             continue;
         };
         // No release_repo is a deliberate state, not an oversight: the

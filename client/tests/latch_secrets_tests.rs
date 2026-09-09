@@ -261,3 +261,50 @@ fn mr1_every_app_reports_where_its_secrets_came_from() {
         "every app names its source, and the shadowed one says so explicitly"
     );
 }
+
+/// F301: a stack with several natives whose FIRST one still keeps its
+/// service.yml at the stack root — kyu's real shape, three units with the
+/// hub's own file at the top from when it was the only one.
+///
+/// The staging loop used to look for `<unit>/service.yml` and nothing else,
+/// so it resolved the two units that had a directory and silently skipped the
+/// hub. Every deploy shipped kyu-runner and http-switchboard and never once
+/// the program the container exists for, with nothing in the transcript
+/// saying so.
+#[test]
+fn f301_a_service_file_at_the_stack_root_is_still_found() {
+    let tmp = std::env::temp_dir().join(format!("homelab-f301-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let dir = tmp.join("stacks").join("kyu");
+    std::fs::create_dir_all(dir.join("kyu-runner")).unwrap();
+
+    let manifest = |unit: &str| {
+        format!(
+            "stack_name: kyu\nvmid: 109\nhostname: 109-app-kyu\nunit: {u}\n\
+             binary: /opt/{u}/bin/{u}\nenv_file: /appdata/kyu/{u}-config/token.env\n\
+             data_dirs:\n  - /appdata/kyu/{u}-config\n",
+            u = unit
+        )
+    };
+    // The hub's own file at the TOP, its neighbour in a directory.
+    std::fs::write(dir.join("service.yml"), manifest("kyu")).unwrap();
+    std::fs::write(dir.join("kyu-runner/service.yml"), manifest("kyu-runner")).unwrap();
+
+    let found = homelab_client::spec::native_manifests_for(&dir);
+    assert!(
+        found.contains_key("kyu"),
+        "the unit whose service.yml sits at the stack root must resolve: {:?}",
+        found.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        found.contains_key("kyu-runner"),
+        "the unit with its own directory must still resolve: {:?}",
+        found.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        found["kyu"].binary, "/opt/kyu/bin/kyu",
+        "and it must be the root file's content, not a guess"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

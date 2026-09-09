@@ -28,7 +28,10 @@ stack_name: kyu
 vmid: 109
 hostname: 109-app-kyu
 unit: kyu-runner
-binary: /usr/local/bin/kyu-runner
+# V6 migration, 2026-09-09: same move as its two neighbours — the kit unit
+# owns /opt/<service>/bin so ReadWritePaths can cover the binary's directory
+# and nothing else.
+binary: /opt/kyu-runner/bin/kyu-runner
 # Paths follow the migration of 2026-09-01: this service's state and
 # configuration live on the host at /appdata/<stack>/<unit>-config,
 # bind-mounted in, so destroying the container costs nothing. The
@@ -45,4 +48,9 @@ data_dirs:
 # T11: measured 2026-09-02 — release v0.1.0 carries the binary under a
 # target-triple name, not the unit name, so the asset is named explicitly.
 release_repo: kennypassenier/kyu-runner
-release_asset: kyu-runner-x86_64-linux-musl
+# Was `kyu-runner-x86_64-linux-musl`, which stopped existing at some release
+# nobody re-read this line for. Measured 2026-09-09 while planning V6: the
+# release carries `kyu-runner`, and the override was quietly making every
+# staging attempt fail with "binary not shipped" — a stack that could not have
+# been rebuilt from its own file.
+release_asset: kyu-runner

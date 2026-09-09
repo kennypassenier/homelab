@@ -5,7 +5,11 @@ stack_name: kyu
 vmid: 109
 hostname: 109-app-kyu
 unit: kyu
-binary: /usr/local/bin/kyu
+# V6 migration, 2026-09-09: kyu 3.x is built on the chassis-rs kit and ships
+# its own golden unit, which puts the program under /opt/<service>/bin so the
+# unit's ReadWritePaths can cover the binary's directory and nothing else. The
+# state directory did not move — only the program did.
+binary: /opt/kyu/bin/kyu
 # Paths follow the migration of 2026-09-01: this service's state and
 # configuration live on the host at /appdata/<stack>/<unit>-config,
 # bind-mounted in, so destroying the container costs nothing. The
@@ -15,10 +19,14 @@ binary: /usr/local/bin/kyu
 env_file: /appdata/kyu/kyu-config/kyu.env
 data_dirs:
   - /appdata/kyu/kyu-config
-# update_cmd deliberately absent for now: the app has (or may have) its own
-# complete rollback mechanism, and two systems restoring binaries can fight
-# each other. Ownership is Kenny's call (form pending); until then the
-# nightly run backs up only.
+# update_cmd STILL deliberately absent, and deliberately not adopted with the
+# rest of V6 on 2026-09-09. kyu's own deploy/service.yml now ships one, so
+# taking the migration wholesale would have switched on nightly unattended
+# updates of the message hub — which is a decision Kenny has not made. The
+# three natives on this container all sit on the same open question; it is one
+# form, not three silent adoptions. Until he answers, the nightly run backs up
+# only, and the log line "kyu has no update_cmd — skipped by decision" is the
+# truth rather than an oversight.
 
 # T11: the hub publishes a verifiable release since v2.1.0 (2026-09-02), so
 # this stack can be finished by the orchestrator like the other three. The
@@ -31,3 +39,7 @@ data_dirs:
 # measured the two as byte-for-byte identical. What lands here is literally
 # what runs in the container.
 release_repo: kennypassenier/kyu
+# Named explicitly since V6 even though it still matches the unit name: the
+# kit's own service.yml spells it out, and a default that silently agrees is a
+# default that silently disagrees the day either name changes.
+release_asset: kyu

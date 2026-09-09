@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**442 tests across 23 suites.**
+**443 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -536,6 +536,7 @@ D12 and its 2026-09-05 amendment (MR1): where an app's secrets come from, and wh
 - `d12_latch_sourced_secrets` — One test fn on purpose: PATH and HOMELAB_LATCH_ENV are process-global, and parallel tests would race on them.
 - `a_misspelled_key_in_a_stack_file_is_refused` — A typo in a stack file must be refused, not ignored.
 - `mr1_every_app_reports_where_its_secrets_came_from` — MR1's second half: precedence is safe only because the deploy says which source answered.
+- `f301_a_service_file_at_the_stack_root_is_still_found` — F301: a stack with several natives whose FIRST one still keeps its service.yml at the stack root — kyu's real shape, three units with the hub's own file at the top from when it was the only one.
 
 ### `client/tests/tls_pin_tests.rs`
 

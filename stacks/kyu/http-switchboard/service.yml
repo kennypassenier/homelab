@@ -20,7 +20,13 @@ stack_name: kyu
 vmid: 109
 hostname: 109-app-kyu
 unit: http-switchboard
-binary: /usr/local/bin/http-switchboard
+# V6 migration, 2026-09-09: 3.0.0 is built on the chassis-rs kit, which puts
+# the program under /opt/<service>/bin. This upgrade crosses TWO majors — the
+# command line changed at 2.0.0 and the door at 3.0.0 — and the kit unit runs
+# `--check` as ExecStartPre, so a binary swap without the two new secrets in
+# token.env leaves a STOPPED service rather than a broken one. That is the
+# safe direction, and it is why the secrets go in before the restart.
+binary: /opt/http-switchboard/bin/http-switchboard
 # Paths follow the migration of 2026-09-01: this service's state and
 # configuration live on the host at /appdata/<stack>/<unit>-config,
 # bind-mounted in, so destroying the container costs nothing. The

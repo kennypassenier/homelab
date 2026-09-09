@@ -56,15 +56,27 @@ pub fn older(host: &str, client: &str) -> bool {
 /// `homelab release-update` answered "Connection reset by peer". That names
 /// the network. The limit had never been written down anywhere, so there was
 /// nothing to read.
-pub const MAX_WS_FRAME: usize = 64 * 1024 * 1024;
+pub const MAX_WS_FRAME: usize = 256 * 1024 * 1024;
+
+// Raised from 64 MiB on 2026-09-09 (F303). The old figure was "five times the
+// current binary" — reasoning about the HOST binary, which was the only large
+// payload the link had at the time. A stack deploy carries every native
+// service's program in one message, so the ceiling has to scale with the
+// STACK, not with one program: CT 109 alone ships kyu, kyu-runner and
+// http-switchboard, 71 MiB of binaries and 94.7 MiB once base64-encoded.
+//
+// Headroom, not a solution. The honest fix is to send those programs one at a
+// time instead of in one message — recorded as T85. This number only buys the
+// room to get there without a wall in the middle.
 
 /// Refuse a payload the far side cannot accept, and say why.
 pub fn too_large(len: usize) -> Option<String> {
     (len > MAX_WS_FRAME).then(|| {
         format!(
             "payload is {} MiB and the link carries at most {} MiB :: this is a limit, not a \
-             network fault — the binary has outgrown the transport and the transfer needs to \
-             be split, not retried",
+             network fault — retrying sends the same bytes and gets the same reset. What has \
+             outgrown the transport is the message itself: a host binary, or a stack deploy \
+             carrying every native service's program at once. It has to be split or shrunk",
             len / 1024 / 1024,
             MAX_WS_FRAME / 1024 / 1024
         )

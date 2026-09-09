@@ -2634,7 +2634,18 @@ async fn scheduler_loop(state: AppState) {
 
 /// The largest single message the link carries, in bytes. Shared with the
 /// client so a payload that cannot arrive is refused before it is built.
-pub const MAX_WS_FRAME: usize = 64 * 1024 * 1024;
+pub const MAX_WS_FRAME: usize = 256 * 1024 * 1024;
+
+// Raised from 64 MiB on 2026-09-09 (F303). The old figure was "five times the
+// current binary" — reasoning about the HOST binary, which was the only large
+// payload the link had at the time. A stack deploy carries every native
+// service's program in one message, so the ceiling has to scale with the
+// STACK, not with one program: CT 109 alone ships kyu, kyu-runner and
+// http-switchboard, 71 MiB of binaries and 94.7 MiB once base64-encoded.
+//
+// Headroom, not a solution. The honest fix is to send those programs one at a
+// time instead of in one message — recorded as T85. This number only buys the
+// room to get there without a wall in the middle.
 
 async fn ws_upgrade(
     State(state): State<AppState>,

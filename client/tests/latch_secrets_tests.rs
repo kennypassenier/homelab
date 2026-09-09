@@ -308,3 +308,45 @@ fn f301_a_service_file_at_the_stack_root_is_still_found() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// F303: the size guard belongs where every command passes, not in the call
+/// sites that remembered it.
+///
+/// Its own doc comment records the first time this happened: a host binary
+/// 132 KB past the ceiling, answered with "Connection reset by peer", which
+/// names the network for a limit. The guard was then fitted to the verbs that
+/// ship the host binary. On 2026-09-09 a stack deploy carrying three service
+/// binaries hit the identical reset — same fault, one caller over.
+#[test]
+fn f303_the_link_refuses_an_oversized_payload_in_words() {
+    use homelab_client::version::{too_large, MAX_WS_FRAME};
+
+    // The ceiling and the "not a network fault" wording are F122's test in
+    // tui_snapshot_tests; this one covers only what F303 added.
+    let why = too_large(MAX_WS_FRAME + 1).expect("one byte over must be refused");
+    assert!(
+        why.contains("retrying sends the same bytes"),
+        "and must close the door on a retry rather than leave it open: {}",
+        why
+    );
+    // The guard now sits in `rpc`, so it speaks for every command — not only
+    // for the host binary the first version was written about.
+    assert!(
+        why.contains("stack deploy"),
+        "the refusal must name the other thing that can outgrow the link: {}",
+        why
+    );
+
+    // The ceiling has to clear a real stack payload: CT 109 ships kyu,
+    // kyu-runner and http-switchboard — 71 MiB of programs, 94.7 MiB once
+    // base64-encoded. Measured 2026-09-09, and the reason the old 64 MiB
+    // figure was not a considered capacity number but a guess about one
+    // binary.
+    let ct109_base64 = (31_204_472usize + 10_830_160 + 32_424_752) * 4 / 3;
+    assert!(
+        too_large(ct109_base64).is_none(),
+        "a real three-service stack payload ({} MiB) must fit under {} MiB",
+        ct109_base64 / 1024 / 1024,
+        MAX_WS_FRAME / 1024 / 1024
+    );
+}

@@ -1476,8 +1476,12 @@ fn a_payload_the_link_cannot_carry_is_refused_with_a_reason() {
         "{}",
         why
     );
+    // Derived, not spelled out. This assertion read "64 MiB" until 2026-09-09,
+    // when the ceiling legitimately moved to make room for a stack that ships
+    // three service binaries (F303) — and a test that pins a number it does
+    // not own fails for the change rather than for the defect.
     assert!(
-        why.contains("64 MiB"),
+        why.contains(&format!("{} MiB", MAX_WS_FRAME / 1024 / 1024)),
         "the ceiling must be in the message: {}",
         why
     );

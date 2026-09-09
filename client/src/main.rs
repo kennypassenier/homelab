@@ -924,6 +924,23 @@ async fn main() {
 }
 
 async fn rpc(host: &str, token: &str, command: Command) {
+    // F303: the size guard lives HERE, where every command passes, and not in
+    // the three call sites that happened to remember it.
+    //
+    // `too_large` was written after `release-update` answered "Connection
+    // reset by peer" for a host binary 132 KB past the old ceiling — its own
+    // comment says so. It was then wired into the verbs that ship the host
+    // binary, and nowhere else. On 2026-09-09 `deploy stacks/kyu` built a
+    // 94.7 MiB payload (three service binaries at once) and got the identical
+    // reset, with the identical nothing to read. Same fault, one caller over,
+    // because the fix had been fitted to the place it was found rather than
+    // to the property: any message can outgrow the link.
+    if let Some(why) = serde_json::to_vec(&command)
+        .ok()
+        .and_then(|v| homelab_client::version::too_large(v.len()))
+    {
+        die(&why);
+    }
     // Commands whose real payload arrives as a separate broadcast frame
     // (Config) may see RpcDone first — wait for the payload before exiting.
     let awaits_payload = matches!(command, Command::GetConfig);

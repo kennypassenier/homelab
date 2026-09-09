@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**443 tests across 23 suites.**
+**444 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -537,6 +537,7 @@ D12 and its 2026-09-05 amendment (MR1): where an app's secrets come from, and wh
 - `a_misspelled_key_in_a_stack_file_is_refused` — A typo in a stack file must be refused, not ignored.
 - `mr1_every_app_reports_where_its_secrets_came_from` — MR1's second half: precedence is safe only because the deploy says which source answered.
 - `f301_a_service_file_at_the_stack_root_is_still_found` — F301: a stack with several natives whose FIRST one still keeps its service.yml at the stack root — kyu's real shape, three units with the hub's own file at the top from when it was the only one.
+- `f303_the_link_refuses_an_oversized_payload_in_words` — F303: the size guard belongs where every command passes, not in the call sites that remembered it.
 
 ### `client/tests/tls_pin_tests.rs`
 

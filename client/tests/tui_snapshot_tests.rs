@@ -2026,16 +2026,40 @@ fn every_native_service_in_the_repository_is_found_with_its_unit_file() {
     // night, so the answer is now all four. Asserted as a count so that a
     // service silently LOSING its release source fails here rather than at a
     // rebuild, when it is too late to notice.
+    //
+    // Amended 2026-09-09 (F304): "must have one" became "must have one, or a
+    // written reason". CT 109's three services had their release source
+    // parked that day because every chassis-rs release needs GLIBC_2.39 and
+    // that container carries 2.36 — leaving the line live would let a deploy
+    // replace a working binary with one that cannot start. That is this
+    // project's own rule for a deliberate nothing: valid when it is written
+    // down with its reason. A source that vanishes without the comment still
+    // fails here, which is the loss this guard was built for.
     let all: Vec<_> = kyu.iter().chain(almanac.iter()).collect();
-    let without: Vec<&str> = all
-        .iter()
-        .filter(|(m, _)| m.release_repo.is_none())
-        .map(|(m, _)| m.unit.as_str())
-        .collect();
+    let mut unexplained: Vec<&str> = Vec::new();
+    for (m, _) in all.iter() {
+        if m.release_repo.is_some() {
+            continue;
+        }
+        let root = stacks.join(&m.stack_name);
+        let candidates = [
+            root.join("service.yml"),
+            root.join(&m.unit).join("service.yml"),
+        ];
+        let parked = candidates.iter().any(|c| {
+            std::fs::read_to_string(c)
+                .map(|body| body.contains("# release_repo:"))
+                .unwrap_or(false)
+        });
+        if !parked {
+            unexplained.push(m.unit.as_str());
+        }
+    }
     assert!(
-        without.is_empty(),
-        "these native services cannot be installed from a release: {:?}",
-        without
+        unexplained.is_empty(),
+        "these native services lost their release source with no reason written \
+         beside it: {:?}",
+        unexplained
     );
 }
 
@@ -2139,9 +2163,20 @@ fn a_native_stack_gets_the_native_operation_from_the_same_key() {
         .iter()
         .map(|(s, _)| s.unit.as_str())
         .collect();
+    // Derived from the stack files, not spelled out. This assertion listed
+    // CT 109's three services by name until 2026-09-09, when all three had
+    // their release source parked (F304). A test that names today's content
+    // fails for a deliberate change instead of for the defect; the property
+    // it defends is the mapping — declared gets requested, undeclared gets
+    // skipped — not which services happen to declare.
+    let kyu_services = homelab_client::spec::native_services(&kyu_dir);
+    let expected: Vec<&str> = kyu_services
+        .iter()
+        .filter(|(svc, _)| svc.release_repo.is_some())
+        .map(|(svc, _)| svc.unit.as_str())
+        .collect();
     assert_eq!(
-        requested,
-        vec!["http-switchboard", "kyu", "kyu-runner"],
+        requested, expected,
         "every service that declares a release source is requested; one that \
          does not is skipped rather than attempted"
     );

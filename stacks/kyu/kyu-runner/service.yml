@@ -28,10 +28,7 @@ stack_name: kyu
 vmid: 109
 hostname: 109-app-kyu
 unit: kyu-runner
-# V6 migration, 2026-09-09: same move as its two neighbours — the kit unit
-# owns /opt/<service>/bin so ReadWritePaths can cover the binary's directory
-# and nothing else.
-binary: /opt/kyu-runner/bin/kyu-runner
+binary: /usr/local/bin/kyu-runner
 # Paths follow the migration of 2026-09-01: this service's state and
 # configuration live on the host at /appdata/<stack>/<unit>-config,
 # bind-mounted in, so destroying the container costs nothing. The
@@ -47,10 +44,27 @@ data_dirs:
 
 # T11: measured 2026-09-02 — release v0.1.0 carries the binary under a
 # target-triple name, not the unit name, so the asset is named explicitly.
-release_repo: kennypassenier/kyu-runner
-# Was `kyu-runner-x86_64-linux-musl`, which stopped existing at some release
-# nobody re-read this line for. Measured 2026-09-09 while planning V6: the
-# release carries `kyu-runner`, and the override was quietly making every
-# staging attempt fail with "binary not shipped" — a stack that could not have
-# been rebuilt from its own file.
+# release_repo is PARKED, not lost — 2026-09-09, F304.
+#
+# Every release of this project since it moved to the chassis-rs kit requires
+# GLIBC_2.39. CT 109 is Debian 12 and carries 2.36, so the binary cannot even
+# start: `/lib/x86_64-linux-gnu/libc.so.6: version 'GLIBC_2.39' not found`.
+# Measured today by restarting kyu onto it — the hub crash-looped and was
+# restored to 2.4.1 within ninety seconds.
+#
+# The line is commented rather than deleted because leaving it live is a
+# LOADED GUN: a deploy stages the release and installs it at the path the unit
+# names, replacing a working binary with one that cannot run. Nothing breaks
+# until the next restart, which is the worst possible moment to find out.
+#
+# It goes back the moment the glibc question is settled — Kenny's form.
+# release_repo: kennypassenier/kyu-runner
+# Was `kyu-runner-x86_64-linux-musl` until 2026-09-09. That name is in no
+# release of this project; the asset is `kyu-runner`, and the override was
+# quietly making every staging attempt fail with "binary not shipped" (F302).
+#
+# Worth keeping in view for the V6 question: that dead name says this project
+# once shipped a STATIC musl build. A statically linked binary would not care
+# what glibc CT 109 carries, which is exactly what stopped the migration
+# today (F304).
 release_asset: kyu-runner

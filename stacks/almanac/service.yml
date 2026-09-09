@@ -9,7 +9,14 @@ stack_name: almanac
 vmid: 112
 hostname: 112-app-almanac
 unit: almanac
-binary: /opt/almanac/almanac
+# Corrected 2026-09-09. Almanac moved to the chassis-rs kit layout
+# (/opt/<service>/bin) on 2026-09-06 and this line still named the old path —
+# where a 13.7 MB binary from 2026-09-05 is still lying, unused. An update
+# would have hashed, replaced and compared THAT file while the unit went on
+# running the other one. `homelab adopt` refused before it could: "unit
+# almanac.service does not exec '/opt/almanac/almanac'". The guard earned its
+# keep; the drift is what needed fixing.
+binary: /opt/almanac/bin/almanac
 env_file: /appdata/almanac/almanac-config/latch.env
 data_dirs:
   - /appdata/almanac/almanac-config
@@ -41,7 +48,20 @@ data_dirs:
 # when what was wrong was where and how it was asked. The command now
 # reproduces the unit line for line: same directory, same environment file,
 # same user, same latch wrapper.
-update_cmd: cd /appdata/almanac/almanac-config && set -a && . /appdata/almanac/almanac-config/latch.env && set +a && runuser -u almanac --preserve-environment -- /usr/local/bin/latch run -- /opt/almanac/almanac update
+# The three Environment= lines of the unit are set here too, since 2026-09-09.
+# They are NOT in latch.env — systemd carries them — so an update running
+# outside the unit lost them, and `--check` looked for profiles in the
+# compiled-in default `/var/lib/almanac/profiles` instead of the mounted state
+# directory. It reported "the new version cannot start with this machine's
+# configuration", which was true of the environment it was handed and false of
+# the machine. That is the fourth refusal this command has taught, all of the
+# same shape: run it exactly as the unit runs it or you are testing something
+# that never exists.
+#
+# Worth passing on: almanac's own deploy/service.yml has the same gap — its
+# systemd-run form sets EnvironmentFile and WorkingDirectory and none of the
+# three Environment values.
+update_cmd: cd /appdata/almanac/almanac-config && set -a && . /appdata/almanac/almanac-config/latch.env && ALMANAC_STATE_DIR=/appdata/almanac/almanac-config && ALMANAC_UPDATE_MODE=supervised && ALMANAC_TIMEOUT_STOP_SECS=60 && set +a && runuser -u almanac --preserve-environment -- /usr/local/bin/latch run -- /opt/almanac/bin/almanac update
 
 # T11: where the binary comes from, so a rebuilt container can be finished by
 # the orchestrator instead of by whoever remembers how it was done. Measured

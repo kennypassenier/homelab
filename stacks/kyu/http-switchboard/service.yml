@@ -20,13 +20,7 @@ stack_name: kyu
 vmid: 109
 hostname: 109-app-kyu
 unit: http-switchboard
-# V6 migration, 2026-09-09: 3.0.0 is built on the chassis-rs kit, which puts
-# the program under /opt/<service>/bin. This upgrade crosses TWO majors — the
-# command line changed at 2.0.0 and the door at 3.0.0 — and the kit unit runs
-# `--check` as ExecStartPre, so a binary swap without the two new secrets in
-# token.env leaves a STOPPED service rather than a broken one. That is the
-# safe direction, and it is why the secrets go in before the restart.
-binary: /opt/http-switchboard/bin/http-switchboard
+binary: /usr/local/bin/http-switchboard
 # Paths follow the migration of 2026-09-01: this service's state and
 # configuration live on the host at /appdata/<stack>/<unit>-config,
 # bind-mounted in, so destroying the container costs nothing. The
@@ -42,4 +36,18 @@ data_dirs:
 
 # T11: measured 2026-09-02 — release v1.0.0 carries `http-switchboard` and a
 # SHA256SUMS; the asset name matches the unit name, so it needs no override.
-release_repo: kennypassenier/http-switchboard
+# release_repo is PARKED, not lost — 2026-09-09, F304.
+#
+# Every release of this project since it moved to the chassis-rs kit requires
+# GLIBC_2.39. CT 109 is Debian 12 and carries 2.36, so the binary cannot even
+# start: `/lib/x86_64-linux-gnu/libc.so.6: version 'GLIBC_2.39' not found`.
+# Measured today by restarting kyu onto it — the hub crash-looped and was
+# restored to 2.4.1 within ninety seconds.
+#
+# The line is commented rather than deleted because leaving it live is a
+# LOADED GUN: a deploy stages the release and installs it at the path the unit
+# names, replacing a working binary with one that cannot run. Nothing breaks
+# until the next restart, which is the worst possible moment to find out.
+#
+# It goes back the moment the glibc question is settled — Kenny's form.
+# release_repo: kennypassenier/http-switchboard

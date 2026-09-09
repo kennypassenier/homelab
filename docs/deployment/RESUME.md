@@ -326,6 +326,42 @@ line stays, because it says where the secrets live.
 Still open on latch itself: this machine has no key and no PAT for project
 `stacks`, so nothing can be pushed back INTO latch yet. Not re-minted (D104).
 
+## The work in flight: the fleet moves to Debian 13 (2026-09-09)
+
+**Where it stopped, and why.** Kenny's answer to form G1: the whole fleet goes
+to Debian 13, golden template first, then container by container **with his go
+before each one**. Gateway (CT 104) and media (CT 106) last — which are also
+the only two privileged containers. Rollback is a requirement, not a wish.
+
+Both templates are built and the work is stopped there, as he asked:
+
+| vmid | name | privilege |
+|---|---|---|
+| 996 | `debian-13-homelab-v4` | unprivileged |
+| 995 | `debian-13-homelab-v4-priv` | privileged |
+| 998 | `debian-12-homelab-v3` | unprivileged, kept |
+| 997 | `debian-12-homelab-v3-priv` | privileged, kept |
+
+The Debian 12 pair stays: a container that has not migrated yet must still be
+rebuildable from its own generation.
+
+**What started all of this.** Four releases were due (kyu 3.1.0, kyu-runner
+0.2.1, http-switchboard 3.0.0, almanac 4.0.3). Only almanac landed. Every
+chassis-rs release needs GLIBC_2.39; CT 109 is Debian 12 with 2.36, so kyu
+3.1.0 crash-looped and was restored to 2.4.1 inside ninety seconds (F304).
+`release_repo` is parked on the three services on CT 109 until they can run.
+
+**The finding that outranks it.** Unattended security upgrades had stopped
+fleet-wide (F307). The origins pattern matched the ARCHIVE alias, which Debian
+renames as a release ages — `bookworm-security` answers to `oldstable-security`,
+and `trixie-security` to `stable-security`. Twelve containers carried 19-20
+unapplied security updates each; the daily run reported nothing to do. **The
+Debian version was never the variable** — the two Debian 13 containers refuse
+it in the same words and simply have no backlog yet. Fixed in the guards
+constant (codename matching) and verified inside the new template by mounting
+it and reading the file back. The existing fourteen containers still carry the
+old pattern until each is touched.
+
 ## Waiting on Kenny (not on us)
 
 - **`latch key backup`** now that latch 2.3.0 is out — his passphrase, his

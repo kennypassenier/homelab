@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**444 tests across 23 suites.**
+**447 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -127,6 +127,8 @@ Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, 
 - `a_unit_whose_program_is_absent_is_not_started_and_the_reason_is_named`
 - `a_missing_env_file_is_restored_from_the_vault_rather_than_invented`
 - `a_secret_that_exists_nowhere_stops_the_start_instead_of_looping`
+- `f307_security_updates_are_matched_by_codename_not_by_archive_alias` — F307: the security matcher must key on the codename, never on the archive alias Debian rewrites as a release ages.
+- `a_template_name_reports_the_os_it_was_baked_from` — The template's name must say which OS is inside it.
 
 ### `core/tests/devicebackup_tests.rs`
 
@@ -538,6 +540,7 @@ D12 and its 2026-09-05 amendment (MR1): where an app's secrets come from, and wh
 - `mr1_every_app_reports_where_its_secrets_came_from` — MR1's second half: precedence is safe only because the deploy says which source answered.
 - `f301_a_service_file_at_the_stack_root_is_still_found` — F301: a stack with several natives whose FIRST one still keeps its service.yml at the stack root — kyu's real shape, three units with the hub's own file at the top from when it was the only one.
 - `f303_the_link_refuses_an_oversized_payload_in_words` — F303: the size guard belongs where every command passes, not in the call sites that remembered it.
+- `f309_help_anywhere_in_the_arguments_means_help` — F309: asking for help must never do the work.
 
 ### `client/tests/tls_pin_tests.rs`
 

@@ -4234,14 +4234,17 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             temp_vmid,
             version,
             unprivileged,
+            base_template,
         } => {
             run_mutating_op(state, &exec, req.id, "template-build", |ctx| {
                 Box::pin(async move {
+                    let defaults = homelab_core::ops::template::TemplateCfg::default();
                     let cfg = homelab_core::ops::template::TemplateCfg {
                         temp_vmid,
                         version,
                         unprivileged,
-                        ..Default::default()
+                        base_template: base_template.unwrap_or(defaults.base_template),
+                        ..defaults
                     };
                     homelab_core::ops::template::build_template(ctx, &cfg).await
                 })

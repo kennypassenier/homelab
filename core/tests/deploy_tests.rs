@@ -2663,3 +2663,77 @@ mod native_from_zero {
         );
     }
 }
+
+/// F307: the security matcher must key on the codename, never on the archive
+/// alias Debian rewrites as a release ages.
+///
+/// The old pattern asked for archive `bookworm-security`. Once trixie shipped,
+/// that archive answers to `oldstable-security`, so every security package was
+/// refused with a -32768 pin while the daily run reported nothing to do.
+/// Measured across the fleet the day this was found: twelve Debian 12
+/// containers at 19-20 unapplied security updates each — and the two Debian 13
+/// containers refusing `stable-security` in exactly the same words, with no
+/// backlog yet to make it visible. Upgrading the OS was never the fix.
+#[test]
+fn f307_security_updates_are_matched_by_codename_not_by_archive_alias() {
+    use homelab_core::ops::guards::UNATTENDED_UPGRADES;
+
+    assert!(
+        UNATTENDED_UPGRADES.contains("Origins-Pattern"),
+        "the archive-keyed Allowed-Origins form is what broke: {}",
+        UNATTENDED_UPGRADES
+    );
+    assert!(
+        UNATTENDED_UPGRADES.contains("codename=${distro_codename}-security"),
+        "the security suite is published under the -security codename: {}",
+        UNATTENDED_UPGRADES
+    );
+    assert!(
+        UNATTENDED_UPGRADES.contains("codename=${distro_codename},"),
+        "point releases arrive under the bare codename; covering one and not \
+         the other is how this silence starts: {}",
+        UNATTENDED_UPGRADES
+    );
+    // The shape that aged out. Naming it keeps a well-meant "simplification"
+    // back to the shorthand from passing review.
+    assert!(
+        !UNATTENDED_UPGRADES.contains("Allowed-Origins"),
+        "must not go back to matching the archive: {}",
+        UNATTENDED_UPGRADES
+    );
+    assert!(
+        UNATTENDED_UPGRADES.contains("Automatic-Reboot \"false\""),
+        "a container must not reboot itself on a security update"
+    );
+}
+
+/// The template's name must say which OS is inside it.
+///
+/// It was the literal `debian-12` for as long as there was one base. With the
+/// fleet moving to Debian 13 (Kenny, 2026-09-09) a hardcoded name would have
+/// produced `debian-12-homelab-v4` holding trixie — and `pct clone` cannot
+/// change an OS any more than it can change a privilege level, so the name is
+/// all a later reader has to go on.
+#[test]
+fn a_template_name_reports_the_os_it_was_baked_from() {
+    use homelab_core::ops::template::os_slug;
+
+    assert_eq!(
+        os_slug("local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"),
+        "debian-13"
+    );
+    assert_eq!(
+        os_slug("local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"),
+        "debian-12"
+    );
+    assert_eq!(
+        os_slug("local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"),
+        "ubuntu-24.04"
+    );
+    // Unrecognised shapes fall back to the whole stem: an ugly name is
+    // recoverable, a name that claims the wrong OS is not.
+    assert_eq!(
+        os_slug("local:vztmpl/something_1_amd64.tar.zst"),
+        "something"
+    );
+}

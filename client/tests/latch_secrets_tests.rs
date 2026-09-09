@@ -350,3 +350,27 @@ fn f303_the_link_refuses_an_oversized_payload_in_words() {
         MAX_WS_FRAME / 1024 / 1024
     );
 }
+
+/// F309: asking for help must never do the work.
+#[test]
+fn f309_help_anywhere_in_the_arguments_means_help() {
+    use homelab_client::version::wants_help;
+    let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+    // The invocation that built a template on a live host.
+    assert!(wants_help(&v(&["homelab", "template-build", "--help"])));
+    // After a positional argument, which is where it is just as likely typed.
+    assert!(wants_help(&v(&[
+        "homelab",
+        "template-build",
+        "999",
+        "--help"
+    ])));
+    assert!(wants_help(&v(&["homelab", "deploy", "stacks/kyu", "-h"])));
+
+    // Real work is still real work.
+    assert!(!wants_help(&v(&["homelab", "template-build", "999", "4"])));
+    assert!(!wants_help(&v(&["homelab", "deploy", "stacks/kyu"])));
+    // argv[0] is not an argument.
+    assert!(!wants_help(&v(&["--help"])));
+}

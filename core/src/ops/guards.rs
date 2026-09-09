@@ -100,8 +100,31 @@ pub const LOGROTATE_POLICY: &str = r#"/var/log/syslog /var/log/messages /var/log
 pub const APT_AUTOCLEAN: &str =
     "APT::Periodic::AutocleanInterval \"7\";\nAPT::Periodic::CleanInterval \"7\";\n";
 
-pub const UNATTENDED_UPGRADES: &str = r#"Unattended-Upgrade::Allowed-Origins {
-    "${distro_id}:${distro_codename}-security";
+/// F307: matched on the CODENAME, not on the archive alias.
+///
+/// This used to be `Allowed-Origins` with `"${distro_id}:${distro_codename}-security"`,
+/// which matches the archive field. Debian renames that field as a release
+/// ages: bookworm-security reports `a=oldstable-security` once trixie ships,
+/// and trixie-security reports `a=stable-security` today. The pattern then
+/// matches nothing and every security package is refused with a -32768 pin,
+/// while the daily run reports "No packages found that can be upgraded
+/// unattended" — true, and the exact opposite of what is happening.
+///
+/// Measured 2026-09-09 across the whole fleet: twelve Debian 12 containers
+/// each carried 19-20 unapplied security updates. The two Debian 13
+/// containers carried none, which looked like the newer release being
+/// immune — it is not. A dry-run there refuses `a=stable-security` in the
+/// same words; they simply had no backlog yet. **The version was never the
+/// variable.**
+///
+/// `codename=` matches `n=bookworm-security` / `n=trixie-security`, which
+/// Debian does not rename. Both spellings are listed because the security
+/// suite is published under the `-security` codename while point releases
+/// arrive under the bare one, and a pattern that covers one and not the
+/// other is how this class of silence starts.
+pub const UNATTENDED_UPGRADES: &str = r#"Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${distro_codename},label=Debian-Security";
+    "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
 };
 Unattended-Upgrade::Automatic-Reboot "false";
 Unattended-Upgrade::Remove-Unused-Dependencies "true";

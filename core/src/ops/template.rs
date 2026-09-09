@@ -61,12 +61,37 @@ impl Default for TemplateCfg {
     }
 }
 
+/// The OS part of a template's name, read from the base it is baked from.
+///
+/// It was the literal `debian-12` until 2026-09-09, which was true for as
+/// long as there was one base. Kenny then chose to move the whole fleet to
+/// Debian 13 (form G1), and a builder that hardcodes the old name would have
+/// produced `debian-12-homelab-v4` containing trixie — a template whose name
+/// lies about what is inside it, which is the one thing a template name is
+/// for. `pct clone` cannot change a privilege level and cannot change an OS
+/// either; the name is all anyone has to go on.
+///
+/// Falls back to the whole file stem rather than guessing, so an unrecognised
+/// base produces an ugly name instead of a wrong one.
+pub fn os_slug(base_template: &str) -> String {
+    let file = base_template.rsplit('/').next().unwrap_or(base_template);
+    let stem = file.split('_').next().unwrap_or(file);
+    // `debian-13-standard` -> `debian-13`
+    let parts: Vec<&str> = stem.split('-').collect();
+    if parts.len() >= 2 && parts[1].chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        format!("{}-{}", parts[0], parts[1])
+    } else {
+        stem.to_string()
+    }
+}
+
 pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationReport {
     // The suffix is not decoration: a clone silently inherits its template's
     // privilege level, so telling the two apart at a glance is the difference
     // between a deploy that works and one that fails on permissions later.
     let name = format!(
-        "debian-12-homelab-v{}{}",
+        "{}-homelab-v{}{}",
+        os_slug(&cfg.base_template),
         cfg.version,
         if cfg.unprivileged { "" } else { "-priv" }
     );

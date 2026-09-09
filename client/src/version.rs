@@ -82,3 +82,19 @@ pub fn too_large(len: usize) -> Option<String> {
         )
     })
 }
+
+/// F309: does this invocation ask for help rather than for work?
+///
+/// `homelab template-build --help` did not print usage on 2026-09-09. That
+/// verb reads its arguments positionally, `--help` failed to parse as a vmid,
+/// and `unwrap_or(default)` turned an argument nobody understood into a real
+/// golden-template build on a live host. The stray template had to be
+/// destroyed afterwards; nothing was lost, and only because that verb's
+/// default target is a scratch vmid it owns.
+///
+/// Checked over EVERY argument, not just the second: the flag is as likely to
+/// be typed after a positional one, and a guard that only covers the position
+/// where it first bit is the shape this project keeps writing findings about.
+pub fn wants_help(args: &[String]) -> bool {
+    args.iter().skip(1).any(|a| a == "--help" || a == "-h")
+}

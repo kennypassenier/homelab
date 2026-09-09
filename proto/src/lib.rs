@@ -79,6 +79,16 @@ pub enum Command {
         /// unprivileged, which is what every stack but those two wants.
         #[serde(default = "yes")]
         unprivileged: bool,
+        /// The base OS to bake, as a vztmpl path. Absent keeps the host's
+        /// own default, so an older client still builds what it always did.
+        ///
+        /// Carried on the command rather than pinned in the host because the
+        /// fleet is moving from Debian 12 to 13 one container at a time
+        /// (Kenny, 2026-09-09), and during that move BOTH have to be
+        /// buildable — a single pinned default would make the other one
+        /// unreachable exactly while it is needed.
+        #[serde(default)]
+        base_template: Option<String>,
     },
     /// C4: hot-apply manifest resources to the running container (grow only).
     ApplyResources(Box<StackManifest>),

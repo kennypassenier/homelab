@@ -84,7 +84,25 @@ fn load_config_env() {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
+    let mut cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
+
+    // F309: `--help` anywhere means SHOW the help, never do the thing.
+    //
+    // On 2026-09-09 `homelab template-build --help` did not print usage. The
+    // verb reads its arguments positionally, `--help` failed to parse as a
+    // vmid, the parse fell back to the default — and a real golden template
+    // was built on a live host, ending as a stray Debian 12 template that had
+    // to be destroyed afterwards. Nothing was lost, and only because that
+    // verb's default target is a scratch vmid it owns.
+    //
+    // `unwrap_or(default)` on an argument that could not be understood is the
+    // fault, and it is a fault this whole suite is otherwise built against:
+    // an unparseable input is a question, not a licence to proceed. Fixing it
+    // here covers every verb at once rather than the one that happened to
+    // bite.
+    if homelab_client::version::wants_help(&args) {
+        cmd = "help";
+    }
 
     // Kenny, 2026-09-02: `homelab check` has to work from any directory
     // without sourcing anything first. Every command in every document here
@@ -432,9 +450,21 @@ async fn main() {
             // O2: `--privileged` builds the second template. CT 105 and 106
             // are privileged and a clone cannot change that, so they need one.
             let unprivileged = !args.iter().any(|a| a == "--privileged");
+            // `--base <vztmpl>` picks the OS. Absent keeps the host's default,
+            // so this stays the command it has always been for a caller that
+            // does not care which Debian it is baking.
+            let base_template = args
+                .iter()
+                .position(|a| a == "--base")
+                .and_then(|i| args.get(i + 1).cloned());
+            let shown = base_template
+                .as_deref()
+                .map(homelab_core::ops::template::os_slug)
+                .unwrap_or_else(|| "the host's default OS".into());
             println!(
-                "{}▶ template build :: debian-12-homelab-v{}{} on temp vmid {}{}",
+                "{}▶ template build :: {}-homelab-v{}{} on temp vmid {}{}",
                 C_CYAN,
+                shown,
                 version,
                 if unprivileged { "" } else { "-priv" },
                 temp_vmid,
@@ -447,6 +477,7 @@ async fn main() {
                     temp_vmid,
                     version,
                     unprivileged,
+                    base_template,
                 },
             )
             .await;
@@ -903,7 +934,9 @@ async fn main() {
             println!(
                 "  homelab install-native stacks/<name>[/<unit>] [<tag>]  install a native service (O1)"
             );
-            println!("  homelab template-build              build a golden template (M3)");
+            println!(
+                "  homelab template-build [vmid] [ver] [--privileged] [--base <vztmpl>]  golden template (M3)"
+            );
             println!("  homelab templates                   list the golden templates");
             println!("  homelab resize stacks/<name>        apply changed resources (H4)");
             println!("  homelab config                      show the host's settings (G8)");

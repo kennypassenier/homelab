@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**447 tests across 23 suites.**
+**453 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -425,6 +425,12 @@ Covers: F117, F171
 - `c7_adopt_leaves_its_own_description_alone` — Three native services share CT 109 (T5), so adoption runs three times over the same container.
 - `f300_the_health_check_watches_a_window_not_a_moment` — F300, the fault the chassis-rs architecture critic found by reading this file: the health check asked "did it start", not "is it still running".
 - `f300_the_rollback_stops_the_unit_before_overwriting_its_binary` — F300's second half: the rollback wrote over a binary systemd was busy re-executing every five seconds, and lost the race as "ROLLBACK ALSO FAILED" rather than as ETXTBSY.
+- `the_owner_is_read_from_the_unit_that_is_being_installed` — The kit's own update keeps the version it replaces beside the binary.
+- `the_service_is_handed_its_own_program_directory` — Recursive on the directory that holds the program, which is exactly what the kit needs to write its `.prev` beside it, plus the file itself.
+- `a_healthy_update_does_not_leave_its_rollback_copy_behind` — `.homelab-prev` is read only by the run that writes it.
+- `a_rolled_back_update_keeps_the_binary_it_is_running_from` — A rolled-back update KEEPS the copy: the service is running from it.
+- `a_skip_says_which_copy_it_read_and_how_to_refresh_it` — "skipped by decision" is what an empty field looks like from the inside and a deliberate choice from the outside.
+- `stored_timestamps_render_as_plain_dates` — The formatter behind that date.
 
 ### `core/tests/real_deps_tests.rs`
 

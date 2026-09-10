@@ -61,6 +61,29 @@ pub struct StackState {
     pub incomplete_step: Option<String>,
 }
 
+/// A unix timestamp as `YYYY-MM-DD`, for messages that have to say when a
+/// stored value was last refreshed.
+///
+/// Written by hand rather than pulled in with a date crate: this is the only
+/// place the orchestrator formats a time, the input always comes from a value
+/// someone else read off a clock (core never reads one itself), and a whole
+/// dependency for twelve lines of arithmetic is a poor trade. The algorithm is
+/// the standard civil-from-days one.
+pub fn ymd(unix: u64) -> String {
+    let days = (unix / 86_400) as i64;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{:04}-{:02}-{:02}", y, m, d)
+}
+
 impl StackState {
     /// Fold the pre-T5 single-service field into the list. Idempotent.
     fn migrate_natives(&mut self) {

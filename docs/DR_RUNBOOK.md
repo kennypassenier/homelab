@@ -145,7 +145,7 @@ restic restore latest --target /
 ### kyu (vmid 109)
 
 - hostname `109-app-kyu`, ip `10.10.10.9/24`
-- resources: 1 core(s), 256 MiB RAM, 0 MiB swap, 2 GiB disk
+- resources: 1 core(s), 256 MiB RAM, 0 MiB swap, 4 GiB disk
 - apps: none — native services under systemd, not compose
 - recreate from scratch: `homelab adopt stacks/kyu` — native services; the unit files and binaries come from the service's own release, not from a compose pull
 - data restore from: `…:kyu-config`, `…:kyu-runner-config`, `…:http-switchboard-config`

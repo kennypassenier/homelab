@@ -420,6 +420,46 @@ pub async fn install_native(
         )))
     });
 
+    let mut stale_kept = false;
+    step!(runner, "own program directory", {
+        let Some(user) = unit_user(unit_file) else {
+            // A unit with no User= runs as root and already owns everything.
+            return Ok(StepOutcome::Unchanged);
+        };
+        let out = util_pct_sh(exec, m.vmid, &own_program_dir_script(&user, &m.binary), 120).await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "{} is installed and running but its program directory is still root's ({}) — \
+                 the service cannot update itself from here",
+                m.unit,
+                out.stderr.trim()
+            )));
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    step!(runner, "drop the stale rollback copy", {
+        if !had_previous {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let out = util_pct_sh(exec, m.vmid, &drop_stale_rollback_script(&prev), 60).await?;
+        if !out.success() {
+            // Not fatal: the service is up and correct, this only leaves a
+            // copy on disk. Reported after the step rather than failing a
+            // good install over it.
+            stale_kept = true;
+            return Ok(StepOutcome::Unchanged);
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    if stale_kept {
+        runner.log(
+            Level::Warn,
+            format!("could not remove {} — a stale copy stays on disk", prev),
+        );
+    }
+
     // Installed and healthy: the same record adoption writes, so a service
     // built this way and one taken over by hand are indistinguishable
     // afterwards — which is the point.
@@ -617,6 +657,52 @@ pub fn health_script(unit: &str) -> String {
 /// running before the update, so the question is whether the restore took
 /// effect — not whether an unproven version is stable. Doubling the worst
 /// case for that would delay the loud failure report the operator needs.
+/// The user a unit runs as, read from its `User=` line.
+///
+/// The orchestrator installs a binary as root; the chassis kit's own update
+/// then wants to keep the version it replaces beside it, and a service cannot
+/// move root's file out of the way. On 2026-09-10 that surfaced as
+/// `cannot keep the previous binary at /opt/kyu/bin/kyu.prev: Operation not
+/// permitted` on all three services of CT 109 — a deploy that had reported
+/// success three times. The unit is the only place that says who the service
+/// is, and it is already in hand here, so nothing new has to be declared.
+pub fn unit_user(unit_file: &str) -> Option<String> {
+    unit_file
+        .lines()
+        .map(str::trim)
+        .find_map(|l| l.strip_prefix("User="))
+        .map(str::trim)
+        .filter(|u| !u.is_empty() && !u.starts_with('%'))
+        .map(str::to_string)
+}
+
+/// Hand the service its own program directory.
+///
+/// Recursive on the directory holding the binary, which is exactly what the
+/// kit needs to write its `.prev` beside it. Anything a service needs beyond
+/// that, its own unit says and its own deploy does.
+pub fn own_program_dir_script(user: &str, binary: &str) -> String {
+    format!(
+        "d=$(dirname {bin}) && chown -R {u}:{u} \"$d\" && chown {u}:{u} {bin}",
+        bin = shq(binary),
+        u = user
+    )
+}
+
+/// Remove the within-run rollback copy once the run has proven healthy.
+///
+/// `.homelab-prev` is read only by the function that writes it, as the way
+/// back from an install or a supervised update that does not come up. Nothing
+/// ever deleted it, so every deploy left a full copy of the program behind
+/// forever — and the chassis kit keeps a `.prev` of its own beside it, so the
+/// same version sat on disk twice. Measured on 2026-09-10: 220 MB of programs
+/// on CT 109's 2.0 GB rootfs, 70 MB of it the duplicate, and the disk at 98%.
+/// Deleting it after success costs nothing: past this point it can no longer
+/// be used, because the next run makes its own.
+pub fn drop_stale_rollback_script(prev: &str) -> String {
+    format!("rm -f {}", shq(prev))
+}
+
 pub fn rollback_script(unit: &str, prev: &str, binary: &str) -> String {
     format!(
         "systemctl stop {u}; cp -p {prev} {bin} && systemctl start {u} && sleep 2 && \
@@ -627,7 +713,14 @@ pub fn rollback_script(unit: &str, prev: &str, binary: &str) -> String {
     )
 }
 
-pub async fn update_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
+/// `stored_at` is when the host last wrote the manifest this runs from —
+/// `StackState::applied_at`, passed in because core never reads a clock. It is
+/// only used to make the skip message below say where its facts come from.
+pub async fn update_native(
+    ctx: &OpCtx<'_>,
+    m: &NativeServiceManifest,
+    stored_at: Option<u64>,
+) -> OperationReport {
     let op = format!("update-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
@@ -636,11 +729,25 @@ pub async fn update_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Operat
     let prev = format!("{}.homelab-prev", m.binary);
 
     let Some(update_cmd) = m.update_cmd.clone() else {
+        // This used to read "skipped by decision", which is what an empty
+        // field looks like from the inside and a deliberate choice from the
+        // outside. On 2026-09-10 it said that three times about three
+        // services whose stack files all carried an update_cmd: the host was
+        // reading a copy stored before those files were written. A service
+        // left on an old version for months while the nightly round reports
+        // every night that this is intended is never found, so the message
+        // now names the copy it read and how to refresh it.
+        let when = match stored_at {
+            Some(t) => format!("stored on {}", crate::state::ymd(t)),
+            None => "stored at an unrecorded time".to_string(),
+        };
         runner.log(
             Level::Info,
             format!(
-                "[update] {} has no update_cmd — skipped by decision",
-                m.stack_name
+                "[update] {} skipped: the manifest the host has {} carries no update_cmd. \
+                 This is the host's copy, not what the repository says — if the stack file \
+                 has one, `homelab adopt <path to the service>` refreshes it.",
+                m.stack_name, when
             ),
         );
         return runner.finish_ok();
@@ -720,6 +827,22 @@ pub async fn update_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Operat
         )))
     });
 
+    let mut stale_kept = false;
+    step!(runner, "drop the stale rollback copy", {
+        let out = util_pct_sh(exec, m.vmid, &drop_stale_rollback_script(&prev), 60).await?;
+        if !out.success() {
+            stale_kept = true;
+            return Ok(StepOutcome::Unchanged);
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    if stale_kept {
+        runner.log(
+            Level::Warn,
+            format!("could not remove {} — a stale copy stays on disk", prev),
+        );
+    }
     runner.log(
         Level::Info,
         format!("[update] {} self-update supervised — healthy", m.stack_name),

@@ -51,7 +51,14 @@ resources:
   # instead, and that costs a re-read. Was 128 MB.
 
   swap_mb: 0
-  disk_gb: 2
+  # Was 2 GB, which is the floor manifest.rs still enforces, and it was set
+  # on 2026-08-31 when this container held ONE binary and no docker. It now
+  # holds three services, each keeping a rollback copy beside its program,
+  # and it went from Debian 12 to 13 in place, which needs working room in
+  # /var. It hit 98% on 2026-09-10 and the fleet check called it broken.
+  # Every other app container in the fleet is 4 GB or more; this was the
+  # only one at the floor. Kenny's answer, same day: grow it to 4.
+  disk_gb: 4
   storage: local-lvm
 
 lxc:

@@ -211,7 +211,7 @@ async fn c7_supervised_update_restarts_only_on_binary_change() {
     exec.respond_always("sha256sum", CmdOutput::ok("aaaa\n"));
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
     assert!(report.ok, "{:?}", report.error);
     assert!(
         exec.calls_containing("systemctl restart").is_empty(),
@@ -224,7 +224,7 @@ async fn c7_supervised_update_restarts_only_on_binary_change() {
     exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
     adopt_mocks(&exec);
     exec.respond_always("systemctl restart", CmdOutput::ok(""));
-    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
     assert!(report.ok, "{:?}", report.error);
     assert_eq!(
         exec.calls_containing("cp -p '/usr/local/bin/kyu' '/usr/local/bin/kyu.homelab-prev'")
@@ -252,7 +252,7 @@ async fn c7_supervised_update_rolls_back_when_new_version_stays_down() {
     adopt_mocks(&exec);
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
     assert!(!report.ok, "a rolled-back update is still a FAILED update");
     assert_eq!(
         exec.calls_containing("cp -p '/usr/local/bin/kyu.homelab-prev' '/usr/local/bin/kyu'")
@@ -900,4 +900,146 @@ fn f300_the_rollback_stops_the_unit_before_overwriting_its_binary() {
         "a failed stop must not abort the restore: {}",
         s
     );
+}
+
+// ── 2026-09-11: the two faults the CT 109 rollout surfaced ──────────────────
+
+/// The kit's own update keeps the version it replaces beside the binary. It
+/// cannot, if the orchestrator installed that binary as root: the kernel
+/// refuses to let a service move root's file. Measured on all three services
+/// of CT 109 on 2026-09-10, after a deploy that had reported success.
+///
+/// The unit is the only place that says who the service is, and the installer
+/// already holds it, so nothing new has to be declared anywhere.
+#[test]
+fn the_owner_is_read_from_the_unit_that_is_being_installed() {
+    use homelab_core::ops::native::unit_user;
+
+    let real = "[Unit]\nDescription=kyu\n\n[Service]\nUser=kyu\nGroup=kyu\n\
+                ExecStart=/opt/kyu/bin/kyu serve\n";
+    assert_eq!(unit_user(real).as_deref(), Some("kyu"));
+
+    // Indented, as systemd also accepts.
+    assert_eq!(
+        unit_user("[Service]\n  User=almanac\n").as_deref(),
+        Some("almanac")
+    );
+
+    // No User= at all: the service runs as root and already owns everything,
+    // so there is nothing to hand over and nothing to fail on.
+    assert_eq!(unit_user("[Service]\nExecStart=/opt/x/bin/x\n"), None);
+
+    // A template specifier is not a user name; chowning to "%i" would fail
+    // loudly on a unit that is otherwise fine.
+    assert_eq!(unit_user("[Service]\nUser=%i\n"), None);
+    assert_eq!(unit_user("[Service]\nUser=\n"), None);
+}
+
+/// Recursive on the directory that holds the program, which is exactly what
+/// the kit needs to write its `.prev` beside it, plus the file itself.
+#[test]
+fn the_service_is_handed_its_own_program_directory() {
+    use homelab_core::ops::native::own_program_dir_script;
+    let s = own_program_dir_script("kyu", "/opt/kyu/bin/kyu");
+    assert!(s.contains("dirname '/opt/kyu/bin/kyu'"), "{}", s);
+    assert!(s.contains("chown -R kyu:kyu"), "{}", s);
+    assert!(
+        s.contains("chown kyu:kyu '/opt/kyu/bin/kyu'"),
+        "the file itself too — the directory alone was not enough on CT 109: {}",
+        s
+    );
+}
+
+/// `.homelab-prev` is read only by the run that writes it. Nothing deleted it,
+/// so every deploy left a full copy of the program on disk forever — beside
+/// the `.prev` the chassis kit keeps of the same version. 220 MB of programs
+/// on CT 109's 2.0 GB rootfs, 70 MB of it the duplicate, disk at 98%.
+#[tokio::test]
+async fn a_healthy_update_does_not_leave_its_rollback_copy_behind() {
+    use homelab_core::ops::native::update_native;
+    let exec = MockExecutor::new();
+    exec.enqueue("sha256sum", CmdOutput::ok("aaaa\n"));
+    exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
+    adopt_mocks(&exec);
+    exec.respond_always("systemctl restart", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        exec.calls_containing("rm -f '/usr/local/bin/kyu.homelab-prev'")
+            .len(),
+        1,
+        "the within-run copy is removed once the run proved healthy: {:?}",
+        exec.calls()
+    );
+}
+
+/// A rolled-back update KEEPS the copy: the service is running from it.
+#[tokio::test]
+async fn a_rolled_back_update_keeps_the_binary_it_is_running_from() {
+    use homelab_core::ops::native::update_native;
+    let exec = MockExecutor::new();
+    exec.enqueue("sha256sum", CmdOutput::ok("aaaa\n"));
+    exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
+    exec.respond_always("NRestarts", CmdOutput::failed(1, "DIED_IN_WINDOW"));
+    exec.respond_always("cp -p '/usr/local/bin/kyu.homelab-prev'", CmdOutput::ok(""));
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
+    assert!(!report.ok);
+    assert!(
+        exec.calls_containing("rm -f '/usr/local/bin/kyu.homelab-prev'")
+            .is_empty(),
+        "deleting it here would remove the file the service was just restored from: {:?}",
+        exec.calls()
+    );
+}
+
+/// "skipped by decision" is what an empty field looks like from the inside and
+/// a deliberate choice from the outside. It said that three times on
+/// 2026-09-10 about three services whose stack files all carried an
+/// update_cmd — the host was reading a copy stored before those files existed.
+#[tokio::test]
+async fn a_skip_says_which_copy_it_read_and_how_to_refresh_it() {
+    use homelab_core::ops::native::update_native;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut m = kyu_manifest();
+    m.update_cmd = None;
+    // 1_788_000_000 is 2026-08-29 (checked with `date -u -d @1788000000`).
+    let report = update_native(&ctx(&exec, &sink, &j), &m, Some(1_788_000_000)).await;
+    assert!(report.ok, "a skip is not a failure");
+    let said = sink.lines().join("\n");
+    assert!(
+        !said.contains("skipped by decision"),
+        "the wording that hid a stale field for three services: {}",
+        said
+    );
+    assert!(
+        said.contains("2026-08-29"),
+        "names when the copy was stored: {}",
+        said
+    );
+    assert!(
+        said.contains("homelab adopt"),
+        "and what refreshes it, or the reader is left with a fact and no move: {}",
+        said
+    );
+}
+
+/// The formatter behind that date. Hand-written because it is the only place
+/// the orchestrator renders a time and a date crate would be a poor trade.
+#[test]
+fn stored_timestamps_render_as_plain_dates() {
+    use homelab_core::state::ymd;
+    assert_eq!(ymd(0), "1970-01-01");
+    assert_eq!(ymd(1_788_000_000), "2026-08-29");
+    // A leap day, which is where a hand-rolled conversion goes wrong.
+    assert_eq!(ymd(1_709_164_800), "2024-02-29");
+    // Last second of a year.
+    assert_eq!(ymd(1_767_225_599), "2025-12-31");
 }

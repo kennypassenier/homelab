@@ -1,53 +1,36 @@
-# C7 native service — deployed 2026-08-31 on CT 109, the third unit there
-# after kyu and kyu-runner.
+# Native service on CT 109, migrated to the chassis-rs kit layout on
+# 2026-09-10 after that container was upgraded to Debian 13.
 #
-# stack_name is `kyu` for the same reason kyu-runner's is: the A2 guard wants
-# the hostname to be <vmid>-app-<stack>, and this service shares the container
-# with the hub it consumes from — deliberately, since it reads the hub over
-# localhost. A stack holds a list of native services distinguished by unit.
+# The first attempt at this migration was on 2026-09-09 and was reverted the
+# same hour: every kit release then needed GLIBC_2.39 and the container ran
+# Debian 12 with 2.36, so the binary could not start at all. Two things
+# changed since. The container is on Debian 13 (glibc 2.41), and the kit
+# builds statically — `file` on the kyu release now says `static-pie linked`
+# with no glibc symbols at all, so this layout no longer depends on either.
 #
-# What it does: Alertmanager's payload has a fixed shape that Home Assistant's
-# alert automation cannot read. This service consumes that payload off the hub,
-# reshapes it, and delivers it — acknowledging on the hub only after HA
-# accepted. An alert raised while HA is down therefore waits instead of
-# vanishing.
+# update_cmd is adopted from the service's own deploy/service.yml, including
+# the `--property=Environment=` lines. Those are not decoration: the unit sets
+# them, and an update running outside the unit without them reports "the new
+# version cannot start with this machine's configuration" while the machine is
+# perfectly fine. That cost a rollout on 2026-09-09.
 #
-# /etc/http-switchboard holds the config AND the token, and is the whole of
-# what has to survive: the config names the Home Assistant webhook id, which
-# is the credential for the notification dispatcher, and is deliberately in no
-# repository — this one is public.
+# Supervised nightly updates are Kenny's decision of 2026-09-09 (form G2): the
+# homelab runs these, with the armed rollback that watches a settle window
+# rather than a single reading.
 stack_name: kyu
 vmid: 109
 hostname: 109-app-kyu
 unit: http-switchboard
-binary: /usr/local/bin/http-switchboard
-# Paths follow the migration of 2026-09-01: this service's state and
-# configuration live on the host at /appdata/<stack>/<unit>-config,
-# bind-mounted in, so destroying the container costs nothing. The
-# stack's own backup already covers those directories; data_dirs is
-# kept pointing at them so the C7 verbs still describe reality, and
-# the duplication with the stack backup is recorded as T61.
+binary: /opt/http-switchboard/bin/http-switchboard
 env_file: /appdata/kyu/http-switchboard-config/token.env
 data_dirs:
   - /appdata/kyu/http-switchboard-config
-# update_cmd deliberately absent, as with the other two units here: ownership
-# of the binary update is Kenny's call, and two systems restoring binaries can
-# fight each other.
-
-# T11: measured 2026-09-02 — release v1.0.0 carries `http-switchboard` and a
-# SHA256SUMS; the asset name matches the unit name, so it needs no override.
-# release_repo is PARKED, not lost — 2026-09-09, F304.
-#
-# Every release of this project since it moved to the chassis-rs kit requires
-# GLIBC_2.39. CT 109 is Debian 12 and carries 2.36, so the binary cannot even
-# start: `/lib/x86_64-linux-gnu/libc.so.6: version 'GLIBC_2.39' not found`.
-# Measured today by restarting kyu onto it — the hub crash-looped and was
-# restored to 2.4.1 within ninety seconds.
-#
-# The line is commented rather than deleted because leaving it live is a
-# LOADED GUN: a deploy stages the release and installs it at the path the unit
-# names, replacing a working binary with one that cannot run. Nothing breaks
-# until the next restart, which is the worst possible moment to find out.
-#
-# It goes back the moment the glibc question is settled — Kenny's form.
-# release_repo: kennypassenier/http-switchboard
+update_cmd: >-
+  systemd-run --wait --pipe --collect --uid=http-switchboard --gid=http-switchboard
+  --property=EnvironmentFile=/appdata/kyu/http-switchboard-config/token.env
+  --property=WorkingDirectory=/appdata/kyu/http-switchboard-config
+  --property=Environment=HTTP_SWITCHBOARD_STATE_DIR=/appdata/kyu/http-switchboard-config
+  --property=Environment=HTTP_SWITCHBOARD_TIMEOUT_STOP_SECS=60
+  /opt/http-switchboard/bin/http-switchboard update
+release_repo: kennypassenier/http-switchboard
+release_asset: http-switchboard

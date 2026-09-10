@@ -102,7 +102,17 @@ storage:
     app: kyu-runner
   - host_path: /appdata/kyu/http-switchboard-config
     mount_point: /appdata/kyu/http-switchboard-config
-    host_owner_uid: 100000
+    # 100995, not 100000. The 1.x unit ran as root and read its config through
+    # a systemd credential; the chassis-rs kit unit runs as its own user
+    # `http-switchboard` (uid 995 inside) and both reads the config and writes
+    # its state directly. This is an UNPRIVILEGED container, so the host-side
+    # owner is 100000 + 995.
+    #
+    # Measured the hard way on 2026-09-10: with the old value the deploy
+    # chowned the directory back to root after every run, and the unit then
+    # failed at `CHDIR ... Permission denied` — a message about the working
+    # directory, for a cause that lives in this file.
+    host_owner_uid: 100995
     app: http-switchboard
 
 # No docker apps by design. The three services are named in their own

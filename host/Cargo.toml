@@ -9,7 +9,7 @@ description = "Homelab HOST daemon: Proxmox LXC lifecycle + stack sync over one 
 homelab-core = { path = "../core" }
 homelab-proto = { path = "../proto" }
 axum = { version = "0.7", features = ["ws"] }
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

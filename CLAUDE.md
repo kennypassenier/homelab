@@ -48,7 +48,11 @@ Two projects live in this repo, each with its own phase track.
 | Phase | 9 · Released — **v3.51.0** live on the host | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
-| Next action | — | **waiting on Kenny: the Debian 13 migration, one container at a time with his go for each (gateway CT 104 and media CT 106 last, by his own instruction).** Nothing else blocks; the open register rows that need him are `gap-7` (Traefik's restart window without CrowdSec, for the gateway round), `gap-10` (the `KYU_DATA_DIR` line still in `kyu.env` on CT 109 — commenting it out was refused by a session classifier, not skipped), `ask-2` (kyu's helper units, whose direction he fixed and whose build he stopped) and the 28 manual checks in `homelab checks`. One item waits on the clock rather than on him: `ask-3` closes at the 03:00 backup round following 2026-09-18, the first since the store was restored — the file beside it must be tens of MB, not 61440 bytes |
+
+| | |
+|---|---|
+| Next action | waiting on Kenny: the Debian 13 migration, one container at a time with his go for each — gateway CT 104 and media CT 106 last, by his own instruction. Behind it sit `gap-7` (Traefik's restart window without CrowdSec, for the gateway round), `gap-10` (the `KYU_DATA_DIR` line still in `kyu.env` on CT 109; commenting it out was refused by a session classifier, and kyu 3.3.0's guard will refuse to start until it goes), `fix-14` (six of eight kyu publishers still cannot authenticate — the choice between a 3.3.0 import fix, a manual import, or six re-issues is being put to him in the kyu session, and nothing is issued from here), `ask-2` (kyu's helper units, direction fixed and build stopped by him) and the 28 manual checks in `homelab checks`. Waiting on the clock rather than on him: `ask-3` closes at the first 03:00 backup round after 2026-09-18 — the file beside the restored store must be tens of MB, not 61440 bytes. |
+
 
 **The deployment project is the active work.** It brings the whole fleet under
 the orchestrator: one inventory, one target layout, one proven backup, then

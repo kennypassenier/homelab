@@ -45,9 +45,10 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — v3.42.2 live on the host | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
+| Phase | 9 · Released — **v3.51.0** live on the host | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
+| Next action | — | **waiting on Kenny: the Debian 13 migration, one container at a time with his go for each (gateway CT 104 and media CT 106 last, by his own instruction).** Nothing else blocks; the open register rows that need him are `gap-7` (Traefik's restart window without CrowdSec, for the gateway round), `gap-10` (the `KYU_DATA_DIR` line still in `kyu.env` on CT 109 — commenting it out was refused by a session classifier, not skipped), `ask-2` (kyu's helper units, whose direction he fixed and whose build he stopped) and the 28 manual checks in `homelab checks`. One item waits on the clock rather than on him: `ask-3` closes at the 03:00 backup round following 2026-09-18, the first since the store was restored — the file beside it must be tens of MB, not 61440 bytes |
 
 **The deployment project is the active work.** It brings the whole fleet under
 the orchestrator: one inventory, one target layout, one proven backup, then
@@ -56,7 +57,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.44.2** (2026-09-04); 455 tests, CI green — and green now
+- **Released and live at v3.51.0** (2026-09-11); 480 tests, CI green — and green now
   means something: CI ran without `--locked` until that day, so it built
   whatever crates.io served rather than what the lockfile pins (F235).
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.
@@ -91,8 +92,12 @@ it is the resume point and is kept current as part of the work, not afterwards.
     `lxc-compose.yml`, native services `service.yml`.
 - **Host daemon LIVE** on Proxmox as `homelab-host.service` (:8443, TLS
   fp SHA256:85:00:F8:84…); ships via `homelab self-update` (H5, armed
-  rollback proven). Golden templates = CT 998 (v3 unprivileged, the default) and CT 997 (v3
-  privileged, for media + downloader); CT 999 is the retired v1.
+  rollback proven). Golden templates: **CT 996 `debian-13-homelab-v4` (unprivileged) and CT 995
+  `debian-13-homelab-v4-priv`**, both built 2026-09-10 and carrying the fixed
+  unattended-upgrades config; CT 998 and CT 997 are the Debian 12 pair they
+  replace and are kept until the fleet has moved. CT 999 is the retired v1.
+  `template-build` derives the name from the base template, so a Debian 14
+  pair names itself.
 - **There is no standing test container any more.** vmid 108 used to be it;
   since the pilot it is `108-app-syncthing` — which, measured 2026-09-01, is
   running and synchronising NOTHING: zero folders, zero devices, 120 KB on

@@ -122,3 +122,17 @@ latch_secrets: [traefik, cloudflared, grafana]
 
 gateway_route:
   filename: 104-app-gateway.yml
+
+
+# gap-11 (2026-09-18): OPNsense ships its logs here as RFC 5424 over UDP —
+# `System › Settings › Logging / targets` on the firewall names
+# 10.10.10.4:1514. The log shipper opens the port and labels every line
+# `{job="syslog", stack="gateway", host="opnsense"}`; app, level and facility
+# come out of the message. Port 1514 because Alloy runs unprivileged and
+# cannot bind 514. Change the port here AND on the firewall, or one side
+# talks to nobody.
+syslog_receivers:
+  - host: opnsense
+    listen: 0.0.0.0:1514
+    protocol: udp
+    format: rfc5424

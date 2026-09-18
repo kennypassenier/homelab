@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**453 tests across 23 suites.**
+**460 tests across 23 suites.**
 
 ## Accepted limitations
 
@@ -129,6 +129,7 @@ Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, 
 - `a_secret_that_exists_nowhere_stops_the_start_instead_of_looping`
 - `f307_security_updates_are_matched_by_codename_not_by_archive_alias` — F307: the security matcher must key on the codename, never on the archive alias Debian rewrites as a release ages.
 - `a_template_name_reports_the_os_it_was_baked_from` — The template's name must say which OS is inside it.
+- `a_gateway_deploy_renders_the_receiver_and_restores_single_file_mode` — gap-11 · the deploy renders the gateway's syslog receiver into the one file Alloy reads, and puts Alloy back to reading that one file.
 
 ### `core/tests/devicebackup_tests.rs`
 
@@ -258,6 +259,10 @@ C1/C2 · the replacement for a log shipper that reached end of life.
 - `dropping_outranks_sending` — Dropping wins over sending: a shipper that delivered something and then started losing batches is broken, not fine.
 - `several_endpoints_are_summed_rather_than_the_first_one_taken`
 - `the_journal_job_label_is_forced_and_not_left_to_alloy` — Alloy names a job after the component that produced it, so the journal arrived as `job="loki.source.journal.journal"` on the first live run.
+- `a_declared_receiver_listens_and_labels_its_lines_like_the_hand_made_one_did` — The labels are the contract again: the vault note and the Grafana query both read `{job="syslog", host="opnsense"}`.
+- `a_stack_that_declares_no_receiver_opens_no_port` — Ten other containers render this same file.
+- `two_receivers_get_two_distinct_component_names` — Two receivers on one container are two components, and Alloy refuses a file that names one component twice.
+- `the_deploy_puts_alloy_back_to_reading_the_one_file_it_renders` — The hand-made change on CT 104 switched Alloy to directory mode (`CONFIG_FILE="/etc/alloy"`), which loads every `*.alloy` in the directory.
 
 ### `core/tests/m4_ops_tests.rs`
 
@@ -507,6 +512,8 @@ G10 · the thirteen stack files that actually run this house, validated.
 - `walk`
 - `every_internal_monitor_points_at_a_stack_that_exists_at_the_address_it_has`
 - `every_stack_without_an_application_monitor_is_one_we_named` — A stack with no monitor at all is not automatically wrong — the mechanical half already pings every container.
+- `only_the_gateway_declares_the_opnsense_syslog_receiver` — gap-11 · the OPNsense syslog receiver is declared by the gateway stack and by nothing else.
+- `a_receiver_the_shipper_could_not_open_is_refused_at_plan_time` — The validator refuses a receiver the shipper could not actually open — Alloy runs as its own user, so a port below 1024 binds nothing and Alloy merely logs it while the deploy reports success.
 
 ### `core/tests/unit_prereqs_tests.rs`
 

@@ -72,6 +72,16 @@ curl -s -G "http://10.10.10.4:3100/loki/api/v1/query_range" \
 Zero streams after a migration = that stack is broken, whatever the container
 says about itself.
 
+**gap-11 (2026-09-18): the gateway also receives syslog from OPNsense.** The
+receiver (UDP 1514, RFC 5424, `{job="syslog", host="opnsense"}`) is declared
+under `syslog_receivers:` in `stacks/gateway/lxc-compose.yml` and rendered
+into the same `config.alloy`. One file, deliberately: the deploy restores
+`CONFIG_FILE="/etc/alloy/config.alloy"` in `/etc/default/alloy` and removes
+any other `.alloy` in the directory, saying so in its output. Verification is
+the same query with `host="opnsense"`, and `ss -lunp | grep 1514` inside
+CT 104. Until the next gateway deploy the container still carries the
+hand-made file and directory mode from 2026-09-18; the deploy undoes both.
+
 ## Fleet state after the migration, 2026-09-02 21:00
 
 **2026-09-03: `homelab check` reports NO broken findings at all.** The

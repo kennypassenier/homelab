@@ -136,7 +136,7 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
 
 ## Observability & control
 
-- **F1/F2 · Logs** — promtail ships to Loki fleet-wide; the LOG_STREAM tab
+- **F1/F2 · Logs** — Alloy ships to Loki fleet-wide (promtail until 2026-09-02); the LOG_STREAM tab
   shows the live operation feed.
 - **F3 · Events → Home Assistant** — one webhook POST per finished
   operation (`{op, ok, error}`), plus `host-online` at boot,

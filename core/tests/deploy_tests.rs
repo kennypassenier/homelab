@@ -14,6 +14,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        syslog_receivers: vec![],
         natives: Vec::new(),
         stack_name: stack.into(),
         vmid,
@@ -2735,5 +2736,64 @@ fn a_template_name_reports_the_os_it_was_baked_from() {
     assert_eq!(
         os_slug("local:vztmpl/something_1_amd64.tar.zst"),
         "something"
+    );
+}
+
+/// gap-11 · the deploy renders the gateway's syslog receiver into the one
+/// file Alloy reads, and puts Alloy back to reading that one file.
+///
+/// On 2026-09-18 the receiver lived in a second file on CT 104 and Alloy was
+/// switched to directory mode by hand so it would load it. A deploy that
+/// only rewrote `config.alloy` would have left both in place: the extra file
+/// loaded beside the rendered one, and — once the receiver is rendered too —
+/// the same component declared twice, which Alloy refuses to start on. So
+/// the step restores single-file mode and sweeps the directory BEFORE it
+/// restarts the service.
+#[tokio::test]
+async fn a_gateway_deploy_renders_the_receiver_and_restores_single_file_mode() {
+    use homelab_core::manifest::SyslogReceiver;
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(104, "gateway");
+    sp.gateway_route = None;
+    sp.manifest.syslog_receivers = vec![SyslogReceiver {
+        host: "opnsense".into(),
+        listen: "0.0.0.0:1514".into(),
+        protocol: "udp".into(),
+        format: "rfc5424".into(),
+    }];
+    let mut c = ctx(&exec, &sink, &journal);
+    c.loki_url = Some("http://10.10.10.4:3100".into());
+    let report = deploy(&c, &sp).await;
+    assert!(report.ok, "{:?}", report);
+
+    // The mock keeps pushed content under its staging path (T74), which is
+    // derived from the destination, so the rendered file is read back there.
+    let staged =
+        homelab_core::ops::util::staging_path(104, homelab_core::ops::logshipper::CONFIG_PATH);
+    let rendered = exec
+        .file(&staged)
+        .expect("the deploy renders the shipper config");
+    assert!(
+        rendered.contains("loki.source.syslog \"syslog_opnsense\""),
+        "{}",
+        rendered
+    );
+    assert!(rendered.contains("0.0.0.0:1514"), "{}", rendered);
+
+    let calls = exec.calls();
+    let restore = calls
+        .iter()
+        .position(|c| c.contains("restored-single-file-mode"))
+        .expect("single-file mode is restored on every deploy");
+    let restart = calls
+        .iter()
+        .position(|c| c.contains("systemctl restart alloy"))
+        .expect("alloy is restarted after a changed config");
+    assert!(
+        restore < restart,
+        "the sweep must come before the restart, or Alloy starts on two copies of the receiver"
     );
 }

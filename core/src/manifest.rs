@@ -92,6 +92,20 @@ pub struct StackManifest {
     /// step that exists only in someone's memory.
     #[serde(default)]
     pub registry_login: Option<RegistryLogin>,
+    /// gap-11 (2026-09-18): syslog receivers the log shipper opens for
+    /// devices that cannot run a shipper of their own. OPNsense is the case:
+    /// a firewall ships nothing but syslog, and the gateway container is
+    /// where its lines land (`10.10.10.4:1514`).
+    ///
+    /// Declared here rather than hard-wired to the gateway in code for the
+    /// same reason `retention` is: the port and the host label are a
+    /// contract with a device outside this repository, and a contract typed
+    /// into a Rust file is one nobody finds when the device is reconfigured.
+    /// The first version of this receiver was a second file beside the
+    /// rendered one on CT 104, with Alloy switched to directory mode by hand
+    /// so it would be loaded; the orchestrator knew nothing about either.
+    #[serde(default)]
+    pub syslog_receivers: Vec<SyslogReceiver>,
 }
 
 /// Where the credentials for a private registry come from.
@@ -99,6 +113,37 @@ pub struct StackManifest {
 /// Deliberately no new secrets channel: the values ride in an app's ordinary
 /// `.env`, which already travels from latch through the host vault to the
 /// container. One mechanism, already proven, already backed up.
+/// One syslog listener the log shipper opens on the container (gap-11).
+///
+/// The lines it receives carry `job="syslog"`, the stack's name, and `host`
+/// set to the value here — the sender's own hostname is not trusted for the
+/// label because OPNsense sends whatever its GUI was told, and the dashboards
+/// filter on a name that has to stay stable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyslogReceiver {
+    /// The `host` label every received line carries, and the stem of the
+    /// component's name: lowercase `[a-z0-9-]`, like a stack name.
+    pub host: String,
+    /// `address:port` to listen on. Alloy runs unprivileged, so the port is
+    /// 1024 or higher; a lower one binds nothing and Alloy only logs it.
+    pub listen: String,
+    /// `udp` or `tcp`. Default `udp`, which is what OPNsense sends.
+    #[serde(default = "udp")]
+    pub protocol: String,
+    /// `rfc5424` or `rfc3164`. Default `rfc5424`, the structured one, which
+    /// carries the app name, severity and facility the relabel rules read.
+    #[serde(default = "rfc5424")]
+    pub format: String,
+}
+
+fn udp() -> String {
+    "udp".into()
+}
+
+fn rfc5424() -> String {
+    "rfc5424".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegistryLogin {
     /// The registry host, e.g. `ghcr.io`.
@@ -366,6 +411,60 @@ fn compose_mount_targets(content: &str) -> Vec<(String, String, bool)> {
 }
 
 fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
+    // gap-11: a receiver the shipper could not open would pass the deploy —
+    // Alloy logs a bind failure and keeps running — and the device's lines
+    // would vanish with every step reporting success. So the manifest is
+    // refused for what the shipper cannot do, with the remedy in the message.
+    let mut seen_listen: Vec<&str> = Vec::new();
+    for r in &m.syslog_receivers {
+        if r.host.is_empty()
+            || !r
+                .host
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            problems.push(format!(
+                "syslog receiver host '{}' must be non-empty lowercase [a-z0-9-] — it becomes \
+                 the `host` label and the component's name",
+                r.host
+            ));
+        }
+        match r.listen.parse::<std::net::SocketAddr>() {
+            Ok(addr) if addr.port() < 1024 => problems.push(format!(
+                "syslog receiver '{}' listens on port {} — Alloy runs unprivileged and \
+                 cannot bind below 1024; use 1024 or higher (OPNsense sends to 1514) and \
+                 point the sender there",
+                r.host,
+                addr.port()
+            )),
+            Ok(_) => {}
+            Err(e) => problems.push(format!(
+                "syslog receiver '{}' has listen '{}' which is not address:port ({}) — \
+                 write it as 0.0.0.0:1514",
+                r.host, r.listen, e
+            )),
+        }
+        if seen_listen.contains(&r.listen.as_str()) {
+            problems.push(format!(
+                "two syslog receivers listen on {} — Alloy can bind an address once; give the \
+                 second receiver its own port",
+                r.listen
+            ));
+        }
+        seen_listen.push(&r.listen);
+        if !matches!(r.protocol.as_str(), "udp" | "tcp") {
+            problems.push(format!(
+                "syslog receiver '{}' has protocol '{}' — Alloy speaks udp or tcp",
+                r.host, r.protocol
+            ));
+        }
+        if !matches!(r.format.as_str(), "rfc5424" | "rfc3164") {
+            problems.push(format!(
+                "syslog receiver '{}' has format '{}' — Alloy parses rfc5424 or rfc3164",
+                r.host, r.format
+            ));
+        }
+    }
     for app in &m.apps {
         if app.is_empty()
             || !app

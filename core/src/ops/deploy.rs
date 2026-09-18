@@ -1823,7 +1823,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 return Ok(StepOutcome::Unchanged);
             }
             let fresh = out.stdout.contains("installed") && !out.stdout.contains("already");
-            let body = crate::ops::logshipper::config(&m.stack_name, &m.hostname, loki);
+            let body = crate::ops::logshipper::config(
+                &m.stack_name,
+                &m.hostname,
+                loki,
+                &m.syslog_receivers,
+            );
             let changed = push_content(
                 exec,
                 m.vmid,
@@ -1832,6 +1837,33 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 "644",
             )
             .await?;
+            // gap-11: Alloy reads ONE file, the one just pushed. A directory
+            // mode left behind by hand, or a stray `.alloy` beside the
+            // rendered one, is undone here and said out loud — every line the
+            // script prints is a change the operator did not make through
+            // the repository. Before the restart, because with the receiver
+            // rendered above a stray copy of it would make Alloy refuse to
+            // start on a duplicate component.
+            let swept = pct_sh(
+                exec,
+                m.vmid,
+                &crate::ops::logshipper::single_file_mode_script(),
+                60,
+            )
+            .await?;
+            let mut drift = false;
+            for line in swept
+                .stdout
+                .lines()
+                .filter(|l| !l.trim().is_empty() && *l != "done")
+            {
+                drift = true;
+                log_warn(format!(
+                    "[logs] Alloy on {} was not reading the rendered file alone: {}",
+                    m.hostname, line
+                ));
+            }
+            let changed = changed || drift;
             if fresh || changed {
                 pct_sh(
                     exec,

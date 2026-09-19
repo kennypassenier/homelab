@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**486 tests across 25 suites.**
+**496 tests across 26 suites.**
 
 ## Accepted limitations
 
@@ -145,6 +145,21 @@ Covers: F205
 - `a_snapshot_too_small_to_be_a_configuration_fails` — covers: F205  A login page is a 200 with a body, and restic stores whatever it is handed.
 - `an_unverified_certificate_is_used_but_never_quietly` — covers: F205  Verification is configuration-dependent (rule 24), so the code cannot enforce it — but it must not be silent about running without it.
 - `a_pinned_public_key_is_what_verifies_the_connection` — covers: F205  The pin is what verifies this connection, and it must reach curl exactly.
+
+### `core/tests/facts_tests.rs`
+
+G6 · the fact gatherer, driven through a mock fleet.
+
+- `g6_pct_list_becomes_vmid_and_hostname_pairs`
+- `g6_a_growth_probe_that_never_ran_is_no_fact` — The `guards` line is the proof the probe ran inside the container.
+- `g6_host_memory_is_five_numbers_in_the_script_order`
+- `g6_the_logs_window_only_passes_digits_and_a_unit`
+- `g6_managed_containers_are_probed_and_the_untouchable_are_not` — Containers come from `pct list`; the untouchable ones are never probed; a stopped guest that answers nothing produces no growth fact but still a boot fact, because `pct config` can be asked about a stopped guest.
+- `g6_routes_are_read_from_the_gateway_and_knocked_on` — Every route fragment on the gateway is read, its target extracted, and the target knocked on from inside the gateway with bash's /dev/tcp.
+- `g6_a_watched_backup_is_aged_against_now_and_a_failed_listing_is_an_error` — O1: a watched backup's age is the difference between now and the newest file rclone lists; a listing that fails is an error, not an old backup.
+- `g6_the_seed_verdict_comes_from_last_seed_json_beside_the_monitors` — T49: the seeder's verdict is read from the file beside the monitor list; no configured file means nothing to judge, which is not a finding.
+- `g6_coverage_asks_prometheus_per_recorded_stack_and_leaves_loki_unasked` — Coverage is asked only where an address is configured, per recorded stack; Prometheus' answer is read for a `1`, and an unconfigured Loki leaves the logs question unasked rather than answered.
+- `g6_an_empty_fleet_yields_empty_facts_not_findings` — Nothing configured, nothing recorded: the gatherer still returns, with every unasked question absent rather than failed.
 
 ### `core/tests/failure_model_tests.rs`
 

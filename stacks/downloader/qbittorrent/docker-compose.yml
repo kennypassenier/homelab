@@ -25,7 +25,12 @@
 
 services:
   gluetun:
-    image: qmcgaw/gluetun:latest
+    # Pinned by digest (Kenny, 2026-09-19, open-items review): the running
+    # image is a master build created 2026-09-01T23:04Z that carries no
+    # release tag (its version label reads literally "latest"), so a tag
+    # would have changed what runs. UPDATE_POLICY.md puts gluetun in the
+    # pinned class: moving it is a deliberate edit of this line.
+    image: qmcgaw/gluetun@sha256:89e3cbe22e0d6f09a18d3e86269392fd9f7f08e8991040741e577f8f127cdfe4
     container_name: gluetun
     cap_add:
       - NET_ADMIN

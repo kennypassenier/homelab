@@ -79,6 +79,19 @@ Blocked: the API key in `/opt/jellyfin/.env` on CT 106 is refused. Measured
 three ways on 2026-08-30 — `Authorization: MediaBrowser Token`,
 `X-Emby-Token` and `?api_key=` all return 401 (F32).
 
+## Who owns the updates of the native services (decided 2026-09-19)
+
+Kenny, open-items review: the question of B1/F26 is answered by use. The
+orchestrator owns the recurring updates of **kyu, kyu-runner and
+http-switchboard** through `homelab update-native` — release fetched, checksum
+verified, installed with a rollback copy, rolled back when the new version does
+not become healthy; proven live on 2026-09-11 (three services, NRestarts=0).
+**almanac and latch update themselves** (almanac keeps its previous binary and
+reverts; latch is minisign-signed and not a deployed service); the orchestrator
+observes and does not update them. What is still to build: the nightly run
+calling `update-native` for native services whose `service.yml` carries the
+`auto` policy, so the ownership above is a mechanism and not a sentence.
+
 ## Kenny's own Rust services
 
 Only two of the six self-update, which is the opposite of what everyone

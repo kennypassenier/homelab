@@ -1,0 +1,16 @@
+[Unit]
+Description=drillsvc — the rollback drill's fake service (B7)
+# No start limit, deliberately: Restart=always with no limit is the shape
+# every native unit in this house recommends — and exactly the shape under
+# which a broken binary crash-loops forever unless the install rolls it
+# back (F300). systemd reads this key here, in [Unit], not in [Service].
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+ExecStart=/opt/drillsvc/bin/drillsvc
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -39,10 +39,10 @@ Scale: **Onmisbaar** (essential) · **Gewenst** (desired) · **Later** ·
 | ID | Feature | Rating | Status |
 |---|---|---|---|
 | R1 | Repair the kyu stack record (pre-rename paths, `enabled: false`) and re-enable its nightly run | Onmisbaar | open |
-| R2 | Bring the live monitoring stack into the repo: Alertmanager + four rules, cadvisor on six hosts, Grafana datasource and three dashboards, the scrape jobs, the SMART collector | Onmisbaar | open |
+| R2 | Bring the live monitoring stack into the repo: Alertmanager + four rules, cadvisor on six hosts, Grafana datasource and three dashboards, the scrape jobs, the SMART collector | Onmisbaar | **done** 2026-09-02 (F1): `stacks/metrics/` (prometheus + rules, alertmanager, pve-exporter), cadvisor baked into the template, dashboards generated (T2), SMART collector in `captured/pve-host/` |
 | R3 | One no-touch list only | Onmisbaar | **done** — the override is out of the live `host.toml`; the compiled list takes effect at the next host update |
 | R4 | A real Uptime Kuma monitor set. Some services need a body check, not a status code — kyu-runner answers 200 while delivering nothing | Onmisbaar | open |
-| R5 | Capture the Cloudflare tunnel ingress and Access policies into the repo | Onmisbaar | blocked on access |
+| R5 | Capture the Cloudflare tunnel ingress and Access policies into the repo | Onmisbaar | **done** 2026-09-20: `captured/gateway/cloudflare-tunnel.json` (1 tunnel, 2 ingress rules) and `cloudflare-access.json` (3 apps, 4 policies, e-mails redacted), read with the read-only token |
 | R6 | promtail on CT 104, the one docker host that ships no logs to the Loki it hosts | Onmisbaar | open |
 | R7 | Adopt CT 111 so SuperSync and Vikunja get backups. A change of container or IP must be reported to Kenny first, with what he has to reconfigure | Onmisbaar | open |
 | R8 | Clean up the Traefik routes and add a check that every route resolves to something that answers | Onmisbaar | open |

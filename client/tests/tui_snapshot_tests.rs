@@ -2455,7 +2455,7 @@ fn the_help_text_and_the_usage_message_agree_about_install_native() {
         .lines()
         .find(|l| l.contains("homelab install-native stacks/") && !l.contains("usage:"))
         .expect("the help line must exist");
-    let shape = "stacks/<name>[/<unit>] [<tag>]";
+    let shape = "stacks/<name>[/<unit>] [<tag> | --file <path>]";
     assert!(usage.contains(shape), "usage drifted: {}", usage.trim());
     assert!(
         help.contains(shape),

@@ -1,0 +1,49 @@
+# B7 · the rollback drill stack.
+#
+# A throwaway container whose only purpose is to prove, on real hardware,
+# that a native install which does not come up is rolled back to the binary
+# that was running — the safety net every native service in this house
+# relies on and nothing had rehearsed. `scripts/drill-native-rollback.sh`
+# deploys this stack, installs a good fake service, then a deliberately
+# broken one, and reads the outcome off the container.
+#
+# It is native-only and stateless on purpose: nothing here is worth backing
+# up, and a drill that leaves history behind has already caused trouble once
+# (F285/F292 — a drill stack borrowing a live app's name). The service name
+# `drillsvc` belongs to nothing else in the fleet.
+#
+# vmid 119: 118, the previous drill container's, is inbox's now. Not on
+# boot: a drill container that comes back after a power cut is a surprise.
+
+stack_name: drill
+vmid: 119
+hostname: 119-app-drill
+native_only: true
+
+network:
+  ip: 10.10.10.19/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 1
+  memory_mb: 256
+  swap_mb: 0
+  disk_gb: 4
+  storage: local-lvm
+
+lxc:
+  template: "clone:998"
+  unprivileged: true
+  features: "nesting=1"
+  protection: false
+  gpu: false
+  vpn: false
+
+boot:
+  onboot: false
+
+storage: []
+apps: []
+natives: [drillsvc]

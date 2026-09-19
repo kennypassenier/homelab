@@ -194,7 +194,7 @@ async fn main() {
         // could take over a hand-built container and could not build one.
         "install-native" => {
             let dir = args.get(2).unwrap_or_else(|| {
-                die("usage: homelab install-native stacks/<name>[/<unit>] [<tag>]")
+                die("usage: homelab install-native stacks/<name>[/<unit>] [<tag> | --file <path>]")
             });
             let path = Path::new(dir).join("service.yml");
             let raw = std::fs::read_to_string(&path)
@@ -204,13 +204,21 @@ async fn main() {
             if let Err(problems) = homelab_core::native::validate_native(&m) {
                 die(&format!("service.yml invalid: {}", problems.join("; ")));
             }
-            let Some(repo) = m.release_repo.clone() else {
-                die(&format!(
+            // B7: `--file <path>` hands the bytes over from disk — the
+            // rollback drill's way of installing a fake service, good and
+            // then deliberately broken. A release stays the normal source.
+            let source =
+                homelab_client::release::install_source(&args[3..]).unwrap_or_else(|e| die(&e));
+            let from_file = matches!(source, homelab_client::release::InstallSource::File(_));
+            let repo = match m.release_repo.clone() {
+                Some(r) => r,
+                None if from_file => String::new(),
+                None => die(&format!(
                     "{} declares no release_repo — this service is adopt-only, and where its \
                      binary comes from is not written down anywhere. Add release_repo to its \
                      service.yml rather than installing by hand again",
                     m.unit
-                ));
+                )),
             };
             // The unit file lives beside the service file, or in the unit's
             // own directory when several services share one stack.
@@ -231,25 +239,41 @@ async fn main() {
                     ))
                 });
             let asset = m.asset_name().to_string();
-            let tag = match args.get(3).cloned() {
-                Some(t) => t,
-                None => homelab_client::release::latest_tag_of(&repo).unwrap_or_else(|| {
-                    die(&format!("no release found in {} (gh authenticated?)", repo))
-                }),
+            let binary_b64 = match source {
+                homelab_client::release::InstallSource::File(path) => {
+                    let (b64, sha) =
+                        homelab_client::release::stage_file(&path).unwrap_or_else(|e| die(&e));
+                    println!(
+                        "{}▶ install-native {} :: CT {} · from file {} (sha256 {}){}",
+                        C_CYAN, m.unit, m.vmid, path, sha, C_RESET
+                    );
+                    b64
+                }
+                homelab_client::release::InstallSource::Release(tag) => {
+                    let tag = match tag {
+                        Some(t) => t,
+                        None => {
+                            homelab_client::release::latest_tag_of(&repo).unwrap_or_else(|| {
+                                die(&format!("no release found in {} (gh authenticated?)", repo))
+                            })
+                        }
+                    };
+                    println!(
+                        "{}▶ install-native {} :: CT {} · {} {} from {}{}",
+                        C_CYAN, m.unit, m.vmid, asset, tag, repo, C_RESET
+                    );
+                    let b64 = homelab_client::release::stage_asset(&repo, &tag, &asset)
+                        .unwrap_or_else(|e| die(&e));
+                    println!(
+                        "{}✓ checksum verified — shipping over the line{}",
+                        C_GREEN, C_RESET
+                    );
+                    b64
+                }
             };
-            println!(
-                "{}▶ install-native {} :: CT {} · {} {} from {}{}",
-                C_CYAN, m.unit, m.vmid, asset, tag, repo, C_RESET
-            );
-            let binary_b64 = homelab_client::release::stage_asset(&repo, &tag, &asset)
-                .unwrap_or_else(|e| die(&e));
             if let Some(why) = homelab_client::version::too_large(binary_b64.len()) {
                 die(&why);
             }
-            println!(
-                "{}✓ checksum verified — shipping over the line{}",
-                C_GREEN, C_RESET
-            );
             rpc(
                 &host,
                 &token,
@@ -1004,7 +1028,7 @@ async fn main() {
                 "  homelab release-update              fetch the newest release and ship it (H7)"
             );
             println!(
-                "  homelab install-native stacks/<name>[/<unit>] [<tag>]  install a native service (O1)"
+                "  homelab install-native stacks/<name>[/<unit>] [<tag> | --file <path>]  install a native service from a release or a file (O1, B7)"
             );
             println!(
                 "  homelab template-build [vmid] [ver] [--privileged] [--base <vztmpl>]  golden template (M3)"

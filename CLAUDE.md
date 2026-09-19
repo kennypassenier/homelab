@@ -45,13 +45,13 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — **v3.53.0** live on the host | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
+| Phase | 9 · Released — **v3.54.0** live on the host (2026-09-20); ten items committed since, waiting on `make release VERSION=3.55.0` | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
 
 | | |
 |---|---|
-| Next action | waiting on Kenny: the Debian 13 migration, one container at a time with his go for each — gateway CT 104 and media CT 106 last, by his own instruction. Behind it sit `gap-7` (Traefik's restart window without CrowdSec, for the gateway round), `gap-10` (the `KYU_DATA_DIR` line still in `kyu.env` on CT 109; commenting it out was refused by a session classifier, and kyu 3.3.0's guard will refuse to start until it goes), `fix-14` (six of eight kyu publishers still cannot authenticate — the choice between a 3.3.0 import fix, a manual import, or six re-issues is being put to him in the kyu session, and nothing is issued from here), `ask-2` (kyu's helper units, direction fixed and build stopped by him) and the 28 manual checks in `homelab checks`. Waiting on the clock rather than on him: `ask-3` closes at the first 03:00 backup round after 2026-09-18 — the file beside the restored store must be tens of MB, not 61440 bytes. |
+| Next action | **Kenny: `make release VERSION=3.55.0`** — it carries T81, T82, G6, F160, M-T75, gap-14, T85, B1, B7 and R5. After it Claude runs `homelab release-update`, installs the release client, and `homelab adopt`s kyu and kyu-runner so their `update_policy: auto` reaches the host. Open with Kenny: R1 (the kyu stack is parked in host state since 2026-09-10 — `homelab enable kyu` is the remedy, his call), the C7 report (B2, form), 14 manual checks. Waiting on the clock: 04:00 the first nightly under 3.54.0 (M-D94, M-T75 — only if kyu is enabled), 08:00 the deferred HA push. kyu door: ha, sonarr, radarr, newsflash still without a client token (kyu session's form). |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

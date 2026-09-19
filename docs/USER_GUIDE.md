@@ -154,6 +154,11 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   A native service with `backup_from_newest` (kyu) is archived from its own
   nightly copy, which is a COMPLETE database: put it back as the live file
   and delete any `-wal`/`-shm` beside it (T77).
+- **B7 · Rollback drill** — `scripts/drill-native-rollback.sh` deploys the
+  throwaway `stacks/drill`, installs a good fake service, then a broken one
+  with `homelab install-native stacks/drill/drillsvc --file <script>`, and
+  reads off the container that the install rolled back and the service is
+  still on the good binary; then destroys the stack. Passed 2026-09-20.
 - **E7 · DR runbook** — `homelab runbook` regenerates
   [DR_RUNBOOK.md](DR_RUNBOOK.md), the document for when everything is down.
 - **C2 · Destroy** — `homelab destroy stacks/<name>`: typed-name confirm,

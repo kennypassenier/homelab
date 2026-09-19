@@ -45,13 +45,13 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — **v3.54.0** live on the host (2026-09-20); ten items committed since, waiting on `make release VERSION=3.55.0` | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
+| Phase | 9 · Released — **v3.55.0** live on the host (2026-09-20 01:47 local) | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
 
 | | |
 |---|---|
-| Next action | **waiting on Kenny: `make release VERSION=3.55.0`** — it carries T81, T82, G6, F160, M-T75, gap-14, T85, B1, B7 and R5 (seven commits since 3.54.0, all tests green). Nothing else needs him: the native-services report is signed off 5/5, the drill passed, kyu is back in the nightly rotation. After the release Claude runs `homelab release-update`, installs the release client, and `homelab adopt`s kyu and kyu-runner so their `update_policy: auto` reaches the host. Waiting on the clock: 04:00 the first nightly under 3.54.0 (M-D94 kyu copy-backup, M-T75 phase duration), 08:00 the deferred HA push. Open elsewhere: 14 manual checks (`homelab checks`), earlier form items (CT 116 reachability, swap, checks part 1), kyu door for ha/sonarr/radarr/newsflash (kyu session's form). |
+| Next action | **waiting on the clock**: 04:00 the first nightly under 3.55.0 — read `journalctl -u homelab-host` for `[backup] kyu archives its own copy` (M-D94), `backup phase took` (M-T75), `[release] kyu … already runs` / `updated to` (B1), and the seeder's next run without stale native warnings (gap-14); 08:00 the deferred HA push (F85). Nothing waits on Kenny right now: the native-services report is signed off 5/5, kyu and kyu-runner are adopted with `update_policy: auto`, the release client is installed. Open elsewhere: 14 manual checks (`homelab checks`), earlier form items (CT 116 reachability, swap, checks part 1), kyu door for ha/sonarr/radarr/newsflash (kyu session's form). |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

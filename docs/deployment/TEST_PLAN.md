@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**477 tests across 25 suites.**
+**480 tests across 25 suites.**
 
 ## Accepted limitations
 
@@ -439,6 +439,9 @@ Covers: F117, F171
 - `a_rolled_back_update_keeps_the_binary_it_is_running_from` — A rolled-back update KEEPS the copy: the service is running from it.
 - `a_skip_says_which_copy_it_read_and_how_to_refresh_it` — "skipped by decision" is what an empty field looks like from the inside and a deliberate choice from the outside.
 - `stored_timestamps_render_as_plain_dates` — The formatter behind that date.
+- `t87_static_and_satisfiable_binaries_pass` — A static build asks nothing; a dynamic one is fine when the container has at least what it names; and the probe's line is the only input.
+- `t87_a_higher_requirement_or_an_unreadable_container_is_refused` — F304 in one line: a binary built against 2.39 on a container with 2.36 is refused, and the refusal names both numbers so the reader knows what to ship instead.
+- `t87_a_binary_that_needs_a_newer_glibc_is_refused_before_anything_moves` — The check runs on the STAGED copy, before the unit file is written and before anything is moved: a refused binary leaves the container exactly as it was, staged copy included.
 
 ### `core/tests/real_deps_tests.rs`
 

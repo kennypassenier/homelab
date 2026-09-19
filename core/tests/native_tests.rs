@@ -59,6 +59,11 @@ fn adopt_mocks(exec: &MockExecutor) {
     exec.respond_always("test -x", CmdOutput::ok(""));
 }
 
+/// T87: the container answers the glibc probe as a static binary would.
+fn glibc_ok(exec: &MockExecutor) {
+    exec.respond_always("GNU_LIBC_VERSION", CmdOutput::ok("need=none have=2.41\n"));
+}
+
 #[test]
 fn c7_validation_catches_the_lies() {
     assert!(validate_native(&kyu_manifest()).is_ok());
@@ -577,6 +582,7 @@ async fn an_install_without_a_unit_file_is_refused() {
 async fn an_install_stages_beside_the_target_before_it_replaces_anything() {
     let exec = MockExecutor::new();
     adopt_mocks(&exec);
+    glibc_ok(&exec);
     exec.respond_always("test -f", CmdOutput::ok("no\n"));
     exec.respond_always("base64 -d", CmdOutput::ok(""));
     exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
@@ -638,6 +644,7 @@ async fn an_install_stages_beside_the_target_before_it_replaces_anything() {
 async fn a_first_install_that_fails_says_there_is_nothing_to_roll_back_to() {
     let exec = MockExecutor::new();
     adopt_mocks(&exec);
+    glibc_ok(&exec);
     exec.respond_always("test -f", CmdOutput::ok("no\n"));
     exec.respond_always("base64 -d", CmdOutput::ok(""));
     exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
@@ -682,6 +689,7 @@ async fn a_first_install_that_fails_says_there_is_nothing_to_roll_back_to() {
 async fn a_reinstall_that_fails_returns_to_the_binary_that_was_running() {
     let exec = MockExecutor::new();
     adopt_mocks(&exec);
+    glibc_ok(&exec);
     exec.respond_always("test -f", CmdOutput::ok("yes\n"));
     exec.respond_always("cp -p", CmdOutput::ok(""));
     exec.respond_always("base64 -d", CmdOutput::ok(""));
@@ -1042,4 +1050,91 @@ fn stored_timestamps_render_as_plain_dates() {
     assert_eq!(ymd(1_709_164_800), "2024-02-29");
     // Last second of a year.
     assert_eq!(ymd(1_767_225_599), "2025-12-31");
+}
+
+// ── T87 · the glibc check before a binary is installed ─────────────────────
+
+use homelab_core::ops::native::glibc_verdict;
+
+/// A static build asks nothing; a dynamic one is fine when the container
+/// has at least what it names; and the probe's line is the only input.
+#[test]
+fn t87_static_and_satisfiable_binaries_pass() {
+    let ok = glibc_verdict("need=none have=2.41\n").unwrap();
+    assert!(ok.contains("static"), "{}", ok);
+    let ok = glibc_verdict("need=2.34 have=2.41\n").unwrap();
+    assert!(ok.contains("2.34") && ok.contains("2.41"), "{}", ok);
+    let ok = glibc_verdict("need=2.41 have=2.41\n").unwrap();
+    assert!(ok.contains("2.41"), "{}", ok);
+}
+
+/// F304 in one line: a binary built against 2.39 on a container with 2.36 is
+/// refused, and the refusal names both numbers so the reader knows what to
+/// ship instead. A container whose version cannot be read refuses too — the
+/// alternative is learning the answer as a crash loop.
+#[test]
+fn t87_a_higher_requirement_or_an_unreadable_container_is_refused() {
+    let why = glibc_verdict("need=2.39 have=2.36\n").unwrap_err();
+    assert!(why.contains("2.39") && why.contains("2.36"), "{}", why);
+    assert!(
+        why.contains("crash-loop") || why.contains("F304"),
+        "{}",
+        why
+    );
+    let why = glibc_verdict("need=2.39 have=unknown\n").unwrap_err();
+    assert!(why.contains("could not be read"), "{}", why);
+    let why = glibc_verdict("").unwrap_err();
+    assert!(why.contains("could not read"), "{}", why);
+    let why = glibc_verdict("garbage\n").unwrap_err();
+    assert!(why.contains("could not read"), "{}", why);
+}
+
+/// The check runs on the STAGED copy, before the unit file is written and
+/// before anything is moved: a refused binary leaves the container exactly
+/// as it was, staged copy included.
+#[tokio::test]
+async fn t87_a_binary_that_needs_a_newer_glibc_is_refused_before_anything_moves() {
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("test -f", CmdOutput::ok("yes\n"));
+    exec.respond_always("base64 -d", CmdOutput::ok(""));
+    exec.respond_always("GNU_LIBC_VERSION", CmdOutput::ok("need=2.39 have=2.36\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = homelab_core::ops::native::install_native(
+        &ctx(&exec, &sink, &j),
+        &install_manifest(),
+        "YmluYXJ5",
+        UNIT_FILE,
+    )
+    .await;
+    assert!(
+        !report.ok,
+        "a binary the container cannot run must be refused"
+    );
+    let why = format!("{:?}", report.error);
+    assert!(why.contains("2.39") && why.contains("2.36"), "{}", why);
+    assert!(
+        !exec
+            .calls_containing("rm -f '/usr/local/bin/kyu.homelab-new'")
+            .is_empty(),
+        "the staged copy is removed on refusal: {:?}",
+        exec.calls()
+    );
+    assert!(
+        exec.calls_containing("mv -f").is_empty(),
+        "nothing may be moved into place: {:?}",
+        exec.calls()
+    );
+    assert!(
+        exec.calls_containing("/etc/systemd/system/kyu.service")
+            .is_empty(),
+        "the unit file is not written for a binary that was refused: {:?}",
+        exec.calls()
+    );
+    assert!(
+        exec.calls_containing("systemctl stop").is_empty(),
+        "the running service is never stopped: {:?}",
+        exec.calls()
+    );
 }

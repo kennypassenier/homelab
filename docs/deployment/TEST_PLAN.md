@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**500 tests across 26 suites.**
+**505 tests across 26 suites.**
 
 ## Accepted limitations
 
@@ -467,6 +467,11 @@ Covers: F117, F171
 - `t77_a_stale_or_missing_own_copy_fails_the_backup_rather_than_archiving_it` — M-D94: a stale copy is the failure that looks like success.
 - `t77_the_copy_glob_is_validated` — The glob is validated like every other path: absolute, no climbing, and it has to BE a glob — one fixed name is the trap the count-based rotation exists to avoid.
 - `t85_staged_binaries_are_merged_and_empty_entries_dropped` — A staged unit is filled in; a unit that came with its bytes is kept; an empty entry with nothing staged disappears rather than becoming an empty program.
+- `b1_the_latest_release_is_reduced_to_tag_and_two_urls_and_refused_without_sums`
+- `b1_auto_policy_needs_a_release_repo`
+- `b1_a_current_binary_costs_one_small_download_and_no_install` — The decision is made on checksums, from a few hundred bytes: an installed binary whose sum SHA256SUMS already lists is current, and nothing is downloaded, encoded or moved.
+- `b1_a_newer_release_is_verified_on_the_host_and_installed_through_the_same_path` — A differing sum means: download to the host, verify there, encode, read the unit the container runs, and go through `install_native` — staged beside, glibc-checked, rollback armed.
+- `b1_a_checksum_mismatch_installs_nothing` — A download whose sum is not the listed one installs nothing.
 
 ### `core/tests/real_deps_tests.rs`
 

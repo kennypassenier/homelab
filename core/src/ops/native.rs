@@ -850,6 +850,255 @@ pub fn glibc_verdict(probe_output: &str) -> Result<String, String> {
     }
 }
 
+/// B1: what the latest release of a repository offers — the tag, and the
+/// download URLs of the asset and its checksum list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseRefs {
+    pub tag: String,
+    pub asset_url: String,
+    pub sums_url: String,
+}
+
+/// GitHub's `releases/latest` answer, reduced to what an update needs. A
+/// release without the asset, or without SHA256SUMS, is refused here — an
+/// unverifiable binary is exactly the hand-built step this replaces.
+pub fn parse_latest_release(json: &str, asset: &str) -> Result<ReleaseRefs, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("release listing is not JSON: {}", e))?;
+    if let Some(msg) = v.get("message").and_then(|m| m.as_str()) {
+        if v.get("tag_name").is_none() {
+            return Err(format!("GitHub answered: {}", msg));
+        }
+    }
+    let tag = v
+        .get("tag_name")
+        .and_then(|t| t.as_str())
+        .ok_or("release listing carries no tag_name")?
+        .to_string();
+    let url_of = |name: &str| -> Option<String> {
+        v.get("assets")?
+            .as_array()?
+            .iter()
+            .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(name))?
+            .get("browser_download_url")?
+            .as_str()
+            .map(str::to_string)
+    };
+    let asset_url =
+        url_of(asset).ok_or_else(|| format!("release {} carries no asset '{}'", tag, asset))?;
+    let sums_url = url_of("SHA256SUMS").ok_or_else(|| {
+        format!(
+            "release {} has no SHA256SUMS — refusing to install an unverified binary",
+            tag
+        )
+    })?;
+    Ok(ReleaseRefs {
+        tag,
+        asset_url,
+        sums_url,
+    })
+}
+
+/// The checksum a SHA256SUMS file lists for `filename`, if any.
+pub fn listed_sha(sums: &str, filename: &str) -> Option<String> {
+    sums.lines().find_map(|l| {
+        let mut parts = l.split_whitespace();
+        match (parts.next(), parts.next()) {
+            (Some(h), Some(f)) if f.trim_start_matches('*') == filename => {
+                Some(h.to_ascii_lowercase())
+            }
+            _ => None,
+        }
+    })
+}
+
+/// B1: the orchestrator's own update of a native service, from the host.
+///
+/// The client's `install-native` fetches through `gh`; the host has no `gh`
+/// and needs none for a public repository — `curl` against the GitHub API
+/// reaches it from pve (measured 200 on 2026-09-20). The decision is made
+/// on checksums, not versions: SHA256SUMS is fetched first (a few hundred
+/// bytes), and only when the listed sum differs from the installed binary's
+/// is the asset downloaded, verified on the host, and handed to
+/// `install_native` — the same staged-beside, glibc-checked, rollback-armed
+/// path a client install takes. The unit file comes from the container
+/// itself: it is the one systemd is running, and a rebuild put it there
+/// from the repository.
+pub async fn release_update(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
+    let op = format!("release-update-{}", m.unit);
+    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+    let Some(repo) = m.release_repo.clone() else {
+        runner.log(
+            Level::Info,
+            format!(
+                "[release] {} declares no release_repo — nothing to fetch",
+                m.unit
+            ),
+        );
+        return runner.finish_ok();
+    };
+    let asset = m.release_asset.clone().unwrap_or_else(|| m.unit.clone());
+
+    step!(runner, "guard target", {
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    let mut refs: Option<ReleaseRefs> = None;
+    step!(runner, "ask GitHub for the latest release", {
+        let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+        let out = exec
+            .run(&Cmd::new(
+                "curl",
+                &[
+                    "-sSL",
+                    "-m",
+                    "30",
+                    "-H",
+                    "Accept: application/vnd.github+json",
+                    &url,
+                ],
+                60,
+            ))
+            .await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "could not reach GitHub for {}: {}",
+                repo,
+                out.stderr.trim()
+            )));
+        }
+        refs = Some(parse_latest_release(&out.stdout, &asset).map_err(CoreError::Other)?);
+        Ok(StepOutcome::Unchanged)
+    });
+    let refs = refs.expect("set by the step above");
+
+    let mut wanted = String::new();
+    step!(runner, "read the checksum list", {
+        let out = exec
+            .run(&Cmd::new("curl", &["-sSL", "-m", "60", &refs.sums_url], 90))
+            .await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "could not fetch SHA256SUMS of {} {}: {}",
+                repo,
+                refs.tag,
+                out.stderr.trim()
+            )));
+        }
+        wanted = listed_sha(&out.stdout, &asset).ok_or_else(|| {
+            CoreError::Other(format!(
+                "SHA256SUMS of {} {} lists no '{}' — refusing an unverifiable binary",
+                repo, refs.tag, asset
+            ))
+        })?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    let mut current = false;
+    step!(runner, "compare with the installed binary", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("sha256sum {} 2>/dev/null | cut -d' ' -f1", shq(&m.binary)),
+            60,
+        )
+        .await?;
+        current = out.stdout.trim().eq_ignore_ascii_case(&wanted);
+        Ok(StepOutcome::Unchanged)
+    });
+    if current {
+        runner.log(
+            Level::Info,
+            format!(
+                "[release] {} already runs {} of {} — nothing to install",
+                m.unit, refs.tag, repo
+            ),
+        );
+        return runner.finish_ok();
+    }
+
+    let staged = format!(
+        "{}/staged/{}/{}.release",
+        ctx.state_dir, m.stack_name, m.unit
+    );
+    let mut b64 = String::new();
+    step!(runner, "download and verify the asset", {
+        let dir = staged.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
+        let script = format!(
+            "mkdir -p {d} && curl -sSL -m 600 -o {f} {u} && sha256sum {f} | cut -d' ' -f1",
+            d = shq(dir),
+            f = shq(&staged),
+            u = shq(&refs.asset_url)
+        );
+        let out = exec.run(&Cmd::new("sh", &["-c", &script], 700)).await?;
+        if !out.success() {
+            let _ = exec.run(&Cmd::new("rm", &["-f", &staged], 30)).await;
+            return Err(CoreError::Other(format!(
+                "download of {} {} failed: {}",
+                asset,
+                refs.tag,
+                out.stderr.trim()
+            )));
+        }
+        if !out.stdout.trim().eq_ignore_ascii_case(&wanted) {
+            let _ = exec.run(&Cmd::new("rm", &["-f", &staged], 30)).await;
+            return Err(CoreError::SafetyAbort(format!(
+                "CHECKSUM MISMATCH for {} in {} {} — download corrupted or tampered; nothing \
+                 installed",
+                asset, repo, refs.tag
+            )));
+        }
+        let enc = exec
+            .run(&Cmd::new("base64", &["-w0", &staged], 300))
+            .await?;
+        let _ = exec.run(&Cmd::new("rm", &["-f", &staged], 30)).await;
+        if !enc.success() || enc.stdout.trim().is_empty() {
+            return Err(CoreError::Other(format!(
+                "could not encode {} for the transfer into the container",
+                staged
+            )));
+        }
+        b64 = enc.stdout.trim().to_string();
+        Ok(StepOutcome::Changed)
+    });
+
+    let mut unit_file = String::new();
+    step!(runner, "read the unit file from the container", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("cat /etc/systemd/system/{}.service", m.unit),
+            30,
+        )
+        .await?;
+        if !out.success() || out.stdout.trim().is_empty() {
+            return Err(CoreError::Other(format!(
+                "{}.service is not on {} — a service without its unit is not one this \
+                 orchestrator installs; adopt or deploy it first",
+                m.unit, m.hostname
+            )));
+        }
+        unit_file = out.stdout;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    let report = install_native(ctx, m, &b64, &unit_file).await;
+    if !report.ok {
+        return report;
+    }
+    runner.log(
+        Level::Info,
+        format!(
+            "[release] {} updated to {} of {} — installed under the armed rollback",
+            m.unit, refs.tag, repo
+        ),
+    );
+    runner.finish_ok()
+}
+
 /// T85: fill a deploy's binary map from what was staged one message at a
 /// time. A unit whose entry is missing or empty is looked up; a unit that
 /// arrived with its bytes (an older client) is left alone; an entry that is

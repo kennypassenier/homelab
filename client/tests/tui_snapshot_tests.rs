@@ -896,6 +896,11 @@ const CLI_ONLY: &[(&str, &str)] = &[
         "ForgetStack",
         "housekeeping after a rename; rare and easy to do wrong — a later round",
     ),
+    (
+        "ReleaseUpdateNative",
+        "the nightly round's own release update, run by hand only to prove it — \
+         the TUI's update key is the supervised self-update (B1)",
+    ),
 ];
 
 /// covers: F156

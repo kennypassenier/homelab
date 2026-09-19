@@ -34,3 +34,6 @@ update_cmd: >-
   /opt/kyu-runner/bin/kyu-runner update
 release_repo: kennypassenier/kyu-runner
 release_asset: kyu-runner
+# B1: the orchestrator owns kyu-runner's recurring update (nightly release
+# check against the installed binary's checksum; rollback armed).
+update_policy: auto

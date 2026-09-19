@@ -46,3 +46,7 @@ release_asset: kyu
 # is looking at. The reverse of the moving rule, where those three travel
 # together.
 backup_from_newest: /appdata/kyu/kyu-config/kyu.backup-*.db
+# B1 (UPDATE_POLICY.md, decided 2026-09-19): the orchestrator owns kyu's
+# recurring update. Nightly: fetch the latest release's SHA256SUMS, compare
+# with the installed binary, install under the armed rollback when it differs.
+update_policy: auto

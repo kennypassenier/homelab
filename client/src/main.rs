@@ -338,6 +338,20 @@ async fn main() {
             )
             .await;
         }
+        // B1: the orchestrator's own release update of a native stack, now.
+        "release-update-native" => {
+            let stack = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab release-update-native <stack>"));
+            rpc(
+                &host,
+                &token,
+                Command::ReleaseUpdateNative {
+                    stack: stack.clone(),
+                },
+            )
+            .await;
+        }
         // Route A: ask every configured device for its own configuration now,
         // instead of waiting for 04:00 to find out whether it works.
         "backup-devices" => rpc(&host, &token, Command::BackupDevices).await,
@@ -998,6 +1012,7 @@ async fn main() {
             println!("  homelab templates                   list the golden templates");
             println!("  homelab resize stacks/<name>        apply changed resources (H4)");
             println!("  homelab config                      show the host's settings (G8)");
+            println!("  homelab release-update-native <stack> install the latest release of each service (B1)");
             println!("  homelab backup-devices              fetch each device's own config now");
             println!(
                 "  homelab testplan                    regenerate docs/deployment/TEST_PLAN.md"

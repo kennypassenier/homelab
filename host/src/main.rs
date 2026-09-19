@@ -2357,6 +2357,22 @@ async fn scheduler_loop(state: AppState) {
                     .unwrap_or(NightBackup::Failed);
                 let mut update_ok = true;
                 let applied = Some(st.applied_at);
+                // B1: the orchestrator's own release update, for the
+                // services whose policy hands it to the orchestrator.
+                for native in st
+                    .natives
+                    .iter()
+                    .filter(|n| n.update_policy == homelab_core::native::UpdatePolicy::Auto)
+                {
+                    let native = native.clone();
+                    let r = run_mutating_op(&state, &exec, 0, "scheduled-release-update", |ctx| {
+                        Box::pin(async move {
+                            homelab_core::ops::native::release_update(ctx, &native).await
+                        })
+                    })
+                    .await;
+                    update_ok &= r.ok;
+                }
                 for native in st.natives.clone() {
                     let n2 = native.clone();
                     let r = run_mutating_op(&state, &exec, 0, "scheduled-update-native", |ctx| {
@@ -3448,6 +3464,41 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                             })
                         })
                         .await;
+                        let failed = !r.ok;
+                        if resp.ok || failed {
+                            resp = r;
+                        }
+                        if failed {
+                            break;
+                        }
+                    }
+                    resp
+                }
+                Err(msg) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: msg,
+                    deferred: None,
+                },
+            }
+        }
+        Rpc::ReleaseUpdateNative { stack } => {
+            match native_from_state(&state.config.state_dir, &stack).await {
+                Ok((services, _)) => {
+                    let mut resp = RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: format!("no services on stack '{}'", stack),
+                        deferred: None,
+                    };
+                    for m in services {
+                        let r =
+                            run_mutating_op(state, &exec, req.id, "release-update-native", |ctx| {
+                                Box::pin(async move {
+                                    homelab_core::ops::native::release_update(ctx, &m).await
+                                })
+                            })
+                            .await;
                         let failed = !r.ok;
                         if resp.ok || failed {
                             resp = r;

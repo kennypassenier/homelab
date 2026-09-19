@@ -7,6 +7,21 @@
 
 use serde::{Deserialize, Serialize};
 
+/// B1: who owns this service's recurring update. `manual` (the default) means
+/// the nightly round never installs a release for it; `auto` means the
+/// orchestrator fetches the latest release nightly, verifies its checksum
+/// against the installed binary and installs it under the armed rollback
+/// when it differs. Decided per service in UPDATE_POLICY.md: kyu and
+/// kyu-runner are the orchestrator's; http-switchboard stays manual while it
+/// sits on the alert path; almanac updates itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdatePolicy {
+    #[default]
+    Manual,
+    Auto,
+}
+
 /// Everything the homelab needs to know about one native service. One
 /// service per stack/container — the shapes that need more run compose.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,6 +77,10 @@ pub struct NativeServiceManifest {
     /// back as the live file and delete any `-wal`/`-shm` beside it.
     #[serde(default)]
     pub backup_from_newest: Option<String>,
+    /// B1: `auto` = the nightly round installs the latest release when its
+    /// checksum differs from the installed binary; `manual` = never.
+    #[serde(default)]
+    pub update_policy: UpdatePolicy,
 }
 
 impl NativeServiceManifest {
@@ -139,6 +158,11 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
         problems.push(
             "release_asset is set without a release_repo — there is nowhere to fetch it from"
                 .into(),
+        );
+    }
+    if m.update_policy == UpdatePolicy::Auto && m.release_repo.is_none() {
+        problems.push(
+            "update_policy: auto without a release_repo — there is nothing to fetch nightly".into(),
         );
     }
     if let Some(glob) = &m.backup_from_newest {

@@ -42,6 +42,7 @@ fn kyu_manifest() -> NativeServiceManifest {
         update_cmd: Some("kyu update".into()),
         stateless: false,
         backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
     }
@@ -311,6 +312,7 @@ async fn t5_a_stack_holds_several_native_services() {
         data_dirs: vec![],
         stateless: true,
         backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
         update_cmd: None,
@@ -343,6 +345,7 @@ async fn t5_a_stack_holds_several_native_services() {
         data_dirs: vec![],
         stateless: true,
         backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
         update_cmd: Some("kyu-runner update".into()),
@@ -430,6 +433,7 @@ async fn d25_native_backup_uses_the_service_name_for_its_repo() {
         data_dirs: vec!["/etc/kyu-runner".into()],
         stateless: false,
         backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
         update_cmd: None,
@@ -1290,4 +1294,166 @@ fn t85_staged_binaries_are_merged_and_empty_entries_dropped() {
         "nothing staged and nothing sent = not shipped: {:?}",
         map
     );
+}
+
+// ── B1 · the orchestrator's own release update, nightly for the auto class ─
+
+const RELEASE_JSON: &str = r#"{"tag_name":"v3.3.0","assets":[
+  {"name":"kyu","browser_download_url":"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/kyu"},
+  {"name":"SHA256SUMS","browser_download_url":"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/SHA256SUMS"}]}"#;
+
+#[test]
+fn b1_the_latest_release_is_reduced_to_tag_and_two_urls_and_refused_without_sums() {
+    use homelab_core::ops::native::{listed_sha, parse_latest_release};
+    let r = parse_latest_release(RELEASE_JSON, "kyu").unwrap();
+    assert_eq!(r.tag, "v3.3.0");
+    assert!(r.asset_url.ends_with("/v3.3.0/kyu"));
+    assert!(r.sums_url.ends_with("/SHA256SUMS"));
+    let why = parse_latest_release(RELEASE_JSON, "kyu-runner").unwrap_err();
+    assert!(why.contains("no asset 'kyu-runner'"), "{}", why);
+    let no_sums = r#"{"tag_name":"v1","assets":[{"name":"kyu","browser_download_url":"u"}]}"#;
+    let why = parse_latest_release(no_sums, "kyu").unwrap_err();
+    assert!(why.contains("SHA256SUMS"), "{}", why);
+    let why = parse_latest_release(r#"{"message":"Not Found"}"#, "kyu").unwrap_err();
+    assert!(why.contains("Not Found"), "{}", why);
+    assert_eq!(
+        listed_sha("ABCD  kyu\n1234 *SHA256SUMS\n", "kyu").as_deref(),
+        Some("abcd")
+    );
+    assert_eq!(listed_sha("abcd  kyu\n", "kyu-runner"), None);
+}
+
+#[test]
+fn b1_auto_policy_needs_a_release_repo() {
+    use homelab_core::native::{validate_native, UpdatePolicy};
+    let m = NativeServiceManifest {
+        update_policy: UpdatePolicy::Auto,
+        ..kyu_manifest()
+    };
+    let why = validate_native(&m).unwrap_err().join("; ");
+    assert!(
+        why.contains("update_policy: auto without a release_repo"),
+        "{}",
+        why
+    );
+    assert!(validate_native(&NativeServiceManifest {
+        update_policy: UpdatePolicy::Auto,
+        ..install_manifest()
+    })
+    .is_ok());
+}
+
+fn release_mocks(exec: &MockExecutor, listed: &str, installed: &str) {
+    adopt_mocks(exec);
+    exec.respond_always("releases/latest", CmdOutput::ok(RELEASE_JSON));
+    exec.respond_always(
+        "/v3.3.0/SHA256SUMS",
+        CmdOutput::ok(&format!("{}  kyu\n", listed)),
+    );
+    exec.respond_always(
+        "sha256sum '/usr/local/bin/kyu'",
+        CmdOutput::ok(&format!("{}\n", installed)),
+    );
+}
+
+/// The decision is made on checksums, from a few hundred bytes: an
+/// installed binary whose sum SHA256SUMS already lists is current, and
+/// nothing is downloaded, encoded or moved.
+#[tokio::test]
+async fn b1_a_current_binary_costs_one_small_download_and_no_install() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    release_mocks(&exec, "abcd", "abcd");
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("curl -sSL -m 600 -o").is_empty(),
+        "no asset download for a current binary: {:?}",
+        exec.calls()
+    );
+    assert!(exec.calls_containing("mv -f").is_empty());
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("already runs v3.3.0")),
+        "{:?}",
+        sink.lines()
+    );
+}
+
+/// A differing sum means: download to the host, verify there, encode, read
+/// the unit the container runs, and go through `install_native` — staged
+/// beside, glibc-checked, rollback armed.
+#[tokio::test]
+async fn b1_a_newer_release_is_verified_on_the_host_and_installed_through_the_same_path() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    release_mocks(&exec, "beef", "abcd");
+    exec.respond_always(
+        "sha256sum '/var/lib/homelab/staged/kyu/kyu.release'",
+        CmdOutput::ok("beef\n"),
+    );
+    exec.respond_always("base64 -w0", CmdOutput::ok("YmluYXJ5\n"));
+    exec.respond_always(
+        "cat /etc/systemd/system/kyu.service",
+        CmdOutput::ok(UNIT_FILE),
+    );
+    exec.respond_always("test -f", CmdOutput::ok("yes\n"));
+    exec.respond_always("base64 -d", CmdOutput::ok(""));
+    glibc_ok(&exec);
+    exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
+    exec.respond_always("systemctl stop", CmdOutput::ok(""));
+    exec.respond_always("cat /var/lib/homelab/state.json", CmdOutput::failed(1, ""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let cmds = exec.calls();
+    let download = cmds
+        .iter()
+        .position(|c| c.contains("curl -sSL -m 600 -o"))
+        .expect("the asset is downloaded");
+    let moved = cmds
+        .iter()
+        .position(|c| c.contains("mv -f"))
+        .expect("the binary is moved into place");
+    assert!(download < moved, "download before install: {:?}", cmds);
+    assert!(
+        cmds.iter().any(|c| c.contains("kyu.homelab-new")),
+        "installed through the staged path: {:?}",
+        cmds
+    );
+    assert!(
+        !exec
+            .calls_containing("rm -f /var/lib/homelab/staged/kyu/kyu.release")
+            .is_empty(),
+        "the host copy is removed afterwards: {:?}",
+        cmds
+    );
+}
+
+/// A download whose sum is not the listed one installs nothing.
+#[tokio::test]
+async fn b1_a_checksum_mismatch_installs_nothing() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    release_mocks(&exec, "beef", "abcd");
+    exec.respond_always(
+        "sha256sum '/var/lib/homelab/staged/kyu/kyu.release'",
+        CmdOutput::ok("dead\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(!report.ok);
+    let why = format!("{:?}", report.error);
+    assert!(why.contains("CHECKSUM MISMATCH"), "{}", why);
+    assert!(
+        exec.calls_containing("base64 -w0").is_empty(),
+        "{:?}",
+        exec.calls()
+    );
+    assert!(exec.calls_containing("mv -f").is_empty());
 }

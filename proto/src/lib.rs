@@ -145,6 +145,13 @@ pub enum Command {
     UpdateNative {
         stack: String,
     },
+    /// B1: the orchestrator's own release update of a native stack, on
+    /// demand — the same thing the nightly round does for services whose
+    /// `update_policy` is `auto`, for every service of the stack that
+    /// declares a release_repo.
+    ReleaseUpdateNative {
+        stack: String,
+    },
     /// T69: the operator's answer to a suspended step. `allow` false means
     /// stop; a question that is never answered times out on the host into
     /// `Unattended`, which is not the same thing and says so.

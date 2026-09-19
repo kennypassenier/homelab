@@ -125,6 +125,11 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   restarting it; nightly in-container backup + the app's own self-update
   under supervision (binary preserved, restart only on change, rollback
   from outside). On demand: `homelab backup-native|update-native <stack>`.
+  **B1** — a service whose `service.yml` says `update_policy: auto` gets the
+  latest release installed nightly when its checksum differs from the
+  installed binary (rollback armed); `homelab release-update-native <stack>`
+  does the same on demand. Change the policy in the file, then
+  `homelab adopt` the service so the host's copy carries it.
 - **H5 · Host self-update** — `homelab self-update <new-binary>`: selfcheck
   gate → backup → install → armed rollback marker → restart. A release that
   crashes on start is rolled back automatically by systemd (proven with a

@@ -34,3 +34,6 @@ update_cmd: >-
   /opt/http-switchboard/bin/http-switchboard update
 release_repo: kennypassenier/http-switchboard
 release_asset: http-switchboard
+# B1: manual while it sits on the alert path — a nightly surprise on the one
+# service that translates alarms is the wrong night to find out.
+update_policy: manual

@@ -88,9 +88,15 @@ verified, installed with a rollback copy, rolled back when the new version does
 not become healthy; proven live on 2026-09-11 (three services, NRestarts=0).
 **almanac and latch update themselves** (almanac keeps its previous binary and
 reverts; latch is minisign-signed and not a deployed service); the orchestrator
-observes and does not update them. What is still to build: the nightly run
-calling `update-native` for native services whose `service.yml` carries the
-`auto` policy, so the ownership above is a mechanism and not a sentence.
+observes and does not update them. **Built 2026-09-20 (B1):** every
+`service.yml` carries `update_policy: auto | manual` (default manual). The
+nightly round runs `release_update` for the `auto` ones — the latest release's
+SHA256SUMS is fetched from GitHub by the host itself, compared with the
+installed binary's checksum, and only a differing asset is downloaded,
+verified on the host and installed through the same staged, glibc-checked,
+rollback-armed path as `install-native`. `homelab release-update-native
+<stack>` runs it on demand. kyu and kyu-runner are `auto`; http-switchboard
+and almanac are `manual`, each with its reason in its file.
 
 ## Kenny's own Rust services
 

@@ -980,6 +980,13 @@ async fn a_healthy_update_does_not_leave_its_rollback_copy_behind() {
         1,
         "the within-run copy is removed once the run proved healthy: {:?}",
         exec.calls()
+    ); // fix-10: and so is the kit's own copy — the same version, kept twice.
+    assert_eq!(
+        exec.calls_containing("rm -f '/usr/local/bin/kyu.prev'")
+            .len(),
+        1,
+        "the kit's copy goes with it after a healthy update: {:?}",
+        exec.calls()
     );
 }
 
@@ -1001,6 +1008,12 @@ async fn a_rolled_back_update_keeps_the_binary_it_is_running_from() {
         exec.calls_containing("rm -f '/usr/local/bin/kyu.homelab-prev'")
             .is_empty(),
         "deleting it here would remove the file the service was just restored from: {:?}",
+        exec.calls()
+    );
+    assert!(
+        exec.calls_containing("rm -f '/usr/local/bin/kyu.prev'")
+            .is_empty(),
+        "a rolled-back run leaves the kit's copy alone too: {:?}",
         exec.calls()
     );
 }

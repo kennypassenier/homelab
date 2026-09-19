@@ -936,6 +936,33 @@ pub async fn update_native(
             format!("could not remove {} — a stale copy stays on disk", prev),
         );
     }
+
+    // fix-10: the chassis kit keeps its own `.prev` beside the binary, and
+    // this run keeps `.homelab-prev` — the same version twice, 73 MB of it
+    // on CT 109's small rootfs after the first was already gone. Past this
+    // point the service has proven healthy on the binary it runs, so the
+    // kit's copy has nothing left to return to either; Kenny, 2026-09-19:
+    // the deploy removes it after a healthy update. A rolled-back run never
+    // reaches here, so the copy the rollback may need is never touched.
+    let kit_prev = format!("{}.prev", m.binary);
+    let mut kit_kept = false;
+    step!(runner, "drop the kit's own rollback copy", {
+        let out = util_pct_sh(exec, m.vmid, &drop_stale_rollback_script(&kit_prev), 60).await?;
+        if !out.success() {
+            kit_kept = true;
+            return Ok(StepOutcome::Unchanged);
+        }
+        Ok(StepOutcome::Changed)
+    });
+    if kit_kept {
+        runner.log(
+            Level::Warn,
+            format!(
+                "could not remove {} — the kit's copy stays on disk",
+                kit_prev
+            ),
+        );
+    }
     runner.log(
         Level::Info,
         format!("[update] {} self-update supervised — healthy", m.stack_name),

@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**460 tests across 23 suites.**
+**469 tests across 24 suites.**
 
 ## Accepted limitations
 
@@ -554,6 +554,20 @@ D12 and its 2026-09-05 amendment (MR1): where an app's secrets come from, and wh
 - `f301_a_service_file_at_the_stack_root_is_still_found` — F301: a stack with several natives whose FIRST one still keeps its service.yml at the stack root — kyu's real shape, three units with the hub's own file at the top from when it was the only one.
 - `f303_the_link_refuses_an_oversized_payload_in_words` — F303: the size guard belongs where every command passes, not in the call sites that remembered it.
 - `f309_help_anywhere_in_the_arguments_means_help` — F309: asking for help must never do the work.
+
+### `client/tests/repo_config_tests.rs`
+
+feat-client-1 · the host address is a fact about the fleet, not about the machine typing, so it lives in the repository.
+
+- `the_repo_file_beats_the_machine_file_and_the_default` — The whole point: the repository's word beats what this machine's env file says, and the compiled-in default is the last resort.
+- `an_explicit_environment_variable_still_wins` — A one-off override typed before the command must keep working — that is how the 3.52.0 rollout got past the stalled path on 2026-09-19.
+- `without_a_repo_file_the_machine_file_speaks_and_then_the_default`
+- `a_repo_file_without_a_host_line_changes_nothing` — A repo file that names no host is not an override of anything.
+- `the_file_is_found_from_a_subdirectory_of_the_repo` — `homelab deploy stacks/gateway` is typed from the repo root, but `homelab check` is typed from anywhere — including a subdirectory of the repo.
+- `outside_any_repo_there_is_simply_no_file`
+- `a_file_that_does_not_parse_is_refused_not_defaulted` — Standing rule 45: an input the program could not parse is refused, never quietly replaced by a default — a typo in the address file would otherwise send every command to the wrong door without a word.
+- `a_repo_pin_fills_an_empty_machine_and_never_overrides_a_different_one` — The daemon's fingerprint in the repo means a fresh machine does not trust on first use — but it may never overrule a machine that already pinned something else, because that is exactly what a changed certificate looks like.
+- `the_committed_client_file_names_the_in_vlan_door_and_a_real_fingerprint` — The committed file itself, as the deploy would read it: the in-VLAN address chosen on 2026-09-19 and the daemon's real fingerprint.
 
 ### `client/tests/tls_pin_tests.rs`
 

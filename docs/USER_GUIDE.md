@@ -9,6 +9,17 @@ puts it in `~/.cargo/bin` and it reads `~/.config/homelab/env` itself. That
 was not true before 2026-09-02 — every command in this guide needed the repo
 root and a sourced `.env`, which is a ritual nobody had written down (F240).
 
+**Where the host's address comes from (feat-client-1).** `config/client.toml`
+in the repository names the daemon's address and its certificate fingerprint,
+so a second machine — a Windows box included, once the client builds there —
+finds the right door without a per-machine file. Precedence: `HOMELAB_HOST`
+typed before the command, then `config/client.toml` (found from the repo root
+or any subdirectory of it), then `~/.config/homelab/env`, then the built-in
+default. `homelab ping` prints which one it used. The token stays in
+`~/.config/homelab/env`: it is the one thing that is per machine. A machine
+that already pinned a different certificate is refused with both fingerprints
+in the message — that is what a changed certificate looks like.
+
 ## Daily driver
 
 ```bash

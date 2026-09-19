@@ -28,6 +28,12 @@ const C_YELLOW: &str = "\x1b[33m";
 const C_RED: &str = "\x1b[31m";
 const C_DIM: &str = "\x1b[2m";
 
+/// Where the address in use came from, and the repository's pin — set once
+/// in `main`, read by `rpc`, which is called from every verb.
+static HOST_SOURCE: std::sync::OnceLock<homelab_client::repo_config::HostSource> =
+    std::sync::OnceLock::new();
+static REPO_PIN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
 fn die(msg: &str) -> ! {
     eprintln!("{}error:{} {}", C_RED, C_RESET, msg);
     std::process::exit(1);
@@ -114,8 +120,23 @@ async fn main() {
     // the user's own config, then the repository's `.env` when standing in
     // it. Reading, never writing: this file is where the token lives, not a
     // cache of it.
+    // feat-client-1 (Kenny, 2026-09-19): the address is a fact about the
+    // fleet and lives in the repository, `config/client.toml`; a value typed
+    // before the command still wins, the machine's env file comes after the
+    // repository, and the compiled-in default is the last resort.
+    let explicit_host = std::env::var("HOMELAB_HOST").ok();
     load_config_env();
-    let host = std::env::var("HOMELAB_HOST").unwrap_or_else(|_| "10.10.5.250:8443".into());
+    let repo_cfg = homelab_client::repo_config::load(
+        &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    )
+    .unwrap_or_else(|e| die(&e));
+    let (host, host_source) = homelab_client::repo_config::resolve_host(
+        explicit_host,
+        repo_cfg.as_ref().map(|(p, c)| (p.as_path(), c)),
+        std::env::var("HOMELAB_HOST").ok(),
+    );
+    let _ = HOST_SOURCE.set(host_source);
+    let _ = REPO_PIN.set(repo_cfg.as_ref().and_then(|(_, c)| c.pin.clone()));
     let token = std::env::var("HOMELAB_TOKEN").unwrap_or_default();
     let offline = args.iter().any(|a| a == "--offline" || a == "--demo");
     // Commands that never touch the network need no token: help, offline TUI,
@@ -977,6 +998,7 @@ async fn rpc(host: &str, token: &str, command: Command) {
     // Commands whose real payload arrives as a separate broadcast frame
     // (Config) may see RpcDone first — wait for the payload before exiting.
     let awaits_payload = matches!(command, Command::GetConfig);
+    let is_ping = matches!(command, Command::Ping);
     let mut payload_seen = false;
     let mut done: Option<bool> = None;
     let url = format!("wss://{}/api/ws", host);
@@ -989,8 +1011,27 @@ async fn rpc(host: &str, token: &str, command: Command) {
         format!("Bearer {}", token).parse().unwrap(),
     );
 
-    // A4: pin the host certificate (TOFU on first connect).
-    let pin = load_pin();
+    // A4: pin the host certificate (TOFU on first connect) — unless the
+    // repository names the fingerprint (feat-client-1), in which case a
+    // fresh machine pins that instead of trusting whatever answers first.
+    let decision = homelab_client::repo_config::reconcile_pin(
+        load_pin(),
+        REPO_PIN.get().and_then(|p| p.as_deref()),
+    )
+    .unwrap_or_else(|e| die(&e));
+    if decision.adopted_from_repo {
+        if let Some(fp) = decision.pin.as_deref() {
+            save_pin(fp);
+            eprintln!(
+                "{}● pinned host certificate SHA256:{} from {}{}",
+                C_YELLOW,
+                fp,
+                homelab_client::repo_config::REPO_FILE,
+                C_RESET
+            );
+        }
+    }
+    let pin = decision.pin;
     let first_connect = pin.is_none();
     let verifier = homelab_client::tls::PinnedVerifier::new(pin);
     let tls_config = rustls::ClientConfig::builder()
@@ -1049,6 +1090,13 @@ async fn rpc(host: &str, token: &str, command: Command) {
                     "{}● HOST v{} (proto {}) — link up{}",
                     C_GREEN, version, proto, C_RESET
                 );
+                // Only on ping: which door was knocked on, and who said so.
+                // The rest of the verbs stay quiet about it.
+                if is_ping {
+                    if let Some(src) = HOST_SOURCE.get() {
+                        println!("{}  via {} ({}){}", C_DIM, host, src, C_RESET);
+                    }
+                }
                 // A client newer than the host loses whatever the host does
                 // not know about. Serde drops an unknown field silently, so
                 // the deploy succeeds and simply does less than it was asked

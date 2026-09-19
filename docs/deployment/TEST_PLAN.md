@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**469 tests across 24 suites.**
+**472 tests across 24 suites.**
 
 ## Accepted limitations
 
@@ -130,6 +130,9 @@ Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, 
 - `f307_security_updates_are_matched_by_codename_not_by_archive_alias` — F307: the security matcher must key on the codename, never on the archive alias Debian rewrites as a release ages.
 - `a_template_name_reports_the_os_it_was_baked_from` — The template's name must say which OS is inside it.
 - `a_gateway_deploy_renders_the_receiver_and_restores_single_file_mode` — gap-11 · the deploy renders the gateway's syslog receiver into the one file Alloy reads, and puts Alloy back to reading that one file.
+- `an_image_that_is_present_is_not_pulled_and_the_app_still_comes_up`
+- `an_image_that_is_missing_is_pulled_as_before`
+- `no_answer_about_the_images_means_pull` — Standing rule 12: defaults fail closed.
 
 ### `core/tests/devicebackup_tests.rs`
 

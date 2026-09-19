@@ -1178,10 +1178,51 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 _ => 900,
             };
             let cmd = format!("cd '{}' && docker compose pull -q", dir);
+            // gap-12 (Kenny, 2026-09-19: "alleen wat ontbreekt"): a deploy
+            // fetches only what the container does not have. Pulling every
+            // app on every deploy lifted five `manual`-policy apps on the
+            // gateway to whatever `latest` meant that day, with none of the
+            // health check and rollback the nightly update has. Updating
+            // stays where the rollback is; a deploy deploys.
+            //
+            // The container is asked per image the compose file names (after
+            // the cache rewrite, so the name asked about is the name `up -d`
+            // will start). Standing rule 12: no usable answer means pull —
+            // the old behaviour — never "assume it is there".
+            let present = pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "cd '{}' && for i in $(docker compose config --images 2>/dev/null); do \
+                     docker image inspect \"$i\" >/dev/null 2>&1 && echo \"present $i\" \
+                     || echo \"missing $i\"; done",
+                    dir
+                ),
+                60,
+            )
+            .await;
+            let all_present = match &present {
+                Ok(o) if o.success() => {
+                    let lines: Vec<&str> = o.stdout.lines().map(str::trim).collect();
+                    !lines.is_empty() && lines.iter().all(|l| l.starts_with("present "))
+                }
+                _ => false,
+            };
+            if all_present {
+                log_info(format!(
+                    "[images] {} :: every image is already on the container — not pulled \
+                     (a deploy never replaces an image; `homelab update` does)",
+                    app
+                ));
+            }
             // Not `?`: a timeout is an Err by the Executor contract, and a
             // timeout is precisely the case the fallback exists for. Taking
             // the error here would step over it.
-            let first = pct_sh(exec, m.vmid, &cmd, budget).await;
+            let first = if all_present {
+                Ok(crate::executor::CmdOutput::ok(""))
+            } else {
+                pct_sh(exec, m.vmid, &cmd, budget).await
+            };
             let mut pull = match first {
                 Ok(o) if o.success() => o,
                 other => {

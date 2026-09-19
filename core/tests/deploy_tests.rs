@@ -2797,3 +2797,61 @@ async fn a_gateway_deploy_renders_the_receiver_and_restores_single_file_mode() {
         "the sweep must come before the restart, or Alloy starts on two copies of the receiver"
     );
 }
+
+/// gap-12 · a deploy fetches only what is missing; it never replaces an
+/// image that is already there.
+///
+/// The `start apps` step used to `compose pull` every app on every deploy,
+/// so a deploy typed to change one config line lifted traefik, crowdsec,
+/// grafana, cloudflared and goaccess to whatever `latest` meant that day —
+/// five apps the update policy marks `manual` because a silent failure there
+/// is expensive, and without the health check and rollback the nightly
+/// update has. Kenny, 2026-09-19: "Alleen wat ontbreekt". Updating stays
+/// where the rollback is; deploying deploys.
+mod deploy_pulls_only_what_is_missing {
+    use super::*;
+
+    async fn run(images_answer: Option<&str>) -> MockExecutor {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        if let Some(a) = images_answer {
+            exec.respond_always("compose config --images", CmdOutput::ok(a));
+        }
+        let sink = VecSink::new();
+        let journal = NullJournal;
+        let sp = spec(110, "syncthing");
+        let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+        assert!(report.ok, "{:?}", report);
+        exec
+    }
+
+    #[tokio::test]
+    async fn an_image_that_is_present_is_not_pulled_and_the_app_still_comes_up() {
+        let exec = run(Some("present syncthing/syncthing:latest\n")).await;
+        assert!(
+            exec.calls_containing("compose pull").is_empty(),
+            "a present image is left exactly as it is: {:?}",
+            exec.calls_containing("compose")
+        );
+        assert!(
+            !exec.calls_containing("compose up -d").is_empty(),
+            "the app is still started"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_image_that_is_missing_is_pulled_as_before() {
+        let exec = run(Some("missing syncthing/syncthing:latest\n")).await;
+        assert_eq!(exec.calls_containing("compose pull").len(), 1);
+    }
+
+    /// Standing rule 12: defaults fail closed. Here "closed" is the old
+    /// behaviour — when the container gives no usable answer about what it
+    /// holds, the deploy pulls rather than starting an app on an image it
+    /// only assumed was there.
+    #[tokio::test]
+    async fn no_answer_about_the_images_means_pull() {
+        let exec = run(None).await;
+        assert_eq!(exec.calls_containing("compose pull").len(), 1);
+    }
+}

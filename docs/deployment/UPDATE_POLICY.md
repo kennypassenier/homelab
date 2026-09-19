@@ -47,6 +47,23 @@ does not understand. It does **not** catch a release that starts cleanly and
 does the wrong thing. For services on the alert path that is the failure that
 matters, which is why they are `manual`.
 
+## A deploy fetches only what is missing (amendment, 2026-09-19)
+
+Decided by Kenny in the gap-12 mini-round. Until then the `start apps` step
+of `homelab deploy` ran `docker compose pull` for every app on every deploy,
+which is a second road to the same containers that this document never
+mentioned — and one without the health check and rollback the nightly run
+has. Measured on 2026-09-18: a gateway deploy would have replaced all five
+`manual` apps there (traefik, crowdsec, grafana, cloudflared, goaccess) to
+lift one Alloy line.
+
+The rule now: **a deploy pulls an image only when the container does not
+have it, and never replaces one that is there.** `auto` apps are refreshed
+by the nightly run within a day, with its rollback; `manual` apps only by
+`homelab update`. A fresh container still gets everything, through the
+registry cache with its fallback. When the container cannot say what it
+holds, the deploy pulls — the old behaviour — rather than assume.
+
 ## Jellyfin, and never during a stream
 
 O10: before updating Jellyfin the orchestrator asks its API which sessions are

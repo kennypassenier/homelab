@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**483 tests across 25 suites.**
+**486 tests across 25 suites.**
 
 ## Accepted limitations
 
@@ -59,7 +59,7 @@ Covers: F156
 
 The M0 safety and idempotency suite — every scenario here maps to a FEATURES.md test scenario (A1, A2, A3/D10, B1, D1, A5).
 
-Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, F159, F164, F169, F170, F173, F21, F210, F213, F22
+Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, F159, F164, F169, F170, F173, F21, F210, F213, F22, F289
 
 - `a_clone_refuses_a_privilege_level_the_template_cannot_give` — A clone can never change a container's privilege level, so asking for one the template cannot give must stop the deploy rather than silently produce the other.
 - `a_privileged_stack_cloning_the_privileged_template_is_allowed` — And the matching case passes: a privileged stack cloning the privileged template is exactly how the media and downloader stacks are built.
@@ -110,6 +110,7 @@ Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, 
 - `s2_a_push_that_did_not_land_fails_its_own_step` — S2c · a push that reports success and did not land fails its own step, not three steps later.
 - `storage_the_app_cannot_write_fails_the_deploy` — Can the application write its own data? That, and nothing about uids.
 - `storage_the_app_can_write_says_nothing` — And it must stay quiet when the app CAN write, whatever the uids happen to be — the half that decides whether a check survives a month.
+- `storage_a_container_that_is_not_running_is_reported_as_unmeasured` — T81 (F289): a container that is not running cannot be probed, and the step says so instead of reading the failed exec as a permissions fault.
 - `storage_a_directory_the_app_does_not_mount_is_skipped` — A directory the app does not mount is not its business.
 - `h4_cadvisor_is_installed_by_the_guards_on_every_docker_host` — H4 · cAdvisor is installed on every managed docker host, not declared per stack.
 - `h4_cadvisor_is_started_even_when_its_compose_file_is_unchanged` — And it must bring cadvisor up even when the compose file is ALREADY there.
@@ -364,6 +365,8 @@ Covers: F105, F153, F154, F156, F162, F180, F207, F209, F210, F36, F75
 - `f285_a_stack_does_not_conflict_with_itself`
 - `f285_an_owner_nobody_else_claims_is_fine`
 - `f285_the_backup_stops_before_it_touches_the_other_repository` — End to end: the backup refuses before it initialises a repository, so the other stack's history is never opened at all.
+- `t82_the_stack_recorded_first_keeps_the_repository` — A stack without a state entry is the newcomer; between two recorded stacks the earlier one keeps the repository; a tie favours the caller.
+- `t82_the_incumbent_backs_up_and_the_newcomer_is_named` — The live stack's backup goes on when a throwaway stack borrows its app name AFTER it — the six minutes JobTracker had no working backup (F292) were the symmetric guard refusing the wrong side.
 - `f274_the_host_meta_snapshot_carries_the_smart_collector` — The SMART collector is installed by this suite on the Proxmox host and lives nowhere under `state_dir`, so the nightly host-meta snapshot walked straight past it.
 - `f274_a_host_without_the_collector_still_gets_its_snapshot` — A host that never had the collector is not a broken backup.
 

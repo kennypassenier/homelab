@@ -1416,6 +1416,43 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 // is nothing here to judge.
                 continue;
             }
+            // T81 (F289): establish that the probe CAN run before reading
+            // anything into its result. A container that is restarting
+            // fails `docker exec` before it reaches the directory, and the
+            // first JobTracker deploy reported that as "cannot write … the
+            // directory belongs to 110001" — a hypothesis printed as a
+            // finding. Not running is reported as unmeasured, never as a
+            // permissions fault.
+            let status = pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "docker inspect {} -f '{{{{.State.Status}}}}' 2>/dev/null || echo unknown",
+                    app
+                ),
+                30,
+            )
+            .await
+            .map(|o| o.stdout.trim().to_string())
+            .unwrap_or_else(|_| "unknown".into());
+            if status != "running" {
+                ctx.sink.emit(PipelineEvent::Line {
+                    level: Level::Warn,
+                    source: "HOST".into(),
+                    msg: format!(
+                        "[storage] '{}' is {} — whether it can write {} could not be \
+                         measured, so nothing about its ownership is claimed (F289)",
+                        app,
+                        if status.is_empty() {
+                            "in an unknown state"
+                        } else {
+                            status.as_str()
+                        },
+                        mount.host_path
+                    ),
+                });
+                continue;
+            }
             let probe = pct_sh(
                 exec,
                 m.vmid,
@@ -1438,7 +1475,10 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             };
             let unprobeable = out.contains("executable file not found")
                 || out.contains("OCI runtime exec failed")
-                || out.contains("no such file or directory: unknown");
+                || out.contains("no such file or directory: unknown")
+                || out.contains("is restarting")
+                || out.contains("is not running")
+                || out.contains("is paused");
             if unprobeable {
                 ctx.sink.emit(PipelineEvent::Line {
                     level: Level::Warn,

@@ -3304,6 +3304,86 @@ async fn f285_the_backup_stops_before_it_touches_the_other_repository() {
     );
 }
 
+// ── T82 (F292): the incumbent keeps the repository ─────────────────────────
+
+/// A stack without a state entry is the newcomer; between two recorded
+/// stacks the earlier one keeps the repository; a tie favours the caller.
+#[test]
+fn t82_the_stack_recorded_first_keeps_the_repository() {
+    use homelab_core::ops::backup::repository_keeper;
+    assert!(
+        !repository_keeper(None, Some(0)),
+        "never recorded = newcomer"
+    );
+    assert!(!repository_keeper(None, None));
+    assert!(
+        repository_keeper(Some(5), None),
+        "the other was never recorded"
+    );
+    assert!(repository_keeper(Some(10), Some(20)), "earlier keeps it");
+    assert!(!repository_keeper(Some(20), Some(10)), "later is refused");
+    assert!(repository_keeper(Some(7), Some(7)), "a tie is one deploy");
+}
+
+/// The live stack's backup goes on when a throwaway stack borrows its app
+/// name AFTER it — the six minutes JobTracker had no working backup (F292)
+/// were the symmetric guard refusing the wrong side. The newcomer names
+/// itself in a warning; the incumbent's restic calls happen.
+#[tokio::test]
+async fn t82_the_incumbent_backs_up_and_the_newcomer_is_named() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    let other = {
+        let mut m = manifest(109, "other");
+        m.hostname = "109-app-other".into();
+        m.storage[0].host_path = "/appdata/other/test-config".into();
+        m.storage[0].mount_point = "/appdata/other/test-config".into();
+        m.storage[0].app = Some("test".into());
+        m
+    };
+    let this = manifest(108, "test");
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "test": {
+                    "vmid": 108,
+                    "hostname": "108-app-test",
+                    "apps": ["test"],
+                    "applied_at": 100,
+                    "manifest": this,
+                },
+                "other": {
+                    "vmid": 109,
+                    "hostname": "109-app-other",
+                    "apps": ["test"],
+                    "applied_at": 200,
+                    "manifest": other,
+                }
+            }
+        })
+        .to_string(),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(&ctx(&exec, &sink, &j), &this, &BackupCfg::default()).await;
+    assert!(report.ok, "the incumbent must back up: {:?}", report.error);
+    assert!(
+        !exec.calls_containing("restic").is_empty(),
+        "its restic calls must happen: {:?}",
+        exec.calls()
+    );
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("'other'") && l.contains("newcomer")),
+        "the newcomer is named: {:?}",
+        sink.lines()
+    );
+}
+
 // ── F274: the host's own pieces that live outside state_dir ────────────────
 
 /// The SMART collector is installed by this suite on the Proxmox host and

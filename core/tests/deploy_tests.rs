@@ -1982,6 +1982,7 @@ async fn s2_a_push_that_did_not_land_fails_its_own_step() {
 async fn storage_the_app_cannot_write_fails_the_deploy() {
     let exec = MockExecutor::new();
     script_fresh(&exec);
+    exec.respond_first("{{.State.Status}}", CmdOutput::ok("running\n"));
     exec.respond_first("{{.Destination}}", CmdOutput::ok("/config\n"));
     exec.respond_first(
         "touch /config/.homelab-write-probe",
@@ -2014,6 +2015,7 @@ async fn storage_the_app_cannot_write_fails_the_deploy() {
 async fn storage_the_app_can_write_says_nothing() {
     let exec = MockExecutor::new();
     script_fresh(&exec);
+    exec.respond_first("{{.State.Status}}", CmdOutput::ok("running\n"));
     exec.respond_first("{{.Destination}}", CmdOutput::ok("/config\n"));
     exec.respond_first("touch /config/.homelab-write-probe", CmdOutput::ok(""));
     let sink = VecSink::new();
@@ -2025,6 +2027,48 @@ async fn storage_the_app_can_write_says_nothing() {
         report.ok,
         "a writable directory must pass: {:?}",
         report.error
+    );
+}
+
+/// T81 (F289): a container that is not running cannot be probed, and the
+/// step says so instead of reading the failed exec as a permissions fault.
+/// The first JobTracker deploy printed "the directory belongs to 110001"
+/// about a container that was merely restarting.
+/// covers: F289
+#[tokio::test]
+async fn storage_a_container_that_is_not_running_is_reported_as_unmeasured() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_first("{{.Destination}}", CmdOutput::ok("/config\n"));
+    exec.respond_first("{{.State.Status}}", CmdOutput::ok("restarting\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let sp = spec(110, "syncthing");
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(
+        report.ok,
+        "an unmeasured directory is not a failed deploy: {:?}",
+        report.error
+    );
+    assert!(
+        exec.calls_containing("homelab-write-probe").is_empty(),
+        "no probe may run against a container that is not running: {:?}",
+        exec.calls()
+    );
+    let warned = sink
+        .lines()
+        .iter()
+        .any(|l| l.contains("restarting") && l.contains("could not be measured"));
+    assert!(
+        warned,
+        "the step must say it could not measure: {:?}",
+        sink.lines()
+    );
+    assert!(
+        !sink.lines().iter().any(|l| l.contains("belongs to")),
+        "and it must not claim anything about ownership: {:?}",
+        sink.lines()
     );
 }
 

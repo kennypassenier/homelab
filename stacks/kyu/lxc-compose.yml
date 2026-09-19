@@ -20,7 +20,11 @@
 #   1. this manifest recreates the container;
 #   2. `homelab restore stacks/kyu` puts /var/lib/kyu and /etc/kyu back from
 #      their own restic repositories (C7 backs them up per unit);
-#   3. the three binaries are installed the way C7 installs them.
+#   3. the three binaries are installed the way C7 installs them;
+#   4. `homelab deploy stacks/kyu` writes the helper files under `rootfs/`
+#      (kyu-backup + kyu-alert scripts, their units and the timer) to their
+#      absolute paths and enables the timer — ask-2, 2026-09-20. Until then
+#      those five existed only on the container.
 # Nothing here starts or stops a service — that stays true after a rebuild
 # too.
 

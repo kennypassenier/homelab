@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**472 tests across 24 suites.**
+**477 tests across 25 suites.**
 
 ## Accepted limitations
 
@@ -485,6 +485,16 @@ G14 · the recurring restore drill, and the rule that a drill which can be satis
 - `f290_the_native_services_are_in_the_rotation` — A native stack has an EMPTY `apps` list by design — its services are in `natives`.
 - `f290_an_app_without_a_repository_is_not_in_the_rotation` — The other direction: an app that keeps nothing has no repository, and a drill night spent on one proves nothing while looking like a failure.
 - `f290_the_list_is_owners_deduplicated_not_mounts` — The owner is what names the repository, not the stack — and an owner two mounts share is one repository, not two.
+
+### `core/tests/rootfs_files_tests.rs`
+
+ask-2 · stack files that belong outside `/opt/<stack>/`.
+
+- `an_ordinary_stack_file_still_lands_under_opt`
+- `a_rootfs_file_lands_at_its_absolute_path_with_a_mode_that_fits_the_place`
+- `a_rootfs_file_anywhere_else_or_climbing_is_refused`
+- `rootfs_files_land_at_their_absolute_paths_and_the_timer_is_enabled` — The five files of CT 109, in miniature: a timer and a script travel with the stack, land at their absolute paths, systemd is reloaded, and the timer is enabled — while /opt/kyu/rootfs never exists.
+- `a_rootfs_file_outside_the_allowed_places_stops_the_deploy_before_any_push` — A rootfs path outside the two allowed places is refused BEFORE anything is pushed or committed — the validate step, not the push step.
 
 ### `core/tests/secrets_tests.rs`
 

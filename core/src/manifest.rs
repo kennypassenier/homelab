@@ -306,6 +306,56 @@ pub struct FileBlob {
     pub mode: Option<u32>,
 }
 
+/// ask-2: a stack file that belongs OUTSIDE `/opt/<stack>/`.
+///
+/// Every stack file lands under `/opt/<stack>/<path>` — the right place for
+/// a compose file and the wrong place for a systemd unit or a script that has
+/// to be on PATH. CT 109 carried five such files (two helper scripts, two
+/// units and a timer) that existed only on the container and in kyu's own
+/// repository; a rebuild from the golden template would have dropped them
+/// without a word. Kenny chose "opnemen in de stack" on 2026-09-02 and the
+/// extension itself on 2026-09-19.
+///
+/// The convention is a `rootfs/` directory in the stack whose tree maps onto
+/// the container's `/`: `rootfs/etc/systemd/system/kyu-backup.timer` lands at
+/// `/etc/systemd/system/kyu-backup.timer`. Only two places are allowed, and
+/// the list is short on purpose: a stack may add a unit or a command, and
+/// nothing else on the container is a stack's to write.
+pub const ROOTFS_PREFIX: &str = "rootfs/";
+pub const ROOTFS_ALLOWED: [&str; 2] = ["etc/systemd/system/", "usr/local/bin/"];
+
+/// Where a stack file lands in the container, and the mode it gets when the
+/// file declares none. A `rootfs/` path outside the allowed places, or one
+/// that climbs, is a validation problem — refused before anything is pushed.
+pub fn file_destination(stack: &str, path: &str) -> Result<(String, u32), String> {
+    let Some(rest) = path.strip_prefix(ROOTFS_PREFIX) else {
+        return Ok((format!("/opt/{}/{}", stack, path), 0o644));
+    };
+    if rest
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+    {
+        return Err(format!(
+            "{}: a rootfs/ path may not climb or carry empty segments",
+            path
+        ));
+    }
+    if !ROOTFS_ALLOWED.iter().any(|a| rest.starts_with(a)) {
+        return Err(format!(
+            "{}: a rootfs/ file may only land under /{} — anything else on the container is \
+             not this stack's to write",
+            path,
+            ROOTFS_ALLOWED.join(" or /")
+        ));
+    }
+    let mode = if rest.starts_with("usr/local/bin/") {
+        0o755
+    } else {
+        0o644
+    };
+    Ok((format!("/{}", rest), mode))
+}
+
 /// The only cross-stack write the system allows: one traefik route fragment
 /// into the gateway's watched routes directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -526,6 +576,11 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
     }
     if !(100..=354).contains(&m.vmid) {
         problems.push(format!("vmid {} outside the allowed range 100-354", m.vmid));
+    }
+    for f in &spec.files {
+        if let Err(why) = file_destination(&m.stack_name, &f.path) {
+            problems.push(why);
+        }
     }
     if m.hostname != m.canonical_hostname() {
         problems.push(format!(

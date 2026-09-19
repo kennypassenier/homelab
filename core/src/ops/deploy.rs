@@ -985,6 +985,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         m,
         "push files",
         {
+            let mut rootfs_changed: Vec<String> = Vec::new();
             for f in &spec.files {
                 // A native unit file goes to /etc/systemd/system and nowhere
                 // else. Pushing it here too cost almanac its binary: the stack
@@ -1000,8 +1001,15 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 {
                     continue;
                 }
-                let dest = format!("/opt/{}/{}", m.stack_name, f.path);
-                let perms = format!("{:o}", f.mode.unwrap_or(0o644));
+                // ask-2: a `rootfs/` file lands at its absolute path (a unit,
+                // a timer, a script on PATH); everything else under
+                // /opt/<stack>/. Validated before the first push, so an
+                // `Err` here cannot happen — it is mapped rather than
+                // unwrapped so a future gap is a refusal, not a panic.
+                let (dest, default_mode) = manifest::file_destination(&m.stack_name, &f.path)
+                    .map_err(CoreError::Validation)?;
+                let rootfs = f.path.starts_with(manifest::ROOTFS_PREFIX);
+                let perms = format!("{:o}", f.mode.unwrap_or(default_mode));
                 // D60: the file in the repository names the real origin; what
                 // lands in the container names the cache, but only for the
                 // upstreams that answered a moment ago and never for a registry
@@ -1040,9 +1048,14 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     if let Ok(mut g) = pushed_w.lock() {
                         g.push((dest.clone(), manifest::sha256_hex(content.as_bytes())));
                     }
+                    if rootfs {
+                        rootfs_changed.push(dest.clone());
+                    }
                     // The path is "<app>/<file>"; a file outside an app directory
-                    // belongs to no service and needs nothing restarted.
-                    if let Some((app, name)) = f.path.split_once('/') {
+                    // belongs to no service and needs nothing restarted. A
+                    // rootfs file is not an app either: "rootfs" must never
+                    // reach the restart step as a service name.
+                    if let Some((app, name)) = f.path.split_once('/').filter(|_| !rootfs) {
                         if name == "docker-compose.yml" {
                             // compose up -d recreates this one by itself.
                             if let Ok(mut g) = recreated_w.lock() {
@@ -1059,6 +1072,40 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     done: f.content.len() as u64,
                     total: Some(f.content.len() as u64),
                 });
+            }
+            // ask-2: systemd only reads a unit it has been told about, and a
+            // timer file on disk fires nothing until it is enabled. A changed
+            // unit or timer reloads the manager; a changed timer is enabled
+            // and started — starting a TIMER is not starting a service, so
+            // adoption's rule (a deploy never restarts a running service)
+            // holds. Nothing here touches a `.service` beyond the reload.
+            if rootfs_changed
+                .iter()
+                .any(|d| d.starts_with("/etc/systemd/system/"))
+            {
+                pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
+                log_info("[rootfs] systemd reloaded for the unit files written above".to_string());
+            }
+            for dest in &rootfs_changed {
+                if let Some(timer) = dest
+                    .strip_prefix("/etc/systemd/system/")
+                    .filter(|n| n.ends_with(".timer"))
+                {
+                    let out = pct_sh(
+                        exec,
+                        m.vmid,
+                        &format!("systemctl enable --now {}", timer),
+                        60,
+                    )
+                    .await?;
+                    if !out.success() {
+                        return Err(CoreError::Command {
+                            rendered: format!("systemctl enable --now {}", timer),
+                            detail: out.stderr.trim().to_string(),
+                        });
+                    }
+                    log_info(format!("[rootfs] {} enabled and started", timer));
+                }
             }
             for (app, env) in &spec.env {
                 let dest = format!("/opt/{}/{}/.env", m.stack_name, app);

@@ -90,6 +90,13 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   them (jellyfin does).
 - **D3 · App add/remove** — add/remove an app dir + manifest entry,
   redeploy; removed apps are composed down, config dirs are kept.
+- **ask-2 · Files outside /opt** — a `rootfs/` directory in a stack maps
+  onto the container's `/`, for the two things a stack may legitimately add
+  there: a unit or timer under `rootfs/etc/systemd/system/` and a command
+  under `rootfs/usr/local/bin/` (pushed executable). A changed unit reloads
+  systemd; a changed timer is enabled and started. Anything else under
+  `rootfs/` is refused at validation. `stacks/kyu/rootfs/` carries the hub's
+  backup and alert helpers, which used to exist only on CT 109.
 - **D11 · Share a stack** — `homelab export stacks/<name>` → one YAML,
   secrets excluded; `homelab import <bundle> <newname> <vmid>` re-derives
   the whole identity.

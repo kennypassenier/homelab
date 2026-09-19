@@ -79,8 +79,11 @@ into the same `config.alloy`. One file, deliberately: the deploy restores
 `CONFIG_FILE="/etc/alloy/config.alloy"` in `/etc/default/alloy` and removes
 any other `.alloy` in the directory, saying so in its output. Verification is
 the same query with `host="opnsense"`, and `ss -lunp | grep 1514` inside
-CT 104. Until the next gateway deploy the container still carries the
-hand-made file and directory mode from 2026-09-18; the deploy undoes both.
+CT 104. CT 104 was aligned by hand on 2026-09-18 with exactly the rendered
+bytes (Kenny's choice), so a deploy from a daemon ≥ 3.52.0 finds it unchanged.
+Note gap-13 before deploying anything large: pve answers VLAN 10 directly
+(`vmbr0.10`, its 2026-09-17 rescue path), so a bulk transfer through the
+firewall stalls; `HOMELAB_HOST=10.10.10.250:8443` stays inside VLAN 10.
 
 ## Fleet state after the migration, 2026-09-02 21:00
 

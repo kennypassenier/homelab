@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **Kenny: `make release VERSION=3.55.0`** — it carries T81, T82, G6, F160, M-T75, gap-14, T85, B1, B7 and R5. After it Claude runs `homelab release-update`, installs the release client, and `homelab adopt`s kyu and kyu-runner so their `update_policy: auto` reaches the host. Open with Kenny: R1 (the kyu stack is parked in host state since 2026-09-10 — `homelab enable kyu` is the remedy, his call), the C7 report (B2, form), 14 manual checks. Waiting on the clock: 04:00 the first nightly under 3.54.0 (M-D94, M-T75 — only if kyu is enabled), 08:00 the deferred HA push. kyu door: ha, sonarr, radarr, newsflash still without a client token (kyu session's form). |
+| Next action | **waiting on Kenny: `make release VERSION=3.55.0`** — it carries T81, T82, G6, F160, M-T75, gap-14, T85, B1, B7 and R5 (seven commits since 3.54.0, all tests green). Nothing else needs him: the native-services report is signed off 5/5, the drill passed, kyu is back in the nightly rotation. After the release Claude runs `homelab release-update`, installs the release client, and `homelab adopt`s kyu and kyu-runner so their `update_policy: auto` reaches the host. Waiting on the clock: 04:00 the first nightly under 3.54.0 (M-D94 kyu copy-backup, M-T75 phase duration), 08:00 the deferred HA push. Open elsewhere: 14 manual checks (`homelab checks`), earlier form items (CT 116 reachability, swap, checks part 1), kyu door for ha/sonarr/radarr/newsflash (kyu session's form). |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

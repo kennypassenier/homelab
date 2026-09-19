@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **waiting on the clock**: 04:00 the first nightly under 3.55.0 — read `journalctl -u homelab-host` for `[backup] kyu archives its own copy` (M-D94), `backup phase took` (M-T75), `[release] kyu … already runs` / `updated to` (B1), and the seeder's next run without stale native warnings (gap-14); 08:00 the deferred HA push (F85). Nothing waits on Kenny right now: the native-services report is signed off 5/5, kyu and kyu-runner are adopted with `update_policy: auto`, the release client is installed. Open elsewhere: 14 manual checks (`homelab checks`), earlier form items (CT 116 reachability, swap, checks part 1), kyu door for ha/sonarr/radarr/newsflash (kyu session's form). |
+| Next action | **waiting on Kenny: the answers to three forms he has not returned yet** — the CT 116 reachability deep dive (F183: which devices and subnets can reach which, measured from CT 116), the swap form for VM 100 and VM 101 (F185), and manual-checks part 1 (11 items, `homelab checks`). Nothing else needs him: 3.55.0 is live, the native-services report is signed off 5/5, kyu and kyu-runner carry `update_policy: auto`. Clock-bound measurements to read when they have happened: 04:00 the first nightly under 3.55.0 (`journalctl -u homelab-host` for `[backup] kyu archives its own copy` M-D94, `backup phase took` M-T75, `[release] kyu` B1, and the seeder without stale native warnings gap-14); 08:00 the deferred HA push (F85). Elsewhere: kyu door for ha/sonarr/radarr/newsflash (kyu session's form). |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

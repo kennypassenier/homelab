@@ -850,6 +850,34 @@ pub fn glibc_verdict(probe_output: &str) -> Result<String, String> {
     }
 }
 
+/// T85: fill a deploy's binary map from what was staged one message at a
+/// time. A unit whose entry is missing or empty is looked up; a unit that
+/// arrived with its bytes (an older client) is left alone; an entry that is
+/// empty with nothing staged is dropped, so the deploy treats the binary as
+/// not shipped rather than as an empty program. Returns the units filled.
+pub fn merge_staged_binaries(
+    natives: &[String],
+    map: &mut std::collections::BTreeMap<String, String>,
+    fetch: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let mut merged = Vec::new();
+    for unit in natives {
+        let present = map.get(unit).map(|v| !v.trim().is_empty()).unwrap_or(false);
+        if present {
+            continue;
+        }
+        match fetch(unit) {
+            Some(b64) if !b64.trim().is_empty() => {
+                map.insert(unit.clone(), b64);
+                merged.push(unit.clone());
+            }
+            _ => {}
+        }
+    }
+    map.retain(|_, v| !v.trim().is_empty());
+    merged
+}
+
 pub fn rollback_script(unit: &str, prev: &str, binary: &str) -> String {
     format!(
         "systemctl stop {u}; cp -p {prev} {bin} && systemctl start {u} && sleep 2 && \

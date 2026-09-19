@@ -2094,6 +2094,54 @@ async fn storage_a_directory_the_app_does_not_mount_is_skipped() {
     );
 }
 
+/// gap-14: the seeder called `host · kyu` and `host · almanac` monitors of
+/// stacks the fleet does not have, because the generated list came only from
+/// stacks with a stack manifest in state — and an adopted native stack has
+/// none. Its address follows from its vmid, so it is on the list now.
+#[tokio::test]
+async fn gap14_the_monitor_list_carries_adopted_native_stacks() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "kyu": {
+                    "vmid": 109, "hostname": "109-app-kyu", "apps": [], "applied_at": 1,
+                    "manifest": null,
+                    "natives": [{
+                        "stack_name": "kyu", "vmid": 109, "hostname": "109-app-kyu",
+                        "unit": "kyu", "binary": "/opt/kyu/bin/kyu",
+                        "data_dirs": ["/appdata/kyu/kyu-config"]
+                    }]
+                }
+            }
+        })
+        .to_string(),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut c = ctx(&exec, &sink, &journal);
+    c.kuma_monitors_file = Some("/appdata/uptime/kuma-seeder-config/host-monitors.json".into());
+    let sp = spec(110, "syncthing");
+    let report = deploy(&c, &sp).await;
+    assert!(report.ok, "{:?}", report.error);
+    let body = exec
+        .file("/appdata/uptime/kuma-seeder-config/host-monitors.json")
+        .expect("the monitor list is written");
+    assert!(
+        body.contains("host · kyu") && body.contains("10.10.10.9"),
+        "the adopted native stack is on the list with its derived address: {}",
+        body
+    );
+    assert!(
+        body.contains("host · syncthing"),
+        "and the deployed stack still is: {}",
+        body
+    );
+}
+
 /// H4 · cAdvisor is installed on every managed docker host, not declared per
 /// stack.
 ///

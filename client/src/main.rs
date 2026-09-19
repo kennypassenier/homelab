@@ -669,6 +669,43 @@ async fn main() {
                 spec.env.len(),
                 C_RESET
             );
+            // T85: each native binary goes over the link on its own, then the
+            // deploy follows with the map emptied — the host fills it back in
+            // from what was staged. Three binaries in one message measured
+            // 94.7 MiB against a 64 MiB frame (F303); one at a time never
+            // meets that ceiling, however many services a stack grows.
+            let mut spec = spec;
+            let staged: Vec<(String, String)> = spec
+                .native_binaries
+                .iter()
+                .map(|(u, b)| (u.clone(), b.clone()))
+                .collect();
+            for (unit, b64) in staged {
+                println!(
+                    "{}▶ staging {} ({} KiB of base64){}",
+                    C_DIM,
+                    unit,
+                    b64.len() / 1024,
+                    C_RESET
+                );
+                let ok = rpc_with(
+                    &host,
+                    &token,
+                    Command::StageNativeBinary {
+                        stack: spec.manifest.stack_name.clone(),
+                        unit: unit.clone(),
+                        binary_b64: b64,
+                    },
+                )
+                .await;
+                if !ok {
+                    die(&format!(
+                        "staging the binary of {} failed — deploy not started, nothing changed",
+                        unit
+                    ));
+                }
+                spec.native_binaries.insert(unit, String::new());
+            }
             rpc(&host, &token, Command::DeployStack(Box::new(spec))).await;
         }
         "backup" => {
@@ -978,6 +1015,14 @@ async fn main() {
 }
 
 async fn rpc(host: &str, token: &str, command: Command) {
+    let ok = rpc_with(host, token, command).await;
+    std::process::exit(if ok { 0 } else { 1 });
+}
+
+/// One command over the link; `true` when the host reported it done and ok.
+/// T85 needed a caller that sends several commands in a row (one staged
+/// binary per message, then the deploy), so the exit moved to `rpc`.
+async fn rpc_with(host: &str, token: &str, command: Command) -> bool {
     // F303: the size guard lives HERE, where every command passes, and not in
     // the three call sites that happened to remember it.
     //
@@ -1172,19 +1217,23 @@ async fn rpc(host: &str, token: &str, command: Command) {
             ServerMsg::RpcDone(resp) => {
                 if !resp.ok {
                     println!("{}✗ {}{}", C_RED, resp.message, C_RESET);
-                    std::process::exit(1);
+                    return false;
                 }
                 if homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
                     println!("{}✓ {}{}", C_GREEN, resp.message, C_RESET);
-                    std::process::exit(0);
+                    return true;
                 }
                 done = Some(true);
             }
         }
         if done.is_some() && homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
             println!("{}✓ ok{}", C_GREEN, C_RESET);
-            std::process::exit(0);
+            return true;
         }
     }
-    die("connection closed before RPC completed");
+    eprintln!(
+        "{}✗ connection closed before RPC completed{}",
+        C_RED, C_RESET
+    );
+    false
 }

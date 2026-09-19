@@ -1808,9 +1808,14 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 .stacks
                 .iter()
                 .filter_map(|(name, st)| {
-                    st.manifest
-                        .as_ref()
-                        .map(|mf| (name.clone(), mf.network.ip.clone()))
+                    // gap-14: an adopted native stack has no stack manifest
+                    // in state; its address follows from the vmid.
+                    let ip = match st.manifest.as_ref() {
+                        Some(mf) => mf.network.ip.clone(),
+                        None if st.is_native() => crate::ops::monitors::address_for_vmid(st.vmid)?,
+                        None => return None,
+                    };
+                    Some((name.clone(), ip))
                 })
                 .collect();
             // The stack being deployed is in state by now, but on a FIRST

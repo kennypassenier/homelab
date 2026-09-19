@@ -3156,6 +3156,13 @@ fn render_findings(findings: &[homelab_core::ops::fleetcheck::Finding]) -> Strin
     s
 }
 
+/// T85: where a stack's binaries wait between `StageNativeBinary` and the
+/// `DeployStack` that installs them. Under the state directory (root-only,
+/// in no backup — a staged binary is re-fetchable and short-lived).
+fn staged_binaries_dir(state_dir: &str, stack: &str) -> String {
+    format!("{}/staged/{}", state_dir, stack)
+}
+
 async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
     let exec = RealExecutor;
     match req.command {
@@ -3179,11 +3186,86 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
-        Rpc::DeployStack(spec) => {
-            run_mutating_op(state, &exec, req.id, "deploy", |ctx| {
+        // T85: a native binary arrives on its own, before the deploy that
+        // installs it. Kept under the state directory, root-only, until the
+        // deploy consumes it; a name that is not a plain stack or unit name
+        // is refused before it can become a path.
+        Rpc::StageNativeBinary {
+            stack,
+            unit,
+            binary_b64,
+        } => {
+            let plain = |s: &str| {
+                !s.is_empty()
+                    && s.chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            };
+            if !plain(&stack) || !plain(&unit) {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!(
+                        "refusing to stage '{}' for '{}': stack and unit names are lowercase \
+                         [a-z0-9-] and nothing else",
+                        unit, stack
+                    ),
+                    deferred: None,
+                };
+            }
+            let dir = staged_binaries_dir(&state.config.state_dir, &stack);
+            let path = format!("{}/{}.b64", dir, unit);
+            let written = std::fs::create_dir_all(&dir)
+                .and_then(|_| std::fs::write(&path, binary_b64.as_bytes()))
+                .and_then(|_| {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                });
+            match written {
+                Ok(()) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!(
+                        "staged {} for {} ({} KiB of base64) — the next deploy of this stack \
+                         installs it",
+                        unit,
+                        stack,
+                        binary_b64.len() / 1024
+                    ),
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("could not stage {} for {}: {}", unit, stack, e),
+                    deferred: None,
+                },
+            }
+        }
+        Rpc::DeployStack(mut spec) => {
+            // T85: the binaries this deploy installs were staged one per
+            // message; fill them in here, and clear the staging area after
+            // the deploy whatever its outcome — a retry stages again.
+            let dir = staged_binaries_dir(&state.config.state_dir, &spec.manifest.stack_name);
+            let merged = homelab_core::ops::native::merge_staged_binaries(
+                &spec.manifest.natives,
+                &mut spec.native_binaries,
+                |unit| std::fs::read_to_string(format!("{}/{}.b64", dir, unit)).ok(),
+            );
+            if !merged.is_empty() {
+                info!(
+                    "deploy {}: {} staged binar{} taken up ({})",
+                    spec.manifest.stack_name,
+                    merged.len(),
+                    if merged.len() == 1 { "y" } else { "ies" },
+                    merged.join(", ")
+                );
+            }
+            let resp = run_mutating_op(state, &exec, req.id, "deploy", |ctx| {
                 Box::pin(async move { deploy(ctx, &spec).await })
             })
-            .await
+            .await;
+            let _ = std::fs::remove_dir_all(&dir);
+            resp
         }
         Rpc::DestroyStack {
             manifest,

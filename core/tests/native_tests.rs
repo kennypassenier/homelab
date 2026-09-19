@@ -1257,3 +1257,37 @@ fn t77_the_copy_glob_is_validated() {
     }
     assert!(validate_native(&kyu_with_own_copy()).is_ok());
 }
+
+// ── T85 · binaries travel one per message ──────────────────────────────────
+
+/// A staged unit is filled in; a unit that came with its bytes is kept;
+/// an empty entry with nothing staged disappears rather than becoming an
+/// empty program.
+#[test]
+fn t85_staged_binaries_are_merged_and_empty_entries_dropped() {
+    use homelab_core::ops::native::merge_staged_binaries;
+    use std::collections::BTreeMap;
+    let natives = vec![
+        "kyu".to_string(),
+        "kyu-runner".into(),
+        "http-switchboard".into(),
+    ];
+    let mut map: BTreeMap<String, String> = BTreeMap::new();
+    map.insert("kyu".into(), String::new());
+    map.insert("kyu-runner".into(), "b2xk".into());
+    map.insert("http-switchboard".into(), String::new());
+    let staged = |unit: &str| (unit == "kyu").then(|| "bmV3".to_string());
+    let merged = merge_staged_binaries(&natives, &mut map, staged);
+    assert_eq!(merged, vec!["kyu".to_string()]);
+    assert_eq!(map.get("kyu").map(String::as_str), Some("bmV3"));
+    assert_eq!(
+        map.get("kyu-runner").map(String::as_str),
+        Some("b2xk"),
+        "an old client's bytes are kept"
+    );
+    assert!(
+        !map.contains_key("http-switchboard"),
+        "nothing staged and nothing sent = not shipped: {:?}",
+        map
+    );
+}

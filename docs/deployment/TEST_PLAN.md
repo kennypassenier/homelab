@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**497 tests across 26 suites.**
+**500 tests across 26 suites.**
 
 ## Accepted limitations
 
@@ -112,6 +112,7 @@ Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, 
 - `storage_the_app_can_write_says_nothing` — And it must stay quiet when the app CAN write, whatever the uids happen to be — the half that decides whether a check survives a month.
 - `storage_a_container_that_is_not_running_is_reported_as_unmeasured` — T81 (F289): a container that is not running cannot be probed, and the step says so instead of reading the failed exec as a permissions fault.
 - `storage_a_directory_the_app_does_not_mount_is_skipped` — A directory the app does not mount is not its business.
+- `gap14_the_monitor_list_carries_adopted_native_stacks` — gap-14: the seeder called `host · kyu` and `host · almanac` monitors of stacks the fleet does not have, because the generated list came only from stacks with a stack manifest in state — and an adopted native stack has none.
 - `h4_cadvisor_is_installed_by_the_guards_on_every_docker_host` — H4 · cAdvisor is installed on every managed docker host, not declared per stack.
 - `h4_cadvisor_is_started_even_when_its_compose_file_is_unchanged` — And it must bring cadvisor up even when the compose file is ALREADY there.
 - `h4_cadvisor_is_not_installed_where_there_is_no_docker` — And never on a container that runs no docker: a weekly prune timer on a native-only host has been failing every week since it was installed, which is worse than useless — a guard that fails on schedule teaches you to ignore failures.
@@ -420,6 +421,7 @@ Covers: F158, F175
 - `a_native_stack_asks_node_exporter_instead` — The case Kenny found: three empty graphs on a container that runs no docker at all, because cadvisor has nothing there to measure.
 - `both_shapes_ask_about_the_disk_because_that_question_is_the_same`
 - `both_shapes_are_valid_json`
+- `gap14_an_adopted_native_stack_gets_its_address_from_its_vmid` — gap-14: the adopted native stacks have no stack manifest in state, so their address is derived from the vmid the way every container here is numbered — kyu on 109 is 10.10.10.9, almanac on 112 is 10.10.10.12.
 
 ### `core/tests/native_tests.rs`
 
@@ -464,6 +466,7 @@ Covers: F117, F171
 - `t77_a_fresh_own_copy_is_archived_instead_of_the_live_store` — The newest copy, fresh, is what goes into restic — not the live directory that is being written to while tar reads it (F172).
 - `t77_a_stale_or_missing_own_copy_fails_the_backup_rather_than_archiving_it` — M-D94: a stale copy is the failure that looks like success.
 - `t77_the_copy_glob_is_validated` — The glob is validated like every other path: absolute, no climbing, and it has to BE a glob — one fixed name is the trap the count-based rotation exists to avoid.
+- `t85_staged_binaries_are_merged_and_empty_entries_dropped` — A staged unit is filled in; a unit that came with its bytes is kept; an empty entry with nothing staged disappears rather than becoming an empty program.
 
 ### `core/tests/real_deps_tests.rs`
 

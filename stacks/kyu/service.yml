@@ -34,3 +34,15 @@ update_cmd: >-
   /opt/kyu/bin/kyu update
 release_repo: kennypassenier/kyu
 release_asset: kyu
+# T77 (D94, Kenny 2026-09-02; live 2026-09-20): the nightly backup archives
+# the copy kyu makes of itself at 03:00 (kyu-backup.timer, VACUUM INTO,
+# integrity-checked before it reports success) instead of tarring the live
+# store while it is being written to. The newest match must be under 26 h
+# old, or the backup fails rather than archiving yesterday's file.
+#
+# RESTORE NOTE: such a copy is a COMPLETE database. Put it back as
+# /appdata/kyu/kyu-config/kyu.db and delete any kyu.db-wal and kyu.db-shm
+# beside it — they belong to the old file and confuse SQLite about what it
+# is looking at. The reverse of the moving rule, where those three travel
+# together.
+backup_from_newest: /appdata/kyu/kyu-config/kyu.backup-*.db

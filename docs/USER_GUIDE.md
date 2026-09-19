@@ -146,6 +146,9 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   needed).
 - **E2 · Restore** — `homelab restore stacks/<name> [snapshot]` (default
   latest): validate → quiesce → restore → resume → verify.
+  A native service with `backup_from_newest` (kyu) is archived from its own
+  nightly copy, which is a COMPLETE database: put it back as the live file
+  and delete any `-wal`/`-shm` beside it (T77).
 - **E7 · DR runbook** — `homelab runbook` regenerates
   [DR_RUNBOOK.md](DR_RUNBOOK.md), the document for when everything is down.
 - **C2 · Destroy** — `homelab destroy stacks/<name>`: typed-name confirm,

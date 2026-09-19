@@ -41,6 +41,7 @@ fn kyu_manifest() -> NativeServiceManifest {
         data_dirs: vec!["/var/lib/kyu".into()],
         update_cmd: Some("kyu update".into()),
         stateless: false,
+        backup_from_newest: None,
         release_repo: None,
         release_asset: None,
     }
@@ -309,6 +310,7 @@ async fn t5_a_stack_holds_several_native_services() {
         env_file: Some("/etc/kyu-runner/token.env".into()),
         data_dirs: vec![],
         stateless: true,
+        backup_from_newest: None,
         release_repo: None,
         release_asset: None,
         update_cmd: None,
@@ -340,6 +342,7 @@ async fn t5_a_stack_holds_several_native_services() {
         env_file: Some("/etc/kyu-runner/token.env".into()),
         data_dirs: vec![],
         stateless: true,
+        backup_from_newest: None,
         release_repo: None,
         release_asset: None,
         update_cmd: Some("kyu-runner update".into()),
@@ -426,6 +429,7 @@ async fn d25_native_backup_uses_the_service_name_for_its_repo() {
         env_file: None,
         data_dirs: vec!["/etc/kyu-runner".into()],
         stateless: false,
+        backup_from_newest: None,
         release_repo: None,
         release_asset: None,
         update_cmd: None,
@@ -1150,4 +1154,106 @@ async fn t87_a_binary_that_needs_a_newer_glibc_is_refused_before_anything_moves(
         "the running service is never stopped: {:?}",
         exec.calls()
     );
+}
+
+// ── T77 · the hub is archived from its own verified copy ───────────────────
+
+fn kyu_with_own_copy() -> NativeServiceManifest {
+    NativeServiceManifest {
+        backup_from_newest: Some("/var/lib/kyu/kyu.backup-*.db".into()),
+        ..kyu_manifest()
+    }
+}
+
+/// The newest copy, fresh, is what goes into restic — not the live
+/// directory that is being written to while tar reads it (F172).
+#[tokio::test]
+async fn t77_a_fresh_own_copy_is_archived_instead_of_the_live_store() {
+    use homelab_core::ops::backup::BackupCfg;
+    use homelab_core::ops::native::backup_native;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    exec.respond_always(
+        "ls -1t",
+        CmdOutput::ok("/var/lib/kyu/kyu.backup-1789786870562.db 600\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup_native(
+        &ctx(&exec, &sink, &j),
+        &kyu_with_own_copy(),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let pipelines = exec.calls_containing("pct exec 109 -- tar -cf -");
+    assert_eq!(pipelines.len(), 1, "{:?}", exec.calls());
+    let p = &pipelines[0];
+    assert!(
+        p.contains("'/var/lib/kyu/kyu.backup-1789786870562.db'"),
+        "the copy is what travels: {}",
+        p
+    );
+    assert!(
+        !p.contains("'/var/lib/kyu' "),
+        "the live directory is no longer tarred: {}",
+        p
+    );
+}
+
+/// M-D94: a stale copy is the failure that looks like success. Older than
+/// 26 h, or no copy at all, fails the backup loudly and archives nothing.
+#[tokio::test]
+async fn t77_a_stale_or_missing_own_copy_fails_the_backup_rather_than_archiving_it() {
+    use homelab_core::ops::backup::BackupCfg;
+    use homelab_core::ops::native::backup_native;
+    for (answer, expect) in [
+        (
+            CmdOutput::ok("/var/lib/kyu/kyu.backup-1.db 200000\n"),
+            "old",
+        ),
+        (CmdOutput::failed(3, ""), "no copy matches"),
+    ] {
+        let exec = MockExecutor::new();
+        adopt_mocks(&exec);
+        exec.respond_always("ls -1t", answer);
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let report = backup_native(
+            &ctx(&exec, &sink, &j),
+            &kyu_with_own_copy(),
+            &BackupCfg::default(),
+        )
+        .await;
+        assert!(!report.ok, "expected a refusal: {:?}", report);
+        let why = format!("{:?}", report.error);
+        assert!(why.contains(expect), "{}", why);
+        assert!(
+            exec.calls_containing("restic backup").is_empty(),
+            "nothing may be archived: {:?}",
+            exec.calls()
+        );
+    }
+}
+
+/// The glob is validated like every other path: absolute, no climbing, and
+/// it has to BE a glob — one fixed name is the trap the count-based
+/// rotation exists to avoid.
+#[test]
+fn t77_the_copy_glob_is_validated() {
+    use homelab_core::native::validate_native;
+    for bad in [
+        "kyu.backup-*.db",
+        "/var/lib/kyu/kyu.db",
+        "/var/../kyu.backup-*.db",
+    ] {
+        let m = NativeServiceManifest {
+            backup_from_newest: Some(bad.into()),
+            ..kyu_manifest()
+        };
+        let why = validate_native(&m).expect_err(bad).join("; ");
+        assert!(why.contains("backup_from_newest"), "{}", why);
+    }
+    assert!(validate_native(&kyu_with_own_copy()).is_ok());
 }

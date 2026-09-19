@@ -1579,6 +1579,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
         data_dirs: vec![],
         update_cmd: None,
         stateless: false,
+        backup_from_newest: None,
         release_repo: None,
         release_asset: None,
     };
@@ -1592,6 +1593,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
     // Declared: accepted.
     let stateless = NativeServiceManifest {
         stateless: true,
+        backup_from_newest: None,
         release_repo: None,
         release_asset: None,
         ..base.clone()
@@ -1601,6 +1603,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
     // whether the service is backed up.
     let confused = NativeServiceManifest {
         stateless: true,
+        backup_from_newest: None,
         release_repo: None,
         release_asset: None,
         data_dirs: vec!["/var/lib/x".into()],

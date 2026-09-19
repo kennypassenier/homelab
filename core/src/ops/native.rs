@@ -12,6 +12,10 @@ use crate::sink::Level;
 use super::util::shq;
 use super::{util_pct_sh, OpCtx};
 
+/// T77: a service's own nightly copy older than this is not tonight's copy.
+/// 26 h leaves room for a late run without accepting yesterday's file.
+pub const MAX_OWN_COPY_AGE_S: u64 = 26 * 3600;
+
 macro_rules! step {
     ($runner:expr, $name:expr, $body:expr) => {
         match $runner.step($name, || async { $body }).await {
@@ -537,13 +541,63 @@ pub async fn backup_native(
         Ok(StepOutcome::Unchanged)
     });
 
+    // T77 (D94): a service that makes its own verified copy is archived from
+    // that copy, and only when it is fresh. The age is measured against the
+    // container's clock, in the same command that finds the file, so a copy
+    // from a run that silently stopped cannot pass as tonight's.
+    let mut own_copy: Option<String> = None;
+    step!(runner, "find the service's own newest copy", {
+        let Some(glob) = &m.backup_from_newest else {
+            return Ok(StepOutcome::Unchanged);
+        };
+        let script = format!(
+            "f=$(ls -1t {glob} 2>/dev/null | head -1); [ -n \"$f\" ] || exit 3; \
+             echo \"$f $(( $(date +%s) - $(stat -c %Y \"$f\") ))\"",
+            glob = glob
+        );
+        let out = util_pct_sh(exec, m.vmid, &script, 60).await?;
+        let line = out.stdout.trim().to_string();
+        let (file, age) = match line.rsplit_once(' ') {
+            Some((f, a)) if out.success() && !f.is_empty() => {
+                (f.to_string(), a.parse::<u64>().unwrap_or(u64::MAX))
+            }
+            _ => {
+                return Err(CoreError::Other(format!(
+                    "no copy matches {} on {} — the service's own backup has not produced \
+                     one; refusing to archive nothing and call it a backup",
+                    glob, m.hostname
+                )))
+            }
+        };
+        if age > MAX_OWN_COPY_AGE_S {
+            return Err(CoreError::Other(format!(
+                "the newest copy {} is {} h old (limit {} h) — the service's own backup did \
+                 not run; archiving a stale copy would look exactly like success (M-D94)",
+                file,
+                age / 3600,
+                MAX_OWN_COPY_AGE_S / 3600
+            )));
+        }
+        own_copy = Some(file);
+        Ok(StepOutcome::Unchanged)
+    });
+    if let Some(f) = &own_copy {
+        runner.log(
+            Level::Info,
+            format!("[backup] {} archives its own copy {}", m.stack_name, f),
+        );
+    }
+
     step!(runner, "snapshot", {
-        let dirs = m
-            .data_dirs
-            .iter()
-            .map(|d| shq(d))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let dirs = match &own_copy {
+            Some(f) => shq(f),
+            None => m
+                .data_dirs
+                .iter()
+                .map(|d| shq(d))
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
         // pipefail is load-bearing: without it a dead `pct exec tar` still
         // yields a "successful" empty snapshot — a backup that lies.
         // F171: RESTIC_CACHE_DIR was missing here while `backup.rs` has set

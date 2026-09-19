@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**480 tests across 25 suites.**
+**483 tests across 25 suites.**
 
 ## Accepted limitations
 
@@ -442,6 +442,9 @@ Covers: F117, F171
 - `t87_static_and_satisfiable_binaries_pass` — A static build asks nothing; a dynamic one is fine when the container has at least what it names; and the probe's line is the only input.
 - `t87_a_higher_requirement_or_an_unreadable_container_is_refused` — F304 in one line: a binary built against 2.39 on a container with 2.36 is refused, and the refusal names both numbers so the reader knows what to ship instead.
 - `t87_a_binary_that_needs_a_newer_glibc_is_refused_before_anything_moves` — The check runs on the STAGED copy, before the unit file is written and before anything is moved: a refused binary leaves the container exactly as it was, staged copy included.
+- `t77_a_fresh_own_copy_is_archived_instead_of_the_live_store` — The newest copy, fresh, is what goes into restic — not the live directory that is being written to while tar reads it (F172).
+- `t77_a_stale_or_missing_own_copy_fails_the_backup_rather_than_archiving_it` — M-D94: a stale copy is the failure that looks like success.
+- `t77_the_copy_glob_is_validated` — The glob is validated like every other path: absolute, no climbing, and it has to BE a glob — one fixed name is the trap the count-based rotation exists to avoid.
 
 ### `core/tests/real_deps_tests.rs`
 

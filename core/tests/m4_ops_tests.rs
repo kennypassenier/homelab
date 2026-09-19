@@ -3304,6 +3304,28 @@ async fn f285_the_backup_stops_before_it_touches_the_other_repository() {
     );
 }
 
+// ── M-T75: the backup phase reports its own duration ───────────────────────
+
+/// Minutes and seconds, hours past sixty minutes, never bare seconds above
+/// a minute — the house rule for durations, and the number the concurrency
+/// setting is judged by.
+#[test]
+fn m_t75_the_backup_phase_says_how_long_it_took() {
+    use homelab_core::ops::backup::phase_duration_line;
+    assert_eq!(
+        phase_duration_line(45, 1, 3),
+        "scheduler: backup phase took 45 s for 1 stack(s), 3 at a time"
+    );
+    assert_eq!(
+        phase_duration_line(13 * 60 + 7, 13, 3),
+        "scheduler: backup phase took 13 min 7 s for 13 stack(s), 3 at a time"
+    );
+    assert_eq!(
+        phase_duration_line(3600 + 125, 13, 1),
+        "scheduler: backup phase took 1 h 2 min 5 s for 13 stack(s), 1 at a time"
+    );
+}
+
 // ── T82 (F292): the incumbent keeps the repository ─────────────────────────
 
 /// A stack without a state entry is the newcomer; between two recorded

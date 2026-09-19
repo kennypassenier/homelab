@@ -242,6 +242,30 @@ pub fn repository_keeper(this_applied_at: Option<u64>, other_applied_at: Option<
     }
 }
 
+/// M-T75: the nightly backup phase says how long it took, in minutes and
+/// seconds (hours past sixty minutes), so the concurrency setting can be
+/// judged against a measurement instead of a prediction. One at a time
+/// measured 38 min on 2026-09-02; three at a time was predicted at about
+/// 13 min and never read.
+pub fn phase_duration_line(secs: u64, stacks: usize, at_a_time: usize) -> String {
+    let human = if secs >= 3600 {
+        format!(
+            "{} h {} min {} s",
+            secs / 3600,
+            (secs % 3600) / 60,
+            secs % 60
+        )
+    } else if secs >= 60 {
+        format!("{} min {} s", secs / 60, secs % 60)
+    } else {
+        format!("{} s", secs)
+    };
+    format!(
+        "scheduler: backup phase took {} for {} stack(s), {} at a time",
+        human, stacks, at_a_time
+    )
+}
+
 pub fn owner_groups(m: &StackManifest) -> Vec<(String, Vec<String>)> {
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     for mount in &m.storage {

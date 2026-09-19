@@ -15,13 +15,24 @@ checks:
     command: >-
       curl -s -m 15 -H "Host: traefik.kp-soft.dev"
       http://127.0.0.1/api/http/routers |
-      grep -o '"status":"enabled"' | wc -l
-    expect: never_decreases
+      python3 -c 'import sys,json; r=json.load(sys.stdin);
+      f=[x for x in r if x.get("provider")=="file"];
+      e=[x for x in f if x.get("status")=="enabled"];
+      print("ok" if f and len(e)==len(f) else "mismatch: %d enabled of %d declared" % (len(e),len(f)))'
+    # F160 (Kenny, 2026-09-19): this used to count enabled routers with
+    # never_decreases, which could not tell a deliberate removal from an
+    # accidental one — removing go.kp-soft.dev cost one red deploy. Now every
+    # router the route files DECLARE (Traefik's file provider) must be
+    # enabled: removing a route lowers both sides and stays "ok"; a route file
+    # Traefik refuses shows up as "mismatch: 25 enabled of 26 declared".
+    # Measured 2026-09-20 on CT 104: 28 routers, 26 from files, 26 enabled.
+    expect: must_match
     layer: application
     blind_spot: >-
-      Counts the routes Traefik accepted, not that any of them reaches a
-      living backend. A route to a container that is down is enabled and
-      counted.
+      Compares the routers Traefik accepted with the ones its route files
+      declare, not that any of them reaches a living backend. A route to a
+      container that is down is enabled and counted; a route file that was
+      never deployed is invisible to both sides.
 
   # The one reading that would have caught the fleet-wide 403. Every layer is
   # in it: the entrypoint, the CrowdSec middleware that fails closed, and a

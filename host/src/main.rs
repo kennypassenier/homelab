@@ -2153,6 +2153,9 @@ async fn run_backup_batch(
         limit
     );
     let _guard = state.op_lock.lock().await;
+    // M-T75: measured, not predicted — the line the morning reads.
+    let phase_started = std::time::Instant::now();
+    let stacks_in_phase = jobs.len();
     let results: Vec<(String, NightBackup)> = futures_util::stream::iter(jobs)
         .map(|job| async move {
             let name = job.stack.clone();
@@ -2195,6 +2198,14 @@ async fn run_backup_batch(
         .buffer_unordered(limit)
         .collect()
         .await;
+    info!(
+        "{}",
+        homelab_core::ops::backup::phase_duration_line(
+            phase_started.elapsed().as_secs(),
+            stacks_in_phase,
+            limit
+        )
+    );
     results.into_iter().collect()
 }
 

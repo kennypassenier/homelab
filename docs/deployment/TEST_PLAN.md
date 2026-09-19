@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**496 tests across 26 suites.**
+**497 tests across 26 suites.**
 
 ## Accepted limitations
 
@@ -380,6 +380,7 @@ Covers: F105, F153, F154, F156, F162, F180, F207, F209, F210, F36, F75
 - `f285_a_stack_does_not_conflict_with_itself`
 - `f285_an_owner_nobody_else_claims_is_fine`
 - `f285_the_backup_stops_before_it_touches_the_other_repository` — End to end: the backup refuses before it initialises a repository, so the other stack's history is never opened at all.
+- `m_t75_the_backup_phase_says_how_long_it_took` — Minutes and seconds, hours past sixty minutes, never bare seconds above a minute — the house rule for durations, and the number the concurrency setting is judged by.
 - `t82_the_stack_recorded_first_keeps_the_repository` — A stack without a state entry is the newcomer; between two recorded stacks the earlier one keeps the repository; a tie favours the caller.
 - `t82_the_incumbent_backs_up_and_the_newcomer_is_named` — The live stack's backup goes on when a throwaway stack borrows its app name AFTER it — the six minutes JobTracker had no working backup (F292) were the symmetric guard refusing the wrong side.
 - `f274_the_host_meta_snapshot_carries_the_smart_collector` — The SMART collector is installed by this suite on the Proxmox host and lives nowhere under `state_dir`, so the nightly host-meta snapshot walked straight past it.

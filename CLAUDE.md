@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **waiting on the clock** — every open form is answered (2026-09-20 02:40 local). 04:00: the first nightly under 3.55.0 with kyu back in the rotation — read `journalctl -u homelab-host` for `[backup] kyu archives its own copy` (M-D94), `backup phase took` (M-T75), `[release] kyu` / `kyu-runner` (B1), and the seeder's run without stale native warnings (gap-14). 08:00: two deferred pushes on Kenny's phone — `claude-test-failure` (F85) and `claude-test-kyu-chain` (check kyu-e576, then `homelab checks answer e576228c ok`). After 2026-09-21: VmSwap of kvm 100 again (F185 ballooning floor). Open elsewhere: 4 manual checks (paperwork ×2, media posters, kyu chain), kyu door for ha/sonarr/radarr/newsflash (kyu session's form). |
+| Next action | **waiting on Kenny: four manual checks and the kyu door.** The 04:00 nightly of 2026-09-20 is read and measured (step-9): M-D94, M-T75, B1 and gap-14 all clean, and the 03:00Z copy is 35,368,960 bytes, which closes ask-3. Open on Kenny: the four manual checks (paperwork ×2, media posters, kyu chain — `homelab checks` lists the ids), and the kyu door for **ha, sonarr, radarr, newsflash** in the kyu session's form; the door holds 4 of 8 (http-switchboard, kyu-runner, homelab-host, alertmanager), so Home Assistant still takes 401s on notify.kenny — 8 of them today. Also open: gap-15, a check that is red by design every night while D56 stands. Waiting on the clock: after 2026-09-21, VmSwap of kvm 100 again (F185 ballooning floor). |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

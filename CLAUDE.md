@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **waiting on Kenny: the answers to three forms he has not returned yet** — the CT 116 reachability deep dive (F183: which devices and subnets can reach which, measured from CT 116), the swap form for VM 100 and VM 101 (F185), and manual-checks part 1 (11 items, `homelab checks`). Nothing else needs him: 3.55.0 is live, the native-services report is signed off 5/5, kyu and kyu-runner carry `update_policy: auto`. Clock-bound measurements to read when they have happened: 04:00 the first nightly under 3.55.0 (`journalctl -u homelab-host` for `[backup] kyu archives its own copy` M-D94, `backup phase took` M-T75, `[release] kyu` B1, and the seeder without stale native warnings gap-14); 08:00 the deferred HA push (F85). Elsewhere: kyu door for ha/sonarr/radarr/newsflash (kyu session's form). |
+| Next action | **waiting on the clock** — every open form is answered (2026-09-20 02:40 local). 04:00: the first nightly under 3.55.0 with kyu back in the rotation — read `journalctl -u homelab-host` for `[backup] kyu archives its own copy` (M-D94), `backup phase took` (M-T75), `[release] kyu` / `kyu-runner` (B1), and the seeder's run without stale native warnings (gap-14). 08:00: two deferred pushes on Kenny's phone — `claude-test-failure` (F85) and `claude-test-kyu-chain` (check kyu-e576, then `homelab checks answer e576228c ok`). After 2026-09-21: VmSwap of kvm 100 again (F185 ballooning floor). Open elsewhere: 4 manual checks (paperwork ×2, media posters, kyu chain), kyu door for ha/sonarr/radarr/newsflash (kyu session's form). |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

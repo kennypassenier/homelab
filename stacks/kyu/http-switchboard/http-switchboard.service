@@ -8,12 +8,25 @@
 # the binary's directory too, or self-update verifies, downloads and then
 # fails at the swap.
 #
-# Install: install -D -m755 http-switchboard /opt/http-switchboard/bin/http-switchboard (the
-# service owns that directory: chown -R http-switchboard: /opt/http-switchboard), copy
-# this file to /etc/systemd/system/http-switchboard.service, create the user
-# (http-switchboard), the state dir (/appdata/kyu/http-switchboard-config) and the env file
-# (/appdata/kyu/http-switchboard-config/token.env, 0640 root:http-switchboard), then
-# systemctl enable --now http-switchboard.
+# Install, in this order — the user first, because the install command
+# sets the owner itself:
+#
+#   useradd --system --no-create-home --shell /usr/sbin/nologin http-switchboard
+#   install -D -m755 -o http-switchboard -g http-switchboard http-switchboard /opt/http-switchboard/bin/http-switchboard
+#   install -m644 http-switchboard.service /etc/systemd/system/http-switchboard.service
+#   install -d -o http-switchboard -g http-switchboard /appdata/kyu/http-switchboard-config
+#   install -m640 -o root -g http-switchboard http-switchboard.env /appdata/kyu/http-switchboard-config/http-switchboard.env
+#   stat -c '%U:%G %n' /opt/http-switchboard/bin/http-switchboard     # must read http-switchboard:http-switchboard
+#   systemctl enable --now http-switchboard
+#
+# The owner is part of the install command on purpose. This block used to
+# say "install … (the service owns that directory: chown -R http-switchboard:
+# /opt/http-switchboard)", with the ownership as an aside on the next line. On
+# 2026-09-19 someone installed kyu's binary by hand, ran the first line and
+# not the second, and left it root-owned. Nothing failed then: it failed
+# weeks later, at the next update, with a message blaming directory
+# permissions that were never wrong (fix-21). An owner that cannot be
+# forgotten separately cannot be forgotten.
 
 [Unit]
 Description=http-switchboard — Translates message shapes between webhooks and the kyu hub

@@ -4,7 +4,7 @@
 
 use std::collections::VecDeque;
 
-use rand::Rng;
+use rand::RngExt;
 
 pub const RING: usize = 60;
 
@@ -22,8 +22,8 @@ impl Ring {
         Self { data, cur: start }
     }
     pub fn walk(&mut self, min: f64, max: f64, vol: f64) {
-        let mut rng = rand::thread_rng();
-        self.cur += rng.gen_range(-vol..vol);
+        let mut rng = rand::rng();
+        self.cur += rng.random_range(-vol..vol);
         self.cur = self.cur.clamp(min, max);
         if self.data.len() >= RING {
             self.data.pop_front();
@@ -56,14 +56,14 @@ pub struct AppSim {
 
 impl AppSim {
     fn new(name: &'static str, image: &str) -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         Self {
             name,
             image: image.to_string(),
-            digest: format!("{:08x}", rng.gen::<u32>()),
+            digest: format!("{:08x}", rng.random::<u32>()),
             state: AppState::Running,
             restarts: 0,
-            cpu: rng.gen_range(0.5..8.0),
+            cpu: rng.random_range(0.5..8.0),
         }
     }
 }
@@ -240,7 +240,7 @@ const BACKUP_STEPS: &[&str] = &[
 impl World {
     pub fn new() -> Self {
         let mk = |name: &str, vmid: u16, apps: Vec<AppSim>, ram_limit: u32| -> Stack {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             Stack {
                 name: name.to_string(),
                 vmid,
@@ -250,8 +250,8 @@ impl World {
                 drift: false,
                 sealed: true,
                 apps,
-                cpu: Ring::new(rng.gen_range(5.0..30.0)),
-                ram: Ring::new(rng.gen_range(20.0..60.0)),
+                cpu: Ring::new(rng.random_range(5.0..30.0)),
+                ram: Ring::new(rng.random_range(20.0..60.0)),
                 ram_mb: 0,
                 ram_limit_mb: ram_limit,
                 last_backup: "02:14".into(),
@@ -313,9 +313,9 @@ impl World {
         ]
         .into_iter()
         .map(|(s, t, sz)| {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             Snapshot {
-                id: format!("{:08x}", rng.gen::<u32>()),
+                id: format!("{:08x}", rng.random::<u32>()),
                 stack: s.into(),
                 time: t.into(),
                 size: sz.into(),
@@ -360,12 +360,13 @@ impl World {
     }
 
     pub fn tick(&mut self, dt_ms: i64) {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         self.clock = chrono::Local::now().time();
         self.host.cpu.walk(3.0, 95.0, 4.0);
         self.host.ram.walk(55.0, 85.0, 1.0);
-        self.host.temp = (self.host.temp + rng.gen_range(-0.4..0.4)).clamp(44.0, 62.0);
-        self.link_latency_ms = (self.link_latency_ms + rng.gen_range(-0.15..0.15)).clamp(0.3, 4.0);
+        self.host.temp = (self.host.temp + rng.random_range(-0.4..0.4)).clamp(44.0, 62.0);
+        self.link_latency_ms =
+            (self.link_latency_ms + rng.random_range(-0.15..0.15)).clamp(0.3, 4.0);
         self.next_backup_min = (self.next_backup_min - dt_ms as f64 / 60_000.0).max(0.0);
 
         for s in self.stacks.iter_mut() {
@@ -374,16 +375,16 @@ impl World {
             s.ram.walk(10.0, 92.0, 1.5);
             s.ram_mb = (s.ram.last() as u32 * s.ram_limit_mb) / 100;
             for a in s.apps.iter_mut() {
-                a.cpu = (a.cpu + rng.gen_range(-0.8..0.8)).clamp(0.1, 60.0);
+                a.cpu = (a.cpu + rng.random_range(-0.8..0.8)).clamp(0.1, 60.0);
             }
         }
 
         // Occasionally flip a media app into a short restart (or brief stop) so
         // the fleet shows real-looking degradation now and then.
-        if rng.gen_bool(0.004) {
+        if rng.random_bool(0.004) {
             if let Some(s) = self.stacks.iter_mut().find(|s| s.name == "media") {
                 if let Some(a) = s.apps.iter_mut().find(|a| a.state == AppState::Running) {
-                    a.state = if rng.gen_bool(0.25) {
+                    a.state = if rng.random_bool(0.25) {
                         AppState::Stopped
                     } else {
                         AppState::Restarting
@@ -394,7 +395,7 @@ impl World {
                     }
                 }
             }
-        } else if rng.gen_bool(0.06) {
+        } else if rng.random_bool(0.06) {
             for s in self.stacks.iter_mut() {
                 let mut recovered = false;
                 for a in s.apps.iter_mut() {
@@ -415,13 +416,13 @@ impl World {
         self.log_cooldown_ms -= dt_ms;
         if self.log_cooldown_ms <= 0 {
             self.emit_random_log();
-            self.log_cooldown_ms = rng.gen_range(180..1400);
+            self.log_cooldown_ms = rng.random_range(180..1400);
         }
     }
 
     /// A plausible transcript line for the currently-running deploy step.
     fn deploy_sub_line(step: usize, stack: &Stack, count: u32) -> (Level, String) {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let app = stack
             .apps
             .get(count as usize % stack.apps.len().max(1))
@@ -451,7 +452,7 @@ impl World {
                     "tls :: session resumed · cipher TLS_AES_256_GCM_SHA384".into(),
                     format!(
                         "tls :: payload {:.1} KB → HOST · seq {}",
-                        rng.gen_range(4.0..40.0),
+                        rng.random_range(4.0..40.0),
                         count + 1
                     ),
                     "tls :: ack — payload integrity verified".into(),
@@ -464,7 +465,7 @@ impl World {
                     format!("git :: stacks/{} staged", stack.name),
                     format!(
                         "git :: commit {:07x} \"deploy {}\"",
-                        rng.gen::<u32>() & 0xFFFFFFF,
+                        rng.random::<u32>() & 0xFFFFFFF,
                         stack.name
                     ),
                     "git :: mirror push queued (github, non-blocking)".into(),
@@ -484,7 +485,7 @@ impl World {
                     format!(
                         "pull :: {} … digest sha256:{:012x}",
                         image,
-                        rng.gen::<u64>()
+                        rng.random::<u64>()
                     ),
                     format!("pull :: {} :: layer cached, skipping", app),
                 ][count as usize % 2]
@@ -526,17 +527,17 @@ impl World {
             // Sub-transcript: the running step chatters while it works.
             d.sub_timer_ms -= dt_ms;
             if d.sub_timer_ms <= 0 && d.current < d.steps.len() {
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 let stack = &self.stacks[d.stack_idx];
                 let (lvl, line) = Self::deploy_sub_line(d.current, stack, d.sub_count);
                 d.log.push((lvl, format!("  {}", line)));
                 d.sub_count += 1;
-                d.sub_timer_ms = rng.gen_range(220..520);
+                d.sub_timer_ms = rng.random_range(220..520);
             }
 
             d.timer_ms -= dt_ms;
             if d.timer_ms <= 0 {
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 if d.current < d.steps.len() {
                     d.steps[d.current].1 = StepState::Done;
                     let stack = &self.stacks[d.stack_idx];
@@ -556,7 +557,7 @@ impl World {
                             Level::Info,
                             format!("[sync][run ] {}", d.steps[d.current].0),
                         ));
-                        d.timer_ms = rng.gen_range(900..2200);
+                        d.timer_ms = rng.random_range(900..2200);
                     } else {
                         d.finished = true;
                         d.log.push((
@@ -589,7 +590,7 @@ impl World {
 
     /// A plausible transcript line for the currently-running backup step.
     fn backup_sub_line(step: usize, stack: &Stack, count: u32, bytes: f64) -> (Level, String) {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let app = stack
             .apps
             .get(count as usize % stack.apps.len().max(1))
@@ -618,7 +619,7 @@ impl World {
                     format!("restic :: scanning /appdata/{}/{}-config", stack.name, app),
                     format!(
                         "restic :: added {:.1} MB to the repo",
-                        rng.gen_range(0.4..18.0)
+                        rng.random_range(0.4..18.0)
                     ),
                     format!("restic :: {:.0} MB processed, dedup active", bytes),
                 ][count as usize % 3]
@@ -630,7 +631,7 @@ impl World {
                     "retention :: keep-daily=7 keep-weekly=4 keep-monthly=3".into(),
                     format!(
                         "retention :: removed {} stale snapshot(s)",
-                        rng.gen_range(0..3)
+                        rng.random_range(0..3)
                     ),
                     "prune :: repacking, freed space reported".into(),
                 ][count as usize % 3]
@@ -656,8 +657,8 @@ impl World {
             if b.finished {
                 return;
             }
-            let mut rng = rand::thread_rng();
-            b.bytes_done += rng.gen_range(0.2..2.5);
+            let mut rng = rand::rng();
+            b.bytes_done += rng.random_range(0.2..2.5);
 
             b.sub_timer_ms -= dt_ms;
             if b.sub_timer_ms <= 0 && b.current < b.steps.len() {
@@ -666,7 +667,7 @@ impl World {
                     Self::backup_sub_line(b.current, stack, b.sub_count, b.bytes_done);
                 b.log.push((lvl, format!("  {}", line)));
                 b.sub_count += 1;
-                b.sub_timer_ms = rng.gen_range(240..560);
+                b.sub_timer_ms = rng.random_range(240..560);
             }
 
             b.timer_ms -= dt_ms;
@@ -683,7 +684,7 @@ impl World {
                         Level::Info,
                         format!("[bkup][run ] {}", b.steps[b.current].0),
                     ));
-                    b.timer_ms = rng.gen_range(800..2000);
+                    b.timer_ms = rng.random_range(800..2000);
                 } else {
                     b.finished = true;
                     b.log.push((
@@ -699,14 +700,14 @@ impl World {
             let name = self.stacks[idx].name.clone();
             let now = self.clock.format("%H:%M").to_string();
             self.stacks[idx].last_backup = now.clone();
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             self.snapshots.insert(
                 0,
                 Snapshot {
-                    id: format!("{:08x}", rng.gen::<u32>()),
+                    id: format!("{:08x}", rng.random::<u32>()),
                     stack: name.clone(),
                     time: format!("today {}", now),
-                    size: format!("{} MB", rng.gen_range(9..220)),
+                    size: format!("{} MB", rng.random_range(9..220)),
                 },
             );
             emitted.push((
@@ -810,7 +811,7 @@ impl World {
                 name, vmid
             ),
         );
-        self.git.commit = format!("{:07x}", rand::thread_rng().gen::<u32>() & 0xFFFFFFF);
+        self.git.commit = format!("{:07x}", rand::rng().random::<u32>() & 0xFFFFFFF);
         self.git.last_msg = format!("stacks/{}: initial scaffold", name);
         self.git.commits_today += 1;
         self.stacks.push(s);
@@ -852,15 +853,15 @@ impl World {
     }
 
     fn emit_random_log(&mut self) {
-        let mut rng = rand::thread_rng();
-        let pick = rng.gen_range(0..100);
+        let mut rng = rand::rng();
+        let pick = rng.random_range(0..100);
         let (src, level, msg): (String, Level, String) = if pick < 22 {
             (
                 "platform".into(),
                 Level::Debug,
                 format!(
                     "traefik :: 200 GET jellyfin.kp-soft.dev {}ms",
-                    rng.gen_range(3..140)
+                    rng.random_range(3..140)
                 ),
             )
         } else if pick < 34 {
@@ -872,7 +873,7 @@ impl World {
                     "sonarr :: rss sync complete, 0 new",
                     "radarr :: import: Movie.2026.1080p → /mnt/data/18TB",
                     "bazarr :: subtitles fetched (nl) for 1 episode",
-                ][rng.gen_range(0..4)]
+                ][rng.random_range(0..4)]
                 .to_string(),
             )
         } else if pick < 44 {
@@ -881,10 +882,10 @@ impl World {
                 Level::Debug,
                 format!(
                     "gluetun :: vpn healthy, egress {}.{}.{}.{}",
-                    rng.gen_range(80..180),
-                    rng.gen_range(1..250),
-                    rng.gen_range(1..250),
-                    rng.gen_range(1..250)
+                    rng.random_range(80..180),
+                    rng.random_range(1..250),
+                    rng.random_range(1..250),
+                    rng.random_range(1..250)
                 ),
             )
         } else if pick < 56 {
@@ -896,7 +897,7 @@ impl World {
                     "syncthing :: folder \"obsidian-vault\" in sync",
                     "syncthing :: versioning: pruned 3 old versions",
                     "syncthing :: connected to phone (QUIC)",
-                ][rng.gen_range(0..4)]
+                ][rng.random_range(0..4)]
                 .to_string(),
             )
         } else if pick < 70 {
@@ -905,7 +906,7 @@ impl World {
                 Level::Debug,
                 format!(
                     "heartbeat :: CLIENT fresh ({}ms) — failsafe window skipped",
-                    rng.gen_range(2..40)
+                    rng.random_range(2..40)
                 ),
             )
         } else if pick < 78 {
@@ -914,10 +915,10 @@ impl World {
                 Level::Warn,
                 format!(
                     "crowdsec :: ip {}.{}.{}.{} banned (http-probing)",
-                    rng.gen_range(2..250),
-                    rng.gen_range(1..250),
-                    rng.gen_range(1..250),
-                    rng.gen_range(1..250)
+                    rng.random_range(2..250),
+                    rng.random_range(1..250),
+                    rng.random_range(1..250),
+                    rng.random_range(1..250)
                 ),
             )
         } else if pick < 86 {
@@ -930,7 +931,7 @@ impl World {
             (
                 "platform".into(),
                 Level::Debug,
-                format!("loki :: ingested {} lines", rng.gen_range(40..900)),
+                format!("loki :: ingested {} lines", rng.random_range(40..900)),
             )
         } else if pick < 98 {
             (

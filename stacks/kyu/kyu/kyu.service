@@ -8,12 +8,25 @@
 # the binary's directory too, or self-update verifies, downloads and then
 # fails at the swap.
 #
-# Install: install -D -m755 kyu /opt/kyu/bin/kyu (the
-# service owns that directory: chown -R kyu: /opt/kyu), copy
-# this file to /etc/systemd/system/kyu.service, create the user
-# (kyu), the state dir (/appdata/kyu/kyu-config) and the env file
-# (/appdata/kyu/kyu-config/kyu.env, 0640 root:kyu), then
-# systemctl enable --now kyu.
+# Install, in this order — the user first, because the install command
+# sets the owner itself:
+#
+#   useradd --system --no-create-home --shell /usr/sbin/nologin kyu
+#   install -D -m755 -o kyu -g kyu kyu /opt/kyu/bin/kyu
+#   install -m644 kyu.service /etc/systemd/system/kyu.service
+#   install -d -o kyu -g kyu /appdata/kyu/kyu-config
+#   install -m640 -o root -g kyu kyu.env /appdata/kyu/kyu-config/kyu.env
+#   stat -c '%U:%G %n' /opt/kyu/bin/kyu     # must read kyu:kyu
+#   systemctl enable --now kyu
+#
+# The owner is part of the install command on purpose. This block used to
+# say "install … (the service owns that directory: chown -R kyu:
+# /opt/kyu)", with the ownership as an aside on the next line. On
+# 2026-09-19 someone installed kyu's binary by hand, ran the first line and
+# not the second, and left it root-owned. Nothing failed then: it failed
+# weeks later, at the next update, with a message blaming directory
+# permissions that were never wrong (fix-21). An owner that cannot be
+# forgotten separately cannot be forgotten.
 
 [Unit]
 Description=kyu — A self-documenting durable message hub for a homelab

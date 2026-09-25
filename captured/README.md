@@ -19,6 +19,7 @@ milestone M8 of `docs/deployment/REALIZATION_PLAN.md`.
 | `gateway/cloudflare-*.json` | R5 (2026-09-20): the Cloudflare tunnel's ingress rules and the three Access applications with their four policies, read through the read-only API token; e-mail addresses redacted. What the edge does before Traefik sees a request — captured so a lost Cloudflare account can be rebuilt from a record instead of memory | stays a record: Cloudflare is configured through its own API, never by a deploy |
 | `fleet/` | The cadvisor compose file that runs identically on every docker host | baked into the golden template (O2) |
 | `pve-host/` | The SMART textfile collector and its systemd timer, which run on the Proxmox host itself — never inside a container, because SMART is unreadable from an unprivileged LXC | stays here; the host is not a stack |
+| `pve-host/firewall/` | The Proxmox firewall files live on pve since 2026-09-20 (F183): the datacenter switch, the host's own firewall kept OFF, and CT 116's per-veth ruleset that closes neighbour traffic OPNsense cannot see | stays here; applied by hand with `pct set … firewall=1`, rollback is the same flag at 0 |
 
 ## Why the SMART collector is a script and not an exporter
 

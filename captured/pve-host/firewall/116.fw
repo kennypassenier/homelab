@@ -1,0 +1,29 @@
+# /etc/pve/firewall/116.fw — CT 116 (kp-soft), the one container strangers
+# reach. Stateful, applied on its veth, so it sees NEIGHBOUR traffic inside
+# VLAN 10 that no OPNsense rule can (F183). Every rule below comes from a
+# measurement of 2026-09-20: ss on the container (no neighbour connections),
+# the containers' own configuration (almanac, registry cache), the gateway
+# route (8080, 8787), the Prometheus targets (8081, 9100) and the Uptime Kuma
+# ping. Kenny approved it on 2026-09-20 ("Klopt").
+[OPTIONS]
+enable: 1
+policy_in: DROP
+policy_out: ACCEPT
+log_level_in: nolog
+log_level_out: nolog
+
+[RULES]
+# 1 · pve's rescue address first: never from the container that strangers reach
+OUT DROP -dest 10.10.10.250
+# 2 · the neighbours it really uses: almanac (JobTracker events), registry cache (docker pulls)
+OUT ACCEPT -dest 10.10.10.12 -p tcp -dport 8080
+OUT ACCEPT -dest 10.10.10.17 -p tcp -dport 5000:5003
+# 3 · every other neighbour in VLAN 10 stays out of reach; what leaves the
+#     VLAN (DNS 10.10.5.1, internet) crosses the router, where OPNsense rules apply
+OUT DROP -dest 10.10.10.0/24
+# 4 · who may reach the container: Traefik (site, JobTracker), Prometheus
+#     (cadvisor, node exporter), Uptime Kuma (ping), Kenny's desktop (ssh)
+IN ACCEPT -source 10.10.10.4 -p tcp -dport 8080,8787
+IN ACCEPT -source 10.10.10.13 -p tcp -dport 8081,9100
+IN ACCEPT -source 10.10.10.7 -p icmp
+IN ACCEPT -source 10.10.10.10 -p tcp -dport 22

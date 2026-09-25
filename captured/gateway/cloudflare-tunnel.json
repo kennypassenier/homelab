@@ -1,0 +1,29 @@
+{
+  "captured_at": "2026-09-20",
+  "source": "Cloudflare API, read-only token (R5)",
+  "tunnels": [
+    {
+      "name": "kp-soft.dev-tunnel",
+      "id": "b027d052-9f97-43e5-9272-eeb336d3266e",
+      "status": "healthy",
+      "config": {
+        "ingress": [
+          {
+            "service": "http://10.10.10.4:80",
+            "hostname": "*.kp-soft.dev",
+            "originRequest": {
+              "httpHostHeader": "",
+              "noHappyEyeballs": true
+            }
+          },
+          {
+            "service": "http_status:404"
+          }
+        ],
+        "warp-routing": {
+          "enabled": false
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "captured_at": "2026-09-20",
+  "source": "Cloudflare API, read-only token (R5); e-mail addresses redacted",
+  "apps": [
+    {
+      "name": "Kobo services",
+      "domain": "ha.kp-soft.dev",
+      "self_hosted_domains": [
+        "ha.kp-soft.dev",
+        "trmnl.kp-soft.dev"
+      ],
+      "type": "self_hosted",
+      "session_duration": "24h",
+      "policies": [
+        {
+          "name": "Toegang kpsoft",
+          "decision": "allow",
+          "include": [
+            {
+              "email": {
+                "email": "<email>"
+              }
+            },
+            {
+              "email": {
+                "email": "<email>"
+              }
+            },
+            {
+              "email": {
+                "email": "<email>"
+              }
+            }
+          ],
+          "require": [],
+          "exclude": []
+        },
+        {
+          "name": "kobo-token",
+          "decision": "non_identity",
+          "include": [
+            {
+              "service_token": {
+                "token_id": "a836cb28-4c6e-440c-ac2b-b4317ee0b44c"
+              }
+            }
+          ],
+          "require": [],
+          "exclude": []
+        }
+      ]
+    },
+    {
+      "name": "sp",
+      "domain": "sp.kp-soft.dev",
+      "self_hosted_domains": [
+        "sp.kp-soft.dev"
+      ],
+      "type": "self_hosted",
+      "session_duration": "24h",
+      "policies": [
+        {
+          "name": "SuperSync Bypass",
+          "decision": "bypass",
+          "include": [
+            {
+              "everyone": {}
+            }
+          ],
+          "require": [],
+          "exclude": []
+        }
+      ]
+    },
+    {
+      "name": "Homelab",
+      "domain": "*.kp-soft.dev",
+      "self_hosted_domains": [
+        "*.kp-soft.dev"
+      ],
+      "type": "self_hosted",
+      "session_duration": "730h",
+      "policies": [
+        {
+          "name": "Toegang kpsoft",
+          "decision": "allow",
+          "include": [
+            {
+              "email": {
+                "email": "<email>"
+              }
+            },
+            {
+              "email": {
+                "email": "<email>"
+              }
+            },
+            {
+              "email": {
+                "email": "<email>"
+              }
+            }
+          ],
+          "require": [],
+          "exclude": []
+        }
+      ]
+    }
+  ]
+}

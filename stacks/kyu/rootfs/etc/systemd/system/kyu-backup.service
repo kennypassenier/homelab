@@ -1,0 +1,25 @@
+[Unit]
+Description=kyu — consistent backup of the store
+Documentation=https://github.com/kennypassenier/kyu
+After=kyu.service
+Requires=kyu.service
+
+# A timer reports that it FIRED, not that the work succeeded (F179). Without
+# this line a failing backup is invisible until someone asks systemctl about
+# this service by name — which is exactly how two nights went by.
+OnFailure=kyu-alert@%n.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/appdata/kyu/kyu-config/kyu.env
+# The script prunes old copies in this directory and refuses to guess it.
+# It used to read KYU_DATA_DIR from kyu.env, until kyu 3.3.0's state-dir
+# guard made that line in kyu.env a refusal for the hub itself and the
+# homelab removed it (gap-10, 2026-09-19). The value is the deployment's to
+# know (standing rule 28), so the unit hands it in here — the same directory
+# kyu.service names as KYU_STATE_DIR.
+Environment=KYU_DATA_DIR=/appdata/kyu/kyu-config
+ExecStart=/usr/local/bin/kyu-backup
+# VACUUM INTO on a large store takes a while; the socket has no timeout of
+# its own, so the ceiling lives here.
+TimeoutStartSec=300

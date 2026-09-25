@@ -7,6 +7,7 @@ fn cfg() -> String {
         "kyu",
         "109-app-kyu",
         "http://10.10.10.4:3100/loki/api/v1/push",
+        &[],
     )
 }
 
@@ -62,6 +63,7 @@ fn it_points_at_the_loki_it_was_given_and_nowhere_else() {
         "media",
         "106-app-media",
         "http://10.10.10.4:3100/loki/api/v1/push",
+        &[],
     );
     assert!(
         c.contains("http://10.10.10.4:3100/loki/api/v1/push"),
@@ -164,7 +166,7 @@ mod push_endpoint {
 
     #[test]
     fn the_generated_config_carries_the_push_path_and_not_the_base() {
-        let c = config("kyu", "109-app-kyu", "http://10.10.10.4:3100");
+        let c = config("kyu", "109-app-kyu", "http://10.10.10.4:3100", &[]);
         assert!(
             c.contains("url = \"http://10.10.10.4:3100/loki/api/v1/push\""),
             "{}",
@@ -238,7 +240,7 @@ loki_write_dropped_bytes_total{component_id="loki.write.default"} 0
 /// The dashboards filter on `job`, so the label has to be forced.
 #[test]
 fn the_journal_job_label_is_forced_and_not_left_to_alloy() {
-    let c = config("kyu", "109-app-kyu", "http://10.10.10.4:3100");
+    let c = config("kyu", "109-app-kyu", "http://10.10.10.4:3100", &[]);
     let relabel = c
         .split("loki.relabel \"journal\"")
         .nth(1)
@@ -249,4 +251,142 @@ fn the_journal_job_label_is_forced_and_not_left_to_alloy() {
         "without this the job label is the component's name:\n{}",
         relabel
     );
+}
+
+/// gap-11 · a syslog receiver for a device that cannot ship its own logs.
+///
+/// OPNsense sends RFC 5424 over UDP to the gateway container, and the
+/// listener that receives it was hand-added on CT 104 on 2026-09-18 as a
+/// second file beside the rendered one. The orchestrator knew nothing about
+/// it, so the next deploy of the gateway would have kept remote logging
+/// working only by accident — the extra file survived because the deploy
+/// never looked at it. The receiver is declared in the stack file now and
+/// rendered here, for the stack that declares it and for no other.
+mod syslog_receiver {
+    use homelab_core::manifest::SyslogReceiver;
+    use homelab_core::ops::logshipper::{config, single_file_mode_script};
+
+    fn opnsense() -> SyslogReceiver {
+        SyslogReceiver {
+            host: "opnsense".into(),
+            listen: "0.0.0.0:1514".into(),
+            protocol: "udp".into(),
+            format: "rfc5424".into(),
+        }
+    }
+
+    /// The labels are the contract again: the vault note and the Grafana
+    /// query both read `{job="syslog", host="opnsense"}`.
+    #[test]
+    fn a_declared_receiver_listens_and_labels_its_lines_like_the_hand_made_one_did() {
+        let c = config(
+            "gateway",
+            "104-app-gateway",
+            "http://10.10.10.4:3100",
+            &[opnsense()],
+        );
+        assert!(c.contains("loki.source.syslog"), "{}", c);
+        assert!(c.contains("address       = \"0.0.0.0:1514\""), "{}", c);
+        assert!(c.contains("protocol      = \"udp\""), "{}", c);
+        assert!(c.contains("syslog_format = \"rfc5424\""), "{}", c);
+        for label in [
+            "job   = \"syslog\"",
+            "stack = \"gateway\"",
+            "host  = \"opnsense\"",
+        ] {
+            assert!(c.contains(label), "label {} missing:\n{}", label, c);
+        }
+        // app / level / facility come out of the RFC 5424 header, and the
+        // dashboards filter on them.
+        for src in [
+            "__syslog_message_app_name",
+            "__syslog_message_severity",
+            "__syslog_message_facility",
+        ] {
+            assert!(c.contains(src), "relabel source {} missing:\n{}", src, c);
+        }
+        assert_eq!(
+            c.matches("loki.write.default.receiver").count(),
+            4,
+            "docker, journal, syslog file AND the receiver must reach the writer:\n{}",
+            c
+        );
+    }
+
+    /// Ten other containers render this same file. A receiver that leaked
+    /// into all of them would open UDP 1514 on every one and, worse, label
+    /// whatever arrived there as OPNsense.
+    #[test]
+    fn a_stack_that_declares_no_receiver_opens_no_port() {
+        let c = config("kyu", "109-app-kyu", "http://10.10.10.4:3100", &[]);
+        assert!(!c.contains("loki.source.syslog"), "{}", c);
+        assert!(!c.contains("1514"), "{}", c);
+    }
+
+    /// Two receivers on one container are two components, and Alloy refuses
+    /// a file that names one component twice.
+    #[test]
+    fn two_receivers_get_two_distinct_component_names() {
+        let second = SyslogReceiver {
+            host: "omada-controller".into(),
+            listen: "0.0.0.0:1515".into(),
+            protocol: "udp".into(),
+            format: "rfc3164".into(),
+        };
+        let c = config(
+            "gateway",
+            "104-app-gateway",
+            "http://10.10.10.4:3100",
+            &[opnsense(), second],
+        );
+        assert_eq!(c.matches("loki.source.syslog \"").count(), 2, "{}", c);
+        assert!(
+            c.contains("loki.source.syslog \"syslog_opnsense\""),
+            "{}",
+            c
+        );
+        // A hyphen is legal in a host label and not in an Alloy component
+        // label, so the name is derived, not copied.
+        assert!(
+            c.contains("loki.source.syslog \"syslog_omada_controller\""),
+            "{}",
+            c
+        );
+        assert!(c.contains("syslog_format = \"rfc3164\""), "{}", c);
+    }
+
+    /// The hand-made change on CT 104 switched Alloy to directory mode
+    /// (`CONFIG_FILE="/etc/alloy"`), which loads every `*.alloy` in the
+    /// directory. That is the mechanism by which a file the orchestrator
+    /// never wrote kept being loaded — exactly the drift class this project
+    /// keeps finding. The deploy renders ONE file and puts the unit back to
+    /// reading one file; anything else in the directory is removed and said
+    /// out loud, never silently.
+    #[test]
+    fn the_deploy_puts_alloy_back_to_reading_the_one_file_it_renders() {
+        let s = single_file_mode_script();
+        assert!(
+            s.contains("CONFIG_FILE=\"/etc/alloy/config.alloy\""),
+            "the package default must be restored: {}",
+            s
+        );
+        // Standing rule 20: a scripted edit asserts its target is present
+        // before it replaces anything.
+        assert!(
+            s.find("grep").unwrap() < s.find("sed").unwrap(),
+            "the directory-mode line is checked for before it is rewritten: {}",
+            s
+        );
+        assert!(s.contains("restored-single-file-mode"), "{}", s);
+        assert!(
+            s.contains("removed "),
+            "a removed file is named, not hidden: {}",
+            s
+        );
+        assert!(
+            s.contains("config.alloy\" ] && continue") || s.contains("config.alloy\" ] || rm"),
+            "the rendered file itself must survive the sweep: {}",
+            s
+        );
+    }
 }

@@ -36,6 +36,18 @@ fn ip_only(ip: &str) -> Option<&str> {
 /// Input is `(stack, ip)` pairs — everything host state already holds.
 /// Sorted by name, so two runs over the same fleet produce the same list and
 /// a diff means the fleet changed rather than the order did.
+/// gap-14: the address of a container this house never deployed from a
+/// stack file — the adopted native stacks (kyu on 109, almanac on 112) have
+/// no `StackManifest` in state and so no `network.ip`, and the seeder read
+/// their monitors as watching stacks the fleet does not have. Every
+/// container here takes `10.10.10.<vmid-100>`, which `stack_files_tests`
+/// pins for the deployed ones; the adopted ones follow the same rule.
+pub fn address_for_vmid(vmid: u16) -> Option<String> {
+    (100..=354)
+        .contains(&vmid)
+        .then(|| format!("10.10.10.{}", vmid - 100))
+}
+
 pub fn host_monitors(stacks: &[(String, String)]) -> Vec<Monitor> {
     let mut out: Vec<Monitor> = stacks
         .iter()

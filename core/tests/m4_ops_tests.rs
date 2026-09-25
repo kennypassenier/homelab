@@ -15,6 +15,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        syslog_receivers: vec![],
         natives: Vec::new(),
         stack_name: stack.into(),
         vmid,
@@ -1578,6 +1579,8 @@ fn t40_stateless_must_be_declared_not_inferred() {
         data_dirs: vec![],
         update_cmd: None,
         stateless: false,
+        backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
     };
@@ -1591,6 +1594,8 @@ fn t40_stateless_must_be_declared_not_inferred() {
     // Declared: accepted.
     let stateless = NativeServiceManifest {
         stateless: true,
+        backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
         ..base.clone()
@@ -1600,6 +1605,8 @@ fn t40_stateless_must_be_declared_not_inferred() {
     // whether the service is backed up.
     let confused = NativeServiceManifest {
         stateless: true,
+        backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
         data_dirs: vec!["/var/lib/x".into()],
@@ -3297,6 +3304,108 @@ async fn f285_the_backup_stops_before_it_touches_the_other_repository() {
         exec.calls_containing("restic").is_empty(),
         "not one restic call may reach the other stack's repository: {:?}",
         exec.calls_containing("restic")
+    );
+}
+
+// ── M-T75: the backup phase reports its own duration ───────────────────────
+
+/// Minutes and seconds, hours past sixty minutes, never bare seconds above
+/// a minute — the house rule for durations, and the number the concurrency
+/// setting is judged by.
+#[test]
+fn m_t75_the_backup_phase_says_how_long_it_took() {
+    use homelab_core::ops::backup::phase_duration_line;
+    assert_eq!(
+        phase_duration_line(45, 1, 3),
+        "scheduler: backup phase took 45 s for 1 stack(s), 3 at a time"
+    );
+    assert_eq!(
+        phase_duration_line(13 * 60 + 7, 13, 3),
+        "scheduler: backup phase took 13 min 7 s for 13 stack(s), 3 at a time"
+    );
+    assert_eq!(
+        phase_duration_line(3600 + 125, 13, 1),
+        "scheduler: backup phase took 1 h 2 min 5 s for 13 stack(s), 1 at a time"
+    );
+}
+
+// ── T82 (F292): the incumbent keeps the repository ─────────────────────────
+
+/// A stack without a state entry is the newcomer; between two recorded
+/// stacks the earlier one keeps the repository; a tie favours the caller.
+#[test]
+fn t82_the_stack_recorded_first_keeps_the_repository() {
+    use homelab_core::ops::backup::repository_keeper;
+    assert!(
+        !repository_keeper(None, Some(0)),
+        "never recorded = newcomer"
+    );
+    assert!(!repository_keeper(None, None));
+    assert!(
+        repository_keeper(Some(5), None),
+        "the other was never recorded"
+    );
+    assert!(repository_keeper(Some(10), Some(20)), "earlier keeps it");
+    assert!(!repository_keeper(Some(20), Some(10)), "later is refused");
+    assert!(repository_keeper(Some(7), Some(7)), "a tie is one deploy");
+}
+
+/// The live stack's backup goes on when a throwaway stack borrows its app
+/// name AFTER it — the six minutes JobTracker had no working backup (F292)
+/// were the symmetric guard refusing the wrong side. The newcomer names
+/// itself in a warning; the incumbent's restic calls happen.
+#[tokio::test]
+async fn t82_the_incumbent_backs_up_and_the_newcomer_is_named() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    let other = {
+        let mut m = manifest(109, "other");
+        m.hostname = "109-app-other".into();
+        m.storage[0].host_path = "/appdata/other/test-config".into();
+        m.storage[0].mount_point = "/appdata/other/test-config".into();
+        m.storage[0].app = Some("test".into());
+        m
+    };
+    let this = manifest(108, "test");
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "test": {
+                    "vmid": 108,
+                    "hostname": "108-app-test",
+                    "apps": ["test"],
+                    "applied_at": 100,
+                    "manifest": this,
+                },
+                "other": {
+                    "vmid": 109,
+                    "hostname": "109-app-other",
+                    "apps": ["test"],
+                    "applied_at": 200,
+                    "manifest": other,
+                }
+            }
+        })
+        .to_string(),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(&ctx(&exec, &sink, &j), &this, &BackupCfg::default()).await;
+    assert!(report.ok, "the incumbent must back up: {:?}", report.error);
+    assert!(
+        !exec.calls_containing("restic").is_empty(),
+        "its restic calls must happen: {:?}",
+        exec.calls()
+    );
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("'other'") && l.contains("newcomer")),
+        "the newcomer is named: {:?}",
+        sink.lines()
     );
 }
 

@@ -8,6 +8,7 @@ pub mod destroy;
 pub mod devicebackup;
 pub mod discovery;
 pub mod enable;
+pub mod facts;
 pub mod fleetcheck;
 pub mod guards;
 pub mod hardware;

@@ -1,4 +1,4 @@
-# Resume point — 2026-09-04, early morning
+# Resume point — last verified 2026-09-18
 
 Written so a new session can pick this up without reading a chat log. Kenny's
 standing instruction that day: *"ga door tot je niet meer kan, houdt er
@@ -12,7 +12,9 @@ only says what is IN FLIGHT.
 
 - Phase 7 hardening: **22 of 23 gaps closed**, 1 deferred by Kenny (G6).
   Per-gap table in `REALIZATION_PLAN.md`.
-- Host runs **v3.42.2**; repo version matches. 434 tests, CI green.
+- Host runs **v3.51.0**; repo version matches. **480 tests**, CI green.
+  (Counted with `cargo test --workspace`, not carried forward — this line said
+  v3.42.2 and 434 tests until 2026-09-18, seven releases behind.)
 - `homelab` is installed at `~/.cargo/bin/homelab` (`make install`) and reads
   `~/.config/homelab/env`, so it works from any directory with no sourcing.
 
@@ -69,6 +71,19 @@ curl -s -G "http://10.10.10.4:3100/loki/api/v1/query_range" \
 
 Zero streams after a migration = that stack is broken, whatever the container
 says about itself.
+
+**gap-11 (2026-09-18): the gateway also receives syslog from OPNsense.** The
+receiver (UDP 1514, RFC 5424, `{job="syslog", host="opnsense"}`) is declared
+under `syslog_receivers:` in `stacks/gateway/lxc-compose.yml` and rendered
+into the same `config.alloy`. One file, deliberately: the deploy restores
+`CONFIG_FILE="/etc/alloy/config.alloy"` in `/etc/default/alloy` and removes
+any other `.alloy` in the directory, saying so in its output. Verification is
+the same query with `host="opnsense"`, and `ss -lunp | grep 1514` inside
+CT 104. CT 104 was aligned by hand on 2026-09-18 with exactly the rendered
+bytes (Kenny's choice), so a deploy from a daemon ≥ 3.52.0 finds it unchanged.
+Note gap-13 before deploying anything large: pve answers VLAN 10 directly
+(`vmbr0.10`, its 2026-09-17 rescue path), so a bulk transfer through the
+firewall stalls; `HOMELAB_HOST=10.10.10.250:8443` stays inside VLAN 10.
 
 ## Fleet state after the migration, 2026-09-02 21:00
 
@@ -349,7 +364,9 @@ rebuildable from its own generation.
 0.2.1, http-switchboard 3.0.0, almanac 4.0.3). Only almanac landed. Every
 chassis-rs release needs GLIBC_2.39; CT 109 is Debian 12 with 2.36, so kyu
 3.1.0 crash-looped and was restored to 2.4.1 inside ninety seconds (F304).
-`release_repo` is parked on the three services on CT 109 until they can run.
+`release_repo` **is no longer parked** — all three stack files carry it again,
+because the chassis kit went to static musl and the host's libc stopped
+deciding whether a service starts (measured 2026-09-18).
 
 **The finding that outranks it.** Unattended security upgrades had stopped
 fleet-wide (F307). The origins pattern matched the ARCHIVE alias, which Debian
@@ -361,6 +378,33 @@ it in the same words and simply have no backlog yet. Fixed in the guards
 constant (codename matching) and verified inside the new template by mounting
 it and reading the file back. The existing fourteen containers still carry the
 old pattern until each is touched.
+
+## The work in flight: nothing, and that is the point (2026-09-18)
+
+The Debian 13 migration is still where Kenny stopped it — his go is needed per
+container, gateway (CT 104) and media (CT 106) last. **CT 109 is the exception
+and has moved**: it went to Debian 13 in place rather than being rebuilt,
+because `kyu-alert` and `kyu-backup` exist only on that rootfs and in kyu's own
+repo, and a rebuild would have dropped them. Its rootfs also went from 2 GB to
+4 GB (`step-3`), driven from the stack file rather than by hand, because 2 GB
+was the floor `manifest.rs` still allows and was set when that container held
+one binary.
+
+Live on CT 109 since 2026-09-10: kyu 3.2.1, kyu-runner 0.2.3,
+http-switchboard 3.1.1. Almanac 4.0.5 on CT 112.
+
+Three orchestrator changes shipped in v3.51.0, all from faults that reported
+success while being wrong (`fix-7`, `fix-8`, `fix-10`): the installer hands a
+service its own program directory, the within-run rollback copy is dropped once
+a run proves healthy instead of accumulating forever, and a skip on stored
+state says which copy it read and when.
+
+**Open and numbered in `REGISTER.md`**, so this list stays short: `gap-7`
+(Traefik's restart window without CrowdSec), `gap-9` (Jellyfin's Home Screen
+Sections plugin, disabled), `gap-10` (`KYU_DATA_DIR` still in `kyu.env` on
+CT 109), `fix-14` (six of eight kyu publishers cannot authenticate; the choice
+is with Kenny in the kyu session), `ask-2` (kyu's helper units), `ask-3`
+(closes at the first 03:00 backup round after 2026-09-18).
 
 ## Waiting on Kenny (not on us)
 

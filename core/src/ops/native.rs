@@ -12,6 +12,10 @@ use crate::sink::Level;
 use super::util::shq;
 use super::{util_pct_sh, OpCtx};
 
+/// T77: a service's own nightly copy older than this is not tonight's copy.
+/// 26 h leaves room for a late run without accepting yesterday's file.
+pub const MAX_OWN_COPY_AGE_S: u64 = 26 * 3600;
+
 macro_rules! step {
     ($runner:expr, $name:expr, $body:expr) => {
         match $runner.step($name, || async { $body }).await {
@@ -352,6 +356,30 @@ pub async fn install_native(
         Ok(StepOutcome::Changed)
     });
 
+    // T87: the one reading that tells a crash loop from a working install,
+    // taken while the running service is still untouched. On refusal the
+    // staged file goes too, so a retry starts clean and nothing on the
+    // container looks half-installed.
+    let mut glibc_note = String::new();
+    step!(runner, "check the glibc the binary needs", {
+        let out = util_pct_sh(exec, m.vmid, &glibc_probe_script(&staged), 60).await?;
+        match glibc_verdict(&out.stdout) {
+            Ok(fine) => {
+                glibc_note = fine;
+                Ok(StepOutcome::Unchanged)
+            }
+            Err(why) => {
+                let _ = util_pct_sh(exec, m.vmid, &format!("rm -f {}", shq(&staged)), 30).await;
+                Err(CoreError::SafetyAbort(format!(
+                    "{} :: the staged copy was removed; the running {} is untouched",
+                    why, m.unit
+                )))
+            }
+        }
+    });
+
+    runner.log(Level::Info, format!("[install] {}", glibc_note));
+
     step!(runner, "install unit file", {
         crate::ops::util::push_content(exec, m.vmid, &unit_path, unit_file, "644").await?;
         let out = util_pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
@@ -420,6 +448,46 @@ pub async fn install_native(
         )))
     });
 
+    let mut stale_kept = false;
+    step!(runner, "own program directory", {
+        let Some(user) = unit_user(unit_file) else {
+            // A unit with no User= runs as root and already owns everything.
+            return Ok(StepOutcome::Unchanged);
+        };
+        let out = util_pct_sh(exec, m.vmid, &own_program_dir_script(&user, &m.binary), 120).await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "{} is installed and running but its program directory is still root's ({}) — \
+                 the service cannot update itself from here",
+                m.unit,
+                out.stderr.trim()
+            )));
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    step!(runner, "drop the stale rollback copy", {
+        if !had_previous {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let out = util_pct_sh(exec, m.vmid, &drop_stale_rollback_script(&prev), 60).await?;
+        if !out.success() {
+            // Not fatal: the service is up and correct, this only leaves a
+            // copy on disk. Reported after the step rather than failing a
+            // good install over it.
+            stale_kept = true;
+            return Ok(StepOutcome::Unchanged);
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    if stale_kept {
+        runner.log(
+            Level::Warn,
+            format!("could not remove {} — a stale copy stays on disk", prev),
+        );
+    }
+
     // Installed and healthy: the same record adoption writes, so a service
     // built this way and one taken over by hand are indistinguishable
     // afterwards — which is the point.
@@ -473,13 +541,63 @@ pub async fn backup_native(
         Ok(StepOutcome::Unchanged)
     });
 
+    // T77 (D94): a service that makes its own verified copy is archived from
+    // that copy, and only when it is fresh. The age is measured against the
+    // container's clock, in the same command that finds the file, so a copy
+    // from a run that silently stopped cannot pass as tonight's.
+    let mut own_copy: Option<String> = None;
+    step!(runner, "find the service's own newest copy", {
+        let Some(glob) = &m.backup_from_newest else {
+            return Ok(StepOutcome::Unchanged);
+        };
+        let script = format!(
+            "f=$(ls -1t {glob} 2>/dev/null | head -1); [ -n \"$f\" ] || exit 3; \
+             echo \"$f $(( $(date +%s) - $(stat -c %Y \"$f\") ))\"",
+            glob = glob
+        );
+        let out = util_pct_sh(exec, m.vmid, &script, 60).await?;
+        let line = out.stdout.trim().to_string();
+        let (file, age) = match line.rsplit_once(' ') {
+            Some((f, a)) if out.success() && !f.is_empty() => {
+                (f.to_string(), a.parse::<u64>().unwrap_or(u64::MAX))
+            }
+            _ => {
+                return Err(CoreError::Other(format!(
+                    "no copy matches {} on {} — the service's own backup has not produced \
+                     one; refusing to archive nothing and call it a backup",
+                    glob, m.hostname
+                )))
+            }
+        };
+        if age > MAX_OWN_COPY_AGE_S {
+            return Err(CoreError::Other(format!(
+                "the newest copy {} is {} h old (limit {} h) — the service's own backup did \
+                 not run; archiving a stale copy would look exactly like success (M-D94)",
+                file,
+                age / 3600,
+                MAX_OWN_COPY_AGE_S / 3600
+            )));
+        }
+        own_copy = Some(file);
+        Ok(StepOutcome::Unchanged)
+    });
+    if let Some(f) = &own_copy {
+        runner.log(
+            Level::Info,
+            format!("[backup] {} archives its own copy {}", m.stack_name, f),
+        );
+    }
+
     step!(runner, "snapshot", {
-        let dirs = m
-            .data_dirs
-            .iter()
-            .map(|d| shq(d))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let dirs = match &own_copy {
+            Some(f) => shq(f),
+            None => m
+                .data_dirs
+                .iter()
+                .map(|d| shq(d))
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
         // pipefail is load-bearing: without it a dead `pct exec tar` still
         // yields a "successful" empty snapshot — a backup that lies.
         // F171: RESTIC_CACHE_DIR was missing here while `backup.rs` has set
@@ -617,6 +735,398 @@ pub fn health_script(unit: &str) -> String {
 /// running before the update, so the question is whether the restore took
 /// effect — not whether an unproven version is stable. Doubling the worst
 /// case for that would delay the loud failure report the operator needs.
+/// The user a unit runs as, read from its `User=` line.
+///
+/// The orchestrator installs a binary as root; the chassis kit's own update
+/// then wants to keep the version it replaces beside it, and a service cannot
+/// move root's file out of the way. On 2026-09-10 that surfaced as
+/// `cannot keep the previous binary at /opt/kyu/bin/kyu.prev: Operation not
+/// permitted` on all three services of CT 109 — a deploy that had reported
+/// success three times. The unit is the only place that says who the service
+/// is, and it is already in hand here, so nothing new has to be declared.
+pub fn unit_user(unit_file: &str) -> Option<String> {
+    unit_file
+        .lines()
+        .map(str::trim)
+        .find_map(|l| l.strip_prefix("User="))
+        .map(str::trim)
+        .filter(|u| !u.is_empty() && !u.starts_with('%'))
+        .map(str::to_string)
+}
+
+/// Hand the service its own program directory.
+///
+/// Recursive on the directory holding the binary, which is exactly what the
+/// kit needs to write its `.prev` beside it. Anything a service needs beyond
+/// that, its own unit says and its own deploy does.
+pub fn own_program_dir_script(user: &str, binary: &str) -> String {
+    format!(
+        "d=$(dirname {bin}) && chown -R {u}:{u} \"$d\" && chown {u}:{u} {bin}",
+        bin = shq(binary),
+        u = user
+    )
+}
+
+/// Remove the within-run rollback copy once the run has proven healthy.
+///
+/// `.homelab-prev` is read only by the function that writes it, as the way
+/// back from an install or a supervised update that does not come up. Nothing
+/// ever deleted it, so every deploy left a full copy of the program behind
+/// forever — and the chassis kit keeps a `.prev` of its own beside it, so the
+/// same version sat on disk twice. Measured on 2026-09-10: 220 MB of programs
+/// on CT 109's 2.0 GB rootfs, 70 MB of it the duplicate, and the disk at 98%.
+/// Deleting it after success costs nothing: past this point it can no longer
+/// be used, because the next run makes its own.
+pub fn drop_stale_rollback_script(prev: &str) -> String {
+    format!("rm -f {}", shq(prev))
+}
+
+/// T87: what the staged binary asks of the container's C library, and what
+/// the container has — read on the container, in one line, without tools.
+///
+/// A dynamically linked program names every glibc version it needs as a
+/// plain string (`GLIBC_2.39`) in its version-needs table, so `grep -a`
+/// finds the highest one without binutils; a static build carries none.
+/// `getconf GNU_LIBC_VERSION` is the C library asking itself. Measured on
+/// CT 109 (glibc 2.41): the static kyu binary answers `need=none`, `curl`
+/// answers `need=2.34`, `bash` `need=2.38`.
+///
+/// Why it exists: on 2026-09-09 three kit releases built against 2.39 were
+/// installed on a Debian 12 container with 2.36, and the fault surfaced at
+/// the restart as a crash loop under `Restart=always` — the most expensive
+/// place there is (F304). Static builds made that go away for now; this is
+/// the net under the next non-static release.
+pub fn glibc_probe_script(staged: &str) -> String {
+    format!(
+        "need=$(grep -ao 'GLIBC_2\\.[0-9]*' {bin} 2>/dev/null | sed 's/GLIBC_//' | \
+         sort -t. -k2,2n -u | tail -1); \
+         have=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{{print $2}}'); \
+         echo \"need=${{need:-none}} have=${{have:-unknown}}\"",
+        bin = shq(staged)
+    )
+}
+
+/// The verdict on that probe's one line. `Ok` carries the sentence to log;
+/// `Err` carries the sentence to refuse with. Fail-closed on purpose: a
+/// requirement that cannot be compared is refused, because the alternative
+/// is discovering the answer as a crash loop at the first restart.
+pub fn glibc_verdict(probe_output: &str) -> Result<String, String> {
+    let line = probe_output.trim();
+    let mut need: Option<&str> = None;
+    let mut have: Option<&str> = None;
+    for tok in line.split_whitespace() {
+        if let Some(v) = tok.strip_prefix("need=") {
+            need = Some(v);
+        } else if let Some(v) = tok.strip_prefix("have=") {
+            have = Some(v);
+        }
+    }
+    let (Some(need), Some(have)) = (need, have) else {
+        return Err(format!(
+            "could not read what glibc the staged binary needs (probe said '{}')",
+            line
+        ));
+    };
+    if need == "none" {
+        return Ok("the binary is static — it asks nothing of the container's glibc".into());
+    }
+    let minor = |v: &str| -> Option<u32> { v.strip_prefix("2.")?.parse().ok() };
+    match (minor(need), minor(have)) {
+        (Some(n), Some(h)) if n <= h => Ok(format!(
+            "the binary needs glibc {} and the container has {}",
+            need, have
+        )),
+        (Some(_), Some(_)) => Err(format!(
+            "the binary needs glibc {} and the container has {} — it would install fine and \
+             crash-loop at the first restart (F304); refusing. Ship a static build, or one \
+             built against glibc {} or older",
+            need, have, have
+        )),
+        _ => Err(format!(
+            "the binary needs glibc {} and the container's version could not be read ('{}') — \
+             refusing rather than finding out at the first restart",
+            need, have
+        )),
+    }
+}
+
+/// B1: what the latest release of a repository offers — the tag, and the
+/// download URLs of the asset and its checksum list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseRefs {
+    pub tag: String,
+    pub asset_url: String,
+    pub sums_url: String,
+}
+
+/// GitHub's `releases/latest` answer, reduced to what an update needs. A
+/// release without the asset, or without SHA256SUMS, is refused here — an
+/// unverifiable binary is exactly the hand-built step this replaces.
+pub fn parse_latest_release(json: &str, asset: &str) -> Result<ReleaseRefs, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("release listing is not JSON: {}", e))?;
+    if let Some(msg) = v.get("message").and_then(|m| m.as_str()) {
+        if v.get("tag_name").is_none() {
+            return Err(format!("GitHub answered: {}", msg));
+        }
+    }
+    let tag = v
+        .get("tag_name")
+        .and_then(|t| t.as_str())
+        .ok_or("release listing carries no tag_name")?
+        .to_string();
+    let url_of = |name: &str| -> Option<String> {
+        v.get("assets")?
+            .as_array()?
+            .iter()
+            .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(name))?
+            .get("browser_download_url")?
+            .as_str()
+            .map(str::to_string)
+    };
+    let asset_url =
+        url_of(asset).ok_or_else(|| format!("release {} carries no asset '{}'", tag, asset))?;
+    let sums_url = url_of("SHA256SUMS").ok_or_else(|| {
+        format!(
+            "release {} has no SHA256SUMS — refusing to install an unverified binary",
+            tag
+        )
+    })?;
+    Ok(ReleaseRefs {
+        tag,
+        asset_url,
+        sums_url,
+    })
+}
+
+/// The checksum a SHA256SUMS file lists for `filename`, if any.
+pub fn listed_sha(sums: &str, filename: &str) -> Option<String> {
+    sums.lines().find_map(|l| {
+        let mut parts = l.split_whitespace();
+        match (parts.next(), parts.next()) {
+            (Some(h), Some(f)) if f.trim_start_matches('*') == filename => {
+                Some(h.to_ascii_lowercase())
+            }
+            _ => None,
+        }
+    })
+}
+
+/// B1: the orchestrator's own update of a native service, from the host.
+///
+/// The client's `install-native` fetches through `gh`; the host has no `gh`
+/// and needs none for a public repository — `curl` against the GitHub API
+/// reaches it from pve (measured 200 on 2026-09-20). The decision is made
+/// on checksums, not versions: SHA256SUMS is fetched first (a few hundred
+/// bytes), and only when the listed sum differs from the installed binary's
+/// is the asset downloaded, verified on the host, and handed to
+/// `install_native` — the same staged-beside, glibc-checked, rollback-armed
+/// path a client install takes. The unit file comes from the container
+/// itself: it is the one systemd is running, and a rebuild put it there
+/// from the repository.
+pub async fn release_update(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
+    let op = format!("release-update-{}", m.unit);
+    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+    let Some(repo) = m.release_repo.clone() else {
+        runner.log(
+            Level::Info,
+            format!(
+                "[release] {} declares no release_repo — nothing to fetch",
+                m.unit
+            ),
+        );
+        return runner.finish_ok();
+    };
+    let asset = m.release_asset.clone().unwrap_or_else(|| m.unit.clone());
+
+    step!(runner, "guard target", {
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    let mut refs: Option<ReleaseRefs> = None;
+    step!(runner, "ask GitHub for the latest release", {
+        let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+        let out = exec
+            .run(&Cmd::new(
+                "curl",
+                &[
+                    "-sSL",
+                    "-m",
+                    "30",
+                    "-H",
+                    "Accept: application/vnd.github+json",
+                    &url,
+                ],
+                60,
+            ))
+            .await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "could not reach GitHub for {}: {}",
+                repo,
+                out.stderr.trim()
+            )));
+        }
+        refs = Some(parse_latest_release(&out.stdout, &asset).map_err(CoreError::Other)?);
+        Ok(StepOutcome::Unchanged)
+    });
+    let refs = refs.expect("set by the step above");
+
+    let mut wanted = String::new();
+    step!(runner, "read the checksum list", {
+        let out = exec
+            .run(&Cmd::new("curl", &["-sSL", "-m", "60", &refs.sums_url], 90))
+            .await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "could not fetch SHA256SUMS of {} {}: {}",
+                repo,
+                refs.tag,
+                out.stderr.trim()
+            )));
+        }
+        wanted = listed_sha(&out.stdout, &asset).ok_or_else(|| {
+            CoreError::Other(format!(
+                "SHA256SUMS of {} {} lists no '{}' — refusing an unverifiable binary",
+                repo, refs.tag, asset
+            ))
+        })?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    let mut current = false;
+    step!(runner, "compare with the installed binary", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("sha256sum {} 2>/dev/null | cut -d' ' -f1", shq(&m.binary)),
+            60,
+        )
+        .await?;
+        current = out.stdout.trim().eq_ignore_ascii_case(&wanted);
+        Ok(StepOutcome::Unchanged)
+    });
+    if current {
+        runner.log(
+            Level::Info,
+            format!(
+                "[release] {} already runs {} of {} — nothing to install",
+                m.unit, refs.tag, repo
+            ),
+        );
+        return runner.finish_ok();
+    }
+
+    let staged = format!(
+        "{}/staged/{}/{}.release",
+        ctx.state_dir, m.stack_name, m.unit
+    );
+    let mut b64 = String::new();
+    step!(runner, "download and verify the asset", {
+        let dir = staged.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
+        let script = format!(
+            "mkdir -p {d} && curl -sSL -m 600 -o {f} {u} && sha256sum {f} | cut -d' ' -f1",
+            d = shq(dir),
+            f = shq(&staged),
+            u = shq(&refs.asset_url)
+        );
+        let out = exec.run(&Cmd::new("sh", &["-c", &script], 700)).await?;
+        if !out.success() {
+            let _ = exec.run(&Cmd::new("rm", &["-f", &staged], 30)).await;
+            return Err(CoreError::Other(format!(
+                "download of {} {} failed: {}",
+                asset,
+                refs.tag,
+                out.stderr.trim()
+            )));
+        }
+        if !out.stdout.trim().eq_ignore_ascii_case(&wanted) {
+            let _ = exec.run(&Cmd::new("rm", &["-f", &staged], 30)).await;
+            return Err(CoreError::SafetyAbort(format!(
+                "CHECKSUM MISMATCH for {} in {} {} — download corrupted or tampered; nothing \
+                 installed",
+                asset, repo, refs.tag
+            )));
+        }
+        let enc = exec
+            .run(&Cmd::new("base64", &["-w0", &staged], 300))
+            .await?;
+        let _ = exec.run(&Cmd::new("rm", &["-f", &staged], 30)).await;
+        if !enc.success() || enc.stdout.trim().is_empty() {
+            return Err(CoreError::Other(format!(
+                "could not encode {} for the transfer into the container",
+                staged
+            )));
+        }
+        b64 = enc.stdout.trim().to_string();
+        Ok(StepOutcome::Changed)
+    });
+
+    let mut unit_file = String::new();
+    step!(runner, "read the unit file from the container", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("cat /etc/systemd/system/{}.service", m.unit),
+            30,
+        )
+        .await?;
+        if !out.success() || out.stdout.trim().is_empty() {
+            return Err(CoreError::Other(format!(
+                "{}.service is not on {} — a service without its unit is not one this \
+                 orchestrator installs; adopt or deploy it first",
+                m.unit, m.hostname
+            )));
+        }
+        unit_file = out.stdout;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    let report = install_native(ctx, m, &b64, &unit_file).await;
+    if !report.ok {
+        return report;
+    }
+    runner.log(
+        Level::Info,
+        format!(
+            "[release] {} updated to {} of {} — installed under the armed rollback",
+            m.unit, refs.tag, repo
+        ),
+    );
+    runner.finish_ok()
+}
+
+/// T85: fill a deploy's binary map from what was staged one message at a
+/// time. A unit whose entry is missing or empty is looked up; a unit that
+/// arrived with its bytes (an older client) is left alone; an entry that is
+/// empty with nothing staged is dropped, so the deploy treats the binary as
+/// not shipped rather than as an empty program. Returns the units filled.
+pub fn merge_staged_binaries(
+    natives: &[String],
+    map: &mut std::collections::BTreeMap<String, String>,
+    fetch: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let mut merged = Vec::new();
+    for unit in natives {
+        let present = map.get(unit).map(|v| !v.trim().is_empty()).unwrap_or(false);
+        if present {
+            continue;
+        }
+        match fetch(unit) {
+            Some(b64) if !b64.trim().is_empty() => {
+                map.insert(unit.clone(), b64);
+                merged.push(unit.clone());
+            }
+            _ => {}
+        }
+    }
+    map.retain(|_, v| !v.trim().is_empty());
+    merged
+}
+
 pub fn rollback_script(unit: &str, prev: &str, binary: &str) -> String {
     format!(
         "systemctl stop {u}; cp -p {prev} {bin} && systemctl start {u} && sleep 2 && \
@@ -627,7 +1137,14 @@ pub fn rollback_script(unit: &str, prev: &str, binary: &str) -> String {
     )
 }
 
-pub async fn update_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
+/// `stored_at` is when the host last wrote the manifest this runs from —
+/// `StackState::applied_at`, passed in because core never reads a clock. It is
+/// only used to make the skip message below say where its facts come from.
+pub async fn update_native(
+    ctx: &OpCtx<'_>,
+    m: &NativeServiceManifest,
+    stored_at: Option<u64>,
+) -> OperationReport {
     let op = format!("update-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
@@ -636,11 +1153,25 @@ pub async fn update_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Operat
     let prev = format!("{}.homelab-prev", m.binary);
 
     let Some(update_cmd) = m.update_cmd.clone() else {
+        // This used to read "skipped by decision", which is what an empty
+        // field looks like from the inside and a deliberate choice from the
+        // outside. On 2026-09-10 it said that three times about three
+        // services whose stack files all carried an update_cmd: the host was
+        // reading a copy stored before those files were written. A service
+        // left on an old version for months while the nightly round reports
+        // every night that this is intended is never found, so the message
+        // now names the copy it read and how to refresh it.
+        let when = match stored_at {
+            Some(t) => format!("stored on {}", crate::state::ymd(t)),
+            None => "stored at an unrecorded time".to_string(),
+        };
         runner.log(
             Level::Info,
             format!(
-                "[update] {} has no update_cmd — skipped by decision",
-                m.stack_name
+                "[update] {} skipped: the manifest the host has {} carries no update_cmd. \
+                 This is the host's copy, not what the repository says — if the stack file \
+                 has one, `homelab adopt <path to the service>` refreshes it.",
+                m.stack_name, when
             ),
         );
         return runner.finish_ok();
@@ -720,6 +1251,49 @@ pub async fn update_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Operat
         )))
     });
 
+    let mut stale_kept = false;
+    step!(runner, "drop the stale rollback copy", {
+        let out = util_pct_sh(exec, m.vmid, &drop_stale_rollback_script(&prev), 60).await?;
+        if !out.success() {
+            stale_kept = true;
+            return Ok(StepOutcome::Unchanged);
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    if stale_kept {
+        runner.log(
+            Level::Warn,
+            format!("could not remove {} — a stale copy stays on disk", prev),
+        );
+    }
+
+    // fix-10: the chassis kit keeps its own `.prev` beside the binary, and
+    // this run keeps `.homelab-prev` — the same version twice, 73 MB of it
+    // on CT 109's small rootfs after the first was already gone. Past this
+    // point the service has proven healthy on the binary it runs, so the
+    // kit's copy has nothing left to return to either; Kenny, 2026-09-19:
+    // the deploy removes it after a healthy update. A rolled-back run never
+    // reaches here, so the copy the rollback may need is never touched.
+    let kit_prev = format!("{}.prev", m.binary);
+    let mut kit_kept = false;
+    step!(runner, "drop the kit's own rollback copy", {
+        let out = util_pct_sh(exec, m.vmid, &drop_stale_rollback_script(&kit_prev), 60).await?;
+        if !out.success() {
+            kit_kept = true;
+            return Ok(StepOutcome::Unchanged);
+        }
+        Ok(StepOutcome::Changed)
+    });
+    if kit_kept {
+        runner.log(
+            Level::Warn,
+            format!(
+                "could not remove {} — the kit's copy stays on disk",
+                kit_prev
+            ),
+        );
+    }
     runner.log(
         Level::Info,
         format!("[update] {} self-update supervised — healthy", m.stack_name),

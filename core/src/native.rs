@@ -7,6 +7,21 @@
 
 use serde::{Deserialize, Serialize};
 
+/// B1: who owns this service's recurring update. `manual` (the default) means
+/// the nightly round never installs a release for it; `auto` means the
+/// orchestrator fetches the latest release nightly, verifies its checksum
+/// against the installed binary and installs it under the armed rollback
+/// when it differs. Decided per service in UPDATE_POLICY.md: kyu and
+/// kyu-runner are the orchestrator's; http-switchboard stays manual while it
+/// sits on the alert path; almanac updates itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdatePolicy {
+    #[default]
+    Manual,
+    Auto,
+}
+
 /// Everything the homelab needs to know about one native service. One
 /// service per stack/container — the shapes that need more run compose.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,6 +66,21 @@ pub struct NativeServiceManifest {
     /// absent, which is what all four services happen to use.
     #[serde(default)]
     pub release_asset: Option<String>,
+    /// T77 (D94): archive the newest file matching this glob instead of
+    /// `data_dirs`. kyu writes an integrity-checked copy of its store every
+    /// night (`VACUUM INTO`, re-opened and verified before it reports
+    /// success); that copy is a better source than the live database, which
+    /// is being written to while tar reads it (F172). The newest match must
+    /// be fresh — older than 26 hours means the service's own copy did not
+    /// run, and archiving a stale file would look exactly like success
+    /// (M-D94). Restore note: such a copy is a COMPLETE database; put it
+    /// back as the live file and delete any `-wal`/`-shm` beside it.
+    #[serde(default)]
+    pub backup_from_newest: Option<String>,
+    /// B1: `auto` = the nightly round installs the latest release when its
+    /// checksum differs from the installed binary; `manual` = never.
+    #[serde(default)]
+    pub update_policy: UpdatePolicy,
 }
 
 impl NativeServiceManifest {
@@ -129,6 +159,25 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
             "release_asset is set without a release_repo — there is nowhere to fetch it from"
                 .into(),
         );
+    }
+    if m.update_policy == UpdatePolicy::Auto && m.release_repo.is_none() {
+        problems.push(
+            "update_policy: auto without a release_repo — there is nothing to fetch nightly".into(),
+        );
+    }
+    if let Some(glob) = &m.backup_from_newest {
+        if !glob.starts_with('/') || glob.contains("..") || !glob.contains('*') {
+            problems.push(format!(
+                "backup_from_newest '{}' must be an absolute glob with a '*' — it names the \
+                 service's own rotating copies, not one fixed file",
+                glob
+            ));
+        }
+        if m.stateless {
+            problems.push(
+                "backup_from_newest is set on a stateless service — one of the two is wrong".into(),
+            );
+        }
     }
     if problems.is_empty() {
         Ok(())

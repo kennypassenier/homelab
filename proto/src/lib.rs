@@ -23,6 +23,20 @@ pub enum Command {
     Ping,
     Status,
     DeployStack(Box<DeploySpec>),
+    /// T85: one native binary, sent BEFORE the deploy that installs it.
+    ///
+    /// `DeployStack` used to carry every service binary of a stack in one
+    /// message; three of them came to 94.7 MiB against a 64 MiB frame limit
+    /// and the host reset the connection without a log line (F303). Raising
+    /// the ceiling was a postponement — a stack with five services would
+    /// have met it again, and the guard would then have said "split" while
+    /// nothing split. The host keeps the staged bytes under its state
+    /// directory until the deploy that follows consumes them.
+    StageNativeBinary {
+        stack: String,
+        unit: String,
+        binary_b64: String,
+    },
     /// F6: self-diagnosis checks.
     Doctor,
     /// AR14: list captured incident bundles.
@@ -129,6 +143,13 @@ pub enum Command {
     /// C7: run the app's own self-update under homelab supervision
     /// (preserve binary, restart-if-changed, health check, armed rollback).
     UpdateNative {
+        stack: String,
+    },
+    /// B1: the orchestrator's own release update of a native stack, on
+    /// demand — the same thing the nightly round does for services whose
+    /// `update_policy` is `auto`, for every service of the stack that
+    /// declares a release_repo.
+    ReleaseUpdateNative {
         stack: String,
     },
     /// T69: the operator's answer to a suspended step. `allow` false means

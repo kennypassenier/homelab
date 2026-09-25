@@ -1,0 +1,12 @@
+# B7: a fake native service for the rollback drill. Its "binary" is a shell
+# script shipped with `homelab install-native stacks/drill/drillsvc --file`;
+# a good one sleeps forever, a broken one exits at once. No release_repo on
+# purpose — the drill hands the bytes over itself, and there is nothing to
+# fetch nightly.
+stack_name: drill
+vmid: 119
+hostname: 119-app-drill
+unit: drillsvc
+binary: /opt/drillsvc/bin/drillsvc
+stateless: true
+update_policy: manual

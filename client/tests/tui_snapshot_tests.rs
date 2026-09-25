@@ -208,6 +208,7 @@ fn plan_modal_previews_changes() {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        syslog_receivers: vec![],
         natives: Vec::new(),
         stack_name: "syncthing".into(),
         vmid: 110,
@@ -895,6 +896,11 @@ const CLI_ONLY: &[(&str, &str)] = &[
         "ForgetStack",
         "housekeeping after a rename; rare and easy to do wrong — a later round",
     ),
+    (
+        "ReleaseUpdateNative",
+        "the nightly round's own release update, run by hand only to prove it — \
+         the TUI's update key is the supervised self-update (B1)",
+    ),
 ];
 
 /// covers: F156
@@ -1262,6 +1268,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        syslog_receivers: vec![],
         natives: Vec::new(),
         stack_name: "test".into(),
         vmid: 108,
@@ -1504,6 +1511,7 @@ fn the_runbook_names_the_repositories_restic_actually_uses() {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        syslog_receivers: vec![],
         natives: Vec::new(),
         stack_name: "media".into(),
         vmid: 106,
@@ -2447,7 +2455,7 @@ fn the_help_text_and_the_usage_message_agree_about_install_native() {
         .lines()
         .find(|l| l.contains("homelab install-native stacks/") && !l.contains("usage:"))
         .expect("the help line must exist");
-    let shape = "stacks/<name>[/<unit>] [<tag>]";
+    let shape = "stacks/<name>[/<unit>] [<tag> | --file <path>]";
     assert!(usage.contains(shape), "usage drifted: {}", usage.trim());
     assert!(
         help.contains(shape),

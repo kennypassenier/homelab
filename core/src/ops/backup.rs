@@ -225,6 +225,47 @@ pub fn conflicting_owner(
     None
 }
 
+/// T82 (F292): who keeps a repository two stacks both claim.
+///
+/// The F285 guard was symmetric: it saw two stacks naming one owner and
+/// refused both, so a throwaway drill stack that borrowed the name
+/// `jobtracker` switched off the REAL JobTracker's backup for six minutes.
+/// Ownership has an order: the stack that was recorded first keeps the
+/// repository, and only the newcomer is refused. A stack with no state
+/// entry at all is by definition the newcomer. Equal timestamps favour the
+/// caller — that is one deploy, not two stacks.
+pub fn repository_keeper(this_applied_at: Option<u64>, other_applied_at: Option<u64>) -> bool {
+    match (this_applied_at, other_applied_at) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(a), Some(b)) => a <= b,
+    }
+}
+
+/// M-T75: the nightly backup phase says how long it took, in minutes and
+/// seconds (hours past sixty minutes), so the concurrency setting can be
+/// judged against a measurement instead of a prediction. One at a time
+/// measured 38 min on 2026-09-02; three at a time was predicted at about
+/// 13 min and never read.
+pub fn phase_duration_line(secs: u64, stacks: usize, at_a_time: usize) -> String {
+    let human = if secs >= 3600 {
+        format!(
+            "{} h {} min {} s",
+            secs / 3600,
+            (secs % 3600) / 60,
+            secs % 60
+        )
+    } else if secs >= 60 {
+        format!("{} min {} s", secs / 60, secs % 60)
+    } else {
+        format!("{} s", secs)
+    };
+    format!(
+        "scheduler: backup phase took {} for {} stack(s), {} at a time",
+        human, stacks, at_a_time
+    )
+}
+
 pub fn owner_groups(m: &StackManifest) -> Vec<(String, Vec<String>)> {
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     for mount in &m.storage {
@@ -282,6 +323,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     // Fail closed and before anything runs: a backup that quietly writes into
     // somebody else's repository is worse than no backup, because the
     // repository still looks healthy afterwards.
+    let mut newcomer_named: Option<(String, String)> = None;
     step!(runner, "owner conflict", {
         let store = crate::state::StateStore::new(ctx.exec, &ctx.state_dir);
         let Ok(snapshot) = store.load().await else {
@@ -301,17 +343,34 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
             .collect();
         let owners: Vec<String> = groups.iter().map(|(o, _)| o.clone()).collect();
         if let Some((owner, other)) = conflicting_owner(&m.stack_name, &owners, &others) {
+            // T82: the incumbent keeps the repository; the newcomer is refused.
+            let this_at = snapshot.stacks.get(&m.stack_name).map(|s| s.applied_at);
+            let other_at = snapshot.stacks.get(&other).map(|s| s.applied_at);
+            if repository_keeper(this_at, other_at) {
+                newcomer_named = Some((owner.clone(), other.clone()));
+                return Ok(StepOutcome::Unchanged);
+            }
             return Err(CoreError::SafetyAbort(format!(
                 "stack '{}' would back up into the repository '{}-config', which stack '{}' \
                  already owns :: repositories are named after the owning app (D25), so both \
                  stacks write into ONE history and the retention pass afterwards applies this \
-                 stack's tiers to the other stack's snapshots. Rename the app in one of the \
-                 two stack files",
+                 stack's tiers to the other stack's snapshots. The stack recorded first keeps \
+                 the repository; rename the app in this stack file",
                 m.stack_name, owner, other
             )));
         }
         Ok(StepOutcome::Unchanged)
     });
+    if let Some((owner, other)) = &newcomer_named {
+        runner.log(
+            Level::Warn,
+            format!(
+                "[owner] stack '{}' also claims '{}' but was recorded later — it is the \
+                 newcomer and ITS backup is refused, not this one (T82)",
+                other, owner
+            ),
+        );
+    }
 
     // O10, second caller: ask before stopping anything.
     //

@@ -92,6 +92,20 @@ pub struct StackManifest {
     /// step that exists only in someone's memory.
     #[serde(default)]
     pub registry_login: Option<RegistryLogin>,
+    /// gap-11 (2026-09-18): syslog receivers the log shipper opens for
+    /// devices that cannot run a shipper of their own. OPNsense is the case:
+    /// a firewall ships nothing but syslog, and the gateway container is
+    /// where its lines land (`10.10.10.4:1514`).
+    ///
+    /// Declared here rather than hard-wired to the gateway in code for the
+    /// same reason `retention` is: the port and the host label are a
+    /// contract with a device outside this repository, and a contract typed
+    /// into a Rust file is one nobody finds when the device is reconfigured.
+    /// The first version of this receiver was a second file beside the
+    /// rendered one on CT 104, with Alloy switched to directory mode by hand
+    /// so it would be loaded; the orchestrator knew nothing about either.
+    #[serde(default)]
+    pub syslog_receivers: Vec<SyslogReceiver>,
 }
 
 /// Where the credentials for a private registry come from.
@@ -99,6 +113,37 @@ pub struct StackManifest {
 /// Deliberately no new secrets channel: the values ride in an app's ordinary
 /// `.env`, which already travels from latch through the host vault to the
 /// container. One mechanism, already proven, already backed up.
+/// One syslog listener the log shipper opens on the container (gap-11).
+///
+/// The lines it receives carry `job="syslog"`, the stack's name, and `host`
+/// set to the value here — the sender's own hostname is not trusted for the
+/// label because OPNsense sends whatever its GUI was told, and the dashboards
+/// filter on a name that has to stay stable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyslogReceiver {
+    /// The `host` label every received line carries, and the stem of the
+    /// component's name: lowercase `[a-z0-9-]`, like a stack name.
+    pub host: String,
+    /// `address:port` to listen on. Alloy runs unprivileged, so the port is
+    /// 1024 or higher; a lower one binds nothing and Alloy only logs it.
+    pub listen: String,
+    /// `udp` or `tcp`. Default `udp`, which is what OPNsense sends.
+    #[serde(default = "udp")]
+    pub protocol: String,
+    /// `rfc5424` or `rfc3164`. Default `rfc5424`, the structured one, which
+    /// carries the app name, severity and facility the relabel rules read.
+    #[serde(default = "rfc5424")]
+    pub format: String,
+}
+
+fn udp() -> String {
+    "udp".into()
+}
+
+fn rfc5424() -> String {
+    "rfc5424".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegistryLogin {
     /// The registry host, e.g. `ghcr.io`.
@@ -261,6 +306,56 @@ pub struct FileBlob {
     pub mode: Option<u32>,
 }
 
+/// ask-2: a stack file that belongs OUTSIDE `/opt/<stack>/`.
+///
+/// Every stack file lands under `/opt/<stack>/<path>` — the right place for
+/// a compose file and the wrong place for a systemd unit or a script that has
+/// to be on PATH. CT 109 carried five such files (two helper scripts, two
+/// units and a timer) that existed only on the container and in kyu's own
+/// repository; a rebuild from the golden template would have dropped them
+/// without a word. Kenny chose "opnemen in de stack" on 2026-09-02 and the
+/// extension itself on 2026-09-19.
+///
+/// The convention is a `rootfs/` directory in the stack whose tree maps onto
+/// the container's `/`: `rootfs/etc/systemd/system/kyu-backup.timer` lands at
+/// `/etc/systemd/system/kyu-backup.timer`. Only two places are allowed, and
+/// the list is short on purpose: a stack may add a unit or a command, and
+/// nothing else on the container is a stack's to write.
+pub const ROOTFS_PREFIX: &str = "rootfs/";
+pub const ROOTFS_ALLOWED: [&str; 2] = ["etc/systemd/system/", "usr/local/bin/"];
+
+/// Where a stack file lands in the container, and the mode it gets when the
+/// file declares none. A `rootfs/` path outside the allowed places, or one
+/// that climbs, is a validation problem — refused before anything is pushed.
+pub fn file_destination(stack: &str, path: &str) -> Result<(String, u32), String> {
+    let Some(rest) = path.strip_prefix(ROOTFS_PREFIX) else {
+        return Ok((format!("/opt/{}/{}", stack, path), 0o644));
+    };
+    if rest
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+    {
+        return Err(format!(
+            "{}: a rootfs/ path may not climb or carry empty segments",
+            path
+        ));
+    }
+    if !ROOTFS_ALLOWED.iter().any(|a| rest.starts_with(a)) {
+        return Err(format!(
+            "{}: a rootfs/ file may only land under /{} — anything else on the container is \
+             not this stack's to write",
+            path,
+            ROOTFS_ALLOWED.join(" or /")
+        ));
+    }
+    let mode = if rest.starts_with("usr/local/bin/") {
+        0o755
+    } else {
+        0o644
+    };
+    Ok((format!("/{}", rest), mode))
+}
+
 /// The only cross-stack write the system allows: one traefik route fragment
 /// into the gateway's watched routes directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,6 +461,60 @@ fn compose_mount_targets(content: &str) -> Vec<(String, String, bool)> {
 }
 
 fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
+    // gap-11: a receiver the shipper could not open would pass the deploy —
+    // Alloy logs a bind failure and keeps running — and the device's lines
+    // would vanish with every step reporting success. So the manifest is
+    // refused for what the shipper cannot do, with the remedy in the message.
+    let mut seen_listen: Vec<&str> = Vec::new();
+    for r in &m.syslog_receivers {
+        if r.host.is_empty()
+            || !r
+                .host
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            problems.push(format!(
+                "syslog receiver host '{}' must be non-empty lowercase [a-z0-9-] — it becomes \
+                 the `host` label and the component's name",
+                r.host
+            ));
+        }
+        match r.listen.parse::<std::net::SocketAddr>() {
+            Ok(addr) if addr.port() < 1024 => problems.push(format!(
+                "syslog receiver '{}' listens on port {} — Alloy runs unprivileged and \
+                 cannot bind below 1024; use 1024 or higher (OPNsense sends to 1514) and \
+                 point the sender there",
+                r.host,
+                addr.port()
+            )),
+            Ok(_) => {}
+            Err(e) => problems.push(format!(
+                "syslog receiver '{}' has listen '{}' which is not address:port ({}) — \
+                 write it as 0.0.0.0:1514",
+                r.host, r.listen, e
+            )),
+        }
+        if seen_listen.contains(&r.listen.as_str()) {
+            problems.push(format!(
+                "two syslog receivers listen on {} — Alloy can bind an address once; give the \
+                 second receiver its own port",
+                r.listen
+            ));
+        }
+        seen_listen.push(&r.listen);
+        if !matches!(r.protocol.as_str(), "udp" | "tcp") {
+            problems.push(format!(
+                "syslog receiver '{}' has protocol '{}' — Alloy speaks udp or tcp",
+                r.host, r.protocol
+            ));
+        }
+        if !matches!(r.format.as_str(), "rfc5424" | "rfc3164") {
+            problems.push(format!(
+                "syslog receiver '{}' has format '{}' — Alloy parses rfc5424 or rfc3164",
+                r.host, r.format
+            ));
+        }
+    }
     for app in &m.apps {
         if app.is_empty()
             || !app
@@ -427,6 +576,11 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
     }
     if !(100..=354).contains(&m.vmid) {
         problems.push(format!("vmid {} outside the allowed range 100-354", m.vmid));
+    }
+    for f in &spec.files {
+        if let Err(why) = file_destination(&m.stack_name, &f.path) {
+            problems.push(why);
+        }
     }
     if m.hostname != m.canonical_hostname() {
         problems.push(format!(

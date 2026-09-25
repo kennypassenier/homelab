@@ -31,7 +31,7 @@ import os
 import sys
 import time
 
-from uptime_kuma_api import UptimeKumaApi, MonitorType
+from uptime_kuma_api import UptimeKumaApi, MonitorType, NotificationType
 
 OK = ["200-299"]
 OK_REDIRECT = ["200-299", "302"]
@@ -75,6 +75,34 @@ APPLICATION_MONITORS = [
 ]
 
 
+# Uptime Kuma as a source for almanac (homelab ask-6): every state change of
+# a monitor becomes a 15-minute, not-busy event on the Infra calendar. Kuma
+# renders this Liquid template itself, so it speaks almanac's own event shape
+# and needs no HTTPSwitchboard in between. Rendered and parsed against
+# liquidjs 10 before it was written down; the `json` filter is what keeps a
+# quote in a monitor's error message from breaking the body.
+#
+# One event per state change, not one per incident: the recovery cannot know
+# when the outage started. The external_id is the monitor plus the heartbeat
+# second, so Kuma resending the same heartbeat updates the event rather than
+# adding a second one. Kuma's own "Test" button sends no heartbeat and is
+# answered 422 by almanac; that is the expected reply to a test.
+ALMANAC_NOTIFICATION = "almanac · infra calendar"
+ALMANAC_BODY = (
+    '{% assign at = heartbeatJSON.time | replace: " ", "T" | truncate: 19, "" %}'
+    '{% if heartbeatJSON.status == 0 %}'
+    '{% assign what = "down" %}{% assign color = "tomato" %}'
+    '{% else %}'
+    '{% assign what = "back up" %}{% assign color = "sage" %}'
+    '{% endif %}'
+    '{% capture title %}{{ monitorJSON.name }} {{ what }}{% endcapture %}'
+    '{"title": {{ title | json }}, "start": "{{ at }}Z", "timezone": "UTC", '
+    '"duration_minutes": 15, "busy": false, "color": "{{ color }}", '
+    '"description": {{ heartbeatJSON.msg | json }}, '
+    '"external_id": "kuma-{{ monitorJSON.id }}-{{ at }}"}'
+)
+
+
 def env(name, default=None):
     v = os.environ.get(name, default)
     if v is None or v == "":
@@ -110,9 +138,54 @@ def load_host_monitors(path):
     return out, True
 
 
+def ensure_almanac_notification(api):
+    """Returns (notification id or None, what happened).
+
+    Created once, then left alone like every monitor here: a notification
+    whose name exists is never rewritten, so Kenny's own edits to it stand.
+    Creating it attaches it to every existing monitor (applyExisting) — the
+    one place this seeder touches a monitor it did not just add, and only by
+    adding a notification to it, never by changing what it checks.
+
+    Without ALMANAC_KUMA_TOKEN nothing is created: a webhook almanac answers
+    401 is a notification that fails on every outage, which is worse than
+    none. The token is issued for source `uptime-kuma` on almanac's
+    dashboard and travels into .env through the vault like KUMA_PASSWORD.
+    """
+    for n in api.get_notifications():
+        if n.get("name") == ALMANAC_NOTIFICATION:
+            return n.get("id"), "exists"
+
+    token = os.environ.get("ALMANAC_KUMA_TOKEN", "")
+    if not token:
+        print("[seed] INFO: ALMANAC_KUMA_TOKEN is not set, so outages are "
+              "not sent to almanac", flush=True)
+        return None, "no-token"
+
+    base = env("ALMANAC_URL", "http://10.10.10.12:8080").rstrip("/")
+    created = api.add_notification(
+        name=ALMANAC_NOTIFICATION,
+        type=NotificationType.WEBHOOK,
+        isDefault=True,
+        applyExisting=True,
+        webhookURL=f"{base}/v1/ingest/uptime-kuma",
+        webhookContentType="custom",
+        webhookCustomBody=ALMANAC_BODY,
+        webhookAdditionalHeaders=json.dumps(
+            {"Authorization": f"Bearer {token}"}),
+    )
+    print(f"[seed]   + notification {ALMANAC_NOTIFICATION}", flush=True)
+    return created.get("id"), "added"
+
+
 def seed_once(api, host_monitors, have_generated_list):
     have = {m["name"] for m in api.get_monitors()}
     added = skipped = 0
+
+    # Kuma applies a default notification only in its own UI, so a monitor
+    # added through the API has to name it.
+    notification_id, almanac_state = ensure_almanac_notification(api)
+    notify = {"notificationIDList": [notification_id]} if notification_id else {}
 
     for name, url, accepted in APPLICATION_MONITORS:
         if name in have:
@@ -120,7 +193,7 @@ def seed_once(api, host_monitors, have_generated_list):
             continue
         api.add_monitor(type=MonitorType.HTTP, name=name, url=url,
                         interval=60, maxretries=2,
-                        accepted_statuscodes=accepted)
+                        accepted_statuscodes=accepted, **notify)
         added += 1
         print(f"[seed]   + {name}", flush=True)
 
@@ -129,7 +202,7 @@ def seed_once(api, host_monitors, have_generated_list):
             skipped += 1
             continue
         api.add_monitor(type=MonitorType.PING, name=name, hostname=hostname,
-                        interval=60, maxretries=2)
+                        interval=60, maxretries=2, **notify)
         added += 1
         print(f"[seed]   + {name}", flush=True)
 
@@ -172,6 +245,7 @@ def seed_once(api, host_monitors, have_generated_list):
         "skipped": skipped,
         "stale": stale,
         "judged": bool(have_generated_list),
+        "almanac_notification": almanac_state,
     }
     try:
         path = env("STATUS_FILE", "/config/last-seed.json")

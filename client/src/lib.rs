@@ -2,6 +2,7 @@
 //! `homelab` binary and the test suite.
 
 pub mod release;
+pub mod repo_config;
 pub mod scaffold;
 pub mod spec;
 pub mod testplan;

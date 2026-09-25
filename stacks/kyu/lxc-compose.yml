@@ -20,7 +20,11 @@
 #   1. this manifest recreates the container;
 #   2. `homelab restore stacks/kyu` puts /var/lib/kyu and /etc/kyu back from
 #      their own restic repositories (C7 backs them up per unit);
-#   3. the three binaries are installed the way C7 installs them.
+#   3. the three binaries are installed the way C7 installs them;
+#   4. `homelab deploy stacks/kyu` writes the helper files under `rootfs/`
+#      (kyu-backup + kyu-alert scripts, their units and the timer) to their
+#      absolute paths and enables the timer — ask-2, 2026-09-20. Until then
+#      those five existed only on the container.
 # Nothing here starts or stops a service — that stays true after a rebuild
 # too.
 
@@ -51,7 +55,14 @@ resources:
   # instead, and that costs a re-read. Was 128 MB.
 
   swap_mb: 0
-  disk_gb: 2
+  # Was 2 GB, which is the floor manifest.rs still enforces, and it was set
+  # on 2026-08-31 when this container held ONE binary and no docker. It now
+  # holds three services, each keeping a rollback copy beside its program,
+  # and it went from Debian 12 to 13 in place, which needs working room in
+  # /var. It hit 98% on 2026-09-10 and the fleet check called it broken.
+  # Every other app container in the fleet is 4 GB or more; this was the
+  # only one at the floor. Kenny's answer, same day: grow it to 4.
+  disk_gb: 4
   storage: local-lvm
 
 lxc:
@@ -102,7 +113,17 @@ storage:
     app: kyu-runner
   - host_path: /appdata/kyu/http-switchboard-config
     mount_point: /appdata/kyu/http-switchboard-config
-    host_owner_uid: 100000
+    # 100995, not 100000. The 1.x unit ran as root and read its config through
+    # a systemd credential; the chassis-rs kit unit runs as its own user
+    # `http-switchboard` (uid 995 inside) and both reads the config and writes
+    # its state directly. This is an UNPRIVILEGED container, so the host-side
+    # owner is 100000 + 995.
+    #
+    # Measured the hard way on 2026-09-10: with the old value the deploy
+    # chowned the directory back to root after every run, and the unit then
+    # failed at `CHDIR ... Permission denied` — a message about the working
+    # directory, for a cause that lives in this file.
+    host_owner_uid: 100995
     app: http-switchboard
 
 # No docker apps by design. The three services are named in their own

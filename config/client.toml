@@ -1,0 +1,20 @@
+# Where the `homelab` client finds the host daemon (feat-client-1).
+#
+# Committed on purpose: the address and the daemon's certificate are facts
+# about the fleet, not about the machine typing the command, so a second
+# desktop or a Windows box finds the right door without a per-machine env
+# file. The token is the one thing that IS per machine and stays in
+# ~/.config/homelab/env (HOMELAB_TOKEN).
+#
+# Precedence: HOMELAB_HOST typed before the command > this file >
+# ~/.config/homelab/env > the built-in default.
+#
+# 10.10.10.250 is pve's address inside VLAN 10 (its 2026-09-17 rescue
+# path): the client then never crosses the firewall, and keeps working
+# when OPNsense is down — which is what the rescue path is for (gap-13).
+host = "10.10.10.250:8443"
+
+# SHA-256 fingerprint of the daemon's TLS certificate, as `homelab-host`
+# prints it at boot. A fresh machine pins this instead of trusting on first
+# use; a machine that already pinned something else is refused loudly.
+pin = "SHA256:85:00:F8:84:44:87:7E:85:FA:2E:29:97:15:16:74:15:43:FE:0E:70:5A:AE:F8:1C:EE:ED:F8:25:42:DC:7F:2A"

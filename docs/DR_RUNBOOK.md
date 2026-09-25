@@ -118,6 +118,14 @@ restic restore latest --target /
 - recreate from scratch: `homelab deploy stacks/downloader` (or by hand per Layer 2)
 - data restore from: `…:qbittorrent-config`
 
+### drill (vmid 119)
+
+- hostname `119-app-drill`, ip `10.10.10.19/24`
+- resources: 1 core(s), 256 MiB RAM, 0 MiB swap, 4 GiB disk
+- apps: none — native services under systemd, not compose
+- recreate from scratch: `homelab adopt stacks/drill` — native services; the unit files and binaries come from the service's own release, not from a compose pull
+- data restore from: no /appdata paths — nothing to restore
+
 ### gateway (vmid 104)
 
 - hostname `104-app-gateway`, ip `10.10.10.4/24`
@@ -145,7 +153,7 @@ restic restore latest --target /
 ### kyu (vmid 109)
 
 - hostname `109-app-kyu`, ip `10.10.10.9/24`
-- resources: 1 core(s), 256 MiB RAM, 0 MiB swap, 2 GiB disk
+- resources: 1 core(s), 256 MiB RAM, 0 MiB swap, 4 GiB disk
 - apps: none — native services under systemd, not compose
 - recreate from scratch: `homelab adopt stacks/kyu` — native services; the unit files and binaries come from the service's own release, not from a compose pull
 - data restore from: `…:kyu-config`, `…:kyu-runner-config`, `…:http-switchboard-config`

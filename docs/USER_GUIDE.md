@@ -9,6 +9,17 @@ puts it in `~/.cargo/bin` and it reads `~/.config/homelab/env` itself. That
 was not true before 2026-09-02 — every command in this guide needed the repo
 root and a sourced `.env`, which is a ritual nobody had written down (F240).
 
+**Where the host's address comes from (feat-client-1).** `config/client.toml`
+in the repository names the daemon's address and its certificate fingerprint,
+so a second machine — a Windows box included, once the client builds there —
+finds the right door without a per-machine file. Precedence: `HOMELAB_HOST`
+typed before the command, then `config/client.toml` (found from the repo root
+or any subdirectory of it), then `~/.config/homelab/env`, then the built-in
+default. `homelab ping` prints which one it used. The token stays in
+`~/.config/homelab/env`: it is the one thing that is per machine. A machine
+that already pinned a different certificate is refused with both fingerprints
+in the message — that is what a changed certificate looks like.
+
 ## Daily driver
 
 ```bash
@@ -79,6 +90,13 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   them (jellyfin does).
 - **D3 · App add/remove** — add/remove an app dir + manifest entry,
   redeploy; removed apps are composed down, config dirs are kept.
+- **ask-2 · Files outside /opt** — a `rootfs/` directory in a stack maps
+  onto the container's `/`, for the two things a stack may legitimately add
+  there: a unit or timer under `rootfs/etc/systemd/system/` and a command
+  under `rootfs/usr/local/bin/` (pushed executable). A changed unit reloads
+  systemd; a changed timer is enabled and started. Anything else under
+  `rootfs/` is refused at validation. `stacks/kyu/rootfs/` carries the hub's
+  backup and alert helpers, which used to exist only on CT 109.
 - **D11 · Share a stack** — `homelab export stacks/<name>` → one YAML,
   secrets excluded; `homelab import <bundle> <newname> <vmid>` re-derives
   the whole identity.
@@ -107,6 +125,11 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   restarting it; nightly in-container backup + the app's own self-update
   under supervision (binary preserved, restart only on change, rollback
   from outside). On demand: `homelab backup-native|update-native <stack>`.
+  **B1** — a service whose `service.yml` says `update_policy: auto` gets the
+  latest release installed nightly when its checksum differs from the
+  installed binary (rollback armed); `homelab release-update-native <stack>`
+  does the same on demand. Change the policy in the file, then
+  `homelab adopt` the service so the host's copy carries it.
 - **H5 · Host self-update** — `homelab self-update <new-binary>`: selfcheck
   gate → backup → install → armed rollback marker → restart. A release that
   crashes on start is rolled back automatically by systemd (proven with a
@@ -128,6 +151,14 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   needed).
 - **E2 · Restore** — `homelab restore stacks/<name> [snapshot]` (default
   latest): validate → quiesce → restore → resume → verify.
+  A native service with `backup_from_newest` (kyu) is archived from its own
+  nightly copy, which is a COMPLETE database: put it back as the live file
+  and delete any `-wal`/`-shm` beside it (T77).
+- **B7 · Rollback drill** — `scripts/drill-native-rollback.sh` deploys the
+  throwaway `stacks/drill`, installs a good fake service, then a broken one
+  with `homelab install-native stacks/drill/drillsvc --file <script>`, and
+  reads off the container that the install rolled back and the service is
+  still on the good binary; then destroys the stack. Passed 2026-09-20.
 - **E7 · DR runbook** — `homelab runbook` regenerates
   [DR_RUNBOOK.md](DR_RUNBOOK.md), the document for when everything is down.
 - **C2 · Destroy** — `homelab destroy stacks/<name>`: typed-name confirm,
@@ -136,7 +167,7 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
 
 ## Observability & control
 
-- **F1/F2 · Logs** — promtail ships to Loki fleet-wide; the LOG_STREAM tab
+- **F1/F2 · Logs** — Alloy ships to Loki fleet-wide (promtail until 2026-09-02); the LOG_STREAM tab
   shows the live operation feed.
 - **F3 · Events → Home Assistant** — one webhook POST per finished
   operation (`{op, ok, error}`), plus `host-online` at boot,

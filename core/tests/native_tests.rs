@@ -41,6 +41,8 @@ fn kyu_manifest() -> NativeServiceManifest {
         data_dirs: vec!["/var/lib/kyu".into()],
         update_cmd: Some("kyu update".into()),
         stateless: false,
+        backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
     }
@@ -57,6 +59,11 @@ fn adopt_mocks(exec: &MockExecutor) {
         ),
     );
     exec.respond_always("test -x", CmdOutput::ok(""));
+}
+
+/// T87: the container answers the glibc probe as a static binary would.
+fn glibc_ok(exec: &MockExecutor) {
+    exec.respond_always("GNU_LIBC_VERSION", CmdOutput::ok("need=none have=2.41\n"));
 }
 
 #[test]
@@ -211,7 +218,7 @@ async fn c7_supervised_update_restarts_only_on_binary_change() {
     exec.respond_always("sha256sum", CmdOutput::ok("aaaa\n"));
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
     assert!(report.ok, "{:?}", report.error);
     assert!(
         exec.calls_containing("systemctl restart").is_empty(),
@@ -224,7 +231,7 @@ async fn c7_supervised_update_restarts_only_on_binary_change() {
     exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
     adopt_mocks(&exec);
     exec.respond_always("systemctl restart", CmdOutput::ok(""));
-    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
     assert!(report.ok, "{:?}", report.error);
     assert_eq!(
         exec.calls_containing("cp -p '/usr/local/bin/kyu' '/usr/local/bin/kyu.homelab-prev'")
@@ -252,7 +259,7 @@ async fn c7_supervised_update_rolls_back_when_new_version_stays_down() {
     adopt_mocks(&exec);
     let sink = VecSink::new();
     let j = NullJournal;
-    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
     assert!(!report.ok, "a rolled-back update is still a FAILED update");
     assert_eq!(
         exec.calls_containing("cp -p '/usr/local/bin/kyu.homelab-prev' '/usr/local/bin/kyu'")
@@ -304,6 +311,8 @@ async fn t5_a_stack_holds_several_native_services() {
         env_file: Some("/etc/kyu-runner/token.env".into()),
         data_dirs: vec![],
         stateless: true,
+        backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
         update_cmd: None,
@@ -335,6 +344,8 @@ async fn t5_a_stack_holds_several_native_services() {
         env_file: Some("/etc/kyu-runner/token.env".into()),
         data_dirs: vec![],
         stateless: true,
+        backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
         update_cmd: Some("kyu-runner update".into()),
@@ -421,6 +432,8 @@ async fn d25_native_backup_uses_the_service_name_for_its_repo() {
         env_file: None,
         data_dirs: vec!["/etc/kyu-runner".into()],
         stateless: false,
+        backup_from_newest: None,
+        update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
         update_cmd: None,
@@ -577,6 +590,7 @@ async fn an_install_without_a_unit_file_is_refused() {
 async fn an_install_stages_beside_the_target_before_it_replaces_anything() {
     let exec = MockExecutor::new();
     adopt_mocks(&exec);
+    glibc_ok(&exec);
     exec.respond_always("test -f", CmdOutput::ok("no\n"));
     exec.respond_always("base64 -d", CmdOutput::ok(""));
     exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
@@ -638,6 +652,7 @@ async fn an_install_stages_beside_the_target_before_it_replaces_anything() {
 async fn a_first_install_that_fails_says_there_is_nothing_to_roll_back_to() {
     let exec = MockExecutor::new();
     adopt_mocks(&exec);
+    glibc_ok(&exec);
     exec.respond_always("test -f", CmdOutput::ok("no\n"));
     exec.respond_always("base64 -d", CmdOutput::ok(""));
     exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
@@ -682,6 +697,7 @@ async fn a_first_install_that_fails_says_there_is_nothing_to_roll_back_to() {
 async fn a_reinstall_that_fails_returns_to_the_binary_that_was_running() {
     let exec = MockExecutor::new();
     adopt_mocks(&exec);
+    glibc_ok(&exec);
     exec.respond_always("test -f", CmdOutput::ok("yes\n"));
     exec.respond_always("cp -p", CmdOutput::ok(""));
     exec.respond_always("base64 -d", CmdOutput::ok(""));
@@ -900,4 +916,544 @@ fn f300_the_rollback_stops_the_unit_before_overwriting_its_binary() {
         "a failed stop must not abort the restore: {}",
         s
     );
+}
+
+// ── 2026-09-11: the two faults the CT 109 rollout surfaced ──────────────────
+
+/// The kit's own update keeps the version it replaces beside the binary. It
+/// cannot, if the orchestrator installed that binary as root: the kernel
+/// refuses to let a service move root's file. Measured on all three services
+/// of CT 109 on 2026-09-10, after a deploy that had reported success.
+///
+/// The unit is the only place that says who the service is, and the installer
+/// already holds it, so nothing new has to be declared anywhere.
+#[test]
+fn the_owner_is_read_from_the_unit_that_is_being_installed() {
+    use homelab_core::ops::native::unit_user;
+
+    let real = "[Unit]\nDescription=kyu\n\n[Service]\nUser=kyu\nGroup=kyu\n\
+                ExecStart=/opt/kyu/bin/kyu serve\n";
+    assert_eq!(unit_user(real).as_deref(), Some("kyu"));
+
+    // Indented, as systemd also accepts.
+    assert_eq!(
+        unit_user("[Service]\n  User=almanac\n").as_deref(),
+        Some("almanac")
+    );
+
+    // No User= at all: the service runs as root and already owns everything,
+    // so there is nothing to hand over and nothing to fail on.
+    assert_eq!(unit_user("[Service]\nExecStart=/opt/x/bin/x\n"), None);
+
+    // A template specifier is not a user name; chowning to "%i" would fail
+    // loudly on a unit that is otherwise fine.
+    assert_eq!(unit_user("[Service]\nUser=%i\n"), None);
+    assert_eq!(unit_user("[Service]\nUser=\n"), None);
+}
+
+/// Recursive on the directory that holds the program, which is exactly what
+/// the kit needs to write its `.prev` beside it, plus the file itself.
+#[test]
+fn the_service_is_handed_its_own_program_directory() {
+    use homelab_core::ops::native::own_program_dir_script;
+    let s = own_program_dir_script("kyu", "/opt/kyu/bin/kyu");
+    assert!(s.contains("dirname '/opt/kyu/bin/kyu'"), "{}", s);
+    assert!(s.contains("chown -R kyu:kyu"), "{}", s);
+    assert!(
+        s.contains("chown kyu:kyu '/opt/kyu/bin/kyu'"),
+        "the file itself too — the directory alone was not enough on CT 109: {}",
+        s
+    );
+}
+
+/// `.homelab-prev` is read only by the run that writes it. Nothing deleted it,
+/// so every deploy left a full copy of the program on disk forever — beside
+/// the `.prev` the chassis kit keeps of the same version. 220 MB of programs
+/// on CT 109's 2.0 GB rootfs, 70 MB of it the duplicate, disk at 98%.
+#[tokio::test]
+async fn a_healthy_update_does_not_leave_its_rollback_copy_behind() {
+    use homelab_core::ops::native::update_native;
+    let exec = MockExecutor::new();
+    exec.enqueue("sha256sum", CmdOutput::ok("aaaa\n"));
+    exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
+    adopt_mocks(&exec);
+    exec.respond_always("systemctl restart", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        exec.calls_containing("rm -f '/usr/local/bin/kyu.homelab-prev'")
+            .len(),
+        1,
+        "the within-run copy is removed once the run proved healthy: {:?}",
+        exec.calls()
+    ); // fix-10: and so is the kit's own copy — the same version, kept twice.
+    assert_eq!(
+        exec.calls_containing("rm -f '/usr/local/bin/kyu.prev'")
+            .len(),
+        1,
+        "the kit's copy goes with it after a healthy update: {:?}",
+        exec.calls()
+    );
+}
+
+/// A rolled-back update KEEPS the copy: the service is running from it.
+#[tokio::test]
+async fn a_rolled_back_update_keeps_the_binary_it_is_running_from() {
+    use homelab_core::ops::native::update_native;
+    let exec = MockExecutor::new();
+    exec.enqueue("sha256sum", CmdOutput::ok("aaaa\n"));
+    exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
+    exec.respond_always("NRestarts", CmdOutput::failed(1, "DIED_IN_WINDOW"));
+    exec.respond_always("cp -p '/usr/local/bin/kyu.homelab-prev'", CmdOutput::ok(""));
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
+    assert!(!report.ok);
+    assert!(
+        exec.calls_containing("rm -f '/usr/local/bin/kyu.homelab-prev'")
+            .is_empty(),
+        "deleting it here would remove the file the service was just restored from: {:?}",
+        exec.calls()
+    );
+    assert!(
+        exec.calls_containing("rm -f '/usr/local/bin/kyu.prev'")
+            .is_empty(),
+        "a rolled-back run leaves the kit's copy alone too: {:?}",
+        exec.calls()
+    );
+}
+
+/// "skipped by decision" is what an empty field looks like from the inside and
+/// a deliberate choice from the outside. It said that three times on
+/// 2026-09-10 about three services whose stack files all carried an
+/// update_cmd — the host was reading a copy stored before those files existed.
+#[tokio::test]
+async fn a_skip_says_which_copy_it_read_and_how_to_refresh_it() {
+    use homelab_core::ops::native::update_native;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut m = kyu_manifest();
+    m.update_cmd = None;
+    // 1_788_000_000 is 2026-08-29 (checked with `date -u -d @1788000000`).
+    let report = update_native(&ctx(&exec, &sink, &j), &m, Some(1_788_000_000)).await;
+    assert!(report.ok, "a skip is not a failure");
+    let said = sink.lines().join("\n");
+    assert!(
+        !said.contains("skipped by decision"),
+        "the wording that hid a stale field for three services: {}",
+        said
+    );
+    assert!(
+        said.contains("2026-08-29"),
+        "names when the copy was stored: {}",
+        said
+    );
+    assert!(
+        said.contains("homelab adopt"),
+        "and what refreshes it, or the reader is left with a fact and no move: {}",
+        said
+    );
+}
+
+/// The formatter behind that date. Hand-written because it is the only place
+/// the orchestrator renders a time and a date crate would be a poor trade.
+#[test]
+fn stored_timestamps_render_as_plain_dates() {
+    use homelab_core::state::ymd;
+    assert_eq!(ymd(0), "1970-01-01");
+    assert_eq!(ymd(1_788_000_000), "2026-08-29");
+    // A leap day, which is where a hand-rolled conversion goes wrong.
+    assert_eq!(ymd(1_709_164_800), "2024-02-29");
+    // Last second of a year.
+    assert_eq!(ymd(1_767_225_599), "2025-12-31");
+}
+
+// ── T87 · the glibc check before a binary is installed ─────────────────────
+
+use homelab_core::ops::native::glibc_verdict;
+
+/// A static build asks nothing; a dynamic one is fine when the container
+/// has at least what it names; and the probe's line is the only input.
+#[test]
+fn t87_static_and_satisfiable_binaries_pass() {
+    let ok = glibc_verdict("need=none have=2.41\n").unwrap();
+    assert!(ok.contains("static"), "{}", ok);
+    let ok = glibc_verdict("need=2.34 have=2.41\n").unwrap();
+    assert!(ok.contains("2.34") && ok.contains("2.41"), "{}", ok);
+    let ok = glibc_verdict("need=2.41 have=2.41\n").unwrap();
+    assert!(ok.contains("2.41"), "{}", ok);
+}
+
+/// F304 in one line: a binary built against 2.39 on a container with 2.36 is
+/// refused, and the refusal names both numbers so the reader knows what to
+/// ship instead. A container whose version cannot be read refuses too — the
+/// alternative is learning the answer as a crash loop.
+#[test]
+fn t87_a_higher_requirement_or_an_unreadable_container_is_refused() {
+    let why = glibc_verdict("need=2.39 have=2.36\n").unwrap_err();
+    assert!(why.contains("2.39") && why.contains("2.36"), "{}", why);
+    assert!(
+        why.contains("crash-loop") || why.contains("F304"),
+        "{}",
+        why
+    );
+    let why = glibc_verdict("need=2.39 have=unknown\n").unwrap_err();
+    assert!(why.contains("could not be read"), "{}", why);
+    let why = glibc_verdict("").unwrap_err();
+    assert!(why.contains("could not read"), "{}", why);
+    let why = glibc_verdict("garbage\n").unwrap_err();
+    assert!(why.contains("could not read"), "{}", why);
+}
+
+/// The check runs on the STAGED copy, before the unit file is written and
+/// before anything is moved: a refused binary leaves the container exactly
+/// as it was, staged copy included.
+#[tokio::test]
+async fn t87_a_binary_that_needs_a_newer_glibc_is_refused_before_anything_moves() {
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("test -f", CmdOutput::ok("yes\n"));
+    exec.respond_always("base64 -d", CmdOutput::ok(""));
+    exec.respond_always("GNU_LIBC_VERSION", CmdOutput::ok("need=2.39 have=2.36\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = homelab_core::ops::native::install_native(
+        &ctx(&exec, &sink, &j),
+        &install_manifest(),
+        "YmluYXJ5",
+        UNIT_FILE,
+    )
+    .await;
+    assert!(
+        !report.ok,
+        "a binary the container cannot run must be refused"
+    );
+    let why = format!("{:?}", report.error);
+    assert!(why.contains("2.39") && why.contains("2.36"), "{}", why);
+    assert!(
+        !exec
+            .calls_containing("rm -f '/usr/local/bin/kyu.homelab-new'")
+            .is_empty(),
+        "the staged copy is removed on refusal: {:?}",
+        exec.calls()
+    );
+    assert!(
+        exec.calls_containing("mv -f").is_empty(),
+        "nothing may be moved into place: {:?}",
+        exec.calls()
+    );
+    assert!(
+        exec.calls_containing("/etc/systemd/system/kyu.service")
+            .is_empty(),
+        "the unit file is not written for a binary that was refused: {:?}",
+        exec.calls()
+    );
+    assert!(
+        exec.calls_containing("systemctl stop").is_empty(),
+        "the running service is never stopped: {:?}",
+        exec.calls()
+    );
+}
+
+// ── T77 · the hub is archived from its own verified copy ───────────────────
+
+fn kyu_with_own_copy() -> NativeServiceManifest {
+    NativeServiceManifest {
+        backup_from_newest: Some("/var/lib/kyu/kyu.backup-*.db".into()),
+        ..kyu_manifest()
+    }
+}
+
+/// The newest copy, fresh, is what goes into restic — not the live
+/// directory that is being written to while tar reads it (F172).
+#[tokio::test]
+async fn t77_a_fresh_own_copy_is_archived_instead_of_the_live_store() {
+    use homelab_core::ops::backup::BackupCfg;
+    use homelab_core::ops::native::backup_native;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    exec.respond_always(
+        "ls -1t",
+        CmdOutput::ok("/var/lib/kyu/kyu.backup-1789786870562.db 600\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup_native(
+        &ctx(&exec, &sink, &j),
+        &kyu_with_own_copy(),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let pipelines = exec.calls_containing("pct exec 109 -- tar -cf -");
+    assert_eq!(pipelines.len(), 1, "{:?}", exec.calls());
+    let p = &pipelines[0];
+    assert!(
+        p.contains("'/var/lib/kyu/kyu.backup-1789786870562.db'"),
+        "the copy is what travels: {}",
+        p
+    );
+    assert!(
+        !p.contains("'/var/lib/kyu' "),
+        "the live directory is no longer tarred: {}",
+        p
+    );
+}
+
+/// M-D94: a stale copy is the failure that looks like success. Older than
+/// 26 h, or no copy at all, fails the backup loudly and archives nothing.
+#[tokio::test]
+async fn t77_a_stale_or_missing_own_copy_fails_the_backup_rather_than_archiving_it() {
+    use homelab_core::ops::backup::BackupCfg;
+    use homelab_core::ops::native::backup_native;
+    for (answer, expect) in [
+        (
+            CmdOutput::ok("/var/lib/kyu/kyu.backup-1.db 200000\n"),
+            "old",
+        ),
+        (CmdOutput::failed(3, ""), "no copy matches"),
+    ] {
+        let exec = MockExecutor::new();
+        adopt_mocks(&exec);
+        exec.respond_always("ls -1t", answer);
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let report = backup_native(
+            &ctx(&exec, &sink, &j),
+            &kyu_with_own_copy(),
+            &BackupCfg::default(),
+        )
+        .await;
+        assert!(!report.ok, "expected a refusal: {:?}", report);
+        let why = format!("{:?}", report.error);
+        assert!(why.contains(expect), "{}", why);
+        assert!(
+            exec.calls_containing("restic backup").is_empty(),
+            "nothing may be archived: {:?}",
+            exec.calls()
+        );
+    }
+}
+
+/// The glob is validated like every other path: absolute, no climbing, and
+/// it has to BE a glob — one fixed name is the trap the count-based
+/// rotation exists to avoid.
+#[test]
+fn t77_the_copy_glob_is_validated() {
+    use homelab_core::native::validate_native;
+    for bad in [
+        "kyu.backup-*.db",
+        "/var/lib/kyu/kyu.db",
+        "/var/../kyu.backup-*.db",
+    ] {
+        let m = NativeServiceManifest {
+            backup_from_newest: Some(bad.into()),
+            ..kyu_manifest()
+        };
+        let why = validate_native(&m).expect_err(bad).join("; ");
+        assert!(why.contains("backup_from_newest"), "{}", why);
+    }
+    assert!(validate_native(&kyu_with_own_copy()).is_ok());
+}
+
+// ── T85 · binaries travel one per message ──────────────────────────────────
+
+/// A staged unit is filled in; a unit that came with its bytes is kept;
+/// an empty entry with nothing staged disappears rather than becoming an
+/// empty program.
+#[test]
+fn t85_staged_binaries_are_merged_and_empty_entries_dropped() {
+    use homelab_core::ops::native::merge_staged_binaries;
+    use std::collections::BTreeMap;
+    let natives = vec![
+        "kyu".to_string(),
+        "kyu-runner".into(),
+        "http-switchboard".into(),
+    ];
+    let mut map: BTreeMap<String, String> = BTreeMap::new();
+    map.insert("kyu".into(), String::new());
+    map.insert("kyu-runner".into(), "b2xk".into());
+    map.insert("http-switchboard".into(), String::new());
+    let staged = |unit: &str| (unit == "kyu").then(|| "bmV3".to_string());
+    let merged = merge_staged_binaries(&natives, &mut map, staged);
+    assert_eq!(merged, vec!["kyu".to_string()]);
+    assert_eq!(map.get("kyu").map(String::as_str), Some("bmV3"));
+    assert_eq!(
+        map.get("kyu-runner").map(String::as_str),
+        Some("b2xk"),
+        "an old client's bytes are kept"
+    );
+    assert!(
+        !map.contains_key("http-switchboard"),
+        "nothing staged and nothing sent = not shipped: {:?}",
+        map
+    );
+}
+
+// ── B1 · the orchestrator's own release update, nightly for the auto class ─
+
+const RELEASE_JSON: &str = r#"{"tag_name":"v3.3.0","assets":[
+  {"name":"kyu","browser_download_url":"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/kyu"},
+  {"name":"SHA256SUMS","browser_download_url":"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/SHA256SUMS"}]}"#;
+
+#[test]
+fn b1_the_latest_release_is_reduced_to_tag_and_two_urls_and_refused_without_sums() {
+    use homelab_core::ops::native::{listed_sha, parse_latest_release};
+    let r = parse_latest_release(RELEASE_JSON, "kyu").unwrap();
+    assert_eq!(r.tag, "v3.3.0");
+    assert!(r.asset_url.ends_with("/v3.3.0/kyu"));
+    assert!(r.sums_url.ends_with("/SHA256SUMS"));
+    let why = parse_latest_release(RELEASE_JSON, "kyu-runner").unwrap_err();
+    assert!(why.contains("no asset 'kyu-runner'"), "{}", why);
+    let no_sums = r#"{"tag_name":"v1","assets":[{"name":"kyu","browser_download_url":"u"}]}"#;
+    let why = parse_latest_release(no_sums, "kyu").unwrap_err();
+    assert!(why.contains("SHA256SUMS"), "{}", why);
+    let why = parse_latest_release(r#"{"message":"Not Found"}"#, "kyu").unwrap_err();
+    assert!(why.contains("Not Found"), "{}", why);
+    assert_eq!(
+        listed_sha("ABCD  kyu\n1234 *SHA256SUMS\n", "kyu").as_deref(),
+        Some("abcd")
+    );
+    assert_eq!(listed_sha("abcd  kyu\n", "kyu-runner"), None);
+}
+
+#[test]
+fn b1_auto_policy_needs_a_release_repo() {
+    use homelab_core::native::{validate_native, UpdatePolicy};
+    let m = NativeServiceManifest {
+        update_policy: UpdatePolicy::Auto,
+        ..kyu_manifest()
+    };
+    let why = validate_native(&m).unwrap_err().join("; ");
+    assert!(
+        why.contains("update_policy: auto without a release_repo"),
+        "{}",
+        why
+    );
+    assert!(validate_native(&NativeServiceManifest {
+        update_policy: UpdatePolicy::Auto,
+        ..install_manifest()
+    })
+    .is_ok());
+}
+
+fn release_mocks(exec: &MockExecutor, listed: &str, installed: &str) {
+    adopt_mocks(exec);
+    exec.respond_always("releases/latest", CmdOutput::ok(RELEASE_JSON));
+    exec.respond_always(
+        "/v3.3.0/SHA256SUMS",
+        CmdOutput::ok(&format!("{}  kyu\n", listed)),
+    );
+    exec.respond_always(
+        "sha256sum '/usr/local/bin/kyu'",
+        CmdOutput::ok(&format!("{}\n", installed)),
+    );
+}
+
+/// The decision is made on checksums, from a few hundred bytes: an
+/// installed binary whose sum SHA256SUMS already lists is current, and
+/// nothing is downloaded, encoded or moved.
+#[tokio::test]
+async fn b1_a_current_binary_costs_one_small_download_and_no_install() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    release_mocks(&exec, "abcd", "abcd");
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("curl -sSL -m 600 -o").is_empty(),
+        "no asset download for a current binary: {:?}",
+        exec.calls()
+    );
+    assert!(exec.calls_containing("mv -f").is_empty());
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("already runs v3.3.0")),
+        "{:?}",
+        sink.lines()
+    );
+}
+
+/// A differing sum means: download to the host, verify there, encode, read
+/// the unit the container runs, and go through `install_native` — staged
+/// beside, glibc-checked, rollback armed.
+#[tokio::test]
+async fn b1_a_newer_release_is_verified_on_the_host_and_installed_through_the_same_path() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    release_mocks(&exec, "beef", "abcd");
+    exec.respond_always(
+        "sha256sum '/var/lib/homelab/staged/kyu/kyu.release'",
+        CmdOutput::ok("beef\n"),
+    );
+    exec.respond_always("base64 -w0", CmdOutput::ok("YmluYXJ5\n"));
+    exec.respond_always(
+        "cat /etc/systemd/system/kyu.service",
+        CmdOutput::ok(UNIT_FILE),
+    );
+    exec.respond_always("test -f", CmdOutput::ok("yes\n"));
+    exec.respond_always("base64 -d", CmdOutput::ok(""));
+    glibc_ok(&exec);
+    exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
+    exec.respond_always("systemctl stop", CmdOutput::ok(""));
+    exec.respond_always("cat /var/lib/homelab/state.json", CmdOutput::failed(1, ""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let cmds = exec.calls();
+    let download = cmds
+        .iter()
+        .position(|c| c.contains("curl -sSL -m 600 -o"))
+        .expect("the asset is downloaded");
+    let moved = cmds
+        .iter()
+        .position(|c| c.contains("mv -f"))
+        .expect("the binary is moved into place");
+    assert!(download < moved, "download before install: {:?}", cmds);
+    assert!(
+        cmds.iter().any(|c| c.contains("kyu.homelab-new")),
+        "installed through the staged path: {:?}",
+        cmds
+    );
+    assert!(
+        !exec
+            .calls_containing("rm -f /var/lib/homelab/staged/kyu/kyu.release")
+            .is_empty(),
+        "the host copy is removed afterwards: {:?}",
+        cmds
+    );
+}
+
+/// A download whose sum is not the listed one installs nothing.
+#[tokio::test]
+async fn b1_a_checksum_mismatch_installs_nothing() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    release_mocks(&exec, "beef", "abcd");
+    exec.respond_always(
+        "sha256sum '/var/lib/homelab/staged/kyu/kyu.release'",
+        CmdOutput::ok("dead\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(!report.ok);
+    let why = format!("{:?}", report.error);
+    assert!(why.contains("CHECKSUM MISMATCH"), "{}", why);
+    assert!(
+        exec.calls_containing("base64 -w0").is_empty(),
+        "{:?}",
+        exec.calls()
+    );
+    assert!(exec.calls_containing("mv -f").is_empty());
 }

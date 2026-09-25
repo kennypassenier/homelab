@@ -985,6 +985,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         m,
         "push files",
         {
+            let mut rootfs_changed: Vec<String> = Vec::new();
             for f in &spec.files {
                 // A native unit file goes to /etc/systemd/system and nowhere
                 // else. Pushing it here too cost almanac its binary: the stack
@@ -1000,8 +1001,15 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 {
                     continue;
                 }
-                let dest = format!("/opt/{}/{}", m.stack_name, f.path);
-                let perms = format!("{:o}", f.mode.unwrap_or(0o644));
+                // ask-2: a `rootfs/` file lands at its absolute path (a unit,
+                // a timer, a script on PATH); everything else under
+                // /opt/<stack>/. Validated before the first push, so an
+                // `Err` here cannot happen — it is mapped rather than
+                // unwrapped so a future gap is a refusal, not a panic.
+                let (dest, default_mode) = manifest::file_destination(&m.stack_name, &f.path)
+                    .map_err(CoreError::Validation)?;
+                let rootfs = f.path.starts_with(manifest::ROOTFS_PREFIX);
+                let perms = format!("{:o}", f.mode.unwrap_or(default_mode));
                 // D60: the file in the repository names the real origin; what
                 // lands in the container names the cache, but only for the
                 // upstreams that answered a moment ago and never for a registry
@@ -1040,9 +1048,14 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     if let Ok(mut g) = pushed_w.lock() {
                         g.push((dest.clone(), manifest::sha256_hex(content.as_bytes())));
                     }
+                    if rootfs {
+                        rootfs_changed.push(dest.clone());
+                    }
                     // The path is "<app>/<file>"; a file outside an app directory
-                    // belongs to no service and needs nothing restarted.
-                    if let Some((app, name)) = f.path.split_once('/') {
+                    // belongs to no service and needs nothing restarted. A
+                    // rootfs file is not an app either: "rootfs" must never
+                    // reach the restart step as a service name.
+                    if let Some((app, name)) = f.path.split_once('/').filter(|_| !rootfs) {
                         if name == "docker-compose.yml" {
                             // compose up -d recreates this one by itself.
                             if let Ok(mut g) = recreated_w.lock() {
@@ -1059,6 +1072,40 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     done: f.content.len() as u64,
                     total: Some(f.content.len() as u64),
                 });
+            }
+            // ask-2: systemd only reads a unit it has been told about, and a
+            // timer file on disk fires nothing until it is enabled. A changed
+            // unit or timer reloads the manager; a changed timer is enabled
+            // and started — starting a TIMER is not starting a service, so
+            // adoption's rule (a deploy never restarts a running service)
+            // holds. Nothing here touches a `.service` beyond the reload.
+            if rootfs_changed
+                .iter()
+                .any(|d| d.starts_with("/etc/systemd/system/"))
+            {
+                pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
+                log_info("[rootfs] systemd reloaded for the unit files written above".to_string());
+            }
+            for dest in &rootfs_changed {
+                if let Some(timer) = dest
+                    .strip_prefix("/etc/systemd/system/")
+                    .filter(|n| n.ends_with(".timer"))
+                {
+                    let out = pct_sh(
+                        exec,
+                        m.vmid,
+                        &format!("systemctl enable --now {}", timer),
+                        60,
+                    )
+                    .await?;
+                    if !out.success() {
+                        return Err(CoreError::Command {
+                            rendered: format!("systemctl enable --now {}", timer),
+                            detail: out.stderr.trim().to_string(),
+                        });
+                    }
+                    log_info(format!("[rootfs] {} enabled and started", timer));
+                }
             }
             for (app, env) in &spec.env {
                 let dest = format!("/opt/{}/{}/.env", m.stack_name, app);
@@ -1178,10 +1225,51 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 _ => 900,
             };
             let cmd = format!("cd '{}' && docker compose pull -q", dir);
+            // gap-12 (Kenny, 2026-09-19: "alleen wat ontbreekt"): a deploy
+            // fetches only what the container does not have. Pulling every
+            // app on every deploy lifted five `manual`-policy apps on the
+            // gateway to whatever `latest` meant that day, with none of the
+            // health check and rollback the nightly update has. Updating
+            // stays where the rollback is; a deploy deploys.
+            //
+            // The container is asked per image the compose file names (after
+            // the cache rewrite, so the name asked about is the name `up -d`
+            // will start). Standing rule 12: no usable answer means pull —
+            // the old behaviour — never "assume it is there".
+            let present = pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "cd '{}' && for i in $(docker compose config --images 2>/dev/null); do \
+                     docker image inspect \"$i\" >/dev/null 2>&1 && echo \"present $i\" \
+                     || echo \"missing $i\"; done",
+                    dir
+                ),
+                60,
+            )
+            .await;
+            let all_present = match &present {
+                Ok(o) if o.success() => {
+                    let lines: Vec<&str> = o.stdout.lines().map(str::trim).collect();
+                    !lines.is_empty() && lines.iter().all(|l| l.starts_with("present "))
+                }
+                _ => false,
+            };
+            if all_present {
+                log_info(format!(
+                    "[images] {} :: every image is already on the container — not pulled \
+                     (a deploy never replaces an image; `homelab update` does)",
+                    app
+                ));
+            }
             // Not `?`: a timeout is an Err by the Executor contract, and a
             // timeout is precisely the case the fallback exists for. Taking
             // the error here would step over it.
-            let first = pct_sh(exec, m.vmid, &cmd, budget).await;
+            let first = if all_present {
+                Ok(crate::executor::CmdOutput::ok(""))
+            } else {
+                pct_sh(exec, m.vmid, &cmd, budget).await
+            };
             let mut pull = match first {
                 Ok(o) if o.success() => o,
                 other => {
@@ -1328,6 +1416,43 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 // is nothing here to judge.
                 continue;
             }
+            // T81 (F289): establish that the probe CAN run before reading
+            // anything into its result. A container that is restarting
+            // fails `docker exec` before it reaches the directory, and the
+            // first JobTracker deploy reported that as "cannot write … the
+            // directory belongs to 110001" — a hypothesis printed as a
+            // finding. Not running is reported as unmeasured, never as a
+            // permissions fault.
+            let status = pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "docker inspect {} -f '{{{{.State.Status}}}}' 2>/dev/null || echo unknown",
+                    app
+                ),
+                30,
+            )
+            .await
+            .map(|o| o.stdout.trim().to_string())
+            .unwrap_or_else(|_| "unknown".into());
+            if status != "running" {
+                ctx.sink.emit(PipelineEvent::Line {
+                    level: Level::Warn,
+                    source: "HOST".into(),
+                    msg: format!(
+                        "[storage] '{}' is {} — whether it can write {} could not be \
+                         measured, so nothing about its ownership is claimed (F289)",
+                        app,
+                        if status.is_empty() {
+                            "in an unknown state"
+                        } else {
+                            status.as_str()
+                        },
+                        mount.host_path
+                    ),
+                });
+                continue;
+            }
             let probe = pct_sh(
                 exec,
                 m.vmid,
@@ -1350,7 +1475,10 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             };
             let unprobeable = out.contains("executable file not found")
                 || out.contains("OCI runtime exec failed")
-                || out.contains("no such file or directory: unknown");
+                || out.contains("no such file or directory: unknown")
+                || out.contains("is restarting")
+                || out.contains("is not running")
+                || out.contains("is paused");
             if unprobeable {
                 ctx.sink.emit(PipelineEvent::Line {
                     level: Level::Warn,
@@ -1680,9 +1808,14 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 .stacks
                 .iter()
                 .filter_map(|(name, st)| {
-                    st.manifest
-                        .as_ref()
-                        .map(|mf| (name.clone(), mf.network.ip.clone()))
+                    // gap-14: an adopted native stack has no stack manifest
+                    // in state; its address follows from the vmid.
+                    let ip = match st.manifest.as_ref() {
+                        Some(mf) => mf.network.ip.clone(),
+                        None if st.is_native() => crate::ops::monitors::address_for_vmid(st.vmid)?,
+                        None => return None,
+                    };
+                    Some((name.clone(), ip))
                 })
                 .collect();
             // The stack being deployed is in state by now, but on a FIRST
@@ -1823,7 +1956,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 return Ok(StepOutcome::Unchanged);
             }
             let fresh = out.stdout.contains("installed") && !out.stdout.contains("already");
-            let body = crate::ops::logshipper::config(&m.stack_name, &m.hostname, loki);
+            let body = crate::ops::logshipper::config(
+                &m.stack_name,
+                &m.hostname,
+                loki,
+                &m.syslog_receivers,
+            );
             let changed = push_content(
                 exec,
                 m.vmid,
@@ -1832,6 +1970,33 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 "644",
             )
             .await?;
+            // gap-11: Alloy reads ONE file, the one just pushed. A directory
+            // mode left behind by hand, or a stray `.alloy` beside the
+            // rendered one, is undone here and said out loud — every line the
+            // script prints is a change the operator did not make through
+            // the repository. Before the restart, because with the receiver
+            // rendered above a stray copy of it would make Alloy refuse to
+            // start on a duplicate component.
+            let swept = pct_sh(
+                exec,
+                m.vmid,
+                &crate::ops::logshipper::single_file_mode_script(),
+                60,
+            )
+            .await?;
+            let mut drift = false;
+            for line in swept
+                .stdout
+                .lines()
+                .filter(|l| !l.trim().is_empty() && *l != "done")
+            {
+                drift = true;
+                log_warn(format!(
+                    "[logs] Alloy on {} was not reading the rendered file alone: {}",
+                    m.hostname, line
+                ));
+            }
+            let changed = changed || drift;
             if fresh || changed {
                 pct_sh(
                     exec,

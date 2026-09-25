@@ -134,6 +134,7 @@ fn spec(files_content: &str) -> DeploySpec {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        syslog_receivers: vec![],
         natives: Vec::new(),
         stack_name: "test".into(),
         vmid: 108,

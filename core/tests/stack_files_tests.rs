@@ -456,3 +456,73 @@ mod kuma_seeder {
         }
     }
 }
+
+/// gap-11 · the OPNsense syslog receiver is declared by the gateway stack and
+/// by nothing else.
+///
+/// OPNsense is configured to send to 10.10.10.4:1514, which is the gateway
+/// container; a receiver declared on any other stack would open a port
+/// nothing sends to, and one missing from the gateway would silently end
+/// remote logging at the next deploy — the state the fleet was in between
+/// 2026-09-18 and this test.
+#[test]
+fn only_the_gateway_declares_the_opnsense_syslog_receiver() {
+    for (name, m) in compose_stacks() {
+        if name == "gateway" {
+            let r = m
+                .syslog_receivers
+                .iter()
+                .find(|r| r.host == "opnsense")
+                .expect("stacks/gateway/lxc-compose.yml must declare the opnsense receiver");
+            assert_eq!(
+                r.listen, "0.0.0.0:1514",
+                "OPNsense is configured to send here"
+            );
+            assert_eq!(r.protocol, "udp");
+            assert_eq!(r.format, "rfc5424");
+        } else {
+            assert!(
+                m.syslog_receivers.is_empty(),
+                "{} declares a syslog receiver and nothing sends to it",
+                name
+            );
+        }
+    }
+}
+
+/// The validator refuses a receiver the shipper could not actually open —
+/// Alloy runs as its own user, so a port below 1024 binds nothing and Alloy
+/// merely logs it while the deploy reports success.
+#[test]
+fn a_receiver_the_shipper_could_not_open_is_refused_at_plan_time() {
+    use homelab_core::manifest::SyslogReceiver;
+    let (_, gw) = compose_stacks()
+        .into_iter()
+        .find(|(n, _)| n == "gateway")
+        .expect("gateway stack");
+    let mut bad = gw.clone();
+    bad.syslog_receivers = vec![SyslogReceiver {
+        host: "opnsense".into(),
+        listen: "0.0.0.0:514".into(),
+        protocol: "udp".into(),
+        format: "rfc5424".into(),
+    }];
+    let err = validate_manifest(&bad).expect_err("port 514 cannot be bound unprivileged");
+    let msg = err.to_string();
+    assert!(msg.contains("514") && msg.contains("1024"), "{}", msg);
+
+    let mut twice = gw.clone();
+    twice
+        .syslog_receivers
+        .push(twice.syslog_receivers[0].clone());
+    let err = validate_manifest(&twice).expect_err("two receivers on one address");
+    assert!(err.to_string().contains("0.0.0.0:1514"), "{}", err);
+
+    let mut odd = gw.clone();
+    odd.syslog_receivers[0].protocol = "sctp".into();
+    odd.syslog_receivers[0].format = "cef".into();
+    let msg = validate_manifest(&odd)
+        .expect_err("a protocol or format Alloy does not speak")
+        .to_string();
+    assert!(msg.contains("sctp") && msg.contains("cef"), "{}", msg);
+}

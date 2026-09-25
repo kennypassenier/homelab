@@ -159,6 +159,26 @@ mod tests {
     }
 
     #[test]
+    fn b7_install_source_reads_a_tag_or_a_file() {
+        use super::{install_source, InstallSource};
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            install_source(&a(&[])).unwrap(),
+            InstallSource::Release(None)
+        );
+        assert_eq!(
+            install_source(&a(&["v3.3.0"])).unwrap(),
+            InstallSource::Release(Some("v3.3.0".into()))
+        );
+        assert_eq!(
+            install_source(&a(&["--file", "/tmp/good.sh"])).unwrap(),
+            InstallSource::File("/tmp/good.sh".into())
+        );
+        assert!(install_source(&a(&["--file"])).is_err());
+        assert!(install_source(&a(&["--bogus"])).is_err());
+    }
+
+    #[test]
     fn sha_listing_verification() {
         let sums = "abc123  homelab-host\ndef456  homelab\n";
         assert!(sha_listed(sums, "homelab-host", "abc123"));
@@ -173,4 +193,46 @@ mod tests {
         assert!(!sha_listed(sums, "homelab-host", "beef"), "unlisted hash");
         assert!(!sha_listed("", "homelab-host", "abc123"));
     }
+}
+
+/// B7: where `install-native` takes its binary from — a release tag (the
+/// default, resolved to the latest when absent) or a local file for a drill
+/// that hands a fake service over by hand. Pure so the argument shapes have
+/// one reader and a test.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallSource {
+    Release(Option<String>),
+    File(String),
+}
+
+pub fn install_source(rest: &[String]) -> Result<InstallSource, String> {
+    match rest {
+        [] => Ok(InstallSource::Release(None)),
+        [flag, path] if flag == "--file" => Ok(InstallSource::File(path.clone())),
+        [flag] if flag == "--file" => Err("--file needs a path".into()),
+        [tag] if !tag.starts_with("--") => Ok(InstallSource::Release(Some(tag.clone()))),
+        other => Err(format!(
+            "usage: homelab install-native stacks/<name>[/<unit>] [<tag> | --file <path>] (got {:?})",
+            other
+        )),
+    }
+}
+
+/// A local file as the binary: read, hashed for the transcript, base64 for
+/// the line. Nothing is verified against a checksum list here — the caller
+/// chose the bytes and sees their hash.
+pub fn stage_file(path: &str) -> Result<(String, String), String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {}", path, e))?;
+    if bytes.is_empty() {
+        return Err(format!(
+            "{} is empty — an empty program is not a service",
+            path
+        ));
+    }
+    let sha = homelab_core::manifest::sha256_hex(&bytes);
+    use base64::Engine as _;
+    Ok((
+        base64::engine::general_purpose::STANDARD.encode(&bytes),
+        sha,
+    ))
 }

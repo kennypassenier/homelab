@@ -68,3 +68,6 @@ update_cmd: cd /appdata/almanac/almanac-config && set -a && . /appdata/almanac/a
 # 2026-09-02: release v1.4.0 carries `almanac` and a SHA256SUMS, which is what
 # `homelab install-native` verifies against before it ships anything.
 release_repo: kennypassenier/almanac
+# B1: almanac updates itself and keeps its previous binary; the orchestrator
+# observes its revert and never installs over it.
+update_policy: manual

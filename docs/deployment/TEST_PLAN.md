@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**447 tests across 23 suites.**
+**505 tests across 26 suites.**
 
 ## Accepted limitations
 
@@ -59,7 +59,7 @@ Covers: F156
 
 The M0 safety and idempotency suite — every scenario here maps to a FEATURES.md test scenario (A1, A2, A3/D10, B1, D1, A5).
 
-Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, F159, F164, F169, F170, F173, F21, F210, F213, F22
+Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, F159, F164, F169, F170, F173, F21, F210, F213, F22, F289
 
 - `a_clone_refuses_a_privilege_level_the_template_cannot_give` — A clone can never change a container's privilege level, so asking for one the template cannot give must stop the deploy rather than silently produce the other.
 - `a_privileged_stack_cloning_the_privileged_template_is_allowed` — And the matching case passes: a privileged stack cloning the privileged template is exactly how the media and downloader stacks are built.
@@ -110,7 +110,9 @@ Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, 
 - `s2_a_push_that_did_not_land_fails_its_own_step` — S2c · a push that reports success and did not land fails its own step, not three steps later.
 - `storage_the_app_cannot_write_fails_the_deploy` — Can the application write its own data? That, and nothing about uids.
 - `storage_the_app_can_write_says_nothing` — And it must stay quiet when the app CAN write, whatever the uids happen to be — the half that decides whether a check survives a month.
+- `storage_a_container_that_is_not_running_is_reported_as_unmeasured` — T81 (F289): a container that is not running cannot be probed, and the step says so instead of reading the failed exec as a permissions fault.
 - `storage_a_directory_the_app_does_not_mount_is_skipped` — A directory the app does not mount is not its business.
+- `gap14_the_monitor_list_carries_adopted_native_stacks` — gap-14: the seeder called `host · kyu` and `host · almanac` monitors of stacks the fleet does not have, because the generated list came only from stacks with a stack manifest in state — and an adopted native stack has none.
 - `h4_cadvisor_is_installed_by_the_guards_on_every_docker_host` — H4 · cAdvisor is installed on every managed docker host, not declared per stack.
 - `h4_cadvisor_is_started_even_when_its_compose_file_is_unchanged` — And it must bring cadvisor up even when the compose file is ALREADY there.
 - `h4_cadvisor_is_not_installed_where_there_is_no_docker` — And never on a container that runs no docker: a weekly prune timer on a native-only host has been failing every week since it was installed, which is worse than useless — a guard that fails on schedule teaches you to ignore failures.
@@ -129,6 +131,10 @@ Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, 
 - `a_secret_that_exists_nowhere_stops_the_start_instead_of_looping`
 - `f307_security_updates_are_matched_by_codename_not_by_archive_alias` — F307: the security matcher must key on the codename, never on the archive alias Debian rewrites as a release ages.
 - `a_template_name_reports_the_os_it_was_baked_from` — The template's name must say which OS is inside it.
+- `a_gateway_deploy_renders_the_receiver_and_restores_single_file_mode` — gap-11 · the deploy renders the gateway's syslog receiver into the one file Alloy reads, and puts Alloy back to reading that one file.
+- `an_image_that_is_present_is_not_pulled_and_the_app_still_comes_up`
+- `an_image_that_is_missing_is_pulled_as_before`
+- `no_answer_about_the_images_means_pull` — Standing rule 12: defaults fail closed.
 
 ### `core/tests/devicebackup_tests.rs`
 
@@ -140,6 +146,21 @@ Covers: F205
 - `a_snapshot_too_small_to_be_a_configuration_fails` — covers: F205  A login page is a 200 with a body, and restic stores whatever it is handed.
 - `an_unverified_certificate_is_used_but_never_quietly` — covers: F205  Verification is configuration-dependent (rule 24), so the code cannot enforce it — but it must not be silent about running without it.
 - `a_pinned_public_key_is_what_verifies_the_connection` — covers: F205  The pin is what verifies this connection, and it must reach curl exactly.
+
+### `core/tests/facts_tests.rs`
+
+G6 · the fact gatherer, driven through a mock fleet.
+
+- `g6_pct_list_becomes_vmid_and_hostname_pairs`
+- `g6_a_growth_probe_that_never_ran_is_no_fact` — The `guards` line is the proof the probe ran inside the container.
+- `g6_host_memory_is_five_numbers_in_the_script_order`
+- `g6_the_logs_window_only_passes_digits_and_a_unit`
+- `g6_managed_containers_are_probed_and_the_untouchable_are_not` — Containers come from `pct list`; the untouchable ones are never probed; a stopped guest that answers nothing produces no growth fact but still a boot fact, because `pct config` can be asked about a stopped guest.
+- `g6_routes_are_read_from_the_gateway_and_knocked_on` — Every route fragment on the gateway is read, its target extracted, and the target knocked on from inside the gateway with bash's /dev/tcp.
+- `g6_a_watched_backup_is_aged_against_now_and_a_failed_listing_is_an_error` — O1: a watched backup's age is the difference between now and the newest file rclone lists; a listing that fails is an error, not an old backup.
+- `g6_the_seed_verdict_comes_from_last_seed_json_beside_the_monitors` — T49: the seeder's verdict is read from the file beside the monitor list; no configured file means nothing to judge, which is not a finding.
+- `g6_coverage_asks_prometheus_per_recorded_stack_and_leaves_loki_unasked` — Coverage is asked only where an address is configured, per recorded stack; Prometheus' answer is read for a `1`, and an unconfigured Loki leaves the logs question unasked rather than answered.
+- `g6_an_empty_fleet_yields_empty_facts_not_findings` — Nothing configured, nothing recorded: the gatherer still returns, with every unasked question absent rather than failed.
 
 ### `core/tests/failure_model_tests.rs`
 
@@ -258,6 +279,10 @@ C1/C2 · the replacement for a log shipper that reached end of life.
 - `dropping_outranks_sending` — Dropping wins over sending: a shipper that delivered something and then started losing batches is broken, not fine.
 - `several_endpoints_are_summed_rather_than_the_first_one_taken`
 - `the_journal_job_label_is_forced_and_not_left_to_alloy` — Alloy names a job after the component that produced it, so the journal arrived as `job="loki.source.journal.journal"` on the first live run.
+- `a_declared_receiver_listens_and_labels_its_lines_like_the_hand_made_one_did` — The labels are the contract again: the vault note and the Grafana query both read `{job="syslog", host="opnsense"}`.
+- `a_stack_that_declares_no_receiver_opens_no_port` — Ten other containers render this same file.
+- `two_receivers_get_two_distinct_component_names` — Two receivers on one container are two components, and Alloy refuses a file that names one component twice.
+- `the_deploy_puts_alloy_back_to_reading_the_one_file_it_renders` — The hand-made change on CT 104 switched Alloy to directory mode (`CONFIG_FILE="/etc/alloy"`), which loads every `*.alloy` in the directory.
 
 ### `core/tests/m4_ops_tests.rs`
 
@@ -356,6 +381,9 @@ Covers: F105, F153, F154, F156, F162, F180, F207, F209, F210, F36, F75
 - `f285_a_stack_does_not_conflict_with_itself`
 - `f285_an_owner_nobody_else_claims_is_fine`
 - `f285_the_backup_stops_before_it_touches_the_other_repository` — End to end: the backup refuses before it initialises a repository, so the other stack's history is never opened at all.
+- `m_t75_the_backup_phase_says_how_long_it_took` — Minutes and seconds, hours past sixty minutes, never bare seconds above a minute — the house rule for durations, and the number the concurrency setting is judged by.
+- `t82_the_stack_recorded_first_keeps_the_repository` — A stack without a state entry is the newcomer; between two recorded stacks the earlier one keeps the repository; a tie favours the caller.
+- `t82_the_incumbent_backs_up_and_the_newcomer_is_named` — The live stack's backup goes on when a throwaway stack borrows its app name AFTER it — the six minutes JobTracker had no working backup (F292) were the symmetric guard refusing the wrong side.
 - `f274_the_host_meta_snapshot_carries_the_smart_collector` — The SMART collector is installed by this suite on the Proxmox host and lives nowhere under `state_dir`, so the nightly host-meta snapshot walked straight past it.
 - `f274_a_host_without_the_collector_still_gets_its_snapshot` — A host that never had the collector is not a broken backup.
 
@@ -393,6 +421,7 @@ Covers: F158, F175
 - `a_native_stack_asks_node_exporter_instead` — The case Kenny found: three empty graphs on a container that runs no docker at all, because cadvisor has nothing there to measure.
 - `both_shapes_ask_about_the_disk_because_that_question_is_the_same`
 - `both_shapes_are_valid_json`
+- `gap14_an_adopted_native_stack_gets_its_address_from_its_vmid` — gap-14: the adopted native stacks have no stack manifest in state, so their address is derived from the vmid the way every container here is numbered — kyu on 109 is 10.10.10.9, almanac on 112 is 10.10.10.12.
 
 ### `core/tests/native_tests.rs`
 
@@ -425,6 +454,24 @@ Covers: F117, F171
 - `c7_adopt_leaves_its_own_description_alone` — Three native services share CT 109 (T5), so adoption runs three times over the same container.
 - `f300_the_health_check_watches_a_window_not_a_moment` — F300, the fault the chassis-rs architecture critic found by reading this file: the health check asked "did it start", not "is it still running".
 - `f300_the_rollback_stops_the_unit_before_overwriting_its_binary` — F300's second half: the rollback wrote over a binary systemd was busy re-executing every five seconds, and lost the race as "ROLLBACK ALSO FAILED" rather than as ETXTBSY.
+- `the_owner_is_read_from_the_unit_that_is_being_installed` — The kit's own update keeps the version it replaces beside the binary.
+- `the_service_is_handed_its_own_program_directory` — Recursive on the directory that holds the program, which is exactly what the kit needs to write its `.prev` beside it, plus the file itself.
+- `a_healthy_update_does_not_leave_its_rollback_copy_behind` — `.homelab-prev` is read only by the run that writes it.
+- `a_rolled_back_update_keeps_the_binary_it_is_running_from` — A rolled-back update KEEPS the copy: the service is running from it.
+- `a_skip_says_which_copy_it_read_and_how_to_refresh_it` — "skipped by decision" is what an empty field looks like from the inside and a deliberate choice from the outside.
+- `stored_timestamps_render_as_plain_dates` — The formatter behind that date.
+- `t87_static_and_satisfiable_binaries_pass` — A static build asks nothing; a dynamic one is fine when the container has at least what it names; and the probe's line is the only input.
+- `t87_a_higher_requirement_or_an_unreadable_container_is_refused` — F304 in one line: a binary built against 2.39 on a container with 2.36 is refused, and the refusal names both numbers so the reader knows what to ship instead.
+- `t87_a_binary_that_needs_a_newer_glibc_is_refused_before_anything_moves` — The check runs on the STAGED copy, before the unit file is written and before anything is moved: a refused binary leaves the container exactly as it was, staged copy included.
+- `t77_a_fresh_own_copy_is_archived_instead_of_the_live_store` — The newest copy, fresh, is what goes into restic — not the live directory that is being written to while tar reads it (F172).
+- `t77_a_stale_or_missing_own_copy_fails_the_backup_rather_than_archiving_it` — M-D94: a stale copy is the failure that looks like success.
+- `t77_the_copy_glob_is_validated` — The glob is validated like every other path: absolute, no climbing, and it has to BE a glob — one fixed name is the trap the count-based rotation exists to avoid.
+- `t85_staged_binaries_are_merged_and_empty_entries_dropped` — A staged unit is filled in; a unit that came with its bytes is kept; an empty entry with nothing staged disappears rather than becoming an empty program.
+- `b1_the_latest_release_is_reduced_to_tag_and_two_urls_and_refused_without_sums`
+- `b1_auto_policy_needs_a_release_repo`
+- `b1_a_current_binary_costs_one_small_download_and_no_install` — The decision is made on checksums, from a few hundred bytes: an installed binary whose sum SHA256SUMS already lists is current, and nothing is downloaded, encoded or moved.
+- `b1_a_newer_release_is_verified_on_the_host_and_installed_through_the_same_path` — A differing sum means: download to the host, verify there, encode, read the unit the container runs, and go through `install_native` — staged beside, glibc-checked, rollback armed.
+- `b1_a_checksum_mismatch_installs_nothing` — A download whose sum is not the listed one installs nothing.
 
 ### `core/tests/real_deps_tests.rs`
 
@@ -472,6 +519,16 @@ G14 · the recurring restore drill, and the rule that a drill which can be satis
 - `f290_an_app_without_a_repository_is_not_in_the_rotation` — The other direction: an app that keeps nothing has no repository, and a drill night spent on one proves nothing while looking like a failure.
 - `f290_the_list_is_owners_deduplicated_not_mounts` — The owner is what names the repository, not the stack — and an owner two mounts share is one repository, not two.
 
+### `core/tests/rootfs_files_tests.rs`
+
+ask-2 · stack files that belong outside `/opt/<stack>/`.
+
+- `an_ordinary_stack_file_still_lands_under_opt`
+- `a_rootfs_file_lands_at_its_absolute_path_with_a_mode_that_fits_the_place`
+- `a_rootfs_file_anywhere_else_or_climbing_is_refused`
+- `rootfs_files_land_at_their_absolute_paths_and_the_timer_is_enabled` — The five files of CT 109, in miniature: a timer and a script travel with the stack, land at their absolute paths, systemd is reloaded, and the timer is enabled — while /opt/kyu/rootfs never exists.
+- `a_rootfs_file_outside_the_allowed_places_stops_the_deploy_before_any_push` — A rootfs path outside the two allowed places is refused BEFORE anything is pushed or committed — the validate step, not the push step.
+
 ### `core/tests/secrets_tests.rs`
 
 Standing rule 10: secrets never in git, argv, logs, state or transcripts — and these tests ASSERT it. A deploy runs with a planted secret; every observable surface is scanned for the plaintext.
@@ -501,6 +558,8 @@ G10 · the thirteen stack files that actually run this house, validated.
 - `walk`
 - `every_internal_monitor_points_at_a_stack_that_exists_at_the_address_it_has`
 - `every_stack_without_an_application_monitor_is_one_we_named` — A stack with no monitor at all is not automatically wrong — the mechanical half already pings every container.
+- `only_the_gateway_declares_the_opnsense_syslog_receiver` — gap-11 · the OPNsense syslog receiver is declared by the gateway stack and by nothing else.
+- `a_receiver_the_shipper_could_not_open_is_refused_at_plan_time` — The validator refuses a receiver the shipper could not actually open — Alloy runs as its own user, so a port below 1024 binds nothing and Alloy merely logs it while the deploy reports success.
 
 ### `core/tests/unit_prereqs_tests.rs`
 
@@ -541,6 +600,20 @@ D12 and its 2026-09-05 amendment (MR1): where an app's secrets come from, and wh
 - `f301_a_service_file_at_the_stack_root_is_still_found` — F301: a stack with several natives whose FIRST one still keeps its service.yml at the stack root — kyu's real shape, three units with the hub's own file at the top from when it was the only one.
 - `f303_the_link_refuses_an_oversized_payload_in_words` — F303: the size guard belongs where every command passes, not in the call sites that remembered it.
 - `f309_help_anywhere_in_the_arguments_means_help` — F309: asking for help must never do the work.
+
+### `client/tests/repo_config_tests.rs`
+
+feat-client-1 · the host address is a fact about the fleet, not about the machine typing, so it lives in the repository.
+
+- `the_repo_file_beats_the_machine_file_and_the_default` — The whole point: the repository's word beats what this machine's env file says, and the compiled-in default is the last resort.
+- `an_explicit_environment_variable_still_wins` — A one-off override typed before the command must keep working — that is how the 3.52.0 rollout got past the stalled path on 2026-09-19.
+- `without_a_repo_file_the_machine_file_speaks_and_then_the_default`
+- `a_repo_file_without_a_host_line_changes_nothing` — A repo file that names no host is not an override of anything.
+- `the_file_is_found_from_a_subdirectory_of_the_repo` — `homelab deploy stacks/gateway` is typed from the repo root, but `homelab check` is typed from anywhere — including a subdirectory of the repo.
+- `outside_any_repo_there_is_simply_no_file`
+- `a_file_that_does_not_parse_is_refused_not_defaulted` — Standing rule 45: an input the program could not parse is refused, never quietly replaced by a default — a typo in the address file would otherwise send every command to the wrong door without a word.
+- `a_repo_pin_fills_an_empty_machine_and_never_overrides_a_different_one` — The daemon's fingerprint in the repo means a fresh machine does not trust on first use — but it may never overrule a machine that already pinned something else, because that is exactly what a changed certificate looks like.
+- `the_committed_client_file_names_the_in_vlan_door_and_a_real_fingerprint` — The committed file itself, as the deploy would read it: the in-VLAN address chosen on 2026-09-19 and the daemon's real fingerprint.
 
 ### `client/tests/tls_pin_tests.rs`
 

@@ -14,6 +14,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        syslog_receivers: vec![],
         natives: Vec::new(),
         stack_name: stack.into(),
         vmid,
@@ -1981,6 +1982,7 @@ async fn s2_a_push_that_did_not_land_fails_its_own_step() {
 async fn storage_the_app_cannot_write_fails_the_deploy() {
     let exec = MockExecutor::new();
     script_fresh(&exec);
+    exec.respond_first("{{.State.Status}}", CmdOutput::ok("running\n"));
     exec.respond_first("{{.Destination}}", CmdOutput::ok("/config\n"));
     exec.respond_first(
         "touch /config/.homelab-write-probe",
@@ -2013,6 +2015,7 @@ async fn storage_the_app_cannot_write_fails_the_deploy() {
 async fn storage_the_app_can_write_says_nothing() {
     let exec = MockExecutor::new();
     script_fresh(&exec);
+    exec.respond_first("{{.State.Status}}", CmdOutput::ok("running\n"));
     exec.respond_first("{{.Destination}}", CmdOutput::ok("/config\n"));
     exec.respond_first("touch /config/.homelab-write-probe", CmdOutput::ok(""));
     let sink = VecSink::new();
@@ -2024,6 +2027,48 @@ async fn storage_the_app_can_write_says_nothing() {
         report.ok,
         "a writable directory must pass: {:?}",
         report.error
+    );
+}
+
+/// T81 (F289): a container that is not running cannot be probed, and the
+/// step says so instead of reading the failed exec as a permissions fault.
+/// The first JobTracker deploy printed "the directory belongs to 110001"
+/// about a container that was merely restarting.
+/// covers: F289
+#[tokio::test]
+async fn storage_a_container_that_is_not_running_is_reported_as_unmeasured() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_first("{{.Destination}}", CmdOutput::ok("/config\n"));
+    exec.respond_first("{{.State.Status}}", CmdOutput::ok("restarting\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let sp = spec(110, "syncthing");
+
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(
+        report.ok,
+        "an unmeasured directory is not a failed deploy: {:?}",
+        report.error
+    );
+    assert!(
+        exec.calls_containing("homelab-write-probe").is_empty(),
+        "no probe may run against a container that is not running: {:?}",
+        exec.calls()
+    );
+    let warned = sink
+        .lines()
+        .iter()
+        .any(|l| l.contains("restarting") && l.contains("could not be measured"));
+    assert!(
+        warned,
+        "the step must say it could not measure: {:?}",
+        sink.lines()
+    );
+    assert!(
+        !sink.lines().iter().any(|l| l.contains("belongs to")),
+        "and it must not claim anything about ownership: {:?}",
+        sink.lines()
     );
 }
 
@@ -2046,6 +2091,54 @@ async fn storage_a_directory_the_app_does_not_mount_is_skipped() {
     assert!(
         exec.calls_containing("homelab-write-probe").is_empty(),
         "and it must not have probed at all"
+    );
+}
+
+/// gap-14: the seeder called `host · kyu` and `host · almanac` monitors of
+/// stacks the fleet does not have, because the generated list came only from
+/// stacks with a stack manifest in state — and an adopted native stack has
+/// none. Its address follows from its vmid, so it is on the list now.
+#[tokio::test]
+async fn gap14_the_monitor_list_carries_adopted_native_stacks() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "kyu": {
+                    "vmid": 109, "hostname": "109-app-kyu", "apps": [], "applied_at": 1,
+                    "manifest": null,
+                    "natives": [{
+                        "stack_name": "kyu", "vmid": 109, "hostname": "109-app-kyu",
+                        "unit": "kyu", "binary": "/opt/kyu/bin/kyu",
+                        "data_dirs": ["/appdata/kyu/kyu-config"]
+                    }]
+                }
+            }
+        })
+        .to_string(),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut c = ctx(&exec, &sink, &journal);
+    c.kuma_monitors_file = Some("/appdata/uptime/kuma-seeder-config/host-monitors.json".into());
+    let sp = spec(110, "syncthing");
+    let report = deploy(&c, &sp).await;
+    assert!(report.ok, "{:?}", report.error);
+    let body = exec
+        .file("/appdata/uptime/kuma-seeder-config/host-monitors.json")
+        .expect("the monitor list is written");
+    assert!(
+        body.contains("host · kyu") && body.contains("10.10.10.9"),
+        "the adopted native stack is on the list with its derived address: {}",
+        body
+    );
+    assert!(
+        body.contains("host · syncthing"),
+        "and the deployed stack still is: {}",
+        body
     );
 }
 
@@ -2736,4 +2829,121 @@ fn a_template_name_reports_the_os_it_was_baked_from() {
         os_slug("local:vztmpl/something_1_amd64.tar.zst"),
         "something"
     );
+}
+
+/// gap-11 · the deploy renders the gateway's syslog receiver into the one
+/// file Alloy reads, and puts Alloy back to reading that one file.
+///
+/// On 2026-09-18 the receiver lived in a second file on CT 104 and Alloy was
+/// switched to directory mode by hand so it would load it. A deploy that
+/// only rewrote `config.alloy` would have left both in place: the extra file
+/// loaded beside the rendered one, and — once the receiver is rendered too —
+/// the same component declared twice, which Alloy refuses to start on. So
+/// the step restores single-file mode and sweeps the directory BEFORE it
+/// restarts the service.
+#[tokio::test]
+async fn a_gateway_deploy_renders_the_receiver_and_restores_single_file_mode() {
+    use homelab_core::manifest::SyslogReceiver;
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(104, "gateway");
+    sp.gateway_route = None;
+    sp.manifest.syslog_receivers = vec![SyslogReceiver {
+        host: "opnsense".into(),
+        listen: "0.0.0.0:1514".into(),
+        protocol: "udp".into(),
+        format: "rfc5424".into(),
+    }];
+    let mut c = ctx(&exec, &sink, &journal);
+    c.loki_url = Some("http://10.10.10.4:3100".into());
+    let report = deploy(&c, &sp).await;
+    assert!(report.ok, "{:?}", report);
+
+    // The mock keeps pushed content under its staging path (T74), which is
+    // derived from the destination, so the rendered file is read back there.
+    let staged =
+        homelab_core::ops::util::staging_path(104, homelab_core::ops::logshipper::CONFIG_PATH);
+    let rendered = exec
+        .file(&staged)
+        .expect("the deploy renders the shipper config");
+    assert!(
+        rendered.contains("loki.source.syslog \"syslog_opnsense\""),
+        "{}",
+        rendered
+    );
+    assert!(rendered.contains("0.0.0.0:1514"), "{}", rendered);
+
+    let calls = exec.calls();
+    let restore = calls
+        .iter()
+        .position(|c| c.contains("restored-single-file-mode"))
+        .expect("single-file mode is restored on every deploy");
+    let restart = calls
+        .iter()
+        .position(|c| c.contains("systemctl restart alloy"))
+        .expect("alloy is restarted after a changed config");
+    assert!(
+        restore < restart,
+        "the sweep must come before the restart, or Alloy starts on two copies of the receiver"
+    );
+}
+
+/// gap-12 · a deploy fetches only what is missing; it never replaces an
+/// image that is already there.
+///
+/// The `start apps` step used to `compose pull` every app on every deploy,
+/// so a deploy typed to change one config line lifted traefik, crowdsec,
+/// grafana, cloudflared and goaccess to whatever `latest` meant that day —
+/// five apps the update policy marks `manual` because a silent failure there
+/// is expensive, and without the health check and rollback the nightly
+/// update has. Kenny, 2026-09-19: "Alleen wat ontbreekt". Updating stays
+/// where the rollback is; deploying deploys.
+mod deploy_pulls_only_what_is_missing {
+    use super::*;
+
+    async fn run(images_answer: Option<&str>) -> MockExecutor {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        if let Some(a) = images_answer {
+            exec.respond_always("compose config --images", CmdOutput::ok(a));
+        }
+        let sink = VecSink::new();
+        let journal = NullJournal;
+        let sp = spec(110, "syncthing");
+        let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+        assert!(report.ok, "{:?}", report);
+        exec
+    }
+
+    #[tokio::test]
+    async fn an_image_that_is_present_is_not_pulled_and_the_app_still_comes_up() {
+        let exec = run(Some("present syncthing/syncthing:latest\n")).await;
+        assert!(
+            exec.calls_containing("compose pull").is_empty(),
+            "a present image is left exactly as it is: {:?}",
+            exec.calls_containing("compose")
+        );
+        assert!(
+            !exec.calls_containing("compose up -d").is_empty(),
+            "the app is still started"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_image_that_is_missing_is_pulled_as_before() {
+        let exec = run(Some("missing syncthing/syncthing:latest\n")).await;
+        assert_eq!(exec.calls_containing("compose pull").len(), 1);
+    }
+
+    /// Standing rule 12: defaults fail closed. Here "closed" is the old
+    /// behaviour — when the container gives no usable answer about what it
+    /// holds, the deploy pulls rather than starting an app on an image it
+    /// only assumed was there.
+    #[tokio::test]
+    async fn no_answer_about_the_images_means_pull() {
+        let exec = run(None).await;
+        assert_eq!(exec.calls_containing("compose pull").len(), 1);
+    }
 }

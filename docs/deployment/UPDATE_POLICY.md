@@ -47,6 +47,23 @@ does not understand. It does **not** catch a release that starts cleanly and
 does the wrong thing. For services on the alert path that is the failure that
 matters, which is why they are `manual`.
 
+## A deploy fetches only what is missing (amendment, 2026-09-19)
+
+Decided by Kenny in the gap-12 mini-round. Until then the `start apps` step
+of `homelab deploy` ran `docker compose pull` for every app on every deploy,
+which is a second road to the same containers that this document never
+mentioned — and one without the health check and rollback the nightly run
+has. Measured on 2026-09-18: a gateway deploy would have replaced all five
+`manual` apps there (traefik, crowdsec, grafana, cloudflared, goaccess) to
+lift one Alloy line.
+
+The rule now: **a deploy pulls an image only when the container does not
+have it, and never replaces one that is there.** `auto` apps are refreshed
+by the nightly run within a day, with its rollback; `manual` apps only by
+`homelab update`. A fresh container still gets everything, through the
+registry cache with its fallback. When the container cannot say what it
+holds, the deploy pulls — the old behaviour — rather than assume.
+
 ## Jellyfin, and never during a stream
 
 O10: before updating Jellyfin the orchestrator asks its API which sessions are
@@ -61,6 +78,25 @@ whether someone is watching were the conditions in which it said go ahead.
 Blocked: the API key in `/opt/jellyfin/.env` on CT 106 is refused. Measured
 three ways on 2026-08-30 — `Authorization: MediaBrowser Token`,
 `X-Emby-Token` and `?api_key=` all return 401 (F32).
+
+## Who owns the updates of the native services (decided 2026-09-19)
+
+Kenny, open-items review: the question of B1/F26 is answered by use. The
+orchestrator owns the recurring updates of **kyu, kyu-runner and
+http-switchboard** through `homelab update-native` — release fetched, checksum
+verified, installed with a rollback copy, rolled back when the new version does
+not become healthy; proven live on 2026-09-11 (three services, NRestarts=0).
+**almanac and latch update themselves** (almanac keeps its previous binary and
+reverts; latch is minisign-signed and not a deployed service); the orchestrator
+observes and does not update them. **Built 2026-09-20 (B1):** every
+`service.yml` carries `update_policy: auto | manual` (default manual). The
+nightly round runs `release_update` for the `auto` ones — the latest release's
+SHA256SUMS is fetched from GitHub by the host itself, compared with the
+installed binary's checksum, and only a differing asset is downloaded,
+verified on the host and installed through the same staged, glibc-checked,
+rollback-armed path as `install-native`. `homelab release-update-native
+<stack>` runs it on demand. kyu and kyu-runner are `auto`; http-switchboard
+and almanac are `manual`, each with its reason in its file.
 
 ## Kenny's own Rust services
 

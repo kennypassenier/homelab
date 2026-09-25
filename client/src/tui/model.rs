@@ -266,6 +266,9 @@ pub struct Model {
     pub shell_input: String,
     pub shell_lines: Vec<String>,
     pub shell_waiting: bool,
+    /// T85: staged-binary commands still on the wire ahead of a deploy. Their
+    /// answers feed the focus instead of closing it.
+    pub staging_pending: usize,
 
     /// G8 settings tab: last received host config, edit cursor, dirty flag,
     /// and the webhook text-edit buffer (None = not editing).
@@ -325,6 +328,7 @@ impl Model {
             shell_input: String::new(),
             shell_lines: Vec::new(),
             shell_waiting: false,
+            staging_pending: 0,
             settings: None,
             settings_row: 0,
             settings_dirty: false,
@@ -534,6 +538,29 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                     }
                     return;
                 }
+                // T85: a staged binary's answer belongs to the deploy that
+                // follows it — it feeds the focus and does not close it. A
+                // refused stage closes it as a failure and drops the deploy
+                // still queued behind it, so nothing installs half a stack.
+                if model.staging_pending > 0 {
+                    model.staging_pending -= 1;
+                    if let Some(focus) = model.focus.as_mut() {
+                        focus.feed.push(LogRow {
+                            level: LogLevel::Info,
+                            source: "HOST".into(),
+                            msg: format!("staging :: {}", resp.message),
+                        });
+                        if !resp.ok {
+                            focus.done = true;
+                            focus.ok = false;
+                            focus.result = resp.message.clone();
+                            model.outbox.clear();
+                            model.staging_pending = 0;
+                            model.status_line = "deploy NOT started — staging failed".into();
+                        }
+                    }
+                    return;
+                }
                 if let Some(focus) = model.focus.as_mut() {
                     if !focus.done {
                         focus.done = true;
@@ -554,6 +581,26 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
             }
         },
     }
+}
+
+/// T85: queue a deploy the way the command line does it — every native
+/// binary on its own message first, then the deploy with the map emptied,
+/// which the host fills back in from what was staged. Three binaries in one
+/// message measured 94.7 MiB against a 64 MiB frame (F303).
+fn queue_deploy(model: &mut Model, mut spec: Box<homelab_proto::DeploySpec>) {
+    let staged: Vec<(String, String)> = std::mem::take(&mut spec.native_binaries)
+        .into_iter()
+        .collect();
+    for (unit, b64) in staged {
+        model.outbox.push(Command::StageNativeBinary {
+            stack: spec.manifest.stack_name.clone(),
+            unit: unit.clone(),
+            binary_b64: b64,
+        });
+        model.staging_pending += 1;
+        spec.native_binaries.insert(unit, String::new());
+    }
+    model.outbox.push(Command::DeployStack(spec));
 }
 
 fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
@@ -630,7 +677,7 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                         ok: false,
                         result: String::new(),
                     });
-                    model.outbox.push(Command::DeployStack(plan.spec));
+                    queue_deploy(model, plan.spec);
                 }
             }
             _ => {}
@@ -1254,6 +1301,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        syslog_receivers: vec![],
         natives: Vec::new(),
         stack_name: stack.name.clone(),
         vmid: stack.vmid,
@@ -1551,7 +1599,7 @@ fn start_deploy(model: &mut Model) {
                 ok: false,
                 result: String::new(),
             });
-            model.outbox.push(Command::DeployStack(Box::new(spec)));
+            queue_deploy(model, Box::new(spec));
         }
         Err(e) => model.status_line = e,
     }

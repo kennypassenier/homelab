@@ -1436,6 +1436,7 @@ port = 5003
                 retention: None,
                 data_mounts: Vec::new(),
                 native_only: false,
+                syslog_receivers: vec![],
                 natives: Vec::new(),
                 stack_name: "x".into(),
                 vmid: 108,
@@ -2152,6 +2153,9 @@ async fn run_backup_batch(
         limit
     );
     let _guard = state.op_lock.lock().await;
+    // M-T75: measured, not predicted — the line the morning reads.
+    let phase_started = std::time::Instant::now();
+    let stacks_in_phase = jobs.len();
     let results: Vec<(String, NightBackup)> = futures_util::stream::iter(jobs)
         .map(|job| async move {
             let name = job.stack.clone();
@@ -2194,6 +2198,14 @@ async fn run_backup_batch(
         .buffer_unordered(limit)
         .collect()
         .await;
+    info!(
+        "{}",
+        homelab_core::ops::backup::phase_duration_line(
+            phase_started.elapsed().as_secs(),
+            stacks_in_phase,
+            limit
+        )
+    );
     results.into_iter().collect()
 }
 
@@ -2344,12 +2356,29 @@ async fn scheduler_loop(state: AppState) {
                     .cloned()
                     .unwrap_or(NightBackup::Failed);
                 let mut update_ok = true;
+                let applied = Some(st.applied_at);
+                // B1: the orchestrator's own release update, for the
+                // services whose policy hands it to the orchestrator.
+                for native in st
+                    .natives
+                    .iter()
+                    .filter(|n| n.update_policy == homelab_core::native::UpdatePolicy::Auto)
+                {
+                    let native = native.clone();
+                    let r = run_mutating_op(&state, &exec, 0, "scheduled-release-update", |ctx| {
+                        Box::pin(async move {
+                            homelab_core::ops::native::release_update(ctx, &native).await
+                        })
+                    })
+                    .await;
+                    update_ok &= r.ok;
+                }
                 for native in st.natives.clone() {
                     let n2 = native.clone();
                     let r = run_mutating_op(&state, &exec, 0, "scheduled-update-native", |ctx| {
-                        Box::pin(
-                            async move { homelab_core::ops::native::update_native(ctx, &n2).await },
-                        )
+                        Box::pin(async move {
+                            homelab_core::ops::native::update_native(ctx, &n2, applied).await
+                        })
                     })
                     .await;
                     update_ok &= r.ok;
@@ -3039,14 +3068,16 @@ where
 async fn native_from_state(
     state_dir: &str,
     stack: &str,
-) -> Result<Vec<homelab_core::native::NativeServiceManifest>, String> {
+) -> Result<(Vec<homelab_core::native::NativeServiceManifest>, u64), String> {
     let store = homelab_core::state::StateStore::new(&RealExecutor, state_dir);
     let snapshot = store
         .load()
         .await
         .map_err(|e| format!("state unreadable: {}", e))?;
     match snapshot.stacks.get(stack) {
-        Some(st) if st.is_native() => Ok(st.natives.clone()),
+        // The timestamp rides along so a skip can say how old the copy it
+        // read is — the difference between a decision and a stale field.
+        Some(st) if st.is_native() => Ok((st.natives.clone(), st.applied_at)),
         Some(_) => Err(format!(
             "stack '{}' is a compose stack, not a native service :: use the regular backup/update verbs",
             stack
@@ -3060,529 +3091,46 @@ async fn native_from_state(
 
 /// Y4: read off the machine what the pure comparison needs. Kept separate so
 /// the judgement stays testable without a fleet.
-/// F184: total RAM, memory promised to guests, and swap in use — the three
-/// numbers that decide whether "give this container more memory" is advice
-/// or nonsense. None when any of them cannot be read, which is deliberately
-/// not the same as a healthy host.
-async fn read_host_memory(exec: &RealExecutor) -> Option<(u32, u32, u32, u32)> {
-    let out = exec
-        .run(&Cmd::new(
-            "sh",
-            &[
-                "-c",
-                // free gives total and swap; pct/qm give what is promised.
-                "free -m | awk '/^Mem:/{print $2} /^Swap:/{print $3\" \"$2}'; \
-                 pct list 2>/dev/null | awk 'NR>1{print $1}' | \
-                   xargs -r -n1 pct config 2>/dev/null | awk '/^memory:/{s+=$2} END{print s+0}'; \
-                 qm list 2>/dev/null | awk 'NR>1{s+=$4} END{print s+0}'",
-            ],
-            60,
-        ))
-        .await
-        .ok()?;
-    let n: Vec<&str> = out.stdout.split_whitespace().collect();
-    // total, swap_used, swap_total, lxc_committed, vm_committed
-    if n.len() < 5 {
-        return None;
-    }
-    let p = |i: usize| n.get(i)?.parse::<u32>().ok();
-    Some((p(0)?, p(3)? + p(4)?, p(1)?, p(2)?))
-}
-
+///
+/// G6 (T79): the gathering itself now lives in `homelab_core::ops::facts`,
+/// behind an executor, with tests; this is the host's thin adapter that
+/// hands it the configuration and logs what it measured.
 async fn gather_live_facts(
     exec: &RealExecutor,
     state: &AppState,
     stack_files: &[(String, u16)],
 ) -> homelab_core::ops::fleetcheck::LiveFacts {
-    use homelab_core::executor::{Cmd, Executor};
-    // O1: what the router (and anything else outside this suite) uploaded
-    // last night. Read through the rclone remote that already exists for the
-    // restic repositories — no new credential, no new timer.
-    let mut watched = Vec::new();
-    for w in &state.config.watched_backups {
-        let out = exec
-            .run(&Cmd::new(
-                "sh",
-                &[
-                    "-c",
-                    &format!(
-                        "rclone lsjson --files-only '{}' 2>&1 | \
-                         sed -n 's/.*\"ModTime\":\"\\([^\"]*\\)\".*/\\1/p' | sort | tail -1",
-                        w.rclone_path
-                    ),
-                ],
-                180,
-            ))
-            .await;
-        let mut fact = homelab_core::ops::fleetcheck::WatchedBackupFact {
-            name: w.name.clone(),
-            max_age_s: w.max_age_hours * 3600,
-            ..Default::default()
-        };
-        match out {
-            Err(e) => fact.error = Some(e.to_string()),
-            Ok(o) if !o.success() => fact.error = Some(o.stderr.trim().to_string()),
-            Ok(o) => {
-                let newest = o.stdout.trim().to_string();
-                if !newest.is_empty() {
-                    // rclone prints RFC3339; the host has `date` and this
-                    // avoids a chrono dependency in a place that has none.
-                    if let Ok(d) = exec
-                        .run(&Cmd::new("date", &["-d", &newest, "+%s"], 30))
-                        .await
-                    {
-                        if let Ok(t) = d.stdout.trim().parse::<u64>() {
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|x| x.as_secs())
-                                .unwrap_or(0);
-                            fact.newest_age_s = Some(now.saturating_sub(t));
-                        }
-                    }
-                }
-            }
-        }
-        watched.push(fact);
-    }
-    let now_unix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // T49: the seeder's verdict, read from the file it writes beside the
-    // generated monitor list. Same directory, so there is no second setting
-    // to keep in step with the first.
-    let seed = match state.config.kuma_monitors_file.as_deref() {
-        None => homelab_core::ops::fleetcheck::SeedFact {
-            judged: true,
-            age_s: Some(0),
-            ..Default::default()
-        },
-        Some(monitors) => {
-            let dir = monitors.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
-            let path = format!("{}/last-seed.json", dir);
-            match exec.read_file(&path).await {
-                Err(e) => homelab_core::ops::fleetcheck::SeedFact {
-                    error: Some(format!("{}: {}", path, e)),
-                    ..Default::default()
-                },
-                Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
-                    Err(e) => homelab_core::ops::fleetcheck::SeedFact {
-                        error: Some(format!("{} is not JSON: {}", path, e)),
-                        ..Default::default()
-                    },
-                    Ok(v) => homelab_core::ops::fleetcheck::SeedFact {
-                        stale: v["stale"]
-                            .as_array()
-                            .map(|a| {
-                                a.iter()
-                                    .filter_map(|x| x.as_str().map(str::to_string))
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        age_s: v["at"].as_u64().map(|at| now_unix.saturating_sub(at)),
-                        judged: v["judged"].as_bool().unwrap_or(false),
-                        error: None,
-                    },
-                },
-            }
-        }
+    use homelab_core::ops::facts::{FactsInputs, WatchedBackupSpec};
+    let inp = FactsInputs {
+        watched_backups: state
+            .config
+            .watched_backups
+            .iter()
+            .map(|w| WatchedBackupSpec {
+                name: w.name.clone(),
+                rclone_path: w.rclone_path.clone(),
+                max_age_hours: w.max_age_hours,
+            })
+            .collect(),
+        kuma_monitors_file: state.config.kuma_monitors_file.clone(),
+        state_dir: state.config.state_dir.clone(),
+        gateway_vmid: state.config.safety.gateway_vmid,
+        gateway_routes_dir: state.config.safety.gateway_routes_dir.clone(),
+        no_touch: state.config.safety.no_touch.to_vec(),
+        prometheus_url: state.config.prometheus_url.clone(),
+        loki_url: state.config.loki_url.clone(),
+        logs_window: sane_window(&state.config.logs_window),
+        grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
+        now_unix: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
     };
-
-    let mut facts = homelab_core::ops::fleetcheck::LiveFacts {
-        seed,
-        stack_files: stack_files.to_vec(),
-        watched_backups: watched,
-        // F184: the host's own numbers, so a per-container remedy cannot
-        // advise memory the machine does not have.
-        host_memory: read_host_memory(exec).await,
-        ..Default::default()
-    };
-    // R13: how full are the pools the libraries actually live on.
-    //
-    // Every other disk number in this suite is a container's own rootfs. CT
-    // 106's is 80 GB; the films beside it are on 16.4 TB of ZFS that nothing
-    // measured. Recyclarr replacing 27 MB/min releases with ones near Kenny's
-    // 95 MB/min preference takes the same 943 films from 4.1 TB to roughly
-    // 10 TB, so "somebody will notice" stopped being a plan.
-    //
-    // The paths come from the stacks' own `data_mounts` — the borrowed
-    // datasets each manifest declares — so this watches what is declared
-    // rather than a list somebody has to keep in step by hand. One `df` for
-    // all of them, keyed by filesystem: two stacks that name different paths
-    // on one pool are one pool.
-    if let Ok(snapshot) =
-        homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir)
-            .load()
-            .await
-    {
-        let mut declared: Vec<(String, String)> = Vec::new();
-        for (name, st) in &snapshot.stacks {
-            if let Some(m) = &st.manifest {
-                for dm in &m.data_mounts {
-                    declared.push((dm.host_path.clone(), name.clone()));
-                }
-            }
-        }
-        if !declared.is_empty() {
-            // Each line carries the path we ASKED about, printed by us, not
-            // df's own first column. Reading df's rows positionally looks
-            // simpler and is wrong: a path that does not exist produces no
-            // row at all, every later row shifts up one, and the pool of one
-            // stack gets reported under the name of another — silently, with
-            // plausible numbers.
-            // Unique paths: two stacks that declare the same mount are one
-            // question for df, and `pool_facts_from_df` attributes it to both.
-            let mut paths: Vec<&String> = declared.iter().map(|(p, _)| p).collect();
-            paths.sort();
-            paths.dedup();
-            let script = paths
-                .iter()
-                .map(|p| {
-                    format!(
-                        "printf '%s ' '{}'; df -Pk '{}' 2>/dev/null | tail -n +2 | head -1; echo",
-                        p, p
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("; ");
-            if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 60)).await {
-                facts.pools =
-                    homelab_core::ops::fleetcheck::pool_facts_from_df(&out.stdout, &declared);
-
-                // Say what was measured, even when nothing is wrong.
-                //
-                // A pool check that only speaks up when a pool is filling is
-                // indistinguishable from a pool check that reads nothing at
-                // all — which is F263, the fault this project keeps finding:
-                // an assertion about existence passes on the wrong value. The
-                // silence has to be provably the good kind.
-                info!(
-                    "fleet check: {} data pool(s) measured — {}",
-                    facts.pools.len(),
-                    facts
-                        .pools
-                        .iter()
-                        .map(|p| format!(
-                            "{} {}% full, {} GB free ({})",
-                            p.path,
-                            p.used_pct,
-                            p.free_gb,
-                            p.stacks.join(", ")
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(" · ")
-                );
-            }
-        }
-    }
-    if let Ok(out) = exec.run(&Cmd::new("pct", &["list"], 30)).await {
-        for line in out.stdout.lines().skip(1) {
-            let mut cols = line.split_whitespace();
-            if let (Some(vmid), Some(_status)) = (cols.next(), cols.next()) {
-                if let (Ok(vmid), Some(name)) = (vmid.parse::<u16>(), cols.last()) {
-                    facts.containers.push((vmid, name.to_string()));
-                }
-            }
-        }
-    }
-    // Gateway routes: read every fragment, pull out the address it forwards
-    // to, and ask whether anything is listening there. A route that resolves
-    // to nothing is only ever found by someone who needs it.
-    let gw = state.config.safety.gateway_vmid.to_string();
-    let dir = &state.config.safety.gateway_routes_dir;
-    let script = format!(
-        "for f in {}/*.yml; do echo \"### $(basename $f)\"; cat \"$f\"; done 2>/dev/null",
-        dir
-    );
-    if let Ok(out) = exec
-        .run(&Cmd::new(
-            "pct",
-            &["exec", &gw, "--", "sh", "-c", &script],
-            60,
-        ))
-        .await
-    {
-        let mut current = String::new();
-        for line in out.stdout.lines() {
-            if let Some(name) = line.strip_prefix("### ") {
-                current = name.to_string();
-                continue;
-            }
-            let t = line.trim();
-            let target = t
-                .strip_prefix("- url:")
-                .or_else(|| t.strip_prefix("- address:"))
-                .map(|v| v.trim().trim_matches('"').to_string());
-            if let Some(target) = target {
-                let hostport =
-                    homelab_core::ops::fleetcheck::probe_hostport(target.trim_matches('"'));
-                // bash, not sh: /dev/tcp is a bash feature and the shell in
-                // these containers is dash, which reports "Directory
-                // nonexistent" for every address. The first run of this check
-                // called every route in the house dead, Jellyfin included —
-                // a check that always fires is worse than none, because it
-                // teaches you to stop reading it.
-                let probe = format!(
-                    "timeout 3 bash -c 'echo > /dev/tcp/{}' 2>/dev/null && echo up || echo down",
-                    hostport
-                );
-                let answered = exec
-                    .run(&Cmd::new(
-                        "pct",
-                        &["exec", &gw, "--", "sh", "-c", &probe],
-                        15,
-                    ))
-                    .await
-                    .map(|o| o.stdout.contains("up"))
-                    .unwrap_or(false);
-                facts.routes.push(homelab_core::ops::fleetcheck::RouteFact {
-                    file: current.clone(),
-                    target,
-                    answered,
-                });
-            }
-        }
-    }
-
-    // G3: what each managed container's resources look like right now.
-    //
-    // One `pct exec` per container emitting key=value lines, rather than six
-    // round trips each. Every value has a fallback of 0 so a container that
-    // answers half the questions still reports the half it knows — a check
-    // that gives up on partial data is a check nobody trusts.
-    const PROBE: &str = concat!(
-        "df -P / | awk 'NR==2{gsub(\"%\",\"\",$5); print \"disk=\"$5}'; ",
-        "free -m | awk '/^Mem:/{if($2>0) printf \"mem=%d\\n\", ($3*100)/$2} /^Swap:/{print \"swap=\"$3}'; ",
-        "echo \"journal=$(du -sm /var/log/journal 2>/dev/null | cut -f1)\"; ",
-        "echo \"dockerlogs=$(du -sm /var/lib/docker/containers 2>/dev/null | cut -f1)\"; ",
-        // Both halves of the guard must be present. Checking only one is how
-        // a half-guarded container reads as guarded.
-        "if ls /etc/systemd/journald.conf.d/*.conf >/dev/null 2>&1 && ",
-        "grep -q max-size /etc/docker/daemon.json 2>/dev/null; ",
-        "then echo guards=1; else echo guards=0; fi"
-    );
-    // Every container on the hypervisor except the untouchable ones — not
-    // only the stacks this orchestrator has adopted.
-    //
-    // The first version read host state instead, which is the defensible
-    // choice for anything that ACTS. It is the wrong one for a check that
-    // only looks: it covered 5 of the 9 containers here, and the four it
-    // could not see (104, 105, 106, 111) are the oldest and fullest on the
-    // machine. That is the same blind spot as the guards themselves —
-    // a safeguard that quietly applies to almost nothing.
-    //
-    // The no-touch list is still honoured absolutely, so the report never
-    // invites action on a guest that is out of bounds.
-    let no_touch = &state.config.safety.no_touch;
-    for (vmid, hostname) in facts
-        .containers
-        .iter()
-        .filter(|(v, _)| !no_touch.contains(v))
-        .map(|(v, h)| (*v, h.clone()))
-        .collect::<Vec<_>>()
-    {
-        let vs = vmid.to_string();
-        let Ok(out) = exec
-            .run(&Cmd::new(
-                "pct",
-                &["exec", &vs, "--", "sh", "-c", PROBE],
-                45,
-            ))
-            .await
-        else {
-            continue;
-        };
-        let mut g = homelab_core::ops::fleetcheck::GrowthFact {
-            vmid,
-            hostname,
-            ..Default::default()
-        };
-        // Did the probe actually run inside the container? The `guards` line
-        // is unconditional, so its absence means the shell never got there —
-        // a stopped guest, a template, an exec that failed.
-        let mut probed = false;
-        for line in out.stdout.lines() {
-            let Some((k, v)) = line.trim().split_once('=') else {
-                continue;
-            };
-            match k {
-                "disk" => g.disk_used_pct = v.parse().unwrap_or(0),
-                "mem" => g.mem_used_pct = v.parse().unwrap_or(0),
-                "swap" => g.swap_used_mb = v.parse().unwrap_or(0),
-                "journal" => g.journal_mb = v.parse().unwrap_or(0),
-                "dockerlogs" => g.docker_logs_mb = v.parse().unwrap_or(0),
-                "guards" => {
-                    g.guards = v == "1";
-                    probed = true;
-                }
-                _ => {}
-            }
-        }
-        // Not examined is not the same as examined and found wanting. The
-        // first live run of the widened check reported the three golden
-        // templates (997, 998, 999) as having no runaway guards. They have
-        // them — baked in at build time — but they are stopped, so `pct
-        // exec` produced nothing and every field kept its zero default,
-        // which read as an unguarded container. A check that invents a
-        // finding out of a failed measurement is worse than one that misses:
-        // it spends the reader's trust to say something false.
-        if probed {
-            facts.growth.push(g);
-        }
-    }
-
-    // W3: the configured shape of every managed container, from `pct config`
-    // rather than from inside it — a container that does not start on boot is
-    // exactly the one you find stopped after the reboot that should have
-    // started it, and `pct exec` cannot ask a stopped guest anything.
-    for (vmid, hostname) in facts
-        .containers
-        .iter()
-        .filter(|(v, _)| !no_touch.contains(v))
-        .map(|(v, h)| (*v, h.clone()))
-        .collect::<Vec<_>>()
-    {
-        let vs = vmid.to_string();
-        let Ok(out) = exec.run(&Cmd::new("pct", &["config", &vs], 30)).await else {
-            continue;
-        };
-        if !out.success() {
-            continue;
-        }
-        facts.boot.push(homelab_core::ops::fleetcheck::BootFact {
-            vmid,
-            hostname,
-            live: homelab_core::ops::reconcile::parse(&out.stdout),
-        });
-    }
-
-    // Is each stack's safety net actually attached? The most expensive class
-    // of failure here is not a service falling over, it is a mechanism that
-    // runs, reports success and is wired to nothing — see CoverageFact.
-    //
-    // Both questions are skipped when their address is not configured. An
-    // unasked question must never become a finding: that is how a check earns
-    // the right to be believed.
-    let prom = state.config.prometheus_url.clone();
-    let loki = state.config.loki_url.clone();
-    let window = sane_window(&state.config.logs_window);
-    // Which dashboards Grafana actually holds, asked once rather than per
-    // stack. Grafana is the reader; the deploy is the writer, and the writer
-    // has been reporting success into a dead directory (F149). Only asked
-    // when a dashboards directory is configured — an unasked question must
-    // never become a finding.
-    let provisioned: Option<Vec<String>> = match state.config.grafana_dashboards_dir.as_deref() {
-        Some(dir) => grafana_generated_uids(exec, state.config.safety.gateway_vmid, dir).await,
-        None => None,
-    };
-    if prom.is_some() || loki.is_some() {
-        if let Ok(snapshot) =
-            homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir)
-                .load()
-                .await
-        {
-            for (name, st) in &snapshot.stacks {
-                let mut c = homelab_core::ops::fleetcheck::CoverageFact {
-                    stack: name.clone(),
-                    ..Default::default()
-                };
-                if let Some(base) = prom.as_deref() {
-                    let q = format!(
-                        "{}/api/v1/query?query=max(up%7Bstack%3D%22{}%22%7D)",
-                        base.trim_end_matches('/'),
-                        name
-                    );
-                    c.scraped = Some(
-                        exec.run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
-                            .await
-                            .map(|o| o.stdout.contains("\"1\""))
-                            .unwrap_or(false),
-                    );
-                }
-                // Only ask about logs where logs are expected. A native
-                // service with no promtail ships none by design, and a
-                // finding it can never clear is worse than no finding.
-                let ships_logs = st
-                    .manifest
-                    .as_ref()
-                    .map(|m| m.apps.iter().any(|a| a == "promtail"))
-                    .unwrap_or(false);
-                if let (Some(base), true) = (loki.as_deref(), ships_logs) {
-                    // `container_name=~".+"` is not decoration. F79 was not
-                    // silence: lines kept arriving for months while promtail
-                    // read `attrs.name`, a field docker does not write, so
-                    // every line landed without the label the dashboards
-                    // query by. Counting lines would have passed throughout.
-                    // Counting LABELLED lines is the question that was
-                    // actually being got wrong.
-                    let q = format!(
-                        "{}/loki/api/v1/query?query=sum(count_over_time(%7Bstack%3D%22{}%22%2Ccontainer_name%3D~%22.%2B%22%7D%5B{}%5D))",
-                        base.trim_end_matches('/'),
-                        name,
-                        window
-                    );
-                    c.logs_recent = Some(
-                        exec.run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
-                            .await
-                            .map(|o| o.stdout.contains("\"value\""))
-                            .unwrap_or(false),
-                    );
-                }
-                if let Some(uids) = provisioned.as_ref() {
-                    let uid = format!("homelab-{}", name);
-                    c.dashboard_provisioned = Some(uids.iter().any(|u| u == &uid));
-                }
-                facts.coverage.push(c);
-            }
-        }
+    let (facts, notes) = homelab_core::ops::facts::gather_live_facts(exec, &inp, stack_files).await;
+    for n in notes {
+        info!("{}", n);
     }
     facts
-}
-
-/// The uids of the generated dashboards Grafana is actually serving.
-///
-/// Asked of Grafana over its own API, with the credentials read from the
-/// app's `.env` at the moment of asking — the same reasoning as Jellyfin's
-/// key (F131): a credential handed to a check goes stale without telling
-/// anybody, and the service itself is the only source that cannot.
-///
-/// The `.env` path is DERIVED from the configured dashboards directory
-/// rather than typed, because a second typed path is exactly what caused the
-/// fault this question exists to catch. `/opt/gateway/grafana/dashboards-generated`
-/// → `/opt/gateway/grafana/.env`.
-///
-/// `None` means the question could not be asked at all (no parent directory,
-/// the container unreachable, Grafana refusing) — never an empty answer, so a
-/// gateway that is down does not turn every stack into a finding.
-async fn grafana_generated_uids(
-    exec: &dyn homelab_core::executor::Executor,
-    gateway_vmid: u16,
-    dashboards_dir: &str,
-) -> Option<Vec<String>> {
-    let app_dir = std::path::Path::new(dashboards_dir).parent()?.to_str()?;
-    let script = format!(
-        "U=$(grep -h GRAFANA_GF_ADMIN_USER {0}/.env | cut -d= -f2);          P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD {0}/.env | cut -d= -f2);          curl -s -m 15 -u \"$U:$P\" 'http://127.0.0.1:3000/api/search?tag=generated&limit=500'",
-        app_dir
-    );
-    let out = exec
-        .run(&Cmd::new(
-            "pct",
-            &["exec", &gateway_vmid.to_string(), "--", "sh", "-c", &script],
-            60,
-        ))
-        .await
-        .ok()?;
-    if !out.stdout.contains("\"uid\"") {
-        return None;
-    }
-    Some(
-        out.stdout
-            .split("\"uid\":\"")
-            .skip(1)
-            .filter_map(|rest| rest.split('"').next())
-            .map(str::to_string)
-            .collect(),
-    )
 }
 
 /// A backup is a backup, whoever asked for it. The scheduler recorded
@@ -3624,6 +3172,13 @@ fn render_findings(findings: &[homelab_core::ops::fleetcheck::Finding]) -> Strin
     s
 }
 
+/// T85: where a stack's binaries wait between `StageNativeBinary` and the
+/// `DeployStack` that installs them. Under the state directory (root-only,
+/// in no backup — a staged binary is re-fetchable and short-lived).
+fn staged_binaries_dir(state_dir: &str, stack: &str) -> String {
+    format!("{}/staged/{}", state_dir, stack)
+}
+
 async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
     let exec = RealExecutor;
     match req.command {
@@ -3647,11 +3202,86 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
-        Rpc::DeployStack(spec) => {
-            run_mutating_op(state, &exec, req.id, "deploy", |ctx| {
+        // T85: a native binary arrives on its own, before the deploy that
+        // installs it. Kept under the state directory, root-only, until the
+        // deploy consumes it; a name that is not a plain stack or unit name
+        // is refused before it can become a path.
+        Rpc::StageNativeBinary {
+            stack,
+            unit,
+            binary_b64,
+        } => {
+            let plain = |s: &str| {
+                !s.is_empty()
+                    && s.chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            };
+            if !plain(&stack) || !plain(&unit) {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!(
+                        "refusing to stage '{}' for '{}': stack and unit names are lowercase \
+                         [a-z0-9-] and nothing else",
+                        unit, stack
+                    ),
+                    deferred: None,
+                };
+            }
+            let dir = staged_binaries_dir(&state.config.state_dir, &stack);
+            let path = format!("{}/{}.b64", dir, unit);
+            let written = std::fs::create_dir_all(&dir)
+                .and_then(|_| std::fs::write(&path, binary_b64.as_bytes()))
+                .and_then(|_| {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                });
+            match written {
+                Ok(()) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!(
+                        "staged {} for {} ({} KiB of base64) — the next deploy of this stack \
+                         installs it",
+                        unit,
+                        stack,
+                        binary_b64.len() / 1024
+                    ),
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("could not stage {} for {}: {}", unit, stack, e),
+                    deferred: None,
+                },
+            }
+        }
+        Rpc::DeployStack(mut spec) => {
+            // T85: the binaries this deploy installs were staged one per
+            // message; fill them in here, and clear the staging area after
+            // the deploy whatever its outcome — a retry stages again.
+            let dir = staged_binaries_dir(&state.config.state_dir, &spec.manifest.stack_name);
+            let merged = homelab_core::ops::native::merge_staged_binaries(
+                &spec.manifest.natives,
+                &mut spec.native_binaries,
+                |unit| std::fs::read_to_string(format!("{}/{}.b64", dir, unit)).ok(),
+            );
+            if !merged.is_empty() {
+                info!(
+                    "deploy {}: {} staged binar{} taken up ({})",
+                    spec.manifest.stack_name,
+                    merged.len(),
+                    if merged.len() == 1 { "y" } else { "ies" },
+                    merged.join(", ")
+                );
+            }
+            let resp = run_mutating_op(state, &exec, req.id, "deploy", |ctx| {
                 Box::pin(async move { deploy(ctx, &spec).await })
             })
-            .await
+            .await;
+            let _ = std::fs::remove_dir_all(&dir);
+            resp
         }
         Rpc::DestroyStack {
             manifest,
@@ -3774,7 +3404,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         }
         Rpc::BackupNative { stack } => {
             match native_from_state(&state.config.state_dir, &stack).await {
-                Ok(services) => {
+                Ok((services, _)) => {
                     let tiers = state.settings.read().unwrap().retention.clone();
                     let cfg = homelab_core::ops::backup::BackupCfg {
                         tiers,
@@ -3819,7 +3449,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         }
         Rpc::UpdateNative { stack } => {
             match native_from_state(&state.config.state_dir, &stack).await {
-                Ok(services) => {
+                Ok((services, applied_at)) => {
+                    let stored_at = Some(applied_at);
                     let mut resp = RpcResponse {
                         id: req.id,
                         ok: true,
@@ -3829,10 +3460,45 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     for m in services {
                         let r = run_mutating_op(state, &exec, req.id, "update-native", |ctx| {
                             Box::pin(async move {
-                                homelab_core::ops::native::update_native(ctx, &m).await
+                                homelab_core::ops::native::update_native(ctx, &m, stored_at).await
                             })
                         })
                         .await;
+                        let failed = !r.ok;
+                        if resp.ok || failed {
+                            resp = r;
+                        }
+                        if failed {
+                            break;
+                        }
+                    }
+                    resp
+                }
+                Err(msg) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: msg,
+                    deferred: None,
+                },
+            }
+        }
+        Rpc::ReleaseUpdateNative { stack } => {
+            match native_from_state(&state.config.state_dir, &stack).await {
+                Ok((services, _)) => {
+                    let mut resp = RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: format!("no services on stack '{}'", stack),
+                        deferred: None,
+                    };
+                    for m in services {
+                        let r =
+                            run_mutating_op(state, &exec, req.id, "release-update-native", |ctx| {
+                                Box::pin(async move {
+                                    homelab_core::ops::native::release_update(ctx, &m).await
+                                })
+                            })
+                            .await;
                         let failed = !r.ok;
                         if resp.ok || failed {
                             resp = r;

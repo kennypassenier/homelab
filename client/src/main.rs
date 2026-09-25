@@ -28,6 +28,12 @@ const C_YELLOW: &str = "\x1b[33m";
 const C_RED: &str = "\x1b[31m";
 const C_DIM: &str = "\x1b[2m";
 
+/// Where the address in use came from, and the repository's pin — set once
+/// in `main`, read by `rpc`, which is called from every verb.
+static HOST_SOURCE: std::sync::OnceLock<homelab_client::repo_config::HostSource> =
+    std::sync::OnceLock::new();
+static REPO_PIN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
 fn die(msg: &str) -> ! {
     eprintln!("{}error:{} {}", C_RED, C_RESET, msg);
     std::process::exit(1);
@@ -114,8 +120,23 @@ async fn main() {
     // the user's own config, then the repository's `.env` when standing in
     // it. Reading, never writing: this file is where the token lives, not a
     // cache of it.
+    // feat-client-1 (Kenny, 2026-09-19): the address is a fact about the
+    // fleet and lives in the repository, `config/client.toml`; a value typed
+    // before the command still wins, the machine's env file comes after the
+    // repository, and the compiled-in default is the last resort.
+    let explicit_host = std::env::var("HOMELAB_HOST").ok();
     load_config_env();
-    let host = std::env::var("HOMELAB_HOST").unwrap_or_else(|_| "10.10.5.250:8443".into());
+    let repo_cfg = homelab_client::repo_config::load(
+        &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    )
+    .unwrap_or_else(|e| die(&e));
+    let (host, host_source) = homelab_client::repo_config::resolve_host(
+        explicit_host,
+        repo_cfg.as_ref().map(|(p, c)| (p.as_path(), c)),
+        std::env::var("HOMELAB_HOST").ok(),
+    );
+    let _ = HOST_SOURCE.set(host_source);
+    let _ = REPO_PIN.set(repo_cfg.as_ref().and_then(|(_, c)| c.pin.clone()));
     let token = std::env::var("HOMELAB_TOKEN").unwrap_or_default();
     let offline = args.iter().any(|a| a == "--offline" || a == "--demo");
     // Commands that never touch the network need no token: help, offline TUI,
@@ -173,7 +194,7 @@ async fn main() {
         // could take over a hand-built container and could not build one.
         "install-native" => {
             let dir = args.get(2).unwrap_or_else(|| {
-                die("usage: homelab install-native stacks/<name>[/<unit>] [<tag>]")
+                die("usage: homelab install-native stacks/<name>[/<unit>] [<tag> | --file <path>]")
             });
             let path = Path::new(dir).join("service.yml");
             let raw = std::fs::read_to_string(&path)
@@ -183,13 +204,21 @@ async fn main() {
             if let Err(problems) = homelab_core::native::validate_native(&m) {
                 die(&format!("service.yml invalid: {}", problems.join("; ")));
             }
-            let Some(repo) = m.release_repo.clone() else {
-                die(&format!(
+            // B7: `--file <path>` hands the bytes over from disk — the
+            // rollback drill's way of installing a fake service, good and
+            // then deliberately broken. A release stays the normal source.
+            let source =
+                homelab_client::release::install_source(&args[3..]).unwrap_or_else(|e| die(&e));
+            let from_file = matches!(source, homelab_client::release::InstallSource::File(_));
+            let repo = match m.release_repo.clone() {
+                Some(r) => r,
+                None if from_file => String::new(),
+                None => die(&format!(
                     "{} declares no release_repo — this service is adopt-only, and where its \
                      binary comes from is not written down anywhere. Add release_repo to its \
                      service.yml rather than installing by hand again",
                     m.unit
-                ));
+                )),
             };
             // The unit file lives beside the service file, or in the unit's
             // own directory when several services share one stack.
@@ -210,25 +239,41 @@ async fn main() {
                     ))
                 });
             let asset = m.asset_name().to_string();
-            let tag = match args.get(3).cloned() {
-                Some(t) => t,
-                None => homelab_client::release::latest_tag_of(&repo).unwrap_or_else(|| {
-                    die(&format!("no release found in {} (gh authenticated?)", repo))
-                }),
+            let binary_b64 = match source {
+                homelab_client::release::InstallSource::File(path) => {
+                    let (b64, sha) =
+                        homelab_client::release::stage_file(&path).unwrap_or_else(|e| die(&e));
+                    println!(
+                        "{}▶ install-native {} :: CT {} · from file {} (sha256 {}){}",
+                        C_CYAN, m.unit, m.vmid, path, sha, C_RESET
+                    );
+                    b64
+                }
+                homelab_client::release::InstallSource::Release(tag) => {
+                    let tag = match tag {
+                        Some(t) => t,
+                        None => {
+                            homelab_client::release::latest_tag_of(&repo).unwrap_or_else(|| {
+                                die(&format!("no release found in {} (gh authenticated?)", repo))
+                            })
+                        }
+                    };
+                    println!(
+                        "{}▶ install-native {} :: CT {} · {} {} from {}{}",
+                        C_CYAN, m.unit, m.vmid, asset, tag, repo, C_RESET
+                    );
+                    let b64 = homelab_client::release::stage_asset(&repo, &tag, &asset)
+                        .unwrap_or_else(|e| die(&e));
+                    println!(
+                        "{}✓ checksum verified — shipping over the line{}",
+                        C_GREEN, C_RESET
+                    );
+                    b64
+                }
             };
-            println!(
-                "{}▶ install-native {} :: CT {} · {} {} from {}{}",
-                C_CYAN, m.unit, m.vmid, asset, tag, repo, C_RESET
-            );
-            let binary_b64 = homelab_client::release::stage_asset(&repo, &tag, &asset)
-                .unwrap_or_else(|e| die(&e));
             if let Some(why) = homelab_client::version::too_large(binary_b64.len()) {
                 die(&why);
             }
-            println!(
-                "{}✓ checksum verified — shipping over the line{}",
-                C_GREEN, C_RESET
-            );
             rpc(
                 &host,
                 &token,
@@ -312,6 +357,20 @@ async fn main() {
                 &host,
                 &token,
                 Command::UpdateNative {
+                    stack: stack.clone(),
+                },
+            )
+            .await;
+        }
+        // B1: the orchestrator's own release update of a native stack, now.
+        "release-update-native" => {
+            let stack = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab release-update-native <stack>"));
+            rpc(
+                &host,
+                &token,
+                Command::ReleaseUpdateNative {
                     stack: stack.clone(),
                 },
             )
@@ -648,6 +707,43 @@ async fn main() {
                 spec.env.len(),
                 C_RESET
             );
+            // T85: each native binary goes over the link on its own, then the
+            // deploy follows with the map emptied — the host fills it back in
+            // from what was staged. Three binaries in one message measured
+            // 94.7 MiB against a 64 MiB frame (F303); one at a time never
+            // meets that ceiling, however many services a stack grows.
+            let mut spec = spec;
+            let staged: Vec<(String, String)> = spec
+                .native_binaries
+                .iter()
+                .map(|(u, b)| (u.clone(), b.clone()))
+                .collect();
+            for (unit, b64) in staged {
+                println!(
+                    "{}▶ staging {} ({} KiB of base64){}",
+                    C_DIM,
+                    unit,
+                    b64.len() / 1024,
+                    C_RESET
+                );
+                let ok = rpc_with(
+                    &host,
+                    &token,
+                    Command::StageNativeBinary {
+                        stack: spec.manifest.stack_name.clone(),
+                        unit: unit.clone(),
+                        binary_b64: b64,
+                    },
+                )
+                .await;
+                if !ok {
+                    die(&format!(
+                        "staging the binary of {} failed — deploy not started, nothing changed",
+                        unit
+                    ));
+                }
+                spec.native_binaries.insert(unit, String::new());
+            }
             rpc(&host, &token, Command::DeployStack(Box::new(spec))).await;
         }
         "backup" => {
@@ -932,7 +1028,7 @@ async fn main() {
                 "  homelab release-update              fetch the newest release and ship it (H7)"
             );
             println!(
-                "  homelab install-native stacks/<name>[/<unit>] [<tag>]  install a native service (O1)"
+                "  homelab install-native stacks/<name>[/<unit>] [<tag> | --file <path>]  install a native service from a release or a file (O1, B7)"
             );
             println!(
                 "  homelab template-build [vmid] [ver] [--privileged] [--base <vztmpl>]  golden template (M3)"
@@ -940,6 +1036,7 @@ async fn main() {
             println!("  homelab templates                   list the golden templates");
             println!("  homelab resize stacks/<name>        apply changed resources (H4)");
             println!("  homelab config                      show the host's settings (G8)");
+            println!("  homelab release-update-native <stack> install the latest release of each service (B1)");
             println!("  homelab backup-devices              fetch each device's own config now");
             println!(
                 "  homelab testplan                    regenerate docs/deployment/TEST_PLAN.md"
@@ -957,6 +1054,14 @@ async fn main() {
 }
 
 async fn rpc(host: &str, token: &str, command: Command) {
+    let ok = rpc_with(host, token, command).await;
+    std::process::exit(if ok { 0 } else { 1 });
+}
+
+/// One command over the link; `true` when the host reported it done and ok.
+/// T85 needed a caller that sends several commands in a row (one staged
+/// binary per message, then the deploy), so the exit moved to `rpc`.
+async fn rpc_with(host: &str, token: &str, command: Command) -> bool {
     // F303: the size guard lives HERE, where every command passes, and not in
     // the three call sites that happened to remember it.
     //
@@ -977,6 +1082,7 @@ async fn rpc(host: &str, token: &str, command: Command) {
     // Commands whose real payload arrives as a separate broadcast frame
     // (Config) may see RpcDone first — wait for the payload before exiting.
     let awaits_payload = matches!(command, Command::GetConfig);
+    let is_ping = matches!(command, Command::Ping);
     let mut payload_seen = false;
     let mut done: Option<bool> = None;
     let url = format!("wss://{}/api/ws", host);
@@ -989,8 +1095,27 @@ async fn rpc(host: &str, token: &str, command: Command) {
         format!("Bearer {}", token).parse().unwrap(),
     );
 
-    // A4: pin the host certificate (TOFU on first connect).
-    let pin = load_pin();
+    // A4: pin the host certificate (TOFU on first connect) — unless the
+    // repository names the fingerprint (feat-client-1), in which case a
+    // fresh machine pins that instead of trusting whatever answers first.
+    let decision = homelab_client::repo_config::reconcile_pin(
+        load_pin(),
+        REPO_PIN.get().and_then(|p| p.as_deref()),
+    )
+    .unwrap_or_else(|e| die(&e));
+    if decision.adopted_from_repo {
+        if let Some(fp) = decision.pin.as_deref() {
+            save_pin(fp);
+            eprintln!(
+                "{}● pinned host certificate SHA256:{} from {}{}",
+                C_YELLOW,
+                fp,
+                homelab_client::repo_config::REPO_FILE,
+                C_RESET
+            );
+        }
+    }
+    let pin = decision.pin;
     let first_connect = pin.is_none();
     let verifier = homelab_client::tls::PinnedVerifier::new(pin);
     let tls_config = rustls::ClientConfig::builder()
@@ -1049,6 +1174,13 @@ async fn rpc(host: &str, token: &str, command: Command) {
                     "{}● HOST v{} (proto {}) — link up{}",
                     C_GREEN, version, proto, C_RESET
                 );
+                // Only on ping: which door was knocked on, and who said so.
+                // The rest of the verbs stay quiet about it.
+                if is_ping {
+                    if let Some(src) = HOST_SOURCE.get() {
+                        println!("{}  via {} ({}){}", C_DIM, host, src, C_RESET);
+                    }
+                }
                 // A client newer than the host loses whatever the host does
                 // not know about. Serde drops an unknown field silently, so
                 // the deploy succeeds and simply does less than it was asked
@@ -1124,19 +1256,23 @@ async fn rpc(host: &str, token: &str, command: Command) {
             ServerMsg::RpcDone(resp) => {
                 if !resp.ok {
                     println!("{}✗ {}{}", C_RED, resp.message, C_RESET);
-                    std::process::exit(1);
+                    return false;
                 }
                 if homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
                     println!("{}✓ {}{}", C_GREEN, resp.message, C_RESET);
-                    std::process::exit(0);
+                    return true;
                 }
                 done = Some(true);
             }
         }
         if done.is_some() && homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
             println!("{}✓ ok{}", C_GREEN, C_RESET);
-            std::process::exit(0);
+            return true;
         }
     }
-    die("connection closed before RPC completed");
+    eprintln!(
+        "{}✗ connection closed before RPC completed{}",
+        C_RED, C_RESET
+    );
+    false
 }

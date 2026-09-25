@@ -1,6 +1,14 @@
 """Drive the TUI in a real pty long enough to see whether it draws.
 
-    python3 scripts/tui-smoke.py ./target/release/homelab tui --offline
+    python3 scripts/tui-smoke.py ~/.cargo/bin/homelab tui --offline
+
+The example used to say ./target/release/homelab, which stopped existing on
+2026-09-20 when a global ~/.cargo/config.toml moved every project's build
+output into one shared directory. It points at the installed binary instead,
+because that path does not move. To drive a binary you just built rather than
+the installed one, `cargo metadata --no-deps` reports the build directory in
+its `target_directory` field. The script takes the binary as an argument and
+has never cared where it lives.
 
 Written 2026-08-31 to check that a ratatui major upgrade had not broken the
 interface, and kept because it answers a question Kenny asked earlier that

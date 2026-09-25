@@ -180,3 +180,16 @@ mod native_dashboard {
         }
     }
 }
+
+/// gap-14: the adopted native stacks have no stack manifest in state, so
+/// their address is derived from the vmid the way every container here is
+/// numbered — kyu on 109 is 10.10.10.9, almanac on 112 is 10.10.10.12.
+#[test]
+fn gap14_an_adopted_native_stack_gets_its_address_from_its_vmid() {
+    use homelab_core::ops::monitors::address_for_vmid;
+    assert_eq!(address_for_vmid(109).as_deref(), Some("10.10.10.9"));
+    assert_eq!(address_for_vmid(112).as_deref(), Some("10.10.10.12"));
+    assert_eq!(address_for_vmid(354).as_deref(), Some("10.10.10.254"));
+    assert_eq!(address_for_vmid(99), None, "below the fleet's range");
+    assert_eq!(address_for_vmid(355), None, "above it");
+}

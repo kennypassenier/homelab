@@ -2711,7 +2711,7 @@ async fn ws_session(socket: WebSocket, state: AppState) {
         proto: homelab_proto::PROTO_VERSION,
     };
     let _ = tx
-        .send(Message::Text(serde_json::to_string(&hello).unwrap()))
+        .send(Message::Text(serde_json::to_string(&hello).unwrap().into()))
         .await;
 
     let mut log_rx = state.log_tx.subscribe();
@@ -2720,10 +2720,10 @@ async fn ws_session(socket: WebSocket, state: AppState) {
         loop {
             tokio::select! {
                 Ok(msg) = log_rx.recv() => {
-                    if tx.send(Message::Text(serde_json::to_string(&msg).unwrap())).await.is_err() { break; }
+                    if tx.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() { break; }
                 }
                 Some(msg) = out_rx.recv() => {
-                    if tx.send(Message::Text(serde_json::to_string(&msg).unwrap())).await.is_err() { break; }
+                    if tx.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() { break; }
                 }
                 else => break,
             }

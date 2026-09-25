@@ -45,13 +45,13 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — **v3.54.0** live on the host (2026-09-20); ten items committed since, waiting on `make release VERSION=3.55.0` | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
+| Phase | 9 · Released — **v3.55.0** live on the host (2026-09-20 01:47 local) | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
 
 | | |
 |---|---|
-| Next action | **waiting on Kenny: `make release VERSION=3.55.0`** — it carries T81, T82, G6, F160, M-T75, gap-14, T85, B1, B7 and R5 (seven commits since 3.54.0, all tests green). Nothing else needs him: the native-services report is signed off 5/5, the drill passed, kyu is back in the nightly rotation. After the release Claude runs `homelab release-update`, installs the release client, and `homelab adopt`s kyu and kyu-runner so their `update_policy: auto` reaches the host. Waiting on the clock: 04:00 the first nightly under 3.54.0 (M-D94 kyu copy-backup, M-T75 phase duration), 08:00 the deferred HA push. Open elsewhere: 14 manual checks (`homelab checks`), earlier form items (CT 116 reachability, swap, checks part 1), kyu door for ha/sonarr/radarr/newsflash (kyu session's form). |
+| Next action | **waiting on Kenny: four manual checks.** The kyu chain is finished for now — 3.5.0 live on CT 109 since 20:41 (step-13), the door holds all 8 clients, zero 401 since the merge at 18:58, binary kyu-owned, store at schema 5, disk 45%. Three corrections closed tonight with measurements that could fail: fix-check-1 (`--check` left a schema-4 copy at 4), fix-state-1 (the guard refuses, naming both directories) and fix-21 (install commands now set the owner themselves, here and in kyu). Open on Kenny: the four manual checks — paperwork ×2, media posters, and **kyu-e576**, the chain test that rings his phone (`homelab checks answer e576228c ok`). Also open: gap-15, a check red by design every night while D56 stands. Waiting on the clock: the kyu session reads fix-events-1 after 2026-09-21 19:35 UTC; VmSwap of kvm 100 after 2026-09-21 (F185). One known leftover, recorded in fix-22 and deliberately kept: `kyu.pre-v4.db` (35 MB) in CT 109's state dir, the pre-migration copy from the 3.3.0 drill. |
 
 
 **The deployment project is the active work.** It brings the whole fleet under
@@ -61,7 +61,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.53.0** (2026-09-19, after 3.52.0 the same day; 3.51.0 on 2026-09-11); 499 tests, CI green — and green now
+- **Released and live at v3.55.0** (2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **533 tests in 35 suites**, CI green — and green now
   means something: CI ran without `--locked` until that day, so it built
   whatever crates.io served rather than what the lockfile pins (F235).
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.

@@ -8,12 +8,25 @@
 # the binary's directory too, or self-update verifies, downloads and then
 # fails at the swap.
 #
-# Install: install -D -m755 kyu-runner /opt/kyu-runner/bin/kyu-runner (the
-# service owns that directory: chown -R kyu-runner: /opt/kyu-runner), copy
-# this file to /etc/systemd/system/kyu-runner.service, create the user
-# (kyu-runner), the state dir (/appdata/kyu/kyu-runner-config) and the env file
-# (/appdata/kyu/kyu-runner-config/token.env, 0640 root:kyu-runner), then
-# systemctl enable --now kyu-runner.
+# Install, in this order — the user first, because the install command
+# sets the owner itself:
+#
+#   useradd --system --no-create-home --shell /usr/sbin/nologin kyu-runner
+#   install -D -m755 -o kyu-runner -g kyu-runner kyu-runner /opt/kyu-runner/bin/kyu-runner
+#   install -m644 kyu-runner.service /etc/systemd/system/kyu-runner.service
+#   install -d -o kyu-runner -g kyu-runner /appdata/kyu/kyu-runner-config
+#   install -m640 -o root -g kyu-runner kyu-runner.env /appdata/kyu/kyu-runner-config/kyu-runner.env
+#   stat -c '%U:%G %n' /opt/kyu-runner/bin/kyu-runner     # must read kyu-runner:kyu-runner
+#   systemctl enable --now kyu-runner
+#
+# The owner is part of the install command on purpose. This block used to
+# say "install … (the service owns that directory: chown -R kyu-runner:
+# /opt/kyu-runner)", with the ownership as an aside on the next line. On
+# 2026-09-19 someone installed kyu's binary by hand, ran the first line and
+# not the second, and left it root-owned. Nothing failed then: it failed
+# weeks later, at the next update, with a message blaming directory
+# permissions that were never wrong (fix-21). An owner that cannot be
+# forgotten separately cannot be forgotten.
 
 [Unit]
 Description=kyu-runner — Pulls topics from the kyu hub and pushes each message to Home Assistant

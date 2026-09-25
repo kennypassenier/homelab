@@ -18,6 +18,7 @@ OUT DROP -dest 10.10.10.250
 # 2 · the neighbours it really uses: almanac (JobTracker events), registry cache (docker pulls)
 OUT ACCEPT -dest 10.10.10.12 -p tcp -dport 8080
 OUT ACCEPT -dest 10.10.10.17 -p tcp -dport 5000:5003
+OUT ACCEPT -dest 10.10.10.4 -p tcp -dport 3100 # Loki push (Alloy), added 2026-09-25
 # 3 · every other neighbour in VLAN 10 stays out of reach; what leaves the
 #     VLAN (DNS 10.10.5.1, internet) crosses the router, where OPNsense rules apply
 OUT DROP -dest 10.10.10.0/24

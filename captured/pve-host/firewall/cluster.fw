@@ -1,0 +1,5 @@
+# Datacenter switch of the Proxmox firewall (F183, 2026-09-20). Turning it on
+# is what makes a per-container ruleset (116.fw) take effect. The HOST keeps
+# no ruleset of its own — see host.fw beside this file.
+[OPTIONS]
+enable: 1

@@ -1,0 +1,7 @@
+# /etc/pve/nodes/proxmox/host.fw — the host's own firewall stays OFF (F183).
+# pve auto-detects its "local network" as 192.168.99.0/24, not 10.10.5.x or
+# 10.10.10.x, so a host ruleset would lock ssh (22), the web UI (8006) and
+# the homelab daemon (8443) out for Kenny's desktop. Measured 2026-09-20:
+# `pve-firewall localnet` → 192.168.99.0/24.
+[OPTIONS]
+enable: 0

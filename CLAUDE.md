@@ -45,13 +45,13 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | 9 · Released — **v3.55.0** live on the host (2026-09-20 01:47 local) | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
+| Phase | **10 · Retrospective** (opened 2026-09-26, `docs/RETROSPECTIVE.md`) — **v3.55.0** live on the host (2026-09-20 01:47 local) | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
 
 | | |
 |---|---|
-| Next action | **waiting on Kenny: the four manual checks** — paperwork ×2, media posters, and **kyu-e576**, the chain test that rings his phone (`homelab checks answer e576228c ok`). The 2026-09-26 round is closed: M-T75, M-D94, F48, fix-16, gap-16 done; `opnsense-swap` Sluiten (VM 100 to the expert panel); F6 parked by Kenny (**Later**, with the Grafana move to metrics); fix-23 guards register ids (the red-by-design check is now gap-18). Still open as work, not started: gap-7 (CrowdSec missing ~1 min after a Traefik restart, for the gateway round), T64 redesign (inventory done), gap-15 guard (waits for a first escrow step). fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
+| Next action | **Orchestrator: waiting on Kenny's retrospective form** (lessons, ecosystem entry, test pass, the two dead root snapshots) — numbers in `docs/RETROSPECTIVE.md`. **Deployment: waiting on Kenny: the four manual checks** — paperwork ×2, media posters, and **kyu-e576**, the chain test that rings his phone (`homelab checks answer e576228c ok`). The 2026-09-26 round is closed: M-T75, M-D94, F48, fix-16, gap-16 done; `opnsense-swap` Sluiten (VM 100 to the expert panel); F6 parked by Kenny (**Later**, with the Grafana move to metrics); fix-23 guards register ids (the red-by-design check is now gap-18). Still open as work, not started: gap-7 (CrowdSec missing ~1 min after a Traefik restart, for the gateway round), T64 redesign (inventory done), gap-15 guard (waits for a first escrow step). fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
 
 
 **The deployment project is the active work.** It brings the whole fleet under
@@ -112,27 +112,29 @@ it is the resume point and is kept current as part of the work, not afterwards.
   recommending drills on a live service because of it. When something has to
   be created and destroyed for real, make a throwaway stack on a free vmid
   (`stacks/drill`, vmid 118) and destroy it in the same sitting — Kenny's
-  form B1. LVM snapshot `pve/root-v2-preinstall` is the host-OS rollback net.
-- **No-touch list is law**: `core/src/safety.rs` (VMs 100/101/201–203,
-  CT 102/103, and 104–107/111 until migration).
+  form B1. There is no host-OS rollback net: both LVM snapshots on
+  `pve` are invalid (see below).
+- **No-touch list is law**: `core/src/safety.rs` (VM 100 OPNsense, VM 101
+  Home Assistant, 102, 103; narrowed 2026-08-30 — the legacy stacks come
+  under management through the deployment project).
 - **Backups (audited 2026-08-27)**: nightly restic per stack +
   `host-meta-config` repo (vault, state.json, TLS, intent repo) — restore
   drill green. Kenny's restic password is in Bitwarden (verified).
   E8 replicates HDD2TB/HDD4TB to `HDD18TB/replica/`; the legacy
   `HDD18TB/REPLICA_*` datasets are frozen history, media pools are
   deliberately out of scope.
-- **Pre-test safety net (remove when testing is done)**: LVM snapshot
-  `pve/root-pretest` (8G — a full snapshot is an invalid rollback, check
-  `lvs pve`) and `vzdump-lxc-108-2026_08_27-18_10_04.tar.zst`. VG `pve`
-  is 100% allocated; only new LVM volumes are blocked, containers have
-  ~631G on local-lvm plus TBs on the ZFS pools.
-- **Open**: M5 migration (after the gridsim demo; procedure in
-  docs/MIGRATION_INVENTORY.md), CT 107/111 decommission (needs explicit
-  go), Kenny's own test pass (docs/TEST_PLAN.md), phase-10 retro for
-  E8/G9/H7/H8, `pve/root-v2-preinstall` cleanup once v3 has proven
-  itself. HTTPSwitchboard preset adoption — S1 decided (policy=manual),
-  the container and the config location wait for the deployment plan;
-  verified facts in the vault note "Homelab HTTPSwitchboard Deployment".
+- **Host-OS snapshots are dead** (measured 2026-09-26, `lvs pve`): both
+  `pve/root-pretest` and `pve/root-v2-preinstall` are `swi-I-s---` at
+  100% — invalid, no rollback possible. They hold 16G of VG `pve`, which
+  has 0 free. Removal is in the retrospective form (host change, Kenny's
+  go). The CT 108 pre-test vzdump no longer exists on the host.
+- **Open**: the phase-10 retrospective (`docs/RETROSPECTIVE.md`), Kenny's
+  own test pass (docs/TEST_PLAN.md, in the retrospective form). The old
+  M5 migration milestone is carried by the deployment project
+  (`docs/deployment/REGISTER.md`). HTTPSwitchboard preset adoption — S1
+  decided (policy=manual), the container and the config location wait for
+  the deployment plan; verified facts in the vault note "Homelab
+  HTTPSwitchboard Deployment".
 - **Awaiting Kenny**: D5 mirror remote+deploy-key, H2 OPNsense API creds,
   F4 PVE token.
 

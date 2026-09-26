@@ -95,6 +95,31 @@ webhook_url = "http://10.10.10.2:8123/api/webhook/REDACTED"
 [routes.policy]
 max_attempts = 25
 
+# ── Two topics that had no reader (T64 orphan-topics, 2026-09-26) ──────
+#
+# ops.alerts carries kyu-alert (a failed unit on CT 109, such as the nightly
+# kyu backup); switchboard.events carries http-switchboard's reports on its
+# own delivery. Neither payload has op/ok, so automation.homelab_ops_webhook
+# maps both shapes in its variables — changed in HA BEFORE these routes
+# were added, as every route here requires.
+[[routes]]
+name = "ops-alerts"
+topic = "ops.alerts"
+subscription = "ha-runner"
+webhook_url = "http://10.10.10.2:8123/api/webhook/REDACTED"
+
+[routes.policy]
+max_attempts = 25
+
+[[routes]]
+name = "switchboard-events"
+topic = "switchboard.events"
+subscription = "ha-runner"
+webhook_url = "http://10.10.10.2:8123/api/webhook/REDACTED"
+
+[routes.policy]
+max_attempts = 25
+
 # ── Why this is an example, and why it is here at all ─────────────────
 #
 # The deployed file is /appdata/kyu/kyu-runner-config/config.toml on CT 109. It is not

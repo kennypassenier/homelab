@@ -46,6 +46,11 @@ topics fill up with nobody reading them.
 
 ## 3. Topics nobody reads
 
+> **2026-09-26:** `ops.alerts` and `switchboard.events` now have kyu-runner
+> routes (`ops-alerts`, `switchboard-events`) to the homelab-ops automation,
+> which maps their payloads (T64 orphan-topics). `notify.actions` is still
+> unread; it waits on the Life design.
+
 Anything published to these topics stays on the hub. It shows up on the kyu
 dashboard and in the kyu events for that topic, but no route delivers it to a
 person.

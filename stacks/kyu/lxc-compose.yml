@@ -108,8 +108,13 @@ storage:
     app: kyu
   - host_path: /appdata/kyu/kyu-runner-config
     mount_point: /appdata/kyu/kyu-runner-config
-    # Read by systemd as root before it drops to a DynamicUser.
-    host_owner_uid: 100000
+    # 100996, not 100000 (fix-26). kyu-runner 0.2.x runs as its own user
+    # `kyu-runner` (uid 996 inside) and refuses to start unless it can write
+    # this directory. With 100000 the deploy chowned it to root, and the
+    # running service only noticed at its next restart, on 2026-09-26:
+    # "the state directory ... is not writable". The same trap as
+    # http-switchboard below, one directory further down.
+    host_owner_uid: 100996
     app: kyu-runner
   - host_path: /appdata/kyu/http-switchboard-config
     mount_point: /appdata/kyu/http-switchboard-config

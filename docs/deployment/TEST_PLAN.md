@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**505 tests across 26 suites.**
+**507 tests across 26 suites.**
 
 ## Accepted limitations
 
@@ -484,11 +484,14 @@ Standing rule 9 (hardening H15): E2E against REAL dependencies where possible. T
 
 The register claims, the tests prove — and until now nothing held the two together.
 
+Covers: fix-23
+
 - `every_covers_marker_names_a_real_finding` — Rule 1: a marker that names a finding the register does not have.
 - `every_claimed_test_exists_and_names_its_finding` — Rule 2: a row that claims a test must name one that exists and that says so itself.
 - `a_claimed_test_belongs_to_a_closed_finding` — And the claim has to be worth making: a row that names a test must be one that was actually closed.
 - `no_finding_recorded_since_the_rule_may_claim_done_without_naming_its_proof`
 - `no_finding_at_all_claims_done_while_pointing_at_nothing` — The backlog is worked off, so this now holds the ground rather than measuring the descent.
+- `no_two_register_rows_share_an_id` — Numbers are permanent and never reused, the register says of itself — yet on 2026-09-26 two rows both carried `gap-15`: the escrow guard and the check that is red by design.
 
 ### `core/tests/registry_cache_tests.rs`
 
@@ -654,6 +657,7 @@ Covers: F122, F136, F150, F151, F152, F154, F155, F156, F167, F212, F215
 - `g4_shell_tab_sends_exec_and_shows_output`
 - `v8_config_race_regression_rpc_exit_rule`
 - `the_committed_runbook_matches_a_fresh_generation` — The document in the repository is the one somebody opens when the host is gone — and until 2026-09-01 it had never been regenerated after the generator was fixed.
+- `the_runbook_warns_that_a_restore_revives_retired_almanac_profiles` — gap-16: almanac retires a source by renaming its profile at runtime, so a snapshot from before the retirement brings the source back.
 - `every_host_operation_is_reachable_or_deliberately_not` — covers: F156
 - `a_stack_scaffolded_without_the_wizard_matches_the_wizard` — A stack can be created without the TUI, and the result is the wizard's.
 - `the_wizard_can_declare_an_app_that_keeps_nothing` — The wizard can reach `no_data`, and its preview cannot drift from what it scaffolds.

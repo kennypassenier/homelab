@@ -65,6 +65,11 @@ reaches in with `pct exec`/`pct push`.
   (D11), presets, argv (see the Kea curl pattern: `-u "$(cat file)"`).
 - Remote exec is deny-by-default (`exec_enabled`), always audit-logged,
   and no-touch vmids are refused even when enabled.
+- **Precondition for any future key-escrow step (gap-15).** `latch key
+  backup` empties the shared OS keyring, even under a separate
+  `LATCH_HOME`. A step that escrows a latch key on the host must therefore
+  refuse to run on a machine that holds other latch keys, until the latch
+  project decides otherwise. No such step exists today.
 
 ## Self-preservation
 

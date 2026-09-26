@@ -539,6 +539,15 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          restic snapshots\n\
          restic restore latest --target /\n\
          ```\n\
+         \n\
+         **A restore brings back what was retired after the snapshot** (gap-16).\n\
+         almanac retires a source by renaming its profile to `*.toml.retired`\n\
+         in `/appdata/almanac/almanac-config/profiles/`, at runtime and without\n\
+         a deploy. A snapshot taken before that rename still holds the live\n\
+         `*.toml`, so restoring it makes almanac load the retired source again.\n\
+         After restoring almanac, compare `ls profiles/` with the list of\n\
+         retired sources before starting the service.\n\
+         \n\
          ## Stacks\n\n",
     );
     let mut included = 0usize;

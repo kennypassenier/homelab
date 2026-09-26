@@ -131,8 +131,17 @@ fn register_rows(root: &Path) -> BTreeMap<String, String> {
             continue;
         }
         let id = cells[0].trim();
-        let is_finding =
+        // The old shape `F123`, and since 2026-09-09 the house scheme
+        // `fix-23`, `gap-16`: a kind word, a dash and a number.
+        let old_shape =
             id.starts_with('F') && id.len() > 1 && id[1..].chars().all(|c| c.is_ascii_digit());
+        let new_shape = id.split_once('-').is_some_and(|(kind, n)| {
+            !kind.is_empty()
+                && kind.chars().all(|c| c.is_ascii_lowercase())
+                && !n.is_empty()
+                && n.chars().all(|c| c.is_ascii_digit())
+        });
+        let is_finding = old_shape || new_shape;
         if is_finding {
             out.insert(id.to_string(), cells[2].trim().to_string());
         }
@@ -377,4 +386,44 @@ mod proof_ratchet {
             offenders
         );
     }
+}
+
+/// Numbers are permanent and never reused, the register says of itself — yet
+/// on 2026-09-26 two rows both carried `gap-15`: the escrow guard and the
+/// check that is red by design. A reference to "gap-15" then meant whichever
+/// row the reader happened to find first.
+///
+/// covers: fix-23
+#[test]
+fn no_two_register_rows_share_an_id() {
+    let raw = std::fs::read_to_string(repo_root().join("docs/deployment/REGISTER.md"))
+        .expect("the register is part of the repo");
+    let mut seen = std::collections::BTreeMap::<String, usize>::new();
+    for line in raw.lines() {
+        let Some(rest) = line.strip_prefix("| ") else {
+            continue;
+        };
+        let id = rest.split(" |").next().unwrap_or("").trim();
+        let looks_like_id = !id.is_empty()
+            && !id.contains(' ')
+            && id.chars().any(|c| c.is_ascii_digit())
+            && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+        if looks_like_id {
+            *seen.entry(id.to_string()).or_default() += 1;
+        }
+    }
+    // fix-23: these eight pairs were already doubled when this check arrived.
+    // Their numbers are quoted in commits, in other repositories and, for D82,
+    // in the dev procedure itself, so renumbering either half would break more
+    // references than it repairs. They are frozen here; the list may shrink,
+    // never grow.
+    const HISTORICAL: [&str; 8] = ["D75", "D76", "D77", "D82", "D103", "D104", "F237", "gap-10"];
+    let dupes: Vec<_> = seen
+        .iter()
+        .filter(|(id, n)| **n > 1 && !HISTORICAL.contains(&id.as_str()))
+        .collect();
+    assert!(
+        dupes.is_empty(),
+        "register ids used more than once: {dupes:?}"
+    );
 }

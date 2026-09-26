@@ -821,6 +821,29 @@ fn the_committed_runbook_matches_a_fresh_generation() {
     );
 }
 
+/// gap-16: almanac retires a source by renaming its profile at runtime, so a
+/// snapshot from before the retirement brings the source back. The runbook is
+/// where someone restoring at 3am reads that.
+#[test]
+fn the_runbook_warns_that_a_restore_revives_retired_almanac_profiles() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let out = std::env::temp_dir().join(format!("homelab-dr-g16-{}.md", std::process::id()));
+    homelab_client::spec::generate_runbook(&root.join("stacks"), out.to_str().unwrap()).unwrap();
+    let doc = std::fs::read_to_string(&out).unwrap();
+    let _ = std::fs::remove_file(&out);
+    assert!(
+        doc.contains("*.toml.retired"),
+        "the retirement mechanism is named"
+    );
+    assert!(
+        doc.contains("/appdata/almanac/almanac-config/profiles/"),
+        "the directory to check after a restore is named"
+    );
+}
+
 /// Every host operation is either reachable from the TUI or listed here as
 /// deliberately command-line-only.
 ///

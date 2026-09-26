@@ -41,7 +41,7 @@ topics fill up with nobody reading them.
 | 8 | **Proxmox VE** | `/etc/pve/notifications.cfg` → mail to root → Gmail SMTP | email | Live, not managed by the homelab | `docs/OPERATIONS_RUNBOOK.md:147-151` |
 | 9 | **kp-soft, SuperSync** | SMTP | application mail to their users, such as invitations and login links; not operations mail | Live | `stacks/kp-soft/kp-soft/docker-compose.yml:49-56`, `stacks/productivity/supersync/docker-compose.yml:55-60` |
 | 10 | **JobTracker → almanac** | `POST /v1/ingest` → Google Calendar | Kenny's calendar. This is a calendar entry, not an alert; it is sent on a click | Live. It is **the only source almanac has** (F265) | `JobTracker/dashboard/packages/server/src/almanac.js`; REGISTER F265 |
-| 11 | **Manual checks** (F221/G17) | a Drift finding (open) or Broken finding (nok) inside the nightly `fleet-check` → row 1 | phone and log | Live. **gap-15** is open: kp-soft's deliberate "nok" makes the check red every night | `core/src/ops/manualchecks.rs`; REGISTER gap-15 |
+| 11 | **Manual checks** (F221/G17) | a Drift finding (open) or Broken finding (nok) inside the nightly `fleet-check` → row 1 | phone and log | Live. **gap-18** is open: kp-soft's deliberate "nok" makes the check red every night | `core/src/ops/manualchecks.rs`; REGISTER gap-15 |
 | 12 | **H7 update badge** | badge in the TUI only | whoever has the TUI open | Live; it sends no push | `client/src/tui/model.rs:350` |
 
 ## 3. Topics nobody reads

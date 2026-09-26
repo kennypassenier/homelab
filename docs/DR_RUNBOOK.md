@@ -100,6 +100,15 @@ export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
 restic snapshots
 restic restore latest --target /
 ```
+
+**A restore brings back what was retired after the snapshot** (gap-16).
+almanac retires a source by renaming its profile to `*.toml.retired`
+in `/appdata/almanac/almanac-config/profiles/`, at runtime and without
+a deploy. A snapshot taken before that rename still holds the live
+`*.toml`, so restoring it makes almanac load the retired source again.
+After restoring almanac, compare `ls profiles/` with the list of
+retired sources before starting the service.
+
 ## Stacks
 
 ### almanac (vmid 112)

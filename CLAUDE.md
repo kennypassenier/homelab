@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **waiting on Kenny: the form of 2026-09-26 with three items** — `opnsense-swap` (the balloon target of 2048 on VM 100 never engaged), `grafana-lan` (F6: Grafana still answers on 10.10.10.4:3000 from the LAN) and `almanac-retired` (gap-16 part 2: may the orphan report read almanac's profiles directory). Done that day: M-T75, M-D94, F48, fix-16 closed; gap-16 and gap-15 half done; fix-23 (nine register ids used twice, now guarded by a test; the red-by-design check is renamed gap-18). Also waiting on Kenny: the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). No live action on the machines while the form is open (rule 3 above). fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
+| Next action | **waiting on Kenny: the deep-dive form `grafana-lan`** (F6: Grafana still answers on 10.10.10.4:3000 from the LAN; the Traefik-only route was measured impossible for Kuma and the homepage, which hit Cloudflare Access). Answered 2026-09-26: `opnsense-swap` Sluiten, `almanac-retired` Runbook volstaat. Done that day: M-T75, M-D94, F48, fix-16 closed; gap-16 and gap-15 half done; fix-23 (nine register ids used twice, now guarded by a test; the red-by-design check is renamed gap-18). Also waiting on Kenny: the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). No live action on the machines while the form is open (rule 3 above). fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

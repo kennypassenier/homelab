@@ -21,6 +21,13 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
+# fix-25: refuse a webhook id before spending minutes on the full suite.
+if [ -x "$root/.githooks/check-secrets.sh" ]; then
+  "$root/.githooks/check-secrets.sh" || exit 1
+else
+  echo "warning: .githooks/check-secrets.sh is missing; the secret gate did not run." >&2
+fi
+
 # Single source of truth: the same script the session hook runs.
 gates="$root/.claude/hooks/gates.sh"
 if [ ! -x "$gates" ]; then

@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**507 tests across 26 suites.**
+**508 tests across 27 suites.**
 
 ## Accepted limitations
 
@@ -531,6 +531,14 @@ ask-2 · stack files that belong outside `/opt/<stack>/`.
 - `a_rootfs_file_anywhere_else_or_climbing_is_refused`
 - `rootfs_files_land_at_their_absolute_paths_and_the_timer_is_enabled` — The five files of CT 109, in miniature: a timer and a script travel with the stack, land at their absolute paths, systemd is reloaded, and the timer is enabled — while /opt/kyu/rootfs never exists.
 - `a_rootfs_file_outside_the_allowed_places_stops_the_deploy_before_any_push` — A rootfs path outside the two allowed places is refused BEFORE anything is pushed or committed — the validate step, not the push step.
+
+### `core/tests/secret_gate_tests.rs`
+
+The pre-commit secret gate (`.githooks/check-secrets.sh`).
+
+Covers: fix-25
+
+- `an_added_webhook_id_is_refused_and_a_redacted_one_passes` — covers: fix-25
 
 ### `core/tests/secrets_tests.rs`
 

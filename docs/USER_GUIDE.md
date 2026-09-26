@@ -169,8 +169,10 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
 
 - **F1/F2 · Logs** — Alloy ships to Loki fleet-wide (promtail until 2026-09-02); the LOG_STREAM tab
   shows the live operation feed.
-- **F3 · Events → Home Assistant** — one webhook POST per finished
-  operation (`{op, ok, error}`), plus `host-online` at boot,
+- **F3 · Events → Home Assistant** — one event per finished operation
+  (`{op, ok, error}`), published onto kyu (`homelab.ops`) and delivered to
+  HA by kyu-runner, with a direct webhook POST as fallback; plus
+  `host-online` at boot,
   `self-update-rollback` and `daemon-failed` from systemd. All land in
   `/media/homelab_events.log` on HA; flip
   `input_boolean.homelab_event_notifications` on to get warnings for

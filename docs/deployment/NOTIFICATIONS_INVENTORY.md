@@ -30,7 +30,7 @@ topics fill up with nobody reading them.
 | 2 | **homelab-host systemd units** | `self-update-rollback` and `daemon-failed`, fired by OnFailure scripts | same as row 1 | a failed self-update, or the daemon dying | Live-proven 2026-08-11. **The scripts exist only on the host**; the repository does not have them | `docs/TEST_PLAN.md:287-298`, `docs/USER_GUIDE.md:172-177` |
 | 3 | **Prometheus → Alertmanager** (CT 113) | Alertmanager receiver `kyu-hub` → `alerts.raw` → http-switchboard 3.0.0, profile `alertmanager` (subscription `switchboard`) → reshaped JSON | `automation.homelab_alert_webhook` → dispatcher | Four rules: HostDown, FilesystemAlmostFull, DiskPendingSectors, DiskSmartFailed. Grouped by alertname and host, repeated every 12 h, resolved alerts sent too | **Live** (D54, F89) | `stacks/metrics/alertmanager/alertmanager.yml:24-45`, `stacks/metrics/prometheus/rules/homelab.rules.yml`, `captured/messaging/http-switchboard/config.example.toml:32-44` |
 | 4 | **kyu hub's own events** | kyu publishes onto `kyu.events` → kyu-runner route `kyu-events` | `automation.hub_kyu_events_webhook` → dispatcher, **throttled to once per 24 h per topic** | dead-lettered and archived count as warnings; expired, flagged and unarchived count as info. Since kyu 3.3.0, `message.expired` is announced at most once per subscription per day (fix-events-1) | **Live** (T55). M-T55, the first real event delivered end to end, is still **open** | `kyu/src/events.rs`, `kyu/docs/USER_GUIDE.md:277-289`; REGISTER T55, M-T55 |
-| 5 | **Sonarr and Radarr** | each app's own webhook with a header token → `arr.ops` → kyu-runner route `arr-ops` | `automation.arr_manual_interaction_webhook` → dispatcher | "manual interaction required", meaning a download could not be imported | **Live** (D58). The configuration lives in the apps' own databases and is in no stack file | REGISTER D58; `captured/messaging/kyu-runner/config.example.toml:74-83` |
+| 5 | **Sonarr and Radarr** | each app's own webhook with a header token → `arr.ops` → kyu-runner route `arr-ops` | `automation.arr_manual_interaction_webhook` → dispatcher | "manual interaction required", meaning a download could not be imported | **Live** (D58). The configuration lives in the apps' own databases and is in no stack file | REGISTER D58; `captured/messaging/kyu-runner/config.example.toml` (route `arr-ops`) |
 | 6 | **almanac** (CT 112) | its own notifier, a direct POST to HA with **no kyu hop** | `automation.homelab_ops_webhook`, same as row 1 | update reverted, update unverified, entry set aside, journal backlog. A successful update is only logged | Code **live**. Whether `ALMANAC_NOTIFY_WEBHOOK` is set on CT 112 is **not recorded**; it is not in `stacks/almanac` | `almanac/src/shell/notify.rs`, `almanac/src/main.rs:250-266`, `almanac/src/shell/worker.rs:198-297` |
 
 ## 2. Paths that do not end in Home Assistant
@@ -71,17 +71,24 @@ apprise, Telegram or Discord appears in any repository.
 
 ## 5. Where the documents disagree
 
-The redesign should not inherit these:
+The redesign should not inherit these. **Resolved 2026-09-26** marks the
+ones corrected in this repository since.
 
 - `docs/deployment/INVENTORY.md:117-123` says Alertmanager delivers to a
   `none` receiver and that the host posts straight to HA. D54 and Y2
-  superseded both statements.
+  superseded both statements. **Resolved 2026-09-26:** a dated
+  "superseded" note under the paragraph.
 - `docs/OPERATIONS_RUNBOOK.md:15-18`, `docs/USER_GUIDE.md:172-177` and
   `docs/FEATURES.md:305-310` describe a direct HA webhook with no kyu hop.
+  **Resolved 2026-09-26** for the runbook and the user guide; FEATURES.md is
+  frozen and states the intent (reach HA), which still holds.
 - `captured/messaging/kyu-runner/config.example.toml:48-52` says `kyu.events`
   is not enabled, but T55 enabled it. The live routes (`homelab-ops`,
   `arr-ops` and `kyu-events`) are recorded only in that captured example and in
   `/etc/kyu-runner/config.toml` on CT 109. The kyu-runner repository has one.
+  **Resolved 2026-09-26:** re-captured from the live file, which now lives
+  at `/appdata/kyu/kyu-runner-config/config.toml`; the three routes and
+  their policies match it line for line (webhook ids redacted).
 - `http-switchboard/CLAUDE.md` and its README say Alertmanager is not deployed,
   which contradicts D54. The switchboard deployed is 3.0.0; the latest release
   is 3.1.1.

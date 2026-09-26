@@ -14,8 +14,10 @@ daemon, the vault and the containers are.
 
 The nightly scheduler (04:00, adjustable in SETTINGS) backs up every managed
 stack and updates `auto`-policy apps. Failures announce themselves through
-the HA webhook into `/media/homelab_events.log` (and as notifications once
-the toggle is on). Unattended-upgrades patches security updates inside every
+kyu (topic `homelab.ops`, delivered by kyu-runner on CT 109, with the direct
+HA webhook as fallback) into `/media/homelab_events.log` (and as
+notifications once the toggle is on). The whole map of who notifies how is
+`docs/deployment/NOTIFICATIONS_INVENTORY.md`. Unattended-upgrades patches security updates inside every
 container daily. You only act when an event says so.
 
 ## Weekly-ish glance

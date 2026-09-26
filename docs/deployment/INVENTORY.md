@@ -119,8 +119,15 @@ receiver. Grafana on CT 104 has both datasources and six provisioned
 dashboards.
 
 **Alerting and notification.** `homelab-host` posts operation results to
-`http://10.10.10.2:8123/api/webhook/homelab-ops-c4d81f26`. Alertmanager has
+`http://10.10.10.2:8123/api/webhook/homelab-ops-<id>`. Alertmanager has
 no delivery leg — that is what HTTPSwitchboard is for.
+
+> **Superseded (2026-09-26, T64).** This paragraph and the `none` receiver
+> above describe the fleet on the day of the sweep. Since then the host
+> publishes onto kyu (`homelab.ops`) and kyu-runner delivers to the webhook,
+> which stays as the direct fallback (Y2), and Alertmanager delivers through
+> kyu and HTTPSwitchboard (D54). The current picture is
+> `NOTIFICATIONS_INVENTORY.md`.
 
 **Kenny's own software.** kyu (CT 109) is the hub; almanac (CT 112) posts
 into it; kyu-runner and newsflash consume from it; HTTPSwitchboard will

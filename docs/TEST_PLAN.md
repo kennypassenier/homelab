@@ -367,7 +367,7 @@ kyu project.
 
 ### B20 · HA webhook receiver (F3, HA side) — LIVE-PROVEN 2026-08-11
 Host `notify_webhook` points at `automation.homelab_ops_webhook`
-(`/api/webhook/homelab-ops-c4d81f26`, local-only, POST). Every event is
+(`/api/webhook/homelab-ops-<id>`, local-only, POST). Every event is
 appended to `/media/homelab_events.log` on HA (Media browser → local);
 **no notifications by default**. Failures (`ok:false`) additionally route
 through `script.notification_dispatch` as a warning ONLY when

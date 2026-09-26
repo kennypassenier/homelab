@@ -2,9 +2,13 @@
 #
 # The copy in ~/Projects/kyu-runner/deploy/config.toml is the source of truth;
 # this is a copy. Check drift with:
-#   diff deploy/config.toml /etc/kyu-runner/config.toml
+#   diff deploy/config.toml /appdata/kyu/kyu-runner-config/config.toml
 #
-# The app token is NOT here: it lives in /etc/kyu-runner/token.env
+# Re-captured 2026-09-26 (T64): since the Debian 13 move the live file is
+# /appdata/kyu/kyu-runner-config/config.toml, the listen address moved to
+# KYU_RUNNER_LISTEN in the unit, and the kyu-events route (T55) is live.
+#
+# The app token is NOT here: it lives in /appdata/kyu/kyu-runner-config/token.env
 # (KYU_RUNNER_TOKEN=…), root-owned 0600, loaded by the systemd unit, and its
 # only durable copy is in latch under kyu/kyu-runner.
 
@@ -12,10 +16,9 @@
 # the release binary is static musl and cannot resolve .local.
 hub_url = "http://127.0.0.1:8080"
 
-# W4: Uptime Kuma probes the runner here. 8082, not the 8081 in the shipped
-# example: 8081 is cadvisor's port on every container in this fleet, and one
-# uniform port keeps the scrape config to a single pattern.
-healthz_listen = "10.10.10.9:8082"
+# W4: Uptime Kuma probes the runner on 10.10.10.9:8082 — 8082, not the 8081
+# in the shipped example: 8081 is cadvisor's port on every container in this
+# fleet. Set by KYU_RUNNER_LISTEN in the systemd unit, not in this file.
 
 # ── The homelab's own operations ──────────────────────────────────────
 #
@@ -45,11 +48,6 @@ webhook_url = "http://10.10.10.2:8123/api/webhook/REDACTED"
 [routes.policy]
 max_attempts = 25
 
-# NOT enabled yet: the kyu.events route from the shipped example. Its Home
-# Assistant automation (webhook hub_kyu_events) does not exist, and HA answers
-# 200 to an unknown webhook id — so the route would acknowledge the hub's own
-# warnings into the void, which is worse than not having it. Filed as a
-# follow-up in the homelab register.
 
 # ── Sonarr and Radarr: a download that is waiting for Kenny ───────────
 #
@@ -82,13 +80,28 @@ webhook_url = "http://10.10.10.2:8123/api/webhook/REDACTED"
 [routes.policy]
 max_attempts = 25
 
+# ── The hub's own events (T55) ─────────────────────────────────────────
+#
+# kyu publishes its own warnings (dead-lettered, archived, expired) onto
+# kyu.events. automation.hub_kyu_events_webhook in Home Assistant existed
+# before this route was added, so nothing was acknowledged into the void; it
+# throttles to once per 24 h per topic.
+[[routes]]
+name = "kyu-events"
+topic = "kyu.events"
+subscription = "ha-runner"
+webhook_url = "http://10.10.10.2:8123/api/webhook/REDACTED"
+
+[routes.policy]
+max_attempts = 25
+
 # ── Why this is an example, and why it is here at all ─────────────────
 #
-# The deployed file is /etc/kyu-runner/config.toml on CT 109. It is not
+# The deployed file is /appdata/kyu/kyu-runner-config/config.toml on CT 109. It is not
 # pushed by the orchestrator: kyu-runner is a C7 native service, so the
 # homelab backs its directory up but never writes it. That means a route
 # added by hand lives only on the container and in the nightly restic
-# snapshot of /etc/kyu-runner — and nowhere a reader would look.
+# snapshot of that directory — and nowhere a reader would look.
 #
 # The webhook ids are removed above. They are the credential for Home
 # Assistant's notification dispatcher, and this repository is public.

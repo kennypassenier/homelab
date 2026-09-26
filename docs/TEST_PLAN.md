@@ -22,6 +22,9 @@ alias homelab='~/Projects/homelab/target/release/homelab'
 
 ## Part A — Offline (do these now)
 
+**Last run:** headless, 2026-09-26 — results and findings in
+[TEST_RUN_PART_A.md](TEST_RUN_PART_A.md).
+
 Launch: `homelab tui --offline` (needs a real terminal, ≥100×30 recommended).
 
 ### A1 · Boot & chrome (G1)
@@ -36,7 +39,7 @@ Launch: `homelab tui --offline` (needs a real terminal, ≥100×30 recommended).
 - **Pass:** every key switches tabs; the flicker/decrypt effect fires on switch.
 
 ### A3 · Effects toggle (G1)
-1. Press `F2` repeatedly: FX cycles FULL → SUBTLE → OFF → FULL.
+1. Press `F2` repeatedly: FX cycles FULL → OFF → SUBTLE → FULL.
 - **Pass:** glitch/pulse/scanline visibly change; OFF is calm.
 
 ### A4 · Dashboard panels + capacity (C6, G6)
@@ -67,21 +70,23 @@ Launch: `homelab tui --offline` (needs a real terminal, ≥100×30 recommended).
 - **Pass:** fuzzy list filters; selection runs the action; palette closes.
 
 ### A9 · New-stack wizard (G2, D7)
-1. On DASHBOARD/STACKS press `N`.
+1. On DASHBOARD/STACKS press `n` (lowercase; the footer shows `[N]`).
 2. **Preset:** `UP`/`DOWN`, pick one, `ENTER`.
 3. **Name:** type a name (lowercase); hostname preview updates; `ENTER`.
 4. **Resources:** `UP`/`DOWN` between RAM/CPU/DISK/SWAP/VMID; `LEFT`/`RIGHT`
    adjusts; on DISK and SWAP type a number for a custom size; SWAP shows
    "(auto from RAM)" until you touch it, "off" at 0; `ENTER`.
-5. **Review:** confirm derived hostname/ip/resources/swap; `ENTER`.
+5. **Storage:** mark which app keeps files of its own (an app that keeps
+   nothing gets no backup repository); `ENTER`.
+6. **Review:** confirm derived hostname/ip/resources/swap; `ENTER`.
 - **Pass:** a real `stacks/<name>/` dir is written (check on disk); status line
   says "scaffolded … press SHIFT+D to deploy". Delete the dir to undo.
-6. Verify the scaffold: `cat stacks/<name>/lxc-compose.yml` — swap follows the
+7. Verify the scaffold: `cat stacks/<name>/lxc-compose.yml` — swap follows the
    formula, protection: true, no watchtower; `cat stacks/<name>/<app>/docker-compose.yml`
    has `com.homelab.update.policy=manual`, no watchtower label.
 
 ### A10 · Change-plan preview (D6)
-1. Select a stack, press `P`.
+1. Select a stack, press `p`.
 - **Pass:** CHANGE_PLAN modal lists CREATE/UPDATE/SYNC + payload + safety
   gates; `ESC` cancels, `ENTER` would deploy.
 
@@ -271,7 +276,7 @@ remain the last-resort recovery layer during migration. Scheduler armed:
 1. `homelab tui --offline` → press `5` (AZERTY: `(`).
 - **Pass:** HOST_SETTINGS renders: NIGHTLY RUN hour (◂ 04:00 ▸), retention
   tiers ("every Xd for Y days / forever"), WEBHOOK row, sync indicator.
-  `UP/DOWN` moves fields, `LEFT/RIGHT` edits values, `A`/`D` adds/removes a
+  `UP/DOWN` moves fields, `LEFT/RIGHT` edits values, `a`/`d` adds/removes a
   tier, `ENTER` on WEBHOOK opens a text editor (keys are swallowed while
   editing), `SHIFT+S` saves (demo acks).
 
@@ -382,7 +387,7 @@ through `script.notification_dispatch` as a warning ONLY when
 ```bash
 homelab presets
 ```
-- **Pass:** lists the catalog from `presets/` (6 entries, custom last), no
+- **Pass:** lists the catalog from `presets/` (10 entries on 2026-09-26, custom last), no
   "(built-in fallback)" markers.
 1. Add a throwaway preset: `mkdir -p presets/test-x/hello`, write a
    `preset.yml` (description + ram_mb) and a `hello/docker-compose.yml`

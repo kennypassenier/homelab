@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **Orchestrator: retrospective form answered 2026-09-26** (all six as recommended; `docs/RETROSPECTIVE.md` §4). Left: Claude's headless pass of TEST_PLAN part A, then Kenny approves the dev-procedure diff. **Deployment: waiting on Kenny: a correction form for fix-26 (kyu-runner's state dir owned by root stopped it at restart) and fix-27 (a deploy that restarts Loki fails its own service check)**, plus the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). Done 2026-09-26 evening (Kenny's form): v3.56.0 released and live (`rotate:` on data mounts + big-log finding, fix-24), gateway deployed with Traefik rotation and without Loki's dead route; new homelab-ops webhook id live (fix-25, pre-commit refuses ids); kyu-runner routes for `ops.alerts` and `switchboard.events`; Uptime Kuma notifies HA on all 40 monitors; http-switchboard fix-7 (grouped alerts arrive whole) live on CT 109. **Measurement open:** the first unforced Traefik log rotation, read on 2026-09-27 (fix-24). Waits for a first escrow step: gap-15 guard. fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
+| Next action | **Orchestrator: retrospective form answered 2026-09-26** (all six as recommended; `docs/RETROSPECTIVE.md` §4). Part A run headless the same evening (`docs/TEST_RUN_PART_A.md`: 16 of 19 steps pass, 8 findings). **Waiting on Kenny's form:** approve the dev-procedure diff (branch `retro-homelab-orchestrator`, a25f706) and decide the eight findings. **Deployment: waiting on Kenny: a correction form for fix-26 (kyu-runner's state dir owned by root stopped it at restart) and fix-27 (a deploy that restarts Loki fails its own service check)**, plus the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). Done 2026-09-26 evening (Kenny's form): v3.56.0 released and live (`rotate:` on data mounts + big-log finding, fix-24), gateway deployed with Traefik rotation and without Loki's dead route; new homelab-ops webhook id live (fix-25, pre-commit refuses ids); kyu-runner routes for `ops.alerts` and `switchboard.events`; Uptime Kuma notifies HA on all 40 monitors; http-switchboard fix-7 (grouped alerts arrive whole) live on CT 109. **Measurement open:** the first unforced Traefik log rotation, read on 2026-09-27 (fix-24). Waits for a first escrow step: gap-15 guard. fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
 
 
 **The deployment project is the active work.** It brings the whole fleet under
@@ -128,9 +128,9 @@ it is the resume point and is kept current as part of the work, not afterwards.
   `pve/root-v2-preinstall` were both invalid at 100%. `vgs pve` after
   removal: 16.00g free, `pve/root` untouched. The CT 108 pre-test vzdump
   no longer exists either.
-- **Open**: the phase-10 retrospective (`docs/RETROSPECTIVE.md`), the
-  headless pass of docs/TEST_PLAN.md part A (Kenny's choice: Claude runs
-  it and reports; part B is closed as an open item). The old
+- **Open**: the phase-10 retrospective (`docs/RETROSPECTIVE.md`) waits on
+  the approval form; the eight part-A findings are in
+  `docs/TEST_RUN_PART_A.md` (part B is closed as an open item). The old
   M5 migration milestone is carried by the deployment project
   (`docs/deployment/REGISTER.md`). HTTPSwitchboard preset adoption — S1
   decided (policy=manual), the container and the config location wait for

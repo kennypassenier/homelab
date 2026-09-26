@@ -27,7 +27,9 @@ services:
       - "8080:8080"
     environment:
       KYU_LISTEN: 0.0.0.0:8080
-      KYU_DATA_DIR: /data
+      # kyu 4.0 renamed this and exits 1 when the old name is set, so the
+      # preset (image :latest) follows the new name.
+      KYU_STATE_DIR: /data
       KYU_LOG: info
     env_file:
       - .env

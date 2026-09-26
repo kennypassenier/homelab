@@ -178,6 +178,42 @@ def ensure_almanac_notification(api):
     return created.get("id"), "added"
 
 
+# The dispatcher in Home Assistant (T64 kuma-channel, Kenny 2026-09-26).
+# Until this existed Kuma watched forty monitors and told nobody: zero
+# notifications in its database. It posts straight to HA, NOT through kyu,
+# because one of the things Kuma has to report is kyu itself being down.
+# HA's automation.uptime_kuma_webhook logs every change and pushes a monitor
+# that went down; the URL carries the webhook id, which is a credential, so
+# it comes from latch like KUMA_PASSWORD and never sits in this repository.
+HA_NOTIFICATION = "home assistant · dispatcher"
+
+
+def ensure_ha_notification(api):
+    """Returns (notification id or None, what happened). Same contract as the
+    almanac one below: created once, never rewritten, attached to every
+    existing monitor on creation, and not created without its URL."""
+    for n in api.get_notifications():
+        if n.get("name") == HA_NOTIFICATION:
+            return n.get("id"), "exists"
+
+    url = os.environ.get("HA_KUMA_WEBHOOK_URL", "")
+    if not url:
+        print("[seed] INFO: HA_KUMA_WEBHOOK_URL is not set, so outages are "
+              "not sent to Home Assistant", flush=True)
+        return None, "no-url"
+
+    created = api.add_notification(
+        name=HA_NOTIFICATION,
+        type=NotificationType.WEBHOOK,
+        isDefault=True,
+        applyExisting=True,
+        webhookURL=url,
+        webhookContentType="json",
+    )
+    print(f"[seed]   + notification {HA_NOTIFICATION}", flush=True)
+    return created.get("id"), "added"
+
+
 def seed_once(api, host_monitors, have_generated_list):
     have = {m["name"] for m in api.get_monitors()}
     added = skipped = 0
@@ -185,7 +221,9 @@ def seed_once(api, host_monitors, have_generated_list):
     # Kuma applies a default notification only in its own UI, so a monitor
     # added through the API has to name it.
     notification_id, almanac_state = ensure_almanac_notification(api)
-    notify = {"notificationIDList": [notification_id]} if notification_id else {}
+    ha_id, ha_state = ensure_ha_notification(api)
+    ids = [i for i in (notification_id, ha_id) if i]
+    notify = {"notificationIDList": ids} if ids else {}
 
     for name, url, accepted in APPLICATION_MONITORS:
         if name in have:
@@ -246,6 +284,7 @@ def seed_once(api, host_monitors, have_generated_list):
         "stale": stale,
         "judged": bool(have_generated_list),
         "almanac_notification": almanac_state,
+        "ha_notification": ha_state,
     }
     try:
         path = env("STATUS_FILE", "/config/last-seed.json")

@@ -61,15 +61,15 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.57.0** (2026-09-26 23:22 local, fix-26/27); v3.56.0 the same evening (fix-24 log rotation); v3.55.0 on 2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **533 tests in 35 suites**, CI green — and green now
+- **Released and live at v3.57.0** (2026-09-26 23:22 local, fix-26/27); v3.56.0 the same evening (fix-24 log rotation); v3.55.0 on 2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **544 tests in 36 suites** (counted 2026-09-26), CI green — and green now
   means something: CI ran without `--locked` until that day, so it built
   whatever crates.io served rather than what the lockfile pins (F235).
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.
   M7 is done: CT 115 destroyed and rebuilt end to end, 653 s of outage of
   which 573 s was one stalled image pull (F108). W1-W3 built straight after
   it (host hardware readiness, per-stack retention, boot-policy drift).
-  Open Dependabot PR that does NOT pass: axum 0.7 → 0.8, a real breaking
-  upgrade; main is green.
+  The open Dependabot bumps, axum 0.7 → 0.8 among them, were combined into
+  one change and merged on 2026-09-25 (674438f); no Dependabot PR is open.
   v3.0.0 was the first tag (Kenny's number: "hele nieuwe rewrite").
   Features added after the hardening batch:
   - **H7 · release-driven host updates** — TUI badge + `U` key +

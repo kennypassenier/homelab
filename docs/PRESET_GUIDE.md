@@ -48,10 +48,7 @@ Open the TUI, press `N` — "stirling" is in the list. That's the whole flow.
 
 ```
 presets/
-  _core/                 # apps injected into EVERY new stack
-    promtail/            #   (log shipping to Loki — D8)
-      docker-compose.yml
-      promtail-config.yml
+  _core/                 # apps injected into EVERY new stack (none today)
   syncthing/             # one preset
     preset.yml           #   metadata (description, resources, overrides)
     syncthing/           #   one directory PER APP, holding its files
@@ -68,7 +65,7 @@ Rules:
   `_` are reserved (`_core` = the always-injected apps).
 - Every **subdirectory** of a preset is an app; **every file** in it is
   copied into the new stack with placeholder substitution. Extra config
-  files (like promtail's) ride along automatically.
+  files ride along automatically.
 - A preset may have **multiple app dirs** — a "media" preset with jellyfin +
   sonarr + radarr is just three subdirectories.
 - The manifest's `apps:` list is derived from the app directory names —
@@ -179,7 +176,11 @@ under a new name) and `homelab deploy`.
 ## Core apps (`_core/`)
 
 Every directory under `presets/_core/` is copied into **every** new stack.
-Today that is promtail. To exempt one stack: delete the app dir from the
+Today there is none: promtail was the only one, and since 2026-09-02 the
+deploy installs Grafana Alloy as the log shipper in every container itself
+(`core/src/ops/logshipper.rs`), so the scaffold stopped adding a promtail
+sidecar on 2026-09-26 (test-plan part A, finding 4). To exempt one stack
+from a future core app: delete the app dir from the
 scaffolded stack + remove it from the manifest's `apps:` list. If a preset
 ships its own version of a core app (same dir name), the preset's version
 wins.
@@ -223,14 +224,16 @@ already there.
 | Layer | Where | For | Live examples |
 |---|---|---|---|
 | **Golden image** | `homelab template-build` (`core/src/ops/template.rs`) | Every container needs it, and it is identical everywhere | docker, the runaway guards, unattended-upgrades, node_exporter, cadvisor |
-| **Core app** | `presets/_core/<app>/` | Every container needs it, but its configuration differs per container | promtail |
+| **Core app** | `presets/_core/<app>/` | Every container needs it, but its configuration differs per container | none today (promtail until 2026-09-26) |
 | **Preset** | `presets/<name>/` | You want it sometimes | jellyfin, syncthing, uptime-kuma |
 
 **The trade-off that decides it.** Something in the golden image is free at
 deploy time — a clone already has it — but changing it means rebuilding the
-image and then rebuilding containers to pick it up. That is why promtail is
+image and then rebuilding containers to pick it up. That is why promtail was
 *not* in the image despite running everywhere: it was changed three times this
-year, and each change would have meant a fleet-wide rebuild. Ask how often the
+year, and each change would have meant a fleet-wide rebuild. Its successor,
+Alloy, is installed by the deploy from Grafana's apt repository instead, so
+unattended-upgrades keeps it patched without either. Ask how often the
 thing changes, not only how widely it is used.
 
 **The template a new stack clones is not a free choice either.** The scaffold

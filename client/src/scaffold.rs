@@ -1,7 +1,9 @@
 //! Scaffold a new stack directory (G2 / D7): writes a real, deployable
-//! stacks/<name>/ tree — lxc-compose.yml manifest + a starter app compose +
-//! the promtail core app (D8) — using the preset the wizard picked. Only the
-//! per-VM values are substituted; the rest is the canonical template.
+//! stacks/<name>/ tree — lxc-compose.yml manifest + a starter app compose —
+//! using the preset the wizard picked. Only the per-VM values are
+//! substituted; the rest is the canonical template. The log shipper is not
+//! part of the scaffold: the deploy installs Grafana Alloy in every container
+//! itself (C1/C2, 2026-09-02).
 
 use std::path::{Path, PathBuf};
 
@@ -29,9 +31,12 @@ pub struct StackDefaults {
     pub boot_order: u16,
     pub default_cores: u16,
     pub default_disk_gb: u16,
-    /// Core apps injected into every new stack (D8): promtail only. Watchtower
-    /// is deliberately dropped (D9 — replaced by managed updates with a
-    /// per-app update.policy label); traefik was never auto-injected.
+    /// Core apps injected into every new stack (D8), copied from
+    /// `presets/_core/<app>/`. Empty since the Alloy migration: promtail was
+    /// the only one, and the deploy now installs the log shipper itself, so a
+    /// scaffolded sidecar would be a second, end-of-life shipper (test-plan
+    /// part A, 2026-09-26). Watchtower is deliberately dropped (D9); traefik
+    /// was never auto-injected.
     pub core_apps: Vec<String>,
     /// Swap auto-formula: clamp(RAM / divisor, min, max). For LXC, swap is a
     /// cap on shared HOST swap — keep it small so a runaway container OOMs
@@ -70,7 +75,7 @@ impl Default for StackDefaults {
             boot_order: 99,
             default_cores: 2,
             default_disk_gb: 32,
-            core_apps: vec!["promtail".into()],
+            core_apps: Vec::new(),
             swap_divisor: 4,
             swap_min_mb: 512,
             swap_max_mb: 2048,
@@ -97,8 +102,9 @@ pub struct Scaffolded {
 // A preset is a DIRECTORY under presets/: `preset.yml` (metadata) plus one
 // subdirectory per app holding the literal files to install (compose, config,
 // …). Files are copied with placeholder substitution — adding or changing a
-// preset is a file edit, never a recompile. `presets/_core/` holds apps
-// injected into every stack (promtail). See docs/PRESET_GUIDE.md.
+// preset is a file edit, never a recompile. `presets/_core/` would hold apps
+// injected into every stack; it is empty since the deploy installs the log
+// shipper itself. See docs/PRESET_GUIDE.md.
 
 /// Metadata from `preset.yml`. Everything except `description`/`ram_mb` is an
 /// optional override on [`StackDefaults`].
@@ -441,8 +447,8 @@ pub fn scaffold_stack_with(
         }
     }
 
-    // Core apps (D8): copied from presets/_core/<app>/, falling back to the
-    // built-in promtail template when the directory is missing.
+    // Core apps (D8): copied from presets/_core/<app>/. A core app whose
+    // directory is missing is refused rather than invented.
     for core in &d.core_apps {
         if apps.iter().filter(|a| *a == core).count() == 0 {
             continue; // preset removed it deliberately
@@ -453,19 +459,13 @@ pub fn scaffold_stack_with(
         let core_dir = presets_base.join("_core").join(core);
         if core_dir.is_dir() {
             copy_app_templates(&core_dir, &dir.join(core), name, vmid, &ip, &mut files)?;
-        } else if core == "promtail" {
-            // presets/_core/promtail/ is missing, which means this checkout is
-            // incomplete rather than that a fallback is wanted. Emitting a
-            // second, hand-written promtail config here is how a third shape
-            // of the same file came to exist — one without pipeline_stages,
-            // so the container_name label it is supposed to produce stayed
-            // empty and three Loki dashboards queried a label that was never
-            // written. Say what is missing instead of quietly inventing it.
+        } else {
             return Err(format!(
-                "presets/_core/promtail is missing from {} — a stack scaffolded \
-                 without it ships no working log config; restore the presets \
-                 directory rather than deploying this stack",
-                presets_base.display()
+                "presets/_core/{} is missing from {} — restore the presets \
+                 directory or drop {} from core_apps",
+                core,
+                presets_base.display(),
+                core
             ));
         }
     }
@@ -569,7 +569,6 @@ fn generic_compose(app: &str, image: &str, name: &str) -> String {
     )
 }
 
-/// Built-in promtail (D8) used when presets/_core/promtail is absent.
 fn write_file(path: &Path, content: &str, files: &mut Vec<String>) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {}", parent.display(), e))?;

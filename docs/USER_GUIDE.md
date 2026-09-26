@@ -50,8 +50,9 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   and, for converting a vendor compose with an LLM,
   [LLM_COMPOSE_CONVERSION.md](LLM_COMPOSE_CONVERSION.md).
   `homelab presets` lists the catalog.
-- **D8 · Core apps** — every new stack gets promtail from `presets/_core/`
-  automatically; delete its dir from the stack to opt out.
+- **D8 · Core apps** — every new stack gets the apps in `presets/_core/`
+  automatically (none today; the deploy installs the Alloy log shipper in
+  every container itself); delete an app's dir from the stack to opt out.
 - **A5 · Secrets** — put `stacks/<name>/<app>/.env` next to the compose;
   deploy ships it over the TLS line into the host vault
   (`/var/lib/homelab/secrets/`). Never in git (gitignored), never in

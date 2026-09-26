@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**516 tests across 27 suites.**
+**517 tests across 27 suites.**
 
 ## Accepted limitations
 
@@ -662,6 +662,7 @@ Covers: F122, F136, F150, F151, F152, F154, F155, F156, F167, F212, F215
 - `swap_formula_matches_legacy_tiers`
 - `scaffold_has_no_watchtower_and_manual_update_policy`
 - `scaffold_writes_a_deployable_stack`
+- `scaffold_injects_no_promtail_sidecar` — Test-plan part A run, 2026-09-26, finding 4: the fleet left promtail for Grafana Alloy on 2026-09-02 and the deploy now installs Alloy in every container itself, but the scaffold still gave each new stack a promtail sidecar — a second log shipper, and one past end of life.
 - `palette_fuzzy_matches`
 - `settings_tab_renders_config_and_edits`
 - `settings_azerty_fifth_tab_key`

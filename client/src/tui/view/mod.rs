@@ -505,7 +505,7 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
                         defaults.swap_for(wiz.ram)
                     ),
                 ),
-                kv("apps", format!("{}, promtail", app)),
+                kv("apps", app.to_string()),
                 Line::default(),
                 Line::from(Span::styled(
                     "  writes a real stacks/<name>/ tree; nothing deploys yet",

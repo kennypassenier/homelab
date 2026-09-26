@@ -409,20 +409,71 @@ fn scaffold_writes_a_deployable_stack() {
         },
     )
     .expect("scaffold");
-    // Manifest + app compose + promtail compose + promtail config.
+    // Manifest + app compose; no log-shipper sidecar (the deploy installs Alloy).
     assert!(s.files.iter().any(|f| f.ends_with("lxc-compose.yml")));
     assert!(s
         .files
         .iter()
         .any(|f| f.ends_with("syncthing/docker-compose.yml")));
-    assert!(s
-        .files
-        .iter()
-        .any(|f| f.ends_with("promtail/docker-compose.yml")));
+    assert!(!s.files.iter().any(|f| f.contains("promtail")));
     // The scaffolded manifest passes the same validator the host uses (D10).
     let spec = homelab_client::spec::build_spec(&tmp.join("demo")).expect("build spec");
     homelab_core::manifest::validate(&spec).expect("scaffolded stack must be valid");
     assert_eq!(spec.manifest.hostname, "120-app-demo");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Test-plan part A run, 2026-09-26, finding 4: the fleet left promtail for
+/// Grafana Alloy on 2026-09-02 and the deploy now installs Alloy in every
+/// container itself, but the scaffold still gave each new stack a promtail
+/// sidecar — a second log shipper, and one past end of life.
+#[test]
+fn scaffold_injects_no_promtail_sidecar() {
+    use homelab_client::scaffold::{scaffold_stack, scan_presets, StackDefaults, StackParams};
+    assert!(
+        StackDefaults::default().core_apps.is_empty(),
+        "the deploy installs the log shipper; no core app should declare one"
+    );
+    let tmp = std::env::temp_dir().join(format!("homelab-nopromtail-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = scan_presets(&presets_dir);
+    let actual = presets.iter().find(|p| p.name == "actual").unwrap();
+    let s = scaffold_stack(
+        &tmp,
+        &presets_dir,
+        &StackParams {
+            name: "retrotest",
+            vmid: 150,
+            ram_mb: 512,
+            cores: 2,
+            disk_gb: 8,
+            swap_mb: None,
+            no_data_paths: &[],
+            preset: Some(actual),
+        },
+    )
+    .unwrap();
+    let root = tmp.join("retrotest");
+    let written: Vec<String> = s
+        .files
+        .iter()
+        .map(|f| {
+            std::path::Path::new(f)
+                .strip_prefix(&root)
+                .unwrap()
+                .display()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        !written.iter().any(|f| f.contains("promtail")),
+        "scaffold wrote {:?}",
+        written
+    );
+    let manifest = std::fs::read_to_string(tmp.join("retrotest/lxc-compose.yml")).unwrap();
+    assert!(!manifest.contains("promtail"), "{}", manifest);
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
@@ -495,7 +546,7 @@ fn preset_templates_substitute_and_apps_list_matches_dirs() {
     // The scaffolded stack from a disk preset must: substitute __STACK__/
     // __HOSTNAME__ everywhere, list the APP dir names in the manifest (a
     // stack named differently from its app must still start the right
-    // /opt/<stack>/<app> dirs), and inject the _core promtail from disk.
+    // /opt/<stack>/<app> dirs).
     use homelab_client::scaffold::{scaffold_stack, scan_presets, StackParams};
     let tmp = std::env::temp_dir().join(format!("homelab-presetsub-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
@@ -522,19 +573,12 @@ fn preset_templates_substitute_and_apps_list_matches_dirs() {
     let manifest = std::fs::read_to_string(tmp.join("vault-sync/lxc-compose.yml")).unwrap();
     // Apps list uses APP dir names, not the stack name (the old latent bug).
     assert!(manifest.contains("- syncthing"));
-    assert!(manifest.contains("- promtail"));
     assert!(!manifest.contains("- vault-sync"));
     let compose =
         std::fs::read_to_string(tmp.join("vault-sync/syncthing/docker-compose.yml")).unwrap();
     assert!(compose.contains("vault-sync_net"), "network substituted");
     assert!(compose.contains("hostname: 130-app-vault-sync"));
     assert!(!compose.contains("__STACK__"), "no leftover placeholders");
-    let ptcfg =
-        std::fs::read_to_string(tmp.join("vault-sync/promtail/promtail-config.yml")).unwrap();
-    assert!(ptcfg.contains("stack: vault-sync"));
-    assert!(ptcfg.contains("host: 130-app-vault-sync"));
-    // __path__ is a real promtail key, NOT a placeholder — must survive.
-    assert!(ptcfg.contains("__path__"));
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
@@ -1745,8 +1789,10 @@ fn every_shipped_preset_scaffolds_a_valid_stack() {
                 }
             }
         }
+        // `custom` is the empty stack by design; since the scaffold stopped
+        // injecting a promtail sidecar it has no compose file to write.
         assert!(
-            compose_files >= 1,
+            compose_files >= 1 || preset.apps.is_empty(),
             "preset '{}' scaffolded no compose file at all",
             preset.name
         );

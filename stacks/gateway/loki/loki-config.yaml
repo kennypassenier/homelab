@@ -44,9 +44,12 @@ compactor:
 limits_config:
   retention_period: 744h  # 31 days
 
-# Disable alertmanager integration — no alertmanager in this homelab setup
+# No alerting from Loki (T64 grafana-contact, Kenny 2026-09-26). Alerts go
+# through Prometheus -> Alertmanager -> kyu -> Home Assistant (D54), the one
+# path that is proven. The alertmanager_url that used to sit here pointed at
+# a localhost Alertmanager that never existed, so the file promised a route
+# nobody had. The ruler keeps its local storage and holds no rules.
 ruler:
-  alertmanager_url: http://localhost:9093
   storage:
     type: local
     local:

@@ -323,3 +323,65 @@ pub async fn apply(
     log("[guard] runaway guards + security patching in place".into());
     Ok(())
 }
+
+/// fix-24: where the per-stack rotation rule lives inside the container.
+pub fn rotation_path(stack: &str) -> String {
+    format!("/etc/logrotate.d/homelab-{}", stack)
+}
+
+/// fix-24: the logrotate rule for every data mount that declares `rotate:`,
+/// or None when the stack declares none. Pure, so the exact bytes are tested.
+pub fn rotation_policy(data_mounts: &[crate::manifest::DataMount]) -> Option<String> {
+    let mut out = String::new();
+    for dm in data_mounts {
+        let Some(r) = &dm.rotate else { continue };
+        let path = format!("{}/{}", dm.mount_point.trim_end_matches('/'), r.files);
+        out.push_str(&format!(
+            "# written by the homelab deploy from data_mounts[{}].rotate — edits here are overwritten\n",
+            dm.mount_point
+        ));
+        out.push_str(&format!(
+            "{} {{\n    daily\n    rotate {}\n    missingok\n    notifempty\n    compress\n    delaycompress\n",
+            path, r.keep
+        ));
+        match &r.reopen {
+            Some(o) => out.push_str(&format!(
+                "    sharedscripts\n    postrotate\n        docker kill --signal={} {} >/dev/null 2>&1 || true\n    endscript\n",
+                o.signal, o.container
+            )),
+            None => out.push_str("    copytruncate\n"),
+        }
+        out.push_str("}\n");
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// fix-24: install (or remove) the stack's rotation rule. Returns true when
+/// the container changed.
+pub async fn apply_rotation(
+    exec: &dyn Executor,
+    vmid: u16,
+    stack: &str,
+    data_mounts: &[crate::manifest::DataMount],
+) -> Result<bool, CoreError> {
+    let path = rotation_path(stack);
+    match rotation_policy(data_mounts) {
+        Some(policy) => push_content(exec, vmid, &path, &policy, "644").await,
+        None => {
+            // A rule whose declaration was removed must go with it, or the
+            // stack file stops being the whole truth about this container.
+            let out = pct_sh(
+                exec,
+                vmid,
+                &format!("test -e {p} && rm -f {p} && echo removed || true", p = path),
+                30,
+            )
+            .await?;
+            Ok(out.stdout.contains("removed"))
+        }
+    }
+}

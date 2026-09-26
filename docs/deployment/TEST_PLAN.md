@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**508 tests across 27 suites.**
+**513 tests across 27 suites.**
 
 ## Accepted limitations
 
@@ -59,7 +59,7 @@ Covers: F156
 
 The M0 safety and idempotency suite — every scenario here maps to a FEATURES.md test scenario (A1, A2, A3/D10, B1, D1, A5).
 
-Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, F159, F164, F169, F170, F173, F21, F210, F213, F22, F289
+Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, F159, F164, F169, F170, F173, F21, F210, F213, F22, F289, fix-24
 
 - `a_clone_refuses_a_privilege_level_the_template_cannot_give` — A clone can never change a container's privilege level, so asking for one the template cannot give must stop the deploy rather than silently produce the other.
 - `a_privileged_stack_cloning_the_privileged_template_is_allowed` — And the matching case passes: a privileged stack cloning the privileged template is exactly how the media and downloader stacks are built.
@@ -135,6 +135,10 @@ Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, 
 - `an_image_that_is_present_is_not_pulled_and_the_app_still_comes_up`
 - `an_image_that_is_missing_is_pulled_as_before`
 - `no_answer_about_the_images_means_pull` — Standing rule 12: defaults fail closed.
+- `fix_24_the_rotation_rule_renames_and_signals_or_falls_back_to_copytruncate` — covers: fix-24
+- `fix_24_a_deploy_installs_the_rule_inside_the_container` — covers: fix-24
+- `fix_24_a_rotation_value_that_would_reach_a_shell_is_refused` — covers: fix-24
+- `fix_24_the_gateway_rotates_traefiks_access_log` — covers: fix-24
 
 ### `core/tests/devicebackup_tests.rs`
 
@@ -178,7 +182,7 @@ M1 failure-model suite (AR13, AR14, AR16, F6). Every scenario maps to a FEATURES
 
 Y4: the fleet check has one job — find the things that look healthy.
 
-Covers: F149, F184, F198, F211, F214, F79
+Covers: F149, F184, F198, F211, F214, F79, fix-24
 
 - `y4_a_healthy_fleet_is_silent` — A healthy fleet produces nothing.
 - `y4_finds_the_kyu_case` — The kyu case, exactly: the record still describes the pre-rename hostname, so every operation fails the guard, the nightly run failed, H8 disabled the stack, and it had never been backed up.
@@ -236,6 +240,7 @@ Covers: F149, F184, F198, F211, F214, F79
 - `a_pool_two_stacks_share_names_both_of_them` — The bug this test exists for: CT 105 and CT 106 both mount the 18 TB dataset.
 - `a_missing_mount_does_not_shift_every_reading_after_it` — A path that does not exist yields a line with the path and nothing else.
 - `a_path_nobody_declared_is_ignored`
+- `fix_24_a_log_past_500_mb_is_drift_and_the_remedy_depends_on_its_rule` — covers: fix-24
 
 ### `core/tests/homepage_tests.rs`
 

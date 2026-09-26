@@ -694,6 +694,7 @@ async fn m1_a_borrowed_directory_is_mounted_but_never_created() {
         host_path: "/HDD18TB/subvol-103-disk-0".into(),
         mount_point: "/mnt/data/18TB".into(),
         note: Some("the fileserver's dataset".into()),
+        rotate: None,
     }];
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(report.ok, "deploy failed: {:?}", report.error);
@@ -739,6 +740,7 @@ async fn m1_a_missing_borrowed_directory_stops_the_deploy() {
         host_path: "/HDD18TB/subvol-103-disk-0".into(),
         mount_point: "/mnt/data/18TB".into(),
         note: None,
+        rotate: None,
     }];
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(!report.ok, "a missing library path must stop the deploy");
@@ -764,6 +766,7 @@ fn m1_the_two_kinds_of_directory_cannot_be_confused() {
         host_path: "/appdata/syncthing/other-config".into(),
         mount_point: "/mnt/other".into(),
         note: None,
+        rotate: None,
     }];
     let err = validate(&s).expect_err("must be refused");
     assert!(
@@ -778,6 +781,7 @@ fn m1_the_two_kinds_of_directory_cannot_be_confused() {
         host_path: "/HDD18TB/media".into(),
         mount_point: "/appdata/syncthing/syncthing-config".into(),
         note: None,
+        rotate: None,
     }];
     let err = validate(&s).expect_err("a mount point cannot be claimed twice");
     assert!(format!("{}", err).contains("claimed by both"), "{}", err);
@@ -788,6 +792,7 @@ fn m1_the_two_kinds_of_directory_cannot_be_confused() {
         host_path: "HDD18TB/media".into(),
         mount_point: "/mnt/media".into(),
         note: None,
+        rotate: None,
     }];
     assert!(validate(&s).is_err());
 
@@ -797,6 +802,7 @@ fn m1_the_two_kinds_of_directory_cannot_be_confused() {
         host_path: "/HDD18TB/subvol-103-disk-0".into(),
         mount_point: "/mnt/data/18TB".into(),
         note: Some("CT 103's dataset, mounted twice on purpose".into()),
+        rotate: None,
     }];
     validate(&ok).expect("a borrowed media directory is valid");
 }
@@ -854,6 +860,7 @@ async fn a_missing_mount_is_reattached_on_an_existing_container() {
         host_path: "/HDD18TB/media".into(),
         mount_point: "/mnt/data/18TB".into(),
         note: None,
+        rotate: None,
     }];
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(report.ok, "deploy failed: {:?}", report.error);
@@ -2946,4 +2953,120 @@ mod deploy_pulls_only_what_is_missing {
         let exec = run(None).await;
         assert_eq!(exec.calls_containing("compose pull").len(), 1);
     }
+}
+
+// ── fix-24: rotation for logs on a data mount ─────────────────────────────
+
+fn traefik_logs(rotate: Option<LogRotation>) -> DataMount {
+    DataMount {
+        host_path: "/HDD2TB/logs/traefik".into(),
+        mount_point: "/mnt/traefik-logs".into(),
+        note: None,
+        rotate,
+    }
+}
+
+fn traefik_rotation() -> LogRotation {
+    LogRotation {
+        files: "access.log".into(),
+        keep: 14,
+        reopen: Some(ReopenSignal {
+            container: "traefik".into(),
+            signal: "USR1".into(),
+        }),
+    }
+}
+
+/// covers: fix-24
+#[test]
+fn fix_24_the_rotation_rule_renames_and_signals_or_falls_back_to_copytruncate() {
+    use homelab_core::ops::guards::rotation_policy;
+
+    let with_signal = rotation_policy(&[traefik_logs(Some(traefik_rotation()))]).unwrap();
+    assert_eq!(
+        with_signal,
+        "# written by the homelab deploy from data_mounts[/mnt/traefik-logs].rotate — edits here are overwritten\n\
+         /mnt/traefik-logs/access.log {\n    daily\n    rotate 14\n    missingok\n    notifempty\n    compress\n    delaycompress\n    sharedscripts\n    postrotate\n        docker kill --signal=USR1 traefik >/dev/null 2>&1 || true\n    endscript\n}\n"
+    );
+
+    let mut plain = traefik_rotation();
+    plain.reopen = None;
+    let fallback = rotation_policy(&[traefik_logs(Some(plain))]).unwrap();
+    assert!(fallback.contains("copytruncate"), "{fallback}");
+    assert!(!fallback.contains("docker kill"), "{fallback}");
+
+    assert_eq!(
+        rotation_policy(&[traefik_logs(None)]),
+        None,
+        "no rotate, no rule"
+    );
+}
+
+/// covers: fix-24
+#[tokio::test]
+async fn fix_24_a_deploy_installs_the_rule_inside_the_container() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always("if [ -d ", CmdOutput::ok("/HDD2TB/logs/traefik OK\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut sp = spec(110, "syncthing");
+    sp.manifest.data_mounts = vec![traefik_logs(Some(traefik_rotation()))];
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    let dest = "/etc/logrotate.d/homelab-syncthing";
+    let staged = homelab_core::ops::util::staging_path(110, dest);
+    let pushed = exec.file(&staged).expect("the rule is pushed");
+    assert!(
+        pushed.contains("/mnt/traefik-logs/access.log {"),
+        "{pushed}"
+    );
+    assert!(
+        !exec.calls_containing(dest).is_empty(),
+        "the staged rule is moved into the container"
+    );
+}
+
+/// covers: fix-24
+#[test]
+fn fix_24_a_rotation_value_that_would_reach_a_shell_is_refused() {
+    use homelab_core::manifest::validate;
+
+    for (files, keep, container) in [
+        ("../etc/passwd", 14, "traefik"),
+        ("logs/access.log", 14, "traefik"),
+        ("access.log", 0, "traefik"),
+        ("access.log", 14, "traefik; rm -rf /"),
+    ] {
+        let mut s = spec(110, "syncthing");
+        let mut r = traefik_rotation();
+        r.files = files.into();
+        r.keep = keep;
+        r.reopen.as_mut().unwrap().container = container.into();
+        s.manifest.data_mounts = vec![traefik_logs(Some(r))];
+        assert!(
+            validate(&s).is_err(),
+            "must be refused: files={files} keep={keep} container={container}"
+        );
+    }
+    let mut ok = spec(110, "syncthing");
+    ok.manifest.data_mounts = vec![traefik_logs(Some(traefik_rotation()))];
+    validate(&ok).expect("the gateway's own rule is valid");
+}
+
+/// covers: fix-24
+#[test]
+fn fix_24_the_gateway_rotates_traefiks_access_log() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let text = std::fs::read_to_string(root.join("stacks/gateway/lxc-compose.yml")).unwrap();
+    let m: StackManifest = serde_yaml::from_str(&text).unwrap();
+    let dm = m
+        .data_mounts
+        .iter()
+        .find(|d| d.mount_point == "/mnt/traefik-logs")
+        .expect("the gateway mounts the traefik logs");
+    assert_eq!(dm.rotate.as_ref(), Some(&traefik_rotation()));
 }

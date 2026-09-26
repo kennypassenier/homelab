@@ -355,6 +355,25 @@ pub async fn gather_live_facts(
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
+            // fix-24: oversized logs on the same mounts. Two levels deep only:
+            // logs sit at the top of a log mount, and the media pools hold
+            // terabytes that a nightly walk has no business descending into.
+            let rotated: Vec<String> = snapshot
+                .stacks
+                .values()
+                .filter_map(|st| st.manifest.as_ref())
+                .flat_map(|m| m.data_mounts.iter())
+                .filter(|dm| dm.rotate.is_some())
+                .map(|dm| dm.host_path.clone())
+                .collect();
+            let find = format!(
+                "find {} -maxdepth 2 -xdev -type f -name '*.log' -size +{}k -printf '%s %p\\n' 2>/dev/null; true",
+                paths.iter().map(|p| format!("'{}'", p)).collect::<Vec<_>>().join(" "),
+                crate::ops::fleetcheck::BIG_LOG_BYTES / 1024
+            );
+            if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &find], 120)).await {
+                facts.big_logs = crate::ops::fleetcheck::big_log_facts(&out.stdout, &rotated);
+            }
             if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 60)).await {
                 facts.pools = crate::ops::fleetcheck::pool_facts_from_df(&out.stdout, &declared);
                 notes.push(format!(

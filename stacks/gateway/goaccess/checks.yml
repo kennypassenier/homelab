@@ -13,7 +13,8 @@ checks:
     expect: never_decreases
     layer: application
     blind_spot: >-
-      The number resets when logrotate turns the access log at 02:00, so a
+      The number resets when logrotate turns the access log (daily, around
+      midnight; the rule comes from the gateway's stack file, fix-24), so a
       pair straddling that moment reads as a fall. The pair is taken minutes
       apart, which makes it unlikely rather than impossible.
 

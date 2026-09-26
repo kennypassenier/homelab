@@ -115,6 +115,15 @@ data_mounts:
   - host_path: /HDD2TB/logs/traefik
     mount_point: /mnt/traefik-logs
     note: "Traefik access + rotated logs. Regenerable, deliberately outside the backup."
+    # fix-24: the deploy writes /etc/logrotate.d/homelab-gateway from this.
+    # A hand-added rule rotated the file until CT 104 was rebuilt on
+    # 2026-09-01; after that it grew 25 days unrotated (254 MB).
+    rotate:
+      files: access.log
+      keep: 14
+      reopen:
+        container: traefik
+        signal: USR1
 
 apps: [traefik, cloudflared, crowdsec, grafana, loki, goaccess]
 

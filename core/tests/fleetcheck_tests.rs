@@ -94,6 +94,7 @@ fn y4_a_healthy_fleet_is_silent() {
     let live = LiveFacts {
         seed: Default::default(),
         pools: vec![],
+        big_logs: vec![],
         watched_backups: vec![],
         containers: vec![(113, "113-app-metrics".into())],
         routes: vec![RouteFact {
@@ -1383,4 +1384,38 @@ mod r13_df {
         let stray = "/tmp/elsewhere ext4 100 50 50 50% /tmp";
         assert!(pool_facts_from_df(stray, &declared()).is_empty());
     }
+}
+
+/// covers: fix-24
+#[test]
+fn fix_24_a_log_past_500_mb_is_drift_and_the_remedy_depends_on_its_rule() {
+    use homelab_core::ops::fleetcheck::{big_log_facts, evaluate_big_logs};
+
+    // The size the traefik log would have reached in about seven weeks.
+    let transcript = "524288000 /HDD2TB/logs/traefik/access.log\n\
+                      84488034 /HDD2TB/logs/traefik/access.log.1\n\
+                      600000000 /HDD18TB/other/app.log\n";
+    let facts = big_log_facts(transcript, &["/HDD2TB/logs/traefik".to_string()]);
+    assert_eq!(
+        facts.len(),
+        2,
+        "the 84 MB rotated day is not a finding: {facts:?}"
+    );
+
+    let findings = evaluate_big_logs(&facts);
+    assert!(findings.iter().all(|f| f.severity == Severity::Drift));
+    let traefik = findings
+        .iter()
+        .find(|f| f.subject.contains("traefik"))
+        .unwrap();
+    assert!(traefik.remedy.contains("not running"), "{}", traefik.remedy);
+    let other = findings
+        .iter()
+        .find(|f| f.subject.contains("HDD18TB"))
+        .unwrap();
+    assert!(
+        other.remedy.contains("declare `rotate:`"),
+        "{}",
+        other.remedy
+    );
 }

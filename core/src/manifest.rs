@@ -286,6 +286,52 @@ pub struct DataMount {
     /// the next reader does not have to work it out.
     #[serde(default)]
     pub note: Option<String>,
+    /// B2 for a log the stack writes OUTSIDE its container (fix-24): the
+    /// deploy installs a logrotate rule for it inside the container. Absent =
+    /// nothing rotates this mount, which is right for data and wrong for logs.
+    #[serde(default)]
+    pub rotate: Option<LogRotation>,
+}
+
+/// How a log file on a data mount is rotated (fix-24, Kenny 2026-09-26: "het
+/// Homelab Rust project legt alle logrotaties vast").
+///
+/// Traefik's access log on CT 104 was rotated by a rule someone added by hand
+/// on 2026-08-10; the rebuild of CT 104 on 2026-09-01 did not carry it, and
+/// the file grew for 25 days with nothing saying so. A rule the deploy writes
+/// cannot be lost by a rebuild.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LogRotation {
+    /// File name or glob inside the mount, e.g. `access.log` or `*.log`.
+    /// Never a path: it is joined to `mount_point`.
+    pub files: String,
+    /// Rotated copies kept, one per day.
+    #[serde(default = "default_rotate_keep")]
+    pub keep: u32,
+    /// The app to tell that its file moved. Without it the rule falls back
+    /// to `copytruncate`, which can lose a few lines at the moment of the
+    /// copy; with it logrotate renames the file and signals the app to open a
+    /// new one, which loses nothing.
+    #[serde(default)]
+    pub reopen: Option<ReopenSignal>,
+}
+
+fn default_rotate_keep() -> u32 {
+    14
+}
+
+/// `docker kill --signal=<signal> <container>` after the rename.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ReopenSignal {
+    pub container: String,
+    #[serde(default = "default_reopen_signal")]
+    pub signal: String,
+}
+
+fn default_reopen_signal() -> String {
+    "USR1".into()
 }
 
 impl MountSpec {
@@ -655,6 +701,48 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
                 "mount_point '{}' is claimed by both storage: and data_mounts:",
                 dm.mount_point
             ));
+        }
+        if let Some(r) = &dm.rotate {
+            // The values land in a root-run logrotate file and a shell
+            // command, so they are held to plain names, not escaped.
+            let plain = |v: &str, extra: &str| {
+                !v.is_empty()
+                    && v.chars().all(|c| {
+                        c.is_ascii_alphanumeric() || "._-".contains(c) || extra.contains(c)
+                    })
+            };
+            if !plain(&r.files, "*") || r.files.contains("..") {
+                problems.push(format!(
+                    "data_mounts '{}' rotate.files '{}' must be a file name or glob inside the \
+                     mount (letters, digits, . _ - *), never a path",
+                    dm.mount_point, r.files
+                ));
+            }
+            if r.keep == 0 || r.keep > 365 {
+                problems.push(format!(
+                    "data_mounts '{}' rotate.keep {} must be between 1 and 365 days",
+                    dm.mount_point, r.keep
+                ));
+            }
+            if let Some(o) = &r.reopen {
+                if !plain(&o.container, "") {
+                    problems.push(format!(
+                        "data_mounts '{}' rotate.reopen.container '{}' is not a container name",
+                        dm.mount_point, o.container
+                    ));
+                }
+                if o.signal.is_empty()
+                    || !o
+                        .signal
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+                {
+                    problems.push(format!(
+                        "data_mounts '{}' rotate.reopen.signal '{}' must be a signal name like USR1",
+                        dm.mount_point, o.signal
+                    ));
+                }
+            }
         }
     }
     for mount in &m.storage {

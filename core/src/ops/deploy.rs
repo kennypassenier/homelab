@@ -881,6 +881,15 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         Ok(StepOutcome::Unchanged)
     });
 
+    // ── fix-24: rotation for logs the stack writes onto a data mount. ────
+    step!(runner, exec, ctx, m, "log rotation", {
+        if guards::apply_rotation(exec, m.vmid, &m.stack_name, &m.data_mounts).await? {
+            Ok(StepOutcome::Changed)
+        } else {
+            Ok(StepOutcome::Unchanged)
+        }
+    });
+
     // ── D4: intent into the host-local git repo (never secrets, A5). ─────
     step!(runner, exec, ctx, m, "commit intent", {
         let repo = format!("{}/repo", ctx.state_dir);

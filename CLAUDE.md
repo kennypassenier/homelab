@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **Orchestrator: waiting on Kenny's retrospective form** (lessons, ecosystem entry, test pass, the two dead root snapshots) — numbers in `docs/RETROSPECTIVE.md`. **Deployment: waiting on Kenny: a correction form for fix-26 (kyu-runner's state dir owned by root stopped it at restart) and fix-27 (a deploy that restarts Loki fails its own service check)**, plus the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). Done 2026-09-26 evening (Kenny's form): v3.56.0 released and live (`rotate:` on data mounts + big-log finding, fix-24), gateway deployed with Traefik rotation and without Loki's dead route; new homelab-ops webhook id live (fix-25, pre-commit refuses ids); kyu-runner routes for `ops.alerts` and `switchboard.events`; Uptime Kuma notifies HA on all 40 monitors; http-switchboard fix-7 (grouped alerts arrive whole) live on CT 109. **Measurement open:** the first unforced Traefik log rotation, read on 2026-09-27 (fix-24). Waits for a first escrow step: gap-15 guard. fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
+| Next action | **Orchestrator: retrospective form answered 2026-09-26** (all six as recommended; `docs/RETROSPECTIVE.md` §4). Left: Claude's headless pass of TEST_PLAN part A, then Kenny approves the dev-procedure diff. **Deployment: waiting on Kenny: a correction form for fix-26 (kyu-runner's state dir owned by root stopped it at restart) and fix-27 (a deploy that restarts Loki fails its own service check)**, plus the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). Done 2026-09-26 evening (Kenny's form): v3.56.0 released and live (`rotate:` on data mounts + big-log finding, fix-24), gateway deployed with Traefik rotation and without Loki's dead route; new homelab-ops webhook id live (fix-25, pre-commit refuses ids); kyu-runner routes for `ops.alerts` and `switchboard.events`; Uptime Kuma notifies HA on all 40 monitors; http-switchboard fix-7 (grouped alerts arrive whole) live on CT 109. **Measurement open:** the first unforced Traefik log rotation, read on 2026-09-27 (fix-24). Waits for a first escrow step: gap-15 guard. fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
 
 
 **The deployment project is the active work.** It brings the whole fleet under
@@ -112,8 +112,8 @@ it is the resume point and is kept current as part of the work, not afterwards.
   recommending drills on a live service because of it. When something has to
   be created and destroyed for real, make a throwaway stack on a free vmid
   (`stacks/drill`, vmid 118) and destroy it in the same sitting — Kenny's
-  form B1. There is no host-OS rollback net: both LVM snapshots on
-  `pve` are invalid (see below).
+  form B1. There is no host-OS rollback net: the two invalid LVM
+  snapshots were removed 2026-09-26 (see below).
 - **No-touch list is law**: `core/src/safety.rs` (VM 100 OPNsense, VM 101
   Home Assistant, 102, 103; narrowed 2026-08-30 — the legacy stacks come
   under management through the deployment project).
@@ -123,13 +123,14 @@ it is the resume point and is kept current as part of the work, not afterwards.
   E8 replicates HDD2TB/HDD4TB to `HDD18TB/replica/`; the legacy
   `HDD18TB/REPLICA_*` datasets are frozen history, media pools are
   deliberately out of scope.
-- **Host-OS snapshots are dead** (measured 2026-09-26, `lvs pve`): both
-  `pve/root-pretest` and `pve/root-v2-preinstall` are `swi-I-s---` at
-  100% — invalid, no rollback possible. They hold 16G of VG `pve`, which
-  has 0 free. Removal is in the retrospective form (host change, Kenny's
-  go). The CT 108 pre-test vzdump no longer exists on the host.
-- **Open**: the phase-10 retrospective (`docs/RETROSPECTIVE.md`), Kenny's
-  own test pass (docs/TEST_PLAN.md, in the retrospective form). The old
+- **No host-OS snapshots** (removed 2026-09-26 21:15 UTC with Kenny's go,
+  retrospective item root-snapshots): `pve/root-pretest` and
+  `pve/root-v2-preinstall` were both invalid at 100%. `vgs pve` after
+  removal: 16.00g free, `pve/root` untouched. The CT 108 pre-test vzdump
+  no longer exists either.
+- **Open**: the phase-10 retrospective (`docs/RETROSPECTIVE.md`), the
+  headless pass of docs/TEST_PLAN.md part A (Kenny's choice: Claude runs
+  it and reports; part B is closed as an open item). The old
   M5 migration milestone is carried by the deployment project
   (`docs/deployment/REGISTER.md`). HTTPSwitchboard preset adoption — S1
   decided (policy=manual), the container and the config location wait for

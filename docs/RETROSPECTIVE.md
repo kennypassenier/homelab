@@ -89,5 +89,15 @@ fault, a status that never took a second value. It was applied, not cited.
 
 ## 4 · Outcome
 
-Filled in after Kenny's form: lessons adopted, the ecosystem entry, and the
-diff on `~/Projects/dev-procedure`.
+Kenny's form, answered 2026-09-26 — all six items as recommended:
+
+| item | answer | what follows |
+|---|---|---|
+| destination-check | Opnemen | one sentence in PROCEDURE.md Phase 9 + the four chains in CASEBOOK under rule 34 |
+| rule-44 | Houden | the v3.40.0 "shipping" status added to CASEBOOK under rule 44 |
+| question-mark-rule | Niet opnemen | register row closed: covered by the one-form rule and standing rule 13c |
+| ecosystem | Ja, met contract | the homelab entry in ECOSYSTEM.md replaced by the v3 contract |
+| test-pass | Claude doet deel A headless | part A run headless with a report form; part B closed as an open item |
+| root-snapshots | Claude verwijdert ze | removed 2026-09-26; `vgs pve` shows 16.00g free, `pve/root` untouched |
+
+The dev-procedure diff is shown to Kenny before it is committed.

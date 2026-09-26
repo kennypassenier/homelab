@@ -79,6 +79,8 @@ gateway_route:
 # is gone everywhere. The hub keeps every overwritten and deleted version for
 # a year, and it is the only device that does.
 #
-# Deliberately NOT behind Traefik and not in the tunnel: the web interface
-# listens on 0.0.0.0:8384 and is reached at http://10.10.10.8:8384 from the
-# house.
+# The web interface listens on 0.0.0.0:8384: http://10.10.10.8:8384 from the
+# house, and https://sync.kp-soft.dev through the gateway_route above, where
+# Cloudflare Access gates it (verified 2026-09-26: 200 through Traefik, 302 to
+# the Access login from outside). Only the sync protocol stays LAN-only. This
+# comment used to say the GUI was not behind Traefik, contradicting the route.

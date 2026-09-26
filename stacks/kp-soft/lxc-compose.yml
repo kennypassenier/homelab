@@ -72,9 +72,13 @@ storage:
   # repeats it from this side either.
   - host_path: /appdata/kp-soft/kp-soft-config
     mount_point: /appdata/kp-soft/kp-soft-config
-    # FrankenPHP runs as root in this image; 100000 is root mapped out of an
-    # unprivileged LXC.
-    host_owner_uid: 100000
+    # 100033 (www-data inside), not 100000 (fix-26). FrankenPHP runs as
+    # root, but the image's entrypoint hands this directory and everything in
+    # it to www-data at every start: measured 2026-09-26, the directory and
+    # all its contents are 100033. With 100000 here every deploy chowned the
+    # top directory to root, the next start chowned it back, and the nightly
+    # owner check would report that churn as drift forever.
+    host_owner_uid: 100033
     app: kp-soft
   # JobTracker's whole state: the data repository it clones for itself, with
   # `.jobtracker/` (queue, configuration, passkeys) inside the checkout.

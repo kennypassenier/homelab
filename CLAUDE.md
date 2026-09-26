@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **waiting on Kenny: four manual checks.** The kyu chain is finished for now — 3.5.0 live on CT 109 since 20:41 (step-13), the door holds all 8 clients, zero 401 since the merge at 18:58, binary kyu-owned, store at schema 5, disk 45%. Three corrections closed tonight with measurements that could fail: fix-check-1 (`--check` left a schema-4 copy at 4), fix-state-1 (the guard refuses, naming both directories) and fix-21 (install commands now set the owner themselves, here and in kyu). Open on Kenny: the four manual checks — paperwork ×2, media posters, and **kyu-e576**, the chain test that rings his phone (`homelab checks answer e576228c ok`). Also open: gap-15, a check red by design every night while D56 stands. Waiting on the clock: the kyu session reads fix-events-1 after 2026-09-21 19:35 UTC; VmSwap of kvm 100 after 2026-09-21 (F185). One known leftover, recorded in fix-22 and deliberately kept: `kyu.pre-v4.db` (35 MB) in CT 109's state dir, the pre-migration copy from the 3.3.0 drill. |
+| Next action | **2026-09-26: the overdue measurements are read.** M-T75 and M-D94 closed green over seven nightly rounds, F48 closed (0 open Dependabot alerts) — see `step-14` in the register. Open on Kenny: the form item on kvm-100 swap (the balloon target of 2048 never engaged), and the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). Also open: gap-15, a check red by design every night while D56 stands; fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

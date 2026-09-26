@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **waiting on Kenny: the deep-dive form `grafana-lan`** (F6: Grafana still answers on 10.10.10.4:3000 from the LAN; the Traefik-only route was measured impossible for Kuma and the homepage, which hit Cloudflare Access). Answered 2026-09-26: `opnsense-swap` Sluiten, `almanac-retired` Runbook volstaat. Done that day: M-T75, M-D94, F48, fix-16 closed; gap-16 and gap-15 half done; fix-23 (nine register ids used twice, now guarded by a test; the red-by-design check is renamed gap-18). Also waiting on Kenny: the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). No live action on the machines while the form is open (rule 3 above). fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
+| Next action | **waiting on Kenny: the four manual checks** — paperwork ×2, media posters, and **kyu-e576**, the chain test that rings his phone (`homelab checks answer e576228c ok`). The 2026-09-26 round is closed: M-T75, M-D94, F48, fix-16, gap-16 done; `opnsense-swap` Sluiten (VM 100 to the expert panel); F6 parked by Kenny (**Later**, with the Grafana move to metrics); fix-23 guards register ids (the red-by-design check is now gap-18). Still open as work, not started: gap-7 (CrowdSec missing ~1 min after a Traefik restart, for the gateway round), T64 redesign (inventory done), gap-15 guard (waits for a first escrow step). fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

@@ -63,6 +63,10 @@ person.
 
 ## 4. Watchers that notify no one
 
+> **2026-09-26:** Uptime Kuma now notifies Home Assistant directly
+> (`automation.uptime_kuma_webhook`, notification `home assistant ·
+> dispatcher` on all 40 monitors), T64 kuma-channel.
+
 | Watcher | What it watches | Channels | Evidence |
 |---|---|---|---|
 | **Uptime Kuma** | 36 monitors, created by the seeder | **0** (`select count(*) from notification` = 0). kyu-alert's comments name Kuma as the backstop for "kyu is down", so that backstop alerts nobody | REGISTER F265; `stacks/uptime/kuma-seeder/seed.py` |

@@ -35,12 +35,17 @@ subscription = "switchboard"
 from = { kyu_topic = "alerts.raw" }
 to = { url = "http://10.10.10.2:8123/api/webhook/REPLACE-WITH-THE-REAL-WEBHOOK-ID" }
 content_type = "application/json"
+# T64 alertmanager-group (2026-09-26): Alertmanager groups by alertname and
+# host, so one message can carry two filesystems of one machine. alerts.0
+# alone dropped the rest; count + every summary now arrive (http-switchboard
+# fix-7). Live on CT 109; the previous file is config.toml.pre-t64 there.
 body = '''
 {"alert": {{ alerts.0.labels.alertname }},
  "status": {{ alerts.0.status }},
  "severity": {{ alerts.0.labels.severity | default("warning") }},
  "instance": {{ alerts.0.labels.instance | default("unknown") }},
- "summary": {{ alerts.0.annotations.summary }}}
+ "count": {{ alerts | length }},
+ "summary": {{ alerts | map(attribute="annotations.summary") | join("; ") }}}
 '''
 
 # ── Why this is an example and not the real file ──────────────────────

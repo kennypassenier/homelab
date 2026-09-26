@@ -43,6 +43,12 @@ EnvironmentFile=/appdata/kyu/http-switchboard-config/token.env
 WorkingDirectory=/appdata/kyu/http-switchboard-config
 ExecStartPre=/opt/http-switchboard/bin/http-switchboard --check
 ExecStart=/opt/http-switchboard/bin/http-switchboard
+# feat-reload-1 (http-switchboard 3.2.0): `systemctl reload http-switchboard`
+# re-reads the config without a restart. All or nothing: a broken file
+# changes nothing, and the journal says why. Profile CONTENTS only — a new or
+# renamed profile, a new source or a [kyu] change still needs a restart.
+# Needs 3.2.0 or later: 3.1.1 ends on SIGHUP (Restart=always brings it back).
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5s
 KillSignal=SIGTERM

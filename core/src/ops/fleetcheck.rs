@@ -81,6 +81,66 @@ pub struct LiveFacts {
     /// fix-24: log files on the declared data mounts above the size a
     /// rotated log never reaches. Empty when none, and when none was read.
     pub big_logs: Vec<BigLogFact>,
+    /// fix-26: storage directories whose owner on disk is not the declared
+    /// `host_owner_uid`. Only mismatches are kept.
+    pub owners: Vec<OwnerFact>,
+}
+
+/// fix-26: one storage directory owned by someone other than its stack file
+/// says.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OwnerFact {
+    pub path: String,
+    pub stack: String,
+    pub declared: u32,
+    pub actual: u32,
+}
+
+/// fix-26: parse `stat -c '%u %n'` lines against the declarations. A path
+/// stat could not read produces no line and no fact: a missing directory is
+/// the deploy's business, not this check's.
+pub fn owner_facts(transcript: &str, declared: &[(String, u32, String)]) -> Vec<OwnerFact> {
+    let mut out = Vec::new();
+    for line in transcript.lines() {
+        let Some((uid, path)) = line.trim().split_once(' ') else {
+            continue;
+        };
+        let Ok(actual) = uid.parse::<u32>() else {
+            continue;
+        };
+        for (p, want, stack) in declared {
+            if p == path && *want != actual {
+                out.push(OwnerFact {
+                    path: path.to_string(),
+                    stack: stack.clone(),
+                    declared: *want,
+                    actual,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// fix-26: Drift per mismatch. Not Broken: the service may run fine today —
+/// kyu-runner did, until the restart on 2026-09-26 — and the finding is
+/// there to be read before that restart, not after.
+pub fn evaluate_owners(facts: &[OwnerFact]) -> Vec<Finding> {
+    facts
+        .iter()
+        .map(|f| Finding {
+            severity: Severity::Drift,
+            subject: format!("{} ({})", f.path, f.stack),
+            what: format!(
+                "owned by uid {} on disk, while the stack file declares host_owner_uid {}",
+                f.actual, f.declared
+            ),
+            remedy: "the next deploy chowns it to the declared uid — if the service runs as \
+                     its own user, correct host_owner_uid in the stack file first (100000 + \
+                     the uid inside an unprivileged container), or it stops at its next restart"
+                .into(),
+        })
+        .collect()
 }
 
 /// fix-24: one oversized log file on a data mount.
@@ -612,6 +672,7 @@ pub fn evaluate(
     ));
     out.extend(evaluate_pools(&live.pools, growth_limits));
     out.extend(evaluate_big_logs(&live.big_logs));
+    out.extend(evaluate_owners(&live.owners));
     out.extend(evaluate_coverage(&live.coverage));
     out.extend(evaluate_boot(state, &live.boot));
     out.extend(evaluate_watched_backups(&live.watched_backups));

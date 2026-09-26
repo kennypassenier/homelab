@@ -3070,3 +3070,89 @@ fn fix_24_the_gateway_rotates_traefiks_access_log() {
         .expect("the gateway mounts the traefik logs");
     assert_eq!(dm.rotate.as_ref(), Some(&traefik_rotation()));
 }
+
+// ── fix-27: a restarted app gets its warm-up before a change counts ───────
+
+fn warmup_setup(exec: &MockExecutor) -> DeploySpec {
+    exec.respond_always("qm status", CmdOutput::failed(2, ""));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 110-app-syncthing\ncores: 1\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    let mut sp = spec(110, "syncthing");
+    exec.respond_always(
+        "sha256sum '/opt/syncthing/syncthing/docker-compose.yml'",
+        CmdOutput::ok(&sha_hex(&sp.files[0].content)),
+    );
+    // Only the config beside it changed, so the deploy RESTARTS the app.
+    sp.files.push(FileBlob {
+        path: "syncthing/config.yml".into(),
+        content: "changed\n".into(),
+        mode: None,
+    });
+    sp.checks.insert(
+        "syncthing".into(),
+        homelab_core::checks::ServiceChecks {
+            checks: vec![homelab_core::checks::Check {
+                name: "is klaar".into(),
+                command: "curl -s ready-probe".into(),
+                expect: homelab_core::checks::Expect::MustMatch,
+                layer: homelab_core::checks::Layer::Application,
+                blind_spot: None,
+            }],
+            ..Default::default()
+        },
+    );
+    sp
+}
+
+/// covers: fix-27
+#[tokio::test]
+async fn fix_27_a_restarted_app_warming_up_is_read_again_not_reported() {
+    let exec = MockExecutor::new();
+    let sp = warmup_setup(&exec);
+    // Baseline, then the reading right after the restart, then the retry.
+    exec.enqueue("ready-probe", CmdOutput::ok("ready"));
+    exec.enqueue(
+        "ready-probe",
+        CmdOutput::ok("Ingester not ready: waiting for 15s after being ready"),
+    );
+    exec.enqueue("ready-probe", CmdOutput::ok("ready"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &sp).await;
+    assert!(
+        report.ok,
+        "a warm-up that settles is not a change: {:?}",
+        report.error
+    );
+    assert!(
+        exec.calls_containing("sleep 5; curl -s ready-probe").len() == 1,
+        "read again exactly until it settled: {:?}",
+        exec.calls_containing("ready-probe")
+    );
+}
+
+/// covers: fix-27
+#[tokio::test]
+async fn fix_27_a_change_that_does_not_settle_is_still_reported() {
+    let exec = MockExecutor::new();
+    let sp = warmup_setup(&exec);
+    exec.enqueue("ready-probe", CmdOutput::ok("ready"));
+    exec.respond_always("ready-probe", CmdOutput::ok("broken"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &sp).await;
+    assert!(!report.ok, "a real regression must still stop the deploy");
+    assert_eq!(
+        exec.calls_containing("sleep 5; curl -s ready-probe").len(),
+        12,
+        "twelve retries, 60 s, then it counts"
+    );
+}

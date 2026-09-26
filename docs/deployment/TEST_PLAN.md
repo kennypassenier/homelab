@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**513 tests across 27 suites.**
+**516 tests across 27 suites.**
 
 ## Accepted limitations
 
@@ -59,7 +59,7 @@ Covers: F156
 
 The M0 safety and idempotency suite — every scenario here maps to a FEATURES.md test scenario (A1, A2, A3/D10, B1, D1, A5).
 
-Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, F159, F164, F169, F170, F173, F21, F210, F213, F22, F289, fix-24
+Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, F159, F164, F169, F170, F173, F21, F210, F213, F22, F289, fix-24, fix-27
 
 - `a_clone_refuses_a_privilege_level_the_template_cannot_give` — A clone can never change a container's privilege level, so asking for one the template cannot give must stop the deploy rather than silently produce the other.
 - `a_privileged_stack_cloning_the_privileged_template_is_allowed` — And the matching case passes: a privileged stack cloning the privileged template is exactly how the media and downloader stacks are built.
@@ -139,6 +139,8 @@ Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, 
 - `fix_24_a_deploy_installs_the_rule_inside_the_container` — covers: fix-24
 - `fix_24_a_rotation_value_that_would_reach_a_shell_is_refused` — covers: fix-24
 - `fix_24_the_gateway_rotates_traefiks_access_log` — covers: fix-24
+- `fix_27_a_restarted_app_warming_up_is_read_again_not_reported` — covers: fix-27
+- `fix_27_a_change_that_does_not_settle_is_still_reported` — covers: fix-27
 
 ### `core/tests/devicebackup_tests.rs`
 
@@ -182,7 +184,7 @@ M1 failure-model suite (AR13, AR14, AR16, F6). Every scenario maps to a FEATURES
 
 Y4: the fleet check has one job — find the things that look healthy.
 
-Covers: F149, F184, F198, F211, F214, F79, fix-24
+Covers: F149, F184, F198, F211, F214, F79, fix-24, fix-26
 
 - `y4_a_healthy_fleet_is_silent` — A healthy fleet produces nothing.
 - `y4_finds_the_kyu_case` — The kyu case, exactly: the record still describes the pre-rename hostname, so every operation fails the guard, the nightly run failed, H8 disabled the stack, and it had never been backed up.
@@ -241,6 +243,7 @@ Covers: F149, F184, F198, F211, F214, F79, fix-24
 - `a_missing_mount_does_not_shift_every_reading_after_it` — A path that does not exist yields a line with the path and nothing else.
 - `a_path_nobody_declared_is_ignored`
 - `fix_24_a_log_past_500_mb_is_drift_and_the_remedy_depends_on_its_rule` — covers: fix-24
+- `fix_26_a_directory_owned_by_someone_else_than_declared_is_drift` — covers: fix-26
 
 ### `core/tests/homepage_tests.rs`
 

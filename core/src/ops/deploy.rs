@@ -2460,9 +2460,13 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             return Ok(StepOutcome::Unchanged);
         }
         let mut all: Vec<crate::checks::Reading> = Vec::new();
+        // fix-27: which app and command each reading came from, so a reading
+        // of an app this deploy just restarted can be taken again.
+        let mut origin: Vec<(String, String)> = Vec::new();
         for (app, sc) in &spec.checks {
             let before = baseline.get(app);
             for c in &sc.checks {
+                origin.push((app.clone(), c.command.clone()));
                 let after = pct_sh(exec, m.vmid, &c.command, 120)
                     .await
                     .map(|o| o.stdout.trim().to_string())
@@ -2480,7 +2484,41 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 });
             }
         }
-        let (verdicts, blind) = crate::checks::judge_all(&all);
+        let (mut verdicts, blind) = crate::checks::judge_all(&all);
+        // fix-27: an app this deploy restarted or recreated may still be
+        // warming up. On 2026-09-26 Loki answered "Ingester not ready:
+        // waiting for 15s after being ready" to the first reading after its
+        // restart, and the deploy asked Kenny about a change that fixed
+        // itself fifteen seconds later. Such a reading is taken again, every
+        // 5 s for up to 60 s, before it counts as a change. An app the deploy
+        // did not touch is judged on its first reading, as before.
+        let touched: std::collections::BTreeSet<String> = {
+            let mut t = needs_restart.lock().map(|g| g.clone()).unwrap_or_default();
+            t.extend(recreated.lock().map(|g| g.clone()).unwrap_or_default());
+            t
+        };
+        for i in 0..all.len() {
+            if !matches!(verdicts[i], crate::checks::Verdict::Regressed(_))
+                || !touched.contains(&origin[i].0)
+            {
+                continue;
+            }
+            for _ in 0..12 {
+                let again = pct_sh(exec, m.vmid, &format!("sleep 5; {}", origin[i].1), 120)
+                    .await
+                    .map(|o| o.stdout.trim().to_string())
+                    .unwrap_or_default();
+                all[i].after = again;
+                verdicts[i] = crate::checks::judge(&all[i]);
+                if !matches!(verdicts[i], crate::checks::Verdict::Regressed(_)) {
+                    log_info(format!(
+                        "[check] {} settled after its restart :: {}",
+                        all[i].name, all[i].after
+                    ));
+                    break;
+                }
+            }
+        }
         for (r, v) in all.iter().zip(verdicts.iter()) {
             match v {
                 crate::checks::Verdict::Ok => {

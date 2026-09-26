@@ -95,6 +95,7 @@ fn y4_a_healthy_fleet_is_silent() {
         seed: Default::default(),
         pools: vec![],
         big_logs: vec![],
+        owners: vec![],
         watched_backups: vec![],
         containers: vec![(113, "113-app-metrics".into())],
         routes: vec![RouteFact {
@@ -1417,5 +1418,54 @@ fn fix_24_a_log_past_500_mb_is_drift_and_the_remedy_depends_on_its_rule() {
         other.remedy.contains("declare `rotate:`"),
         "{}",
         other.remedy
+    );
+}
+
+/// covers: fix-26
+#[test]
+fn fix_26_a_directory_owned_by_someone_else_than_declared_is_drift() {
+    use homelab_core::ops::fleetcheck::{evaluate_owners, owner_facts};
+
+    // The two real cases of 2026-09-26: kyu-runner's directory declared root
+    // while the service runs as uid 996, and kp-soft's owned by www-data.
+    let declared = vec![
+        (
+            "/appdata/kyu/kyu-runner-config".to_string(),
+            100000,
+            "kyu".to_string(),
+        ),
+        (
+            "/appdata/kyu/kyu-config".to_string(),
+            100103,
+            "kyu".to_string(),
+        ),
+        (
+            "/appdata/kp-soft/kp-soft-config".to_string(),
+            100000,
+            "kp-soft".to_string(),
+        ),
+    ];
+    let transcript = "100996 /appdata/kyu/kyu-runner-config\n\
+                      100103 /appdata/kyu/kyu-config\n\
+                      100033 /appdata/kp-soft/kp-soft-config\n";
+    let facts = owner_facts(transcript, &declared);
+    assert_eq!(facts.len(), 2, "the matching one is not a fact: {facts:?}");
+
+    let findings = evaluate_owners(&facts);
+    assert!(findings.iter().all(|f| f.severity == Severity::Drift));
+    assert!(
+        findings[0].what.contains("uid 100996"),
+        "{}",
+        findings[0].what
+    );
+    assert!(
+        findings[0].what.contains("host_owner_uid 100000"),
+        "{}",
+        findings[0].what
+    );
+
+    assert!(
+        owner_facts("", &declared).is_empty(),
+        "an unreadable directory is not a mismatch"
     );
 }

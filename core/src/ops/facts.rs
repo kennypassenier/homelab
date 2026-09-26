@@ -396,6 +396,32 @@ pub async fn gather_live_facts(
         }
     }
 
+    // fix-26: every storage directory whose owner the stack declares, read
+    // back off the disk. The deploy chowns to the declared uid, so a wrong
+    // declaration is a service that works until its next restart.
+    if let Some(snapshot) = snapshot.as_ref() {
+        let mut declared: Vec<(String, u32, String)> = Vec::new();
+        for (name, st) in &snapshot.stacks {
+            if let Some(m) = &st.manifest {
+                for mount in &m.storage {
+                    if let Some(uid) = mount.host_owner_uid {
+                        declared.push((mount.host_path.clone(), uid, name.clone()));
+                    }
+                }
+            }
+        }
+        if !declared.is_empty() {
+            let script = declared
+                .iter()
+                .map(|(p, _, _)| format!("stat -c '%u %n' '{}' 2>/dev/null", p))
+                .collect::<Vec<_>>()
+                .join("; ");
+            if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 60)).await {
+                facts.owners = crate::ops::fleetcheck::owner_facts(&out.stdout, &declared);
+            }
+        }
+    }
+
     if let Ok(out) = exec.run(&Cmd::new("pct", &["list"], 30)).await {
         facts.containers = parse_pct_list(&out.stdout);
     }

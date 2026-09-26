@@ -55,11 +55,17 @@ themselves, and whether an animation feels right. Those stay Kenny's.
 3. **The log stream's stack column is too narrow for `syncthing`**:
    `DEBUG syncthingsyncthing :: folder "obsidian-vault" in sync` — the column
    holds eight characters and the name has nine.
-4. **The wizard scaffolds a stack the fleet has moved away from.** The
-   generated `lxc-compose.yml` says `template: "clone:998"`, the Debian 12
-   template kept only until the fleet has moved (CLAUDE.md: CT 996/995 are
-   the Debian 13 pair). It also injects `promtail/` as a core app, while the
-   whole fleet left promtail for Grafana Alloy on 2026-09-02 (F249).
+4. **The wizard still gives every new stack a promtail sidecar.** The
+   scaffold writes `promtail/docker-compose.yml` (`grafana/promtail:3.0.0`)
+   because `StackDefaults::core_apps` is `["promtail"]`
+   (`client/src/scaffold.rs:73`). Since 2026-09-02 the deploy installs
+   Grafana Alloy on every container itself (`core/src/ops/deploy.rs`, the
+   "log shipper" step), and no stack in `stacks/` carries a promtail
+   directory any more — so a new stack would run two log shippers, one of
+   them end of life. (The scaffold's `template: "clone:998"` looked stale at
+   first sight, but 13 of the 15 stacks in `stacks/` use 998 and 2 use 997;
+   the Debian 13 pair waits on Kenny's go per container, so 998 is the
+   consistent default.)
 5. **Two rendering slips in the wizard.** The review step prints
    `resources1024 MiB · 2 cores` (no space after the label), and the storage
    step's hint line reads `[UP/DOWN] selectback` — text from a longer line

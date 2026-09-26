@@ -394,7 +394,7 @@ homelab presets
    using `__STACK__` placeholders (copy from an existing preset).
 2. `homelab tui --offline` → `N` → "test-x" appears in the wizard; finish
    the wizard with a test name.
-3. Inspect `stacks/<name>/`: placeholders substituted, promtail injected,
+3. Inspect `stacks/<name>/`: placeholders substituted, no promtail sidecar,
    manifest apps list = app dir names. `homelab plan stacks/<name>` → valid.
 4. Delete the stack dir + `presets/test-x`.
 - Full recipe: docs/PRESET_GUIDE.md.

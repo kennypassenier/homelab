@@ -96,7 +96,7 @@ fix = patch.
 separate, deliberate act:
 
 ```bash
-homelab release-update       # or press U in the TUI when the badge appears
+homelab release-update       # or press u in the TUI when the badge appears
 ```
 
 The client downloads the release, verifies its checksum against

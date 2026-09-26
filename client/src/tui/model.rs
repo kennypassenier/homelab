@@ -176,6 +176,9 @@ pub struct Wizard {
     pub step: WizStep,
     pub preset_idx: usize,
     pub name: String,
+    /// True while `name` is the preset's suggested name: the first letter
+    /// typed replaces it instead of being appended to it.
+    pub name_suggested: bool,
     pub ram: u32,
     pub cores: u16,
     pub disk: u16,
@@ -853,6 +856,7 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                     step: WizStep::Preset,
                     preset_idx: 0,
                     name: String::new(),
+                    name_suggested: false,
                     ram: first_ram,
                     cores: 2,
                     disk: 8,
@@ -1762,8 +1766,9 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             KeyCode::Up => w.preset_idx = (w.preset_idx + n_presets - 1) % n_presets,
             KeyCode::Down => w.preset_idx = (w.preset_idx + 1) % n_presets,
             KeyCode::Enter => {
-                if w.name.is_empty() {
+                if w.name.is_empty() || w.name_suggested {
                     w.name = presets[w.preset_idx].name.clone();
+                    w.name_suggested = true;
                 }
                 w.step = WizStep::Name;
             }
@@ -1771,10 +1776,18 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         },
         WizStep::Name => match key.code {
             KeyCode::Esc => w.step = WizStep::Preset,
+            // The preset's name is a suggestion: the first letter typed
+            // replaces it, backspace starts editing it (finding 6 of the
+            // test-plan part A run, 2026-09-26).
             KeyCode::Char(c) if c.is_ascii_alphanumeric() || c == '-' => {
+                if w.name_suggested {
+                    w.name.clear();
+                    w.name_suggested = false;
+                }
                 w.name.push(c.to_ascii_lowercase());
             }
             KeyCode::Backspace => {
+                w.name_suggested = false;
                 w.name.pop();
             }
             KeyCode::Enter if !w.name.is_empty() => {

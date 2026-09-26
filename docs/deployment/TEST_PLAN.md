@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**517 tests across 27 suites.**
+**524 tests across 27 suites.**
 
 ## Accepted limitations
 
@@ -697,4 +697,11 @@ Covers: F122, F136, F150, F151, F152, F154, F155, F156, F167, F212, F215
 - `every_app_either_has_checks_or_is_named_as_deliberately_without` — covers: F215  G18 of the Phase-7 gate.
 - `the_committed_test_plan_matches_a_fresh_generation` — The generated test plan must match what the tests actually say, for the same reason the runbook must: a document nobody regenerates is a document that describes last month.
 - `the_help_text_and_the_usage_message_agree_about_install_native` — The help text and the usage message must describe the same command.
+- `a_key_named_on_screen_is_the_key_that_does_it` — Finding 2: the ticker said "press U" while SHIFT+U updates the selected stack and the host update is lowercase u; the footer printed `[R]` for a lowercase r while SHIFT+R is restore.
+- `the_status_message_never_overwrites_a_key_hint` — Finding 1: the right-aligned status was drawn over the key hints, leaving `[Q]link established` on every screen with a status message.
+- `a_long_log_source_keeps_its_space` — Finding 3: a nine-letter stack name ran into the message, `syncthingsyncthing :: folder …`.
+- `the_wizard_review_and_storage_steps_render_cleanly` — Finding 5: the review step printed `resources1024 MiB`, and the storage step's own hint line was overdrawn by the generic one (`selectback`).
+- `typing_a_name_replaces_the_suggested_one` — Finding 6: the name step starts with the preset's name, and typing appended to it (`actual` + `retrotest` = `actualretrotest`).
+- `the_capacity_panel_shows_its_figures_whole` — Finding 7: at 120 columns the CAPACITY panel cut its own figures off, `free 19064 M` and `ceilings 1.2× (LX`.
+- `a_bad_manifest_value_is_reported_at_its_own_line_with_a_remedy` — Finding 8: a bad value in lxc-compose.yml was reported at line 2 (the flattened struct loses positions) and with no remedy.
 

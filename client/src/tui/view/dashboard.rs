@@ -69,6 +69,9 @@ fn draw_capacity(f: &mut Frame, model: &Model, area: Rect) {
     } else {
         THEME.green
     };
+    // Five short lines instead of four long ones: at 120 columns the panel
+    // is 32 wide and cut its own figures off, `free 19064 M` and
+    // `ceilings 1.2× (LX` (test-plan part A, finding 7).
     let lines = vec![
         Line::from(vec![
             Span::styled("RAM used ", THEME.muted_style()),
@@ -81,19 +84,15 @@ fn draw_capacity(f: &mut Frame, model: &Model, area: Rect) {
                 format!("{} / {} MB", h.ram_used_mb, h.ram_total_mb),
                 Style::new().fg(THEME.text),
             ),
-            Span::styled(
-                format!("  free {} MB", free_mb),
-                Style::new().fg(used_color),
-            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  free ", THEME.muted_style()),
+            Span::styled(format!("{} MB", free_mb), Style::new().fg(used_color)),
         ]),
         Line::from(vec![
             Span::styled("alloc ", THEME.muted_style()),
             Span::styled(
-                format!("{} MB ceilings", h.ram_committed_mb),
-                Style::new().fg(THEME.faint),
-            ),
-            Span::styled(
-                format!(" {:.1}× (LXC ok)", overcommit),
+                format!("{} MB {:.1}× ok", h.ram_committed_mb, overcommit),
                 Style::new().fg(THEME.faint),
             ),
         ]),

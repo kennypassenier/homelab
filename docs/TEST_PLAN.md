@@ -57,7 +57,7 @@ Launch: `homelab tui --offline` (needs a real terminal, ≥100×30 recommended).
 1. Go to LOG_STREAM (`3`). Watch lines arrive.
 2. `LEFT`/`RIGHT` cycles the source (ALL → HOST → each stack).
 3. `UP`/`DOWN` scrolls back; the title shows "⏸ SCROLL -N"; `SPACE` toggles
-   follow; `G` jumps to the tail.
+   follow; `SHIFT+G` jumps to the tail.
 - **Pass:** source filter narrows the stream; scrollback anchors; tail resumes.
 
 ### A7 · Doctor (F6)

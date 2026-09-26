@@ -83,3 +83,19 @@ themselves, and whether an animation feels right. Those stay Kenny's.
 The plan text itself was also out of date (A3 order, lowercase keys, the
 wizard's STORAGE step, 10 presets); `docs/TEST_PLAN.md` is corrected in the
 same commit as this report.
+
+## Outcome (Kenny's form, 2026-09-26)
+
+Test report: **Akkoord**. All eight findings: **Claude fixt het nu**, each
+with a test that failed first (`client/tests/tui_snapshot_tests.rs`):
+
+| finding | test |
+|---|---|
+| 1 status over the key hints | `the_status_message_never_overwrites_a_key_hint` |
+| 2 "press U" and `[R]` | `a_key_named_on_screen_is_the_key_that_does_it` |
+| 3 log source column | `a_long_log_source_keeps_its_space` |
+| 4 promtail sidecar | `scaffold_injects_no_promtail_sidecar` |
+| 5 wizard rendering slips | `the_wizard_review_and_storage_steps_render_cleanly` |
+| 6 name prefill | `typing_a_name_replaces_the_suggested_one` |
+| 7 CAPACITY cut off | `the_capacity_panel_shows_its_figures_whole` |
+| 8 manifest error line | `a_bad_manifest_value_is_reported_at_its_own_line_with_a_remedy` |

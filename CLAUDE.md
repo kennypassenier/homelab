@@ -45,13 +45,13 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | **10 · Retrospective** (opened 2026-09-26, `docs/RETROSPECTIVE.md`) — **v3.55.0** live on the host (2026-09-20 01:47 local) | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
+| Phase | **10 · Retrospective — done 2026-09-26** (`docs/RETROSPECTIVE.md`); **v3.57.1** released 2026-09-27 (client fixes from the part-A run; the host still runs v3.57.0, host code unchanged) | **7 · Hardening — 22 of 23 gate gaps closed (G6 deferred by Kenny). Read `docs/deployment/RESUME.md` for what is in flight** |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
 
 | | |
 |---|---|
-| Next action | **Orchestrator: retrospective form answered 2026-09-26** (all six as recommended; `docs/RETROSPECTIVE.md` §4). Part A run headless the same evening (`docs/TEST_RUN_PART_A.md`, Kenny: Akkoord); the dev-procedure diff is on its main (a25f706); all eight findings fixed with tests first, shipped in the next patch release. **Deployment: waiting on Kenny: the four manual checks** (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). v3.57.0 live since 2026-09-26 23:22 local (owner drift check, fix-26 done; warm-up retry after a restart, fix-27 built). kp-soft v0.4.0 live on CT 116 (23:30). **Measurements open:** the first unforced Traefik log rotation, read on 2026-09-27 (fix-24); the next deploy that restarts Loki must pass without a question (fix-27). Waits for a first escrow step: gap-15 guard. fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
+| Next action | **Orchestrator: retrospective form answered 2026-09-26** (all six as recommended; `docs/RETROSPECTIVE.md` §4). Part A run headless the same evening (`docs/TEST_RUN_PART_A.md`, Kenny: Akkoord); the dev-procedure diff is on its main (a25f706); all eight findings fixed with tests first and released as v3.57.1 (installed on WSL from the verified release asset; Garuda is on the GARUDA.md list). **Deployment: waiting on Kenny: the four manual checks** (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). v3.57.0 live since 2026-09-26 23:22 local (owner drift check, fix-26 done; warm-up retry after a restart, fix-27 built). kp-soft v0.4.0 live on CT 116 (23:30). **Measurements open:** the first unforced Traefik log rotation, read on 2026-09-27 (fix-24); the next deploy that restarts Loki must pass without a question (fix-27). Waits for a first escrow step: gap-15 guard. fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

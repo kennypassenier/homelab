@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **Orchestrator: waiting on Kenny's retrospective form** (lessons, ecosystem entry, test pass, the two dead root snapshots) — numbers in `docs/RETROSPECTIVE.md`. **Deployment: waiting on Kenny: the queued form of 2026-09-26 (evening)** — `traefik-logrotate` (fix-24: the Traefik access log has not rotated since 2026-09-01), `webhook-rotate` (fix-25: the homelab-ops webhook id was in this public repo), the four T64 redesign proposals in `docs/deployment/NOTIFICATIONS_REDESIGN.md`, and correction items for fix-23/24/25; plus the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). Closed that day: M-T75, M-D94, F48, fix-16, gap-16, **gap-7** (the CrowdSec window fails closed, 404, under a second); F6 parked (**Later**). Waits for a first escrow step: gap-15 guard. fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
+| Next action | **Orchestrator: waiting on Kenny's retrospective form** (lessons, ecosystem entry, test pass, the two dead root snapshots) — numbers in `docs/RETROSPECTIVE.md`. **Deployment: waiting on Kenny: a correction form for fix-26 (kyu-runner's state dir owned by root stopped it at restart) and fix-27 (a deploy that restarts Loki fails its own service check)**, plus the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). Done 2026-09-26 evening (Kenny's form): v3.56.0 released and live (`rotate:` on data mounts + big-log finding, fix-24), gateway deployed with Traefik rotation and without Loki's dead route; new homelab-ops webhook id live (fix-25, pre-commit refuses ids); kyu-runner routes for `ops.alerts` and `switchboard.events`; Uptime Kuma notifies HA on all 40 monitors; http-switchboard fix-7 (grouped alerts arrive whole) live on CT 109. **Measurement open:** the first unforced Traefik log rotation, read on 2026-09-27 (fix-24). Waits for a first escrow step: gap-15 guard. fix-22, `kyu.pre-v4.db` (35 MB) on CT 109, deliberately kept. |
 
 
 **The deployment project is the active work.** It brings the whole fleet under
@@ -61,7 +61,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.55.0** (2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **533 tests in 35 suites**, CI green — and green now
+- **Released and live at v3.56.0** (2026-09-26 22:56 local, fix-24 log rotation); v3.55.0 on 2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **533 tests in 35 suites**, CI green — and green now
   means something: CI ran without `--locked` until that day, so it built
   whatever crates.io served rather than what the lockfile pins (F235).
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.

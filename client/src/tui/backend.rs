@@ -2,17 +2,11 @@
 //! accepts Commands". Production is the real wss+pinned connection; tests use a
 //! scripted TestBackend. The TUI cannot tell them apart.
 
-use std::sync::Arc;
-
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::Connector;
 
 use homelab_proto::{Command, LogLevel, RpcRequest, ServerMsg};
-
-use crate::tls;
 
 /// What the TUI receives from whatever it's connected to.
 #[derive(Debug, Clone)]
@@ -40,6 +34,8 @@ pub trait Backend {
 pub struct RemoteBackend {
     pub host: String,
     pub token: String,
+    /// The fingerprint `config/client.toml` names, when there is one.
+    pub repo_pin: Option<String>,
 }
 
 impl Backend for RemoteBackend {
@@ -48,59 +44,58 @@ impl Backend for RemoteBackend {
         let (evt_tx, evt_rx) = mpsc::channel::<BackendEvent>(256);
 
         tokio::spawn(async move {
-            let url = format!("wss://{}/api/ws", self.host);
-            let mut request = match url.clone().into_client_request() {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = evt_tx
-                        .send(BackendEvent::Disconnected(format!("bad url: {}", e)))
-                        .await;
-                    return;
-                }
-            };
-            request.headers_mut().insert(
-                "Authorization",
-                format!("Bearer {}", self.token).parse().unwrap(),
-            );
-
-            let pin = crate::load_pin();
-            let first = pin.is_none();
-            let verifier = tls::PinnedVerifier::new(pin);
-            let tls_config = rustls::ClientConfig::builder()
-                .dangerous()
-                .with_custom_certificate_verifier(verifier.clone())
-                .with_no_client_auth();
-            let connector = Connector::Rustls(Arc::new(tls_config));
-
-            let ws = match tokio_tungstenite::connect_async_tls_with_config(
-                request,
-                None,
-                false,
-                Some(connector),
-            )
-            .await
+            // fix-67 (tui-connection-skips-guards, 2026-09-27): the same
+            // connect as the command line — the repository's pin, the fix-30
+            // frame ceiling — instead of a copy that had drifted from it.
+            let link = match crate::link::connect(&self.host, &self.token, self.repo_pin.as_deref())
+                .await
             {
-                Ok((ws, _)) => ws,
+                Ok(l) => l,
                 Err(e) => {
-                    let _ = evt_tx
-                        .send(BackendEvent::Disconnected(format!("connect: {}", e)))
-                        .await;
+                    let _ = evt_tx.send(BackendEvent::Disconnected(e)).await;
                     return;
                 }
             };
-            let fingerprint = verifier.observed();
-            if first {
-                if let Some(fp) = &fingerprint {
-                    crate::save_pin(fp);
+            let fingerprint = link.fingerprint.clone();
+            let (mut tx, mut rx) = link.ws.split();
+
+            // The version gate needs the host's version before any command
+            // goes out, so nothing is sent until the Hello has been read; the
+            // command line waits for it the same way.
+            let host_version = loop {
+                match rx.next().await {
+                    Some(Ok(Message::Text(t))) => {
+                        if let Ok(sm) = serde_json::from_str::<ServerMsg>(&t) {
+                            if let ServerMsg::Hello { version, .. } = &sm {
+                                let version = version.clone();
+                                let _ = evt_tx
+                                    .send(BackendEvent::Connected {
+                                        version: version.clone(),
+                                        fingerprint,
+                                    })
+                                    .await;
+                                let _ = evt_tx.send(BackendEvent::Server(sm)).await;
+                                break version;
+                            }
+                        }
+                    }
+                    Some(Ok(_)) => {}
+                    Some(Err(e)) => {
+                        let _ = evt_tx
+                            .send(BackendEvent::Disconnected(format!("ws: {}", e)))
+                            .await;
+                        return;
+                    }
+                    None => {
+                        let _ = evt_tx
+                            .send(BackendEvent::Disconnected(
+                                "closed before the host said hello".into(),
+                            ))
+                            .await;
+                        return;
+                    }
                 }
-            }
-            let (mut tx, mut rx) = ws.split();
-            let _ = evt_tx
-                .send(BackendEvent::Connected {
-                    version: String::new(),
-                    fingerprint,
-                })
-                .await;
+            };
 
             let mut req_id = 1u64;
             // fix-66: requests that were answers. The host now reads an answer
@@ -112,6 +107,18 @@ impl Backend for RemoteBackend {
                 tokio::select! {
                     Some(cmd) = cmd_rx.recv() => {
                         req_id += 1;
+                        // The refusal comes back the way a failed operation
+                        // does, so it lands where the operator is looking.
+                        if let Some(why) = crate::link::refuse_older_host(&cmd, &host_version) {
+                            let refused = ServerMsg::RpcDone(homelab_proto::RpcResponse {
+                                id: req_id,
+                                ok: false,
+                                message: why,
+                                deferred: None,
+                            });
+                            if evt_tx.send(BackendEvent::Server(refused)).await.is_err() { break; }
+                            continue;
+                        }
                         if matches!(cmd, Command::Answer { .. }) {
                             answers.insert(req_id);
                         }

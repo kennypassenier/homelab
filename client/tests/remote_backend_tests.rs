@@ -3,7 +3,9 @@
 //!
 //! The pin lives under `$HOME`, so this file points HOME at a directory of
 //! its own before anything connects. Every test here presents the same
-//! certificate, so whichever test pins it first pins it for all of them.
+//! certificate, so whichever test pins it first pins it for all of them. The
+//! tests run one at a time: the repository-pin test starts from a machine
+//! with no pin and would otherwise hand its foreign pin to the others.
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -45,10 +47,19 @@ struct FakeHost {
     addr: String,
     received: mpsc::UnboundedReceiver<String>,
     push: mpsc::UnboundedSender<String>,
+    /// Held for the whole test; see the file comment.
+    _serial: tokio::sync::MutexGuard<'static, ()>,
+}
+
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn pin_file() -> std::path::PathBuf {
+    homelab_client::pin_path()
 }
 
 /// A host that says `Hello { version }` and then relays frames both ways.
 async fn fake_host(version: &str) -> FakeHost {
+    let serial = SERIAL.lock().await;
     let tc = test_cert();
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let key = rustls::pki_types::PrivateKeyDer::try_from(tc.key_der.clone()).unwrap();
@@ -103,13 +114,19 @@ async fn fake_host(version: &str) -> FakeHost {
         addr,
         received,
         push,
+        _serial: serial,
     }
 }
 
 fn start(addr: &str) -> Channels {
+    start_with_repo_pin(addr, None)
+}
+
+fn start_with_repo_pin(addr: &str, repo_pin: Option<&str>) -> Channels {
     Box::new(RemoteBackend {
         host: addr.to_string(),
         token: "0123456789abcdef0123".into(),
+        repo_pin: repo_pin.map(str::to_string),
     })
     .start()
 }
@@ -178,5 +195,113 @@ async fn fix_66_the_reply_to_an_answer_is_a_log_line_not_the_end_of_the_operatio
         )),
         "the reply to an answer should still be visible, as a log line: {:?}",
         events
+    );
+}
+
+/// covers: fix-67
+///
+/// The command line refuses to send a mutating command to a host older than
+/// itself: serde drops a field the host does not know, and on 2026-08-31 a
+/// deploy through a host one release behind lost `data_mounts` and sent 73
+/// torrents to `missingFiles`. The TUI can deploy too, and its connection had
+/// none of that guard (tui-connection-skips-guards, 2026-09-27).
+#[tokio::test]
+async fn fix_67_the_tui_refuses_a_mutating_command_to_an_older_host() {
+    let mut host = fake_host("1.0.0").await;
+    let Channels { cmd_tx, mut evt_rx } = start(&host.addr);
+    let _ = drain(&mut evt_rx, Duration::from_millis(500)).await;
+
+    cmd_tx.send(Command::PatchFleet).await.unwrap();
+    let reached = tokio::time::timeout(Duration::from_millis(1000), host.received.recv()).await;
+    assert!(
+        reached.is_err(),
+        "a mutating command reached a host older than this client: {:?}",
+        reached
+    );
+    let events = drain(&mut evt_rx, Duration::from_millis(500)).await;
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            BackendEvent::Server(ServerMsg::RpcDone(r)) if !r.ok && r.message.contains("release-update")
+        )),
+        "the refusal must reach the screen and name the remedy: {:?}",
+        events
+    );
+}
+
+/// covers: fix-67
+///
+/// A machine with no pin of its own takes the fingerprint the repository
+/// names instead of trusting whatever answers first. The command line did;
+/// the TUI trusted the first certificate and saved it.
+#[tokio::test]
+async fn fix_67_the_tui_holds_the_host_to_the_repository_pin() {
+    let host = fake_host(env!("CARGO_PKG_VERSION")).await;
+    // A fresh machine: nothing pinned yet.
+    let _ = std::fs::remove_file(pin_file());
+    let other = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99";
+    let Channels {
+        cmd_tx: _cmd,
+        mut evt_rx,
+    } = start_with_repo_pin(&host.addr, Some(other));
+    let events = drain(&mut evt_rx, Duration::from_millis(1500)).await;
+    // The machine adopted the foreign pin, as it should; the next test must
+    // not inherit it.
+    let _ = std::fs::remove_file(pin_file());
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, BackendEvent::Connected { .. })),
+        "the TUI connected to a host whose certificate is not the one the repository names: {:?}",
+        events
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, BackendEvent::Disconnected(_))),
+        "the refusal must be visible: {:?}",
+        events
+    );
+}
+
+/// covers: fix-67
+///
+/// fix-30 raised the link's message ceiling past tungstenite's 16 MiB frame
+/// default, because a larger event from the host closed the link in the
+/// middle of an operation. The TUI's connection kept the default.
+#[tokio::test]
+async fn fix_67_the_tui_reads_a_message_larger_than_sixteen_mib() {
+    let host = fake_host(env!("CARGO_PKG_VERSION")).await;
+    let Channels {
+        cmd_tx: _cmd,
+        mut evt_rx,
+    } = start(&host.addr);
+    let _ = drain(&mut evt_rx, Duration::from_millis(500)).await;
+
+    let big = "x".repeat(20 * 1024 * 1024);
+    host.push
+        .send(
+            serde_json::to_string(&ServerMsg::Log {
+                level: homelab_proto::LogLevel::Info,
+                source: "HOST".into(),
+                msg: big,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let events = drain(&mut evt_rx, Duration::from_millis(3000)).await;
+    let seen: Vec<String> = events
+        .iter()
+        .map(|e| match e {
+            BackendEvent::Server(ServerMsg::Log { msg, .. }) => {
+                format!("Log({} bytes)", msg.len())
+            }
+            other => format!("{:?}", other),
+        })
+        .collect();
+    assert!(
+        seen.contains(&format!("Log({} bytes)", 20 * 1024 * 1024)),
+        "a 20 MiB message from the host did not arrive: {:?}",
+        seen
     );
 }

@@ -1689,11 +1689,16 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             // not: `up -d` left the container alone, so the running process is
             // still reading the old file. Restart is enough — the file is
             // bind-mounted, so the new content is already visible inside.
+            // fix-40: a changed compose file is not proof the container was
+            // recreated (a comment-only change recreates nothing). Only
+            // compose's own "Recreated"/"Created" line skips the restart.
+            let compose_recreated = recreated.lock().map(|g| g.contains(app)).unwrap_or(false)
+                && format!("{}{}", up.stdout, up.stderr).contains("reated");
             let restart_this = needs_restart
                 .lock()
                 .map(|g| g.contains(app))
                 .unwrap_or(false)
-                && !recreated.lock().map(|g| g.contains(app)).unwrap_or(false);
+                && !compose_recreated;
             if restart_this {
                 let r = pct_sh(
                     exec,

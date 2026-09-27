@@ -1472,6 +1472,92 @@ async fn t52_a_changed_compose_file_does_not_restart_twice() {
     );
 }
 
+/// fix-40: the compose file AND a bind-mounted script changed, but the
+/// compose change was a comment, so `up -d` recreated nothing. The deploy
+/// assumed a changed compose file means a recreated container and skipped the
+/// restart: on 2026-09-27 the Uptime Kuma seeder kept running yesterday's
+/// code after its new `seed.py` was pushed. Only compose's own word that it
+/// recreated the container skips the restart now.
+///
+/// covers: fix-40
+#[tokio::test]
+async fn fix_40_a_compose_change_that_recreates_nothing_still_restarts_for_a_changed_script() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, ""));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 110-app-syncthing\ncores: 1\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    // Every sha lookup misses: the compose file and the script both changed.
+    // `up -d` answers without recreating anything (the default empty output).
+    let mut spec = spec(110, "syncthing");
+    spec.files.push(FileBlob {
+        path: "syncthing/seed.py".into(),
+        content: "print('new')\n".into(),
+        mode: None,
+    });
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("docker compose restart")
+            .iter()
+            .any(|c| c.contains("/opt/syncthing/syncthing")),
+        "the running process still has the old script: {:?}",
+        exec.calls_containing("docker compose")
+    );
+}
+
+/// fix-40, the other half: when compose says it recreated the container, the
+/// new script is already loaded and a restart would be churn.
+///
+/// covers: fix-40
+#[tokio::test]
+async fn fix_40_a_container_compose_recreated_is_not_restarted_again() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, ""));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 110-app-syncthing\ncores: 1\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    exec.respond_always(
+        "docker compose up -d",
+        CmdOutput {
+            stdout: String::new(),
+            stderr: " Container syncthing  Recreated\n Container syncthing  Started\n".into(),
+            code: 0,
+        },
+    );
+    let mut spec = spec(110, "syncthing");
+    spec.files.push(FileBlob {
+        path: "syncthing/seed.py".into(),
+        content: "print('new')\n".into(),
+        mode: None,
+    });
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("docker compose restart").is_empty(),
+        "compose already recreated it: {:?}",
+        exec.calls_containing("docker compose")
+    );
+}
+
 /// T56: an image behind a login must not need a step nobody wrote down.
 ///
 /// kp-soft was the first stack with a private image, and on 2026-08-31 the

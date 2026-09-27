@@ -724,3 +724,20 @@ fn service_checks_read_what_they_claim_to_count() {
     let dash = &dash[..dash.find("layer:").unwrap()];
     assert!(dash.contains("expect: must_be_present"), "{dash}");
 }
+
+/// Expert panel 2026-09-27 (dashboards-two-sources-ui-edits-lost): an edit in
+/// the browser was accepted and then lost at the next provisioning, and a
+/// second copy of the provisioning tree sat under captured/.
+#[test]
+fn grafana_refuses_browser_edits_it_would_lose() {
+    let p = std::fs::read_to_string(
+        stacks_dir().join("gateway/grafana/provisioning/dashboards/dashboards.yaml"),
+    )
+    .unwrap();
+    assert!(p.contains("allowUiUpdates: false"), "{p}");
+    assert!(!stacks_dir()
+        .parent()
+        .unwrap()
+        .join("captured/gateway/grafana/provisioning")
+        .exists());
+}

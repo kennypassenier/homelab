@@ -1,14 +1,10 @@
 # Auto-provisioned Loki datasource for Grafana
 apiVersion: 1
 
-# Grafana cannot change the uid of a datasource it already has: provisioning
-# looks the entry up by uid, does not find it, and the whole provisioning
-# module fails to start -- which takes Grafana down entirely, not just the
-# datasource. Found the hard way on 2026-08-31. The supported route is to let
-# provisioning delete the old entry by name first and recreate it.
-deleteDatasources:
-  - name: Loki
-    orgId: 1
+# A `deleteDatasources` entry for Loki lived here from 2026-08-31, to move the
+# datasource to uid `loki` once; it re-created the datasource on every start
+# since. Removed 2026-09-27 (expert panel, dashboards-two-sources-ui-edits-lost):
+# the uid has been `loki` for four weeks.
 
 datasources:
   - name: Loki

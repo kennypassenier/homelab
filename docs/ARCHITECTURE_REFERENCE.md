@@ -489,7 +489,7 @@ Verification: `SHA256SUMS.minisig` over `SHA256SUMS` with the compiled
 | AR12 | serial mutations | `host/src/main.rs:1667,2944` |
 | AR13 | journal names interrupted ops | `core/src/incidents.rs:117-137` |
 | AR14 | incident bundle per failure | `core/src/incidents.rs:56-110` |
-| AR15 | journald plus a JSONL ring | stderr only (`host/src/main.rs:1758-1763`); no ring found |
+| AR15 | journald plus a JSONL ring | stderr to the journal, no colour codes; every line of an operation inside `rpc{id,stack}` or `stack{stack}` and `op{op}` spans, step starts and finishes logged (fix-122, `journal_subscriber`, `run_op_locked`); no ring, no runtime debug toggle |
 | AR16 | frame capture, `commands.sh` replay | replay yes (`core/src/incidents.rs:39-52`); no frame-capture toggle found |
 | AR17 | dependency policy | a process rule |
 | AR18 | MSRV 1.88 with its own CI job | `Cargo.toml:7` says 1.88; builds use 1.97 (`rust-toolchain.toml:13`); `ci.yml` has one job, `check` (`:17`), while its comment says branch protection requires an `msrv` context (`:6-9`) |

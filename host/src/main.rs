@@ -1694,6 +1694,100 @@ port = 5003
         assert!(kept, "armed after this daemon started: not its own");
     }
 
+    /// A `MakeWriter` into a shared buffer, to read what the journal gets.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+        type Writer = Captured;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// fix-122 (expert panel, journal-lines-lack-op-context, 2026-09-27):
+    /// three backups run at once at night, and their journal lines carried
+    /// only `source=HOST` and the message, so `image not found` could not be
+    /// tied to one of them; the lines also carried ANSI colour codes, which
+    /// break `grep` on the journal. Every line of an operation now names the
+    /// operation and its stack, steps are logged as they start and finish,
+    /// and no escape code reaches the journal.
+    #[test]
+    fn fix_122_journal_lines_name_their_operation_and_stack_without_colour() {
+        use homelab_core::runner::{Runner, StepOutcome};
+        use tracing::Instrument;
+        let out = Captured::default();
+        let subscriber = journal_subscriber(out.clone(), "info");
+        let dir = std::env::temp_dir().join(format!("homelab-fix122-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml = dir.join("host.toml");
+        std::fs::write(
+            &toml,
+            format!(
+                "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        let state = test_state(load_config_from(toml.to_string_lossy().into_owned()));
+        tracing::subscriber::with_default(subscriber, || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(
+                    async {
+                        run_op_locked(&state, &RealExecutor, 0, "scheduled-backup", |ctx| {
+                            Box::pin(async move {
+                                let mut r = Runner::new("backup-paperwork", ctx.sink, ctx.journal);
+                                let _ = r
+                                    .step("snapshot", || async {
+                                        ctx.sink.emit(PipelineEvent::Line {
+                                            level: homelab_core::sink::Level::Warn,
+                                            source: "HOST".into(),
+                                            msg: "image not found".into(),
+                                        });
+                                        Ok(StepOutcome::Changed)
+                                    })
+                                    .await;
+                                r.finish_ok()
+                            })
+                        })
+                        .await
+                    }
+                    .instrument(stack_span("paperwork")),
+                );
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        let text = String::from_utf8(out.0.lock().unwrap().clone()).unwrap();
+        assert!(!text.contains('\u{1b}'), "no colour codes:\n{}", text);
+        let line = text
+            .lines()
+            .find(|l| l.contains("image not found"))
+            .unwrap_or_else(|| panic!("the line reached the journal:\n{}", text));
+        assert!(
+            line.contains("stack=paperwork") && line.contains("op=scheduled-backup"),
+            "the line names its stack and operation: {}",
+            line
+        );
+        assert!(
+            text.lines()
+                .any(|l| l.contains("snapshot") && l.contains("stack=paperwork")),
+            "the step's start and finish are journal lines too:\n{}",
+            text
+        );
+    }
+
     #[test]
     fn h12_scheduler_clock_logic() {
         // Weird `date` output never silently disables the scheduler.
@@ -2231,28 +2325,47 @@ impl Sink for BroadcastSink {
     fn emit(&self, event: PipelineEvent) {
         let msg = match event {
             PipelineEvent::Line { level, source, msg } => {
-                tracing::info!(source = %source, "{}", msg);
+                // fix-122: at the line's own level, so `grep WARN` on the
+                // journal finds the warnings an operation printed.
+                use homelab_core::sink::Level;
+                match level {
+                    Level::Error => tracing::error!(source = %source, "{}", msg),
+                    Level::Warn => tracing::warn!(source = %source, "{}", msg),
+                    Level::Debug => tracing::debug!(source = %source, "{}", msg),
+                    Level::Info => tracing::info!(source = %source, "{}", msg),
+                }
                 ServerMsg::Log {
                     level: level.into(),
                     source,
                     msg,
                 }
             }
-            PipelineEvent::StepStarted { op, step } => ServerMsg::Log {
-                level: homelab_proto::LogLevel::Info,
-                source: "HOST".into(),
-                msg: format!("[sync][run ] {} :: {}", op, step),
-            },
-            PipelineEvent::StepFinished { op, step, changed } => ServerMsg::Log {
-                level: homelab_proto::LogLevel::Info,
-                source: "HOST".into(),
-                msg: format!(
+            // fix-122: step starts and ends reach the journal too; they went
+            // only to connected clients, so a night's journal had the lines
+            // of a step but not which step they belonged to.
+            PipelineEvent::StepStarted { op, step } => {
+                let msg = format!("[sync][run ] {} :: {}", op, step);
+                tracing::info!("{}", msg);
+                ServerMsg::Log {
+                    level: homelab_proto::LogLevel::Info,
+                    source: "HOST".into(),
+                    msg,
+                }
+            }
+            PipelineEvent::StepFinished { op, step, changed } => {
+                let msg = format!(
                     "[sync][exit] {} :: {} :: {}",
                     op,
                     step,
                     if changed { "changed" } else { "ok (no change)" }
-                ),
-            },
+                );
+                tracing::info!("{}", msg);
+                ServerMsg::Log {
+                    level: homelab_proto::LogLevel::Info,
+                    source: "HOST".into(),
+                    msg,
+                }
+            }
             PipelineEvent::Bytes {
                 op,
                 label,
@@ -2472,6 +2585,68 @@ impl homelab_core::ask::Asker for LiveAsker<'_> {
     }
 }
 
+/// The daemon's log subscriber, writing to `writer` (stderr, which systemd
+/// puts in the journal).
+///
+/// fix-122 (expert panel, journal-lines-lack-op-context, 2026-09-27): no
+/// ANSI colour. tracing-subscriber colours by default, so a journal line
+/// read `\x1b[33m WARN\x1b[0m` and `grep 'WARN scheduler'` found nothing.
+fn journal_subscriber<W>(writer: W, default_filter: &str) -> impl tracing::Subscriber + Send + Sync
+where
+    W: for<'a> tracing_subscriber::fmt::MakeWriter<'a> + Send + Sync + 'static,
+{
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| default_filter.into()),
+        )
+        .with_ansi(false)
+        .with_writer(writer)
+        .finish()
+}
+
+/// fix-122: the span that names the stack an operation works on. Every
+/// journal line inside it carries `stack=<name>`, which is what tells three
+/// concurrent nightly backups apart.
+fn stack_span(stack: &str) -> tracing::Span {
+    tracing::info_span!("stack", stack = %stack)
+}
+
+/// fix-122: the span a request runs in: its id, and its stack when it has
+/// one (a request about the host or the fleet has none, and says nothing).
+fn rpc_span(req: &RpcRequest) -> tracing::Span {
+    let span = tracing::info_span!("rpc", id = req.id, stack = tracing::field::Empty);
+    if let Some(stack) = rpc_stack(&req.command) {
+        span.record("stack", stack.as_str());
+    }
+    span
+}
+
+/// fix-122: the stack a request is about, for its span. `None` for requests
+/// about the host or the whole fleet.
+fn rpc_stack(command: &Rpc) -> Option<String> {
+    match command {
+        Rpc::DeployStack(spec) => Some(spec.manifest.stack_name.clone()),
+        Rpc::DestroyStack { manifest, .. }
+        | Rpc::RestoreStack { manifest, .. }
+        | Rpc::UpdateStack { manifest, .. }
+        | Rpc::PruneOrphans { manifest, .. } => Some(manifest.stack_name.clone()),
+        Rpc::BackupStack(m) | Rpc::ApplyResources(m) => Some(m.stack_name.clone()),
+        Rpc::StageNativeBinary { stack, .. }
+        | Rpc::BackupNative { stack }
+        | Rpc::UpdateNative { stack }
+        | Rpc::ReleaseUpdateNative { stack }
+        | Rpc::ForgetStack { stack }
+        | Rpc::DestroyRecorded { stack, .. }
+        | Rpc::SetStackEnabled { stack, .. }
+        | Rpc::GetApplied { stack } => Some(stack.clone()),
+        Rpc::InstallNative { manifest, .. } | Rpc::AdoptService(manifest) => {
+            Some(manifest.stack_name.clone())
+        }
+        _ => None,
+    }
+}
+
 /// B7: minimal sd_notify — tell systemd we're alive without pulling in a
 /// crate. No-op when NOTIFY_SOCKET is unset (dev runs).
 fn sd_notify(msg: &str) {
@@ -2589,12 +2764,10 @@ async fn main() {
         }
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+    {
+        use tracing_subscriber::util::SubscriberInitExt as _;
+        journal_subscriber(std::io::stderr, "info").init();
+    }
 
     let config = load_config();
     let (log_tx, _) = broadcast::channel(4096);
@@ -3047,43 +3220,51 @@ async fn run_backup_batch(
     let phase_started = std::time::Instant::now();
     let stacks_in_phase = jobs.len();
     let results: Vec<(String, NightBackup)> = futures_util::stream::iter(jobs)
-        .map(|job| async move {
-            let name = job.stack.clone();
-            let outcome = match job.what {
-                BackupWhat::Compose(manifest) => {
-                    let cfg = job.cfg.clone();
-                    let r = run_op_locked(state, exec, 0, "scheduled-backup", |ctx| {
-                        Box::pin(async move {
-                            homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await
-                        })
-                    })
-                    .await;
-                    NightBackup::of(r.ok, r.deferred.as_deref())
-                }
-                // T5: several services share one container, so all of them are
-                // backed up and one failure fails the night for the stack —
-                // they share a container and a fate. Sequential WITHIN a
-                // stack: they are on the same container, so overlapping their
-                // pauses would stop that container twice over.
-                BackupWhat::Native(services) => {
-                    let mut worst = NightBackup::Done;
-                    for native in services {
+        .map(|job| {
+            // fix-122: the three backups interleave; their lines say whose.
+            use tracing::Instrument as _;
+            let span = stack_span(&job.stack);
+            async move {
+                let name = job.stack.clone();
+                let outcome = match job.what {
+                    BackupWhat::Compose(manifest) => {
                         let cfg = job.cfg.clone();
-                        let r = run_op_locked(state, exec, 0, "scheduled-backup-native", |ctx| {
+                        let r = run_op_locked(state, exec, 0, "scheduled-backup", |ctx| {
                             Box::pin(async move {
-                                homelab_core::ops::native::backup_native(ctx, &native, &cfg).await
+                                homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await
                             })
                         })
                         .await;
-                        worst = worst.worse_of(NightBackup::of(r.ok, r.deferred.as_deref()));
+                        NightBackup::of(r.ok, r.deferred.as_deref())
                     }
-                    worst
+                    // T5: several services share one container, so all of them are
+                    // backed up and one failure fails the night for the stack —
+                    // they share a container and a fate. Sequential WITHIN a
+                    // stack: they are on the same container, so overlapping their
+                    // pauses would stop that container twice over.
+                    BackupWhat::Native(services) => {
+                        let mut worst = NightBackup::Done;
+                        for native in services {
+                            let cfg = job.cfg.clone();
+                            let r =
+                                run_op_locked(state, exec, 0, "scheduled-backup-native", |ctx| {
+                                    Box::pin(async move {
+                                        homelab_core::ops::native::backup_native(ctx, &native, &cfg)
+                                            .await
+                                    })
+                                })
+                                .await;
+                            worst = worst.worse_of(NightBackup::of(r.ok, r.deferred.as_deref()));
+                        }
+                        worst
+                    }
+                };
+                if let NightBackup::Deferred(why) = &outcome {
+                    info!("scheduler: backup for {} stood aside — {}", name, why);
                 }
-            };
-            if let NightBackup::Deferred(why) = &outcome {
-                info!("scheduler: backup for {} stood aside — {}", name, why);
+                (name, outcome)
             }
-            (name, outcome)
+            .instrument(span)
         })
         .buffer_unordered(limit)
         .collect()
@@ -3112,6 +3293,8 @@ enum BackupWhat {
 }
 
 async fn scheduler_loop(state: AppState) {
+    // fix-122: the nightly updates run inside a span naming their stack.
+    use tracing::Instrument as _;
     let exec = RealExecutor;
     loop {
         tokio::time::sleep(Duration::from_secs(20 * 60)).await;
@@ -3285,6 +3468,7 @@ async fn scheduler_loop(state: AppState) {
                             homelab_core::ops::native::release_update(ctx, &native).await
                         })
                     })
+                    .instrument(stack_span(&name))
                     .await;
                     update_ok &= r.ok;
                 }
@@ -3295,6 +3479,7 @@ async fn scheduler_loop(state: AppState) {
                             homelab_core::ops::native::update_native(ctx, &n2, applied).await
                         })
                     })
+                    .instrument(stack_span(&name))
                     .await;
                     update_ok &= r.ok;
                 }
@@ -3349,6 +3534,7 @@ async fn scheduler_loop(state: AppState) {
                     async move { homelab_core::ops::update::update(ctx, &m2, None, true).await },
                 )
             })
+            .instrument(stack_span(&name))
             .await;
             // H8: a failed nightly update parks the stack's updates — one
             // loud message, then silence instead of a fresh failure every
@@ -3691,8 +3877,10 @@ where
         let state = state.clone();
         let handler = handler.clone();
         tokio::spawn(async move {
+            use tracing::Instrument as _;
             while let Some(req) = work_rx.recv().await {
-                let resp = handler(state.clone(), req).await;
+                let span = rpc_span(&req);
+                let resp = handler(state.clone(), req).instrument(span).await;
                 let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
                 // fix-121: an answered request is what accepts an update.
                 accept_pending_update(&state.config.state_dir, state.started_at);
@@ -3715,7 +3903,9 @@ where
         if runs_beside_the_queue(&req.command) {
             let (out_tx, state, handler) = (out_tx.clone(), state.clone(), handler.clone());
             tokio::spawn(async move {
-                let resp = handler(state.clone(), req).await;
+                use tracing::Instrument as _;
+                let span = rpc_span(&req);
+                let resp = handler(state.clone(), req).instrument(span).await;
                 let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
                 accept_pending_update(&state.config.state_dir, state.started_at);
             });
@@ -4005,6 +4195,29 @@ where
 /// Every RPC still goes through `run_mutating_op`, which is this plus the
 /// lock — there is one implementation, not two that can drift.
 async fn run_op_locked<F>(
+    state: &AppState,
+    exec: &RealExecutor,
+    req_id: u64,
+    label: &str,
+    op: F,
+) -> RpcResponse
+where
+    F: for<'a> FnOnce(
+        &'a OpCtx<'a>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = homelab_core::runner::OperationReport> + Send + 'a>,
+    >,
+{
+    // fix-122 (journal-lines-lack-op-context, 2026-09-27): every journal
+    // line of the operation, its steps and its failure carries `op=<label>`;
+    // the caller's span adds the stack.
+    use tracing::Instrument as _;
+    run_op_body(state, exec, req_id, label, op)
+        .instrument(tracing::info_span!("op", op = %label))
+        .await
+}
+
+async fn run_op_body<F>(
     state: &AppState,
     exec: &RealExecutor,
     req_id: u64,

@@ -648,3 +648,13 @@ fn the_metrics_stack_caps_its_disk_and_alerts_on_missing_data() {
         "AlertDeliveryFailing reads Alertmanager's own counters"
     );
 }
+
+/// Expert panel 2026-09-27 (phone-path-loses-information): HTTPSwitchboard
+/// reshapes an Alertmanager group from its first alert, so a group of two
+/// lost the second. One alert per group closes that.
+#[test]
+fn alertmanager_sends_one_alert_per_notification() {
+    let am = std::fs::read_to_string(stacks_dir().join("metrics/alertmanager/alertmanager.yml"))
+        .unwrap();
+    assert!(am.contains("group_by: [\"...\"]"), "{am}");
+}

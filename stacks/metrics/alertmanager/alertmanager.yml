@@ -23,9 +23,13 @@ global:
 
 route:
   receiver: kyu-hub
-  # Grouping by host as well as alertname means one failing machine produces one
-  # notification, not one per filesystem or per drive.
-  group_by: ["alertname", "host"]
+  # One notification per alert ('...' groups by every label). HTTPSwitchboard
+  # reshapes a group by reading its first alert, so a group of two lost the
+  # second one, and a group whose first member had resolved was dropped
+  # whole (expert panel 2026-09-27, phone-path-loses-information). The
+  # fan-out that grouping by host used to hide is now removed at the source:
+  # FilesystemAlmostFull counts each device once.
+  group_by: ["..."]
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 12h

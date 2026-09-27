@@ -214,6 +214,15 @@ sequenceDiagram
   fix-36), so vmids `host.toml` added are refused too; it has no hostname
   guard, because it names a vmid rather than a stack. `homelab patch` and
   requested guards run the hostname guard since gap-33.
+- Host policy (fix-120): a deploy refuses a privileged container on a vmid
+  not in `privileged_vmids`, and a `data_mounts:` path outside
+  `data_mount_roots` (whole path components; a `.` or `..` component is
+  refused). Both live in `host.toml`, which no RPC changes; without the keys
+  the daemon uses what the fleet ran on 2026-09-27, `[105, 106]` and the four
+  data-mount directories (`core/src/safety.rs`, `check_host_policy`).
+- The token: compared as SHA-256 digests (constant time). Every refusal is a
+  `warn` line `401 on <path> from <peer>`, counted since start and shown by
+  `homelab doctor` as `refused connections` (fix-120).
 
 **State (AR4).** `state.json` has `schema_version` (`core/src/state.rs:12`).
 Missing file: empty fleet. Unparseable: copied to `state.json.corrupt` and
@@ -495,8 +504,8 @@ Looks wrong, is deliberate:
   (`core/src/ops/deploy.rs:662-677`); an existing container gets its mounts
   reconciled, not its devices (`:681-700`).
 - **`exec_enabled` is not remote.** The client can change backup hour,
-  webhook and retention (`proto/src/lib.rs:239-246`); `exec_enabled` is
-  edited in `host.toml` (`host/src/main.rs:175-176`).
+  webhook and retention (`proto/src/lib.rs:239-246`); `exec_enabled`,
+  `privileged_vmids` and `data_mount_roots` are edited in `host.toml`.
 
 ## 8. Where to add things
 

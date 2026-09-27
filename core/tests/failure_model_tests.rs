@@ -192,6 +192,7 @@ fn f6_doctor_healthy_system_is_ok() {
         mirror_behind: Some(0),
         interrupted_ops: vec![],
         host_units_drift: None,
+        ..Default::default()
     };
     let checks = doctor::diagnose(&p);
     assert_eq!(doctor::overall(&checks), Health::Ok);
@@ -213,6 +214,7 @@ fn f6_doctor_flags_each_problem_with_remedy() {
         mirror_behind: Some(2),                       // warn
         interrupted_ops: vec!["deploy-media".into()], // warn
         host_units_drift: None,
+        ..Default::default()
     };
     let checks = doctor::diagnose(&p);
     assert_eq!(doctor::overall(&checks), Health::Fail);
@@ -245,6 +247,7 @@ fn gap_27_the_dead_drive_token_remedy_does_not_promise_local_backups() {
         mirror_behind: Some(0),
         interrupted_ops: vec![],
         host_units_drift: None,
+        ..Default::default()
     };
     let checks = doctor::diagnose(&p);
     let remedy = checks
@@ -254,6 +257,44 @@ fn gap_27_the_dead_drive_token_remedy_does_not_promise_local_backups() {
         .expect("a remedy");
     assert!(!remedy.contains("local backups still run"), "{remedy}");
     assert!(remedy.contains("no backup"), "{remedy}");
+}
+
+/// fix-120 (expert panel, api-token-is-root, 2026-09-27): a refused token
+/// used to leave no trace. Doctor says how many were refused and from where,
+/// and says "none" when there were none, so the line is always read.
+#[test]
+fn fix_120_doctor_names_refused_connections() {
+    let quiet = Probes {
+        state_parses: true,
+        failed_auth: Some(doctor::FailedAuth::default()),
+        ..Default::default()
+    };
+    let line = doctor::diagnose(&quiet)
+        .into_iter()
+        .find(|c| c.name == "refused connections")
+        .expect("a refused-connections line");
+    assert_eq!(line.health, Health::Ok);
+
+    let probed = Probes {
+        state_parses: true,
+        failed_auth: Some(doctor::FailedAuth {
+            count: 3,
+            last_peer: Some("10.10.10.23:51234".into()),
+            last_at: 1_800_000_000,
+        }),
+        ..Default::default()
+    };
+    let line = doctor::diagnose(&probed)
+        .into_iter()
+        .find(|c| c.name == "refused connections")
+        .expect("a refused-connections line");
+    assert_eq!(line.health, Health::Warn);
+    assert!(
+        line.detail.contains('3') && line.detail.contains("10.10.10.23"),
+        "{}",
+        line.detail
+    );
+    assert!(line.remedy.is_some());
 }
 
 // ── RecordingSink tees to inner sink AND records ────────────────────────────

@@ -33,6 +33,19 @@ pub struct Probes {
     /// Host units on pve that differ from what the binary carries
     /// (`crate::hostunits`); `None` when not asked.
     pub host_units_drift: Option<Vec<String>>,
+    /// fix-120: connections the daemon refused for their token since it
+    /// started; `None` when not asked.
+    pub failed_auth: Option<FailedAuth>,
+}
+
+/// fix-120 (expert panel, api-token-is-root, 2026-09-27): what the 401
+/// counter saw.
+#[derive(Debug, Clone, Default)]
+pub struct FailedAuth {
+    pub count: u64,
+    pub last_peer: Option<String>,
+    /// Unix time of the last refusal; 0 when there was none.
+    pub last_at: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +215,37 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
                  until then the watchdog or the rollback may be missing"
                     .into()
             }),
+        });
+    }
+
+    if let Some(fa) = &p.failed_auth {
+        checks.push(if fa.count == 0 {
+            Check {
+                name: "refused connections".into(),
+                health: Health::Ok,
+                detail: "no connection refused for its token since the daemon started".into(),
+                remedy: None,
+            }
+        } else {
+            Check {
+                name: "refused connections".into(),
+                health: Health::Warn,
+                detail: format!(
+                    "{} connection(s) refused for a missing or wrong token since the daemon \
+                     started, the last from {} at {} {:02}:{:02} UTC",
+                    fa.count,
+                    fa.last_peer.as_deref().unwrap_or("?"),
+                    crate::state::ymd(fa.last_at),
+                    fa.last_at % 86_400 / 3600,
+                    fa.last_at % 3600 / 60
+                ),
+                remedy: Some(
+                    "a machine of yours with an old token, or something probing the daemon: \
+                     `journalctl -u homelab-host | grep '401 on'` lists each one with its \
+                     address"
+                        .into(),
+                ),
+            }
         });
     }
 

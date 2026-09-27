@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -99,6 +99,14 @@ struct FileConfig {
     exec_enabled: Option<bool>,
     mirror_remote: Option<String>,
     no_touch: Option<Vec<u16>>,
+    /// fix-120 (api-token-is-root, 2026-09-27): vmids a deploy may make a
+    /// privileged container. Absent = the ones the fleet runs today
+    /// (`homelab_core::safety::FLEET_PRIVILEGED_VMIDS`). ssh-edited only,
+    /// like exec_enabled: a policy the token could change is no policy.
+    privileged_vmids: Option<Vec<u16>>,
+    /// fix-120: host directories `data_mounts:` may borrow. Absent = the ones
+    /// the fleet uses today (`FLEET_DATA_MOUNT_ROOTS`).
+    data_mount_roots: Option<Vec<String>>,
     gateway_vmid: Option<u16>,
     gateway_routes_dir: Option<String>,
     /// Route A (Kenny, form J1, 2026-09-02): devices this suite may not
@@ -288,6 +296,8 @@ const KNOWN_TOP: &[&str] = &[
     "exec_enabled",
     "mirror_remote",
     "no_touch",
+    "privileged_vmids",
+    "data_mount_roots",
     "gateway_vmid",
     "gateway_routes_dir",
     "zfs_jobs",
@@ -464,6 +474,19 @@ fn load_config_from(path: String) -> Config {
             if let Some(dir) = file.gateway_routes_dir {
                 sc.gateway_routes_dir = dir;
             }
+            // fix-120: the daemon always runs with a policy; without the
+            // keys it is what the fleet uses today, so nothing is refused
+            // that deployed yesterday.
+            sc.privileged_vmids = Some(
+                file.privileged_vmids
+                    .unwrap_or_else(|| homelab_core::safety::FLEET_PRIVILEGED_VMIDS.to_vec()),
+            );
+            sc.data_mount_roots = Some(file.data_mount_roots.unwrap_or_else(|| {
+                homelab_core::safety::FLEET_DATA_MOUNT_ROOTS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            }));
             sc
         },
         zfs_jobs: file.zfs_jobs.unwrap_or_default(),
@@ -564,6 +587,12 @@ fn render_settings_toml(
         mirror_remote: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         no_touch: Option<&'a Vec<u16>>,
+        // fix-120: a settings save that dropped these would quietly put the
+        // fleet defaults back in place of what Kenny wrote.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        privileged_vmids: Option<&'a Vec<u16>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data_mount_roots: Option<&'a Vec<String>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         gateway_vmid: Option<u16>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -623,6 +652,16 @@ fn render_settings_toml(
         mirror_remote: config.mirror_remote.as_ref(),
         no_touch: (config.safety.no_touch != SafetyConfig::default().no_touch)
             .then_some(&config.safety.no_touch),
+        privileged_vmids: config
+            .safety
+            .privileged_vmids
+            .as_ref()
+            .filter(|v| v.as_slice() != homelab_core::safety::FLEET_PRIVILEGED_VMIDS),
+        data_mount_roots: config.safety.data_mount_roots.as_ref().filter(|v| {
+            !v.iter()
+                .map(String::as_str)
+                .eq(homelab_core::safety::FLEET_DATA_MOUNT_ROOTS.iter().copied())
+        }),
         gateway_vmid: (config.safety.gateway_vmid != SafetyConfig::default().gateway_vmid)
             .then_some(config.safety.gateway_vmid),
         gateway_routes_dir: (config.safety.gateway_routes_dir
@@ -1068,6 +1107,98 @@ mod tests {
         assert!(exec_allowed(&cfg, 150).is_ok());
     }
 
+    /// fix-120 (expert panel, api-token-is-root, 2026-09-27): without the two
+    /// keys the host runs with what the fleet uses today, so the policy lands
+    /// without refusing a single existing deploy; with them it runs with
+    /// exactly what the file says.
+    #[test]
+    fn fix_120_host_policy_defaults_to_the_fleet_and_follows_host_toml() {
+        let dir = std::env::temp_dir().join(format!("homelab-fix120-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bare = dir.join("bare.toml");
+        std::fs::write(&bare, "token = \"0123456789abcdef0123\"\n").unwrap();
+        let cfg = load_config_from(bare.to_string_lossy().into_owned());
+        assert_eq!(
+            cfg.safety.privileged_vmids.as_deref(),
+            Some(homelab_core::safety::FLEET_PRIVILEGED_VMIDS)
+        );
+        assert_eq!(
+            cfg.safety.data_mount_roots,
+            Some(
+                homelab_core::safety::FLEET_DATA_MOUNT_ROOTS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+            )
+        );
+        let set = dir.join("set.toml");
+        std::fs::write(
+            &set,
+            "token = \"0123456789abcdef0123\"\nprivileged_vmids = [106]\n\
+             data_mount_roots = [\"/HDD18TB/media\"]\n",
+        )
+        .unwrap();
+        let cfg = load_config_from(set.to_string_lossy().into_owned());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(cfg.safety.privileged_vmids, Some(vec![106]));
+        assert_eq!(
+            cfg.safety.data_mount_roots,
+            Some(vec!["/HDD18TB/media".to_string()])
+        );
+    }
+
+    /// fix-120: the token compare is the digest compare, and a wrong token of
+    /// any length is refused.
+    #[test]
+    fn fix_120_the_bearer_check_refuses_every_near_miss() {
+        let token = "0123456789abcdef0123";
+        assert!(bearer_ok(Some("Bearer 0123456789abcdef0123"), token));
+        for bad in [
+            "Bearer 0123456789abcdef012",
+            "Bearer 0123456789abcdef01234",
+            "Bearer 0123456789abcdef0124",
+            "Bearer ",
+            "bearer 0123456789abcdef0123",
+            "",
+        ] {
+            assert!(!bearer_ok(Some(bad), token), "{:?}", bad);
+        }
+    }
+
+    /// fix-120: a connection refused for its token used to leave no trace at
+    /// all, so a probe from a compromised container or a stolen token tried
+    /// from a new machine was invisible. Every refusal is counted with the
+    /// address it came from, for `homelab doctor`.
+    #[tokio::test]
+    async fn fix_120_a_refused_connection_is_counted_with_its_peer() {
+        let path = format!("/tmp/homelab-fix120-router-{}.toml", std::process::id());
+        std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
+        let state = test_state(load_config_from(path));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = app_router(state.clone());
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap()
+        });
+        let refused = tokio_tungstenite::connect_async(format!("ws://{}/api/ws", addr)).await;
+        assert!(refused.is_err(), "no token, no session");
+        let seen = state.auth_failures.snapshot();
+        assert_eq!(seen.count, 1, "the refusal is counted");
+        assert!(
+            seen.last_peer
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("127.0.0.1"),
+            "and names where it came from: {:?}",
+            seen.last_peer
+        );
+    }
+
     /// F186: the exact file that was live on 2026-09-02. Two OPNsense keys
     /// were appended after the last `[[registry_cache.upstreams]]` table, so
     /// TOML made them fields of the lscr.io mirror and serde dropped them —
@@ -1187,6 +1318,8 @@ port = 5003
                 no_touch: vec![100, 101],
                 gateway_vmid: 112,
                 gateway_routes_dir: "/appdata/platform/traefik-config/routes".into(),
+                privileged_vmids: Some(vec![105, 106, 107]),
+                data_mount_roots: Some(vec!["/HDD18TB/media".into()]),
             },
             registry_cache: Some(homelab_core::ops::registry_cache::CacheCfg {
                 host: "10.10.10.17".into(),
@@ -1290,6 +1423,12 @@ port = 5003
         );
         assert_eq!(parsed.retention.as_ref().map(|r| r.len()), Some(3));
         assert_eq!(parsed.no_touch, Some(vec![100, 101]));
+        // fix-120: the host policy survives a settings save.
+        assert_eq!(parsed.privileged_vmids, Some(vec![105, 106, 107]));
+        assert_eq!(
+            parsed.data_mount_roots,
+            Some(vec!["/HDD18TB/media".to_string()])
+        );
         assert_eq!(parsed.gateway_vmid, Some(112));
         assert_eq!(
             parsed.gateway_routes_dir.as_deref(),
@@ -1336,6 +1475,12 @@ port = 5003
             .any(|c| c.health != homelab_core::doctor::Health::Ok));
     }
 
+    /// The daemon's shared state around `config`, as `main` builds it.
+    fn test_state(config: Config) -> AppState {
+        let (log_tx, _) = broadcast::channel(64);
+        AppState::new(config, log_tx)
+    }
+
     /// A session over a real socket on a free local port, with `handler` in
     /// place of `handle_rpc`. Returns the address to connect to.
     async fn serve_on_loopback<H, Fut>(handler: H) -> SocketAddr
@@ -1347,19 +1492,7 @@ port = 5003
         // test gives: tests run in parallel and another one sets it.
         let path = format!("/tmp/homelab-loopback-test-{}.toml", std::process::id());
         std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
-        let config = load_config_from(path);
-        let (log_tx, _) = broadcast::channel(64);
-        let state = AppState {
-            config: config.clone(),
-            log_tx,
-            op_lock: Arc::new(Mutex::new(())),
-            pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-            settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
-            damper: Arc::new(std::sync::Mutex::new(
-                homelab_core::notify::NotifyDamper::new(20 * 3600),
-            )),
-        };
+        let state = test_state(load_config_from(path));
         let app = Router::new()
             .route(
                 "/ws",
@@ -2072,6 +2205,70 @@ struct AppState {
     /// Monotonic id for those questions. Not a clock: two questions in the
     /// same second must still be distinguishable.
     next_ask_id: Arc<std::sync::atomic::AtomicU64>,
+    /// fix-120: connections refused for their token since this daemon
+    /// started, for `homelab doctor`.
+    auth_failures: Arc<AuthFailures>,
+}
+
+impl AppState {
+    fn new(config: Config, log_tx: broadcast::Sender<ServerMsg>) -> Self {
+        AppState {
+            settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
+            config,
+            log_tx,
+            op_lock: Arc::new(Mutex::new(())),
+            pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            damper: Arc::new(std::sync::Mutex::new(
+                homelab_core::notify::NotifyDamper::new(20 * 3600),
+            )),
+            auth_failures: Arc::new(AuthFailures::default()),
+        }
+    }
+}
+
+/// fix-120 (expert panel, api-token-is-root, 2026-09-27): the 401 branch
+/// logged nothing, so a probe from a compromised container or a stolen token
+/// tried from a new machine left no trace. Kept in memory: a flood of bad
+/// attempts must not turn into a flood of state writes.
+#[derive(Default)]
+struct AuthFailures {
+    count: std::sync::atomic::AtomicU64,
+    last: std::sync::Mutex<Option<(String, u64)>>,
+}
+
+impl AuthFailures {
+    /// Count one refusal from `peer` and return the running total.
+    fn record(&self, peer: &str, now: u64) -> u64 {
+        *self.last.lock().unwrap_or_else(PoisonError::into_inner) = Some((peer.to_string(), now));
+        self.count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1
+    }
+
+    /// What has been seen, in the shape doctor reads.
+    fn snapshot(&self) -> homelab_core::doctor::FailedAuth {
+        let last = self
+            .last
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        homelab_core::doctor::FailedAuth {
+            count: self.count.load(std::sync::atomic::Ordering::Relaxed),
+            last_peer: last.as_ref().map(|(p, _)| p.clone()),
+            last_at: last.map(|(_, t)| t).unwrap_or(0),
+        }
+    }
+}
+
+/// The daemon's routes. One function for `main` and the tests, so a test of
+/// the 401 path runs the real one.
+fn app_router(state: AppState) -> Router {
+    Router::new()
+        .route("/api/health", get(|| async { "ok" }))
+        .route("/api/version", get(|| async { VERSION }))
+        .route("/api/ws", get(ws_upgrade))
+        .with_state(state)
 }
 
 /// T69: the asker that reaches a watching operator over the live line.
@@ -2253,17 +2450,7 @@ async fn main() {
 
     let config = load_config();
     let (log_tx, _) = broadcast::channel(4096);
-    let state = AppState {
-        config: config.clone(),
-        log_tx,
-        op_lock: Arc::new(Mutex::new(())),
-        pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-        settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
-        damper: Arc::new(std::sync::Mutex::new(
-            homelab_core::notify::NotifyDamper::new(20 * 3600),
-        )),
-    };
+    let state = AppState::new(config.clone(), log_tx);
 
     // AR13: surface any operation the previous run left mid-flight.
     let mut interrupted: Vec<String> = Vec::new();
@@ -2319,11 +2506,7 @@ async fn main() {
     };
     let op_lock = state.op_lock.clone();
 
-    let app = Router::new()
-        .route("/api/health", get(|| async { "ok" }))
-        .route("/api/version", get(|| async { VERSION }))
-        .route("/api/ws", get(ws_upgrade))
-        .with_state(state);
+    let app = app_router(state);
 
     // A4: TLS with a self-signed cert; the client pins this fingerprint.
     let (certs, fingerprint) =
@@ -2369,7 +2552,9 @@ async fn main() {
     });
 
     let code = supervise(
-        server.serve(app.into_make_service()),
+        // fix-120: with the peer address, so a refused connection says where
+        // it came from.
+        server.serve(app.into_make_service_with_connect_info::<SocketAddr>()),
         scheduler,
         terminate_signal(),
         op_lock,
@@ -2633,10 +2818,36 @@ fn orphan_watchers(
         .collect()
 }
 
+/// fix-120 (api-token-is-root, 2026-09-27): compared as SHA-256 digests with
+/// every byte folded in, so neither the length nor the first differing byte
+/// shows in the time the answer takes. It was a plain `==` on a formatted
+/// string, which stops at the first difference.
 fn bearer_ok(header: Option<&str>, token: &str) -> bool {
-    header
-        .map(|v| v == format!("Bearer {}", token))
-        .unwrap_or(false)
+    use sha2::{Digest, Sha256};
+    let Some(given) = header else {
+        return false;
+    };
+    let want = Sha256::digest(format!("Bearer {}", token).as_bytes());
+    let got = Sha256::digest(given.as_bytes());
+    want.iter()
+        .zip(got.iter())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
+}
+
+/// fix-120: say that a connection was refused for its token, and from where.
+fn log_refused(state: &AppState, peer: SocketAddr, path: &str) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let n = state.auth_failures.record(&peer.to_string(), now);
+    tracing::warn!(
+        "401 on {} from {}: missing or wrong bearer token ({} refused since this daemon started)",
+        path,
+        peer,
+        n
+    );
 }
 
 /// E4: check every 20 minutes; when the local hour matches `hour` and a
@@ -3214,6 +3425,7 @@ pub const MAX_WS_FRAME: usize = 256 * 1024 * 1024;
 
 async fn ws_upgrade(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
@@ -3222,6 +3434,7 @@ async fn ws_upgrade(
         &state.config.token,
     );
     if !authed {
+        log_refused(&state, peer, "/api/ws");
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
     }
     // H5 self-update ships the whole host binary in one message, and the
@@ -3795,13 +4008,14 @@ async fn gather_today(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let probes = gather_probes(
+    let mut probes = gather_probes(
         exec,
         &state.config.state_dir,
         state.config.mirror_remote.as_deref(),
         now,
     )
     .await;
+    probes.failed_auth = Some(state.auth_failures.snapshot());
     let checks = homelab_core::doctor::diagnose(&probes);
     let live = gather_live_facts(exec, state, stack_files).await;
     let incidents: Vec<String> = std::fs::read_dir(format!("{}/incidents", state.config.state_dir))
@@ -4967,13 +5181,14 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let probes = gather_probes(
+            let mut probes = gather_probes(
                 &exec,
                 &state.config.state_dir,
                 state.config.mirror_remote.as_deref(),
                 now,
             )
             .await;
+            probes.failed_auth = Some(state.auth_failures.snapshot());
             let checks = homelab_core::doctor::diagnose(&probes);
             let overall = homelab_core::doctor::overall(&checks);
             let mut msg = format!("doctor: {:?}\n", overall);
@@ -5234,5 +5449,7 @@ async fn gather_probes(
         offsite_token_valid,
         mirror_behind,
         interrupted_ops: interrupted,
+        // fix-120: filled in by the caller, which holds the counter.
+        failed_auth: None,
     }
 }

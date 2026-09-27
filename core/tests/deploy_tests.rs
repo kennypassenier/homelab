@@ -2596,6 +2596,94 @@ async fn a_vmid_that_is_a_qemu_vm_is_refused_even_when_it_is_not_on_the_list() {
     assert!(msg.contains("9000") && msg.contains("QEMU"), "{}", msg);
 }
 
+/// fix-120 (expert panel, api-token-is-root, 2026-09-27): the API token is
+/// root on pve as long as a stack file may ask for a privileged container or
+/// bind any host path into one. The host's own policy decides; a stack file
+/// that exceeds it is refused before anything is created.
+#[tokio::test]
+async fn fix_120_a_privileged_container_outside_the_host_policy_is_refused() {
+    use homelab_core::safety::{check_deploy_target, SafetyConfig};
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such VM"));
+    exec.respond_always("pct config", CmdOutput::failed(2, "no such CT"));
+    let cfg = SafetyConfig {
+        privileged_vmids: Some(vec![105, 106]),
+        ..SafetyConfig::default()
+    };
+    let mut m = manifest(108, "syncthing");
+    m.lxc.unprivileged = false;
+    let err = check_deploy_target(&exec, &cfg, &m)
+        .await
+        .expect_err("a privileged container the policy does not name must be refused");
+    let msg = format!("{}", err);
+    assert!(
+        msg.contains("108") && msg.contains("privileged_vmids"),
+        "{}",
+        msg
+    );
+
+    // The fleet's own privileged containers still pass, and so does any
+    // unprivileged one.
+    let mut media = manifest(106, "media");
+    media.lxc.unprivileged = false;
+    check_deploy_target(&exec, &cfg, &media)
+        .await
+        .expect("106 is on the list");
+    check_deploy_target(&exec, &cfg, &manifest(108, "syncthing"))
+        .await
+        .expect("unprivileged needs no permission");
+}
+
+/// fix-120: a data mount may only borrow a directory the host names, and a
+/// `..` cannot climb out of one.
+#[tokio::test]
+async fn fix_120_a_data_mount_outside_the_host_roots_is_refused() {
+    use homelab_core::manifest::DataMount;
+    use homelab_core::safety::{check_deploy_target, SafetyConfig};
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "no such VM"));
+    exec.respond_always("pct config", CmdOutput::failed(2, "no such CT"));
+    let cfg = SafetyConfig {
+        data_mount_roots: Some(vec!["/HDD18TB/subvol-103-disk-0".into()]),
+        ..SafetyConfig::default()
+    };
+    let with = |host_path: &str| {
+        let mut m = manifest(106, "media");
+        m.data_mounts = vec![DataMount {
+            host_path: host_path.into(),
+            mount_point: "/mnt/data".into(),
+            note: None,
+            rotate: None,
+        }];
+        m
+    };
+    for bad in [
+        "/etc/pve",
+        "/",
+        "/HDD18TB",
+        "/HDD18TB/subvol-103-disk-0-other",
+        "/HDD18TB/subvol-103-disk-0/../../etc",
+    ] {
+        let err = check_deploy_target(&exec, &cfg, &with(bad))
+            .await
+            .expect_err(bad);
+        assert!(
+            format!("{}", err).contains("data_mount_roots"),
+            "{}: {}",
+            bad,
+            err
+        );
+    }
+    for good in [
+        "/HDD18TB/subvol-103-disk-0",
+        "/HDD18TB/subvol-103-disk-0/downloads",
+    ] {
+        check_deploy_target(&exec, &cfg, &with(good))
+            .await
+            .unwrap_or_else(|e| panic!("{}: {}", good, e));
+    }
+}
+
 /// covers: F210
 ///
 /// The path-traversal guard on the ONE sanctioned cross-stack write. Its

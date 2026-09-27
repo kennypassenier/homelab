@@ -44,7 +44,7 @@ checks:
   - name: "films in de bibliotheek"
     command: >-
       K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
-      curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
+      printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
       sed 's/.*"MovieCount":\([0-9]*\).*/\1/'
     expect: never_decreases
     layer: application
@@ -55,7 +55,7 @@ checks:
   - name: "series in de bibliotheek"
     command: >-
       K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
-      curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
+      printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
       sed 's/.*"SeriesCount":\([0-9]*\).*/\1/'
     expect: never_decreases
     layer: application
@@ -63,7 +63,7 @@ checks:
   - name: "afleveringen"
     command: >-
       K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
-      curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
+      printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
       sed 's/.*"EpisodeCount":\([0-9]*\).*/\1/'
     expect: never_decreases
     layer: application
@@ -71,7 +71,7 @@ checks:
   - name: "collections"
     command: >-
       K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
-      curl -s -m 30 "http://127.0.0.1:8096/Items/Counts?api_key=$K" |
+      printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
       sed 's/.*"BoxSetCount":\([0-9]*\).*/\1/'
     expect: never_decreases
     layer: application
@@ -82,7 +82,7 @@ checks:
   - name: "bibliotheekpaden"
     command: >-
       K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
-      curl -s -m 30 "http://127.0.0.1:8096/Library/VirtualFolders?api_key=$K" |
+      printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Library/VirtualFolders" |
       grep -o '/data/[0-9]*TB/[A-Za-z0-9]*' | sort -u | tr '\n' ','
     expect: must_match
     layer: application

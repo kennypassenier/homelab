@@ -17,7 +17,7 @@ checks:
   - name: "Radarr 1080p · toegestane kwaliteiten"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:7878/api/v3/qualityprofile/4 |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:7878/api/v3/qualityprofile/4 |
       jq -r '[.items[]|select(.allowed)|(.quality.name // .name)]|sort|join(",")'
     expect: must_match
     layer: application
@@ -30,7 +30,7 @@ checks:
   - name: "Radarr 1080p · scores"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:7878/api/v3/qualityprofile/4 |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:7878/api/v3/qualityprofile/4 |
       jq -r '[.formatItems[]|select(.score!=0)|"\(.name)=\(.score)"]|sort|join(" ")'
     expect: must_match
     layer: application
@@ -42,7 +42,7 @@ checks:
   - name: "Sonarr 1080p · toegestane kwaliteiten"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:8989/api/v3/qualityprofile/4 |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/qualityprofile/4 |
       jq -r '[.items[]|select(.allowed)|(.quality.name // .name)]|sort|join(",")'
     expect: must_match
     layer: application
@@ -56,7 +56,7 @@ checks:
   - name: "Sonarr 1080p · scores"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:8989/api/v3/qualityprofile/4 |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/qualityprofile/4 |
       jq -r '[.formatItems[]|select(.score!=0)|"\(.name)=\(.score)"]|sort|join(" ")'
     expect: must_match
     layer: application
@@ -68,7 +68,7 @@ checks:
   - name: "custom formats in Radarr"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:7878/api/v3/customformat |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:7878/api/v3/customformat |
       jq -r 'length'
     expect: never_decreases
     layer: application
@@ -80,7 +80,7 @@ checks:
   - name: "custom formats in Sonarr"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:8989/api/v3/customformat |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/customformat |
       jq -r 'length'
     expect: never_decreases
     layer: application

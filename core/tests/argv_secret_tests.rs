@@ -43,9 +43,23 @@ fn credential_in_curl_argv(line: &str) -> bool {
         return false;
     };
     let rest = &line[at..];
-    ["-u \"$", "-u \\\"$", "--user \"$", "--user \\\"$", "-u $"]
+    let user = ["-u \"$", "-u \\\"$", "--user \"$", "--user \\\"$", "-u $"]
         .iter()
-        .any(|p| rest.contains(p))
+        .any(|p| rest.contains(p));
+    // Expert panel 2026-09-27 (credentials-in-curl-argv): an API key in a
+    // header or a query string is in argv just the same, readable through
+    // /proc/<pid>/cmdline while curl runs; about 25 service checks and the
+    // busy probe did that.
+    let header = rest.match_indices("-H ").any(|(i, _)| {
+        rest[i..]
+            .split_whitespace()
+            .take(4)
+            .any(|w| w.contains('$'))
+    });
+    let query = ["api_key=$", "apikey=$", "token=$"]
+        .iter()
+        .any(|p| rest.contains(p));
+    user || header || query
 }
 
 #[test]

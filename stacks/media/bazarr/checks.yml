@@ -11,7 +11,7 @@ checks:
   - name: "bereikbare arr-diensten"
     command: >-
       K=$(sed -n 's/^ *apikey: *//p' /appdata/media/bazarr-config/config/config.yaml | head -1);
-      curl -sf -m 10 -H "X-API-KEY: $K" http://127.0.0.1:6767/api/system/status
+      printf 'header = "X-API-KEY: %s"\n' "$K" | curl -sf -m 10  -K - http://127.0.0.1:6767/api/system/status
       | grep -oE '"(sonarr|radarr)_version": "[0-9][^"]*"' | wc -l
     expect: never_decreases
     layer: application

@@ -164,7 +164,8 @@ pub async fn app_busy(
         &format!(
             "K=$(sqlite3 /appdata/{}/{}-config/data/jellyfin.db \
                'select AccessToken from ApiKeys limit 1') && \
-             curl -sf -m 10 -H \"Authorization: MediaBrowser Token=$K\" \
+             printf 'header = \"Authorization: MediaBrowser Token=%s\"\\n' \"$K\" | \
+             curl -sf -m 10 -K - \
              http://127.0.0.1:8096/Sessions",
             stack, app
         ),

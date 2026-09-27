@@ -6,7 +6,7 @@ checks:
   - name: "indexers"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:9696/api/v1/indexer |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:9696/api/v1/indexer |
       grep -cE '"definitionName":'
     expect: never_decreases
     layer: application
@@ -17,7 +17,7 @@ checks:
   - name: "gezondheidsmeldingen"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:9696/api/v1/health |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:9696/api/v1/health |
       grep -oE '"type":' | wc -l
     expect: must_be_present
     layer: application

@@ -13,7 +13,7 @@ checks:
   - name: "mappen die syncthing synchroniseert"
     command: >-
       docker exec syncthing sh -c 'K=$(grep -o "<apikey>[^<]*" /var/syncthing/config/config.xml | cut -d\> -f2);
-      curl -s -m 10 -H "X-API-Key: $K" http://127.0.0.1:8384/rest/config/folders |
+      printf "header = \"X-API-Key: %s\"\\n" "$K" | curl -s -m 10 -K - http://127.0.0.1:8384/rest/config/folders |
       grep -o "\"id\":" | wc -l'
     expect: never_decreases
     layer: application
@@ -21,7 +21,7 @@ checks:
   - name: "apparaten die syncthing kent"
     command: >-
       docker exec syncthing sh -c 'K=$(grep -o "<apikey>[^<]*" /var/syncthing/config/config.xml | cut -d\> -f2);
-      curl -s -m 10 -H "X-API-Key: $K" http://127.0.0.1:8384/rest/config/devices |
+      printf "header = \"X-API-Key: %s\"\\n" "$K" | curl -s -m 10 -K - http://127.0.0.1:8384/rest/config/devices |
       grep -o "\"deviceID\":" | wc -l'
     expect: never_decreases
     layer: application

@@ -6,7 +6,7 @@ checks:
   - name: "films onder beheer"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:7878/api/v3/movie |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:7878/api/v3/movie |
        grep -cE '"titleSlug":' 
     expect: never_decreases
     layer: application
@@ -17,7 +17,7 @@ checks:
   - name: "gezondheidsmeldingen"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:7878/api/v3/health |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:7878/api/v3/health |
       grep -oE '"type":' | wc -l
     expect: must_be_present
     layer: application
@@ -28,7 +28,7 @@ checks:
   - name: "root folder paden"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:7878/api/v3/rootfolder |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:7878/api/v3/rootfolder |
       grep -oE '/data/[0-9]*TB/[A-Za-z0-9]*' | sort -u | tr '\n' ','
     expect: must_match
     layer: application

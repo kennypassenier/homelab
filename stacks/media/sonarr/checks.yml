@@ -9,7 +9,7 @@ checks:
   - name: "series onder beheer"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:8989/api/v3/series |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/series |
       grep -cE '"titleSlug":'
     expect: never_decreases
     layer: application
@@ -20,7 +20,7 @@ checks:
   - name: "root folders bereikbaar"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:8989/api/v3/rootfolder |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/rootfolder |
       grep -oE '"accessible": *true' | wc -l
     expect: never_decreases
     layer: application
@@ -31,7 +31,7 @@ checks:
   - name: "root folder paden"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:8989/api/v3/rootfolder |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/rootfolder |
       grep -oE '/data/[0-9]*TB/[A-Za-z0-9]*' | sort -u | tr '\n' ','
     expect: must_match
     layer: application
@@ -43,7 +43,7 @@ checks:
   - name: "download client verbonden"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:8989/api/v3/downloadclient |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/downloadclient |
       grep -oE '"enable": *true' | wc -l
     expect: never_decreases
     layer: application
@@ -54,7 +54,7 @@ checks:
   - name: "meldingen in het gezondheidsrapport"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
-      curl -s -m 40 -H "X-Api-Key: $K" http://127.0.0.1:8989/api/v3/health |
+      printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/health |
       grep -oE '"type":' | wc -l
     # Deliberately not never_decreases: this one is supposed to be able to
     # rise, because a new warning is information rather than a regression.

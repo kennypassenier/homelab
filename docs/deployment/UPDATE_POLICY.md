@@ -39,6 +39,16 @@ Per app, in this order (O9):
 
 1. `docker compose pull` — while the service is still running, so the downtime
    is the swap and not the download.
+   **Pre-update copy (fix-61, 2026-09-27):** when the pull brought a
+   different image, the app's data directories are copied to
+   `/var/lib/homelab/pre-update/<stack>/<app>-<unix time>/` with its
+   containers paused (`docker compose pause`) for a consistent copy. The
+   update is skipped, and the running version left alone, when there is no
+   room for the copy (twice the data plus 1 GiB free) or the copy fails. A
+   verified update deletes this copy; a rolled-back one keeps it and names it
+   in its error, because the rollback restores the image and not data the
+   new image may have migrated. Nothing restores that data automatically:
+   putting it back is an operator's act.
 2. If the container is labelled `com.homelab.update.stop-first=true`,
    `docker stop -t 60`. Sixty seconds because a database checkpoint is not
    always quick, and `up -d` would otherwise kill it and make the next start a

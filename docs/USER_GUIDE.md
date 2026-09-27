@@ -119,10 +119,12 @@ Drawn from `client/src/repo_config.rs` (`reconcile_pin`), `client/src/main.rs` a
 ### 0.2 Which verbs need a token, and which read the working directory
 
 Every verb needs `HOMELAB_TOKEN` except `help`, `plan`, `runbook`,
-`dashboard`, `presets`, `export`, `import` and `tui --offline`
-(`client/src/main.rs:144-150`). Note that `new` and `testplan` never contact
-the host but are not on that list, so they also stop with
-`HOMELAB_TOKEN is not set` when no token is configured.
+`dashboard`, `presets`, `export`, `import`, `new`, `testplan`, `self-install`
+and `tui --offline` (`client/src/main.rs:144-150`; `new` and `testplan` since
+fix-110). Without it the refusal names the file: `HOMELAB_TOKEN is not set —
+put HOMELAB_TOKEN=<token> in ~/.config/homelab/env (or export it)`.
+`template-build` refuses an argument it cannot read instead of falling back
+to vmid 999 or version 1.
 
 These verbs read or write paths in **the repository**: the directory above
 the working directory that holds `config/client.toml`, or, from anywhere

@@ -71,8 +71,9 @@ source; `<...>` marks a value the program fills in.
 **The client's token.** Read from `HOMELAB_TOKEN` in the environment, then
 `~/.config/homelab/env`, then `./.env`; the first place that sets a key wins
 (`client/src/main.rs:45-87`). Every verb except `help`, `plan`, `runbook`,
-`dashboard`, `presets`, `export`, `import` and `tui --offline` stops with
-`"HOMELAB_TOKEN is not set"` when there is none
+`dashboard`, `presets`, `export`, `import`, `new`, `testplan`, `self-install`
+and `tui --offline` stops with `"HOMELAB_TOKEN is not set"` and where to put
+it when there is none
 (`client/src/main.rs:144-150`).
 
 **One operation at a time.** Every mutating operation takes the host's one

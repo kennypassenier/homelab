@@ -115,7 +115,7 @@ be the one the daemon was given (see [The host daemon](#the-host-daemon)).
 Without it, every verb that talks to the host stops before connecting:
 
 ```
-error: HOMELAB_TOKEN is not set
+error: HOMELAB_TOKEN is not set — put HOMELAB_TOKEN=<token> in ~/.config/homelab/env (or export it); it is the token in the daemon's host.toml
 ```
 
 ### 3. Check the link
@@ -209,9 +209,9 @@ when the daemon reports success.
 
 ### Verbs that need no token
 
-`help`, `plan`, `runbook`, `dashboard`, `presets`, `export`, `import`, and
-`tui --offline`. Everything else, including the local-only `new` and
-`testplan`, stops with `HOMELAB_TOKEN is not set` when there is no token
+`help`, `plan`, `runbook`, `dashboard`, `presets`, `export`, `import`, `new`,
+`testplan`, `self-install` and `tui --offline`. Everything else stops with
+`HOMELAB_TOKEN is not set` and where to put it when there is no token
 (`needs_token` in `client/src/main.rs`).
 
 "No token" does not always mean "no network". `plan` and `export` build the

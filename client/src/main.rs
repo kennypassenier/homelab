@@ -219,9 +219,16 @@ async fn main() {
             | "export"
             | "import"
             | "self-install"
+            // fix-110: local, they never reach the host.
+            | "new"
+            | "testplan"
     ) && !(cmd == "tui" && offline);
     if token.is_empty() && needs_token {
-        die("HOMELAB_TOKEN is not set");
+        // fix-110: the refusal names where the token goes.
+        die(
+            "HOMELAB_TOKEN is not set — put HOMELAB_TOKEN=<token> in ~/.config/homelab/env \
+             (or export it); it is the token in the daemon's host.toml",
+        );
     }
 
     match cmd {
@@ -608,18 +615,20 @@ async fn main() {
         "templates" => rpc(&host, &token, Command::ListTemplates).await,
         "template-build" => {
             // B8: bake the golden template. Temp vmid defaults to 999.
-            let temp_vmid: u16 = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(999);
-            let version: u32 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
             // O2: `--privileged` builds the second template. CT 105 and 106
             // are privileged and a clone cannot change that, so they need one.
-            let unprivileged = !args.iter().any(|a| a == "--privileged");
             // `--base <vztmpl>` picks the OS. Absent keeps the host's default,
             // so this stays the command it has always been for a caller that
             // does not care which Debian it is baking.
-            let base_template = args
-                .iter()
-                .position(|a| a == "--base")
-                .and_then(|i| args.get(i + 1).cloned());
+            // fix-110 (small-sharp-edges, 2026-09-27): an argument that does
+            // not parse is refused; it used to become vmid 999 or version 1.
+            let homelab_client::version::TemplateArgs {
+                temp_vmid,
+                version,
+                unprivileged,
+                base_template,
+            } = homelab_client::version::template_build_args(&args[2..])
+                .unwrap_or_else(|e| die(&e));
             let shown = base_template
                 .as_deref()
                 .map(homelab_core::ops::template::os_slug)

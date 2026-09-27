@@ -92,6 +92,16 @@ impl OperatorError {
             ),
             CoreError::Other(msg) => (msg.clone(), "See transcript for context.".to_string()),
         };
+        // fix-57 (expert panel, error-detail-unmasked-to-phone, 2026-09-27):
+        // `why` is often a command's raw output (compose logs, journalctl,
+        // stderr) and goes to the journal, the incident report and the
+        // notification. It passes the transcript's masker first; the
+        // fix-39 mask only ever covered transcript lines.
+        let why = why
+            .lines()
+            .map(crate::executor::mask_secrets)
+            .collect::<Vec<_>>()
+            .join("\n");
         Self {
             what: format!("step '{}' failed", step),
             why,

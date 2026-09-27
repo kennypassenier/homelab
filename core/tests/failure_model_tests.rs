@@ -271,6 +271,51 @@ async fn recording_sink_tees_and_records() {
     assert_eq!(rec.events().len(), 1);
 }
 
+/// fix-57 (expert panel, error-detail-unmasked-to-phone, 2026-09-27): a
+/// failed step's "why" is the command's raw output (`docker compose logs
+/// --tail 20`, `journalctl -n 20`, full stderr). It reached the journal, the
+/// incident report, Home Assistant's event log and the phone unmasked, and
+/// uncapped: a crash-looping app printing its DSN put the password on the
+/// phone.
+#[test]
+fn fix_57_a_failure_reason_is_masked_everywhere_and_capped_on_the_phone() {
+    use homelab_core::error::{CoreError, OperatorError};
+    let detail = format!(
+        "rc=1 :: app-1 | DATABASE_URL=postgres://paperless:hunter22@db/paperless\n\
+         app-1 | PAPERLESS_SECRET_KEY=abcd1234\n{}",
+        "app-1 | still crashing\n".repeat(400)
+    );
+    let err = OperatorError::from_core(
+        "health gate",
+        &CoreError::Command {
+            rendered: "pct exec 110 -- sh -c docker compose logs".into(),
+            detail,
+        },
+    );
+    assert!(!err.why.contains("hunter22"), "{}", &err.why[..300]);
+    assert!(!err.why.contains("abcd1234"), "{}", &err.why[..300]);
+    assert!(err.why.contains("still crashing"), "the rest is kept");
+
+    let payload = homelab_core::notify::op_payload(
+        "deploy-paperless",
+        "deploy",
+        false,
+        Some(&format!("{} :: {}", err.what, err.why)),
+        "3.59.6",
+    );
+    let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    let sent = v["error"].as_str().unwrap();
+    assert!(sent.len() <= 1200, "{} bytes to the phone", sent.len());
+    assert!(
+        sent.contains("incident bundle"),
+        "says where the rest is: {sent}"
+    );
+    // And a raw secret handed straight to the payload is masked there too.
+    let payload =
+        homelab_core::notify::op_payload("x", "deploy", false, Some("KYU_TOKEN=abc123"), "1");
+    assert!(!payload.contains("abc123"), "{payload}");
+}
+
 /// fix-53 (expert panel, timeout-leaves-container-work-running, 2026-09-27):
 /// the host's timeout ended the wait for `pct exec`, not the script inside
 /// the container. A slow `docker compose pull` went on running next to the

@@ -170,6 +170,9 @@ client is the older one.
 
 ### 0.4 Reading an answer
 
+Output is coloured only when it goes to a terminal and `NO_COLOR` is unset
+or empty; piped into a file, `grep` or a log it is plain text (fix-109).
+
 Every host operation streams its log lines and ends with one line:
 `✓ <message>` and exit code 0, or `✗ <message>` and exit code 1
 (`client/src/main.rs:1056-1059,1267-1277`). A successful operation says

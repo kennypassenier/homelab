@@ -18,12 +18,16 @@ use homelab_proto::{Command, LogLevel, RpcRequest, ServerMsg};
 
 use homelab_client::{spec, tui};
 
-const C_RESET: &str = "\x1b[0m";
-const C_CYAN: &str = "\x1b[36m";
-const C_GREEN: &str = "\x1b[32m";
-const C_YELLOW: &str = "\x1b[33m";
-const C_RED: &str = "\x1b[31m";
-const C_DIM: &str = "\x1b[2m";
+// fix-109 (colour-codes-when-piped, 2026-09-27): each prints itself only when
+// `main` found a terminal and no NO_COLOR; they were bare escape codes that
+// landed in every pipe and log.
+use homelab_client::output::Paint;
+const C_RESET: Paint = Paint("\x1b[0m");
+const C_CYAN: Paint = Paint("\x1b[36m");
+const C_GREEN: Paint = Paint("\x1b[32m");
+const C_YELLOW: Paint = Paint("\x1b[33m");
+const C_RED: Paint = Paint("\x1b[31m");
+const C_DIM: Paint = Paint("\x1b[2m");
 
 /// Where the address in use came from, and the repository's pin — set once
 /// in `main`, read by `rpc`, which is called from every verb.
@@ -124,6 +128,11 @@ fn load_config_env() {
 
 #[tokio::main]
 async fn main() {
+    use std::io::IsTerminal as _;
+    homelab_client::output::set_colour(homelab_client::output::should_colour(
+        std::io::stdout().is_terminal(),
+        std::env::var("NO_COLOR").ok().as_deref(),
+    ));
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 

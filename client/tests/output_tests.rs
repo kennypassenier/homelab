@@ -36,3 +36,37 @@ fn fix_103_each_severity_group_is_printed_in_its_own_tone() {
         Tone::Plain
     );
 }
+
+/// colour-codes-when-piped (expert panel, 2026-09-27): the colours were
+/// hard-coded escape codes, printed into pipes, logs and saved output, so a
+/// grep over them broke. Colour only on a terminal, and never with NO_COLOR.
+/// covers: fix-109
+#[test]
+fn fix_109_colour_only_on_a_terminal_without_no_color() {
+    use homelab_client::output::should_colour;
+    assert!(should_colour(true, None));
+    assert!(!should_colour(false, None), "a pipe gets no escape codes");
+    assert!(!should_colour(true, Some("1")), "NO_COLOR wins");
+    assert!(
+        should_colour(true, Some("")),
+        "an empty NO_COLOR is not set (no-color.org)"
+    );
+}
+
+/// The real binary, its output captured the way a pipe or a log does.
+/// covers: fix-109
+#[test]
+fn fix_109_piped_output_carries_no_escape_codes() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_homelab"))
+        .args(["plan", "stacks/drill"])
+        .current_dir(root)
+        .env_remove("NO_COLOR")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("valid"), "{}", text);
+    assert!(!text.contains('\x1b'), "escape codes in a pipe: {:?}", text);
+}

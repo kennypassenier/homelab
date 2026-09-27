@@ -10,13 +10,15 @@ fail-closed, and unit-tested against a mocked executor.
 ```bash
 homelab tui              # the control deck (or: tui --offline to explore safely)
 homelab deploy stacks/<name>
-homelab --help-ish       # run with no args for the full verb list
+homelab --help           # or no args at all: the full verb list
 ```
 
-**Status (2026-08-11): feature-complete at v2.5.0.** Every Must/Should/Could
+**Status (2026-09-27): v3.58.1 live on the host.** Every Must/Should/Could
 feature from the registry is built and tested; the deploy → backup →
 restore → update → rollback → self-update loop is live-proven on the real
-host. Migration of the legacy stacks (M5) happens after the school demo.
+host. The legacy stacks came under management through the deployment
+project ([docs/deployment/REGISTER.md](docs/deployment/REGISTER.md)); only
+the four guests on the no-touch list stay outside it.
 
 ## Documentation
 
@@ -35,20 +37,23 @@ Start here:
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | working on the code: gates, hooks, releases |
 
 Design history: [docs/FEATURES.md](docs/FEATURES.md) (the feature registry,
-IDs A1–H6), [docs/ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md)
-(AR1–16), [docs/REALIZATION_PLAN.md](docs/REALIZATION_PLAN.md) (milestones),
+IDs A1–H8), [docs/ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md)
+(AR1–19), [docs/REALIZATION_PLAN.md](docs/REALIZATION_PLAN.md) (milestones),
 [docs/MIGRATION_INVENTORY.md](docs/MIGRATION_INVENTORY.md) (the M5 plan).
 Pre-rewrite documentation is archived under [docs/legacy/](docs/legacy/).
 
 ## Repository layout
 
 ```
-core/     all domain logic, zero ambient I/O (Executor trait, 83 tests)
+core/     all domain logic, zero ambient I/O (Executor trait, 465 tests on 2026-09-27)
 proto/    wire types for the one CLIENT↔HOST line
 host/     the Proxmox daemon (systemd, TLS, scheduler, watchdog)
 client/   CLI verbs + the TUI (Elm-style, snapshot-tested)
 presets/  the app catalog — data, not code
 stacks/   deployable stack definitions (secrets gitignored)
+config/   client.toml: the host address and TLS pin the client uses
+scripts/  drills and helper scripts
+templates/ the rust-service template (G9)
 docs/     see above
 ```
 

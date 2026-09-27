@@ -10,12 +10,15 @@
 # 0 on Grafana 13, which stores dashboards in unified storage instead. The
 # database was right and the query was wrong — so the API is asked, not the
 # file.
+# fix-32: the admin credential reaches curl as `-K -` on stdin, never as
+# `-u` in argv, where every process on the container could read it.
 checks:
   - name: "dashboards"
     command: >-
       U=$(grep -h GRAFANA_GF_ADMIN_USER /opt/gateway/grafana/.env | cut -d= -f2);
       P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD /opt/gateway/grafana/.env | cut -d= -f2);
-      curl -s -m 15 -u "$U:$P" "http://127.0.0.1:3000/api/search?type=dash-db&limit=500" |
+      printf 'user = "%s:%s"\n' "$U" "$P" |
+      curl -s -m 15 -K - "http://127.0.0.1:3000/api/search?type=dash-db&limit=500" |
       grep -o '"uid"' | wc -l
     expect: never_decreases
     layer: application
@@ -24,7 +27,8 @@ checks:
     command: >-
       U=$(grep -h GRAFANA_GF_ADMIN_USER /opt/gateway/grafana/.env | cut -d= -f2);
       P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD /opt/gateway/grafana/.env | cut -d= -f2);
-      curl -s -m 15 -u "$U:$P" http://127.0.0.1:3000/api/datasources |
+      printf 'user = "%s:%s"\n' "$U" "$P" |
+      curl -s -m 15 -K - http://127.0.0.1:3000/api/datasources |
       grep -o '"uid"' | wc -l
     expect: never_decreases
     layer: application

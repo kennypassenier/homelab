@@ -186,10 +186,13 @@ pub async fn grafana_generated_uids(
     dashboards_dir: &str,
 ) -> Option<Vec<String>> {
     let app_dir = std::path::Path::new(dashboards_dir).parent()?.to_str()?;
+    // fix-32: the credential reaches curl through `-K -` on stdin. `printf`
+    // is a shell builtin, so it never appears in any process's argv.
     let script = format!(
         "U=$(grep -h GRAFANA_GF_ADMIN_USER {0}/.env | cut -d= -f2); \
          P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD {0}/.env | cut -d= -f2); \
-         curl -s -m 15 -u \"$U:$P\" 'http://127.0.0.1:3000/api/search?tag=generated&limit=500'",
+         printf 'user = \"%s:%s\"\\n' \"$U\" \"$P\" | \
+         curl -s -m 15 -K - 'http://127.0.0.1:3000/api/search?tag=generated&limit=500'",
         app_dir
     );
     let out = exec

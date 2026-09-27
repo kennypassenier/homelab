@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**532 tests across 29 suites.**
+**534 tests across 30 suites.**
 
 ## Accepted limitations
 
@@ -19,6 +19,13 @@ from the gap table in `REALIZATION_PLAN.md` so the two cannot disagree.
 - **G6** — the 325-line fact-gatherer feeding every nightly finding has no test · _**later** (Kenny: closing it means rebuilding it to take an executor)_
 
 ## Suites
+
+### `core/tests/argv_secret_tests.rs`
+
+fix-32: a credential never goes into a command's argv.
+
+- `fix_32_no_shipped_script_puts_a_credential_in_curl_argv`
+- `fix_32_the_detector_sees_the_shape_and_ignores_comments`
 
 ### `core/tests/busy_tests.rs`
 

@@ -1,7 +1,7 @@
 # Architecture reference — for the future maintainer
 
 The distilled version of [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md)
-(AR1–16, where the *why* lives). Read this first when you come back after
+(AR1–19, where the *why* lives). Read this first when you come back after
 six months.
 
 ## The shape
@@ -15,11 +15,13 @@ six months.
 └─────────────────────┘   transfer                              └──────────────────────┘
 ```
 
-Two binaries (AR1): `client` and `host`, sharing `proto` (wire types) and
-`core` (all domain logic). Containers run **zero** homelab code — the host
+Two binaries (AR1): `homelab` (crate `client`) and `homelab-host` (crate
+`host`), sharing `proto` (wire types) and `core` (all domain logic). A fifth
+workspace member, `tui-preview`, is a TUI mockup on simulated data and ships
+nowhere. Containers run **zero** homelab code — the host
 reaches in with `pct exec`/`pct push`.
 
-## The four crates
+## The four crates that ship
 
 | Crate | Role | Key invariant |
 |---|---|---|
@@ -33,14 +35,18 @@ reaches in with `pct exec`/`pct push`.
 - **Executor (AR2)** — one trait for run/read/write/sleep. `RealExecutor`
   in the host; `MockExecutor` in tests (scripted responses, recorded
   calls, in-memory files); `TracingExecutor` decorates any of them to emit
-  `[run ]` transcript lines. This is why 83 tests cover destructive
-  operations without a hypervisor.
+  `[run ]` transcript lines. This is why the suites that drive destructive operations (296 test
+  functions in the test files that use `MockExecutor`, counted 2026-09-27
+  with `grep -cE '#\[(tokio::)?test'`) run
+  without a hypervisor.
 - **Runner + step! (AR3)** — every operation is a list of named steps.
   Uniformly provides: transcripts, journal records before each step
-  (crash-visibility, AR13), fail-closed abort (A3), changed/unchanged
+  (B5; AR13 reads them back at boot to name interrupted operations), fail-closed abort (A3), changed/unchanged
   reporting (idempotency surfacing), incident bundles on failure (AR14)
   with a replayable `commands.sh` (AR16).
-- **Safety (A1/A2)** — `SafetyConfig.no_touch` is a hardcoded vmid list
+- **Safety (A1/A2)** — `SafetyConfig.no_touch` is a vmid list whose
+  hardcoded default `[100, 101, 102, 103]` host.toml can widen but never
+  shrink,
   checked by every mutating op *plus* a live hostname guard: a vmid must
   carry `<vmid>-app-<stack>` before it is touched. Defense in depth: the
   guards repeat in ops even when the caller already checked.
@@ -49,8 +55,8 @@ reaches in with `pct exec`/`pct push`.
   (schema-versioned, atomically written). State stores each stack's
   manifest so host-side work (scheduler) needs no client.
 - **Fail direction** — mutations fail closed (abort + bundle); nice-to-have
-  integrations fail open with a loud warning (Kea reservations, webhook,
-  mirror push). Know which one you're writing.
+  integrations fail open with a loud warning (webhook, mirror push, device
+  backups). Know which one you're writing.
 - **Presets are data** — `presets/<name>/` dirs with placeholder
   substitution; the scaffolder derives manifest storage from the compose's
   `/appdata/` binds (single source of truth). Never reintroduce a second
@@ -61,8 +67,11 @@ reaches in with `pct exec`/`pct push`.
 - One line, TLS-pinned (TOFU on first connect → `~/.config/homelab/pin`),
   bearer token required. No PKI.
 - Secrets travel only over that line and land in
-  `/var/lib/homelab/secrets/` (0600). They never enter: git, bundles
-  (D11), presets, argv (see the Kea curl pattern: `-u "$(cat file)"`).
+  `/var/lib/homelab/secrets/` (0600) on the host, and in
+  `/opt/<stack>/<app>/.env` (0600) inside the container that uses them.
+  They never enter: git, bundles (D11), presets, argv. For curl that means
+  `-K` with the credential on stdin or in a file, never `-u "$(cat file)"`
+  (`core/src/ops/devicebackup.rs`; guarded by `core/tests/argv_secret_tests.rs`, fix-32).
 - Remote exec is deny-by-default (`exec_enabled`), always audit-logged,
   and no-touch vmids are refused even when enabled.
 - **Precondition for any future key-escrow step (gap-15).** `latch key
@@ -76,7 +85,8 @@ reaches in with `pct exec`/`pct push`.
 - H5 self-update: selfcheck gate → `.prev` backup → armed marker →
   restart; systemd `OnFailure` restores `.prev` if the new binary never
   reports healthy (marker cleared only after 5s of serving).
-- B7: `Type=notify` + `WatchdogSec=30` — a *hung* daemon is killed and
+- B7: `Type=notify` + a systemd watchdog (the daemon pings every 10 s;
+  `WatchdogSec` lives in the unit on the host, not in this repo) — a *hung* daemon is killed and
   restarted; a *crashing* one is rolled back (different failure, different
   mechanism).
 - Boot: journal names interrupted operations; `host-online` webhook tells
@@ -91,9 +101,9 @@ reaches in with `pct exec`/`pct push`.
   template authoritative.
 - **The SHELL tab is not a PTY** — every command is one audited round-trip
   by design; an interactive PTY would bypass the audit model.
-- **Mounts/devices apply at create only** — documented edge; destroy +
-  redeploy applies them (data survives in /appdata). A reconcile step is
-  future work, not a bug you half-fix in an afternoon.
+- **Devices apply at create only** — documented edge; destroy + redeploy
+  applies them (data survives in /appdata). Mounts are reconciled: a
+  redeploy attaches missing `mp` mounts to an existing container (F118).
 - **swap = clamp(RAM/4, 512M, 2G)** — container swap caps shared *host*
   swap; big swap on a runaway container grinds the whole host.
 - **`exec_enabled` is not in the SETTINGS tab** — enabling remote code

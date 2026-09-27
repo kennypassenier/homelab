@@ -34,9 +34,11 @@ anything `ok:false` you missed.
 1. Preset exists? `homelab presets`. If not: [PRESET_GUIDE.md](PRESET_GUIDE.md)
    (vendor compose? feed it + [LLM_COMPOSE_CONVERSION.md](LLM_COMPOSE_CONVERSION.md)
    to an LLM).
-2. TUI `N` → wizard → scaffold.
-3. Secrets? `stacks/<name>/<app>/.env` first.
-4. `P` to preview, `SHIFT+D` (or `homelab deploy stacks/<name>`).
+2. TUI `n` → wizard → scaffold.
+3. Secrets? Name them under `latch_secrets:` in the stack file (D12);
+   latch supplies them in memory at deploy. A local
+   `stacks/<name>/<app>/.env` is only an override and wins when present.
+4. `p` to preview, `SHIFT+D` (or `homelab deploy stacks/<name>`).
 5. First backup: `homelab backup stacks/<name>` (creates the repo).
 6. Commit the stack dir to git.
 
@@ -63,7 +65,7 @@ you never touch the code: **after cloning this repo on any machine, run
 
 The normal path for shipping daemon changes, end to end:
 
-1. Land your changes on `v2-merge` with the gates green (`make gate`).
+1. Land your changes on `main` with the gates green (`make gate`).
 2. `make release VERSION=x.y.z` — runs the full gate locally, stamps the
    workspace version, commits, tags `vx.y.z` and pushes. Refuses on a dirty
    tree or an existing tag. Version rule: breaking/architectural = major,
@@ -72,7 +74,7 @@ The normal path for shipping daemon changes, end to end:
    `homelab-host`, `homelab` and `SHA256SUMS` as a GitHub Release.
    Watch with `gh run watch`.
 4. Publishing changes nothing on the host. Roll out deliberately:
-   the TUI shows "⬆ HOST UPDATE vx.y.z" — press `U`; or run
+   the TUI shows "⬆ HOST UPDATE vx.y.z" — press `u` (lowercase: `U` updates the selected stack instead); or run
    `homelab release-update`. The client downloads the release, verifies the
    checksum, and ships it over the line into the existing self-update
    pipeline (selfcheck → backup → armed rollback → restart).
@@ -84,7 +86,7 @@ Emergency path without GitHub: `make host-binary` +
 
 ## Parking a service (H8)
 
-`homelab disable <stack>` (or `E` on the stack in the TUI) parks a stack:
+`homelab disable <stack>` (or `e` on the stack in the TUI) parks a stack:
 nightly backup+update runs skip it and onboot is cleared, so it stays down
 across host reboots. Containers are NOT stopped — do that manually if you
 want it down now (`pct stop` in Proxmox is always respected; the flag never
@@ -96,7 +98,8 @@ investigate, then re-enable.
 
 Every nightly run ends with a `host-meta` snapshot: the secrets vault
 (including `restic.pw` — the key to EVERY other backup), `state.json`, the
-TLS certificate + key, and the intent repo with its full deploy history.
+TLS certificate + key, `/etc/homelab/host.toml` (F180), the SMART
+collector files, and the intent repo with its full deploy history.
 On demand: `homelab backup-host-meta`.
 
 **Exact recovery path after losing the host disk** (write this down offline —
@@ -179,7 +182,8 @@ stop the container first, or let the next destroy+deploy apply it.
 homelab destroy stacks/<name>    # typed-name confirm; /appdata survives
 ```
 Data cleanup afterwards is deliberate and manual: the `/appdata/<stack>/`
-dir on the host, and `rclone purge gdrive:homelab-backups/<stack>-config`
+dir on the host, and `rclone purge gdrive:homelab-backups/<app>-config` for each app of the
+stack (repos are named after the owning app since D25)
 once you're sure. Remove the stack dir from git last.
 
 ## After a power cut
@@ -193,13 +197,13 @@ DEBUGGING_GUIDE §5 (`daemon-failed`).
 
 | Credential | Lives | Rotate/renew |
 |---|---|---|
-| API bearer token | `.env` (client) + host.toml | rotate by editing both |
-| TLS cert + pin | `/var/lib/homelab` + `~/.config/homelab/pin` | regenerate = delete cert files, restart daemon, re-pin |
+| API bearer token | `~/.config/homelab/env` (client; a `./.env` in the repo also works) + host.toml | rotate by editing both |
+| TLS cert + pin | `/var/lib/homelab` + `~/.config/homelab/pin` | regenerate = delete cert files, restart daemon, re-pin, and update `pin` in the committed `config/client.toml` (otherwise a fresh machine adopts the old pin) |
 | restic password | host secrets + **offline copy** | never rotate lightly (old repos!) |
 | Google Drive OAuth | host rclone.conf (own client) | re-auth: `rclone authorize` flow |
 | OPNsense API (H2) | `/var/lib/homelab/secrets/opnsense` | OPNsense → Access → Users |
 | PVE metrics token (F4) | metrics stack `.env` | Proxmox → API tokens |
-| App secrets | host vault via stack `.env`s | redeploy after editing |
+| App secrets | latch (`latch_secrets:` in the stack file, D12); a local stack `.env` overrides | redeploy after editing |
 
 ## Standing rules
 
@@ -208,4 +212,5 @@ DEBUGGING_GUIDE §5 (`daemon-failed`).
 - The Proxmox host is never touched outside an agreed step.
 - The no-touch list is code, not convention — extend it in
   `core/src/safety.rs` when new unmanaged guests appear.
-- vmid 108 stays the automated-test container until Kenny reassigns it.
+- vmid 108 is the Syncthing stack now. Throwaway drills use `stacks/drill`
+  on vmid 119 and are destroyed in the same sitting.

@@ -37,6 +37,7 @@ Every failed operation writes `/var/lib/homelab/incidents/<ts>-<op>/`:
 | `commands.sh` | **replayable script of the exact commands run** (AR16) |
 | `journal-tail.jsonl` | the operation journal around the failure |
 | `versions.txt` | host + proto versions at the time |
+| `state-at-failure.json` | a copy of `state.json` as it was when the step failed |
 
 Workflow: read `report.json` for *where*, `events.jsonl` for *why*, then
 re-run the failing command from `commands.sh` by hand to reproduce.
@@ -69,20 +70,20 @@ Log verbosity: the daemon honours `RUST_LOG` (AR15) — set
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `HOMELAB_TOKEN is not set` | source `.env` (`set -a; . ./.env; set +a`) |
-| fingerprint mismatch on connect | host cert changed (reinstall/new state dir). If expected: delete `~/.config/homelab/pin` and re-pin; if not expected: investigate before trusting |
+| `HOMELAB_TOKEN is not set` | put `HOMELAB_TOKEN=…` in `~/.config/homelab/env` (the client reads it, then `./.env` in the repo, by itself; no sourcing needed) |
+| fingerprint mismatch on connect | host cert changed (reinstall/new state dir). If expected: update `pin` in the committed `config/client.toml` and delete `~/.config/homelab/pin`, then re-pin (deleting only the local pin makes the client adopt the stale repository pin again); if not expected: investigate before trusting |
 | `vmid X is on the no-touch list` | by design — check the manifest's vmid |
-| `vmid X has hostname 'Y', expected 'Z'` | manifest points at someone else's container: wrong vmid in the manifest |
+| `vmid X exists with hostname 'Y', expected 'Z' — refusing` (resize: `vmid X is 'Y', expected 'Z'`) | manifest points at someone else's container: wrong vmid in the manifest |
 | deploy hangs in `wait for systemd` | container has no network (bridge/vlan wrong) or template broken — `pct enter <vmid>` and look |
 | `network <stack>_net declared as external…` | compose network name doesn't match the stack name — placeholders wrong in a hand-edited file |
 | verify gate: app not running | `homelab exec <vmid> "cd /opt/<stack>/<app> && docker compose logs --tail 50"` (needs exec_enabled) or `pct exec` via ssh |
-| backup: `repository … does not exist` | restic repo not initialized for a renamed stack — first backup creates it; check rclone works: `rclone lsd gdrive:homelab-backups` on the host |
+| backup: `repository … does not exist` | restic repo not initialized for a new or renamed app (repos are named `<app>-config`, D25) — first backup creates it; check rclone works: `rclone lsd gdrive:homelab-backups` on the host |
 | restic `wrong password` | `/var/lib/homelab/secrets/restic.pw` doesn't match the repo — NEVER regenerate over it; restore the real password |
 | update reports `ROLLED BACK … now healthy` | the new image is bad; system already recovered — check the app's release notes |
 | `daemon-failed` webhook event | daemon crash-looped and systemd gave up: `journalctl -u homelab-host -n 100`, fix, then `systemctl reset-failed homelab-host && systemctl start homelab-host` |
 | self-update seemingly ignored | binary failed the 5s health window and was auto-rolled-back — journal shows `homelab-rollback` lines |
 | drift flag won't clear | you're comparing different content: run `homelab deploy` (converges + records the new hash) |
-| mount changes ignored on redeploy | known edge: mounts/devices are only applied at container CREATE; destroy + redeploy to apply (data in /appdata survives) |
+| mount changes ignored on redeploy | a redeploy attaches missing `mp` mounts to an existing container (lifting and restoring `protection`, F118); device passthrough (`dev0`/`dev1`) is still applied at CREATE only, so a device change needs destroy + redeploy (data in /appdata survives) |
 
 ## 6. Verifying the chain end-to-end
 

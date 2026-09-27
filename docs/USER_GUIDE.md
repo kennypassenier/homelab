@@ -4,10 +4,13 @@ What each feature does and how you use it, in the order you'll meet them.
 IDs refer to [FEATURES.md](FEATURES.md); test steps live in
 [TEST_PLAN.md](TEST_PLAN.md).
 
-**Where to run these.** `homelab …` works from any directory: `make install`
+**Where to run these.** `homelab …` finds its host and token from any directory: `make install`
 puts it in `~/.cargo/bin` and it reads `~/.config/homelab/env` itself. That
 was not true before 2026-09-02 — every command in this guide needed the repo
 root and a sourced `.env`, which is a ritual nobody had written down (F240).
+The verbs that read the repository itself (`presets`, `new`, `import`,
+`runbook`, `testplan`) still use `presets/`, `stacks/` and `docs/` relative
+to the current directory, so run those from the repository root.
 
 **Where the host's address comes from (feat-client-1).** `config/client.toml`
 in the repository names the daemon's address and its certificate fingerprint,
@@ -63,7 +66,8 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   runs `latch cat <stack>/<app>/.env --env $HOMELAB_LATCH_ENV --expand`
   from the stacks/ root (one `latch init` there, once) and composes the
   env in memory — nothing touches disk. An app with BOTH a plaintext
-  `.env` and a latch_secrets entry is refused; so are a missing latch,
+  `.env` and a latch_secrets entry uses the local `.env` (MR1, 2026-09-05)
+  and the deploy prints which source each app used. Refused: a missing latch,
   a missing file, or unresolved `${VAR}` references (latch expands them
   first because docker compose does its own interpolation). Requires
   latch ≥ 2.2.0 (`latch cat`).
@@ -76,10 +80,13 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   state. Fully idempotent (B1): run it twice, the second run changes
   nothing.
 - **D6 · Plan preview** — `P` in the TUI or `homelab plan stacks/<name>`
-  (local validation only, no network, no token needed).
+  (local validation, no host and no token needed; a stack with
+  `latch_secrets` still runs `latch cat` and needs `HOMELAB_LATCH_ENV`).
 - **B8 · Golden template** — new stacks provision in seconds via
-  `template: "clone:999"` (the default). Rebuild the template after big
-  Debian updates: destroy CT 999, then `homelab template-build 999 <v+1>`.
+  `template: "clone:998"` (the scaffold default; privileged stacks use
+  997, and 999 is the retired v1 image the fleet check flags). Rebuild after
+  big Debian updates with `homelab template-build` (add `--privileged` for
+  the privileged one); it derives the name from the base template.
   `homelab templates` (C5) lists what's available.
 - **B4 · Drift** — the dashboard flags `[UPD]` when your local stack files
   differ from what the host last applied. Redeploy to converge.
@@ -126,9 +133,11 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   restarting it; nightly in-container backup + the app's own self-update
   under supervision (binary preserved, restart only on change, rollback
   from outside). On demand: `homelab backup-native|update-native <stack>`.
-  **B1** — a service whose `service.yml` says `update_policy: auto` gets the
+  **Update policy B1** (deployment decision, `docs/deployment/UPDATE_POLICY.md`) — a service whose `service.yml` says `update_policy: auto` gets the
   latest release installed nightly when its checksum differs from the
-  installed binary (rollback armed); `homelab release-update-native <stack>`
+  installed binary and the release carries a valid minisign signature over
+  its SHA256SUMS (fix-29; an unsigned release is skipped until it is signed),
+  installed with the rollback armed; `homelab release-update-native <stack>`
   does the same on demand. Change the policy in the file, then
   `homelab adopt` the service so the host's copy carries it.
 - **H5 · Host self-update** — `homelab self-update <new-binary>`: selfcheck
@@ -141,7 +150,9 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
 ## Backups and recovery
 
 - **E1 · Backup** — `homelab backup stacks/<name>`: restic snapshot of the
-  stack's `/appdata` dirs to `gdrive:homelab-backups/<stack>-config`.
+  stack's `/appdata` dirs to `rclone:gdrive:homelab-backups/<app>-config`, one repository per
+  owning app (D25; the stack name only when no owner is declared). Two stacks
+  claiming the same owner are refused.
   Containers labeled `com.homelab.backup.pause=true` are stopped during
   the snapshot (E4).
 - **G8 · Retention** — tiered, editable in SETTINGS: e.g. daily for 7d →
@@ -155,7 +166,7 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
   A native service with `backup_from_newest` (kyu) is archived from its own
   nightly copy, which is a COMPLETE database: put it back as the live file
   and delete any `-wal`/`-shm` beside it (T77).
-- **B7 · Rollback drill** — `scripts/drill-native-rollback.sh` deploys the
+- **Rollback drill** (deployment register B7) — `scripts/drill-native-rollback.sh` deploys the
   throwaway `stacks/drill`, installs a good fake service, then a broken one
   with `homelab install-native stacks/drill/drillsvc --file <script>`, and
   reads off the container that the install rolled back and the service is
@@ -182,9 +193,6 @@ homelab tui --offline  # same TUI against a fake host — safe to explore
 - **A6/G4 · Remote exec + SHELL tab** — off by default; enable with
   `exec_enabled = true` in host.toml. Every command is appended to
   `/var/lib/homelab/audit.log`; no-touch vmids are refused regardless.
-- **H2 · Kea reservations** — with `opnsense_url` + `opnsense_cred_file`
-  configured, every new container's IP+MAC is registered in Kea
-  automatically (fail-open).
 - **D4/D5 · History + mirror** — every deploy commits intent to
   `/var/lib/homelab/repo`; set `mirror_remote` in host.toml for an
   automatic offsite push (never blocks a deploy).
@@ -199,7 +207,7 @@ itself on the next deploy. You never add a service to it by hand.
 
 | On a tile | Where it comes from |
 |---|---|
-| Whether the service is there at all | its route file, `stacks/<stack>/traefik-routes.yml` |
+| Whether the service is there at all | a route in the gateway's live routes directory: a stack's `traefik-routes.yml`, or a hand-written `manual-…` fragment for services outside the stacks (ha, kyu, almanac, …) |
 | The link | the hostname in that route |
 | The live widget — what is streaming, how many films | derived: the type from the app's name, the address from the route's backend, the API key read from the application itself |
 | The heading it sits under | **you**, in `services-overlay.yml` |
@@ -279,8 +287,9 @@ overwritten on the next deploy.
 
 ## Safety model (always on)
 
-- **A1** hardcoded no-touch list (HA, OPNsense, k3s, omada, fileserver, and
-  the un-migrated stacks) — every mutating operation checks it.
+- **A1** hardcoded no-touch list: vmids 100 (OPNsense), 101 (Home
+  Assistant), 102 (omada) and 103 (fileserver); host.toml can widen it,
+  never shrink it. Every mutating operation checks it.
 - **A2** hostname guard: a vmid must carry the expected `<vmid>-app-<name>`
   hostname before anything touches it.
 - **A3** fail-closed: any failed step aborts the operation and writes an

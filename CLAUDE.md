@@ -111,7 +111,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
   Kenny's open decision. This note said otherwise until 2026-09-01, and a form went out
   recommending drills on a live service because of it. When something has to
   be created and destroyed for real, make a throwaway stack on a free vmid
-  (`stacks/drill`, vmid 118) and destroy it in the same sitting — Kenny's
+  (`stacks/drill`, vmid 119 since 118 went to inbox) and destroy it in the same sitting — Kenny's
   form B1. There is no host-OS rollback net: the two invalid LVM
   snapshots were removed 2026-09-26 (see below).
 - **No-touch list is law**: `core/src/safety.rs` (VM 100 OPNsense, VM 101

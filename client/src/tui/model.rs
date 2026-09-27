@@ -75,6 +75,13 @@ pub enum Msg {
     Backend(BackendEvent),
     /// H7: result of the startup release check (side channel).
     ReleaseTag(Option<String>),
+    /// fix-69: a local stack's intent hash, computed off the UI thread, and
+    /// the lines that computing it would once have printed over the screen.
+    LocalHash {
+        stack: String,
+        hash: Result<String, String>,
+        notes: Vec<String>,
+    },
 }
 
 /// Focus mode (mockup-approved): a near-fullscreen task window showing only
@@ -280,6 +287,11 @@ pub struct Model {
     pub settings_dirty: bool,
     pub settings_editing_webhook: Option<String>,
 
+    /// fix-69: local stacks whose intent hash the run loop is asked to
+    /// compute off the UI thread, and the last hash computed per stack.
+    pub local_hash_requested: Vec<(String, std::path::PathBuf)>,
+    pub local_hashes: std::collections::HashMap<String, String>,
+
     /// fix-68: the day's verdict — doctor, check, incidents and manual checks
     /// in one list — as the host last gave it. `None` until it has answered.
     pub today: Option<homelab_core::ops::today::Today>,
@@ -342,6 +354,8 @@ impl Model {
             settings_row: 0,
             settings_dirty: false,
             settings_editing_webhook: None,
+            local_hash_requested: Vec::new(),
+            local_hashes: std::collections::HashMap::new(),
             today: None,
             today_pending: false,
             should_quit: false,
@@ -411,6 +425,28 @@ pub fn update(model: &mut Model, msg: Msg) {
     match msg {
         Msg::ReleaseTag(tag) => {
             model.latest_release = tag;
+        }
+        Msg::LocalHash { stack, hash, notes } => {
+            for line in notes {
+                model.push_log(LogLevel::Info, "LOCAL".into(), line);
+            }
+            match hash {
+                Ok(h) => {
+                    if let Some(fleet) = model.fleet.as_mut() {
+                        for s in fleet.stacks.iter_mut().filter(|s| s.name == stack) {
+                            if !s.applied_hash.is_empty() {
+                                s.drift = h != s.applied_hash;
+                            }
+                        }
+                    }
+                    model.local_hashes.insert(stack, h);
+                }
+                Err(e) => model.push_log(
+                    LogLevel::Warn,
+                    "LOCAL".into(),
+                    format!("{} :: drift not computed: {}", stack, e),
+                ),
+            }
         }
         Msg::Tick => {
             model.tick += 1;
@@ -515,20 +551,24 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 // B4: drift = the host's applied intent hash differs from the
                 // hash of the local stack directory. Only computable for
                 // stacks we have locally.
+                //
+                // fix-69 (tui-refresh-blocks-on-downloads, 2026-09-27): the
+                // local hash is computed off this thread (it runs `latch`),
+                // asked for here and folded in by `Msg::LocalHash`. Until it
+                // arrives the last one known is used.
                 for stack in fleet.stacks.iter_mut() {
                     if stack.applied_hash.is_empty() {
                         continue;
                     }
-                    let local = model
-                        .local_stacks
-                        .iter()
-                        .find(|(n, _)| *n == stack.name)
-                        .map(|(_, dir)| dir.clone());
-                    if let Some(dir) = local {
-                        if let Ok(spec) = crate::spec::build_spec(&dir) {
-                            let local_hash = homelab_core::manifest::intent_hash(&spec);
-                            stack.drift = local_hash != stack.applied_hash;
-                        }
+                    if let Some(local) = model.local_hashes.get(&stack.name) {
+                        stack.drift = *local != stack.applied_hash;
+                    }
+                    if let Some((_, dir)) =
+                        model.local_stacks.iter().find(|(n, _)| *n == stack.name)
+                    {
+                        model
+                            .local_hash_requested
+                            .push((stack.name.clone(), dir.clone()));
                     }
                 }
                 model.fleet = Some(*fleet);

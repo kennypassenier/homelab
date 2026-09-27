@@ -84,6 +84,41 @@ pub fn build_manifest(dir: &Path) -> Result<homelab_core::manifest::StackManifes
 }
 
 pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
+    let mut notes = Vec::new();
+    let built = spec_without_binaries(dir, &mut notes);
+    for line in &notes {
+        eprintln!("{}", line);
+    }
+    let mut spec = built?;
+    // A5 (Kenny, 2026-09-02): a native stack carries its programs.
+    //
+    // Staged here rather than on the host because only the client can reach
+    // GitHub — the same reason `install-native` ships bytes over the line.
+    // A release that cannot be fetched is a warning, never a failed deploy:
+    // GitHub being down must not stop a running stack from being reconciled,
+    // and the host refuses to START a unit whose program is absent anyway.
+    spec.native_binaries = stage_native_binaries(dir, &spec.manifest.natives);
+    Ok(spec)
+}
+
+/// fix-69 (tui-refresh-blocks-on-downloads, 2026-09-27): the intent hash of a
+/// local stack, for the TUI's drift badge, with what would have been printed
+/// handed back as lines.
+///
+/// The TUI used to call `build_spec` for this inside `update()` on every
+/// fleet state: a `gh` release download per native service (kyu alone about
+/// 71 MiB) while the screen could not redraw, with progress lines printed
+/// over the raw-mode screen. The programs are not part of the hash, so they
+/// are not fetched. The secrets are, because the host's hash includes them,
+/// so `latch` still runs; the caller runs this off the UI thread.
+pub fn local_intent_hash(dir: &Path) -> Result<(String, Vec<String>), String> {
+    let mut notes = Vec::new();
+    let spec = spec_without_binaries(dir, &mut notes)?;
+    Ok((homelab_core::manifest::intent_hash(&spec), notes))
+}
+
+/// Everything of the deploy spec but the native programs.
+fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySpec, String> {
     let manifest_path = dir.join("lxc-compose.yml");
     let raw = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("cannot read {}: {}", manifest_path.display(), e))?;
@@ -114,10 +149,9 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
         &stack_file.latch_secrets,
         &stack_file.manifest.apps,
         &mut env,
+        notes,
     )?;
-    for line in env_sources(&from_disk, &stack_file.latch_secrets, &env) {
-        eprintln!("{}", line);
-    }
+    notes.extend(env_sources(&from_disk, &stack_file.latch_secrets, &env));
 
     let gateway_route = match stack_file.gateway_route.as_ref() {
         Some(g) => {
@@ -152,14 +186,8 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
         None => None,
     };
 
-    // A5 (Kenny, 2026-09-02): a native stack carries its programs.
-    //
-    // Staged here rather than on the host because only the client can reach
-    // GitHub — the same reason `install-native` ships bytes over the line.
-    // A release that cannot be fetched is a warning, never a failed deploy:
-    // GitHub being down must not stop a running stack from being reconciled,
-    // and the host refuses to START a unit whose program is absent anyway.
-    let native_binaries = stage_native_binaries(dir, &stack_file.manifest.natives);
+    // The programs are staged by `build_spec`, and only there.
+    let native_binaries = BTreeMap::new();
 
     Ok(DeploySpec {
         manifest: stack_file.manifest,
@@ -336,6 +364,7 @@ fn fetch_latch_secrets(
     apps: &[String],
     manifest_apps: &[String],
     env: &mut BTreeMap<String, String>,
+    notes: &mut Vec<String>,
 ) -> Result<(), String> {
     if apps.is_empty() {
         return Ok(());
@@ -395,7 +424,10 @@ fn fetch_latch_secrets(
         // notes (e.g. the offline stale-cache notice) arrive on stderr with
         // exit 0 — pass them on rather than swallowing them.
         if !out.stderr.is_empty() {
-            eprintln!("[latch] {}", String::from_utf8_lossy(&out.stderr).trim());
+            notes.push(format!(
+                "[latch] {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
         }
         let content = String::from_utf8(out.stdout)
             .map_err(|_| format!("latch returned non-utf8 content for '{}'", app))?;

@@ -696,17 +696,39 @@ fn b4_drift_flag_computed_from_applied_hash() {
             }],
         }))
     };
+    // fix-69: the local hash is computed off the UI thread; the fleet state
+    // asks for it and the run loop answers with `Msg::LocalHash`. Played by
+    // hand here, the way `tui::run` does it.
+    let answer_hash_requests = |m: &mut Model| {
+        for (stack, dir) in std::mem::take(&mut m.local_hash_requested) {
+            let (hash, notes) = homelab_client::spec::local_intent_hash(&dir).unwrap();
+            homelab_client::tui::model::update(
+                m,
+                Msg::LocalHash {
+                    stack,
+                    hash: Ok(hash),
+                    notes,
+                },
+            );
+        }
+    };
     // Applied hash matches the local dir → no drift.
     homelab_client::tui::model::update(
         &mut m,
         Msg::Backend(BackendEvent::Server(mk_fleet(&real_hash))),
     );
+    answer_hash_requests(&mut m);
     assert!(!m.fleet.as_ref().unwrap().stacks[0].drift);
     // Host applied something else → drift.
     homelab_client::tui::model::update(
         &mut m,
         Msg::Backend(BackendEvent::Server(mk_fleet("deadbeef00112233"))),
     );
+    assert!(
+        m.fleet.as_ref().unwrap().stacks[0].drift,
+        "the last local hash known is used at once"
+    );
+    answer_hash_requests(&mut m);
     assert!(m.fleet.as_ref().unwrap().stacks[0].drift);
     let _ = std::fs::remove_dir_all(&tmp);
 }

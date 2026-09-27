@@ -13,6 +13,9 @@
 # fix-32: the admin credential reaches curl as `-K -` on stdin, never as
 # `-u` in argv, where every process on the container could read it.
 checks:
+  # Present, not never-decreasing: destroying a stack removes its dashboard
+  # on purpose. Whether each stack HAS its dashboard is the fleet check's
+  # coverage question (never-decreases-false-positives, 2026-09-27).
   - name: "dashboards"
     command: >-
       U=$(grep -h GRAFANA_GF_ADMIN_USER /opt/gateway/grafana/.env | cut -d= -f2);
@@ -20,7 +23,7 @@ checks:
       printf 'user = "%s:%s"\n' "$U" "$P" |
       curl -s -m 15 -K - "http://127.0.0.1:3000/api/search?type=dash-db&limit=500" |
       grep -o '"uid"' | wc -l
-    expect: never_decreases
+    expect: must_be_present
     layer: application
 
   - name: "datasources"

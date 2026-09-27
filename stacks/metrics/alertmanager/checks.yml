@@ -11,10 +11,14 @@ checks:
       that fires actually reaches Kenny — that path runs through the
       switchboard and the hub, and only a real test alert proves it.
 
+  # Counts the `- name:` entries in the loaded YAML (config.original). It
+  # grepped JSON `"name":` fields until 2026-09-27 and read 0 with one
+  # receiver configured, so it could never decrease (expert panel,
+  # never-decreases-false-positives).
   - name: "ontvangers in de configuratie"
     command: >-
       curl -s -m 10 http://127.0.0.1:9093/api/v2/status |
-      grep -o '"name":"[a-z0-9_-]*"' | wc -l
+      grep -o '\\n *- name: ' | wc -l
     expect: never_decreases
     layer: application
     blind_spot: >-

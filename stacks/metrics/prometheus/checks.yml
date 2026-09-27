@@ -8,9 +8,12 @@
 # looked. So the readings ask what PROMETHEUS holds, never what somebody
 # wrote for it.
 checks:
+  # Up at any moment of the last two minutes: right after a restart the
+  # first scrape round has not finished and `count(up==1)` read low, a
+  # regression that was not one (never-decreases-false-positives).
   - name: "targets die antwoorden"
     command: >-
-      curl -s -m 15 "http://127.0.0.1:9090/api/v1/query?query=count(up==1)" |
+      curl -s -m 15 "http://127.0.0.1:9090/api/v1/query?query=count(max_over_time(up%5B2m%5D)==1)" |
       grep -o '"value":\[[^]]*\]' | grep -o '[0-9]*"\]' | tr -d '"]'
     expect: never_decreases
     layer: application

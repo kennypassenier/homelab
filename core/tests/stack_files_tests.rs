@@ -699,3 +699,28 @@ fn supersync_and_the_registry_cache_are_monitored() {
     assert!(seed.contains("\"http://10.10.10.11:1900/health\""));
     assert!(seed.contains("\"http://10.10.10.17:5000/v2/\""));
 }
+
+/// Expert panel 2026-09-27 (never-decreases-false-positives). Measured the
+/// same evening: the receiver count grepped JSON `"name":` fields and read 0
+/// with one receiver configured, so it could never decrease; `count(up==1)`
+/// reads low for the first scrape after a restart; the dashboard count drops
+/// by design when a stack is destroyed.
+#[test]
+fn service_checks_read_what_they_claim_to_count() {
+    let read = |p: &str| std::fs::read_to_string(stacks_dir().join(p)).unwrap();
+    let am = read("metrics/alertmanager/checks.yml");
+    assert!(
+        am.contains("- name: "),
+        "receivers are counted in the YAML config"
+    );
+    assert!(!am.contains("\"name\":\"[a-z0-9_-]*\""));
+    let prom = read("metrics/prometheus/checks.yml");
+    assert!(
+        prom.contains("max_over_time(up"),
+        "up at any moment of the last two minutes"
+    );
+    let grafana = read("gateway/grafana/checks.yml");
+    let dash = &grafana[grafana.find("name: \"dashboards\"").unwrap()..];
+    let dash = &dash[..dash.find("layer:").unwrap()];
+    assert!(dash.contains("expect: must_be_present"), "{dash}");
+}

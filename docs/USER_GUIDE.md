@@ -1580,6 +1580,14 @@ order (`client/src/spec.rs:496-740,745-1311`). It prints
 `✓ runbook written — <out> (<n> stack(s))`. The current output is
 [DR_RUNBOOK.md](DR_RUNBOOK.md).
 
+The same is done for the update policy (fix-144): `homelab update-policy`
+rewrites the section between the `BEGIN generated`/`END generated` markers
+of `docs/deployment/UPDATE_POLICY.md` from the stack files (every compose
+service with its `com.homelab.update.policy` label and image, every native
+unit with its `update_policy` and what the nightly round does with it) and
+prints `✓ update policy written — <out> (<n> row(s))`. A test fails while
+the committed section is stale.
+
 #### E8 · ZFS snapshots and replication
 
 **Status:** Built. Off until jobs are declared in `/etc/homelab/host.toml`:

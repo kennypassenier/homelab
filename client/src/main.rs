@@ -140,7 +140,14 @@ async fn main() {
     // and `plan` (local validation only, D10).
     let needs_token = !matches!(
         cmd,
-        "help" | "plan" | "runbook" | "dashboard" | "presets" | "export" | "import"
+        "help"
+            | "plan"
+            | "runbook"
+            | "update-policy"
+            | "dashboard"
+            | "presets"
+            | "export"
+            | "import"
     ) && !(cmd == "tui" && offline);
     if token.is_empty() && needs_token {
         die("HOMELAB_TOKEN is not set");
@@ -1172,6 +1179,25 @@ async fn main() {
                 Err(e) => die(&format!("runbook: {}", e)),
             }
         }
+        // fix-144 (expert panel 2026-09-27, update-policy-doc-drift): the
+        // policy table in UPDATE_POLICY.md is written from the stack files,
+        // like the runbook, and a test fails when the committed one is stale.
+        "update-policy" => {
+            let out = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| "docs/deployment/UPDATE_POLICY.md".into());
+            match homelab_client::updatepolicy::write_update_policy(
+                Path::new("stacks"),
+                Path::new(&out),
+            ) {
+                Ok(n) => println!(
+                    "{}✓ update policy written{} — {} ({} row(s))",
+                    C_GREEN, C_RESET, out, n
+                ),
+                Err(e) => die(&format!("update-policy: {}", e)),
+            }
+        }
         "prune-orphans" => {
             // Kenny's H2b made this the only remover of files the repository
             // no longer has; since ask-8 (2026-09-27) the deploy removes them
@@ -1306,6 +1332,7 @@ async fn main() {
             );
             println!("  homelab zfs-replicate               ZFS snapshots + replication (E8)");
             println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
+            println!("  homelab update-policy [doc.md]      regenerate the policy table in UPDATE_POLICY.md (fix-144, local)");
             println!("  homelab dashboard <stack> <app>...  render a stack dashboard (T2, local)");
             println!("  homelab presets                     list the preset catalog (local)");
             println!("  homelab new <name> --preset <p> --vmid <n>   scaffold a stack (T65)");

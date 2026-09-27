@@ -11,6 +11,7 @@ pub mod spec;
 pub mod testplan;
 pub mod tls;
 pub mod tui;
+pub mod updatepolicy;
 pub mod version;
 
 use std::path::PathBuf;

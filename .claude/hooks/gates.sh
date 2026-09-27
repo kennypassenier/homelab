@@ -44,9 +44,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 # (repo_config_tests.rs), templates and presets. Keyed on Rust alone, a
 # broken stack file was committed and deployed from the working tree before
 # any test saw it (expert panel 2026-09-27, local-gate-skips-stack-tests).
+# The generated policy table in UPDATE_POLICY.md joined them on 2026-09-27
+# (fix-144, update-policy-doc-drift): a hand edit there is caught too.
 gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
   'stacks/*' 'templates/*' 'presets/*' 'config/*' 'proto/*' 'core/assets/*' \
-  'docs/DR_RUNBOOK.md' 'docs/deployment/TEST_PLAN.md' -- \
+  'docs/DR_RUNBOOK.md' 'docs/deployment/TEST_PLAN.md' 'docs/deployment/UPDATE_POLICY.md' -- \
   env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
       -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
       cargo test --workspace

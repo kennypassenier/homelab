@@ -1558,6 +1558,46 @@ async fn fix_40_a_container_compose_recreated_is_not_restarted_again() {
     );
 }
 
+/// fix-40, the invariant behind it: a container that started before a file
+/// in its app directory last changed is running an older version of that
+/// file, whatever this deploy pushed. The seeder had exactly that: its script
+/// was already on disk, so a redeploy pushed nothing and restarted nothing.
+///
+/// covers: fix-40
+#[tokio::test]
+async fn fix_40_a_container_older_than_its_files_is_restarted_even_when_nothing_was_pushed() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, ""));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 110-app-syncthing\ncores: 1\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    let spec = spec(110, "syncthing");
+    // Nothing changed: the compose file on the container has the same hash.
+    exec.respond_always(
+        "sha256sum '/opt/syncthing/syncthing/docker-compose.yml'",
+        CmdOutput::ok(&sha_hex(&spec.files[0].content)),
+    );
+    exec.respond_always("-newermt", CmdOutput::ok("stale\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("docker compose restart")
+            .iter()
+            .any(|c| c.contains("/opt/syncthing/syncthing")),
+        "{:?}",
+        exec.calls_containing("docker compose")
+    );
+}
+
 /// T56: an image behind a login must not need a step nobody wrote down.
 ///
 /// kp-soft was the first stack with a private image, and on 2026-08-31 the

@@ -1694,10 +1694,34 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             // compose's own "Recreated"/"Created" line skips the restart.
             let compose_recreated = recreated.lock().map(|g| g.contains(app)).unwrap_or(false)
                 && format!("{}{}", up.stdout, up.stderr).contains("reated");
-            let restart_this = needs_restart
+            // fix-40, the invariant: a container that started before a
+            // file in its app directory last changed runs an older copy of
+            // that file, whether or not this deploy pushed it (a restart that
+            // an earlier deploy missed is caught here too).
+            let older_than_files = if compose_recreated {
+                false
+            } else {
+                pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!(
+                        "cd '{}' && for c in $(docker compose ps -q); do \
+                         s=$(docker inspect -f '{{{{.State.StartedAt}}}}' \"$c\"); \
+                         find . -maxdepth 3 -type f -newermt \"$s\" -print -quit | grep -q . \
+                         && echo stale; done; true",
+                        dir
+                    ),
+                    60,
+                )
+                .await
+                .map(|o| o.stdout.contains("stale"))
+                .unwrap_or(false)
+            };
+            let restart_this = (needs_restart
                 .lock()
                 .map(|g| g.contains(app))
                 .unwrap_or(false)
+                || older_than_files)
                 && !compose_recreated;
             if restart_this {
                 let r = pct_sh(

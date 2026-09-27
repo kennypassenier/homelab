@@ -17,7 +17,6 @@ services:
     ports:
       - "9090:9090"
     labels:
-      - com.homelab.backup.pause=true
       - com.homelab.update.policy=manual
     networks:
       - metrics_net

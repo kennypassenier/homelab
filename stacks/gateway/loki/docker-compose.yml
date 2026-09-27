@@ -16,7 +16,6 @@ services:
       - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
     restart: unless-stopped
     labels:
-      - "com.homelab.backup.pause=true"
       # Pinned to 3.0.0 on purpose: promtail on nine stacks is pinned to the
       # same version and the two have to agree. This is one of the eleven
       # services where the `auto` policy could never do anything (form H5).

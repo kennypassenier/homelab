@@ -38,6 +38,10 @@ storage:
   - host_path: /appdata/metrics/prometheus-config
     mount_point: /appdata/metrics/prometheus-config
     host_owner_uid: 165534
+    # Not backed up (Kenny, triage 2026-09-27: "Meetdata niet back-uppen,
+    # alleen configuratie"): the TSDB and the generated targets/ files are
+    # regenerable, and copying them meant stopping Prometheus every night.
+    no_backup: "Prometheus TSDB and generated scrape targets; regenerable, configuration is in the repository"
     app: prometheus
   # Alertmanager's silences and notification log. It was bind-mounted by its
   # compose file and declared nowhere, so docker created it on the container

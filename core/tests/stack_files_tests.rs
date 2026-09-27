@@ -741,3 +741,33 @@ fn grafana_refuses_browser_edits_it_would_lose() {
         .join("captured/gateway/grafana/provisioning")
         .exists());
 }
+
+/// Kenny's triage answer 2026-09-27 (backup-pause-stops-monitoring: "Meetdata
+/// niet back-uppen, alleen configuratie"). The nightly backup stopped
+/// Prometheus, Alertmanager and Loki (measured: both metrics services
+/// restarted at 02:11 UTC and Uptime Kuma logged them down) to copy data that
+/// is regenerable or not worth restoring; their configuration is in this
+/// repository.
+#[test]
+fn the_monitoring_data_is_not_backed_up_and_the_services_are_not_paused() {
+    let read = |p: &str| std::fs::read_to_string(stacks_dir().join(p)).unwrap();
+    for (stack, dir) in [
+        (
+            "metrics/lxc-compose.yml",
+            "/appdata/metrics/prometheus-config",
+        ),
+        ("gateway/lxc-compose.yml", "/appdata/gateway/loki-config"),
+    ] {
+        let s = read(stack);
+        let at = s.find(&format!("host_path: {dir}")).unwrap();
+        let block = &s[at..at + s[at..].find("app:").unwrap()];
+        assert!(block.contains("no_backup:"), "{dir}: {block}");
+    }
+    for compose in [
+        "metrics/prometheus/docker-compose.yml",
+        "metrics/alertmanager/docker-compose.yml",
+        "gateway/loki/docker-compose.yml",
+    ] {
+        assert!(!read(compose).contains("backup.pause=true"), "{compose}");
+    }
+}

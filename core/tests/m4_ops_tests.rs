@@ -2432,6 +2432,67 @@ async fn fix_50_an_unreadable_state_file_is_an_error_not_an_empty_fleet() {
     );
 }
 
+/// An executor whose file reads and writes give way to other tasks, the way
+/// a real disk write does. MockExecutor never yields, so on its own it cannot
+/// show two load-modify-save sequences interleaving.
+struct YieldingExec(MockExecutor);
+
+#[async_trait::async_trait]
+impl homelab_core::executor::Executor for YieldingExec {
+    async fn run(
+        &self,
+        cmd: &homelab_core::executor::Cmd,
+    ) -> Result<CmdOutput, homelab_core::error::CoreError> {
+        self.0.run(cmd).await
+    }
+    async fn write_file(
+        &self,
+        path: &str,
+        content: &str,
+        mode: u32,
+    ) -> Result<(), homelab_core::error::CoreError> {
+        tokio::task::yield_now().await;
+        self.0.write_file(path, content, mode).await
+    }
+    async fn read_file(&self, path: &str) -> Result<String, homelab_core::error::CoreError> {
+        tokio::task::yield_now().await;
+        self.0.read_file(path).await
+    }
+    async fn sleep_ms(&self, _ms: u64) {}
+}
+
+/// fix-51 (expert panel, state-writes-race, 2026-09-27): the nightly batch
+/// runs three backups at once, and each records its notification outcome
+/// with a load-modify-save of state.json outside the op lock. Two of those
+/// interleaving meant one of them saved over the other's change.
+#[tokio::test]
+async fn fix_51_concurrent_state_updates_are_all_kept() {
+    use homelab_core::state::StateStore;
+    let exec = YieldingExec(MockExecutor::new());
+    let store = StateStore::new(&exec, "/var/lib/homelab-fix51");
+    let bump = || async {
+        store
+            .update(|s| s.restore_drill_index += 1)
+            .await
+            .expect("update");
+    };
+    tokio::join!(
+        bump(),
+        bump(),
+        bump(),
+        bump(),
+        bump(),
+        bump(),
+        bump(),
+        bump()
+    );
+    let after = store.load().await.unwrap();
+    assert_eq!(
+        after.restore_drill_index, 8,
+        "every one of eight concurrent updates must survive"
+    );
+}
+
 #[tokio::test]
 async fn h7_newer_schema_refused_missing_file_is_fresh() {
     use homelab_core::state::StateStore;

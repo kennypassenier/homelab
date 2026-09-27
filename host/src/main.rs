@@ -724,6 +724,45 @@ fn persist_settings(
 
 #[cfg(test)]
 mod tests {
+    /// fix-51 (expert panel, state-writes-race, 2026-09-27): two writers of
+    /// one path shared the temp name `<path>.tmp`. One removed the other's
+    /// half-written temp file, or `create_new` failed with EEXIST, and the
+    /// error was thrown away by `let _ = store.save(..)`. Concurrent writes of
+    /// one path must all succeed and leave one whole version behind.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole() {
+        use homelab_core::executor::Executor;
+        let dir = std::env::temp_dir().join(format!("homelab-fix51-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json").to_string_lossy().into_owned();
+        for round in 0..20 {
+            let writes = (0..8).map(|i| {
+                let path = path.clone();
+                tokio::spawn(async move {
+                    let body = format!("{}-{};", round, i).repeat(20_000);
+                    super::RealExecutor.write_file(&path, &body, 0o644).await
+                })
+            });
+            for w in writes.collect::<Vec<_>>() {
+                w.await
+                    .unwrap()
+                    .expect("every concurrent write of one path succeeds");
+            }
+            let got = std::fs::read_to_string(&path).unwrap();
+            let piece = &got[..=got.find(';').expect("content present")];
+            assert_eq!(got, piece.repeat(20_000), "one writer's content, whole");
+        }
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "state.json")
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(leftovers.is_empty(), "no temp files left: {:?}", leftovers);
+    }
+
     /// covers: F208
     ///
     /// G1 of the Phase-7 gate. Saving a setting from the TUI rewrites the
@@ -1580,7 +1619,18 @@ impl Executor for RealExecutor {
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| CoreError::State(e.to_string()))?;
             }
-            let tmp = format!("{}.tmp", path);
+            // fix-51 (expert panel, state-writes-race, 2026-09-27): a temp
+            // name of its own per write. The fixed `<path>.tmp` let two
+            // writers of one path (three nightly backups recording their
+            // notification outcome, or writing the notify header file) remove
+            // each other's temp file or fail on EEXIST.
+            static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let tmp = format!(
+                "{}.{}.{}.tmp",
+                path,
+                std::process::id(),
+                SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            );
             {
                 // Created with its final mode: a secret written into a file
                 // that is world-readable until the chmod below is readable in
@@ -1599,9 +1649,19 @@ impl Executor for RealExecutor {
                     .map_err(|e| CoreError::State(e.to_string()))?;
                 f.sync_all().map_err(|e| CoreError::State(e.to_string()))?;
             }
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))
-                .map_err(|e| CoreError::State(e.to_string()))?;
-            std::fs::rename(&tmp, &path).map_err(|e| CoreError::State(e.to_string()))?;
+            let placed = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))
+                .and_then(|()| std::fs::rename(&tmp, &path));
+            if let Err(e) = placed {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(CoreError::State(e.to_string()));
+            }
+            // fix-51: the rename is only durable once the directory entry
+            // is; without this a power cut can bring the old file back.
+            if let Some(parent) = p.parent() {
+                if let Ok(d) = std::fs::File::open(parent) {
+                    let _ = d.sync_all();
+                }
+            }
             Ok(())
         })
         .await
@@ -2440,31 +2500,20 @@ async fn scheduler_loop(state: AppState) {
                     update_ok &= r.ok;
                 }
                 if backup.records_a_timestamp() {
-                    if let Ok(mut s) = store.load().await {
+                    record_state(&store, "last_backup", |s| {
                         if let Some(rec) = s.stacks.get_mut(&name) {
                             rec.last_backup = now;
                         }
-                        let _ = store.save(s).await;
-                    }
+                    })
+                    .await;
                 }
                 // A deferred backup is deliberately absent from this
                 // condition: it is not a failed night, and parking the stack
                 // for it would punish the house for using its own services.
                 if backup.parks_the_stack(update_ok) {
-                    let mut parked = false;
-                    if let Ok(mut s) = store.load().await {
-                        if let Some(rec) = s.stacks.get_mut(&name) {
-                            if rec.enabled {
-                                rec.enabled = false;
-                                parked = true;
-                                tracing::warn!(
-                                    "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
-                                    name, name
-                                );
-                            }
-                        }
-                        let _ = store.save(s).await;
-                    }
+                    let parked = record_state(&store, "auto-disable", |s| park(s, &name))
+                        .await
+                        .unwrap_or(false);
                     if parked {
                         notify_auto_disabled(
                             &state,
@@ -2489,12 +2538,12 @@ async fn scheduler_loop(state: AppState) {
                 .unwrap_or(NightBackup::Failed);
             if backup.records_a_timestamp() {
                 // Record last_backup so tomorrow's check is accurate.
-                if let Ok(mut s) = store.load().await {
+                record_state(&store, "last_backup", |s| {
                     if let Some(rec) = s.stacks.get_mut(&name) {
                         rec.last_backup = now;
                     }
-                    let _ = store.save(s).await;
-                }
+                })
+                .await;
             }
             let m2 = manifest.clone();
             let update_report = run_mutating_op(&state, &exec, 0, "scheduled-update", |ctx| {
@@ -2508,20 +2557,9 @@ async fn scheduler_loop(state: AppState) {
             // onboot and the running containers are untouched, so a transient
             // failure can never keep a stack from surviving a host reboot.
             if backup.parks_the_stack(update_report.ok) {
-                let mut parked = false;
-                if let Ok(mut s) = store.load().await {
-                    if let Some(rec) = s.stacks.get_mut(&name) {
-                        if rec.enabled {
-                            rec.enabled = false;
-                            parked = true;
-                            tracing::warn!(
-                                "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
-                                name, name
-                            );
-                        }
-                    }
-                    let _ = store.save(s).await;
-                }
+                let parked = record_state(&store, "auto-disable", |s| park(s, &name))
+                    .await
+                    .unwrap_or(false);
                 if parked {
                     notify_auto_disabled(
                         &state,
@@ -2550,10 +2588,7 @@ async fn scheduler_loop(state: AppState) {
             })
             .await;
             if report.ok {
-                if let Ok(mut s) = store.load().await {
-                    s.last_host_meta = now;
-                    let _ = store.save(s).await;
-                }
+                record_state(&store, "last_host_meta", |s| s.last_host_meta = now).await;
             } else {
                 tracing::error!(
                     "scheduler: host-meta backup FAILED — the vault/state/TLS snapshot is the recovery path for a lost host disk; investigate now"
@@ -2579,7 +2614,7 @@ async fn scheduler_loop(state: AppState) {
                 };
                 let target = format!("{}/restore-drill", state.config.state_dir);
                 let outcome = run_restore_drill(&exec, &cfg, &repo, &target).await;
-                if let Ok(mut sn) = store.load().await {
+                record_state(&store, "restore drill", |sn| {
                     sn.restore_drill_index = next;
                     sn.last_restore_drill_repo = repo.clone();
                     match &outcome {
@@ -2599,8 +2634,8 @@ async fn scheduler_loop(state: AppState) {
                             tracing::error!("restore drill: {} proved nothing :: {}", repo, why);
                         }
                     }
-                    let _ = store.save(sn).await;
-                }
+                })
+                .await;
             }
         }
 
@@ -2639,10 +2674,7 @@ async fn scheduler_loop(state: AppState) {
             })
             .await;
             if report.ok {
-                if let Ok(mut s) = store.load().await {
-                    s.last_zfs = now;
-                    let _ = store.save(s).await;
-                }
+                record_state(&store, "last_zfs", |s| s.last_zfs = now).await;
             } else {
                 tracing::error!("scheduler: ZFS replication FAILED — investigate; the old cron script used to fail silently, this one does not");
             }
@@ -2959,6 +2991,42 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
     record_notify_outcome(state, exec, delivered, &last).await;
 }
 
+/// fix-51 (expert panel, state-writes-race, 2026-09-27): every short
+/// read-modify-write of state.json outside an operation goes through the
+/// store's lock, and a failure is logged instead of dropped. These used to be
+/// `load` then `let _ = store.save(..)`: concurrent callers saved over each
+/// other and nobody heard about a save that failed.
+async fn record_state<R>(
+    store: &homelab_core::state::StateStore<'_>,
+    what: &str,
+    change: impl FnOnce(&mut homelab_core::state::HostState) -> R,
+) -> Option<R> {
+    match store.update(change).await {
+        Ok(r) => Some(r),
+        Err(e) => {
+            tracing::error!("state: could not record {} :: {}", what, e);
+            None
+        }
+    }
+}
+
+/// H8: flip a stack's enabled flag off after a failed nightly run. True when
+/// this call parked it (it was enabled before).
+fn park(s: &mut homelab_core::state::HostState, name: &str) -> bool {
+    let Some(rec) = s.stacks.get_mut(name) else {
+        return false;
+    };
+    if !rec.enabled {
+        return false;
+    }
+    rec.enabled = false;
+    tracing::warn!(
+        "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
+        name, name
+    );
+    true
+}
+
 /// Keep the last word on whether notifications are arriving, so a broken
 /// notification path is visible somewhere other than in a notification.
 ///
@@ -2967,21 +3035,20 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
 /// so cannot reach him by the path that is broken.
 async fn record_notify_outcome(state: &AppState, exec: &RealExecutor, delivered: bool, why: &str) {
     let store = homelab_core::state::StateStore::new(exec, &state.config.state_dir);
-    let Ok(mut st) = store.load().await else {
-        return;
-    };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    if delivered {
-        st.last_notify_ok = now;
-        st.last_notify_error = None;
-    } else {
-        st.last_notify_failed = now;
-        st.last_notify_error = Some(why.to_string());
-    }
-    let _ = store.save(st).await;
+    record_state(&store, "notification outcome", |st| {
+        if delivered {
+            st.last_notify_ok = now;
+            st.last_notify_error = None;
+        } else {
+            st.last_notify_failed = now;
+            st.last_notify_error = Some(why.to_string());
+        }
+    })
+    .await;
 }
 
 /// Run any mutating operation under the op-lock (AR12) with uniform incident
@@ -3199,15 +3266,16 @@ async fn gather_live_facts(
 /// reported about kyu minutes after I had backed it up myself.
 async fn record_backup_time(state: &AppState, stack: &str) {
     let store = homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
-    if let Ok(mut s) = store.load().await {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    record_state(&store, "last_backup", |s| {
         if let Some(rec) = s.stacks.get_mut(stack) {
-            rec.last_backup = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let _ = store.save(s).await;
+            rec.last_backup = now;
         }
-    }
+    })
+    .await;
 }
 
 fn render_findings(findings: &[homelab_core::ops::fleetcheck::Finding]) -> String {
@@ -3290,12 +3358,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
             let dir = staged_binaries_dir(&state.config.state_dir, &stack);
             let path = format!("{}/{}.b64", dir, unit);
-            let written = std::fs::create_dir_all(&dir)
-                .and_then(|_| std::fs::write(&path, binary_b64.as_bytes()))
-                .and_then(|_| {
-                    use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                });
+            // fix-51: through the executor's atomic write (own temp name,
+            // 0600 from creation, off the async worker) rather than a plain
+            // `std::fs::write` of tens of MB that a deploy reading the file at
+            // the same moment could see half-written.
+            let written = exec.write_file(&path, &binary_b64, 0o600).await;
             match written {
                 Ok(()) => RpcResponse {
                     id: req.id,
@@ -3428,13 +3495,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             if resp.ok {
                 let store =
                     homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
-                if let Ok(mut s) = store.load().await {
-                    s.last_host_meta = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let _ = store.save(s).await;
-                }
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                record_state(&store, "last_host_meta", |s| s.last_host_meta = now).await;
             }
             resp
         }
@@ -3864,13 +3929,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             if resp.ok {
                 let store =
                     homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
-                if let Ok(mut s) = store.load().await {
-                    s.last_zfs = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let _ = store.save(s).await;
-                }
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                record_state(&store, "last_zfs", |s| s.last_zfs = now).await;
             }
             resp
         }
@@ -3934,14 +3997,16 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             note,
         } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
-            let mut st = store.load().await.unwrap_or_default();
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let found = homelab_core::ops::manualchecks::answer(&mut st, &id, ok, &note, now);
+            let found = record_state(&store, "manual check answer", |st| {
+                homelab_core::ops::manualchecks::answer(st, &id, ok, &note, now)
+            })
+            .await
+            .unwrap_or(false);
             let message = if found {
-                let _ = store.save(st).await;
                 format!("{} recorded as {}", id, if ok { "ok" } else { "NOT ok" })
             } else {
                 format!(

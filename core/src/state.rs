@@ -2,7 +2,8 @@
 //! atomically through the Executor so tests capture them and power loss can
 //! never leave a half-written file.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
@@ -228,6 +229,24 @@ pub struct ManualCheckRecord {
     pub note: String,
 }
 
+/// fix-51 (expert panel, state-writes-race, 2026-09-27): the lock that
+/// serialises every write of one state file in this process.
+///
+/// Per path rather than per `StateStore`, because every caller builds its own
+/// store: the nightly batch runs three backups at once, each recording its
+/// notification outcome through a fresh store, and a lock inside the store
+/// would have been three locks.
+fn path_lock(path: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .entry(path.to_string())
+        .or_default()
+        .clone()
+}
+
 pub struct StateStore<'a> {
     exec: &'a dyn Executor,
     path: String,
@@ -285,7 +304,33 @@ impl<'a> StateStore<'a> {
         }
     }
 
-    pub async fn save(&self, mut state: HostState) -> Result<(), CoreError> {
+    /// Load, change and save state as one step, under the file's lock.
+    ///
+    /// fix-51: a bare `load` then `save` from two tasks at once lets the
+    /// later save carry the earlier load, and whatever the other task wrote
+    /// in between is gone: a `last_backup`, a notification outcome, a manual
+    /// check answer. Every short read-modify-write goes through here.
+    pub async fn update<R>(
+        &self,
+        change: impl FnOnce(&mut HostState) -> R,
+    ) -> Result<R, CoreError> {
+        let lock = path_lock(&self.path);
+        let _held = lock.lock().await;
+        let mut state = self.load().await?;
+        let out = change(&mut state);
+        self.save_unlocked(state).await?;
+        Ok(out)
+    }
+
+    /// Save under the same lock `update` takes, so a plain save can never
+    /// land between an update's load and its save.
+    pub async fn save(&self, state: HostState) -> Result<(), CoreError> {
+        let lock = path_lock(&self.path);
+        let _held = lock.lock().await;
+        self.save_unlocked(state).await
+    }
+
+    async fn save_unlocked(&self, mut state: HostState) -> Result<(), CoreError> {
         state.schema_version = STATE_SCHEMA_VERSION;
         let raw =
             serde_json::to_string_pretty(&state).map_err(|e| CoreError::State(e.to_string()))?;

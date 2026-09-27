@@ -334,6 +334,42 @@ async fn main() {
             }
             rpc(&host, &token, Command::FleetCheck { stack_files }).await;
         }
+        // fix-68 (four-answers-to-is-anything-wrong, 2026-09-27): the morning
+        // question in one verb. `check`, `doctor`, `incidents` and `checks`
+        // each gave part of the answer, and the operator merged them in his
+        // head; this asks the host for all of it and prints one verdict.
+        "today" => {
+            let base = args.get(2).cloned().unwrap_or_else(|| "stacks".into());
+            let stack_files = crate::spec::stack_files_with_vmids(&base);
+            if stack_files.is_empty() {
+                println!(
+                    "{}▶ today :: no stack files under '{}' — the check reads only what the \
+                     HOST can see; run this from the repository root, or pass the path{}",
+                    C_YELLOW, base, C_RESET
+                );
+            } else {
+                println!(
+                    "{}▶ today :: doctor, fleet check ({} stack file(s)), incidents, manual \
+                     checks — about a minute{}",
+                    C_CYAN,
+                    stack_files.len(),
+                    C_RESET
+                );
+            }
+            let reply = rpc_reply(&host, &token, Command::Today { stack_files })
+                .await
+                .unwrap_or_else(|| die("the host did not answer"));
+            let today: homelab_core::ops::today::Today = serde_json::from_str(&reply.message)
+                .unwrap_or_else(|_| die(&format!("the host answered: {}", reply.message)));
+            let color = if today.needs_you() { C_YELLOW } else { C_GREEN };
+            let text = homelab_core::ops::today::render(&today);
+            let (body, verdict) = text.rsplit_once('\n').unwrap_or(("", text.as_str()));
+            if !body.is_empty() {
+                println!("{}", body);
+            }
+            println!("{}{}{}", color, verdict, C_RESET);
+            std::process::exit(if today.needs_you() { 1 } else { 0 });
+        }
         "backup-native" => {
             let stack = args
                 .get(2)
@@ -1132,6 +1168,7 @@ async fn main() {
         }
         _ => {
             println!("homelab v{} — usage:", env!("CARGO_PKG_VERSION"));
+            println!("  homelab today [stacks/]             what needs you: doctor, check, incidents, manual checks in one list");
             println!("  homelab ping|status|doctor|incidents");
             println!("  homelab plan stacks/<name>          validate and show the spec (no host; runs latch/gh for secrets and native releases)");
             println!("  homelab deploy stacks/<name>");
@@ -1220,6 +1257,30 @@ async fn rpc_collect(
     token: &str,
     command: Command,
 ) -> (bool, Option<homelab_proto::FleetState>) {
+    let (ok, fleet, _) = rpc_exchange(host, token, command, true).await;
+    (ok, fleet)
+}
+
+/// fix-68: the host's reply handed back instead of printed, for a verb whose
+/// reply is data to render (`today`).
+async fn rpc_reply(
+    host: &str,
+    token: &str,
+    command: Command,
+) -> Option<homelab_proto::RpcResponse> {
+    rpc_exchange(host, token, command, false).await.2
+}
+
+async fn rpc_exchange(
+    host: &str,
+    token: &str,
+    command: Command,
+    echo_reply: bool,
+) -> (
+    bool,
+    Option<homelab_proto::FleetState>,
+    Option<homelab_proto::RpcResponse>,
+) {
     let mut fleet_seen: Option<homelab_proto::FleetState> = None;
     // F303: the size guard lives HERE, where every command passes, and not in
     // the three call sites that happened to remember it.
@@ -1371,27 +1432,30 @@ async fn rpc_collect(
                 fleet_seen = Some(*fleet);
             }
             ServerMsg::RpcDone(resp) => {
+                if !echo_reply {
+                    return (resp.ok, fleet_seen, Some(resp));
+                }
                 if !resp.ok {
                     println!("{}✗ {}{}", C_RED, resp.message, C_RESET);
-                    return (false, fleet_seen);
+                    return (false, fleet_seen, Some(resp));
                 }
                 if homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
                     println!("{}✓ {}{}", C_GREEN, resp.message, C_RESET);
-                    return (true, fleet_seen);
+                    return (true, fleet_seen, Some(resp));
                 }
                 done = Some(true);
             }
         }
         if done.is_some() && homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
             println!("{}✓ ok{}", C_GREEN, C_RESET);
-            return (true, fleet_seen);
+            return (true, fleet_seen, None);
         }
     }
     eprintln!(
         "{}✗ connection closed before RPC completed{}",
         C_RED, C_RESET
     );
-    (false, fleet_seen)
+    (false, fleet_seen, None)
 }
 
 /// Read one line the operator typed after `prompt` (typed-name gates).

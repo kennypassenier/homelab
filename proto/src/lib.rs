@@ -230,6 +230,12 @@ pub enum Command {
     FleetCheck {
         stack_files: Vec<(String, u16)>,
     },
+    /// fix-68: doctor, the fleet check (with its manual checks) and the open
+    /// incident bundles as one list and one verdict. The reply's message is
+    /// a JSON `homelab_core::ops::today::Today`, rendered by the caller.
+    Today {
+        stack_files: Vec<(String, u16)>,
+    },
     /// H8 (light): flip a stack's enabled flag. Disabled = nightly scheduler
     /// skips it + onboot cleared; enabled = back in rotation + onboot per
     /// manifest. Never starts or stops containers.

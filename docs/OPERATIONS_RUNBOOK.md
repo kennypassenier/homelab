@@ -209,6 +209,14 @@ incident bundle under `/var/lib/homelab/incidents`
 
 Workstation, repository root. Read-only: stop at any step.
 
+`homelab today` asks steps 1 to 4 in one go (fix-68): one list, most
+severe first, one remedy per line, ending in `Nothing needs you` or
+`N things need you`, exit 1 when something does. An incident bundle is on
+that list while nothing on its stack has succeeded since
+(`core/src/ops/today.rs`). The TUI shows the same list in its TODAY panel.
+It needs a host that knows the verb; against an older one it refuses and
+names `homelab release-update`. The steps below are the parts it merges.
+
 1. `homelab check`. Prints `"fleet check: repo and reality agree"` or one
    block per finding with a `remedy:` line; exits 1 when there is a
    `broken` or `drift` finding (`noted` ones do not fail it since gap-32) (`host/src/main.rs:3189-3209`, `:3755-3760`). Run from the

@@ -2835,3 +2835,111 @@ fn fix_41_deploy_refuses_a_stack_without_its_local_stack_file() {
     );
     assert!(m.status_line.contains("stacks/"), "{:?}", m.status_line);
 }
+
+/// A fleet whose containers all run and whose stacks are all in step: the
+/// picture the ticker used to call "ALL SYSTEMS NOMINAL".
+fn quiet_fleet_model() -> Model {
+    let mut m = ready_model();
+    if let Some(f) = m.fleet.as_mut() {
+        for s in f.stacks.iter_mut() {
+            s.drift = false;
+            s.env_sealed = true;
+            for a in s.apps.iter_mut() {
+                a.running = true;
+            }
+        }
+    }
+    m
+}
+
+/// fix-68: the ticker said "ALL SYSTEMS NOMINAL" whenever the containers ran
+/// and the envs were sealed. It never read the check, doctor, the open
+/// incidents or the manual checks, so on 2026-09-27 it said so in the same
+/// minute `homelab check` reported nine findings, one of them broken
+/// (four-answers-to-is-anything-wrong). Running containers are not a verdict.
+///
+/// covers: fix-68
+#[test]
+fn fix_68_the_ticker_claims_nothing_the_day_s_verdict_has_not_said() {
+    let m = quiet_fleet_model();
+    let out = render(&m);
+    assert!(
+        !out.contains("ALL SYSTEMS NOMINAL"),
+        "the ticker declared the house healthy without having read the check, doctor, \
+         incidents or manual checks"
+    );
+}
+
+/// fix-68: the day's list arrives while a deploy window is open (the host
+/// runs it beside its queue). It fills the TODAY panel and the ticker, and it
+/// does not close the deploy's window as if the deploy had ended.
+///
+/// covers: fix-68
+#[test]
+fn fix_68_the_day_s_list_fills_the_today_panel_and_leaves_an_open_operation_alone() {
+    use homelab_client::tui::backend::BackendEvent;
+    use homelab_client::tui::model::{update, Focus, Msg};
+    use homelab_core::ops::today::{Item, Level, Today};
+    use homelab_proto::{RpcResponse, ServerMsg};
+
+    let mut m = quiet_fleet_model();
+    update(
+        &mut m,
+        Msg::Backend(BackendEvent::Connected {
+            version: env!("CARGO_PKG_VERSION").into(),
+            fingerprint: None,
+        }),
+    );
+    assert!(
+        m.outbox
+            .iter()
+            .any(|c| matches!(c, homelab_proto::Command::Today { .. })),
+        "connecting must ask for the day's list: {:?}",
+        m.outbox
+    );
+    m.focus = Some(Focus {
+        title: "DEPLOY kyu :: vmid 109".into(),
+        feed: Vec::new(),
+        scroll: 0,
+        done: false,
+        ok: false,
+        result: String::new(),
+    });
+    let today = Today {
+        items: vec![Item {
+            level: Level::Broken,
+            source: "check".into(),
+            what: "kp-soft/kp-soft: somebody looked and said no".into(),
+            remedy: "fix it, then answer the check again".into(),
+        }],
+        unread: Vec::new(),
+    };
+    update(
+        &mut m,
+        Msg::Backend(BackendEvent::Server(ServerMsg::RpcDone(RpcResponse {
+            id: 3,
+            ok: true,
+            message: serde_json::to_string(&today).unwrap(),
+            deferred: None,
+        }))),
+    );
+    assert!(
+        m.focus.as_ref().is_some_and(|f| !f.done),
+        "the day's list closed the open deploy window"
+    );
+    m.focus = None;
+    let out = render(&m);
+    assert!(out.contains("TODAY"), "no TODAY panel");
+    assert!(out.contains("kp-soft/kp-soft: somebody looked"), "{}", out);
+    assert!(out.contains("1 thing needs you"), "no verdict: {}", out);
+    assert!(!out.contains("NOTHING NEEDS YOU"));
+    assert!(
+        out.contains("106-app-media"),
+        "the fleet table must still show its rows under the new panel"
+    );
+
+    // And a quiet day says so in the ticker, in the same words.
+    m.today = Some(Today::default());
+    let out = render(&m);
+    assert!(out.contains("NOTHING NEEDS YOU"), "{}", out);
+}

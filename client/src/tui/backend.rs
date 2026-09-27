@@ -242,6 +242,17 @@ impl Backend for DemoBackend {
                             Some(Command::DeployStack(spec)) => {
                                 play_demo_deploy(&evt_tx, &spec.manifest.stack_name).await;
                             }
+                            Some(Command::Today { .. }) => {
+                                let today = homelab_core::ops::today::Today::default();
+                                let _ = evt_tx.send(BackendEvent::Server(ServerMsg::RpcDone(
+                                    homelab_proto::RpcResponse {
+                                        id: 0,
+                                        ok: true,
+                                        message: serde_json::to_string(&today).unwrap_or_default(),
+                                        deferred: None,
+                                    },
+                                ))).await;
+                            }
                             Some(Command::GetConfig) => {
                                 let _ = evt_tx
                                     .send(BackendEvent::Server(ServerMsg::Config(Box::new(

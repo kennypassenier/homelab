@@ -11,10 +11,18 @@ use crate::tui::theme::THEME;
 
 pub fn draw(f: &mut Frame, model: &Model, area: Rect) {
     let cols = Layout::horizontal([Constraint::Min(50), Constraint::Length(34)]).split(area);
-    let left = Layout::vertical([Constraint::Length(5), Constraint::Min(6)]).split(cols[0]);
+    // fix-68: TODAY sits under the host, above the fleet: the first thing the
+    // dashboard answers is whether anything needs Kenny.
+    let left = Layout::vertical([
+        Constraint::Length(5),
+        Constraint::Length(TODAY_ROWS + 2),
+        Constraint::Min(6),
+    ])
+    .split(cols[0]);
     let right = Layout::vertical([Constraint::Length(7), Constraint::Min(4)]).split(cols[1]);
     draw_host(f, model, left[0]);
-    draw_fleet(f, model, left[1]);
+    draw_today(f, model, left[1]);
+    draw_fleet(f, model, left[2]);
     draw_capacity(f, model, right[0]);
     draw_transfers(f, model, right[1]);
 }
@@ -170,6 +178,80 @@ fn draw_host(f: &mut Frame, model: &Model, area: Rect) {
             inner,
         );
     }
+}
+
+/// Lines inside the TODAY panel: the items that fit, then the verdict.
+const TODAY_ROWS: u16 = 4;
+
+/// fix-68: the day's list, most severe first, one line each with its
+/// remedy, ending in the verdict `homelab today` prints.
+fn draw_today(f: &mut Frame, model: &Model, area: Rect) {
+    use homelab_core::ops::today::Level;
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(THEME.border_active())
+        .title(panel_title("TODAY", 0x70DA, model))
+        .style(THEME.panel_style());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let Some(today) = &model.today else {
+        let text = if model.today_pending {
+            format!(
+                "{} asking the host: doctor, check, incidents, manual checks…",
+                fx::spinner(model.tick)
+            )
+        } else {
+            "not asked yet — press r".to_string()
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, THEME.muted_style()))),
+            inner,
+        );
+        return;
+    };
+    let room = inner.height.saturating_sub(1) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    let shown = if today.items.len() > room {
+        room.saturating_sub(1)
+    } else {
+        today.items.len()
+    };
+    for i in today.items.iter().take(shown) {
+        let (mark, color) = match i.level {
+            Level::Broken => ("✗ ", THEME.red),
+            Level::Attention => ("⚠ ", THEME.yellow),
+        };
+        lines.push(Line::from(vec![
+            Span::styled(mark, Style::new().fg(color)),
+            Span::styled(i.what.clone(), Style::new().fg(THEME.text)),
+            Span::styled(format!("  → {}", i.remedy), THEME.muted_style()),
+        ]));
+    }
+    if shown < today.items.len() {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "… and {} more — `homelab today` prints them all",
+                today.items.len() - shown
+            ),
+            THEME.muted_style(),
+        )));
+    }
+    for u in &today.unread {
+        if lines.len() < room {
+            lines.push(Line::from(Span::styled(
+                format!("? {}", u),
+                Style::new().fg(THEME.yellow),
+            )));
+        }
+    }
+    let verdict_style = if today.needs_you() {
+        Style::new().fg(THEME.yellow).add_modifier(Modifier::BOLD)
+    } else {
+        THEME.ok()
+    };
+    lines.push(Line::from(Span::styled(today.verdict(), verdict_style)));
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_fleet(f: &mut Frame, model: &Model, area: Rect) {

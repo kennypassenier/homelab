@@ -2969,7 +2969,11 @@ where
 /// only hands a value to an operation that is parked waiting for it; queued
 /// behind that same operation it can never arrive.
 fn runs_beside_the_queue(command: &Rpc) -> bool {
-    matches!(command, Rpc::Answer { .. })
+    // fix-68: `today` reads for about a minute (doctor plus the fleet check);
+    // in the queue it would hold up every deploy and refresh the TUI sends
+    // after opening. It changes nothing, and the TUI recognises its reply by
+    // shape rather than by order.
+    matches!(command, Rpc::Answer { .. } | Rpc::Today { .. })
 }
 
 /// D5: push the intent repo to the offsite mirror, detached — a failing
@@ -3323,6 +3327,63 @@ async fn native_from_state(
 /// G6 (T79): the gathering itself now lives in `homelab_core::ops::facts`,
 /// behind an executor, with tests; this is the host's thin adapter that
 /// hands it the configuration and logs what it measured.
+/// fix-68: the three readings `homelab today` merges — doctor, the fleet
+/// check with its manual checks, and the incident bundles — gathered the
+/// same way their own verbs gather them.
+async fn gather_today(
+    exec: &RealExecutor,
+    state: &AppState,
+    stack_files: &[(String, u16)],
+) -> homelab_core::ops::today::Today {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let probes = gather_probes(
+        exec,
+        &state.config.state_dir,
+        state.config.mirror_remote.as_deref(),
+        now,
+    )
+    .await;
+    let checks = homelab_core::doctor::diagnose(&probes);
+    let live = gather_live_facts(exec, state, stack_files).await;
+    let incidents: Vec<String> = std::fs::read_dir(format!("{}/incidents", state.config.state_dir))
+        .map(|rd| {
+            let mut names: Vec<String> = rd
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect();
+            names.sort();
+            names
+        })
+        .unwrap_or_default();
+    match homelab_core::state::StateStore::new(exec, &state.config.state_dir)
+        .load()
+        .await
+    {
+        Ok(snapshot) => {
+            let findings = homelab_core::ops::fleetcheck::evaluate(
+                &snapshot,
+                &live,
+                now,
+                homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+                homelab_core::ops::fleetcheck::GrowthLimits::default(),
+            );
+            homelab_core::ops::today::assemble(&checks, &findings, &incidents, &snapshot, now)
+        }
+        Err(e) => {
+            let mut t =
+                homelab_core::ops::today::assemble(&checks, &[], &[], &Default::default(), now);
+            t.unread.push(format!(
+                "state unreadable, so the fleet check and the incidents were not read: {}",
+                e
+            ));
+            t
+        }
+    }
+}
+
 async fn gather_live_facts(
     exec: &RealExecutor,
     state: &AppState,
@@ -3995,6 +4056,17 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // fix-68: always ok with a JSON body. A part that could not be read
+        // travels inside it as `unread`, so the TUI can tell this reply from
+        // any other by its shape and never mistakes a failure of it for the
+        // end of an operation it has open.
+        Rpc::Today { stack_files } => RpcResponse {
+            id: req.id,
+            ok: true,
+            message: serde_json::to_string(&gather_today(&exec, state, &stack_files).await)
+                .unwrap_or_default(),
+            deferred: None,
+        },
         // T69: the operator answered a suspended step. Delivering it is all
         // that happens here — the step itself is parked on a channel inside
         // the operation, not on this task.

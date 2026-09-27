@@ -280,6 +280,12 @@ pub struct Model {
     pub settings_dirty: bool,
     pub settings_editing_webhook: Option<String>,
 
+    /// fix-68: the day's verdict — doctor, check, incidents and manual checks
+    /// in one list — as the host last gave it. `None` until it has answered.
+    pub today: Option<homelab_core::ops::today::Today>,
+    /// A `Today` request is on the wire.
+    pub today_pending: bool,
+
     pub should_quit: bool,
     /// Commands the update fn wants sent to the backend this cycle.
     pub outbox: Vec<Command>,
@@ -336,6 +342,8 @@ impl Model {
             settings_row: 0,
             settings_dirty: false,
             settings_editing_webhook: None,
+            today: None,
+            today_pending: false,
             should_quit: false,
             outbox: Vec::new(),
         }
@@ -372,6 +380,19 @@ impl Model {
                 self.outbox.push(Command::GetConfig);
             }
         }
+    }
+
+    /// fix-68: ask the host for the day's verdict, unless a request for it is
+    /// already out. It reads for about a minute; the host runs it beside the
+    /// queue, so nothing else waits for it.
+    pub fn request_today(&mut self) {
+        if self.today_pending {
+            return;
+        }
+        self.today_pending = true;
+        self.outbox.push(Command::Today {
+            stack_files: crate::spec::stack_files_with_vmids("stacks"),
+        });
     }
 
     fn push_log(&mut self, level: LogLevel, source: String, msg: String) {
@@ -427,6 +448,9 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
             model.fingerprint = fingerprint;
             model.status_line = "link established".into();
             model.outbox.push(Command::GetState);
+            // A new connection has no request of its own on the wire.
+            model.today_pending = false;
+            model.request_today();
         }
         BackendEvent::Disconnected(why) => {
             model.conn = Conn::Down;
@@ -519,6 +543,19 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 model.settings_row = 0;
             }
             ServerMsg::RpcDone(resp) => {
+                // fix-68: the day's verdict runs beside the host's queue, so
+                // its reply can arrive in the middle of anything — an open
+                // deploy window, a pending plan. It is recognised by its
+                // shape, first, and never taken for another request's reply.
+                if model.today_pending {
+                    if let Ok(t) =
+                        serde_json::from_str::<homelab_core::ops::today::Today>(&resp.message)
+                    {
+                        model.today = Some(t);
+                        model.today_pending = false;
+                        return;
+                    }
+                }
                 if let Some(spec) = model.plan_pending.take() {
                     // D6: the host answered GetApplied with the applied files.
                     let applied: Vec<homelab_proto::FileBlob> =
@@ -776,7 +813,10 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                     model.selected_stack = (model.selected_stack + n - 1) % n;
                 }
             }
-            KeyCode::Char('r') => model.outbox.push(Command::GetState),
+            KeyCode::Char('r') => {
+                model.outbox.push(Command::GetState);
+                model.request_today();
+            }
             KeyCode::Char('u') => {
                 if let Some(tag) = model.host_update_available().map(String::from) {
                     model.focus = Some(Focus {
@@ -1245,7 +1285,10 @@ fn run_action(model: &mut Model, id: &str) {
         "tab.doctor" => model.switch_tab(Tab::Doctor),
         "tab.settings" => model.switch_tab(Tab::Settings),
         "tab.shell" => model.switch_tab(Tab::Shell),
-        "refresh" => model.outbox.push(Command::GetState),
+        "refresh" => {
+            model.outbox.push(Command::GetState);
+            model.request_today();
+        }
         "doctor" => {
             model.switch_tab(Tab::Doctor);
             model.outbox.push(Command::Doctor);

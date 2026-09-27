@@ -11,6 +11,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 sha2 = "0.10"
+# fix-29: the ecosystem's release signatures, the same crate chassis-rs uses.
+minisign-verify = "0.2"
 
 [dev-dependencies]
 serde_yaml.workspace = true

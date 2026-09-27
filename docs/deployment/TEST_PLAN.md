@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**524 tests across 27 suites.**
+**529 tests across 27 suites.**
 
 ## Accepted limitations
 
@@ -59,7 +59,7 @@ Covers: F156
 
 The M0 safety and idempotency suite — every scenario here maps to a FEATURES.md test scenario (A1, A2, A3/D10, B1, D1, A5).
 
-Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, F159, F164, F169, F170, F173, F21, F210, F213, F22, F289, fix-24, fix-27
+Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, F159, F164, F169, F170, F173, F21, F210, F213, F22, F289, fix-24, fix-27, fix-28
 
 - `a_clone_refuses_a_privilege_level_the_template_cannot_give` — A clone can never change a container's privilege level, so asking for one the template cannot give must stop the deploy rather than silently produce the other.
 - `a_privileged_stack_cloning_the_privileged_template_is_allowed` — And the matching case passes: a privileged stack cloning the privileged template is exactly how the media and downloader stacks are built.
@@ -125,6 +125,8 @@ Covers: F107, F124, F129, F130, F133, F137, F141, F143, F144, F145, F146, F147, 
 - `the_update_labels_the_code_reads_exist_somewhere_in_the_fleet` — covers: F213  G2 of the Phase-7 gate.
 - `compose_files`
 - `a_deploy_registers_the_questions_only_a_person_can_answer` — G17 · a deploy that prints a manual check must also register it.
+- `fix_28_a_deploy_never_replaces_an_installed_native_binary` — fix-28: the client stages the NEWEST release of every native; a deploy that found the program already there used to replace it, whatever the service's update_policy said.
+- `fix_28_a_missing_native_binary_is_still_installed` — fix-28: where there is no program yet, the deploy still installs one — a rebuilt container must come back whole.
 - `the_missing_account_is_created_before_anything_starts`
 - `a_unit_whose_program_is_absent_is_not_started_and_the_reason_is_named`
 - `a_missing_env_file_is_restored_from_the_vault_rather_than_invented`
@@ -435,7 +437,7 @@ Covers: F158, F175
 
 C7: native-service adoption. The refusals carry the feature: adopting a container that is not what the manifest claims would point every later backup and update at the wrong thing.
 
-Covers: F117, F171
+Covers: F117, F171, fix-29
 
 - `c7_validation_catches_the_lies`
 - `c7_adopt_records_state_without_touching_the_service`
@@ -480,6 +482,9 @@ Covers: F117, F171
 - `b1_a_current_binary_costs_one_small_download_and_no_install` — The decision is made on checksums, from a few hundred bytes: an installed binary whose sum SHA256SUMS already lists is current, and nothing is downloaded, encoded or moved.
 - `b1_a_newer_release_is_verified_on_the_host_and_installed_through_the_same_path` — A differing sum means: download to the host, verify there, encode, read the unit the container runs, and go through `install_native` — staged beside, glibc-checked, rollback armed.
 - `b1_a_checksum_mismatch_installs_nothing` — A download whose sum is not the listed one installs nothing.
+- `fix_29_an_unsigned_release_is_skipped_not_installed` — fix-29: a release without its signature is skipped — nothing downloaded, nothing installed, one line saying so — and tried again the next night.
+- `fix_29_a_tampered_checksum_list_is_refused` — fix-29: a checksum list that changed after signing is refused before any binary is fetched.
+- `fix_29_the_real_kyu_release_signature_verifies` — fix-29: the real kyu v4.0.0 pair verifies with the compiled-in key.
 
 ### `core/tests/real_deps_tests.rs`
 

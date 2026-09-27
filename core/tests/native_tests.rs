@@ -1300,7 +1300,15 @@ fn t85_staged_binaries_are_merged_and_empty_entries_dropped() {
 
 const RELEASE_JSON: &str = r#"{"tag_name":"v3.3.0","assets":[
   {"name":"kyu","browser_download_url":"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/kyu"},
-  {"name":"SHA256SUMS","browser_download_url":"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/SHA256SUMS"}]}"#;
+  {"name":"SHA256SUMS","browser_download_url":"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/SHA256SUMS"},
+  {"name":"SHA256SUMS.minisig","browser_download_url":"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/SHA256SUMS.minisig"}]}"#;
+
+/// fix-29: a real signed pair, kyu v4.0.0's own `SHA256SUMS` and its
+/// signature by the ecosystem key — standing rule 9, a real vector rather
+/// than one this suite signed for itself.
+const SIGNED_SUMS: &str = include_str!("fixtures/kyu-v4.0.0/SHA256SUMS");
+const SIGNED_SIG: &str = include_str!("fixtures/kyu-v4.0.0/SHA256SUMS.minisig");
+const SIGNED_KYU_SHA: &str = "a0fc183f118d248eeee31123fc8c643f2ea556d33dc936bdd84dcfec4c9921c8";
 
 #[test]
 fn b1_the_latest_release_is_reduced_to_tag_and_two_urls_and_refused_without_sums() {
@@ -1343,13 +1351,12 @@ fn b1_auto_policy_needs_a_release_repo() {
     .is_ok());
 }
 
-fn release_mocks(exec: &MockExecutor, listed: &str, installed: &str) {
+fn release_mocks(exec: &MockExecutor, installed: &str) {
     adopt_mocks(exec);
     exec.respond_always("releases/latest", CmdOutput::ok(RELEASE_JSON));
-    exec.respond_always(
-        "/v3.3.0/SHA256SUMS",
-        CmdOutput::ok(&format!("{}  kyu\n", listed)),
-    );
+    // The signature first: its URL also contains ".../SHA256SUMS".
+    exec.respond_always("/v3.3.0/SHA256SUMS.minisig", CmdOutput::ok(SIGNED_SIG));
+    exec.respond_always("/v3.3.0/SHA256SUMS", CmdOutput::ok(SIGNED_SUMS));
     exec.respond_always(
         "sha256sum '/usr/local/bin/kyu'",
         CmdOutput::ok(&format!("{}\n", installed)),
@@ -1363,7 +1370,7 @@ fn release_mocks(exec: &MockExecutor, listed: &str, installed: &str) {
 async fn b1_a_current_binary_costs_one_small_download_and_no_install() {
     use homelab_core::ops::native::release_update;
     let exec = MockExecutor::new();
-    release_mocks(&exec, "abcd", "abcd");
+    release_mocks(&exec, SIGNED_KYU_SHA);
     let sink = VecSink::new();
     let j = NullJournal;
     let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
@@ -1390,10 +1397,10 @@ async fn b1_a_current_binary_costs_one_small_download_and_no_install() {
 async fn b1_a_newer_release_is_verified_on_the_host_and_installed_through_the_same_path() {
     use homelab_core::ops::native::release_update;
     let exec = MockExecutor::new();
-    release_mocks(&exec, "beef", "abcd");
+    release_mocks(&exec, "abcd");
     exec.respond_always(
         "sha256sum '/var/lib/homelab/staged/kyu/kyu.release'",
-        CmdOutput::ok("beef\n"),
+        CmdOutput::ok(&format!("{}\n", SIGNED_KYU_SHA)),
     );
     exec.respond_always("base64 -w0", CmdOutput::ok("YmluYXJ5\n"));
     exec.respond_always(
@@ -1439,7 +1446,7 @@ async fn b1_a_newer_release_is_verified_on_the_host_and_installed_through_the_sa
 async fn b1_a_checksum_mismatch_installs_nothing() {
     use homelab_core::ops::native::release_update;
     let exec = MockExecutor::new();
-    release_mocks(&exec, "beef", "abcd");
+    release_mocks(&exec, "abcd");
     exec.respond_always(
         "sha256sum '/var/lib/homelab/staged/kyu/kyu.release'",
         CmdOutput::ok("dead\n"),
@@ -1456,4 +1463,78 @@ async fn b1_a_checksum_mismatch_installs_nothing() {
         exec.calls()
     );
     assert!(exec.calls_containing("mv -f").is_empty());
+}
+
+/// fix-29: a release without its signature is skipped — nothing downloaded,
+/// nothing installed, one line saying so — and tried again the next night.
+///
+/// covers: fix-29
+#[tokio::test]
+async fn fix_29_an_unsigned_release_is_skipped_not_installed() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let unsigned = RELEASE_JSON.replace(
+        ",\n  {\"name\":\"SHA256SUMS.minisig\",\"browser_download_url\":\"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/SHA256SUMS.minisig\"}",
+        "",
+    );
+    assert!(
+        !unsigned.contains("minisig"),
+        "the fixture edit must take: {unsigned}"
+    );
+    exec.respond_always("releases/latest", CmdOutput::ok(&unsigned));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(
+        report.ok,
+        "a missing signature is a skip, not a failure: {:?}",
+        report.error
+    );
+    assert!(exec.calls_containing("curl -sSL -m 600 -o").is_empty());
+    assert!(exec.calls_containing("mv -f").is_empty());
+    assert!(
+        sink.lines().iter().any(|l| l.contains("not signed yet")),
+        "{:?}",
+        sink.lines()
+    );
+}
+
+/// fix-29: a checksum list that changed after signing is refused before any
+/// binary is fetched.
+///
+/// covers: fix-29
+#[tokio::test]
+async fn fix_29_a_tampered_checksum_list_is_refused() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("releases/latest", CmdOutput::ok(RELEASE_JSON));
+    exec.respond_always("/v3.3.0/SHA256SUMS.minisig", CmdOutput::ok(SIGNED_SIG));
+    exec.respond_always(
+        "/v3.3.0/SHA256SUMS",
+        CmdOutput::ok(&SIGNED_SUMS.replace("a0fc", "b0fc")),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(!report.ok);
+    assert!(
+        format!("{:?}", report.error).contains("ecosystem signature"),
+        "{:?}",
+        report.error
+    );
+    assert!(exec.calls_containing("curl -sSL -m 600 -o").is_empty());
+}
+
+/// fix-29: the real kyu v4.0.0 pair verifies with the compiled-in key.
+///
+/// covers: fix-29
+#[test]
+fn fix_29_the_real_kyu_release_signature_verifies() {
+    homelab_core::release_sig::verify_sums(SIGNED_SUMS, SIGNED_SIG)
+        .expect("signed by 1C88AB06D43C0B16");
+    assert!(
+        homelab_core::release_sig::verify_sums(&SIGNED_SUMS.replace('a', "b"), SIGNED_SIG).is_err()
+    );
 }

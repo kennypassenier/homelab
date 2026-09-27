@@ -857,6 +857,8 @@ pub struct ReleaseRefs {
     pub tag: String,
     pub asset_url: String,
     pub sums_url: String,
+    /// fix-29: `SHA256SUMS.minisig`, or None while the release is unsigned.
+    pub sig_url: Option<String>,
 }
 
 /// GitHub's `releases/latest` answer, reduced to what an update needs. A
@@ -892,10 +894,12 @@ pub fn parse_latest_release(json: &str, asset: &str) -> Result<ReleaseRefs, Stri
             tag
         )
     })?;
+    let sig_url = url_of(crate::release_sig::SIG_ASSET);
     Ok(ReleaseRefs {
         tag,
         asset_url,
         sums_url,
+        sig_url,
     })
 }
 
@@ -975,6 +979,19 @@ pub async fn release_update(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Opera
     });
     let refs = refs.expect("set by the step above");
 
+    // fix-29: an unsigned release is not installed. Not an error: the author
+    // signs after uploading, and the next night tries again.
+    let Some(sig_url) = refs.sig_url.clone() else {
+        runner.log(
+            Level::Info,
+            format!(
+                "[release] {} {} of {} is not signed yet — skipped, tried again next night",
+                m.unit, refs.tag, repo
+            ),
+        );
+        return runner.finish_ok();
+    };
+
     let mut wanted = String::new();
     step!(runner, "read the checksum list", {
         let out = exec
@@ -988,7 +1005,21 @@ pub async fn release_update(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Opera
                 out.stderr.trim()
             )));
         }
-        wanted = listed_sha(&out.stdout, &asset).ok_or_else(|| {
+        let sums = out.stdout.clone();
+        let sig = exec
+            .run(&Cmd::new("curl", &["-sSL", "-m", "60", &sig_url], 90))
+            .await?;
+        if !sig.success() {
+            return Err(CoreError::Other(format!(
+                "could not fetch the signature of {} {}: {}",
+                repo,
+                refs.tag,
+                sig.stderr.trim()
+            )));
+        }
+        crate::release_sig::verify_sums(&sums, &sig.stdout)
+            .map_err(|e| CoreError::Other(format!("{} {} of {}: {}", m.unit, refs.tag, repo, e)))?;
+        wanted = listed_sha(&sums, &asset).ok_or_else(|| {
             CoreError::Other(format!(
                 "SHA256SUMS of {} {} lists no '{}' — refusing an unverifiable binary",
                 repo, refs.tag, asset

@@ -55,7 +55,10 @@ pub fn sha_listed(sums: &str, filename: &str, actual_hex: &str) -> bool {
 /// Download `homelab-host` + SHA256SUMS for `tag`, verify, return the binary
 /// base64-encoded ready for SelfUpdateHost. Every failure is a clear string.
 pub fn stage_release(tag: &str) -> Result<String, String> {
-    stage_asset(REPO, tag, "homelab-host")
+    // The orchestrator's own releases carry no minisign signature yet (its
+    // CI publishes checksums only), so H7 keeps the checksum check alone.
+    // Recorded as the remaining gap in fix-29.
+    stage_asset_checked(REPO, tag, "homelab-host", false)
 }
 
 /// T11: the same staging for ANY release asset in any repository Kenny's
@@ -70,6 +73,18 @@ pub fn stage_release(tag: &str) -> Result<String, String> {
 /// an unverified binary into a container is precisely the hand-built step
 /// this verb exists to replace.
 pub fn stage_asset(repo: &str, tag: &str, asset: &str) -> Result<String, String> {
+    stage_asset_checked(repo, tag, asset, true)
+}
+
+/// fix-29: `signed` = also demand `SHA256SUMS.minisig` and verify it with
+/// the ecosystem key before the checksum is trusted. Every native service's
+/// release is signed; a release that is not (yet) is refused, not shipped.
+pub fn stage_asset_checked(
+    repo: &str,
+    tag: &str,
+    asset: &str,
+    signed: bool,
+) -> Result<String, String> {
     let dir =
         std::env::temp_dir().join(format!("homelab-release-{}-{}", std::process::id(), asset));
     let _ = std::fs::remove_dir_all(&dir);
@@ -109,6 +124,41 @@ pub fn stage_asset(repo: &str, tag: &str, asset: &str) -> Result<String, String>
             tag, repo
         )
     })?;
+    if signed {
+        // Separate from the download above: a pattern that matches no asset
+        // fails the whole `gh` call, and "not signed yet" deserves its own
+        // sentence rather than a generic download error.
+        let _ = Command::new("gh")
+            .args([
+                "release",
+                "download",
+                tag,
+                "--repo",
+                repo,
+                "-p",
+                homelab_core::release_sig::SIG_ASSET,
+                "-D",
+                dir.to_str().unwrap(),
+                "--clobber",
+            ])
+            .output();
+        let sig = std::fs::read_to_string(dir.join(homelab_core::release_sig::SIG_ASSET)).map_err(
+            |_| {
+                let _ = std::fs::remove_dir_all(&dir);
+                format!(
+                    "release {} of {} is not signed (no {}) — not shipping it; sign it, or wait \
+                     for the author to",
+                    tag,
+                    repo,
+                    homelab_core::release_sig::SIG_ASSET
+                )
+            },
+        )?;
+        if let Err(e) = homelab_core::release_sig::verify_sums(&sums, &sig) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(format!("{} {} of {}: {}", asset, tag, repo, e));
+        }
+    }
     let actual = homelab_core::manifest::sha256_hex(&binary);
     if !sha_listed(&sums, asset, &actual) {
         let _ = std::fs::remove_dir_all(&dir);

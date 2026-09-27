@@ -2629,6 +2629,68 @@ mod native_from_zero {
         sp
     }
 
+    fn native_ready(exec: &MockExecutor) {
+        script_fresh(exec);
+        exec.respond_always("id -u kyu", CmdOutput::ok("103"));
+        exec.respond_always(
+            "test -s '/appdata/drill/kyu-config/kyu.env'",
+            CmdOutput::ok("yes"),
+        );
+        exec.respond_always("test -x '/usr/local/bin/kyu'", CmdOutput::ok("yes"));
+        exec.respond_always("systemctl is-active kyu", CmdOutput::ok("active"));
+    }
+
+    /// fix-28: the client stages the NEWEST release of every native; a deploy
+    /// that found the program already there used to replace it, whatever
+    /// the service's update_policy said.
+    ///
+    /// covers: fix-28
+    #[tokio::test]
+    async fn fix_28_a_deploy_never_replaces_an_installed_native_binary() {
+        let exec = MockExecutor::new();
+        native_ready(&exec);
+        exec.respond_always("test -f '/usr/local/bin/kyu'", CmdOutput::ok("yes"));
+        let mut sp = native_spec();
+        sp.native_binaries.insert("kyu".into(), "bmV3ZXI=".into());
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let report = deploy(&ctx(&exec, &sink, &j), &sp).await;
+        assert!(report.ok, "{:?}", report.error);
+        assert!(
+            exec.calls_containing("kyu.homelab-b64").is_empty(),
+            "an installed binary is not replaced by a deploy: {:?}",
+            exec.calls_containing("homelab-b64")
+        );
+        assert!(
+            sink.lines()
+                .iter()
+                .any(|l| l.contains("already installed, not shipped")),
+            "and the transcript says so"
+        );
+    }
+
+    /// fix-28: where there is no program yet, the deploy still installs one —
+    /// a rebuilt container must come back whole.
+    ///
+    /// covers: fix-28
+    #[tokio::test]
+    async fn fix_28_a_missing_native_binary_is_still_installed() {
+        let exec = MockExecutor::new();
+        native_ready(&exec);
+        exec.respond_always("test -f '/usr/local/bin/kyu'", CmdOutput::ok(""));
+        let mut sp = native_spec();
+        sp.native_binaries.insert("kyu".into(), "bmV3ZXI=".into());
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let report = deploy(&ctx(&exec, &sink, &j), &sp).await;
+        assert!(report.ok, "{:?}", report.error);
+        assert!(
+            !exec.calls_containing("kyu.homelab-b64").is_empty(),
+            "a missing binary is installed: {:?}",
+            exec.calls()
+        );
+    }
+
     #[tokio::test]
     async fn the_missing_account_is_created_before_anything_starts() {
         let exec = MockExecutor::new();

@@ -16,6 +16,7 @@ pub mod manifest;
 pub mod native;
 pub mod notify;
 pub mod ops;
+pub mod release_sig;
 pub mod retention;
 pub mod runner;
 pub mod safety;

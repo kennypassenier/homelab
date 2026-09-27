@@ -2135,10 +2135,35 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     .binary
                     .clone()
                     .unwrap_or_else(|| format!("/usr/local/bin/{}", unit));
+                // fix-28: a deploy puts a program where there is none; it
+                // never replaces one. The client stages the NEWEST release,
+                // so replacing here upgraded every native on every deploy,
+                // whatever its update_policy — an upgrade is the updater's
+                // job, which reads the policy and checks the signature.
+                let present = pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!(
+                        "test -f {} && echo yes || true",
+                        crate::ops::util::shq(&path)
+                    ),
+                    30,
+                )
+                .await?;
+                let b64 = if present.stdout.trim() == "yes" {
+                    log_info(format!(
+                        "[native] {} already installed, not shipped — upgrades go through the \
+                         nightly updater or `homelab release-update-native`",
+                        path
+                    ));
+                    ""
+                } else {
+                    b64.as_str()
+                };
                 let b64_path = format!("{}.homelab-b64", path);
                 // Staged beside the target, then moved: a transfer that dies
                 // half way must never leave a truncated program in place.
-                if push_content(exec, m.vmid, &b64_path, b64, "600").await? {
+                if !b64.is_empty() && push_content(exec, m.vmid, &b64_path, b64, "600").await? {
                     let script = format!(
                         "base64 -d {b} > {p}.new && chmod 755 {p}.new && rm -f {b} \
                          && test -s {p}.new && mv {p}.new {p}",

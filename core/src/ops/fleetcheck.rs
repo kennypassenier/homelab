@@ -729,6 +729,8 @@ pub fn evaluate(
     out.extend(evaluate_incomplete(state));
     out.extend(crate::ops::retired::evaluate_retired(state));
     out.extend(evaluate_notify(state, now_unix));
+    // fix-83: a pinned manual app whose upstream released something newer.
+    out.extend(crate::ops::pins::evaluate_pins(state));
     // A seeder that ran more than a day ago has stopped keeping the watch
     // list in step, which is the same window the backups use.
     out.extend(evaluate_seed(&live.seed, 26 * 3600));

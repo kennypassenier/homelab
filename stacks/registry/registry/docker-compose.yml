@@ -34,6 +34,7 @@ x-cache: &cache
     - registry_net
   labels:
     - com.homelab.update.policy=manual
+    - com.homelab.update.upstream=github.com/distribution/distribution
 
 services:
   cache-dockerhub:

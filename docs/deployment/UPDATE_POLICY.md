@@ -83,6 +83,19 @@ Moving a pinned app is an edit of its `image:` line followed by a deploy of
 its stack: the deploy finds the new digest missing and pulls it. That road
 has no rollback; the nightly `auto` update keeps its own.
 
+**Knowing when to move (fix-83).** The nightly round records, in host state
+(`running_images`), the image and digest every `manual` container runs. A
+service that declares `com.homelab.update.upstream=github.com/<owner>/<repo>`
+has that repository's latest release asked from the host (`curl -m 20`
+against the public API, at most once a night, the answer cached in state as
+`upstream_releases`; when GitHub does not answer, the rest wait for the next
+night). When the pinned version is older, `homelab check` and the nightly
+fleet check print one `noted` line naming both versions. Noted, not drift:
+being behind is a fact to decide on, not a fault. Services without a
+declared upstream (goaccess, both postgres databases, kp-soft, and the two
+digest-only branch builds) are not compared; the label is what opts a
+service in.
+
 ## Jellyfin, and never during a stream
 
 O10: before updating Jellyfin the orchestrator asks its API which sessions are

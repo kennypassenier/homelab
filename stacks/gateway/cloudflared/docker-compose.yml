@@ -26,6 +26,7 @@ services:
       # read auto until 2026-09-02 (F192), so the ratified decision and
       # the fleet disagreed for as long as both existed.
       - "com.homelab.update.policy=manual"
+      - "com.homelab.update.upstream=github.com/cloudflare/cloudflared"
 
 # One network for the whole stack, created by the deploy. Without it every app
 # is its own compose project on its own default network, and Traefik cannot

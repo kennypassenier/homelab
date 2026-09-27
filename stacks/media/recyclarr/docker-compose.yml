@@ -51,6 +51,7 @@ services:
       # A pinned tag with an auto policy is a lie: the nightly pull would find
       # the same digest every night and report a successful update forever.
       - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/recyclarr/recyclarr
       # Deliberately NO `com.homelab.backup.pause`. That label exists so a
       # database is not copied while it is being written to, and nothing here
       # is copied at all — /config is a cache in a docker volume. Carrying the

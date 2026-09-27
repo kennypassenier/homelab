@@ -666,10 +666,27 @@ const UNTAGGED_BUILDS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Every service in one compose text as (service name, image, policy label).
-/// Merge keys are applied first: the registry stack defines its image once
-/// under an anchor.
-fn compose_services(text: &str) -> Vec<(String, String, Option<String>)> {
+/// One label's value on a compose service, whether its labels are written
+/// as a list or as a map.
+fn label(svc: &serde_yaml::Value, key: &str) -> Option<String> {
+    match svc.get("labels") {
+        Some(serde_yaml::Value::Sequence(l)) => l.iter().find_map(|v| {
+            v.as_str()?
+                .strip_prefix(key)?
+                .strip_prefix('=')
+                .map(str::to_string)
+        }),
+        Some(serde_yaml::Value::Mapping(m)) => {
+            m.get(key).and_then(|v| v.as_str()).map(str::to_string)
+        }
+        _ => None,
+    }
+}
+
+/// Every service in one compose text as (service name, image, policy label,
+/// upstream label). Merge keys are applied first: the registry stack defines
+/// its image once under an anchor.
+fn compose_services(text: &str) -> Vec<(String, String, Option<String>, Option<String>)> {
     let mut doc: serde_yaml::Value = serde_yaml::from_str(text).expect("compose parses");
     doc.apply_merge().expect("merge keys apply");
     let mut out = Vec::new();
@@ -683,21 +700,45 @@ fn compose_services(text: &str) -> Vec<(String, String, Option<String>)> {
             .and_then(|i| i.as_str())
             .unwrap_or_default()
             .to_string();
-        let policy = match svc.get("labels") {
-            Some(serde_yaml::Value::Sequence(l)) => l.iter().find_map(|v| {
-                v.as_str()?
-                    .strip_prefix("com.homelab.update.policy=")
-                    .map(str::to_string)
-            }),
-            Some(serde_yaml::Value::Mapping(m)) => m
-                .get("com.homelab.update.policy")
-                .and_then(|v| v.as_str())
-                .map(str::to_string),
-            _ => None,
-        };
-        out.push((name, image, policy));
+        out.push((
+            name,
+            image,
+            label(svc, "com.homelab.update.policy"),
+            label(svc, "com.homelab.update.upstream"),
+        ));
     }
     out
+}
+
+/// Every compose text a deploy starts: each app's file, and the cAdvisor
+/// compose the guards write onto every docker container.
+fn all_compose_texts() -> Vec<(String, String)> {
+    let root = stacks_dir().parent().unwrap().to_path_buf();
+    let mut files: Vec<(String, String)> = vec![(
+        "guards::CADVISOR_COMPOSE".into(),
+        homelab_core::ops::guards::CADVISOR_COMPOSE.to_string(),
+    )];
+    let mut stacks: Vec<_> = std::fs::read_dir(stacks_dir())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    stacks.sort();
+    for stack in stacks {
+        let Ok(apps) = std::fs::read_dir(&stack) else {
+            continue;
+        };
+        for app in apps.flatten() {
+            let f = app.path().join("docker-compose.yml");
+            if f.is_file() {
+                files.push((
+                    f.strip_prefix(&root).unwrap().display().to_string(),
+                    std::fs::read_to_string(&f).unwrap(),
+                ));
+            }
+        }
+    }
+    files
 }
 
 /// Why an image reference is not an exact pin, or None when it is one.
@@ -744,36 +785,11 @@ fn pin_problem(service: &str, image: &str) -> Option<String> {
 /// covers: fix-82
 #[test]
 fn every_manual_image_is_pinned_to_an_exact_version_and_its_digest() {
-    let root = stacks_dir().parent().unwrap().to_path_buf();
-    let mut files: Vec<(String, String)> = vec![(
-        "guards::CADVISOR_COMPOSE".into(),
-        homelab_core::ops::guards::CADVISOR_COMPOSE.to_string(),
-    )];
-    let mut stacks: Vec<_> = std::fs::read_dir(stacks_dir())
-        .unwrap()
-        .flatten()
-        .map(|e| e.path())
-        .collect();
-    stacks.sort();
-    for stack in stacks {
-        let Ok(apps) = std::fs::read_dir(&stack) else {
-            continue;
-        };
-        for app in apps.flatten() {
-            let f = app.path().join("docker-compose.yml");
-            if f.is_file() {
-                files.push((
-                    f.strip_prefix(&root).unwrap().display().to_string(),
-                    std::fs::read_to_string(&f).unwrap(),
-                ));
-            }
-        }
-    }
     let mut manual = 0;
     let mut problems = Vec::new();
     let mut seen_untagged = Vec::new();
-    for (file, text) in &files {
-        for (svc, image, policy) in compose_services(text) {
+    for (file, text) in &all_compose_texts() {
+        for (svc, image, policy, _) in compose_services(text) {
             if policy.as_deref() != Some("manual") {
                 continue;
             }
@@ -825,4 +841,41 @@ fn the_template_pre_pulls_the_cadvisor_image_the_guard_pins() {
         !template.contains("cadvisor/cadvisor:latest"),
         "the template still pre-pulls cAdvisor by :latest"
     );
+}
+
+/// fix-83: the nightly round asks GitHub about each declared upstream, so a
+/// label it cannot ask is a notice that never comes. Every upstream label is
+/// `github.com/<owner>/<repo>`, sits on a `manual` service (an `auto` one
+/// moves by itself) pinned to a version it can compare, and the services the
+/// panel measured behind carry one.
+///
+/// covers: fix-83
+#[test]
+fn every_declared_upstream_is_one_the_nightly_round_can_ask() {
+    let mut declared = Vec::new();
+    let mut problems = Vec::new();
+    for (file, text) in all_compose_texts() {
+        for (svc, image, policy, upstream) in compose_services(&text) {
+            let Some(up) = upstream else { continue };
+            declared.push(svc.clone());
+            let repo = up.strip_prefix("github.com/").unwrap_or("");
+            if repo.split('/').filter(|p| !p.is_empty()).count() != 2 {
+                problems.push(format!("{} :: {} names '{}'", file, svc, up));
+            }
+            if policy.as_deref() != Some("manual") {
+                problems.push(format!("{} :: {} is not manual", file, svc));
+            }
+            if homelab_core::ops::pins::pinned_version(&image).is_none() {
+                problems.push(format!("{} :: {} has no version to compare", file, svc));
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    for svc in ["traefik", "cloudflared", "grafana", "crowdsec", "cadvisor"] {
+        assert!(
+            declared.iter().any(|d| d == svc),
+            "{} declares no upstream",
+            svc
+        );
+    }
 }

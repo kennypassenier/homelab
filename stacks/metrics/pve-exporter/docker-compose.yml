@@ -16,6 +16,7 @@ services:
       - "9221:9221"
     labels:
       - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/prometheus-pve/prometheus-pve-exporter
     networks:
       - metrics_net
 

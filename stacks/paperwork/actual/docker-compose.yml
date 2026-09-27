@@ -23,6 +23,7 @@ services:
       # Y1 class: manual. Actual migrates its budget file format on upgrade
       # and the migration is one-way, so a version step is a decision.
       - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/actualbudget/actual
     networks:
       - paperwork_net
 

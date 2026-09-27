@@ -81,6 +81,10 @@ pub const CADVISOR_COMPOSE: &str = r#"services:
       - "8081:8080"
     labels:
       - com.homelab.update.policy=manual
+      # fix-83: where the nightly round asks whether this pin is behind.
+      # cAdvisor moved its images from gcr.io to ghcr.io/google/cadvisor after
+      # v0.55; the notice says a newer release exists, not that gcr.io has it.
+      - com.homelab.update.upstream=github.com/google/cadvisor
 # No custom network on purpose: cadvisor has to run on EVERY docker host to
 # see that host's containers, and a stack network exists only on its own
 # stack. Prometheus scrapes the published port over the LAN, identically

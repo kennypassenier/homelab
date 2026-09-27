@@ -79,6 +79,7 @@ services:
       # .env that this stack does not have.
       - com.homelab.update.busy-check=jellyfin
       - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/jellyfin/jellyfin
     restart: unless-stopped
     networks:
       - media_net

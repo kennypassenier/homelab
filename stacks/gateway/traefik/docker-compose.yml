@@ -85,6 +85,7 @@ services:
       # read auto until 2026-09-02 (F192), so the ratified decision and
       # the fleet disagreed for as long as both existed.
       - "com.homelab.update.policy=manual"
+      - "com.homelab.update.upstream=github.com/traefik/traefik"
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 10s

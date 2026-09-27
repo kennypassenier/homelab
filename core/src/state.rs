@@ -171,6 +171,16 @@ pub struct HostState {
     /// becomes something nobody knows is there.
     #[serde(default)]
     pub retired: BTreeMap<String, RetiredRecord>,
+    /// fix-83 (manual-images-latest-unpinned, 2026-09-27): per stack, per
+    /// container, the image and digest each `manual` container ran when the
+    /// nightly round last looked. The stack file says what SHOULD run; this
+    /// says what did, read off the container.
+    #[serde(default)]
+    pub running_images: BTreeMap<String, BTreeMap<String, crate::ops::pins::RunningImage>>,
+    /// fix-83: the last answer about each declared upstream, cached so GitHub
+    /// is asked at most once a night.
+    #[serde(default)]
+    pub upstream_releases: BTreeMap<String, crate::ops::pins::UpstreamRelease>,
 }
 
 /// What kind of thing left the files.

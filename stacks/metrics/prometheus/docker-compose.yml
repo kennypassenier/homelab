@@ -21,6 +21,7 @@ services:
     labels:
       - com.homelab.backup.pause=true
       - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/prometheus/prometheus
     networks:
       - metrics_net
 

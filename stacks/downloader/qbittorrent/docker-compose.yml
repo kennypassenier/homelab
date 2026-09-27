@@ -96,4 +96,5 @@ services:
       # they are being written is how a torrent restarts from zero.
       - com.homelab.backup.pause=true
       - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/linuxserver/docker-qbittorrent
     restart: unless-stopped

@@ -68,6 +68,7 @@ services:
       - com.homelab.backup.pause=true
       # Paperless runs database migrations on start and they are one-way.
       - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/paperless-ngx/paperless-ngx
     networks:
       - paperwork_net
 

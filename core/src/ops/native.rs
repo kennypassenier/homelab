@@ -1099,6 +1099,47 @@ pub fn listed_sha(sums: &str, filename: &str) -> Option<String> {
     })
 }
 
+/// fix-116: the tag of `repo`'s latest release and the checksum its
+/// SHA256SUMS lists for `asset`. Used only to decide that nothing needs to be
+/// done; installing still goes through the signed path (`release_update`) or
+/// the service's own verb.
+async fn latest_listed_sha(
+    exec: &dyn Executor,
+    repo: &str,
+    asset: &str,
+) -> Result<(String, String), String> {
+    let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    let out = exec
+        .run(&Cmd::new(
+            "curl",
+            &[
+                "-sSL",
+                "-m",
+                "30",
+                "-H",
+                "Accept: application/vnd.github+json",
+                &url,
+            ],
+            60,
+        ))
+        .await
+        .map_err(|e| e.to_string())?;
+    if !out.success() {
+        return Err(out.stderr.trim().to_string());
+    }
+    let refs = parse_latest_release(&out.stdout, asset)?;
+    let sums = exec
+        .run(&Cmd::new("curl", &["-sSL", "-m", "60", &refs.sums_url], 90))
+        .await
+        .map_err(|e| e.to_string())?;
+    if !sums.success() {
+        return Err(sums.stderr.trim().to_string());
+    }
+    let sha = listed_sha(&sums.stdout, asset)
+        .ok_or_else(|| format!("SHA256SUMS of {} lists no '{}'", refs.tag, asset))?;
+    Ok((refs.tag, sha))
+}
+
 /// B1: the orchestrator's own update of a native service, from the host.
 ///
 /// The client's `install-native` fetches through `gh`; the host has no `gh`
@@ -1397,7 +1438,7 @@ pub async fn update_native(
     });
 
     let mut before = String::new();
-    step!(runner, "preserve binary", {
+    step!(runner, "read the installed binary", {
         let sum = util_pct_sh(
             exec,
             m.vmid,
@@ -1406,6 +1447,40 @@ pub async fn update_native(
         )
         .await?;
         before = sum.stdout.trim().to_string();
+        Ok(StepOutcome::Unchanged)
+    });
+
+    // fix-116 (native-update-copies-binary-nightly, 2026-09-27): the binary
+    // was copied aside and the service's own update run every night for every
+    // service, 40 MB for kyu on CT 109's small rootfs, even when the latest
+    // release was the one installed. The release is asked first, as
+    // `release_update` does, and a service already on it is left alone. When
+    // the release cannot be read the service's own update decides, as before.
+    if let Some(repo) = &m.release_repo {
+        match latest_listed_sha(exec, repo, m.asset_name()).await {
+            Ok((tag, listed)) if !before.is_empty() && listed.eq_ignore_ascii_case(&before) => {
+                runner.log(
+                    Level::Info,
+                    format!(
+                        "[update] {} already runs {} of {} — nothing copied, no update run",
+                        m.unit, tag, repo
+                    ),
+                );
+                return runner.finish_ok();
+            }
+            Ok(_) => {}
+            Err(why) => runner.log(
+                Level::Info,
+                format!(
+                    "[update] could not read the latest release of {} ({}) — the service's own \
+                     update decides",
+                    repo, why
+                ),
+            ),
+        }
+    }
+
+    step!(runner, "preserve binary", {
         let out = util_pct_sh(exec, m.vmid, &preserve_script(&m.binary, &prev), 60).await?;
         if !out.success() {
             return Err(CoreError::Other(format!(

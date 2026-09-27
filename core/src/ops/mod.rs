@@ -34,6 +34,7 @@ pub mod manualchecks;
 pub mod mirror;
 pub mod monitors;
 pub mod native;
+pub mod night;
 pub mod patch;
 pub mod pins;
 pub mod reconcile;

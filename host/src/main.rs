@@ -2379,6 +2379,7 @@ fn bearer_ok(header: Option<&str>, token: &str) -> bool {
 }
 
 use homelab_core::ops::backup::NightBackup;
+use homelab_core::ops::night::{BackupWork, UpdateWork};
 
 /// Y1: the nightly backups, several at a time.
 ///
@@ -2425,7 +2426,7 @@ async fn run_backup_batch(
         .map(|job| async move {
             let name = job.stack.clone();
             let outcome = match job.what {
-                BackupWhat::Compose(manifest) => {
+                BackupWork::Compose(manifest) => {
                     let cfg = job.cfg.clone();
                     let r = run_op_locked(state, exec, 0, "scheduled-backup", |ctx| {
                         Box::pin(async move {
@@ -2440,7 +2441,7 @@ async fn run_backup_batch(
                 // they share a container and a fate. Sequential WITHIN a
                 // stack: they are on the same container, so overlapping their
                 // pauses would stop that container twice over.
-                BackupWhat::Native(services) => {
+                BackupWork::Native(services) => {
                     let mut worst = NightBackup::Done;
                     for native in services {
                         let cfg = job.cfg.clone();
@@ -2474,16 +2475,12 @@ async fn run_backup_batch(
     results.into_iter().collect()
 }
 
-/// One stack's share of the nightly backup phase.
+/// One stack's share of the nightly backup phase; what it backs up is
+/// decided in core (`ops::night::backup_work`).
 struct BackupJob {
     stack: String,
-    what: BackupWhat,
+    what: BackupWork,
     cfg: homelab_core::ops::backup::BackupCfg,
-}
-
-enum BackupWhat {
-    Compose(Box<homelab_proto::StackManifest>),
-    Native(Vec<homelab_core::native::NativeServiceManifest>),
 }
 
 /// E4: check every 20 minutes; when the local hour matches `hour` and a
@@ -2588,24 +2585,20 @@ async fn scheduler_loop(state: AppState) {
         //
         // Backups before updates also orders the night sensibly on its own:
         // everything is safe on disk before anything is replaced.
+        // host-monolith-untested (2026-09-27): what each stack gets tonight
+        // is decided in core (`ops::night`, tested there); this loop runs it.
         let backup_jobs: Vec<BackupJob> = snapshot
             .stacks
             .iter()
             .filter(|(name, _)| plan.contains(&NightlyTask::Stack((*name).clone())))
             .filter_map(|(name, st)| {
-                let cfg = homelab_core::ops::backup::BackupCfg {
-                    tiers: tiers.clone(),
-                    ..state.config.backup.clone()
-                };
-                let what = if st.is_native() {
-                    BackupWhat::Native(st.natives.clone())
-                } else {
-                    BackupWhat::Compose(Box::new(st.manifest.clone()?))
-                };
                 Some(BackupJob {
                     stack: name.clone(),
-                    what,
-                    cfg,
+                    what: homelab_core::ops::night::backup_work(st)?,
+                    cfg: homelab_core::ops::backup::BackupCfg {
+                        tiers: tiers.clone(),
+                        ..state.config.backup.clone()
+                    },
                 })
             })
             .collect();
@@ -2614,72 +2607,29 @@ async fn scheduler_loop(state: AppState) {
 
         let updates_parked = snapshot.updates_parked.clone();
         for (name, st) in snapshot.stacks {
-            if !plan.contains(&NightlyTask::Stack(name.clone())) {
-                if !st.enabled {
-                    // H8: parked stack — no nightly backup, no auto-update.
-                    info!("scheduler: stack {} is disabled — skipped", name);
+            // Y1: the backup already ran in the batch above; a stack it did
+            // not report on counts as failed.
+            let backup = backup_done
+                .get(&name)
+                .cloned()
+                .unwrap_or(NightBackup::Failed);
+            let night = homelab_core::ops::night::stack_night(
+                &name,
+                &st,
+                plan.contains(&NightlyTask::Stack(name.clone())),
+                updates_parked.contains_key(&name),
+                &backup,
+            );
+            for (level, line) in &night.lines {
+                match level {
+                    homelab_core::sink::Level::Warn | homelab_core::sink::Level::Error => {
+                        tracing::warn!("{}", line)
+                    }
+                    _ => info!("{}", line),
                 }
-                continue;
             }
-            // C7: native stacks get the in-container backup + supervised
-            // self-update instead of the compose pair; same bookkeeping,
-            // same H8 auto-disable on a failed night.
-            if st.is_native() {
-                info!(
-                    "scheduler: nightly run for {} ({} native service(s))",
-                    name,
-                    st.natives.len()
-                );
-                // T5: several services share the container, so every one of
-                // them is backed up and updated. One failure fails the night
-                // for the stack — the H8 auto-disable below is deliberately
-                // per stack, because they share a container and a fate.
-                // Y1: the backup already ran in the batch above.
-                let backup = backup_done
-                    .get(&name)
-                    .cloned()
-                    .unwrap_or(NightBackup::Failed);
-                let mut update_ok = true;
-                let applied = Some(st.applied_at);
-                // fix-59: a stack whose updates a failed night parked is
-                // still backed up above, and not updated here.
-                let natives: &[homelab_core::native::NativeServiceManifest] =
-                    if updates_parked.contains_key(&name) {
-                        info!(
-                            "scheduler: automatic updates of {} are parked — skipped; \
-                             `homelab enable {}` resumes them",
-                            name, name
-                        );
-                        &[]
-                    } else if !backup.allows_update() {
-                        info!("{}", backup.update_skip_line(&name));
-                        &[]
-                    } else {
-                        &st.natives
-                    };
-                // B1: the orchestrator's own release update, for the
-                // services whose policy hands it to the orchestrator.
-                for native in natives.iter().filter(|n| n.nightly_updates().release) {
-                    let native = native.clone();
-                    let r = run_mutating_op(&state, &exec, 0, "scheduled-release-update", |ctx| {
-                        Box::pin(async move {
-                            homelab_core::ops::native::release_update(ctx, &native).await
-                        })
-                    })
-                    .await;
-                    update_ok &= r.ok;
-                }
-                for native in natives.iter().filter(|n| n.nightly_updates().own_cmd) {
-                    let n2 = native.clone();
-                    let r = run_mutating_op(&state, &exec, 0, "scheduled-update-native", |ctx| {
-                        Box::pin(async move {
-                            homelab_core::ops::native::update_native(ctx, &n2, applied).await
-                        })
-                    })
-                    .await;
-                    update_ok &= r.ok;
-                }
-                if backup.records_a_timestamp() {
+            let record_backup = || async {
+                if night.record_last_backup {
                     record_state(&store, "last_backup", |s| {
                         if let Some(rec) = s.stacks.get_mut(&name) {
                             rec.last_backup = now;
@@ -2687,55 +2637,58 @@ async fn scheduler_loop(state: AppState) {
                     })
                     .await;
                 }
-                // fix-59: only a failed update parks, and only the updates; a
-                // failed or deferred backup is simply tried again tomorrow.
-                park_after_night(&state, &exec, &store, &name, update_ok, now).await;
-                continue;
-            }
-            let Some(manifest) = st.manifest else {
-                tracing::warn!("scheduler: stack {} has no stored manifest — skipped", name);
-                continue;
             };
-            info!("scheduler: nightly run for {}", name);
-            // Y1: the backup already ran in the batch above.
-            let backup = backup_done
-                .get(&name)
-                .cloned()
-                .unwrap_or(NightBackup::Failed);
-            if backup.records_a_timestamp() {
-                // Record last_backup so tomorrow's check is accurate.
-                record_state(&store, "last_backup", |s| {
-                    if let Some(rec) = s.stacks.get_mut(&name) {
-                        rec.last_backup = now;
+            let update_ok = match &night.updates {
+                UpdateWork::None => {
+                    record_backup().await;
+                    true
+                }
+                UpdateWork::Compose(manifest) => {
+                    record_backup().await;
+                    let m2 = (**manifest).clone();
+                    run_mutating_op(&state, &exec, 0, "scheduled-update", |ctx| {
+                        Box::pin(async move {
+                            homelab_core::ops::update::update(ctx, &m2, None, true).await
+                        })
+                    })
+                    .await
+                    .ok
+                }
+                // T5: one failure fails the night for the stack; the services
+                // share a container and a fate.
+                UpdateWork::Native { release, own_cmd } => {
+                    let mut ok = true;
+                    for native in release.clone() {
+                        let r =
+                            run_mutating_op(&state, &exec, 0, "scheduled-release-update", |ctx| {
+                                Box::pin(async move {
+                                    homelab_core::ops::native::release_update(ctx, &native).await
+                                })
+                            })
+                            .await;
+                        ok &= r.ok;
                     }
-                })
-                .await;
+                    let applied = Some(st.applied_at);
+                    for native in own_cmd.clone() {
+                        let r =
+                            run_mutating_op(&state, &exec, 0, "scheduled-update-native", |ctx| {
+                                Box::pin(async move {
+                                    homelab_core::ops::native::update_native(ctx, &native, applied)
+                                        .await
+                                })
+                            })
+                            .await;
+                        ok &= r.ok;
+                    }
+                    record_backup().await;
+                    ok
+                }
+            };
+            // H8, fix-59: a failed nightly update parks the stack's updates —
+            // one loud message, then silence. State-only; the backups go on.
+            if night.settle_park {
+                park_after_night(&state, &exec, &store, &name, update_ok, now).await;
             }
-            // fix-59: parked updates are skipped; the backup above still ran.
-            if updates_parked.contains_key(&name) {
-                info!(
-                    "scheduler: automatic updates of {} are parked — skipped; \
-                     `homelab enable {}` resumes them",
-                    name, name
-                );
-                continue;
-            }
-            if !backup.allows_update() {
-                info!("{}", backup.update_skip_line(&name));
-                continue;
-            }
-            let m2 = manifest.clone();
-            let update_report = run_mutating_op(&state, &exec, 0, "scheduled-update", |ctx| {
-                Box::pin(
-                    async move { homelab_core::ops::update::update(ctx, &m2, None, true).await },
-                )
-            })
-            .await;
-            // H8: a failed nightly update parks the stack's updates — one
-            // loud message, then silence instead of a fresh failure every
-            // night. State-only: onboot and the running containers are
-            // untouched, and since fix-59 the nightly backup goes on.
-            park_after_night(&state, &exec, &store, &name, update_report.ok, now).await;
         }
 
         // H10: the host's own crown jewels — the secrets vault (holding the

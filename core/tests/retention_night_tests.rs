@@ -65,3 +65,28 @@ fn fix_42_the_kept_older_snapshots_stay_put_from_night_to_night() {
         "older snapshots churned overnight: {a:?} -> {b:?}"
     );
 }
+
+#[test]
+fn fix_42_a_backup_a_few_minutes_earlier_than_yesterday_keeps_every_daily() {
+    // Live on 2026-09-27: the nightly ran at 04:14-04:16 local, so one night's
+    // snapshot was often less than 24 hours old when the next run looked at
+    // it. Counted in whole days from `now` it was "0 days old", shared bucket
+    // 0 with the new one and was forgotten: HDD2TB/paperless_media held
+    // 09-22, 09-26 and 09-27 but not 09-23 to 09-25.
+    let start = 1_780_000_000u64;
+    let mut snaps: Vec<(String, u64)> = Vec::new();
+    let at = |n: u64| start + n * DAY + if n.is_multiple_of(2) { 0 } else { 180 };
+    for n in 0..60u64 {
+        // Alternate a few minutes earlier and later than the day before.
+        let now = at(n);
+        snaps.push((format!("s{n}"), now));
+        let forget = forget_list(&snaps, &default_tiers(), now);
+        snaps.retain(|(id, _)| !forget.contains(id));
+    }
+    let now = at(59);
+    let mut ages: Vec<u64> = snaps.iter().map(|(_, t)| (now - t) / DAY).collect();
+    ages.sort();
+    for d in 0..7 {
+        assert!(ages.contains(&d), "daily {d} missing: {ages:?}");
+    }
+}

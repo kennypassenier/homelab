@@ -341,7 +341,9 @@ impl Model {
         Self {
             screen: Screen::Splash,
             tab: Tab::Dashboard,
-            fx: FxLevel::Full,
+            // fix-106 (tui-not-calm, 2026-09-27): calm unless F2 said
+            // otherwise; `tui::run` restores the level F2 last saved.
+            fx: FxLevel::Off,
             tick: 0,
             reveal_start: 0,
             flicker: 0,
@@ -394,11 +396,11 @@ impl Model {
         }
     }
 
+    /// fix-106 (tui-not-calm, 2026-09-27): always whole. Hostnames and
+    /// doctor lines used to "decrypt" in on every tab switch; text that
+    /// carries meaning is never animated.
     pub fn reveal_progress(&self) -> f32 {
-        if self.fx == FxLevel::Off {
-            return 1.0; // no reveal animation when effects are off
-        }
-        ((self.tick.saturating_sub(self.reveal_start)) as f32 / 9.0).min(1.0)
+        1.0
     }
 
     /// H7: a host update is available when the newest release outruns the
@@ -488,7 +490,8 @@ pub fn update(model: &mut Model, msg: Msg) {
                 t.age = t.age.saturating_add(1);
             }
             model.transfers.retain(|t| t.age < 30);
-            if model.screen == Screen::Splash && model.tick > 120 {
+            // fix-106: with effects off there is no four-second splash.
+            if model.screen == Screen::Splash && (model.fx == FxLevel::Off || model.tick > 120) {
                 enter_main(model);
             }
         }

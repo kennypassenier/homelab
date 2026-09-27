@@ -82,7 +82,7 @@ pub fn draw(f: &mut Frame, model: &Model) {
         focus::draw(f, model, fc);
     }
     if let Some(plan) = &model.plan {
-        draw_plan(f, model, plan);
+        draw_plan(f, plan);
     }
     if let Some(wiz) = &model.wizard {
         draw_wizard(f, model, wiz);
@@ -184,7 +184,7 @@ fn draw_yes_no(f: &mut Frame, q: &crate::tui::model::YesNo) {
     );
 }
 
-fn draw_plan(f: &mut Frame, model: &Model, plan: &crate::tui::model::Plan) {
+fn draw_plan(f: &mut Frame, plan: &crate::tui::model::Plan) {
     let area = f.area();
     let w = 72u16.min(area.width - 4);
     let h = (plan.lines.len() as u16 + 5).min(area.height - 4);
@@ -195,13 +195,8 @@ fn draw_plan(f: &mut Frame, model: &Model, plan: &crate::tui::model::Plan) {
         height: h,
     };
     f.render_widget(Clear, rect);
-    let title = fx::glitch(
-        &format!("CHANGE_PLAN :: {}", plan.stack),
-        0xB1A5,
-        model.tick,
-        model.fx,
-    )
-    .unwrap_or_else(|| format!("CHANGE_PLAN :: {}", plan.stack));
+    // fix-106: titles are read, so they never scramble.
+    let title = format!("CHANGE_PLAN :: {}", plan.stack);
     let block = Block::bordered()
         .border_type(BorderType::Double)
         .border_style(THEME.border_modal())
@@ -582,17 +577,16 @@ fn draw_tab_bar(f: &mut Frame, model: &Model, area: Rect) {
         .map(|t| {
             let label = t.title();
             if *t == model.tab {
-                let text = fx::glitch(label, 0xAB ^ t.index() as u64, model.tick, model.fx)
-                    .unwrap_or_else(|| label.to_string());
-                Line::from(Span::styled(format!(" {} ", text), THEME.title_active()))
+                Line::from(Span::styled(format!(" {} ", label), THEME.title_active()))
             } else {
                 Line::from(Span::styled(format!(" {} ", label), THEME.title_inactive()))
             }
         })
         .collect();
 
-    let title = fx::glitch("HOMELAB :: CONTROL_DECK", 0xC0DE, model.tick, model.fx)
-        .unwrap_or_else(|| "HOMELAB :: CONTROL_DECK".into());
+    // fix-106 (tui-not-calm, 2026-09-27): tab labels and titles used to
+    // scramble into glyphs at random; text that carries meaning stands still.
+    let title = "HOMELAB :: CONTROL_DECK".to_string();
 
     let (dot, conn_txt, conn_style) = match model.conn {
         Conn::Up => ("● ", "HOST_LINK", THEME.ok()),
@@ -736,7 +730,10 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
         c.extend(calm);
         (c, THEME.faint)
     };
-    let text = fx::ticker_text(&segs, area.width, model.tick);
+    // fix-106 (tui-not-calm, 2026-09-27): the alerts used to scroll past as
+    // a marquee, so reading one meant waiting for it. They stand still; what
+    // does not fit is counted, and the TODAY panel lists everything.
+    let text = static_line(&segs, area.width as usize);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             text,
@@ -744,6 +741,28 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
         ))),
         area,
     );
+}
+
+/// fix-106: as many whole segments as fit in `width`, then how many more.
+fn static_line(segs: &[String], width: usize) -> String {
+    let mut out = String::new();
+    for (i, seg) in segs.iter().enumerate() {
+        let sep = if out.is_empty() { "" } else { "  ::  " };
+        let rest = segs.len() - i - 1;
+        let more = if rest > 0 {
+            format!("  ::  +{} more", rest)
+        } else {
+            String::new()
+        };
+        let need = out.chars().count() + sep.chars().count() + seg.chars().count();
+        if need + more.chars().count() > width && !out.is_empty() {
+            out.push_str(&format!("  ::  +{} more", segs.len() - i));
+            return out.chars().take(width).collect();
+        }
+        out.push_str(sep);
+        out.push_str(seg);
+    }
+    out.chars().take(width).collect()
 }
 
 fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
@@ -955,7 +974,9 @@ fn draw_palette(f: &mut Frame, model: &Model) {
 
 /// Shared panel title helper.
 pub fn panel_title(text: &str, id: u64, model: &Model) -> Line<'static> {
-    let t = fx::glitch(text, id, model.tick, model.fx).unwrap_or_else(|| text.to_string());
+    // fix-106: never scrambled; `id` and the effect level no longer matter.
+    let _ = (id, model.fx);
+    let t = text.to_string();
     Line::from(vec![
         Span::styled(" [ ", Style::new().fg(THEME.faint)),
         Span::styled(t, THEME.title_active()),

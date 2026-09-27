@@ -37,6 +37,39 @@ impl FxLevel {
             FxLevel::Full => "FX:FULL",
         }
     }
+    fn word(self) -> &'static str {
+        match self {
+            FxLevel::Off => "off",
+            FxLevel::Subtle => "subtle",
+            FxLevel::Full => "full",
+        }
+    }
+}
+
+/// fix-106 (tui-not-calm, 2026-09-27): where F2's choice is kept, so the
+/// next launch starts where the operator left it instead of at full effects.
+pub fn fx_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(home).join(".config/homelab/tui-fx")
+}
+
+/// fix-106: the saved level; `None` when nothing (readable) was saved.
+pub fn load_fx(path: &std::path::Path) -> Option<FxLevel> {
+    match std::fs::read_to_string(path).ok()?.trim() {
+        "off" => Some(FxLevel::Off),
+        "subtle" => Some(FxLevel::Subtle),
+        "full" => Some(FxLevel::Full),
+        _ => None,
+    }
+}
+
+/// fix-106: keep F2's choice. Best effort: a level that cannot be saved is
+/// still the level on the screen.
+pub fn save_fx(path: &std::path::Path, level: FxLevel) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, format!("{}\n", level.word()));
 }
 
 fn hash2(a: u64, b: u64) -> u64 {

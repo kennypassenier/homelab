@@ -217,7 +217,7 @@ Source: `client/src/tui/model.rs:36-45,751-761`.
 |---|---|---|
 | `TAB` / `SHIFT+TAB` | next / previous tab | `client/src/tui/model.rs:726-733` |
 | `CTRL+K` or `CTRL+P` | command palette (G3) | `client/src/tui/model.rs:716-720` |
-| `F2` | cycle effects `FX:OFF` → `FX:SUBTLE` → `FX:FULL` | `client/src/tui/model.rs:721-724`, `client/src/tui/fx.rs:26-39` |
+| `F2` | cycle effects `FX:OFF` → `FX:SUBTLE` → `FX:FULL`; the choice is kept for the next launch (fix-106) | `client/src/tui/model.rs:721-724`, `client/src/tui/fx.rs:26-39` |
 | `h` | key map; `ESC`, `h` or `ENTER` closes it | `client/src/tui/model.rs:652-657,725` |
 | `q` | quit; asks `y` first when settings are unsaved or an operation sent to the background still runs (fix-102) | `client/src/tui/model.rs:714` |
 
@@ -1679,11 +1679,14 @@ The command exits 1 only when a check is `Fail`.
 
 #### G1 · The control deck
 
-**Status:** Built. Section 1 covers the keys. A splash screen opens on any
-key or by itself after a moment (`client/src/tui/model.rs:403-405,612-615`).
-Effects cycle with `F2`; with effects off there is no reveal animation
-(`client/src/tui/model.rs:344-349`). Screens are covered by snapshot tests in
-`client/tests/tui_snapshot_tests.rs`.
+**Status:** Built. Section 1 covers the keys. The TUI starts with effects
+off, or at the level `F2` last chose, which it keeps in
+`~/.config/homelab/tui-fx` (fix-106). With effects on, a splash screen opens
+on any key or by itself after a moment; with them off there is none. Text
+that carries meaning never moves at any level: titles and tab labels do not
+scramble, names and doctor lines do not "decrypt" in, and the alert line
+under the panels stands still, ending in `+<n> more` when it does not fit.
+Screens are covered by snapshot tests in `client/tests/tui_snapshot_tests.rs`.
 
 #### G2 · New-stack wizard
 

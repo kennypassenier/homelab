@@ -33,7 +33,9 @@ pub fn draw(f: &mut Frame, model: &Model, focus: &Focus) {
     } else {
         THEME.border_modal()
     };
-    let t = fx::glitch(&title, 0x30DA1, model.tick, model.fx).unwrap_or(title);
+    // fix-106 (tui-not-calm, 2026-09-27): the title names the operation;
+    // it never scrambles.
+    let t = title;
     let block = Block::bordered()
         .border_type(BorderType::Double)
         .border_style(border)

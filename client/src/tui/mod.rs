@@ -54,6 +54,13 @@ pub async fn run(
         model.stacks_dir = root.join("stacks");
         model.presets_dir = root.join("presets");
     }
+    // fix-106 (tui-not-calm, 2026-09-27): start at the effect level F2 last
+    // chose; nothing saved means off.
+    let fx_file = fx::fx_path();
+    if let Some(level) = fx::load_fx(&fx_file) {
+        model.fx = level;
+    }
+    let mut saved_fx = model.fx;
     model.local_stacks = crate::spec::scan_local_stacks(&model.stacks_dir);
     model.presets = crate::scaffold::scan_presets(&model.presets_dir);
 
@@ -72,6 +79,11 @@ pub async fn run(
 
     while !model.should_quit {
         terminal.draw(|f| view::draw(f, &model))?;
+        // fix-106: F2 (or the palette) changed the level: keep it.
+        if model.fx != saved_fx {
+            fx::save_fx(&fx_file, model.fx);
+            saved_fx = model.fx;
+        }
 
         tokio::select! {
             maybe = events.next() => {

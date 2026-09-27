@@ -2996,6 +2996,62 @@ fn fix_105_the_header_names_the_client_and_the_host_version() {
     assert!(out.contains("host v3.59.6"), "{}", out);
 }
 
+/// tui-not-calm (expert panel, 2026-09-27): every launch started at full
+/// effects and F2's choice was forgotten. The TUI starts with effects off and
+/// reads back the level F2 last chose.
+/// covers: fix-106
+#[test]
+fn fix_106_the_tui_starts_calm_and_remembers_f2() {
+    use homelab_client::tui::fx::{load_fx, save_fx, FxLevel};
+    assert!(Model::new().fx == FxLevel::Off, "effects on at launch");
+    let dir = std::env::temp_dir().join(format!("homelab-fx-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("tui-fx");
+    assert!(load_fx(&path).is_none(), "nothing saved yet");
+    save_fx(&path, FxLevel::Subtle);
+    assert!(load_fx(&path) == Some(FxLevel::Subtle));
+    std::fs::write(&path, "loud\n").unwrap();
+    assert!(load_fx(&path).is_none(), "an unknown word is no choice");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Panel titles, tab labels and the header scrambled into glyphs at random,
+/// and the alert line scrolled, so an alarm had to be waited for. With every
+/// effect on, text that carries meaning stands still.
+/// covers: fix-106
+#[test]
+fn fix_106_meaningful_text_never_moves() {
+    let mut m = ready_model();
+    m.fx = homelab_client::tui::fx::FxLevel::Full;
+    let first_ticker = {
+        let out = render(&m);
+        let cells: Vec<char> = out.chars().collect();
+        cells[cells.len() - 240..cells.len() - 120]
+            .iter()
+            .collect::<String>()
+    };
+    for tick in (0..900).step_by(3) {
+        m.tick = tick;
+        m.flicker = 0;
+        let out = render(&m);
+        assert!(
+            out.contains("HOMELAB :: CONTROL_DECK"),
+            "tick {}: {}",
+            tick,
+            out
+        );
+        assert!(out.contains(" DASHBOARD "), "tick {}", tick);
+        assert!(out.contains("HOST_MESH"), "tick {}", tick);
+        let cells: Vec<char> = out.chars().collect();
+        let ticker: String = cells[cells.len() - 240..cells.len() - 120].iter().collect();
+        assert_eq!(
+            ticker, first_ticker,
+            "the alert line moved at tick {}",
+            tick
+        );
+    }
+}
+
 fn press(m: &mut Model, code: crossterm::event::KeyCode) {
     use crossterm::event::{KeyEvent, KeyModifiers};
     homelab_client::tui::model::update(m, Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)));

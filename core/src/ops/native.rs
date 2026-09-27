@@ -529,16 +529,19 @@ pub async fn backup_native(
     });
 
     step!(runner, "init repo", {
-        // Fails harmlessly when the repo already exists — same as host-meta.
-        let _ = ctx
-            .exec
-            .run(&crate::ops::backup::restic_cmd(
-                cfg,
+        // gap-24: the answer is read, as for compose stacks and host-meta.
+        let init = crate::ops::backup::restic_cmd(cfg, &m.unit, &["init"], 120);
+        let outcome = crate::ops::backup::init_repository(ctx.exec, &init, &m.unit).await?;
+        if outcome == crate::ops::backup::InitOutcome::Created {
+            crate::ops::backup::same_password_as_host_meta(
+                ctx.exec,
+                &cfg.restic_base,
+                &cfg.password_file,
                 &m.unit,
-                &["init"],
-                120,
-            ))
-            .await;
+            )
+            .await?;
+            return Ok(StepOutcome::Changed);
+        }
         Ok(StepOutcome::Unchanged)
     });
 

@@ -9,6 +9,9 @@ The files directly in this directory describe the OLD three-binary system
 (CLIENT + HOST + per-container LXC daemon, latch secrets, GHCR images) that
 the v2 rewrite replaced in August 2026. `ui-guidelines.md` belongs here too:
 it set rules for the `client-app` Ratatui binary, which no longer exists.
+`config.env.example-pre-v2` was `config/.env.example` until 2026-09-27: every
+key in it (LXC daemon, OPNsense sync, GitOps, v1 latch) belongs to the old
+system, and nothing in the current code reads it (gap-29).
 
 ## Finished work of the current system
 

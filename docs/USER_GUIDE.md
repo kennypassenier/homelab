@@ -1876,9 +1876,9 @@ shows it.
 | 10 | C6 has no overcommit warning in the wizard | `client/src/tui/model.rs:1806-1900` |
 | 11 | Fixed in v3.58.4 (gap-19): without a local `stacks/` directory, TUI backup and restore now refuse instead of acting on a manifest with no storage (section 1.3) | `client/src/tui/model.rs`, `start_stack_op` |
 | 12 | After the wizard, the status line says `SHIFT+D`, which deploys the stack under the cursor, not the new one | `client/src/tui/model.rs:1945-1949,1287-1295` |
-| 13 | Two placeholder texts name `R` where refresh is `r` | `client/src/tui/view/stacks.rs:30`, `client/src/tui/view/doctor.rs:28` |
+| 13 | Fixed in v3.58.4 (gap-21): the placeholders name `r` | `client/src/tui/view/stacks.rs`, `client/src/tui/view/doctor.rs` |
 | 14 | `homelab new` and `homelab testplan` need a token although they never connect | `client/src/main.rs:144-150` |
 | 15 | `destroy`, `resize` and `prune-orphans` need latch for stacks with `latch_secrets` although they send no secret | `client/src/main.rs:487,923,953` |
-| 16 | The help line `homelab export\|import <file>        move state between hosts` describes stack bundles, not host state | `client/src/main.rs:1048` |
+| 16 | Fixed in v3.58.4 (gap-29): the help line for `export\|import` says it writes or reads a stack-definition bundle | `client/src/main.rs` |
 | 17 | `homelab guards` and `homelab patch` skip the hostname guard (A2) | `host/src/main.rs:3687-3700`, `core/src/ops/patch.rs` |
 | 18 | The DASHBOARD's online dot and app states are not measured: the host reports every recorded stack online and every app running | `host/src/main.rs:4216-4229` |

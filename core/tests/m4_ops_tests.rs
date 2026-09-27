@@ -3504,3 +3504,92 @@ async fn gap_28_restore_refuses_a_native_unit_instead_of_dropping_its_tar_on_the
     assert!(text.contains("native"), "{text}");
     assert!(text.contains("OPERATIONS_RUNBOOK"), "{text}");
 }
+
+/// gap-24: `restic init` was run and its answer thrown away. An init that
+/// fails for any reason other than "this repository already exists" (a
+/// permission error, a dead remote) now stops the backup at that step.
+///
+/// covers: gap-24
+#[tokio::test]
+async fn gap_24_an_init_failure_other_than_already_exists_stops_the_backup() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always(
+        "restic init",
+        CmdOutput::failed(
+            1,
+            "Fatal: create key in repository failed: permission denied",
+        ),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(!report.ok);
+    let err = report.error.expect("an error");
+    assert!(err.what.contains("init repos"), "{:?}", err);
+    assert!(exec.calls_containing("restic backup").is_empty());
+}
+
+/// gap-24: an existing repository answers `init` with "already exists" or
+/// "already initialized", which is the normal case every night.
+///
+/// covers: gap-24
+#[tokio::test]
+async fn gap_24_an_existing_repository_is_not_an_error() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always(
+        "restic init",
+        CmdOutput::failed(
+            1,
+            "Fatal: create repository at rclone:gdrive:homelab-backups/app-config failed: \
+             config file already exists",
+        ),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+}
+
+/// gap-24: a repository created tonight must open with the same password as
+/// host-meta-config. A regenerated password file would otherwise encrypt new
+/// repositories with a key the offline copy cannot open, silently.
+///
+/// covers: gap-24
+#[tokio::test]
+async fn gap_24_a_new_repository_whose_password_does_not_open_host_meta_is_refused() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always(
+        "restic init",
+        CmdOutput::ok("created restic repository 1a2b3c"),
+    );
+    exec.respond_always(
+        "host-meta-config RESTIC_PASSWORD_FILE",
+        CmdOutput::failed(1, "Fatal: wrong password or no key found"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(!report.ok, "the backup must stop");
+    let err = report.error.expect("an error");
+    let text = format!("{} {} {}", err.what, err.why, err.remedy);
+    assert!(text.contains("host-meta"), "{text}");
+    assert!(exec.calls_containing("restic backup").is_empty());
+}

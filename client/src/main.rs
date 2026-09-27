@@ -989,7 +989,7 @@ async fn main() {
         _ => {
             println!("homelab v{} — usage:", env!("CARGO_PKG_VERSION"));
             println!("  homelab ping|status|doctor|incidents");
-            println!("  homelab plan stacks/<name>          validate locally (no network)");
+            println!("  homelab plan stacks/<name>          validate and show the spec (no host; runs latch/gh for secrets and native releases)");
             println!("  homelab deploy stacks/<name>");
             println!("  homelab backup stacks/<name>        restic snapshot (E1)");
             println!("  homelab restore stacks/<name> [snap]  restore from snapshot (E2)");
@@ -1045,7 +1045,9 @@ async fn main() {
                 "  homelab checks                      the questions only a person can answer (G17)"
             );
             println!("  homelab checks answer <id> ok|nok [note]   record one of those answers");
-            println!("  homelab export|import <file>        move state between hosts");
+            println!(
+                "  homelab export|import <file>        write or read a stack-definition bundle"
+            );
             println!("  homelab tui                         the terminal interface (G1)");
             println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");
             println!("cert pin: ~/.config/homelab/pin (auto on first connect)");

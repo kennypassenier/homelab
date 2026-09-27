@@ -100,7 +100,7 @@ endif
 	# There was no rehearsal mode at all before 2026-09-02, and a target
 	# whose only mode is "do it for real" gets rehearsed in production.
 ifdef DRY
-	@echo "✓ dry run for v$(VERSION): every check passed, nothing tagged or pushed"
+	@echo "✓ dry run for v$(VERSION): version and tag checks passed; the gate (fmt, clippy, tests) was NOT run; nothing tagged or pushed"
 else
 	$(MAKE) gate
 	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml

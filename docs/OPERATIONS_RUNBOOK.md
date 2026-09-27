@@ -262,8 +262,9 @@ Workstation, repository root, unless stated.
    (`core/src/ops/deploy.rs:355-452`); for a new app there is none and the
    log says `"is empty and has no snapshot"`.
 6. **First backup.** `homelab backup stacks/<name>`. Creates the
-   repositories (`restic init` is idempotent,
-   `core/src/ops/backup.rs:493-507`) and records the time
+   repositories (`restic init` answers "config file already exists" for an
+   existing one, which the backup treats as normal; any other failure stops
+   it, `init_repository` in `core/src/ops/backup.rs`) and records the time
    (`host/src/main.rs:3334-3350`). An app name that another stack already
    uses owns the same repository; the stack recorded later is refused
    (`core/src/ops/backup.rs:315-373`).
@@ -488,8 +489,9 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
 
 1. **Rehearse.** `make release VERSION=x.y.z DRY=1`. Checks the version
    format, a clean tree, that the tag is new, and the CI verdict on `HEAD`;
-   ends with `"every check passed, nothing tagged or pushed"`
-   (`Makefile:51-104`). Refusals: `"working tree not clean"`,
+   ends with `"version and tag checks passed; the gate (fmt, clippy, tests)
+   was NOT run; nothing tagged or pushed"` (`Makefile`; it said "every check
+   passed" until gap-29, while the gate never ran). Refusals: `"working tree not clean"`,
    `"already exists"`, `"refusing: CI on HEAD says"`.
 2. **Release.** `make release VERSION=x.y.z`. Runs `make gate`, stamps the
    version, commits `release: vx.y.z [meta]`, tags and pushes
@@ -778,12 +780,12 @@ Layer 1.
 
 | Credential | Lives (code) | Renew or rotate |
 |---|---|---|
-| API bearer token | host: `token` in `host.toml`, or `HOMELAB_TOKEN` in the daemon's environment, which wins (`host/src/main.rs:409-419`); every workstation: `HOMELAB_TOKEN`, `~/.config/homelab/env` or `./.env` (`client/src/main.rs:45-87`) | op-17 K3d |
+| API bearer token | host: `token` in `host.toml`, or `HOMELAB_TOKEN` in the daemon's environment, which wins (`host/src/main.rs:409-419`); every workstation: `HOMELAB_TOKEN`, `~/.config/homelab/env` or `./.env` (`client/src/main.rs:45-87`) | op-17 lost-3d |
 | TLS key and certificate | host: `/var/lib/homelab/tls-key.pem`, `tls-cert.pem`, made once, never renewed by the code (`host/src/tls.rs:14-54`) | op-17 lost-2 |
-| TLS pin (public) | `pin` in `config/client.toml` (committed) and `~/.config/homelab/pin` per machine (`client/src/repo_config.rs:27-40`, `client/src/lib.rs:15-34`) | op-17 K2b |
+| TLS pin (public) | `pin` in `config/client.toml` (committed) and `~/.config/homelab/pin` per machine (`client/src/repo_config.rs:27-40`, `client/src/lib.rs:15-34`) | op-17 lost-2b |
 | restic password | host: `/var/lib/homelab/secrets/restic.pw`, or `restic_password_file` in `host.toml` (`core/src/ops/backup.rs:124-134`, `host/src/main.rs:479`); one password for every repository (`core/src/ops/backup.rs:88-105`) | none in code; see op-17 lost-1 |
 | Google Drive (rclone remote `gdrive`) | rclone's own configuration on the host; the backup target is `rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:127`) | `rclone config reconnect gdrive:`; `homelab doctor` shows `offsite (Drive)` as `token invalid/expired` when the listing fails (`core/src/doctor.rs:141-157`) |
-| Notification bearers | `notify_auth_bearer`, `notify_fallback_auth_bearer` in `host.toml`, not editable from the TUI (`host/src/main.rs:65-85`, `:178-183`); written for each send to `/var/lib/homelab/secrets/notify-route-<n>.header` (`core/src/notify.rs:188-190`) | edit `host.toml`, restart (K3d step 2 shows the edit-then-restart pattern) |
+| Notification bearers | `notify_auth_bearer`, `notify_fallback_auth_bearer` in `host.toml`, not editable from the TUI (`host/src/main.rs:65-85`, `:178-183`); written for each send to `/var/lib/homelab/secrets/notify-route-<n>.header` (`core/src/notify.rs:188-190`) | edit `host.toml`, restart (lost-3d step 2 shows the edit-then-restart pattern) |
 | Device backup credential and pin | `cred_file` (curl `-K` format) and `pin` (`sha256//<base64>`) per `[[device_backups]]` (`core/src/ops/devicebackup.rs:37-73`) | see below |
 | Stack app secrets | latch, or a local `stacks/<stack>/<app>/.env`; copy on the host in the vault (`client/src/spec.rs:303-412`, `core/src/ops/deploy.rs:1132-1139`) | change in latch, then `homelab deploy stacks/<stack>` |
 | Native service env and credential files | the path in the unit's `EnvironmentFile=`/`LoadCredential=`; copy in the vault (`core/src/ops/deploy.rs:2223-2318`) | op-17 lost-5 |
@@ -802,7 +804,7 @@ openssl s_client -connect <device-ip>:443 </dev/null 2>/dev/null \
 ```
 
 Set `pin = "sha256//<that value>"` in the `[[device_backups]]` table,
-`systemctl restart homelab-host` straight after the edit (K3d explains
+`systemctl restart homelab-host` straight after the edit (lost-3d explains
 why), then `homelab backup-devices` from the workstation.
 
 ---
@@ -850,12 +852,15 @@ readable snapshot" as a new app and starts it empty, logging
 `"is empty and has no snapshot"` (`core/src/ops/deploy.rs:393-406`).
 **Until lost-1 is done, deploy nothing whose `/appdata` is empty.**
 
-**Never generate a new password over it.** `restic init` failures are
-ignored (`core/src/ops/backup.rs:493-507`), so every repository that does
-not exist yet would be created under the new password while all existing
-ones stay locked under the old: two passwords, silently.
+**Never generate a new password over it.** Every repository that does not
+exist yet would be created under the new password while all existing ones
+stay locked under the old. Since v3.58.4 (gap-24) the backup reads what
+`restic init` answers, and a repository created under a password that does
+not open `host-meta-config` stops the run with a message naming it
+(`same_password_as_host_meta` in `core/src/ops/backup.rs`); before that it
+happened silently.
 
-**K1a · Host alive, offline copy available.** Host, root, bash:
+**lost-1a · Host alive, offline copy available.** Host, root, bash:
 
 1. Which file is in use:
 
@@ -895,12 +900,12 @@ ones stay locked under the old: two passwords, silently.
    for every stack the TUI shows `[OFF]` since the password went missing,
    then `homelab check`.
 
-**K1b · Host gone.** DR_RUNBOOK.md Layer 3, after two things it assumes:
+**lost-1b · Host gone.** DR_RUNBOOK.md Layer 3, after two things it assumes:
 the offline password written to `/var/lib/homelab/secrets/restic.pw` as in
-K1a step 2 (without `.new`), and an rclone remote named exactly `gdrive`
+lost-1a step 2 (without `.new`), and an rclone remote named exactly `gdrive`
 (lost-6), because the Drive credentials are in no backup.
 
-**K1c · No copy anywhere.** Nothing written under that password can be
+**lost-1c · No copy anywhere.** Nothing written under that password can be
 read, by anyone. There is no way to put it back. What remains is to start a
 new chain: a new password file and a new `restic_base` in `host.toml`
 (`host/src/main.rs:119-124`, `:475-486`), so new repositories do not
@@ -922,7 +927,7 @@ create the key file (`host/src/tls.rs:31-43`), and the daemon stops at
 start (`host/src/main.rs:1870-1871`). From then on both files exist and do
 not belong together, and nothing regenerates them.
 
-**K2a · Put the old identity back** (every pin stays valid). Host; needs
+**lost-2a · Put the old identity back** (every pin stays valid). Host; needs
 the restic password (lost-1):
 
 1. Stop the daemon so nothing regenerates while you work (not during the
@@ -956,7 +961,7 @@ the restic password (lost-1):
 4. Workstation: `grep '^pin' config/client.toml` shows the same
    fingerprint; `homelab ping` connects.
 
-**K2b · Accept a new identity.**
+**lost-2b · Accept a new identity.**
 
 1. Host:
 
@@ -991,7 +996,7 @@ fingerprint the host printed at boot"` (`client/src/main.rs:1143-1155`).
 
 ### lost-3 · The API token is gone
 
-**K3a · Gone from one workstation.** Workstation (bash). The first line
+**lost-3a · Gone from one workstation.** Workstation (bash). The first line
 that sets a key wins (`client/src/main.rs:79-81`), so remove a stale one
 before adding:
 
@@ -1004,7 +1009,7 @@ homelab ping
 If that adds nothing, the host may take its token from the environment:
 `systemctl show homelab-host -p Environment` on the host.
 
-**K3b · `host.toml` gone, daemon still running.** The daemon holds the
+**lost-3b · `host.toml` gone, daemon still running.** The daemon holds the
 whole configuration in memory and a settings save writes all of it back,
 token included (`host/src/main.rs:524-652`, `:702-723`; guarded by the test
 `settings_render_keeps_every_config_field`, `host/src/main.rs:963-1069`).
@@ -1016,7 +1021,7 @@ Nothing needs the restic password.
 3. Host: `grep -c '^token' /etc/homelab/host.toml` prints 1.
 4. Workstation: `homelab backup-host-meta`.
 
-**K3c · `host.toml` gone and the daemon restarted.** It will not start:
+**lost-3c · `host.toml` gone and the daemon restarted.** It will not start:
 `"FATAL: token must be set (>=16 chars) via <path> or HOMELAB_TOKEN"`
 (`host/src/main.rs:409-419`). Restore it from host-meta. Host; needs the
 restic password:
@@ -1034,7 +1039,7 @@ rm -rf /root/hm
 Settings changed after that snapshot are lost; read them back with
 `homelab config`.
 
-**K3d · Rotate** (leaked, or no copy left). Host, bash:
+**lost-3d · Rotate** (leaked, or no copy left). Host, bash:
 
 1. Check the environment does not override the file:
    `systemctl show homelab-host -p Environment | grep -c HOMELAB_TOKEN`
@@ -1047,7 +1052,7 @@ Settings changed after that snapshot are lost; read them back with
    ```
 
    The token must be at least 16 characters (`host/src/main.rs:413`).
-3. Every workstation: K3a.
+3. Every workstation: lost-3a.
 4. Workstation: `homelab backup-host-meta`.
 
 ### lost-4 · The workstation latch key is gone
@@ -1067,7 +1072,7 @@ spec, which calls latch for every app listed under `latch_secrets` that has
 no local `.env`, and stop when latch cannot answer
 (`client/src/main.rs:487`, `:678`, `:696`, `:923`, `:953`).
 
-**K4a · Get the escrow from the host** (REGISTER D105 records it there;
+**lost-4a · Get the escrow from the host** (REGISTER D105 records it there;
 the file name is not in code). Host: `ls -l /var/lib/homelab/secrets/`.
 Workstation:
 
@@ -1081,7 +1086,7 @@ homelab plan stacks/<stack with latch_secrets>   # prints [env] <app> <- latch
 If the host lost it too, restore `/var/lib/homelab/secrets` from
 host-meta first (R12b shows the restore into a scratch directory).
 
-**K4b · Deploy meanwhile, without the key and without copying a secret off
+**lost-4b · Deploy meanwhile, without the key and without copying a secret off
 the host.** For an app whose env the client does not send, the deploy puts
 back the vault copy (`core/src/ops/deploy.rs:1140-1152`), and with no
 `latch_secrets` the client never calls latch (`client/src/spec.rs:340-342`).
@@ -1102,14 +1107,14 @@ For example almanac's `latch.env`, which is how latch inside CT 112 gets
 its key (`stacks/almanac/service.yml:20`, `:43-47`,
 `stacks/almanac/almanac/almanac.service:23`).
 
-**K5a · The vault has it** (the service was deployed while running, op-7
+**lost-5a · The vault has it** (the service was deployed while running, op-7
 step 6). Workstation: `homelab deploy stacks/<stack>`. Before starting the
 unit, the deploy puts the vault copy back when the file is missing or
 empty and logs `"restored from the vault"`
 (`core/src/ops/deploy.rs:2223-2263`). Check on the host first:
 `ls -lR /var/lib/homelab/secrets/<stack>/`.
 
-**K5b · Vault missing too, file in the service's own backup** (almanac,
+**lost-5b · Vault missing too, file in the service's own backup** (almanac,
 kyu-runner, http-switchboard). op-11, extracting only that file:
 
 ```sh
@@ -1119,10 +1124,10 @@ restic dump --path /<unit>-data.tar latest /<unit>-data.tar | tar -xOf - appdata
 then place it with `pct push` as in op-7 step 3, and `homelab deploy
 stacks/<stack>` twice (op-7 steps 4 and 6) so the vault has it again.
 
-**K5c · Only in host-meta** (kyu's `kyu.env`). Restore
+**lost-5c · Only in host-meta** (kyu's `kyu.env`). Restore
 `/var/lib/homelab/secrets/<stack>` from host-meta into a scratch directory
 as in R12b, copy the file back to the same place under
-`/var/lib/homelab/secrets/<stack>/`, then K5a.
+`/var/lib/homelab/secrets/<stack>/`, then lost-5a.
 
 ### lost-6 · The Google Drive credentials are gone
 

@@ -104,6 +104,72 @@ fn restic(base: &str, stack: &str, password_ref: &str, args: &[&str], timeout: u
     Cmd::new(refs[0], &refs[1..], timeout)
 }
 
+/// What `restic init` found (gap-24).
+#[derive(Debug, PartialEq, Eq)]
+pub enum InitOutcome {
+    Created,
+    Existed,
+}
+
+/// Run `restic init` and read its answer, which used to be thrown away.
+///
+/// "already exists" / "already initialized" is the normal nightly answer.
+/// Anything else that fails (a permission error, a dead remote) is an error
+/// now: the backup that followed it could only fail less clearly.
+pub async fn init_repository(
+    exec: &dyn Executor,
+    init: &Cmd,
+    repo: &str,
+) -> Result<InitOutcome, CoreError> {
+    let out = exec.run(init).await?;
+    if out.code == 0 {
+        return Ok(InitOutcome::Created);
+    }
+    let text = format!("{} {}", out.stderr.trim(), out.stdout.trim());
+    if text.contains("already exists") || text.contains("already initialized") {
+        return Ok(InitOutcome::Existed);
+    }
+    Err(CoreError::Other(format!(
+        "restic init of {}-config failed: {} :: nothing was backed up; check the remote \
+         (`rclone lsd` on the host) and the password file",
+        repo,
+        text.trim()
+    )))
+}
+
+/// A repository created tonight must open with the password that opens
+/// host-meta-config (gap-24). A regenerated password file would otherwise
+/// encrypt every new repository with a key the offline copy cannot open,
+/// and nothing would say so until a restore. When host-meta-config does not
+/// exist yet (a first night) there is nothing to compare with.
+pub async fn same_password_as_host_meta(
+    exec: &dyn Executor,
+    restic_base: &str,
+    password_file: &str,
+    created: &str,
+) -> Result<(), CoreError> {
+    let out = exec
+        .run(&restic(
+            restic_base,
+            "host-meta",
+            password_file,
+            &["cat", "config"],
+            120,
+        ))
+        .await?;
+    let text = format!("{} {}", out.stderr, out.stdout);
+    if out.code != 0 && (text.contains("wrong password") || text.contains("no key found")) {
+        return Err(CoreError::Validation(format!(
+            "{}-config was just created with a password that does not open host-meta-config \
+             :: the password file on the host changed. Put back the password the offline copy \
+             holds (docs/OPERATIONS_RUNBOOK.md op-17, lost-1), then remove the new repository \
+             {}-config before the next run",
+            created, created
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct BackupCfg {
     pub restic_base: String,
@@ -491,19 +557,22 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     });
 
     step!(runner, "init repos", {
-        // Idempotent: init fails harmlessly if the repo already exists.
+        // gap-24: the answer is read. An existing repository says so and is
+        // the normal case; a new one is checked against host-meta's password.
+        let mut created = false;
         for (owner, _) in &groups {
-            let _ = exec
-                .run(&restic(
-                    &cfg.restic_base,
-                    owner,
-                    &cfg.password_file,
-                    &["init"],
-                    120,
-                ))
-                .await?;
+            let init = restic(&cfg.restic_base, owner, &cfg.password_file, &["init"], 120);
+            if init_repository(exec, &init, owner).await? == InitOutcome::Created {
+                same_password_as_host_meta(exec, &cfg.restic_base, &cfg.password_file, owner)
+                    .await?;
+                created = true;
+            }
         }
-        Ok(StepOutcome::Unchanged)
+        Ok(if created {
+            StepOutcome::Changed
+        } else {
+            StepOutcome::Unchanged
+        })
     });
 
     // H2 hardening: a previous run killed mid-snapshot can leave a stale
@@ -1030,16 +1099,18 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
     .collect();
 
     step!(runner, "init repo", {
-        let _ = exec
-            .run(&restic(
-                &cfg.restic_base,
-                "host-meta",
-                &cfg.password_file,
-                &["init"],
-                120,
-            ))
-            .await?;
-        Ok(StepOutcome::Unchanged)
+        // gap-24: read the answer; only "already exists" is harmless.
+        let init = restic(
+            &cfg.restic_base,
+            "host-meta",
+            &cfg.password_file,
+            &["init"],
+            120,
+        );
+        Ok(match init_repository(exec, &init, "host-meta").await? {
+            InitOutcome::Created => StepOutcome::Changed,
+            InitOutcome::Existed => StepOutcome::Unchanged,
+        })
     });
 
     // Which of the extras this host actually has. Read once, here, so the

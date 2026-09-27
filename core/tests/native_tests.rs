@@ -1634,3 +1634,67 @@ fn fix_29_the_real_kyu_release_signature_verifies() {
         homelab_core::release_sig::verify_sums(&SIGNED_SUMS.replace('a', "b"), SIGNED_SIG).is_err()
     );
 }
+
+/// fix-63 (native-rebuild-starts-empty, 2026-09-27): after a rebuild a native
+/// unit runs with empty data directories until somebody restores by hand,
+/// and the nightly backup had no emptiness guard — a tar of an empty
+/// directory is never zero bytes — so one night made the empty state the
+/// latest snapshot, and retention then pruned the real history.
+#[tokio::test]
+async fn fix_63_empty_data_dirs_are_not_backed_up_over_a_repository_with_history() {
+    use homelab_core::ops::backup::BackupCfg;
+    use homelab_core::ops::native::backup_native;
+    let history = r#"[{"short_id":"abcd1234","time":"2026-09-26T04:00:00Z"}]"#;
+
+    // Empty in the container, history in the repository: refused.
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok(history));
+    exec.respond_always("-type f", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup_native(
+        &ctx(&exec, &sink, &j),
+        &kyu_manifest(),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(
+        !report.ok,
+        "an empty state must not become the latest snapshot"
+    );
+    let why = format!("{:?}", report.error);
+    assert!(why.contains("op-11"), "it names the way back: {}", why);
+    assert!(
+        exec.calls_containing("restic backup").is_empty(),
+        "{:?}",
+        exec.calls()
+    );
+
+    // Data present: backed up as before.
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok(history));
+    exec.respond_always("-type f", CmdOutput::ok("/var/lib/kyu/kyu.db\n"));
+    let report = backup_native(
+        &ctx(&exec, &sink, &j),
+        &kyu_manifest(),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(exec.calls_containing("restic backup --stdin").len(), 1);
+
+    // Empty and no history: a new service, backed up as before.
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    exec.respond_always("-type f", CmdOutput::ok(""));
+    let report = backup_native(
+        &ctx(&exec, &sink, &j),
+        &kyu_manifest(),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+}

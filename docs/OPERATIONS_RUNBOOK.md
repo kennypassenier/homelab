@@ -842,6 +842,12 @@ The procedure is DR_RUNBOOK.md Layer 4, "A native stack"
   (`appdata/almanac/almanac-config/...`): GNU tar strips it from the
   absolute paths the backup passes (`core/src/ops/native.rs:611-613`).
   Unpack it inside the container so owners stay the container's own.
+- Since fix-63 (2026-09-27) the nightly backup refuses a native service whose
+  data directories hold no files while its repository has snapshots, and the
+  refusal names this procedure. That is what a rebuilt container looks like
+  before this procedure has run; before the guard, one night was enough to
+  make the empty state the latest snapshot. The deploy still starts the unit
+  on empty directories, so the service runs empty until this is done.
 
 Worked example, host, almanac on CT 112:
 

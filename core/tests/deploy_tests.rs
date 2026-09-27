@@ -58,6 +58,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
 
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         manifest: manifest(vmid, stack),
         files: vec![FileBlob {
@@ -3680,4 +3681,84 @@ fn memory_headroom_is_read_from_meminfo() {
     let f = memory_available_fraction("MemTotal: 1000 kB\nMemAvailable: 250 kB\n").unwrap();
     assert!((f - 0.25).abs() < 1e-9);
     assert!(memory_available_fraction("").is_none());
+}
+
+/// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): every
+/// intent commit said only `deploy <stack>`, so "which commit is deployed on
+/// CT 104?" had no answer, and a stack deployed from files in no commit
+/// looked like any other. The commit and the state record now say where the
+/// files came from, and that some were uncommitted; the intent hash does
+/// not change with it.
+#[tokio::test]
+async fn fix_141_a_deploy_records_the_commit_and_the_uncommitted_files() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    exec.respond_always("restic snapshots", CmdOutput::ok("[]"));
+    let mut sp = spec(110, "syncthing");
+    let hash_before = intent_hash(&sp);
+    sp.source = Some(SourceRev {
+        commit: "3f2a9c1d0e4b5a69788796a5b4c3d2e1f0a1b2c3".into(),
+        uncommitted: vec!["stacks/syncthing/lxc-compose.yml".into()],
+        client: "v3.60.0-4-g3f2a9c1-dirty".into(),
+    });
+    assert_eq!(
+        intent_hash(&sp),
+        hash_before,
+        "where the files came from is not part of what they say"
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+
+    let commit = exec.calls_containing("repo commit");
+    assert_eq!(commit.len(), 1, "{commit:?}");
+    for needle in [
+        "deploy syncthing",
+        "3f2a9c1d0e4b5a69788796a5b4c3d2e1f0a1b2c3",
+        "stacks/syncthing/lxc-compose.yml",
+        "v3.60.0-4-g3f2a9c1-dirty",
+    ] {
+        assert!(
+            commit[0].contains(needle),
+            "the intent commit names {needle}: {}",
+            commit[0]
+        );
+    }
+    let state = homelab_core::state::StateStore::new(&exec, "/var/lib/homelab")
+        .load()
+        .await
+        .unwrap();
+    assert_eq!(
+        state.stacks["syncthing"].applied_source.as_deref(),
+        Some("3f2a9c1d0e4b + 1 uncommitted file(s)")
+    );
+}
+
+/// fix-141: a client that does not say where the files came from still
+/// deploys, and the record says nothing rather than something invented.
+#[tokio::test]
+async fn fix_141_a_deploy_without_a_source_records_none() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    exec.respond_always("restic snapshots", CmdOutput::ok("[]"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(110, "syncthing")).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+    let commit = exec.calls_containing("repo commit");
+    assert!(commit[0].contains("source not reported"), "{}", commit[0]);
+    let state = homelab_core::state::StateStore::new(&exec, "/var/lib/homelab")
+        .load()
+        .await
+        .unwrap();
+    assert_eq!(state.stacks["syncthing"].applied_source, None);
 }

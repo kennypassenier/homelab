@@ -34,6 +34,8 @@ use homelab_proto::{Command as Rpc, RpcRequest, RpcResponse, ServerMsg};
 mod tls;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// fix-141: the tree this binary was built from (see build.rs).
+const BUILD: &str = env!("HOMELAB_BUILD");
 
 // ── Config (AR11) ────────────────────────────────────────────────────────────
 
@@ -724,6 +726,20 @@ fn persist_settings(
 
 #[cfg(test)]
 mod tests {
+    /// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): the
+    /// Hello every client prints names the build, not only the version.
+    #[test]
+    fn fix_141_the_hello_names_the_build() {
+        match super::hello() {
+            homelab_proto::ServerMsg::Hello { version, build, .. } => {
+                assert_eq!(version, env!("CARGO_PKG_VERSION"));
+                assert_eq!(build.as_deref(), option_env!("HOMELAB_BUILD"));
+                assert!(build.is_some_and(|b| !b.is_empty()));
+            }
+            other => panic!("not a Hello: {other:?}"),
+        }
+    }
+
     /// covers: fix-94
     ///
     /// The home address is kept current after every gateway deploy that
@@ -1849,6 +1865,7 @@ port = 5003
         hs.stacks.insert(
             "a".into(),
             homelab_core::state::StackState {
+                applied_source: None,
                 vmid: 108,
                 hostname: "108-app-a".into(),
                 apps: vec![],
@@ -1866,6 +1883,7 @@ port = 5003
         hs.stacks.insert(
             "b".into(),
             homelab_core::state::StackState {
+                applied_source: None,
                 vmid: 109,
                 hostname: "109-app-b".into(),
                 apps: vec![],
@@ -2273,8 +2291,14 @@ async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         None => {}
-        Some("--selfcheck") | Some("--version") if args.len() == 1 => {
+        // `--selfcheck` stays the bare version: the self-update reads it.
+        Some("--selfcheck") if args.len() == 1 => {
             println!("{}", VERSION);
+            std::process::exit(0);
+        }
+        // fix-141: a person asking also learns which tree it was built from.
+        Some("--version") if args.len() == 1 => {
+            println!("{} ({})", VERSION, BUILD);
             std::process::exit(0);
         }
         Some(_) => {
@@ -2371,8 +2395,8 @@ async fn main() {
     let (certs, fingerprint) =
         tls::ensure_cert(&config.state_dir, "homelab-host").expect("tls cert");
     info!(
-        "homelab-host v{} listening on {} (TLS)",
-        VERSION, config.listen
+        "homelab-host v{} ({}) listening on {} (TLS)",
+        VERSION, BUILD, config.listen
     );
     info!("TLS fingerprint SHA256:{}", fingerprint);
     let tls_config =
@@ -3386,6 +3410,15 @@ async fn ws_session(socket: WebSocket, state: AppState) {
     .await
 }
 
+/// The first frame of every session: which host this is.
+fn hello() -> ServerMsg {
+    ServerMsg::Hello {
+        version: VERSION.into(),
+        proto: homelab_proto::PROTO_VERSION,
+        build: Some(BUILD.into()),
+    }
+}
+
 /// One client's session: the Hello, the forwarder that carries broadcasts and
 /// answers out, and the loop that reads requests. The request handler is a
 /// parameter so a test can drive the real session over a real socket with a
@@ -3396,10 +3429,7 @@ where
     Fut: std::future::Future<Output = RpcResponse> + Send + 'static,
 {
     let (mut tx, mut rx) = socket.split();
-    let hello = ServerMsg::Hello {
-        version: VERSION.into(),
-        proto: homelab_proto::PROTO_VERSION,
-    };
+    let hello = hello();
     let _ = tx
         .send(Message::Text(serde_json::to_string(&hello).unwrap().into()))
         .await;

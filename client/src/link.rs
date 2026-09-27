@@ -98,6 +98,20 @@ pub async fn connect(host: &str, token: &str, repo_pin: Option<&str>) -> Result<
     })
 }
 
+/// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): a
+/// version with the build it was made from, `v3.60.0 (v3.60.0-2-gabc1234-dirty)`.
+/// "v3.59.3" named two different binaries: the release and a hand build of
+/// the same version. A host from before this change reports no build.
+pub fn version_label(version: &str, build: Option<&str>) -> String {
+    format!(
+        "v{} ({})",
+        version,
+        build
+            .filter(|b| !b.is_empty())
+            .unwrap_or("build not reported")
+    )
+}
+
 /// Why `command` may not go to a host at `host_version`, if it may not.
 ///
 /// A client newer than the host loses whatever the host does not know about.

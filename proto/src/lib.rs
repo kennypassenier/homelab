@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub use homelab_core::manifest::{
     BootSpec, DeploySpec, FileBlob, GatewayRoute, LxcSpec, MountSpec, NetworkSpec, ResourceSpec,
-    StackManifest,
+    SourceRev, StackManifest,
 };
 pub use homelab_core::native::NativeServiceManifest;
 pub use homelab_core::retention::RetentionTier;
@@ -460,6 +460,12 @@ pub enum ServerMsg {
     Hello {
         version: String,
         proto: u32,
+        /// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci):
+        /// `git describe --dirty` of the tree the host was built from, so a
+        /// hand-built binary no longer passes for the release of the same
+        /// version. None from a host older than this field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        build: Option<String>,
     },
     Log {
         level: LogLevel,

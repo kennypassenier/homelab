@@ -14,6 +14,12 @@ pub mod version;
 
 use std::path::PathBuf;
 
+/// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): `git
+/// describe --dirty` of the tree this client was built from (build.rs), or
+/// `unknown` outside a git tree. Printed by `ping` and `status` and sent
+/// with every deploy.
+pub const BUILD: &str = env!("HOMELAB_BUILD");
+
 /// Path where the pinned TLS fingerprint is stored (A4, TOFU).
 pub fn pin_path() -> PathBuf {
     let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());

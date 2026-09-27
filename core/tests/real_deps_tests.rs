@@ -175,6 +175,7 @@ fn spec(files_content: &str) -> DeploySpec {
     };
     m.hostname = m.canonical_hostname();
     DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         manifest: m,
         files: vec![FileBlob {

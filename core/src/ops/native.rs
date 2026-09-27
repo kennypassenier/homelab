@@ -238,6 +238,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
         state.stacks.insert(
             m.stack_name.clone(),
             crate::state::StackState {
+                applied_source: None,
                 vmid: m.vmid,
                 hostname: m.hostname.clone(),
                 apps,

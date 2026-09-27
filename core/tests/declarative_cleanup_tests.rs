@@ -79,6 +79,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
 
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         manifest: manifest(vmid, stack),
         files: vec![FileBlob {
@@ -117,6 +118,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 
 fn record(m: &StackManifest) -> StackState {
     StackState {
+        applied_source: None,
         vmid: m.vmid,
         hostname: m.hostname.clone(),
         apps: m.apps.clone(),

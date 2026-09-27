@@ -89,6 +89,7 @@ async fn mark_incomplete(
             state.stacks.insert(
                 m.stack_name.clone(),
                 StackState {
+                    applied_source: None,
                     vmid: m.vmid,
                     hostname: m.hostname.clone(),
                     apps: m.apps.clone(),
@@ -1331,7 +1332,21 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             .await?;
         }
         run_ok(exec, &Cmd::new("git", &["-C", &repo, "add", "-A"], 30)).await?;
-        let msg = format!("deploy {}", m.stack_name);
+        // fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci):
+        // the message said only `deploy <stack>`, so the history could not
+        // say which commit went live or that some files were in none.
+        let msg = match spec.source.as_ref() {
+            Some(src) => format!(
+                "deploy {} ({})\n\n{}",
+                m.stack_name,
+                src.summary(),
+                src.commit_body()
+            ),
+            None => format!(
+                "deploy {}\n\nsource not reported (a client older than fix-141)\n",
+                m.stack_name
+            ),
+        };
         let commit = exec
             .run(&Cmd::new(
                 "git",
@@ -2852,6 +2867,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         state.stacks.insert(
             m.stack_name.clone(),
             StackState {
+                // fix-141: which commit this is, for `homelab status`.
+                applied_source: spec.source.as_ref().map(|s| s.summary()),
                 vmid: m.vmid,
                 hostname: m.hostname.clone(),
                 apps: m.apps.clone(),

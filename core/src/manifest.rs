@@ -436,9 +436,61 @@ pub struct DeploySpec {
     /// program is missing rather than failing the whole run.
     #[serde(default)]
     pub native_binaries: BTreeMap<String, String>,
+    /// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): the
+    /// commit the client read this stack from, and whether the stack
+    /// directory differed from it. "Which commit is deployed on CT 104?" had
+    /// no answer, and a stack file could be live that exists in no commit.
+    /// Recorded in the intent history and in state; never part of the
+    /// intent hash, so a commit that leaves the stack alone is not drift.
+    /// None from a client older than this field and from the TUI's
+    /// synthetic specs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceRev>,
 }
 
-// ── Validation (D10) ─────────────────────────────────────────────────────────
+/// fix-141: where a deployed stack came from.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceRev {
+    /// `git rev-parse HEAD` of the repository holding the stack directory.
+    pub commit: String,
+    /// Paths under the stack directory that differ from that commit
+    /// (modified, staged or untracked), as `git status --porcelain` names
+    /// them. Non-empty means what was deployed exists in no commit.
+    #[serde(default)]
+    pub uncommitted: Vec<String>,
+    /// The deploying client's own build (`git describe --dirty`, compiled in).
+    #[serde(default)]
+    pub client: String,
+}
+
+impl SourceRev {
+    /// One line for the intent history and the state record:
+    /// `3f2a9c1d0e4b` or `3f2a9c1d0e4b + 2 uncommitted file(s)`.
+    pub fn summary(&self) -> String {
+        let short: String = self.commit.chars().take(12).collect();
+        if self.uncommitted.is_empty() {
+            short
+        } else {
+            format!("{} + {} uncommitted file(s)", short, self.uncommitted.len())
+        }
+    }
+
+    /// The body of the intent-history commit: the commit, every uncommitted
+    /// path, and the client's build.
+    pub fn commit_body(&self) -> String {
+        let mut out = format!("source: {}\n", self.commit);
+        if !self.uncommitted.is_empty() {
+            out.push_str("uncommitted in the client's tree:\n");
+            for p in &self.uncommitted {
+                out.push_str(&format!("  {}\n", p));
+            }
+        }
+        out.push_str(&format!("client: {}\n", self.client));
+        out
+    }
+}
+
+// ── Validation (D10)─────────────────────────────────────────────────────────
 
 /// Validate a full deploy spec. Returns every problem found (not just the
 /// first) so the wizard can show them all at once.

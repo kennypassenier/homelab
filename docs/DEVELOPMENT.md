@@ -38,11 +38,22 @@ definition of "the gates": `cargo fmt --check`, `cargo clippy --workspace
 |---|---|---|---|
 | git-native | `.githooks/pre-commit`, `.githooks/commit-msg` | every `git commit` | any terminal, editor or session |
 | session hook | `.claude/hooks/check-commit.sh` | Claude Code `git commit` | only a session opened in this directory |
-| CI | `.github/workflows/ci.yml` | every push | the shared truth; red blocks merge |
+| CI | `.github/workflows/ci.yml` | every push | the shared truth, after the fact; red blocks a pull request's merge and `make release`, not a direct push |
 
 Layer 1 is the one that always holds. Layer 2 is a faster feedback loop
-that catches the same thing earlier in an assisted session. CI is the
-backstop nobody can bypass.
+that catches the same thing earlier in an assisted session. CI reports on
+what is already on the branch: branch protection requires `check` for a
+merge, but `enforce_admins` is off so `make release` can push to `main`
+directly, and a direct push lands before CI has a verdict. What CI does
+stop is the next release (`make release` refuses a red HEAD) and a tag
+that is not on `main` (fix-139). This section said "the backstop nobody
+can bypass" until 2026-09-27 (expert panel, changes-reach-prod-without-ci).
+
+Nor does anything stop `homelab deploy`/`apply` from sending files that
+are in no commit: they deploy the working tree. Since fix-141 they warn
+when the stack directory differs from `HEAD`, and the host records the
+commit (plus "N uncommitted file(s)") in its intent history and in
+`homelab status`; `homelab ping` names the build of both binaries.
 
 CI runs four jobs on every push: `check` (the gates above; the one branch
 protection requires), `advisories` (`cargo deny check advisories` against

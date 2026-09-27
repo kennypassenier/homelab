@@ -69,10 +69,16 @@ Drawn from `client/src/main.rs` (`main`) and `client/src/repo_config.rs` (`load`
 that prints where its address came from (`client/src/main.rs:1190-1194`):
 
 ```text
-● HOST v<version> (proto <n>) — link up
+● HOST v<version> (<host build>) · proto <n> — link up
+  client v<version> (<client build>)
   via <host:port> (<source>)
 ✓ pong
 ```
+
+A build is `git describe --tags --dirty` of the tree the binary was
+compiled from (`v3.60.0` for a release, `v3.60.0-3-g1a2b3c4-dirty` for a
+hand build with uncommitted changes; fix-141). `homelab status` prints the
+same two lines. A host from before that change says `build not reported`.
 
 `<source>` is one of `HOMELAB_HOST in the environment`, the path of
 `config/client.toml`, `~/.config/homelab/env` or `built-in default`
@@ -1152,7 +1158,12 @@ change after a reboot (`core/src/ops/deploy.rs:865`).
 **Status:** Built, narrower than FEATURES.md.
 
 Every deploy writes the stack's files into `/var/lib/homelab/repo/stacks/<stack>/`
-and commits them as `deploy <stack>`; secrets are not among them (A5). A
+and commits them as `deploy <stack> (<commit> [+ N uncommitted file(s)])`,
+with the full commit, every uncommitted path and the client's build in the
+message body; `homelab status` shows the same summary as `applied_source`
+(fix-141). A client that does not send its commit leaves `source not
+reported`. The client warns before it deploys uncommitted files but does not
+refuse. Secrets are not among the files (A5). A
 commit that fails for any reason other than "nothing to commit" fails the
 deploy, because history, mirror and plan all depend on it
 (`core/src/ops/deploy.rs:907-970`). There is no revert verb: the deploy always

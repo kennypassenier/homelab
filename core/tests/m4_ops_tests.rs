@@ -1187,6 +1187,7 @@ async fn g8_tiered_retention_forgets_by_explicit_id() {
 fn b4_intent_hash_changes_with_any_file_edit() {
     use homelab_core::manifest::{intent_hash, DeploySpec, FileBlob};
     let base = DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         manifest: manifest(108, "test"),
         files: vec![FileBlob {
@@ -1240,6 +1241,7 @@ async fn h4_gpu_and_vpn_flags_produce_device_config() {
     m.lxc.gpu = true;
     m.lxc.vpn = true;
     let spec = DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         manifest: m,
         files: vec![FileBlob {
@@ -1282,6 +1284,7 @@ async fn h4_no_flags_no_device_config() {
     exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
     exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
     let spec = DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         manifest: manifest(108, "test"),
         files: vec![FileBlob {
@@ -1427,6 +1430,7 @@ async fn b8_clone_template_provisions_via_pct_clone() {
     m.lxc.template = "clone:999".into();
     m.resources.disk_gb = 8;
     let spec = DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         manifest: m,
         files: vec![FileBlob {
@@ -1557,6 +1561,7 @@ fn v8_validate_rejects_undeclared_appdata_bind() {
     let mut m = manifest(108, "test");
     m.storage.clear(); // nothing declared
     let spec = DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         manifest: m,
         files: vec![FileBlob {
@@ -1688,6 +1693,7 @@ fn deploy_mocks(exec: &MockExecutor) {
 
 fn deploy_spec(m: StackManifest) -> homelab_core::manifest::DeploySpec {
     homelab_core::manifest::DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         manifest: m,
         files: vec![homelab_core::manifest::FileBlob {
@@ -3121,6 +3127,7 @@ async fn protection_is_set_after_all_drive_changes() {
         m.lxc.protection = true;
         m.resources.disk_gb = 8;
         let spec = DeploySpec {
+            source: None,
             native_binaries: Default::default(),
             manifest: m,
             files: vec![FileBlob {

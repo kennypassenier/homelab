@@ -1358,6 +1358,8 @@ async fn rpc_exchange(
     // (Config) may see RpcDone first — wait for the payload before exiting.
     let awaits_payload = matches!(command, Command::GetConfig | Command::GetState);
     let is_ping = matches!(command, Command::Ping);
+    // fix-141: ping and status also name the client's own build.
+    let names_builds = matches!(command, Command::Ping | Command::Status);
     let mut payload_seen = false;
     let mut done: Option<bool> = None;
     // fix-67: the pin, the frame ceiling and the version gate live in one
@@ -1413,11 +1415,32 @@ async fn rpc_exchange(
                      or it times out as unattended"
                 );
             }
-            ServerMsg::Hello { version, proto } => {
+            ServerMsg::Hello {
+                version,
+                proto,
+                build,
+            } => {
+                // fix-141 (expert panel 2026-09-27,
+                // changes-reach-prod-without-ci): "v3.59.3" named the release
+                // and a hand build alike; the build tells them apart.
                 println!(
-                    "{}● HOST v{} (proto {}) — link up{}",
-                    C_GREEN, version, proto, C_RESET
+                    "{}● HOST {} · proto {} — link up{}",
+                    C_GREEN,
+                    homelab_client::link::version_label(&version, build.as_deref()),
+                    proto,
+                    C_RESET
                 );
+                if names_builds {
+                    println!(
+                        "{}  client {}{}",
+                        C_DIM,
+                        homelab_client::link::version_label(
+                            env!("CARGO_PKG_VERSION"),
+                            Some(homelab_client::BUILD)
+                        ),
+                        C_RESET
+                    );
+                }
                 // Only on ping: which door was knocked on, and who said so.
                 // The rest of the verbs stay quiet about it.
                 if is_ping {
@@ -1535,6 +1558,16 @@ async fn deploy_spec(host: &str, token: &str, mut spec: homelab_proto::DeploySpe
         spec.env.len(),
         C_RESET
     );
+    // fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci):
+    // `deploy` and `apply` send the working tree; say so when it is not a
+    // commit. A warning, not a refusal (Kenny's batch, 2026-09-27).
+    if let Some(w) = spec
+        .source
+        .as_ref()
+        .and_then(|s| spec::uncommitted_warning(&spec.manifest.stack_name, s))
+    {
+        eprintln!("{}{}{}", C_YELLOW, w, C_RESET);
+    }
     // T85: each native binary goes over the link on its own, then the deploy
     // follows with the map emptied — the host fills it back in from what was
     // staged. Three binaries in one message measured 94.7 MiB against a

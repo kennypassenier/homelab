@@ -448,6 +448,52 @@ reaches curl through a mode-600 header file,
 | `mirror push failed (will retry): <e>` | warn | the intent repo did not reach its mirror; retried every tick | `host/src/main.rs:2781-2785`, `2250` |
 | `A6 exec vmid=<n> cmd=<cmd>` | info | a `homelab exec` ran | `host/src/main.rs:3969` |
 
+### Logs in Loki
+
+Every managed container ships its logs to Loki on CT 104
+(`http://10.10.10.4:3100`) through Grafana Alloy, from a config the deploy
+renders (`core/src/ops/logshipper.rs`). Grafana's Explore view reads the same
+data. Three jobs arrive, with these labels:
+
+| `job` | What | Labels |
+|---|---|---|
+| `docker` | every container's stdout and stderr | `stack`, `host`, `container_name`, `stream` (`stdout`/`stderr`), `filename` |
+| `systemd-journal` | the journal of each container; on the native stacks (kyu, almanac) this IS the service log | `stack`, `host`, `unit` |
+| `syslog` | devices that send syslog to the gateway (OPNsense; measured 2026-09-27: the only sender), and `/var/log/syslog` on a container that has one | `stack`, `host`, `app`, `level`, `facility` |
+
+Five queries that answer most questions (paste into Grafana → Explore → Loki):
+
+```logql
+{stack="media", container_name="jellyfin"}                  # one container
+{job="docker", stream="stderr"} |~ "(?i)error|panic|fatal"   # errors, fleet-wide
+{stack="kyu", unit="kyu.service"}                            # a native service
+sum by (stack) (count_over_time({job="docker"}[1h]))         # who is logging at all
+{job="syslog", host="opnsense"}                              # the router
+```
+
+The fourth one is the health question. On 2026-09-27 it answered with no
+stack at all: from 2026-09-03 no container line reached Loki, because Alloy
+could not read docker's log directory (fix-44). Measured after the fix the
+same evening, the same query over one hour: gateway 42,282 lines, uptime
+17,907, metrics 8,789.
+
+**Is Alloy shipping on a container?** On that container:
+
+```sh
+systemctl status alloy
+curl -s 127.0.0.1:12345/metrics | grep -E '^loki_write_(sent|dropped)_bytes_total'
+grep CapAmb /proc/$(systemctl show -p MainPID --value alloy)/status   # 0000000000000004 = may read docker's logs
+cat /etc/systemd/system/alloy.service.d/homelab-read.conf
+```
+
+Sent bytes growing and dropped bytes at zero means Loki accepts what Alloy
+sends. A deploy asks the same questions and says `[logs] Alloy on <host>
+cannot read /var/lib/docker/containers` when the answer is no
+(`core/src/ops/deploy.rs`, log shipper step), and `homelab check` reports a
+stack whose labelled lines stopped arriving (`core/src/ops/facts.rs`,
+coverage). A redeploy of the stack puts Alloy's config and its read access
+back.
+
 ## 6. state.json
 
 The orchestrator's belief about each stack. `homelab status` prints the host's

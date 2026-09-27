@@ -390,3 +390,37 @@ mod syslog_receiver {
         );
     }
 }
+
+/// Expert panel 2026-09-27 (container-logs-missing-in-loki): no container
+/// log line reached Loki from 2026-09-03 on. Measured on CT 106 the same
+/// day: `/var/lib/docker/containers` is `drwx--x--- root root`, and
+/// `runuser -u alloy -- ls` on it answers "Permission denied". The docker
+/// group opens the socket, not that directory, so the group membership above
+/// never gave Alloy the files. It needs CAP_DAC_READ_SEARCH (read and list
+/// anything, write nothing), given through a systemd drop-in.
+#[test]
+fn alloy_gets_read_search_capability_for_the_root_only_docker_directory() {
+    let p = permissions_script();
+    assert!(
+        p.contains(homelab_core::ops::logshipper::READ_DROPIN_PATH),
+        "{p}"
+    );
+    assert!(p.contains("AmbientCapabilities=CAP_DAC_READ_SEARCH"), "{p}");
+    assert!(p.contains("systemctl daemon-reload"), "{p}");
+    assert!(
+        p.contains(homelab_core::ops::logshipper::DROPIN_WRITTEN),
+        "the script says when it changed something, so the deploy restarts \
+         Alloy on containers whose config did not change: {p}"
+    );
+}
+
+/// The deploy asks the question that was never asked: can the alloy user
+/// actually list the container log directory?
+#[test]
+fn readability_is_read_from_the_probe_output() {
+    use homelab_core::ops::logshipper::{readability, Readability};
+    assert_eq!(readability("readable\n"), Readability::Readable);
+    assert_eq!(readability("denied\n"), Readability::Denied);
+    assert_eq!(readability("no-docker\n"), Readability::NoDocker);
+    assert!(matches!(readability(""), Readability::Unknown(_)));
+}

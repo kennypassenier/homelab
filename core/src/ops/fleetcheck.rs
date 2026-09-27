@@ -1121,7 +1121,7 @@ pub fn evaluate_coverage(facts: &[CoverageFact]) -> Vec<Finding> {
                 severity: Severity::Drift,
                 subject: c.stack.clone(),
                 what: "no LABELLED log line reached Loki from this stack recently — either nothing is shipping, or it ships without the container name (F79)".into(),
-                remedy: "check promtail is running there and that its pipeline matches what docker writes; the container name came from a field docker does not produce for the life of this fleet".into(),
+                remedy: "on that container: `systemctl status alloy`, then `runuser -u alloy -- ls /var/lib/docker/containers` (a compose stack) or `journalctl -u alloy` (a native one); a redeploy re-applies Alloy's config and its read access".into(),
             });
         }
     }

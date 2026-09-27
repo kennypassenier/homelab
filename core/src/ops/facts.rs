@@ -565,22 +565,28 @@ pub async fn gather_live_facts(
                             .unwrap_or(false),
                     );
                 }
-                // Only ask about logs where logs are expected. A native
-                // service with no promtail ships none by design.
-                let ships_logs = st
-                    .manifest
-                    .as_ref()
-                    .map(|m| m.apps.iter().any(|a| a == "promtail"))
-                    .unwrap_or(false);
-                if let (Some(base), true) = (loki.as_deref(), ships_logs) {
-                    // `container_name=~".+"` is not decoration (F79): lines
-                    // kept arriving for months without the label the
-                    // dashboards query by. Counting LABELLED lines is the
-                    // question that was actually being got wrong.
+                // Every stack ships logs through Alloy since 2026-09-02:
+                // compose stacks as container lines labelled
+                // `container_name`, native stacks as journal lines labelled
+                // `unit`. This used to ask only stacks with an app named
+                // `promtail`, which after the migration was none, so the
+                // check stayed silent while no container line arrived for
+                // 24 days (expert panel, container-logs-missing-in-loki).
+                let label = if st.natives.is_empty() {
+                    "container_name"
+                } else {
+                    "unit"
+                };
+                if let Some(base) = loki.as_deref() {
+                    // A label matcher is not decoration (F79): lines kept
+                    // arriving for months without the label the dashboards
+                    // query by. Counting LABELLED lines is the question that
+                    // was actually being got wrong.
                     let q = format!(
-                        "{}/loki/api/v1/query?query=sum(count_over_time(%7Bstack%3D%22{}%22%2Ccontainer_name%3D~%22.%2B%22%7D%5B{}%5D))",
+                        "{}/loki/api/v1/query?query=sum(count_over_time(%7Bstack%3D%22{}%22%2C{}%3D~%22.%2B%22%7D%5B{}%5D))",
                         base.trim_end_matches('/'),
                         name,
+                        label,
                         window
                     );
                     c.logs_recent = Some(

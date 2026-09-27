@@ -2285,15 +2285,28 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     m.hostname, line
                 ));
             }
-            let changed = changed || drift;
+            // Every deploy, not only when the config moved: the read access
+            // Alloy needs for docker's 0710 directory was missing on every
+            // container for 24 days while their configs never changed
+            // (expert panel, container-logs-missing-in-loki).
+            let perms = pct_sh(
+                exec,
+                m.vmid,
+                &crate::ops::logshipper::permissions_script(),
+                60,
+            )
+            .await?;
+            let access = perms
+                .stdout
+                .contains(crate::ops::logshipper::DROPIN_WRITTEN);
+            if access {
+                log_info(format!(
+                    "[logs] gave Alloy read access to the container logs on {}",
+                    m.hostname
+                ));
+            }
+            let changed = changed || drift || access;
             if fresh || changed {
-                pct_sh(
-                    exec,
-                    m.vmid,
-                    &crate::ops::logshipper::permissions_script(),
-                    60,
-                )
-                .await?;
                 let r = pct_sh(
                     exec,
                     m.vmid,
@@ -2344,6 +2357,29 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                         m.hostname, why
                     )),
                 }
+            }
+            // Asked on every deploy: "Alloy is running" said nothing for 24
+            // days while it could not open a single container log.
+            let probe = pct_sh(
+                exec,
+                m.vmid,
+                &crate::ops::logshipper::readability_script(),
+                30,
+            )
+            .await?;
+            match crate::ops::logshipper::readability(&probe.stdout) {
+                crate::ops::logshipper::Readability::Denied => log_warn(format!(
+                    "[logs] Alloy on {} cannot read /var/lib/docker/containers — NO container \
+                     log from {} reaches Loki; check {} and `systemctl status alloy`",
+                    m.hostname,
+                    m.stack_name,
+                    crate::ops::logshipper::READ_DROPIN_PATH
+                )),
+                crate::ops::logshipper::Readability::Unknown(why) => log_warn(format!(
+                    "[logs] could not ask whether Alloy on {} can read the container logs ({})",
+                    m.hostname, why
+                )),
+                _ => {}
             }
             Ok(if fresh || changed {
                 StepOutcome::Changed

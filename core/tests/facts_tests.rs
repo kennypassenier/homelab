@@ -415,3 +415,41 @@ fn gap_33_a_container_without_docker_needs_only_the_journald_cap() {
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "guards=1");
 }
+
+/// Expert panel 2026-09-27 (container-logs-missing-in-loki): the coverage
+/// check only asked Loki about stacks listing an app named `promtail`, and
+/// since the fleet moved to Alloy (2026-09-02) no stack does, so the check
+/// never fired while no container line arrived for 24 days. It now asks every
+/// compose stack for labelled container lines and every native stack for
+/// journal lines with a `unit` label, which is what Alloy ships for each.
+#[tokio::test]
+async fn coverage_asks_loki_for_every_stack_without_a_promtail_app() {
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "media": {"vmid": 106, "hostname": "106-app-media", "apps": ["jellyfin"], "applied_at": 1, "manifest": null},
+                "kyu": {"vmid": 109, "hostname": "109-app-kyu", "apps": [], "applied_at": 1, "manifest": null,
+                        "natives": [{"stack_name": "kyu", "vmid": 109, "hostname": "109-app-kyu", "unit": "kyu", "binary": "/usr/local/bin/kyu"}]}
+            }
+        })
+        .to_string(),
+    );
+    exec.respond_always(
+        "stack%3D%22media%22%2Ccontainer_name",
+        CmdOutput::ok(r#"{"data":{"result":[]}}"#),
+    );
+    exec.respond_always(
+        "stack%3D%22kyu%22%2Cunit",
+        CmdOutput::ok(r#"{"data":{"result":[{"value":[1,"42"]}]}}"#),
+    );
+    let mut inp = inputs();
+    inp.loki_url = Some("http://10.10.10.4:3100".into());
+    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
+    let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
+    assert_eq!(media.logs_recent, Some(false), "{:?}", exec.calls());
+    let kyu = facts.coverage.iter().find(|c| c.stack == "kyu").unwrap();
+    assert_eq!(kyu.logs_recent, Some(true), "{:?}", exec.calls());
+}

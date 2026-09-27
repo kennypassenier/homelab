@@ -309,10 +309,61 @@ pub fn install_script() -> String {
 /// `docker` covers the container log directory — which only exists where
 /// docker does, so the group add is allowed to fail there.
 pub fn permissions_script() -> String {
-    "usermod -aG adm,systemd-journal alloy 2>/dev/null || true; \
-     getent group docker >/dev/null && usermod -aG docker alloy 2>/dev/null || true; \
-     true"
+    // The groups open syslog (adm) and the journal (systemd-journal). The
+    // docker group opens the socket, NOT `/var/lib/docker/containers`, which
+    // docker keeps at 0710 root:root: measured on CT 106 on 2026-09-27,
+    // `runuser -u alloy -- ls` on it said "Permission denied", and no
+    // container line had reached Loki since 2026-09-03. CAP_DAC_READ_SEARCH
+    // lets Alloy read and list any file and write none. The drop-in is
+    // compared before it is written, and the script says when it wrote it, so
+    // the deploy restarts Alloy even where the config itself did not change.
+    format!(
+        "usermod -aG adm,systemd-journal alloy 2>/dev/null || true; \
+         getent group docker >/dev/null && usermod -aG docker alloy 2>/dev/null || true; \
+         want='{body}'; \
+         if [ \"$(cat {path} 2>/dev/null)\" != \"$want\" ]; then \
+           mkdir -p {dir} && printf '%s\\n' \"$want\" > {path} && systemctl daemon-reload && echo {marker}; \
+         fi; \
+         true",
+        body = READ_DROPIN_BODY,
+        path = READ_DROPIN_PATH,
+        dir = READ_DROPIN_DIR,
+        marker = DROPIN_WRITTEN,
+    )
+}
+
+const READ_DROPIN_DIR: &str = "/etc/systemd/system/alloy.service.d";
+/// Where the read-access drop-in lives.
+pub const READ_DROPIN_PATH: &str = "/etc/systemd/system/alloy.service.d/homelab-read.conf";
+const READ_DROPIN_BODY: &str = "[Service]\nAmbientCapabilities=CAP_DAC_READ_SEARCH";
+/// Printed by [`permissions_script`] when it wrote the drop-in.
+pub const DROPIN_WRITTEN: &str = "alloy-read-dropin-written";
+
+/// Asks, as the alloy user, whether the docker log directory can be listed.
+pub fn readability_script() -> String {
+    "if [ ! -d /var/lib/docker/containers ]; then echo no-docker; \
+     elif runuser -u alloy -- ls /var/lib/docker/containers >/dev/null 2>&1; then echo readable; \
+     else echo denied; fi"
         .to_string()
+}
+
+/// What [`readability_script`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Readability {
+    Readable,
+    Denied,
+    /// A native container: nothing to read there.
+    NoDocker,
+    Unknown(String),
+}
+
+pub fn readability(out: &str) -> Readability {
+    match out.trim() {
+        "readable" => Readability::Readable,
+        "denied" => Readability::Denied,
+        "no-docker" => Readability::NoDocker,
+        other => Readability::Unknown(format!("unexpected answer {other:?}")),
+    }
 }
 
 /// Alloy's own verdict on whether anything actually reached Loki.

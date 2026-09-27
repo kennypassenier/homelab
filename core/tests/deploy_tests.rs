@@ -3533,3 +3533,44 @@ async fn fix_27_a_change_that_does_not_settle_is_still_reported() {
         "twelve retries, 60 s, then it counts"
     );
 }
+
+/// Expert panel 2026-09-27 (container-logs-missing-in-loki): for 24 days
+/// Alloy ran on every compose container without being able to open a single
+/// container log, and every deploy said nothing. The deploy now gives Alloy
+/// read access, restarts it when that access was just granted, and asks as
+/// the alloy user whether the directory can be listed; a "no" is said out
+/// loud.
+#[tokio::test]
+async fn a_deploy_grants_alloy_read_access_and_says_so_when_it_still_cannot_read() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always(
+        "homelab-read.conf",
+        CmdOutput::ok(homelab_core::ops::logshipper::DROPIN_WRITTEN),
+    );
+    exec.respond_always("runuser -u alloy", CmdOutput::ok("denied\n"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let sp = spec(106, "media");
+    let mut c = ctx(&exec, &sink, &journal);
+    c.loki_url = Some("http://10.10.10.4:3100".into());
+    let report = deploy(&c, &sp).await;
+    assert!(report.ok, "{:?}", report);
+    let calls = exec.calls();
+    let grant = calls
+        .iter()
+        .position(|c| c.contains("AmbientCapabilities=CAP_DAC_READ_SEARCH"))
+        .expect("the read access is granted");
+    let restart = calls
+        .iter()
+        .position(|c| c.contains("systemctl restart alloy"))
+        .expect("alloy is restarted after the access changed");
+    assert!(grant < restart, "access first, then the restart");
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("cannot read /var/lib/docker/containers")),
+        "{:?}",
+        sink.lines()
+    );
+}

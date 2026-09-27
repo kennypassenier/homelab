@@ -4,7 +4,8 @@ name: ci
 on:
   push:
     # Every branch, not only main: branch protection requires the `check`
-    # context (the `msrv` job was removed on 2026-09-10, d318ada), and a
+    # context (the `msrv` job was removed on 2026-09-10, d318ada, and came
+    # back on 2026-09-27 as a job that is not a required context), and a
     # branch that produces no run can never satisfy it — which locks the branch shut and leaves a pull request as the only
     # road in (standing rule 6a). `v2-merge` was deleted 2026-08-28.
     branches: ["**"]
@@ -12,6 +13,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+
+# Every job here only reads; the token cannot push or publish.
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -42,3 +47,68 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test --workspace --locked
+
+  # Expert panel 2026-09-27, ci-hygiene-gaps: the three checks below ran
+  # nowhere, or only locally. Each is its own job so a red one names itself.
+  # `make release` reads every check on HEAD, so any of them going red also
+  # stops a release. Scanners are release binaries with a pinned checksum.
+
+  # Known vulnerabilities in what Cargo.lock pins. Dependabot's alerts went
+  # unread for weeks (F48); a red run does not. The first local run
+  # (2026-09-27) found RUSTSEC-2026-0285 in rustls 0.23.43, bumped the same day.
+  advisories:
+    runs-on: ubuntu-latest
+    container: rust:1.97-bookworm
+    env:
+      DENY_VERSION: "0.20.2"
+      DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: cargo deny check advisories
+        # Not cargo-deny-action: its image downloads the binary unchecked.
+        run: |
+          name="cargo-deny-$DENY_VERSION-x86_64-unknown-linux-musl"
+          curl -fsSL -o deny.tgz "https://github.com/EmbarkStudios/cargo-deny/releases/download/$DENY_VERSION/$name.tar.gz"
+          echo "$DENY_SHA256  deny.tgz" | sha256sum -c -
+          tar xzf deny.tgz --strip-components=1 -C /usr/local/cargo/bin "$name/cargo-deny"
+          cargo deny --locked check advisories
+
+  # Secrets anywhere in the history. The local check-secrets.sh matches one
+  # shape and `--no-verify` skips it; on a public repository this is the
+  # scan that holds. --redact: the log is public too. The false positives
+  # of the first full scan are allowlisted, per file, in .gitleaks.toml.
+  secrets:
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: gitleaks
+        run: |
+          curl -fsSL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "$GITLEAKS_SHA256  gitleaks.tgz" | sha256sum -c -
+          tar xzf gitleaks.tgz gitleaks
+          ./gitleaks git --no-banner --redact --config .gitleaks.toml .
+
+  # The rust-version Cargo.toml promises, checked with that compiler. It
+  # lived only in `make release` (gap-30), so a break showed at release
+  # time; now it shows on the push that caused it. `+$msrv` overrides
+  # rust-toolchain.toml.
+  msrv:
+    runs-on: ubuntu-latest
+    container: rust:1.97-bookworm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: cargo check with the declared rust-version
+        run: |
+          msrv=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)
+          rustup toolchain install "$msrv" --profile minimal
+          cargo +"$msrv" check --workspace --locked

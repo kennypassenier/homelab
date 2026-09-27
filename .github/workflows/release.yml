@@ -50,6 +50,20 @@ jobs:
             echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main"
             exit 1
           fi
+      - name: Restore CI's cargo cache
+        # About five minutes per release without it (expert panel
+        # 2026-09-27, ci-hygiene-gaps). Restore only: a tag's cache scope is
+        # new every release, so a save would never be read again, and a job
+        # that writes no cache cannot poison one. What it restores was
+        # written by ci.yml on main, which pull requests cannot write to.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /usr/local/cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
       - name: Test gate (AR9 — releases are never exempt)
         # --locked everywhere: the release must be built from what Cargo.lock
         # pins, which is what CI tested (F235).

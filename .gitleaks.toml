@@ -1,0 +1,29 @@
+# gitleaks configuration for the server-side secret scan in ci.yml
+# (expert panel 2026-09-27, ci-hygiene-gaps). The default rules apply; the
+# allowlists below name the false positives a full-history scan found on
+# 2026-09-27 (10 findings, every one of them one of these), each narrowed to
+# its own file so a real secret elsewhere is still caught.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures: the fixed dummy bearer token and named test secrets"
+condition = "AND"
+paths = ['''(^|/)tests/.*\.rs$''', '''^host/src/main\.rs$''']
+regexTarget = "line"
+regexes = ['''0123456789abcdef0123''', '''adopt-secret-gap27''']
+
+[[allowlists]]
+description = "Content hashes of applied apps, once recorded in stack files"
+condition = "AND"
+paths = ['''^stacks/[^/]+/lxc-compose\.yml$''']
+regexTarget = "line"
+regexes = ['''^\s+[a-z0-9-]+: [0-9a-f]{64}$''']
+
+[[allowlists]]
+description = "Cloudflare Access capture: a service token's id names it, the secret is not in the file"
+condition = "AND"
+paths = ['''^captured/gateway/cloudflare-access\.json$''']
+regexTarget = "line"
+regexes = ['''"token_id": "[0-9a-f-]{36}"''']

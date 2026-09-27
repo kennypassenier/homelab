@@ -235,3 +235,106 @@ fn fix_139_every_action_is_pinned_by_commit_sha_with_its_tag_named() {
         bad.join("\n")
     );
 }
+
+fn ci_run_text() -> String {
+    let wf = workflow("ci.yml");
+    wf.get("jobs")
+        .and_then(Value::as_mapping)
+        .unwrap()
+        .values()
+        .map(run_text)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The MSRV `Cargo.toml` promises (`rust-version`), as the Makefile reads it.
+fn msrv() -> String {
+    let cargo = std::fs::read_to_string(root().join("Cargo.toml")).unwrap();
+    cargo
+        .lines()
+        .find_map(|l| l.strip_prefix("rust-version = \""))
+        .and_then(|r| r.strip_suffix('"'))
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn fix_140_ci_checks_advisories_secrets_and_the_msrv_on_every_push() {
+    let run = ci_run_text();
+    // Dependabot alerts went unread for weeks (F48); a red run is read.
+    assert!(
+        run.contains("cargo deny") && run.contains("check advisories"),
+        "ci.yml runs `cargo deny check advisories`"
+    );
+    // The local check-secrets.sh matches one shape and `--no-verify` skips
+    // it; on a public repository the server-side scan is the one that holds.
+    let gl = run
+        .lines()
+        .find(|l| l.contains("gitleaks git"))
+        .expect("ci.yml runs `gitleaks git` over the history");
+    assert!(
+        gl.contains("--redact"),
+        "a public repository's CI log must not print the secret it found: {gl}"
+    );
+    assert!(
+        run.contains("sha256sum -c"),
+        "downloaded scanners are checked against a pinned checksum"
+    );
+    // The MSRV check used to live only in `make release`.
+    assert!(
+        run.contains("rust-version") && run.contains("cargo +\"$msrv\" check --workspace --locked"),
+        "ci.yml checks the workspace with the rust-version Cargo.toml declares ({})",
+        msrv()
+    );
+    // Each of these jobs reads only (a job without its own `permissions:`
+    // gets the workflow's).
+    let wf = workflow("ci.yml");
+    for (name, j) in wf.get("jobs").and_then(Value::as_mapping).unwrap() {
+        let p = permissions(j.get("permissions").or(wf.get("permissions")));
+        assert!(
+            !grants_write(&p),
+            "ci.yml job `{}` holds {p:?}",
+            name.as_str().unwrap()
+        );
+    }
+}
+
+#[test]
+fn fix_140_the_release_build_restores_a_cache_and_never_writes_one() {
+    let wf = workflow("release.yml");
+    let build = job(&wf, "build");
+    let uses: Vec<_> = steps(build).into_iter().filter_map(step_uses).collect();
+    assert!(
+        uses.iter().any(|u| u.starts_with("actions/cache/restore@")),
+        "the release build restores CI's cargo cache: {uses:?}"
+    );
+    // A tag's own cache scope is new every release, so saving is wasted;
+    // and a release job that writes no cache cannot poison one.
+    assert!(
+        !uses
+            .iter()
+            .any(|u| u.starts_with("actions/cache@") || u.starts_with("actions/cache/save@")),
+        "the release build must not save a cache: {uses:?}"
+    );
+}
+
+#[test]
+fn fix_140_dependabot_commits_carry_a_bracketed_id() {
+    let text = std::fs::read_to_string(root().join(".github/dependabot.yml")).unwrap();
+    let v: Value = serde_yaml::from_str(&text).unwrap();
+    let updates = v.get("updates").and_then(Value::as_sequence).unwrap();
+    assert!(!updates.is_empty());
+    for u in updates {
+        let eco = u.get("package-ecosystem").and_then(Value::as_str).unwrap();
+        let prefix = u
+            .get("commit-message")
+            .and_then(|c| c.get("prefix"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        // The commit-msg hook's rule 4: an ID in brackets on every commit.
+        assert!(
+            prefix.contains("[meta]"),
+            "{eco}: Dependabot's prefix `{prefix}` carries no bracketed ID"
+        );
+    }
+}

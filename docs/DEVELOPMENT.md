@@ -44,6 +44,13 @@ Layer 1 is the one that always holds. Layer 2 is a faster feedback loop
 that catches the same thing earlier in an assisted session. CI is the
 backstop nobody can bypass.
 
+CI runs four jobs on every push: `check` (the gates above; the one branch
+protection requires), `advisories` (`cargo deny check advisories` against
+what `Cargo.lock` pins), `secrets` (gitleaks over the whole history,
+redacted; false positives are allowlisted per file in `.gitleaks.toml`) and
+`msrv` (`cargo check` with the `rust-version` from `Cargo.toml`). `make
+release` refuses a HEAD where any of them is red.
+
 ## 3 · What the gates block
 
 **A failing build, lint or test.** Warnings count as errors — a clippy

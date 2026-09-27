@@ -21,13 +21,17 @@ updates:
       cargo-minor-and-patch:
         update-types: ["minor", "patch"]
     commit-message:
-      # The commit-msg hook requires an ID in brackets on every commit.
-      prefix: "chore(deps)"
+      # The commit-msg hook requires an ID in brackets on every commit, and
+      # the prefix used to carry none (expert panel 2026-09-27,
+      # ci-hygiene-gaps). With the scope: "[meta] chore(deps): bump …".
+      prefix: "[meta] chore"
       include: scope
 
+  # Also keeps the commit-SHA pins in the workflows current, rewriting the
+  # tag comment beside each (fix-139).
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
     commit-message:
-      prefix: "chore(ci)"
+      prefix: "[meta] chore(ci)"

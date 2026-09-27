@@ -164,7 +164,12 @@ fn y4_finds_a_stack_file_aimed_at_someone_elses_container() {
     let st = state(vec![("metrics", stack(113, "113-app-metrics", true, NOW))]);
     let live = LiveFacts {
         containers: vec![(113, "113-app-metrics".into()), (109, "109-app-kyu".into())],
-        stack_files: vec![("stacks/cloudflared".into(), 109)],
+        // metrics has its own file; since step-22 a managed stack without
+        // one is a finding of its own, which is not what this test is about.
+        stack_files: vec![
+            ("stacks/cloudflared".into(), 109),
+            ("stacks/metrics".into(), 113),
+        ],
         growth: Vec::new(),
         coverage: Vec::new(),
         boot: Vec::new(),

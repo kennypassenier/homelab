@@ -943,6 +943,16 @@ const CLI_ONLY: &[(&str, &str)] = &[
          comfortable interface and typing it out (Kenny's C2 gate)",
     ),
     (
+        "DestroyRecorded",
+        "ask-8: the destroy half of `homelab apply` — the same friction as \
+         DestroyStack, one typed stack name per destroy",
+    ),
+    (
+        "WipeRetired",
+        "ask-9: deletes backups, /appdata and vault copies for good; the list \
+         and the typed name belong at the command line, never behind a key",
+    ),
+    (
         "BackupHostMeta",
         "runs nightly on its own; there is no moment where an operator wants it \
          by hand from a stack view",

@@ -180,86 +180,13 @@ pub async fn destroy(
         Ok(StepOutcome::Changed)
     });
 
-    // Remove the traefik route fragment if this stack had one.
-    // T1: a destroyed stack stops being a scrape target. Without this it
-    // would keep firing HostDown on its way out — which is exactly what the
-    // scratch container at 10.10.10.14 was set up to do.
-    step!(runner, "remove metrics discovery", {
-        let Some(dir) = ctx.metrics_targets_dir.as_deref() else {
-            return Ok(StepOutcome::Unchanged);
-        };
-        let path = crate::ops::discovery::target_file(dir, stack_name);
-        let _ = exec.run(&Cmd::new("rm", &["-f", &path], 30)).await;
-        Ok(StepOutcome::Changed)
-    });
-
-    // T66: whatever a deploy registers, a destroy has to unregister. The
-    // dashboard was the half that was missing — a destroyed stack left a
-    // panel behind showing a container that no longer exists, which reads as
-    // "everything is down" rather than "this is gone", and there is no
-    // difference visible between the two.
-    step!(runner, "remove grafana dashboard", {
-        let Some(dir) = ctx.grafana_dashboards_dir.as_deref() else {
-            return Ok(StepOutcome::Unchanged);
-        };
-        let path = crate::ops::dashboard::dashboard_file(dir, stack_name);
-        // On the GATEWAY, not on the Proxmox host. The directory is a path
-        // inside CT 104 — the deploy writes it with `pct push` — and a bare
-        // `rm -f` here ran on the host, where it does not exist, and exited 0.
-        // The step reported "changed" and removed nothing for as long as it
-        // existed; the drill on 2026-09-01 destroyed a stack and found its
-        // dashboard still sitting there afterwards (F162).
-        //
-        // Note the shape of the fault: `rm -f` on a missing path SUCCEEDS.
-        // The step could not have discovered this on its own.
-        let _ = exec
-            .run(&Cmd::new(
-                "pct",
-                &[
-                    "exec",
-                    &ctx.safety.gateway_vmid.to_string(),
-                    "--",
-                    "rm",
-                    "-f",
-                    &path,
-                ],
-                30,
-            ))
-            .await;
-        Ok(StepOutcome::Changed)
-    });
-
-    step!(runner, "remove gateway route", {
-        let dest = format!(
-            "{}/{}-app-{}.yml",
-            ctx.safety.gateway_routes_dir, vmid, stack_name
-        );
-        let _ = exec
-            .run(&Cmd::new(
-                "pct",
-                &[
-                    "exec",
-                    &ctx.safety.gateway_vmid.to_string(),
-                    "--",
-                    "rm",
-                    "-f",
-                    &dest,
-                ],
-                30,
-            ))
-            .await?;
-        Ok(StepOutcome::Changed)
-    });
-
-    // Drop the stack from HOST state (B4). Its /appdata + secrets vault are
-    // kept so a redeploy can auto-restore (E3).
-    step!(runner, "update state", {
-        let store = crate::state::StateStore::new(exec, &ctx.state_dir);
-        let mut state = store.load().await?;
-        state.stacks.remove(stack_name);
-        store.save(state).await?;
-        Ok(StepOutcome::Changed)
-    });
+    // step-22: whatever a deploy registers, a destroy unregisters — the same
+    // list `forget` runs, so the two cannot drift apart.
+    if let Err((step, e)) =
+        unregister(&mut runner, ctx, exec, stack_name, vmid, Some(manifest)).await
+    {
+        return runner.finish_err(step, &e);
+    }
 
     runner.log(
         Level::Info,
@@ -269,4 +196,251 @@ pub async fn destroy(
         ),
     );
     runner.finish_ok()
+}
+
+/// step-22: every registration a stack has outside its container, removed
+/// in one place. Destroy runs it after the container is gone; forget runs it
+/// for a record whose container is already gone.
+///
+/// Returns the failing step's name with the error, so the caller can finish
+/// its own runner with it.
+async fn unregister(
+    runner: &mut Runner<'_>,
+    ctx: &OpCtx<'_>,
+    exec: &dyn Executor,
+    stack_name: &str,
+    vmid: u16,
+    manifest: Option<&crate::manifest::StackManifest>,
+) -> Result<(), (&'static str, CoreError)> {
+    // T1: a removed stack stops being a scrape target. Without this it would
+    // keep firing HostDown on its way out — which is exactly what the
+    // scratch container at 10.10.10.14 was set up to do.
+    runner
+        .step("remove metrics discovery", || async {
+            let Some(dir) = ctx.metrics_targets_dir.as_deref() else {
+                return Ok(StepOutcome::Unchanged);
+            };
+            let path = crate::ops::discovery::target_file(dir, stack_name);
+            let _ = exec.run(&Cmd::new("rm", &["-f", &path], 30)).await;
+            Ok(StepOutcome::Changed)
+        })
+        .await
+        .map_err(|e| ("remove metrics discovery", e))?;
+
+    // T66: the dashboard was the half that was missing — a destroyed stack
+    // left a panel behind showing a container that no longer exists, which
+    // reads as "everything is down" rather than "this is gone".
+    runner
+        .step("remove grafana dashboard", || async {
+            let Some(dir) = ctx.grafana_dashboards_dir.as_deref() else {
+                return Ok(StepOutcome::Unchanged);
+            };
+            let path = crate::ops::dashboard::dashboard_file(dir, stack_name);
+            // On the GATEWAY, not on the Proxmox host. The directory is a
+            // path inside CT 104 — the deploy writes it with `pct push` — and
+            // a bare `rm -f` here ran on the host, where it does not exist,
+            // and exited 0. The step reported "changed" and removed nothing
+            // for as long as it existed (F162). `rm -f` on a missing path
+            // SUCCEEDS, so the step could not have discovered this on its own.
+            let _ = exec
+                .run(&Cmd::new(
+                    "pct",
+                    &[
+                        "exec",
+                        &ctx.safety.gateway_vmid.to_string(),
+                        "--",
+                        "rm",
+                        "-f",
+                        &path,
+                    ],
+                    30,
+                ))
+                .await;
+            Ok(StepOutcome::Changed)
+        })
+        .await
+        .map_err(|e| ("remove grafana dashboard", e))?;
+
+    runner
+        .step("remove gateway route", || async {
+            let dest = format!(
+                "{}/{}-app-{}.yml",
+                ctx.safety.gateway_routes_dir, vmid, stack_name
+            );
+            let _ = exec
+                .run(&Cmd::new(
+                    "pct",
+                    &[
+                        "exec",
+                        &ctx.safety.gateway_vmid.to_string(),
+                        "--",
+                        "rm",
+                        "-f",
+                        &dest,
+                    ],
+                    30,
+                ))
+                .await?;
+            Ok(StepOutcome::Changed)
+        })
+        .await
+        .map_err(|e| ("remove gateway route", e))?;
+
+    // Drop the stack from HOST state (B4), and its manual checks with it: a
+    // question about a stack that no longer exists can never be answered
+    // meaningfully, and the fleet check would ask it forever. /appdata and
+    // the secrets vault are kept so a redeploy can auto-restore (E3).
+    runner
+        .step("update state", || async {
+            let store = crate::state::StateStore::new(exec, &ctx.state_dir);
+            let mut state = store.load().await?;
+            let record = state.stacks.remove(stack_name);
+            state.manual_checks.retain(|_, r| r.stack != stack_name);
+            // ask-9: what it leaves behind is kept forever by default, and
+            // recorded so the fleet check can say so and `homelab wipe` can
+            // find it. The state's own manifest first (it is what applied),
+            // the caller's when the stack was never recorded.
+            let natives = record
+                .as_ref()
+                .map(|r| r.natives.clone())
+                .unwrap_or_default();
+            let recorded = record.as_ref().and_then(|r| r.manifest.clone());
+            crate::ops::retired::retire_stack(
+                &mut state,
+                stack_name,
+                vmid,
+                recorded.as_ref().or(manifest),
+                &natives,
+                &ctx.state_dir,
+                ctx.now_unix,
+            );
+            store.save(state).await?;
+            Ok(StepOutcome::Changed)
+        })
+        .await
+        .map_err(|e| ("update state", e))?;
+
+    // T51 + T49: rendered from the fleet as it now is, AFTER the route and
+    // the record are gone — both files are read from exactly those.
+    runner
+        .step("fleet files", || async {
+            Ok(crate::ops::fleetfiles::regenerate_after_removal(ctx, exec).await)
+        })
+        .await
+        .map_err(|e| ("fleet files", e))?;
+    Ok(())
+}
+
+/// Drop a stale record, and everything registered for it, without touching
+/// any container (`homelab forget`).
+///
+/// step-22: this used to remove the state record and nothing else, so a
+/// stack forgotten after its container was lost kept its route, scrape
+/// target, dashboard, manual checks, front-page tile and host monitor. It
+/// now runs the same unregister steps a destroy runs.
+///
+/// The one guard it always had stays first: only a record whose container no
+/// longer answers to that hostname may be forgotten. A live one being
+/// forgotten would go silently unbacked-up.
+pub async fn forget(ctx: &OpCtx<'_>, stack: &str) -> OperationReport {
+    let op = format!("forget-{}", stack);
+    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+    let mut entry: Option<crate::state::StackState> = None;
+
+    step!(runner, "read record", {
+        let store = crate::state::StateStore::new(exec, &ctx.state_dir);
+        let state = store.load().await?;
+        match state.stacks.get(stack) {
+            Some(st) => {
+                entry = Some(st.clone());
+                Ok(StepOutcome::Unchanged)
+            }
+            None => Err(CoreError::Other(format!(
+                "no stack '{}' in host state",
+                stack
+            ))),
+        }
+    });
+    let Some(entry) = entry else {
+        return runner.finish_err(
+            "read record",
+            &CoreError::Other(format!("no stack '{}' in host state", stack)),
+        );
+    };
+
+    step!(runner, "live check", {
+        let live = exec
+            .run(&Cmd::new("pct", &["list"], 30))
+            .await
+            .map(|o| o.stdout)
+            .unwrap_or_default();
+        if live
+            .lines()
+            .any(|l| l.split_whitespace().any(|w| w == entry.hostname))
+        {
+            return Err(CoreError::SafetyAbort(format!(
+                "'{}' still names a live container ({}) :: this record is current, not stale — \
+                 destroy the stack or rename it first",
+                stack, entry.hostname
+            )));
+        }
+        Ok(StepOutcome::Unchanged)
+    });
+
+    if let Err((step, e)) = unregister(&mut runner, ctx, exec, stack, entry.vmid, None).await {
+        return runner.finish_err(step, &e);
+    }
+    runner.log(
+        Level::Info,
+        format!(
+            "[forget] forgot '{}' (was vmid {} as {}) — the container was not touched",
+            stack, entry.vmid, entry.hostname
+        ),
+    );
+    runner.finish_ok()
+}
+
+/// Destroy a stack from the manifest recorded in host state (ask-8).
+///
+/// `homelab apply` destroys a stack whose directory is gone from the
+/// repository, so there is no stack file to build a manifest from — but
+/// state holds the one that was last applied (`StackState.manifest`). This
+/// looks it up and runs the ordinary [`destroy`], so the typed name, the
+/// no-touch list, the hostname guard and the backup-first rule all apply
+/// unchanged. The nightly round never calls this: a destroy always needs a
+/// person who typed the name.
+pub async fn destroy_recorded(
+    ctx: &OpCtx<'_>,
+    stack: &str,
+    confirmed_name: &str,
+    skip_backup: bool,
+) -> OperationReport {
+    let refuse = |why: String| {
+        let runner = Runner::new(&format!("destroy-{}", stack), ctx.sink, ctx.journal);
+        runner.finish_err("read record", &CoreError::SafetyAbort(why))
+    };
+    let store = crate::state::StateStore::new(ctx.exec, &ctx.state_dir);
+    let state = match store.load().await {
+        Ok(s) => s,
+        Err(e) => return refuse(format!("state unreadable: {}", e)),
+    };
+    let Some(record) = state.stacks.get(stack) else {
+        return refuse(format!("no stack '{}' in host state", stack));
+    };
+    let Some(manifest) = record.manifest.as_ref() else {
+        return refuse(format!(
+            "'{}' has no manifest recorded in host state (an adopted service) — there is \
+             nothing to destroy it from; remove the container by hand, then `homelab forget {}`",
+            stack, stack
+        ));
+    };
+    if manifest.stack_name != stack {
+        return refuse(format!(
+            "the record '{}' holds a manifest for '{}' — refusing to guess which one is meant",
+            stack, manifest.stack_name
+        ));
+    }
+    destroy(ctx, manifest, confirmed_name, skip_backup).await
 }

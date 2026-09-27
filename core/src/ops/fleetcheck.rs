@@ -675,6 +675,46 @@ pub fn evaluate(
         }
     }
 
+    // step-22 / ask-8: the other direction. A stack in host state whose
+    // directory is gone from the repository is still running, still backed
+    // up and still registered everywhere — and nothing compared the two, so
+    // deleting a stack directory changed nothing and said nothing. Kenny's
+    // answer (form 2026-09-27, `Via homelab apply`): it is reported here
+    // until `homelab apply` destroys it after its name is typed.
+    //
+    // Only when the client sent its stack files at all: an empty list means
+    // the check ran from somewhere without the repository, and judging
+    // against nothing would call every stack deleted.
+    if !live.stack_files.is_empty() {
+        let dirs: std::collections::BTreeSet<&str> = live
+            .stack_files
+            .iter()
+            .map(|(d, _)| {
+                let d = d.trim_end_matches('/');
+                d.rsplit('/').next().unwrap_or(d)
+            })
+            .collect();
+        for (name, st) in &state.stacks {
+            if dirs.contains(name.as_str()) {
+                continue;
+            }
+            out.push(Finding {
+                severity: Severity::Drift,
+                subject: name.clone(),
+                what: format!(
+                    "is in host state (vmid {}) but has no stack file in the repository — \
+                     stacks/{}/ is gone",
+                    st.vmid, name
+                ),
+                remedy: format!(
+                    "`homelab apply` lists it and destroys it after you type its name; put \
+                     stacks/{}/ back to keep it",
+                    name
+                ),
+            });
+        }
+    }
+
     out.extend(evaluate_growth(
         &live.growth,
         growth_limits,
@@ -687,6 +727,7 @@ pub fn evaluate(
     out.extend(evaluate_boot(state, &live.boot));
     out.extend(evaluate_watched_backups(&live.watched_backups));
     out.extend(evaluate_incomplete(state));
+    out.extend(crate::ops::retired::evaluate_retired(state));
     out.extend(evaluate_notify(state, now_unix));
     // A seeder that ran more than a day ago has stopped keeping the watch
     // list in step, which is the same window the backups use.

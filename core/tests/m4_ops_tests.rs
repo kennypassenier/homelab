@@ -160,9 +160,11 @@ async fn c2_destroy_happy_path_lifts_protection_then_destroys() {
     // Protection is lifted before destroy; state updated after.
     assert!(pos("--protection 0") < pos("pct destroy 108"));
     assert!(exec.calls_containing("pct destroy 108 --purge").len() == 1);
-    // State no longer lists the stack.
-    let state = exec.file("/var/lib/homelab/state.json").unwrap_or_default();
-    assert!(!state.contains("\"test\""));
+    // State no longer lists the stack (it is in `retired` instead, ask-9).
+    let state: homelab_core::state::HostState =
+        serde_json::from_str(&exec.file("/var/lib/homelab/state.json").unwrap_or_default())
+            .unwrap();
+    assert!(!state.stacks.contains_key("test"));
 }
 
 /// The dashboard a destroy removes lives on the GATEWAY, so the removal has

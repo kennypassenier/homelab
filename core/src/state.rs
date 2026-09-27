@@ -155,6 +155,52 @@ pub struct HostState {
     /// instead of proving the same one twelve times.
     #[serde(default)]
     pub restore_drill_index: usize,
+    /// ask-8 / ask-9: what a stack, app or native unit left behind when it
+    /// left the files, keyed by `<stack>` for a whole stack and
+    /// `<stack>/<name>` for an app or unit that left a stack still running.
+    ///
+    /// Kenny, 2026-09-27: backups, /appdata and vault copies of anything
+    /// retired are KEPT FOREVER by default. Nothing automatic ever deletes
+    /// them; `homelab wipe <key>` does, after the name is typed, and the
+    /// fleet check names every entry (Noted) so what is being kept never
+    /// becomes something nobody knows is there.
+    #[serde(default)]
+    pub retired: BTreeMap<String, RetiredRecord>,
+}
+
+/// What kind of thing left the files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetiredKind {
+    /// A whole stack: destroyed, or forgotten after its container was lost.
+    Stack,
+    /// A compose app that left a stack that still exists.
+    App,
+    /// A native unit dropped from a stack's `natives:`.
+    Unit,
+}
+
+/// One retired stack, app or unit, and exactly what it left behind (ask-9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetiredRecord {
+    pub kind: RetiredKind,
+    /// The stack it belonged to (the stack itself for `Stack`).
+    pub stack: String,
+    /// The stack, app or unit name.
+    pub name: String,
+    pub vmid: u16,
+    /// Unix time it left — the destroy, forget or deploy that saw it go.
+    pub retired_at: u64,
+    /// Restic repository names under `restic_base` (`<owner>-config`).
+    #[serde(default)]
+    pub repos: Vec<String>,
+    /// Host directories under /appdata it kept its configuration in.
+    #[serde(default)]
+    pub appdata: Vec<String>,
+    /// Vault paths on the host (a stack's whole `secrets/<stack>` directory,
+    /// or one app's or unit's copies).
+    #[serde(default)]
+    pub vault: Vec<String>,
 }
 
 /// One thing only a person can confirm, and the last word on it.

@@ -183,14 +183,34 @@ pub enum Command {
     ForgetStack {
         stack: String,
     },
+    /// ask-8: gated destroy of a stack whose directory is gone, from the
+    /// manifest the host recorded when it last applied it. Same gates as
+    /// `DestroyStack`: `confirm` must equal the stack name, and the no-touch
+    /// list and hostname guard run on the host. Sent by `homelab apply` (and
+    /// `homelab destroy` when the directory is missing); never by the nightly
+    /// round.
+    DestroyRecorded {
+        stack: String,
+        confirm: String,
+        #[serde(default)]
+        skip_backup: bool,
+    },
+    /// ask-9: delete what a retired stack, app or unit kept — its restic
+    /// repositories, /appdata directories and vault copies — and its record.
+    /// `confirm: None` only returns the list of what would be deleted;
+    /// `Some(name)` deletes, and must equal `name`. Never automatic.
+    WipeRetired {
+        name: String,
+        #[serde(default)]
+        confirm: Option<String>,
+    },
     /// H2b: remove files under `/opt/<stack>/` that the repository no longer
     /// has. `confirm` must equal the stack name.
     ///
-    /// Separate from the deploy on purpose (Kenny, form H2b): the deploy
-    /// REPORTS orphans on every run and never removes anything, because
-    /// deleting is the irreversible direction and a deploy runs when nobody
-    /// is watching. This is the deliberate second step, taken after somebody
-    /// has read the list.
+    /// Kenny's form H2b made this the only remover; since ask-8
+    /// (2026-09-27, `Automatisch bij deploy`) the deploy removes what the
+    /// files no longer declare itself, so this is mostly a no-op kept for a
+    /// container that has not been deployed since.
     PruneOrphans {
         manifest: Box<StackManifest>,
         spec: Box<DeploySpec>,

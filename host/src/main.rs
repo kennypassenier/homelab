@@ -3584,7 +3584,16 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     deferred: None,
                 };
             }
-            let orphans = homelab_core::ops::deploy::orphan_files(&exec, &manifest, &spec).await;
+            // The same exclusions the deploy applies: the gateway holds other
+            // stacks' generated dashboards and routes.
+            let keep = homelab_core::ops::deploy::generated_dirs(
+                &state.config.safety,
+                state.config.grafana_dashboards_dir.as_deref(),
+                manifest.vmid,
+            );
+            let orphans =
+                homelab_core::ops::deploy::orphan_files_keeping(&exec, &manifest, &spec, &keep)
+                    .await;
             if orphans.is_empty() {
                 return RpcResponse {
                     id: req.id,
@@ -3622,69 +3631,79 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // step-22: forget runs the same unregister steps destroy runs
+        // (route, scrape target, dashboard, manual checks, front page, host
+        // monitors) and records what the stack left behind (ask-9) — under
+        // the op-lock like every other operation that writes state.
         Rpc::ForgetStack { stack } => {
-            let store =
-                homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
-            let mut snapshot = match store.load().await {
-                Ok(s) => s,
-                Err(e) => {
-                    return RpcResponse {
+            run_mutating_op(state, &exec, req.id, "forget", |ctx| {
+                Box::pin(async move { homelab_core::ops::destroy::forget(ctx, &stack).await })
+            })
+            .await
+        }
+        // ask-8: `homelab apply` destroys a stack whose directory is gone,
+        // from the manifest recorded in state. Every gate of a destroy holds.
+        Rpc::DestroyRecorded {
+            stack,
+            confirm,
+            skip_backup,
+        } => {
+            run_mutating_op(state, &exec, req.id, "destroy", |ctx| {
+                Box::pin(async move {
+                    homelab_core::ops::destroy::destroy_recorded(ctx, &stack, &confirm, skip_backup)
+                        .await
+                })
+            })
+            .await
+        }
+        // ask-9: what a retired entry kept, listed or wiped.
+        Rpc::WipeRetired { name, confirm } => match confirm {
+            None => {
+                let snapshot = match homelab_core::state::StateStore::new(
+                    &RealExecutor,
+                    &state.config.state_dir,
+                )
+                .load()
+                .await
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return RpcResponse {
+                            id: req.id,
+                            ok: false,
+                            message: format!("state unreadable: {}", e),
+                            deferred: None,
+                        }
+                    }
+                };
+                match homelab_core::ops::retired::wipe_plan(
+                    &snapshot,
+                    &name,
+                    &state.config.state_dir,
+                ) {
+                    Ok(plan) => RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: plan.render(&name),
+                        deferred: None,
+                    },
+                    Err(why) => RpcResponse {
                         id: req.id,
                         ok: false,
-                        message: format!("state unreadable: {}", e),
+                        message: why,
                         deferred: None,
-                    }
+                    },
                 }
-            };
-            let Some(entry) = snapshot.stacks.get(&stack).cloned() else {
-                return RpcResponse {
-                    id: req.id,
-                    ok: false,
-                    message: format!("no stack '{}' in host state", stack),
-                    deferred: None,
-                };
-            };
-            // The safety rule: only a record whose container no longer
-            // answers to that hostname may be forgotten. A live one being
-            // forgotten would go silently unbacked-up.
-            let live = exec
-                .run(&homelab_core::executor::Cmd::new("pct", &["list"], 30))
+            }
+            Some(confirm) => {
+                run_mutating_op(state, &exec, req.id, "wipe", |ctx| {
+                    Box::pin(
+                        async move { homelab_core::ops::retired::wipe(ctx, &name, &confirm).await },
+                    )
+                })
                 .await
-                .map(|o| o.stdout)
-                .unwrap_or_default();
-            if live
-                .lines()
-                .any(|l| l.split_whitespace().any(|w| w == entry.hostname))
-            {
-                return RpcResponse {
-                    id: req.id,
-                    ok: false,
-                    message: format!(
-                        "'{}' still names a live container ({}) :: this record is current, not stale — destroy the stack or rename it first",
-                        stack, entry.hostname
-                    ),
-                    deferred: None,
-                };
             }
-            snapshot.stacks.remove(&stack);
-            match store.save(snapshot).await {
-                Ok(()) => RpcResponse {
-                    id: req.id,
-                    ok: true,
-                    message: format!(
-                        "forgot '{}' (was vmid {} as {}) — the container was not touched",
-                        stack, entry.vmid, entry.hostname
-                    ),
-                    deferred: None,
-                },
-                Err(e) => RpcResponse {
-                    id: req.id,
-                    ok: false,
-                    message: format!("could not write state: {}", e),
-                    deferred: None,
-                },
-            }
-        }
+        },
         Rpc::ApplyGuards { vmid } => {
             // A1 still governs: the guards write files and restart docker, so
             // an untouchable guest is untouchable here too.

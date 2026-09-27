@@ -135,8 +135,44 @@ pub async fn orphan_files(
     m: &crate::manifest::StackManifest,
     spec: &DeploySpec,
 ) -> Vec<String> {
+    orphan_files_keeping(exec, m, spec, &[]).await
+}
+
+/// Directories inside container `vmid` that the orchestrator fills on behalf
+/// of OTHER stacks: on the gateway, the generated Grafana dashboards (T2)
+/// and the route fragments (H1). Their files are in no stack's file list, so
+/// without this every gateway deploy would take them for its own orphans and
+/// remove every other stack's dashboard.
+pub fn generated_dirs(
+    safety: &crate::safety::SafetyConfig,
+    grafana_dashboards_dir: Option<&str>,
+    vmid: u16,
+) -> Vec<String> {
+    if vmid != safety.gateway_vmid {
+        return Vec::new();
+    }
+    let mut v = vec![safety.gateway_routes_dir.clone()];
+    if let Some(d) = grafana_dashboards_dir {
+        v.push(d.to_string());
+    }
+    v
+}
+
+/// [`orphan_files`], leaving out anything under the `keep` directories
+/// (absolute paths inside the container, see [`generated_dirs`]).
+pub async fn orphan_files_keeping(
+    exec: &dyn crate::executor::Executor,
+    m: &crate::manifest::StackManifest,
+    spec: &DeploySpec,
+    keep: &[String],
+) -> Vec<String> {
     let sent: std::collections::BTreeSet<&str> =
         spec.files.iter().map(|f| f.path.as_str()).collect();
+    let kept = |rel: &str| {
+        let abs = format!("/opt/{}/{}", m.stack_name, rel);
+        keep.iter()
+            .any(|d| abs.starts_with(&format!("{}/", d.trim_end_matches('/'))))
+    };
     let out = match pct_sh(
         exec,
         m.vmid,
@@ -157,6 +193,7 @@ pub async fn orphan_files(
         .filter(|l| !l.is_empty())
         .filter(|l| !l.ends_with(".env"))
         .filter(|l| !sent.contains(*l))
+        .filter(|l| !kept(l))
         .map(str::to_string)
         .collect()
 }
@@ -235,6 +272,31 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         exists = safety::check_deploy_target(exec, &ctx.safety, m).await?;
         Ok(StepOutcome::Unchanged)
     });
+
+    // ── step-22 / ask-8: the record as it stood before this deploy. What
+    // the stack file used to declare is the only way to know what has left
+    // it — a mount, a native unit, a route — and so what to take away.
+    // Read after the safety gates: a refused target reads nothing.
+    let prior: Option<StackState> = StateStore::new(exec, &ctx.state_dir)
+        .load()
+        .await
+        .ok()
+        .and_then(|s| s.stacks.get(&m.stack_name).cloned());
+    let prior_manifest: Option<manifest::StackManifest> =
+        prior.as_ref().and_then(|p| p.manifest.clone());
+    // ask-8 (`Stoppen, data bewaren`): only a unit the stack FILE used to
+    // declare is retired. One registered by `homelab adopt` that no stack
+    // file ever named is not the deploy's to take away.
+    let dropped_natives: Vec<String> = prior_manifest
+        .as_ref()
+        .map(|pm| {
+            pm.natives
+                .iter()
+                .filter(|u| !m.natives.contains(u))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
 
     // ── J1: the BEFORE half of every service's own health checks.
     //
@@ -717,6 +779,49 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                         format!("{},mp={}", dm.host_path, dm.mount_point),
                     ));
                 }
+                // ask-8 (`Loskoppelen`): a mount the stack no longer declares
+                // is detached. Which ones: an `mpN` the stack file does not
+                // ask for whose host directory this stack declared before
+                // (or declares now under another number — a duplicate left
+                // by a renumbering). A mount no version of the stack file
+                // ever named was attached by hand, and is not this deploy's
+                // to take away. The host directory is never touched.
+                let wanted_keys: std::collections::BTreeSet<String> = want
+                    .iter()
+                    .map(|(k, _)| k.trim_start_matches('-').to_string())
+                    .collect();
+                let mut ours: std::collections::BTreeSet<String> = m
+                    .storage
+                    .iter()
+                    .map(|s| s.host_path.clone())
+                    .chain(m.data_mounts.iter().map(|d| d.host_path.clone()))
+                    .collect();
+                if let Some(pm) = prior_manifest.as_ref() {
+                    ours.extend(pm.storage.iter().map(|s| s.host_path.clone()));
+                    ours.extend(pm.data_mounts.iter().map(|d| d.host_path.clone()));
+                }
+                let mut stale: Vec<(String, String)> = Vec::new();
+                for line in cfg.stdout.lines() {
+                    let Some((key, val)) = line.trim().split_once(':') else {
+                        continue;
+                    };
+                    let is_mp = key
+                        .strip_prefix("mp")
+                        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+                    if !is_mp || wanted_keys.contains(key) {
+                        continue;
+                    }
+                    let host_path = val.trim().split(',').next().unwrap_or("").to_string();
+                    if ours.contains(&host_path) {
+                        stale.push((key.to_string(), host_path));
+                    } else {
+                        log_info(format!(
+                            "[mounts] {} ({}) is in no version of this stack file — attached by \
+                             hand, left alone",
+                            key, host_path
+                        ));
+                    }
+                }
                 let missing: Vec<(String, String)> = want
                     .into_iter()
                     .filter(|(key, val)| {
@@ -724,7 +829,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                         !cfg.stdout.lines().any(|l| l.trim() == line)
                     })
                     .collect();
-                if !missing.is_empty() {
+                if !missing.is_empty() || !stale.is_empty() {
                     let protected = cfg.stdout.lines().any(|l| l.trim() == "protection: 1");
                     if protected {
                         run_ok(
@@ -732,6 +837,16 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                             &Cmd::new("pct", &["set", &vm, "--protection", "0"], 60),
                         )
                         .await?;
+                    }
+                    // Detached first, so a renumbered mount never sits on two
+                    // keys at once.
+                    for (key, host_path) in &stale {
+                        run_ok(exec, &Cmd::new("pct", &["set", &vm, "--delete", key], 60)).await?;
+                        log_info(format!(
+                            "[mounts] {} ({}) is no longer declared — detached; the directory \
+                             on the host is kept",
+                            key, host_path
+                        ));
                     }
                     for (key, val) in &missing {
                         log_info(format!("[mounts] {} was not attached — {}", key, val));
@@ -747,7 +862,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     // A mount only appears inside a running container after a
                     // restart, so saying so is part of doing it.
                     log_info(
-                        "[mounts] attached — a running container sees them after a reboot".into(),
+                        "[mounts] changed — a running container sees it after a reboot".into(),
                     );
                 }
             }
@@ -903,10 +1018,206 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         }
     });
 
+    // ── step-22 / ask-8: what left the stack's files leaves the container.
+    //
+    // The intent repo's copy of the stack is the record of what the last
+    // deploy placed, so it is read BEFORE this deploy overwrites it: a file it
+    // has and the stack no longer has is a file the stack dropped. Two kinds
+    // are acted on here, before anything later in the deploy can fail and
+    // leave the record already rewritten:
+    //
+    // * a `rootfs/` file (a unit, a timer, a script on PATH) is removed from
+    //   the container — a unit or timer is disabled and stopped first, and
+    //   systemd reloads afterwards (`Automatisch bij deploy`, replacing D84's
+    //   report-then-prune);
+    // * a native unit dropped from `natives:` is stopped, disabled, its unit
+    //   file and program removed (`Stoppen, data bewaren`) — its data dirs
+    //   inside the container and its restic repository are kept.
+    //
+    // Everything else the copy has that the stack does not is removed from
+    // the repo by the commit step below, so `git log` records the removal.
+    let repo_stack_dir = format!("{}/repo/stacks/{}", ctx.state_dir, m.stack_name);
+    let mut dropped_repo_files: Vec<String> = Vec::new();
+    // Vault copies of each retired unit, for its retired record (ask-9).
+    let mut unit_vault: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    step!(runner, exec, ctx, m, "retire dropped", {
+        let listing = exec
+            .run(&Cmd::new(
+                "sh",
+                &[
+                    "-c",
+                    &format!(
+                        "cd {} 2>/dev/null && find . -type f -printf '%P\\n' 2>/dev/null || true",
+                        crate::ops::util::shq(&repo_stack_dir)
+                    ),
+                ],
+                60,
+            ))
+            .await?;
+        let declared: std::collections::BTreeSet<&str> =
+            spec.files.iter().map(|f| f.path.as_str()).collect();
+        dropped_repo_files = listing
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !declared.contains(*l))
+            .map(str::to_string)
+            .collect();
+        let mut changed = false;
+        let mut reload = false;
+        for rel in &dropped_repo_files {
+            if !rel.starts_with(manifest::ROOTFS_PREFIX) {
+                continue;
+            }
+            // A path the validator would refuse today was never placed.
+            let Ok((dest, _)) = manifest::file_destination(&m.stack_name, rel) else {
+                continue;
+            };
+            if let Some(name) = dest.strip_prefix("/etc/systemd/system/") {
+                reload = true;
+                let is_unit = !name.contains('/')
+                    && [".service", ".timer", ".socket", ".path"]
+                        .iter()
+                        .any(|x| name.ends_with(x));
+                if is_unit {
+                    pct_sh(
+                        exec,
+                        m.vmid,
+                        &format!(
+                            "systemctl disable --now {} 2>&1 || true",
+                            crate::ops::util::shq(name)
+                        ),
+                        120,
+                    )
+                    .await?;
+                }
+            }
+            run_ok(
+                exec,
+                &Cmd::new("pct", &["exec", &vm, "--", "rm", "-f", &dest], 60),
+            )
+            .await?;
+            log_info(format!(
+                "[orphans] removed {} — the stack no longer places it",
+                dest
+            ));
+            changed = true;
+        }
+        for unit in &dropped_natives {
+            // The program's path: the registration knows it; the unit file
+            // the last deploy placed says it too; the convention otherwise.
+            let old_unit = exec
+                .read_file(&format!("{}/{}/{}.service", repo_stack_dir, unit, unit))
+                .await
+                .ok();
+            let need = old_unit.as_deref().map(crate::native::unit_prereqs);
+            let binary = prior
+                .as_ref()
+                .and_then(|p| p.natives.iter().find(|n| &n.unit == unit))
+                .map(|n| n.binary.clone())
+                .filter(|b| !b.is_empty())
+                .or_else(|| need.as_ref().and_then(|n| n.binary.clone()))
+                .unwrap_or_else(|| format!("/usr/local/bin/{}", unit));
+            let mut vault: Vec<String> = need
+                .as_ref()
+                .map(|n| {
+                    n.env_files
+                        .iter()
+                        .chain(n.credentials.iter())
+                        .map(|f| {
+                            format!(
+                                "{}/secrets/{}/{}",
+                                ctx.state_dir,
+                                m.stack_name,
+                                vault_key(f)
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let Some(env) = prior
+                .as_ref()
+                .and_then(|p| p.natives.iter().find(|n| &n.unit == unit))
+                .and_then(|n| n.env_file.clone())
+            {
+                vault.push(format!(
+                    "{}/secrets/{}/{}",
+                    ctx.state_dir,
+                    m.stack_name,
+                    vault_key(&env)
+                ));
+            }
+            unit_vault.insert(unit.clone(), vault);
+            pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "systemctl disable --now {} 2>&1 || true",
+                    crate::ops::util::shq(unit)
+                ),
+                120,
+            )
+            .await?;
+            log_info(format!(
+                "[native] {} left the stack file — stopped and disabled",
+                unit
+            ));
+            for path in [format!("/etc/systemd/system/{}.service", unit), binary] {
+                run_ok(
+                    exec,
+                    &Cmd::new("pct", &["exec", &vm, "--", "rm", "-f", &path], 60),
+                )
+                .await?;
+                log_info(format!("[native] removed {}", path));
+            }
+            log_info(format!(
+                "[native] {}'s data directories and its restic repository are kept",
+                unit
+            ));
+            reload = true;
+            changed = true;
+        }
+        if reload {
+            pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
+        }
+        Ok(if changed {
+            StepOutcome::Changed
+        } else {
+            StepOutcome::Unchanged
+        })
+    });
+
     // ── D4: intent into the host-local git repo (never secrets, A5). ─────
     step!(runner, exec, ctx, m, "commit intent", {
         let repo = format!("{}/repo", ctx.state_dir);
         let stack_dir = format!("{}/stacks/{}", repo, m.stack_name);
+        // step-22: the copy holds what the stack declares and nothing else —
+        // a file the stack dropped used to stay here forever.
+        for rel in &dropped_repo_files {
+            run_ok(
+                exec,
+                &Cmd::new("rm", &["-f", &format!("{}/{}", stack_dir, rel)], 30),
+            )
+            .await?;
+        }
+        if !dropped_repo_files.is_empty() {
+            let _ = exec
+                .run(&Cmd::new(
+                    "find",
+                    &[
+                        &stack_dir,
+                        "-mindepth",
+                        "1",
+                        "-type",
+                        "d",
+                        "-empty",
+                        "-delete",
+                    ],
+                    30,
+                ))
+                .await;
+        }
         for f in &spec.files {
             exec.write_file(&format!("{}/{}", stack_dir, f.path), &f.content, 0o644)
                 .await?;
@@ -1623,6 +1934,57 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         });
     }
 
+    // ── step-22: a route the stack no longer declares goes. The file is
+    // named `<vmid>-app-<stack>.yml`, so dropping `gateway_route:` or moving
+    // to another vmid left the old one behind: still routing a hostname to a
+    // container that is gone or no longer this stack, and still on the front
+    // page, which is rendered from these files. Only when the stack had a
+    // record: a stack deployed for the first time has nothing of its own to
+    // take away.
+    let stale_routes: Vec<String> = match prior.as_ref() {
+        Some(p) => {
+            let keep = spec.gateway_route.as_ref().map(|r| r.filename.clone());
+            let mut v: Vec<String> = Vec::new();
+            for vmid in [p.vmid, m.vmid] {
+                let f = format!("{}-app-{}.yml", vmid, m.stack_name);
+                if Some(&f) != keep.as_ref() && !v.contains(&f) {
+                    v.push(f);
+                }
+            }
+            v
+        }
+        None => Vec::new(),
+    };
+    if !stale_routes.is_empty() {
+        step!(runner, exec, ctx, m, "retire gateway route", {
+            let mut changed = false;
+            for f in &stale_routes {
+                let dest = format!("{}/{}", ctx.safety.gateway_routes_dir, f);
+                let q = crate::ops::util::shq(&dest);
+                // Same machine and path destroy removes it from.
+                let out = pct_sh(
+                    exec,
+                    ctx.safety.gateway_vmid,
+                    &format!("if [ -f {q} ]; then rm -f {q} && echo removed; fi"),
+                    30,
+                )
+                .await?;
+                if out.stdout.contains("removed") {
+                    log_info(format!(
+                        "[route] {} removed — the stack file no longer declares it",
+                        dest
+                    ));
+                    changed = true;
+                }
+            }
+            Ok(if changed {
+                StepOutcome::Changed
+            } else {
+                StepOutcome::Unchanged
+            })
+        });
+    }
+
     // ── T2: the stack brings its own dashboard. Written into Grafana's
     // provisioning directory on the gateway, where the watcher picks it up
     // within ten seconds. Provisioned dashboards are files, not database
@@ -1693,136 +2055,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // that fails over it would be a deploy that fails over nothing.
     if let Some(dest) = ctx.homepage_services_file.as_deref() {
         step!(runner, exec, ctx, m, "homepage services", {
-            let dir = &ctx.safety.gateway_routes_dir;
-            let listing = pct_sh(
-                exec,
-                ctx.safety.gateway_vmid,
-                &format!("ls -1 '{}'/*.yml 2>/dev/null || true", dir),
-                60,
-            )
-            .await?;
-            let mut stacks: Vec<(String, Vec<crate::ops::homepage::Entry>)> = Vec::new();
-            for path in listing
-                .stdout
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-            {
-                let name = std::path::Path::new(path)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                // `112-app-almanac` → `almanac`; a hand-written
-                // `manual-…` fragment keeps its own name.
-                let stack = name
-                    .split_once("-app-")
-                    .map(|(_, s)| s.to_string())
-                    .unwrap_or(name);
-                let body = pct_sh(
-                    exec,
-                    ctx.safety.gateway_vmid,
-                    &format!("cat '{}'", path),
-                    60,
-                )
-                .await?;
-                let entries = crate::ops::homepage::entries_from_route(&body.stdout);
-                if !entries.is_empty() {
-                    stacks.push((stack, entries));
-                }
-            }
-            stacks.sort_by(|a, b| a.0.cmp(&b.0));
-            // V6: the overlay is intent, not runtime config, so it lives in
-            // the intent repo next to the stack file that ships it — where
-            // `git log` records who changed the front page and why. Found by
-            // its name rather than by a new setting: there is exactly one,
-            // and a config knob for it would be one more line nobody
-            // remembers to add (which is how T51 sat switched off for two
-            // days — F186).
-            let found = exec
-                .run(&Cmd::new(
-                    "sh",
-                    &[
-                        "-c",
-                        &format!(
-                            "ls -1 {}/repo/stacks/*/*/services-overlay.yml 2>/dev/null | head -1",
-                            ctx.state_dir
-                        ),
-                    ],
-                    30,
-                ))
-                .await?;
-            let overlay_path = found.stdout.trim().to_string();
-            let overlay = match exec.read_file(&overlay_path).await {
-                Ok(text) => {
-                    let ov = crate::ops::homepage::parse_overlay(&text);
-                    log_info(format!(
-                        "[t51] overlay: {} entr(y/ies) from {}",
-                        ov.blocks.len(),
-                        overlay_path
-                    ));
-                    Some(ov)
-                }
-                Err(_) => None,
-            };
-            // V6b: read each widget's API key from the application itself.
-            //
-            // Through ctx.exec rather than the tracing executor on purpose:
-            // the tracing one echoes stdout into the transcript, and these
-            // are live keys (standing rule 10 — a hash may appear there,
-            // plaintext never). Best-effort per app: a key that cannot be
-            // read leaves the widget pointing at Homepage's own variable,
-            // which fails visibly rather than silently.
-            let mut widget_keys: std::collections::HashMap<String, String> =
-                std::collections::HashMap::new();
-            {
-                let store = crate::state::StateStore::new(exec, &ctx.state_dir);
-                let st = store.load().await.unwrap_or_default();
-                for (stack, entries) in &stacks {
-                    let Some(vmid) = st
-                        .stacks
-                        .get(stack)
-                        .and_then(|s| s.manifest.as_ref())
-                        .map(|mf| mf.vmid)
-                    else {
-                        continue;
-                    };
-                    for e in entries {
-                        let Some(spec) = crate::ops::homepage::widget_for(&e.app) else {
-                            continue;
-                        };
-                        let Some(cmd) = spec.key_cmd else { continue };
-                        // O7 makes this path the only legal one, so it is
-                        // derived rather than looked up.
-                        let dir = format!("/appdata/{}/{}-config", stack, e.app);
-                        let script = cmd.replace("{dir}", &dir);
-                        if let Ok(out) = pct_sh(ctx.exec, vmid, &script, 30).await {
-                            let k = out.stdout.trim().to_string();
-                            if out.success() && !k.is_empty() {
-                                widget_keys.insert(e.app.clone(), k);
-                            }
-                        }
-                    }
-                }
-            }
-            log_info(format!(
-                "[t51] widget keys read from the applications themselves: {}",
-                widget_keys.len()
-            ));
-            let body = crate::ops::homepage::services_yaml(&stacks, overlay.as_ref(), &widget_keys);
-            match crate::ops::util::write_file_owned_like_dir(exec, dest, &body, 0o644).await {
-                Ok(()) => {
-                    log_info(format!(
-                        "[t51] {} — {} stack(s) on the front page",
-                        dest,
-                        stacks.len()
-                    ));
-                    Ok(StepOutcome::Changed)
-                }
-                Err(e) => {
-                    log_info(format!("[t51] could not write {} ({})", dest, e));
-                    Ok(StepOutcome::Unchanged)
-                }
-            }
+            crate::ops::fleetfiles::write_homepage_services(ctx, exec, dest).await
         });
     }
 
@@ -1842,86 +2075,71 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // nothing.
     if let Some(dest) = ctx.kuma_monitors_file.as_deref() {
         step!(runner, exec, ctx, m, "uptime monitors", {
-            let store = crate::state::StateStore::new(exec, &ctx.state_dir);
-            let state = store.load().await?;
-            let mut fleet: Vec<(String, String)> = state
-                .stacks
-                .iter()
-                .filter_map(|(name, st)| {
-                    // gap-14: an adopted native stack has no stack manifest
-                    // in state; its address follows from the vmid.
-                    let ip = match st.manifest.as_ref() {
-                        Some(mf) => mf.network.ip.clone(),
-                        None if st.is_native() => crate::ops::monitors::address_for_vmid(st.vmid)?,
-                        None => return None,
-                    };
-                    Some((name.clone(), ip))
-                })
-                .collect();
-            // The stack being deployed is in state by now, but on a FIRST
-            // deploy the state write happens after this step — so add it
-            // here rather than let a brand-new stack wait a whole deploy
-            // for the monitor that says whether it came up.
-            if !fleet.iter().any(|(n, _)| n == &m.stack_name) {
-                fleet.push((m.stack_name.clone(), m.network.ip.clone()));
-            }
-            let monitors = crate::ops::monitors::host_monitors(&fleet);
-            let body = crate::ops::monitors::monitors_json(&monitors);
-            match crate::ops::util::write_file_owned_like_dir(exec, dest, &body, 0o644).await {
-                Ok(()) => {
-                    log_info(format!(
-                        "[t49] {} — {} host monitor(s) for the seeder",
-                        dest,
-                        monitors.len()
-                    ));
-                    Ok(StepOutcome::Changed)
-                }
-                Err(e) => {
-                    log_info(format!("[t49] could not write {} ({})", dest, e));
-                    Ok(StepOutcome::Unchanged)
-                }
-            }
+            crate::ops::fleetfiles::write_host_monitors(
+                ctx,
+                exec,
+                dest,
+                Some((m.stack_name.as_str(), m.network.ip.as_str())),
+            )
+            .await
         });
     }
 
     // ── D3: garbage-collect apps removed from intent — stop + remove their
     // compose project and /opt dir; /appdata config dirs are kept.
-    // Files the container has and the repository does not.
     //
-    // The garbage collection below works per APP DIRECTORY: an app that
-    // leaves the stack file takes its directory with it. A FILE that leaves
-    // an app takes nothing — the deploy puts files down and has never picked
-    // one up. Thirteen Grafana dashboards deleted from the repository on
-    // 2026-09-01 were still on CT 104 two deploys later, one of them with the
-    // same uid as its replacement (F161).
+    // Files the container has and the repository does not. The garbage
+    // collection below works per APP DIRECTORY; a FILE that leaves an app
+    // used to take nothing with it — thirteen Grafana dashboards deleted from
+    // the repository on 2026-09-01 were still on CT 104 two deploys later,
+    // one with the same uid as its replacement (F161).
     //
-    // Reporting only, deliberately (Kenny, form H2b). Deleting is the
-    // irreversible direction and a deploy runs when nobody is looking;
-    // `homelab prune-orphans` does the removing, after showing the same list
-    // and asking.
+    // D84 reported them and left the removing to `homelab prune-orphans`.
+    // Kenny's ask-8 (`Automatisch bij deploy`, 2026-09-27) reverses that:
+    // what the files no longer declare, the deploy removes — one transcript
+    // line per file, so the removal is as visible as the report was. `.env`
+    // files come from the vault, never from the repository, and directories
+    // the orchestrator fills on behalf of other stacks (the gateway's
+    // generated dashboards and routes) are not this stack's files at all.
     step!(runner, exec, ctx, m, "orphan files", {
         if m.native_only {
             return Ok(StepOutcome::Unchanged);
         }
-        let orphans = orphan_files(exec, m, spec).await;
+        let keep = generated_dirs(&ctx.safety, ctx.grafana_dashboards_dir.as_deref(), m.vmid);
+        // An app that left the stack is the garbage collector's below: its
+        // compose file has to still be there when `docker compose down` runs
+        // in its directory, or its containers keep running with nothing left
+        // to stop them by.
+        let leaving: Vec<&String> = prior
+            .as_ref()
+            .map(|p| p.apps.iter().filter(|a| !m.apps.contains(a)).collect())
+            .unwrap_or_default();
+        let orphans: Vec<String> = orphan_files_keeping(exec, m, spec, &keep)
+            .await
+            .into_iter()
+            .filter(|o| {
+                let app = o.split('/').next().unwrap_or("");
+                !leaving.iter().any(|a| a.as_str() == app)
+            })
+            .collect();
         if orphans.is_empty() {
             return Ok(StepOutcome::Unchanged);
         }
-        log_info(format!(
-            "[orphans] {} file(s) on the container that the repository no longer has — \
-             `homelab prune-orphans stacks/{}` removes them after showing the list:",
-            orphans.len(),
-            m.stack_name
-        ));
-        for o in orphans.iter().take(20) {
-            log_info(format!("[orphans]   {}", o));
+        for o in &orphans {
+            let path = format!("/opt/{}/{}", m.stack_name, o);
+            // -f, never -r: FILES the repository dropped. A directory would
+            // take whatever else is under it.
+            run_ok(
+                exec,
+                &Cmd::new("pct", &["exec", &vm, "--", "rm", "-f", &path], 60),
+            )
+            .await?;
+            log_info(format!(
+                "[orphans] removed {} — no longer in the stack's files",
+                path
+            ));
         }
-        if orphans.len() > 20 {
-            log_info(format!("[orphans]   … and {} more", orphans.len() - 20));
-        }
-        // Never a failure: a file too many breaks nothing today, and a deploy
-        // that goes red over it would be one people learn to ignore.
-        Ok(StepOutcome::Unchanged)
+        Ok(StepOutcome::Changed)
     });
 
     step!(runner, exec, ctx, m, "garbage collect", {
@@ -2389,11 +2607,51 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         // kyu-runner, http-switchboard and almanac the moment their
         // containers got a manifest — so the nightly backup of four services
         // would simply have stopped, quietly, with nothing to see.
+        //
+        // ask-8: except a unit the stack FILE dropped from `natives:` — the
+        // step "retire dropped" stopped it, and it leaves the record here.
         let (prior_native, prior_natives) = state
             .stacks
             .get(&m.stack_name)
-            .map(|s| (s.native.clone(), s.natives.clone()))
+            .map(|s| {
+                let native = s
+                    .native
+                    .clone()
+                    .filter(|n| !dropped_natives.contains(&n.unit));
+                let natives: Vec<crate::native::NativeServiceManifest> = s
+                    .natives
+                    .iter()
+                    .filter(|n| !dropped_natives.contains(&n.unit))
+                    .cloned()
+                    .collect();
+                (native, natives)
+            })
             .unwrap_or((None, Vec::new()));
+        // ask-8 / ask-9: an app or unit that left the files leaves its
+        // backups, /appdata and vault copies behind, KEPT until `homelab
+        // wipe`; recorded here with the date it left. A stack or app that is
+        // back is no longer retired.
+        crate::ops::retired::unretire(&mut state, m);
+        if let Some(pm) = prior_manifest.as_ref() {
+            let before = state
+                .stacks
+                .get(&m.stack_name)
+                .map(|s| s.apps.clone())
+                .unwrap_or_default();
+            for app in before.iter().filter(|a| !m.apps.contains(a)) {
+                crate::ops::retired::retire_app(&mut state, pm, app, &ctx.state_dir, ctx.now_unix);
+            }
+        }
+        for unit in &dropped_natives {
+            crate::ops::retired::retire_unit(
+                &mut state,
+                &m.stack_name,
+                m.vmid,
+                unit,
+                unit_vault.get(unit).cloned().unwrap_or_default(),
+                ctx.now_unix,
+            );
+        }
         let (mut last_backup, enabled) = prior.unwrap_or((0, true));
         // A C4 replacement destroys the record along with the container, so
         // there is nothing left to preserve and the rebuilt stack claims it

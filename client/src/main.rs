@@ -698,53 +698,170 @@ async fn main() {
             if let Err(e) = homelab_core::manifest::validate(&spec) {
                 die(&format!("validation failed: {}", e));
             }
-            println!(
-                "{}▶ deploy {} :: vmid {} :: {} file(s), {} env(s){}",
-                C_CYAN,
-                spec.manifest.stack_name,
-                spec.manifest.vmid,
-                spec.files.len(),
-                spec.env.len(),
-                C_RESET
-            );
-            // T85: each native binary goes over the link on its own, then the
-            // deploy follows with the map emptied — the host fills it back in
-            // from what was staged. Three binaries in one message measured
-            // 94.7 MiB against a 64 MiB frame (F303); one at a time never
-            // meets that ceiling, however many services a stack grows.
-            let mut spec = spec;
-            let staged: Vec<(String, String)> = spec
-                .native_binaries
+            let ok = deploy_spec(&host, &token, spec).await;
+            std::process::exit(if ok { 0 } else { 1 });
+        }
+        // ask-8 (Kenny, 2026-09-27): the whole stacks directory against the
+        // host. Changed stacks are deployed; a stack in host state whose
+        // directory is gone is destroyed only after its name is typed. The
+        // nightly round never does this — it never destroys anything.
+        "apply" => {
+            let base = args
+                .get(2)
+                .filter(|a| !a.starts_with("--"))
+                .cloned()
+                .unwrap_or_else(|| "stacks".into());
+            let skip_backup = args.iter().any(|a| a == "--no-backup");
+            let base_path = Path::new(&base);
+            if !base_path.is_dir() {
+                die(&format!(
+                    "no stacks directory at '{}' — run this from the repository root, or pass \
+                     the path: homelab apply ~/Projects/homelab/stacks",
+                    base
+                ));
+            }
+            let (ok, fleet) = rpc_collect(&host, &token, Command::GetState).await;
+            let fleet = match fleet {
+                Some(f) if ok => f,
+                _ => die("could not read the host's state — nothing applied"),
+            };
+            let host_pairs: Vec<(String, String)> = fleet
+                .stacks
                 .iter()
-                .map(|(u, b)| (u.clone(), b.clone()))
+                .map(|s| (s.name.clone(), s.applied_hash.clone()))
                 .collect();
-            for (unit, b64) in staged {
-                println!(
-                    "{}▶ staging {} ({} KiB of base64){}",
-                    C_DIM,
-                    unit,
-                    b64.len() / 1024,
-                    C_RESET
-                );
-                let ok = rpc_with(
-                    &host,
-                    &token,
-                    Command::StageNativeBinary {
-                        stack: spec.manifest.stack_name.clone(),
-                        unit: unit.clone(),
-                        binary_b64: b64,
-                    },
-                )
-                .await;
-                if !ok {
+            // Every stack is built and validated before anything is sent: a
+            // stack file that does not build stops the whole apply rather
+            // than leaving the fleet half-applied.
+            let mut local: Vec<(String, String)> = Vec::new();
+            let mut specs: std::collections::BTreeMap<String, homelab_proto::DeploySpec> =
+                std::collections::BTreeMap::new();
+            for (name, dir) in spec::scan_local_stacks(base_path) {
+                let sp = spec::build_spec(&dir)
+                    .unwrap_or_else(|e| die(&format!("{}: {} — nothing applied", name, e)));
+                if let Err(e) = homelab_core::manifest::validate(&sp) {
                     die(&format!(
-                        "staging the binary of {} failed — deploy not started, nothing changed",
-                        unit
+                        "{}: validation failed: {} — nothing applied",
+                        name, e
                     ));
                 }
-                spec.native_binaries.insert(unit, String::new());
+                local.push((name.clone(), homelab_core::manifest::intent_hash(&sp)));
+                specs.insert(name, sp);
             }
-            rpc(&host, &token, Command::DeployStack(Box::new(spec))).await;
+            let dirs: Vec<String> = std::fs::read_dir(base_path)
+                .map(|rd| {
+                    rd.flatten()
+                        .filter(|e| e.path().is_dir())
+                        .map(|e| e.file_name().to_string_lossy().to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let plan = homelab_client::apply::plan(&local, &dirs, &host_pairs);
+            println!(
+                "{}▶ apply :: {} to deploy · {} unchanged · {} gone from the files{}",
+                C_CYAN,
+                plan.deploy.len(),
+                plan.unchanged.len(),
+                plan.destroy.len(),
+                C_RESET
+            );
+            for n in &plan.unchanged {
+                println!("{}  = {}{}", C_DIM, n, C_RESET);
+            }
+            for n in &plan.deploy {
+                println!("  ↑ {}", n);
+            }
+            for n in &plan.destroy {
+                println!(
+                    "{}  ✗ {} — in host state, no {}/{}/{}",
+                    C_YELLOW, n, base, n, C_RESET
+                );
+            }
+            for name in &plan.deploy {
+                let Some(sp) = specs.remove(name) else {
+                    continue;
+                };
+                if !deploy_spec(&host, &token, sp).await {
+                    die(&format!(
+                        "deploy of {} failed — apply stopped here; nothing after it was \
+                         deployed and nothing was destroyed",
+                        name
+                    ));
+                }
+            }
+            let mut all_ok = true;
+            if !plan.destroy.is_empty() {
+                println!(
+                    "{}! {} stack(s) run on the host but are gone from the files. Each is \
+                     destroyed from the manifest the host recorded — backed up first{}, its \
+                     /appdata, backups and vault kept (see `homelab check`) — only after you \
+                     type its name. Enter keeps it.{}",
+                    C_YELLOW,
+                    plan.destroy.len(),
+                    if skip_backup {
+                        " (NOT: --no-backup)"
+                    } else {
+                        ""
+                    },
+                    C_RESET
+                );
+                for name in &plan.destroy {
+                    let typed =
+                        read_typed(&format!("Type the stack name '{}' to destroy it: ", name));
+                    if &typed != name {
+                        println!("  kept {} — nothing destroyed", name);
+                        continue;
+                    }
+                    all_ok &= rpc_with(
+                        &host,
+                        &token,
+                        Command::DestroyRecorded {
+                            stack: name.clone(),
+                            confirm: typed,
+                            skip_backup,
+                        },
+                    )
+                    .await;
+                }
+            }
+            std::process::exit(if all_ok { 0 } else { 1 });
+        }
+        // ask-9: delete what a retired stack, app or unit kept — never
+        // automatic, always after the list and the typed name.
+        "wipe" => {
+            let name = args
+                .get(2)
+                .filter(|a| !a.starts_with("--"))
+                .cloned()
+                .unwrap_or_else(|| die("usage: homelab wipe <stack> | <stack>/<app>"));
+            let listed = rpc_with(
+                &host,
+                &token,
+                Command::WipeRetired {
+                    name: name.clone(),
+                    confirm: None,
+                },
+            )
+            .await;
+            if !listed {
+                std::process::exit(1);
+            }
+            let typed = read_typed(&format!(
+                "Type '{}' to delete all of the above, permanently: ",
+                name
+            ));
+            if typed != name {
+                die("name mismatch — nothing deleted");
+            }
+            rpc(
+                &host,
+                &token,
+                Command::WipeRetired {
+                    name,
+                    confirm: Some(typed),
+                },
+            )
+            .await;
         }
         "backup" => {
             let dir = args
@@ -912,11 +1029,10 @@ async fn main() {
             }
         }
         "prune-orphans" => {
-            // Kenny's H2b: the deploy REPORTS files the repository no longer
-            // has, and this removes them — after the same typed confirmation
-            // a destroy asks for. Two steps on purpose: deleting is the
-            // irreversible direction, and a deploy runs when nobody is
-            // looking.
+            // Kenny's H2b made this the only remover of files the repository
+            // no longer has; since ask-8 (2026-09-27) the deploy removes them
+            // itself, so this is mostly a no-op kept for a container that has
+            // not been deployed since. Same typed confirmation as before.
             let dir = args
                 .get(2)
                 .unwrap_or_else(|| die("usage: homelab prune-orphans stacks/<name>"));
@@ -950,11 +1066,41 @@ async fn main() {
             let dir = args
                 .get(2)
                 .unwrap_or_else(|| die("usage: homelab destroy stacks/<name>"));
+            let skip_backup = args.iter().any(|a| a == "--no-backup");
+            // ask-8: a stack whose directory is gone is destroyed from the
+            // manifest the host recorded when it last applied it.
+            if !Path::new(dir).join("lxc-compose.yml").exists() {
+                let stack = Path::new(dir)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                eprintln!(
+                    "{}! no {}/lxc-compose.yml — destroying '{}' from the manifest the host \
+                     recorded{}",
+                    C_YELLOW, dir, stack, C_RESET
+                );
+                let confirm = read_typed(&format!(
+                    "Type the stack name '{}' to confirm destroy: ",
+                    stack
+                ));
+                if confirm != stack {
+                    die("name mismatch — aborted");
+                }
+                rpc(
+                    &host,
+                    &token,
+                    Command::DestroyRecorded {
+                        stack,
+                        confirm,
+                        skip_backup,
+                    },
+                )
+                .await;
+            }
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             let stack = &spec.manifest.stack_name;
             // Kenny's B2: the destroy backs up first and refuses if that
             // fails. Skipping is deliberate and says so out loud.
-            let skip_backup = args.iter().any(|a| a == "--no-backup");
             if skip_backup {
                 eprintln!(
                     "{}! --no-backup: destroying without the backup that would otherwise be \
@@ -997,15 +1143,17 @@ async fn main() {
             println!(
                 "  homelab patch                       apt dist-upgrade all managed stacks (H6)"
             );
-            println!("  homelab destroy stacks/<name>       gated destroy (C2)");
-            println!("  homelab prune-orphans stacks/<name>  remove files the repo dropped (H2b)");
+            println!("  homelab destroy stacks/<name>       gated destroy (C2; from the host's record when the dir is gone)");
+            println!("  homelab apply [stacks/] [--no-backup]  deploy what changed, destroy what left the files after its name is typed (ask-8)");
+            println!("  homelab wipe <stack>[/<app>]        delete what a retired stack or app kept: backups, /appdata, vault (ask-9)");
+            println!("  homelab prune-orphans stacks/<name>  remove files the repo dropped (H2b; the deploy does this itself now)");
             println!(
                 "  homelab enable|disable <stack>      (un)park for the nightly scheduler (H8)"
             );
             println!("  homelab backup-host-meta            snapshot vault/state/TLS/repo (H10)");
             println!("  homelab check [stacks/]             hold the repo against reality (Y4)");
             println!("  homelab guards <vmid>               apply the runaway guards (B2/G1)");
-            println!("  homelab forget <stack>              drop a stale state record (no container touched)");
+            println!("  homelab forget <stack>              drop a stale record and its registrations (no container touched)");
             println!("  homelab adopt stacks/<name>         adopt a native-service CT (C7)");
             println!(
                 "  homelab backup-native|update-native <stack>  drive an adopted service (C7)"
@@ -1064,6 +1212,17 @@ async fn rpc(host: &str, token: &str, command: Command) {
 /// T85 needed a caller that sends several commands in a row (one staged
 /// binary per message, then the deploy), so the exit moved to `rpc`.
 async fn rpc_with(host: &str, token: &str, command: Command) -> bool {
+    rpc_collect(host, token, command).await.0
+}
+
+/// [`rpc_with`], also handing back the fleet snapshot a `GetState` answers
+/// with (ask-8: `homelab apply` compares the stacks directory with it).
+async fn rpc_collect(
+    host: &str,
+    token: &str,
+    command: Command,
+) -> (bool, Option<homelab_proto::FleetState>) {
+    let mut fleet_seen: Option<homelab_proto::FleetState> = None;
     // F303: the size guard lives HERE, where every command passes, and not in
     // the three call sites that happened to remember it.
     //
@@ -1083,7 +1242,7 @@ async fn rpc_with(host: &str, token: &str, command: Command) -> bool {
     }
     // Commands whose real payload arrives as a separate broadcast frame
     // (Config) may see RpcDone first — wait for the payload before exiting.
-    let awaits_payload = matches!(command, Command::GetConfig);
+    let awaits_payload = matches!(command, Command::GetConfig | Command::GetState);
     let is_ping = matches!(command, Command::Ping);
     let mut payload_seen = false;
     let mut done: Option<bool> = None;
@@ -1265,27 +1424,91 @@ async fn rpc_with(host: &str, token: &str, command: Command) -> bool {
                     fleet.stacks.len(),
                     C_RESET
                 );
+                payload_seen = true;
+                fleet_seen = Some(*fleet);
             }
             ServerMsg::RpcDone(resp) => {
                 if !resp.ok {
                     println!("{}✗ {}{}", C_RED, resp.message, C_RESET);
-                    return false;
+                    return (false, fleet_seen);
                 }
                 if homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
                     println!("{}✓ {}{}", C_GREEN, resp.message, C_RESET);
-                    return true;
+                    return (true, fleet_seen);
                 }
                 done = Some(true);
             }
         }
         if done.is_some() && homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
             println!("{}✓ ok{}", C_GREEN, C_RESET);
-            return true;
+            return (true, fleet_seen);
         }
     }
     eprintln!(
         "{}✗ connection closed before RPC completed{}",
         C_RED, C_RESET
     );
-    false
+    (false, fleet_seen)
+}
+
+/// Read one line the operator typed after `prompt` (typed-name gates).
+fn read_typed(prompt: &str) -> String {
+    use std::io::Write as _;
+    eprint!("{}{}{}", C_RED, prompt, C_RESET);
+    std::io::stderr().flush().ok();
+    let mut typed = String::new();
+    std::io::stdin().read_line(&mut typed).ok();
+    typed.trim().to_string()
+}
+
+/// Ship one stack: its native binaries one per message (T85), then the
+/// deploy itself. `true` when the host reported the deploy done and ok.
+async fn deploy_spec(host: &str, token: &str, mut spec: homelab_proto::DeploySpec) -> bool {
+    println!(
+        "{}▶ deploy {} :: vmid {} :: {} file(s), {} env(s){}",
+        C_CYAN,
+        spec.manifest.stack_name,
+        spec.manifest.vmid,
+        spec.files.len(),
+        spec.env.len(),
+        C_RESET
+    );
+    // T85: each native binary goes over the link on its own, then the deploy
+    // follows with the map emptied — the host fills it back in from what was
+    // staged. Three binaries in one message measured 94.7 MiB against a
+    // 64 MiB frame (F303); one at a time never meets that ceiling, however
+    // many services a stack grows.
+    let staged: Vec<(String, String)> = spec
+        .native_binaries
+        .iter()
+        .map(|(u, b)| (u.clone(), b.clone()))
+        .collect();
+    for (unit, b64) in staged {
+        println!(
+            "{}▶ staging {} ({} KiB of base64){}",
+            C_DIM,
+            unit,
+            b64.len() / 1024,
+            C_RESET
+        );
+        let ok = rpc_with(
+            host,
+            token,
+            Command::StageNativeBinary {
+                stack: spec.manifest.stack_name.clone(),
+                unit: unit.clone(),
+                binary_b64: b64,
+            },
+        )
+        .await;
+        if !ok {
+            eprintln!(
+                "{}✗ staging the binary of {} failed — deploy not started, nothing changed{}",
+                C_RED, unit, C_RESET
+            );
+            return false;
+        }
+        spec.native_binaries.insert(unit, String::new());
+    }
+    rpc_with(host, token, Command::DeployStack(Box::new(spec))).await
 }

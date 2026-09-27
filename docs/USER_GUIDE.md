@@ -1481,8 +1481,9 @@ finds a snapshot, and restores it before the app starts.
 
 **Status:** Built.
 
-The host looks every 20 minutes. In the configured hour (host local time) it
-plans the night (`host/src/main.rs:2257-2333,2000-2035`):
+The host looks a minute after it starts, then every 20 minutes. In the
+configured hour or the hour after it (host local time; the second hour
+catches up a night a restart interrupted, fix-129) it plans the night (`host/src/main.rs:2257-2333,2000-2035`):
 
 1. Backups of every **enabled** stack whose last backup is more than 20 hours
    old (`host/src/main.rs:1952-1954,2008-2013`), three at a time by default

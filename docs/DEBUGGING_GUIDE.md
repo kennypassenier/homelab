@@ -103,7 +103,7 @@ flowchart LR
 | daemon log | stderr of `homelab-host` (`host/src/main.rs:1780-1785`) | `tracing` calls throughout `host/src/main.rs` | always | startup faults, scheduler decisions, notification delivery, and every transcript line (below) |
 | live transcript | streamed to every connected client | `host/src/main.rs:1611-1655` | while an operation runs | the exact commands and the first lines of their output |
 | state record | `/var/lib/homelab/state.json` | `core/src/state.rs:198-231` | after operations, the scheduler, notifications | what the orchestrator believes about each stack |
-| fleet check | `homelab check` output; daemon log each night | `core/src/ops/fleetcheck.rs:510-715`, `host/src/main.rs:2629-2682` | on demand, and after every nightly tick in the backup hour | where the record and reality disagree |
+| fleet check | `homelab check` output; daemon log each night | `core/src/ops/fleetcheck.rs:510-715`, `host/src/main.rs:2629-2682` | on demand, and after every nightly tick in the night window | where the record and reality disagree |
 | doctor | `homelab doctor` output | `core/src/doctor.rs:45-188`, probes at `host/src/main.rs:4275-4385` | on demand | host disk, state file, backups, offsite, mirror, interrupted operations |
 | exec audit | `/var/lib/homelab/audit.log` | `host/src/main.rs:3955-3969` | every `homelab exec` that passed its guard | who ran what inside which container; 0600, the command masked (fix-124, fix-125) |
 | intent history | `/var/lib/homelab/repo` (git) | deploy step `commit intent` (`core/src/ops/deploy.rs:894-960`) | every deploy | which files each deploy applied |
@@ -832,8 +832,9 @@ Two things the update's transcript will not tell you directly:
 
 ### 8.7 The nightly round
 
-The scheduler wakes every 20 minutes. It only works in the configured
-`backup_hour`, and a stack is due when its last backup is at least 20 hours
+The scheduler looks a minute after start, then every 20 minutes. It only
+works in the night window, `backup_hour` and the hour after it (fix-129),
+and a stack is due when its last backup is at least 20 hours
 old (`host/src/main.rs:2246-2273`, `1941-1943`). Parked stacks are left out
 (`host/src/main.rs:1997-2002`).
 

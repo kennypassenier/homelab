@@ -2090,9 +2090,51 @@ port = 5003
         assert_eq!(parse_local_hour("99"), None);
         let now = 1_800_000_000u64;
         assert!(backup_due(4, 4, now - 25 * 3600, now));
-        assert!(!backup_due(4, 5, now - 25 * 3600, now), "wrong hour");
+        assert!(
+            !backup_due(4, 7, now - 25 * 3600, now),
+            "outside the night window (fix-129)"
+        );
         assert!(!backup_due(4, 4, now - 3600, now), "backed up an hour ago");
         assert!(backup_due(4, 4, 0, now), "never backed up");
+    }
+
+    /// fix-129 (expert panel, restart-skips-night, 2026-09-27): a backup was
+    /// due only while the local hour equalled `backup_hour`, and the first
+    /// check came twenty minutes after start. A self-update, crash or power
+    /// cut inside that hour cost the whole night: no backups, updates,
+    /// host-meta or fleet check. What was not done in the hour is caught up
+    /// in the next one, and the first check comes a minute after start.
+    #[test]
+    fn fix_129_a_night_missed_by_a_restart_is_caught_up_before_morning() {
+        let now = 1_800_000_000u64;
+        let stale = now - 25 * 3600;
+        assert!(
+            backup_due(4, 5, stale, now),
+            "04:xx lost, caught up at 05:xx"
+        );
+        assert!(!backup_due(4, 6, stale, now), "not into the day");
+        assert!(!backup_due(4, 3, stale, now), "not before the hour");
+        assert!(backup_due(23, 0, stale, now), "the window wraps midnight");
+        assert!(
+            !backup_due(4, 5, now - 3600, now),
+            "done in the hour: not again"
+        );
+        let st = NightlyState {
+            last_host_meta: stale,
+            last_zfs: now,
+            last_restore_drill: now,
+            restore_drill_interval_s: 90 * 24 * 3600,
+            zfs_configured: false,
+            devices_configured: false,
+        };
+        assert_eq!(
+            nightly_plan(4, 5, now, &[("a".into(), true, stale)], &st),
+            vec![NightlyTask::Stack("a".into()), NightlyTask::HostMeta]
+        );
+        assert!(
+            Duration::from_secs(SCHEDULER_FIRST_CHECK_S) <= Duration::from_secs(60),
+            "the first look comes soon after a start, not a tick later"
+        );
     }
 
     /// G14: the drill rides the backup hour and only when it is due.
@@ -2111,7 +2153,7 @@ port = 5003
             "never drilled, and it is the hour: it must be planned"
         );
         assert!(
-            !nightly_plan(4, 5, 1_000_000, &[], &never).contains(&NightlyTask::RestoreDrill),
+            !nightly_plan(4, 7, 1_000_000, &[], &never).contains(&NightlyTask::RestoreDrill),
             "a restore pulls a whole snapshot back — not outside the backup hour"
         );
         let fresh = NightlyState {
@@ -2262,10 +2304,10 @@ port = 5003
         );
         assert!(plan.is_empty());
 
-        // Wrong hour: nothing at all.
+        // Outside the night window (fix-129: 04:00-06:00): nothing at all.
         assert!(nightly_plan(
             4,
-            5,
+            7,
             now,
             &[("a".into(), true, stale)],
             &NightlyState {
@@ -3305,8 +3347,29 @@ fn parse_local_hour(date_stdout: &str) -> Option<u8> {
     date_stdout.trim().parse::<u8>().ok().filter(|h| *h < 24)
 }
 
+/// fix-129 (expert panel, restart-skips-night, 2026-09-27): seconds from
+/// start to the scheduler's first look. It waited a whole tick (20 min), so
+/// a restart late in the backup hour missed the hour altogether. A minute
+/// leaves the boot notification and the network their head start.
+const SCHEDULER_FIRST_CHECK_S: u64 = 60;
+
+/// fix-129: how many hours the nightly window lasts, starting at
+/// `backup_hour`. The second hour is a catch-up: a daemon restarted (a
+/// self-update, a crash, a power cut) in the first hour picks up there what
+/// is still due, instead of skipping the night. With `backup_hour = 4` the
+/// window ends at 06:00, before the house wakes up.
+const NIGHT_WINDOW_HOURS: u8 = 2;
+
+/// fix-129: is `local_hour` inside the nightly window that opens at
+/// `cfg_hour`? Wraps midnight.
+fn in_night_window(cfg_hour: u8, local_hour: u8) -> bool {
+    (local_hour + 24 - cfg_hour) % 24 < NIGHT_WINDOW_HOURS
+}
+
 fn backup_due(cfg_hour: u8, local_hour: u8, last_backup: u64, now: u64) -> bool {
-    local_hour == cfg_hour && now.saturating_sub(last_backup) >= 20 * 3600
+    // fix-129: due and not yet run since the last window, anywhere in the
+    // window; it was only in the configured hour itself.
+    in_night_window(cfg_hour, local_hour) && now.saturating_sub(last_backup) >= 20 * 3600
 }
 
 /// One unit of work in a nightly run.
@@ -3376,9 +3439,10 @@ fn nightly_plan(
     if st.devices_configured && backup_due(cfg_hour, local_hour, st.last_host_meta, now) {
         plan.push(NightlyTask::DeviceConfig);
     }
-    // G14: at most one per round, and only in the backup hour — a restore
-    // pulls a whole snapshot back over the same link the backups just used.
-    if local_hour == cfg_hour
+    // G14: at most one per round, and only in the nightly window (fix-129)
+    // — a restore pulls a whole snapshot back over the same link the
+    // backups just used.
+    if in_night_window(cfg_hour, local_hour)
         && homelab_core::ops::restoredrill::due(
             st.last_restore_drill,
             now,
@@ -3672,8 +3736,11 @@ async fn scheduler_loop(state: AppState) {
     // fix-122: the nightly updates run inside a span naming their stack.
     use tracing::Instrument as _;
     let exec = RealExecutor;
+    // fix-129: the first look soon after start, then every 20 minutes.
+    let mut wait = Duration::from_secs(SCHEDULER_FIRST_CHECK_S);
     loop {
-        tokio::time::sleep(Duration::from_secs(20 * 60)).await;
+        tokio::time::sleep(wait).await;
+        wait = Duration::from_secs(20 * 60);
         spawn_mirror_push(&state); // D5 retry queue: try again every tick
         let (hour, tiers) = {
             let s = state
@@ -3698,7 +3765,7 @@ async fn scheduler_loop(state: AppState) {
             tracing::error!("scheduler: cannot determine local hour ('date' failed) — nightly run skipped THIS TICK; investigate");
             continue;
         };
-        if local_hour != hour {
+        if !in_night_window(hour, local_hour) {
             continue;
         }
         let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);

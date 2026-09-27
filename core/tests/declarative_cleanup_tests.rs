@@ -80,6 +80,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest: manifest(vmid, stack),
         files: vec![FileBlob {
             path: format!("{}/docker-compose.yml", stack),

@@ -196,6 +196,7 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
         gateway_route,
         checks,
         native_binaries,
+        native_manifests: native_manifests_for(dir),
     })
 }
 
@@ -1113,7 +1114,10 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          it creates the container, writes each `<unit>/<unit>.service`, creates the unit's \
          account, places the program from the unit's release where none exists (it never \
          replaces one), puts back env and credential files from the vault, and starts a unit \
-         only when all of that is present. A unit left unstarted is named in the output; a \
+         only when all of that is present. A unit that is not running and whose data \
+         directories are empty gets its newest snapshot unpacked back first (fix-146); a \
+         unit archived from its own copy (`backup_from_newest`, kyu) is then left stopped \
+         until that copy is put in place as the live file. A unit left unstarted is named in the output; a \
          missing program is installed with `homelab install-native stacks/<stack>/<unit>` (or \
          `stacks/<stack>` for the unit whose `service.yml` sits at the top).\n\n",
         state = state,

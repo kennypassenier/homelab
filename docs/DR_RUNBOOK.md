@@ -203,7 +203,7 @@ pct exec <vmid> -- systemctl enable --now <unit>
 
 The program comes from the unit's GitHub release (named per unit in the Stacks section). On a workstation: `gh release download --repo <release_repo> --pattern <asset> --pattern SHA256SUMS`, then `sha256sum -c --ignore-missing SHA256SUMS`, then copy it to the host.
 
-When the daemon is up, `homelab deploy stacks/<stack>` rebuilds a native stack too: it creates the container, writes each `<unit>/<unit>.service`, creates the unit's account, places the program from the unit's release where none exists (it never replaces one), puts back env and credential files from the vault, and starts a unit only when all of that is present. A unit left unstarted is named in the output; a missing program is installed with `homelab install-native stacks/<stack>/<unit>` (or `stacks/<stack>` for the unit whose `service.yml` sits at the top).
+When the daemon is up, `homelab deploy stacks/<stack>` rebuilds a native stack too: it creates the container, writes each `<unit>/<unit>.service`, creates the unit's account, places the program from the unit's release where none exists (it never replaces one), puts back env and credential files from the vault, and starts a unit only when all of that is present. A unit that is not running and whose data directories are empty gets its newest snapshot unpacked back first (fix-146); a unit archived from its own copy (`backup_from_newest`, kyu) is then left stopped until that copy is put in place as the live file. A unit left unstarted is named in the output; a missing program is installed with `homelab install-native stacks/<stack>/<unit>` (or `stacks/<stack>` for the unit whose `service.yml` sits at the top).
 
 ## Layer 3: Restore the daemon's own state (host-meta)
 

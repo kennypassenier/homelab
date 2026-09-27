@@ -436,6 +436,13 @@ pub struct DeploySpec {
     /// program is missing rather than failing the whole run.
     #[serde(default)]
     pub native_binaries: BTreeMap<String, String>,
+    /// fix-146 (native-empty-rebuild, 2026-09-27): each native unit's
+    /// `service.yml`, keyed by unit name. The deploy needs its `data_dirs` to
+    /// see a unit whose data is empty and put its newest snapshot back
+    /// before it starts. Absent from older clients, and then nothing is
+    /// restored — the behaviour before this existed.
+    #[serde(default)]
+    pub native_manifests: BTreeMap<String, crate::native::NativeServiceManifest>,
 }
 
 // ── Validation (D10) ─────────────────────────────────────────────────────────

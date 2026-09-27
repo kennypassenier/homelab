@@ -440,6 +440,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             if mount.no_data {
                 continue;
             }
+            // fix-146: a native unit's data is archived as one tar stream,
+            // not by path, so this per-path question always answered "fresh"
+            // for it. The `native units` step restores it instead.
+            if m.natives.iter().any(|n| n == mount.owner(&m.stack_name)) {
+                continue;
+            }
             let probe = exec
                 .run(&Cmd::new(
                     "sh",
@@ -2629,7 +2635,54 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             }
 
             let active = pct_sh(exec, m.vmid, &format!("systemctl is-active {}", unit), 30).await?;
-            if active.stdout.trim() == "active" {
+            let running = active.stdout.trim() == "active";
+            // fix-146 (native-empty-rebuild, 2026-09-27): a unit that is not
+            // running and whose data is empty gets its newest snapshot back
+            // before it starts. A running unit is never written under.
+            if !running {
+                if let Some(nm) = spec.native_manifests.get(unit) {
+                    use crate::ops::native::EmptyUnit;
+                    match crate::ops::native::restore_empty_unit(exec, &ctx.backup, nm).await? {
+                        EmptyUnit::HasData => {}
+                        EmptyUnit::Fresh => log_info(format!(
+                            "[native] {}: data is empty and has no snapshot — fresh",
+                            unit
+                        )),
+                        EmptyUnit::Restored => {
+                            log_info(format!(
+                                "[native] {}: data was empty — the newest snapshot is back",
+                                unit
+                            ));
+                            changed = true;
+                        }
+                        EmptyUnit::RestoredHold(why) => {
+                            log_warn(format!(
+                                "[native] {} NOT started: its data was empty and the newest \
+                                 snapshot was unpacked, but {}",
+                                unit, why
+                            ));
+                            changed = true;
+                            continue;
+                        }
+                        EmptyUnit::CheckFailed(why) => log_warn(format!(
+                            "[native] {}: data is empty and its backup could not be checked \
+                             ({}) — starting it EMPTY; if it held data, restore it by hand \
+                             (op-11) before the next nightly backup",
+                            unit, why
+                        )),
+                        EmptyUnit::RestoreFailed(why) => {
+                            log_warn(format!(
+                                "[native] AUTO-RESTORE FAILED for {} ({}) — NOT started, so it \
+                                 does not begin again empty; restore it by hand (op-11), then \
+                                 deploy again",
+                                unit, why
+                            ));
+                            continue;
+                        }
+                    }
+                }
+            }
+            if running {
                 // 6 · keep the vault current, so the NEXT rebuild can restore
                 // what this container has. The same reasoning as the per-app
                 // .env copies: a file that exists in exactly one place is one

@@ -1440,6 +1440,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
             // a deploy, and downloading megabytes to draw a screen would be
             // wrong. `homelab deploy` is what carries them.
             native_binaries: Default::default(),
+            native_manifests: Default::default(),
             manifest,
             files: vec![],
             env: Default::default(),

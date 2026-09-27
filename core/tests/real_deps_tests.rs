@@ -176,6 +176,7 @@ fn spec(files_content: &str) -> DeploySpec {
     m.hostname = m.canonical_hostname();
     DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest: m,
         files: vec![FileBlob {
             path: "app/docker-compose.yml".into(),

@@ -52,6 +52,7 @@ fn a_rootfs_file_anywhere_else_or_climbing_is_refused() {
 fn native_kyu_spec() -> DeploySpec {
     DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest: StackManifest {
             registry_login: None,
             retention: None,

@@ -544,6 +544,121 @@ pub async fn install_native(
     runner.finish_ok()
 }
 
+/// fix-146 (native-empty-rebuild, Kenny 2026-09-27, form "Keuzes helpers"):
+/// what the deploy found about a native unit's data before starting it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EmptyUnit {
+    /// Its data directories hold something: nothing to do.
+    HasData,
+    /// Empty, and its repository has no snapshot (or does not exist): a new
+    /// service.
+    Fresh,
+    /// Empty; the newest snapshot was unpacked back into the container.
+    Restored,
+    /// Unpacked, but the unit must not start yet: why.
+    RestoredHold(String),
+    /// Empty, and whether a snapshot exists could not be read: why.
+    CheckFailed(String),
+    /// Empty with history, and the restore failed: why.
+    RestoreFailed(String),
+}
+
+/// fix-146: a rebuilt container starts its native units with empty data
+/// directories until somebody restores them by hand (op-11), while a compose
+/// stack's empty directories are refilled on deploy (E3). The unit then
+/// starts empty and fix-63 has to refuse that night's backup. Now the deploy
+/// asks first: empty, with history, means the newest snapshot is unpacked
+/// back into the container — the op-11 procedure, `restic dump` piped into
+/// `tar` inside the container so owners stay the container's own — BEFORE
+/// the unit starts.
+///
+/// A unit archived from its own copy (`backup_from_newest`, kyu) gets that
+/// copy back, not a live store: the copy has to become the live file by hand
+/// (the stack file's restore note names it), so that unit is left stopped.
+pub async fn restore_empty_unit(
+    exec: &dyn Executor,
+    cfg: &crate::ops::backup::BackupCfg,
+    m: &NativeServiceManifest,
+) -> Result<EmptyUnit, CoreError> {
+    if m.stateless || m.data_dirs.is_empty() {
+        return Ok(EmptyUnit::HasData);
+    }
+    let dirs = m
+        .data_dirs
+        .iter()
+        .map(|d| shq(d))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let probe = util_pct_sh(
+        exec,
+        m.vmid,
+        &format!("find {} -mindepth 1 2>/dev/null | head -1", dirs),
+        60,
+    )
+    .await?;
+    if !probe.stdout.trim().is_empty() {
+        return Ok(EmptyUnit::HasData);
+    }
+    let listing = exec
+        .run(&crate::ops::backup::restic_cmd(
+            cfg,
+            &m.unit,
+            &["snapshots", "--json"],
+            120,
+        ))
+        .await;
+    // fix-54's rule: only an empty list and restic's "repository does not
+    // exist" (exit 10) mean there is nothing to restore.
+    let history = match listing {
+        Ok(out) if out.success() => crate::ops::backup::parse_snapshots_json(&out.stdout),
+        Ok(out) if out.code == 10 => Vec::new(),
+        Ok(out) => {
+            return Ok(EmptyUnit::CheckFailed(format!(
+                "rc={} :: {}",
+                out.code,
+                crate::executor::trace_line(out.stderr.trim())
+            )))
+        }
+        Err(e) => return Ok(EmptyUnit::CheckFailed(e.to_string())),
+    };
+    if history.is_empty() {
+        return Ok(EmptyUnit::Fresh);
+    }
+    let script = format!(
+        "set -o pipefail; env RESTIC_REPOSITORY={base}/{unit}-config RESTIC_PASSWORD_FILE={pw} \
+         RESTIC_CACHE_DIR={cache} restic dump latest /{unit}-data.tar | \
+         pct exec {vmid} -- tar -xf - -C /",
+        base = cfg.restic_base,
+        unit = m.unit,
+        pw = cfg.password_file,
+        cache = crate::ops::backup::RESTIC_CACHE_DIR,
+        vmid = m.vmid
+    );
+    let out = exec
+        .run(&Cmd::new("sh", &["-c", &script], cfg.restore_timeout_s))
+        .await;
+    match out {
+        Ok(o) if o.success() => {}
+        Ok(o) => {
+            return Ok(EmptyUnit::RestoreFailed(format!(
+                "rc={} :: {}",
+                o.code,
+                crate::executor::trace_line(o.stderr.trim())
+            )))
+        }
+        Err(e) => return Ok(EmptyUnit::RestoreFailed(e.to_string())),
+    }
+    if let Some(glob) = &m.backup_from_newest {
+        return Ok(EmptyUnit::RestoredHold(format!(
+            "its archive is the service's own copy ({}), not a live store: put the newest \
+             copy in place as the live file as the stack file's restore note says \
+             (docs/OPERATIONS_RUNBOOK.md op-11), then start it",
+            glob
+        )));
+    }
+    Ok(EmptyUnit::Restored)
+}
+
 /// C7 nightly backup for a native stack. The data lives INSIDE the
 /// container (adoption never restarts a service, so a bind-mount to
 /// /appdata was never an option); the snapshot therefore streams

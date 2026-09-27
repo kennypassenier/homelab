@@ -1218,10 +1218,19 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
     doc.push_str(&format!(
         "The daemon replicates the datasets named in `[[zfs_jobs]]` (`source`, `target`) in \
          `{toml}` every night, and on `homelab zfs-replicate` (core/src/ops/zfs.rs). Each run \
-         takes `zfs snapshot -r <source>@{prefix}YYYYMMDD-HHMM`, sends the difference from \
-         the newest snapshot both sides share with `zfs send -RI ... | zfs receive -F -x \
-         mountpoint <target>`, and prunes only snapshots whose name starts with `{prefix}`, \
-         on both sides. A target with no snapshots at all gets a full send.\n\n\
+         takes `zfs snapshot -r <source>@{prefix}YYYYMMDD-HHMM` and then sends every \
+         dataset of the source on its own, never as one `-R` stream: `zfs send -I \
+         <replica's newest snapshot> <new> | zfs receive -F -x mountpoint <target dataset>`, \
+         or a full send when the target dataset does not exist yet or holds no snapshots at \
+         all. It prunes only snapshots whose name starts with `{prefix}`: the source with \
+         the configured tiers, the replica with its own longer ones, keeping whatever either \
+         policy keeps (fix-85).\n\n\
+         The replica keeps its own history. A snapshot destroyed on the source stays on the \
+         replica until the replica's retention thins it; a dataset destroyed on the source \
+         stays on the replica untouched, is never pruned, and is named in a warning every \
+         night. When the replica's newest snapshot of a dataset has left the source, that \
+         dataset is not sent: receiving from an older shared snapshot would roll the \
+         replica back and destroy what came after it, so the job fails and names it.\n\n\
          `-x mountpoint` keeps a replica from arriving with its source's mountpoint, which \
          would put the copy at the live path (F177, a replica claiming the live path of what \
          it copies). A replica received before that change can still carry it, so check \

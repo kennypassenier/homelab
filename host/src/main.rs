@@ -2938,10 +2938,8 @@ async fn scheduler_loop(state: AppState) {
                             .map(|m| m.storage.clone())
                             .unwrap_or_default(),
                         name.clone(),
-                        st.natives
-                            .iter()
-                            .map(|n| n.unit.clone())
-                            .collect::<Vec<_>>(),
+                        // fix-115: only units that have a repository.
+                        homelab_core::ops::restoredrill::backed_up_units(&st.natives),
                     )
                 })
                 .collect::<Vec<_>>(),

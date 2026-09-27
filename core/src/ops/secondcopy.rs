@@ -86,8 +86,9 @@ pub fn repo_policies(
                 .as_ref()
                 .and_then(|m| m.retention.clone())
                 .unwrap_or_else(|| fleet.to_vec());
-            for n in &st.natives {
-                add(n.unit.clone(), Some(tiers.clone()));
+            // fix-115: a stateless unit has no repository to copy.
+            for unit in crate::ops::restoredrill::backed_up_units(&st.natives) {
+                add(unit, Some(tiers.clone()));
             }
             continue;
         }

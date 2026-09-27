@@ -561,6 +561,22 @@ pub async fn backup_native(
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
 
+    // fix-115 (drill-includes-stateless-native, 2026-09-27): a unit that
+    // declares it keeps nothing has nothing to archive. The tar of no
+    // directory failed every night it was tried, which failed the whole
+    // stack's night and held back its updates; and the repository it would
+    // have created is one the drill then rehearsed for nothing.
+    if m.stateless && m.data_dirs.is_empty() && m.backup_from_newest.is_none() {
+        runner.log(
+            Level::Info,
+            format!(
+                "[backup] {} is stateless — nothing to archive, no repository",
+                m.unit
+            ),
+        );
+        return runner.finish_ok();
+    }
+
     step!(runner, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
         Ok(StepOutcome::Unchanged)

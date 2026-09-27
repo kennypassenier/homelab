@@ -90,6 +90,19 @@ pub fn drill_repos(
     out
 }
 
+/// fix-115 (drill-includes-stateless-native, 2026-09-27): the native units
+/// that have a repository. A unit that keeps nothing (`stateless: true`, no
+/// `data_dirs`) is never backed up, so a drill night spent on it failed on a
+/// repository that does not exist — the drill stack's `drillsvc` whenever
+/// that stack was present.
+pub fn backed_up_units(natives: &[crate::native::NativeServiceManifest]) -> Vec<String> {
+    natives
+        .iter()
+        .filter(|n| !n.stateless && !n.data_dirs.is_empty())
+        .map(|n| n.unit.clone())
+        .collect()
+}
+
 pub fn next_repo(repos: &[String], index: usize) -> Option<(String, usize)> {
     if repos.is_empty() {
         return None;

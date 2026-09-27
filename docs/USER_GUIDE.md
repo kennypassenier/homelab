@@ -1032,6 +1032,7 @@ a container runs several (`stacks/kyu/kyu-runner/service.yml`)
 | `update_cmd` | its own self-update command; absent means never updated by the host | `core/src/native.rs:48` |
 | `release_repo`, `release_asset` | `owner/name` on GitHub and the asset (default: the unit name) | `core/src/native.rs:64-68,88-90` |
 | `backup_from_newest` | archive the newest file matching this glob instead of `data_dirs` | `core/src/native.rs:79` |
+| `backup_pause` | stop the unit for the length of the nightly tar and start it again afterwards, whatever the snapshot did (fix-113); default off | `core/src/native.rs` |
 | `update_policy` | `auto`, `self` or `manual` (default) | `core/src/native.rs` |
 
 The verbs:
@@ -1043,6 +1044,7 @@ The verbs:
 | `homelab backup-native <stack>` | archives the service's state from inside the container into restic | `core/src/ops/native.rs:515-665` |
 | `homelab update-native <stack>` | runs the service's own `update_cmd` under supervision | `core/src/ops/native.rs:1174-1333` |
 | `homelab release-update-native <stack>` | installs the latest release when its checksum differs from the installed binary | `core/src/ops/native.rs:931-1131` |
+| `homelab rollback-native <stack>[/<unit>]` | goes back to the one previous binary every healthy install or update keeps beside the program (`<binary>.homelab-prev`, fix-114), under the same health check, and parks the stack's automatic updates until `homelab enable <stack>`; running it again returns to the version rolled back from | `core/src/ops/native.rs` (`rollback_native`) |
 
 `backup-native`, `update-native` and `release-update-native` act on the copy
 of the service files the host recorded at adoption, and on every service of
@@ -1077,8 +1079,9 @@ Tests: `core/tests/native_tests.rs:1473,1508`.
 
 **Update policy** (deployment decision B1, `docs/deployment/UPDATE_POLICY.md`
 and `docs/deployment/REGISTER.md`, row B1): a service with `update_policy: auto`
-gets the latest signed release installed by the nightly run before its
-supervised self-update; `self` services get only their own `update_cmd`; `manual`
+gets the latest signed release installed by the nightly run, and nothing else
+(fix-148: its own `update_cmd` no longer runs as well); `self` services get only
+their own `update_cmd`; `manual`
 services are left alone at night, neither release-updated nor self-updated
 (fix-58, `NativeServiceManifest::nightly_updates`). `update_policy: auto` without a
 `release_repo` fails validation (`core/src/native.rs:163-167`). The host reads
@@ -1315,9 +1318,11 @@ homelab update stacks/syncthing syncthing  # one app
 
 or `SHIFT+U` in the TUI. Per app (`core/src/ops/update.rs:121-270`):
 
-1. **policy**: the nightly run only touches apps whose container carries the
-   label `com.homelab.update.policy=auto`; an update you start yourself
-   touches every app you named.
+1. **policy**: the nightly run only touches services whose container carries
+   the label `com.homelab.update.policy=auto`, read per service (fix-117): in
+   an app whose services disagree, only the `auto` ones are pulled and
+   recreated (`up -d --no-deps <service>`), the others keep their label. An
+   update you start yourself touches every app you named.
 2. **capture** the running images (B6).
 3. **busy check**: only Jellyfin is asked whether anybody is watching, and an
    answer it cannot read counts as busy, so the app is skipped
@@ -1326,7 +1331,12 @@ or `SHIFT+U` in the TUI. Per app (`core/src/ops/update.rs:121-270`):
 5. **stop-first**: containers labelled `com.homelab.update.stop-first=true`
    are stopped with a 60-second grace first.
 6. **up** with `docker compose up -d --remove-orphans`.
-7. **verify**, and roll back when the app is not running (B6).
+7. **verify**, and roll back when the app is not running (B6). When `up -d`
+   started a new image, the app must also stay up (fix-118, the F300 check
+   of the native units): every service that ran before the update running
+   within 30 s and through a 60 s window, no container's restart count
+   moving, and no healthcheck `unhealthy` (a `starting` one gets two more
+   minutes). The rollback is held to the same check.
 
 The command sends only the stack file, so no secrets are needed
 (`client/src/main.rs:779-807`). Tests: `core/tests/m4_ops_tests.rs:662,694,737`.
@@ -1494,7 +1504,14 @@ kept, and the reason must be at least 10 characters
 homelab restore stacks/syncthing              # latest snapshot
 homelab restore stacks/syncthing <snapshot-id>
 homelab restore stacks/syncthing --yes        # scripts: the name counts as typed
+homelab restore stacks/media --app sonarr     # one app; the others keep running
 ```
+
+Since fix-112 (2026-09-27) a stack with several repositories is restored to
+one night across all of them (the `run-<unix time>` tag every backup
+writes), never each repository's own newest; with the safety copy taken,
+each data directory is emptied before restic writes into it, so no file the
+snapshot does not have stays behind.
 
 Since fix-64 (2026-09-27) the command asks you to type the stack name, as the
 TUI always did, and the host refuses a restore request without it. Before it

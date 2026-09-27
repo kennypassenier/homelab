@@ -1417,6 +1417,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
             // a deploy, and downloading megabytes to draw a screen would be
             // wrong. `homelab deploy` is what carries them.
             native_binaries: Default::default(),
+            native_manifests: Default::default(),
             manifest,
             files: vec![],
             env: Default::default(),
@@ -1789,6 +1790,7 @@ fn start_stack_op(model: &mut Model, op: StackOp) {
             manifest: Box::new(m),
             snapshot: "latest".into(),
             skip_safety_copy: false,
+            app: None,
         },
         StackOp::Update => Command::UpdateStack {
             manifest: Box::new(m),

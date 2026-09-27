@@ -89,6 +89,9 @@ pub struct LiveFacts {
     pub route_files: Vec<String>,
     /// fix-88: each recorded stack's `/etc/pve/firewall/<vmid>.fw`.
     pub firewalls: Vec<FirewallFact>,
+    /// fix-96: the configured `second_copy_dataset`, or None when no second
+    /// copy is configured (and then nothing is said about one).
+    pub second_copy_dataset: Option<String>,
 }
 
 /// fix-92 (routes-outside-repo-unvalidated, 2026-09-27): a file in the
@@ -697,6 +700,70 @@ pub fn nightly_report_due(
     fingerprint != last_fingerprint || now.saturating_sub(last_sent) >= NIGHTLY_REPORT_REPEAT_S
 }
 
+/// fix-147 (restore-check-failure, Kenny 2026-09-27, form "Keuzes helpers"):
+/// a deploy that found data empty and could not check its backup goes on
+/// (backup-target trouble never blocks a deploy, E3), so the service may be
+/// running on empty data while a history exists. fix-54 made that a warning
+/// in the transcript; this keeps it standing, on its stack, until a later
+/// check of the same directory or unit succeeds (a deploy, or a restore).
+pub fn evaluate_restore_checks(state: &HostState) -> Vec<Finding> {
+    state
+        .restore_check_failures
+        .values()
+        .map(|r| Finding {
+            severity: Severity::Broken,
+            subject: r.stack.clone(),
+            what: format!(
+                "the deploy of {} found {} empty and could not check its backup ({}) — it \
+                 started without that data, and a history may exist",
+                crate::state::ymd(r.at),
+                r.what,
+                r.why
+            ),
+            remedy: format!(
+                "check the backup target, then restore the data if it held any (`homelab \
+                 restore stacks/{} --app <app>`, or op-11 for a native unit); a later deploy \
+                 whose check of it succeeds, or a restore, clears this",
+                r.stack
+            ),
+        })
+        .collect()
+}
+
+/// fix-111: older than this, the host-meta backup has stopped: two nights.
+pub const HOST_META_MAX_AGE_S: u64 = 48 * 3600;
+
+/// fix-111 (host-meta-gaps, 2026-09-27): the daemon's own repository — the
+/// vault with the restic password, state.json, TLS and host.toml — had no
+/// doctor line and no finding, so a host-meta backup that stopped was
+/// reported nowhere until the host was lost. A host that manages no stack
+/// yet is left alone: there is nothing of its own worth keeping.
+pub fn evaluate_host_meta(state: &HostState, now: u64) -> Vec<Finding> {
+    if state.stacks.is_empty() {
+        return Vec::new();
+    }
+    let age = now.saturating_sub(state.last_host_meta);
+    if state.last_host_meta != 0 && age <= HOST_META_MAX_AGE_S {
+        return Vec::new();
+    }
+    vec![Finding {
+        severity: Severity::Broken,
+        subject: "host-meta".into(),
+        what: if state.last_host_meta == 0 {
+            "the daemon's own state (vault, state.json, TLS, host.toml) has never been backed up"
+                .into()
+        } else {
+            format!(
+                "the daemon's own state was last backed up {} hours ago",
+                age / 3600
+            )
+        },
+        remedy: "a lost host disk now loses the vault and the restic password with it; run \
+                 `homelab backup-host-meta` and read why the nightly one failed"
+            .into(),
+    }]
+}
+
 /// fix-65: how often a standing alarming set is sent again.
 pub const NIGHTLY_REPORT_REPEAT_S: u64 = 7 * 24 * 3600;
 
@@ -851,13 +918,13 @@ pub fn evaluate(
                 severity: Severity::Broken,
                 subject: name.clone(),
                 what: format!(
-                    "automatic updates parked since {} after a failed nightly update; the \
-                     nightly backup still runs",
+                    "automatic updates parked since {} after a failed nightly update or a \
+                     `homelab rollback-native` (fix-114); the nightly backup still runs",
                     crate::state::ymd(*since)
                 ),
                 remedy: format!(
-                    "read that night's update transcript, fix or pin the image, then \
-                     `homelab enable {}` resumes the updates",
+                    "read that night's update transcript, fix or pin the image or release, \
+                     then `homelab enable {}` resumes the updates",
                     name
                 ),
             });
@@ -999,6 +1066,15 @@ pub fn evaluate(
         state,
         now_unix,
         crate::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S,
+    ));
+    out.extend(evaluate_host_meta(state, now_unix));
+    out.extend(evaluate_restore_checks(state));
+    // fix-96: the second copy and the rotating restic check.
+    out.extend(crate::ops::secondcopy::evaluate_copies(
+        state,
+        now_unix,
+        live.second_copy_dataset.as_deref(),
+        crate::ops::secondcopy::DEFAULT_CHECK_INTERVAL_S,
     ));
     out.extend(crate::ops::manualchecks::evaluate_manual(
         state,

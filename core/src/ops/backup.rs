@@ -109,7 +109,13 @@ impl NightBackup {
 }
 
 /// Build a Cmd that runs restic with the repo env inline (via `env`).
-fn restic(base: &str, stack: &str, password_ref: &str, args: &[&str], timeout: u64) -> Cmd {
+pub(crate) fn restic(
+    base: &str,
+    stack: &str,
+    password_ref: &str,
+    args: &[&str],
+    timeout: u64,
+) -> Cmd {
     // The host wraps this so RESTIC_PASSWORD comes from its secret store; here
     // we pass a reference the host resolves. In tests the MockExecutor just
     // records the argv. Path join uses "/" — everything lives under one
@@ -220,6 +226,23 @@ impl Default for BackupCfg {
             restore_timeout_s: 4 * 3600,
         }
     }
+}
+
+/// W2 / fix-113 (native-tar-no-quiesce, 2026-09-27): the retention a stack's
+/// repositories are kept by — the stack file's own policy when it states one,
+/// else the fleet-wide tiers. `backup` resolved this for compose stacks only;
+/// native units always got the fleet-wide tiers.
+pub fn stack_tiers(
+    state: &crate::state::HostState,
+    stack: &str,
+    fleet: &[crate::retention::RetentionTier],
+) -> Vec<crate::retention::RetentionTier> {
+    state
+        .stacks
+        .get(stack)
+        .and_then(|s| s.manifest.as_ref())
+        .and_then(|m| m.retention.clone())
+        .unwrap_or_else(|| fleet.to_vec())
 }
 
 /// Build a restic command from a BackupCfg (shared with deploy's E3
@@ -654,6 +677,8 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         Ok(StepOutcome::Changed)
     });
 
+    let run_tag = run_tag(ctx.now_unix);
+
     // H2 hardening: the snapshot may fail, but RESUME MUST ALWAYS RUN — a
     // fail-closed abort here would leave the quiesced databases down until
     // a human noticed. So the snapshot error is captured, resume runs
@@ -667,7 +692,10 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
                 // --quiet as well as --json: without it restic emits a status line per
                 // update and the operation log becomes a wall of progress json.
                 // Quiet keeps the summary, which is the only line this needs.
-                let mut args = vec!["backup", "--quiet", "--json"];
+                // fix-112: every repository of one stack's night carries the
+                // same tag, so a restore can take one night across all of
+                // them instead of each repository's own newest.
+                let mut args = vec!["backup", "--quiet", "--json", "--tag", &run_tag];
                 for p in paths {
                     args.push(p.as_str());
                 }
@@ -821,6 +849,149 @@ pub(crate) fn parse_snapshots_json(raw: &str) -> Vec<(String, u64)> {
         .collect()
 }
 
+/// fix-112: the tag one night's backups carry, the same in every repository
+/// of the stack.
+pub fn run_tag(now_unix: u64) -> String {
+    format!("run-{}", now_unix)
+}
+
+/// fix-112: one snapshot as a restore sees it — its ids, its time, and the
+/// night it belongs to when it carries a `run-<unix>` tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapRun {
+    pub id: String,
+    pub short_id: String,
+    pub time: u64,
+    pub run: Option<u64>,
+}
+
+/// fix-112: `restic snapshots --json`, with the night tag. Malformed input
+/// gives an empty list, which the resolution below refuses.
+pub fn parse_snapshot_runs(raw: &str) -> Vec<SnapRun> {
+    #[derive(serde::Deserialize)]
+    struct Snap {
+        id: String,
+        short_id: String,
+        time: String,
+        #[serde(default)]
+        tags: Option<Vec<String>>,
+    }
+    let Ok(snaps) = serde_json::from_str::<Vec<Snap>>(raw.trim()) else {
+        return Vec::new();
+    };
+    snaps
+        .into_iter()
+        .filter_map(|s| {
+            let time = humantime_to_unix(&s.time)?;
+            let run = s
+                .tags
+                .unwrap_or_default()
+                .iter()
+                .find_map(|t| t.strip_prefix("run-")?.parse::<u64>().ok());
+            Some(SnapRun {
+                id: s.id,
+                short_id: s.short_id,
+                time,
+                run,
+            })
+        })
+        .collect()
+}
+
+/// fix-112: `(repository, snapshot id)` per repository, and a note to log
+/// when the choice could not keep to one night.
+pub type NightChoice = (Vec<(String, String)>, Option<String>);
+
+/// fix-112: the snapshot of each repository that a restore of `wanted` takes.
+///
+/// `latest` is the newest night present in EVERY repository. When no night
+/// is (history from before the tags), each repository's own newest is taken
+/// and the note says so. An explicit id brings the other repositories of its
+/// night along, and is refused when one of them does not have that night.
+pub fn resolve_night(
+    listings: &[(String, Vec<SnapRun>)],
+    wanted: &str,
+) -> Result<NightChoice, String> {
+    for (owner, snaps) in listings {
+        if snaps.is_empty() {
+            return Err(format!(
+                "repository for '{}' holds no snapshots at all — nothing has been stopped",
+                owner
+            ));
+        }
+    }
+    let of_night = |run: u64| -> Result<Vec<(String, String)>, String> {
+        listings
+            .iter()
+            .map(|(owner, snaps)| {
+                snaps
+                    .iter()
+                    .filter(|s| s.run == Some(run))
+                    .max_by_key(|s| s.time)
+                    .map(|s| (owner.clone(), s.id.clone()))
+                    .ok_or_else(|| owner.clone())
+            })
+            .collect()
+    };
+    if wanted == "latest" {
+        let mut common: Option<std::collections::BTreeSet<u64>> = None;
+        for (_, snaps) in listings {
+            let runs: std::collections::BTreeSet<u64> =
+                snaps.iter().filter_map(|s| s.run).collect();
+            common = Some(match common {
+                None => runs,
+                Some(c) => c.intersection(&runs).cloned().collect(),
+            });
+        }
+        if let Some(run) = common.and_then(|c| c.into_iter().max()) {
+            return of_night(run).map(|ids| (ids, None));
+        }
+        let ids = listings
+            .iter()
+            .map(|(owner, snaps)| {
+                let newest = snaps.iter().max_by_key(|s| s.time).expect("checked above");
+                (owner.clone(), newest.id.clone())
+            })
+            .collect();
+        return Ok((
+            ids,
+            Some(
+                "no night is present in every repository (snapshots from before the night \
+                 tags), so each repository's own newest is restored — they may be from \
+                 different nights"
+                    .into(),
+            ),
+        ));
+    }
+    let found = listings.iter().find_map(|(owner, snaps)| {
+        snaps
+            .iter()
+            .find(|s| s.id.starts_with(wanted) || s.short_id.starts_with(wanted))
+            .map(|s| (owner, s))
+    });
+    let Some((owner, snap)) = found else {
+        return Err(format!(
+            "snapshot '{}' is in none of this stack's repositories — nothing has been stopped",
+            wanted
+        ));
+    };
+    let Some(run) = snap.run else {
+        return Err(format!(
+            "snapshot '{}' of '{}' carries no night tag (it is older than fix-112), so the \
+             other repositories cannot be matched to it — restore that app alone with `--app \
+             {}`, or restore 'latest'. Nothing has been stopped",
+            wanted, owner, owner
+        ));
+    };
+    of_night(run).map(|ids| (ids, None)).map_err(|missing| {
+        format!(
+            "snapshot '{}' is from the night run-{}, which the repository for '{}' does not \
+             have — restoring it would pair two nights. Nothing has been stopped",
+            wanted, run, missing
+        )
+    })
+}
+
 /// Minimal RFC3339 → unix seconds (UTC), no external crates. Handles the
 /// forms restic emits; returns None on anything unexpected.
 fn humantime_to_unix(s: &str) -> Option<u64> {
@@ -940,6 +1111,72 @@ pub async fn restore_with(
     snapshot: &str,
     safety_copy: bool,
 ) -> OperationReport {
+    restore_app(ctx, m, cfg, snapshot, safety_copy, None).await
+}
+
+/// fix-112: the repositories one app's data lives in, or the whole stack's
+/// when `app` is None. The same rule as the pre-update copy: a path names its
+/// app, and a path without one belongs to the stack's only app.
+fn restore_groups(
+    m: &StackManifest,
+    app: Option<&str>,
+) -> Result<Vec<(String, Vec<String>)>, CoreError> {
+    let all = owner_groups(m);
+    let Some(a) = app else {
+        return Ok(all);
+    };
+    if !m.apps.iter().any(|x| x == a) {
+        return Err(CoreError::Validation(format!(
+            "stack '{}' has no app '{}' (it has: {}) — nothing has been stopped",
+            m.stack_name,
+            a,
+            m.apps.join(", ")
+        )));
+    }
+    let owners: Vec<String> = m
+        .storage
+        .iter()
+        .filter(|s| !s.no_data && s.no_backup.is_none())
+        .filter(|s| match s.app.as_deref() {
+            Some(x) => x == a,
+            None => m.apps.len() == 1,
+        })
+        .map(|s| s.owner(&m.stack_name).to_string())
+        .collect();
+    let groups: Vec<(String, Vec<String>)> = all
+        .into_iter()
+        .filter(|(o, _)| owners.contains(o))
+        .collect();
+    if groups.is_empty() {
+        return Err(CoreError::Validation(format!(
+            "app '{}' of stack '{}' keeps no backed-up data, so there is nothing to restore — \
+             nothing has been stopped",
+            a, m.stack_name
+        )));
+    }
+    Ok(groups)
+}
+
+/// E2 for one app of a stack (`app`), or the whole stack (None).
+///
+/// fix-112 (restore-stale-files-mixed-nights, 2026-09-27): three changes.
+/// Only the named app is stopped and restored, so rolling back one broken
+/// Sonarr no longer rolls back Radarr and Jellyfin. A stack with several
+/// repositories restores one NIGHT across all of them (the `run-<unix>` tag
+/// every backup writes), never each repository's own newest: a night whose
+/// backup failed half way used to pair a newer database with older media.
+/// And with the safety copy taken, each target is emptied before restic
+/// writes into it, because a restore over a non-empty directory leaves every
+/// file the snapshot does not have (newer Postgres WAL segments beside a
+/// restored cluster is a corrupt database that "restored successfully").
+pub async fn restore_app(
+    ctx: &OpCtx<'_>,
+    m: &StackManifest,
+    cfg: &BackupCfg,
+    snapshot: &str,
+    safety_copy: bool,
+    app: Option<&str>,
+) -> OperationReport {
     let op = format!("restore-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
@@ -980,8 +1217,16 @@ pub async fn restore_with(
     });
 
     // D25: a stack's data lives in one repository per owning app, so a
-    // restore walks all of them. Order is the manifest's.
-    let groups = owner_groups(m);
+    // restore walks all of them. Order is the manifest's. fix-112: only the
+    // named app's, when one is named.
+    let groups = match restore_groups(m, app) {
+        Ok(g) => g,
+        Err(e) => return runner.finish_err("select app", &e),
+    };
+    let apps: Vec<String> = match app {
+        Some(a) => vec![a.to_string()],
+        None => m.apps.clone(),
+    };
 
     // G5 of the Phase-7 gate: this step was called "validate snapshot" and
     // never looked at the snapshot. It took the caller's id, asked each
@@ -989,7 +1234,38 @@ pub async fn restore_with(
     // passed here, the stack was composed down, and restic then failed on
     // something that does not exist. The name promised the check; only the
     // name.
+    // fix-112: which snapshot of each repository this restore takes.
+    let mut chosen: Vec<(String, String)> = groups
+        .iter()
+        .map(|(o, _)| (o.clone(), snapshot.to_string()))
+        .collect();
+    let mut night_note: Option<String> = None;
     step!(runner, "validate snapshot", {
+        if groups.len() > 1 {
+            let mut listings: Vec<(String, Vec<SnapRun>)> = Vec::new();
+            for (owner, _) in &groups {
+                let out = exec
+                    .run(&restic(
+                        &cfg.restic_base,
+                        owner,
+                        &cfg.password_file,
+                        &["snapshots", "--json"],
+                        120,
+                    ))
+                    .await?;
+                if !out.success() {
+                    return Err(CoreError::Other(format!(
+                        "restic repo for '{}' unreachable",
+                        owner
+                    )));
+                }
+                listings.push((owner.clone(), parse_snapshot_runs(&out.stdout)));
+            }
+            let (ids, note) = resolve_night(&listings, snapshot).map_err(CoreError::Other)?;
+            chosen = ids;
+            night_note = note;
+            return Ok(StepOutcome::Unchanged);
+        }
         for (owner, _) in &groups {
             let out = exec
                 .run(&restic(
@@ -1034,6 +1310,24 @@ pub async fn restore_with(
         }
         Ok(StepOutcome::Unchanged)
     });
+
+    if let Some(note) = &night_note {
+        runner.log(Level::Warn, format!("[restore] {}", note));
+    }
+    if chosen.len() > 1 {
+        runner.log(
+            Level::Info,
+            format!(
+                "[restore] one night across {} repositories: {}",
+                chosen.len(),
+                chosen
+                    .iter()
+                    .map(|(o, id)| format!("{} {}", o, id))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        );
+    }
 
     // fix-64: when the damage happened before last night's backup, `latest`
     // IS the damage, and the restore used to overwrite the only other copy
@@ -1097,7 +1391,8 @@ pub async fn restore_with(
             Level::Warn,
             format!(
                 "[restore] --no-safety-copy: the current data of {} is overwritten without a \
-                 copy",
+                 copy, and restic writes over it in place — files the snapshot does not have \
+                 stay behind (fix-112)",
                 m.stack_name
             ),
         );
@@ -1105,7 +1400,7 @@ pub async fn restore_with(
 
     // Stop the whole stack for a consistent restore.
     step!(runner, "quiesce stack", {
-        for a in &m.apps {
+        for a in &apps {
             let _ = super::util_pct_sh(
                 exec,
                 m.vmid,
@@ -1165,17 +1460,46 @@ pub async fn restore_with(
     // you run when something is already wrong.
     let restore_result = match &copy_result {
         Err(_) => Ok(StepOutcome::Unchanged),
-        Ok(_) => {
+        Ok(copied) => {
+            let copied = *copied;
             runner
                 .step("restore data", || async {
-                    for (owner, _) in &groups {
+                    for (owner, paths) in &groups {
+                        // fix-112: the data is in the safety copy, so the
+                        // target can be emptied and restic writes into a
+                        // clean directory. Without the copy nothing is
+                        // deleted: that would be the only copy there is.
+                        if copied {
+                            for p in paths {
+                                run_ok(
+                                    exec,
+                                    &Cmd::new(
+                                        "sh",
+                                        &[
+                                            "-c",
+                                            &format!(
+                                                "find {} -mindepth 1 -delete",
+                                                super::util::shq(p)
+                                            ),
+                                        ],
+                                        cfg.restore_timeout_s,
+                                    ),
+                                )
+                                .await?;
+                            }
+                        }
+                        let id = chosen
+                            .iter()
+                            .find(|(o, _)| o == owner)
+                            .map(|(_, id)| id.as_str())
+                            .unwrap_or(snapshot);
                         run_ok(
                             exec,
                             &restic(
                                 &cfg.restic_base,
                                 owner,
                                 &cfg.password_file,
-                                &["restore", snapshot, "--target", "/"],
+                                &["restore", id, "--target", "/"],
                                 cfg.restore_timeout_s,
                             ),
                         )
@@ -1188,7 +1512,7 @@ pub async fn restore_with(
     };
 
     step!(runner, "resume stack", {
-        for a in &m.apps {
+        for a in &apps {
             super::util_pct_sh(
                 exec,
                 m.vmid,
@@ -1208,7 +1532,7 @@ pub async fn restore_with(
     }
 
     step!(runner, "verify health", {
-        for a in &m.apps {
+        for a in &apps {
             let out = super::util_pct_sh(
                 exec,
                 m.vmid,
@@ -1226,12 +1550,41 @@ pub async fn restore_with(
         Ok(StepOutcome::Unchanged)
     });
 
+    // fix-147: a restore is a check of these directories that succeeded; a
+    // deploy's earlier failed check of them stops standing.
+    let restored: Vec<String> = groups
+        .iter()
+        .flat_map(|(_, paths)| paths.iter().cloned())
+        .collect();
+    crate::ops::deploy::record_restore_checks(ctx, &m.stack_name, &[], &restored).await;
+
     runner.log(
         Level::Info,
         format!("[restore] {} restored and verified", m.stack_name),
     );
     runner.finish_ok()
 }
+
+/// Host files outside `state_dir` that the host-meta snapshot carries when
+/// they exist. Public so the disaster-recovery runbook lists the same set.
+pub const HOST_META_EXTRAS: &[&str] = &[
+    "/usr/local/bin/smart-textfile-collector.py",
+    "/etc/systemd/system/smart-collector.service",
+    "/etc/systemd/system/smart-collector.timer",
+    // fix-111 (host-meta-gaps, 2026-09-27): what a rebuilt host needs and no
+    // backup held. The VLAN bridges every container sits on; the storage and
+    // job definitions; the VM configurations, which carry Home Assistant's
+    // Zigbee USB passthrough (VM 101) — read from pmxcfs on the host, the VMs
+    // themselves are not touched; the swappiness drop-in; and rclone's
+    // remote, without which restic cannot reach Google Drive at all. All
+    // tiny, and all skipped when absent like the three above.
+    "/etc/network/interfaces",
+    "/etc/pve/storage.cfg",
+    "/etc/pve/jobs.cfg",
+    "/etc/pve/qemu-server",
+    "/etc/sysctl.d/99-homelab-swappiness.conf",
+    "/root/.config/rclone/rclone.conf",
+];
 
 /// H10 hardening: snapshot the host's own critical metadata — the secrets
 /// vault, state.json, and TLS material — into a dedicated `host-meta` repo.
@@ -1270,14 +1623,7 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
     // Absent paths are skipped rather than fatal: a host that never had the
     // SMART collector is not a broken backup, and restic refuses the whole
     // snapshot if any source is missing.
-    let host_extras: Vec<String> = [
-        "/usr/local/bin/smart-textfile-collector.py",
-        "/etc/systemd/system/smart-collector.service",
-        "/etc/systemd/system/smart-collector.timer",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
+    let host_extras: Vec<String> = HOST_META_EXTRAS.iter().map(|s| s.to_string()).collect();
 
     step!(runner, "init repo", {
         // gap-24: read the answer; only "already exists" is harmless.
@@ -1347,6 +1693,47 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
                 &cfg.password_file,
                 &args,
                 600,
+            ),
+        )
+        .await?;
+        Ok(StepOutcome::Changed)
+    });
+
+    // fix-111 (host-meta-gaps, 2026-09-27): this repository was never
+    // pruned, so every rotated secret was kept for ever. The fleet-wide
+    // tiers apply, whose last tier is unbounded: history stays, one
+    // snapshot per bucket.
+    step!(runner, "retention", {
+        let out = run_ok(
+            exec,
+            &restic(
+                &cfg.restic_base,
+                "host-meta",
+                &cfg.password_file,
+                &["snapshots", "--json"],
+                300,
+            ),
+        )
+        .await?;
+        let doomed = crate::retention::forget_list(
+            &parse_snapshots_json(&out.stdout),
+            &cfg.tiers,
+            ctx.now_unix,
+        );
+        if doomed.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let mut args: Vec<&str> = vec!["forget"];
+        args.extend(doomed.iter().map(|s| s.as_str()));
+        args.push("--prune");
+        run_ok(
+            exec,
+            &restic(
+                &cfg.restic_base,
+                "host-meta",
+                &cfg.password_file,
+                &args,
+                900,
             ),
         )
         .await?;

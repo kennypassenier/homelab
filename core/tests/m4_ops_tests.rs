@@ -1219,6 +1219,7 @@ fn b4_intent_hash_changes_with_any_file_edit() {
     use homelab_core::manifest::{intent_hash, DeploySpec, FileBlob};
     let base = DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest: manifest(108, "test"),
         files: vec![FileBlob {
             path: "app/docker-compose.yml".into(),
@@ -1273,6 +1274,7 @@ async fn h4_gpu_and_vpn_flags_produce_device_config() {
     m.lxc.vpn = true;
     let spec = DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest: m,
         files: vec![FileBlob {
             path: "app/docker-compose.yml".into(),
@@ -1316,6 +1318,7 @@ async fn h4_no_flags_no_device_config() {
     exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
     let spec = DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest: manifest(108, "test"),
         files: vec![FileBlob {
             path: "app/docker-compose.yml".into(),
@@ -1462,6 +1465,7 @@ async fn b8_clone_template_provisions_via_pct_clone() {
     m.resources.disk_gb = 8;
     let spec = DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest: m,
         files: vec![FileBlob {
             path: "app/docker-compose.yml".into(),
@@ -1593,6 +1597,7 @@ fn v8_validate_rejects_undeclared_appdata_bind() {
     m.storage.clear(); // nothing declared
     let spec = DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest: m,
         files: vec![FileBlob {
             path: "app/docker-compose.yml".into(),
@@ -1725,6 +1730,7 @@ fn deploy_mocks(exec: &MockExecutor) {
 fn deploy_spec(m: StackManifest) -> homelab_core::manifest::DeploySpec {
     homelab_core::manifest::DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest: m,
         files: vec![homelab_core::manifest::FileBlob {
             path: "app/docker-compose.yml".into(),
@@ -2025,6 +2031,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
         update_cmd: None,
         stateless: false,
         backup_from_newest: None,
+        backup_pause: false,
         update_policy: Default::default(),
         metrics: None,
         release_repo: None,
@@ -2041,6 +2048,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
     let stateless = NativeServiceManifest {
         stateless: true,
         backup_from_newest: None,
+        backup_pause: false,
         update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
@@ -2052,6 +2060,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
     let confused = NativeServiceManifest {
         stateless: true,
         backup_from_newest: None,
+        backup_pause: false,
         update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
@@ -3159,6 +3168,7 @@ async fn protection_is_set_after_all_drive_changes() {
         m.resources.disk_gb = 8;
         let spec = DeploySpec {
             native_binaries: Default::default(),
+            native_manifests: Default::default(),
             manifest: m,
             files: vec![FileBlob {
                 path: "app/docker-compose.yml".into(),

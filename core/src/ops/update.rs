@@ -54,18 +54,177 @@ async fn capture_app(
         .collect())
 }
 
-async fn app_policy(
+/// fix-117 (compose-policy-first-container, 2026-09-27): which services of an
+/// app a scheduled run may update.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoScope {
+    /// No service carries `auto`.
+    Skip,
+    /// Every service carries `auto`: the app is updated whole, as before.
+    All,
+    /// Only these services carry `auto`; the others keep their label.
+    Only(Vec<String>),
+}
+
+/// fix-117: the scope from each container's `(policy, service)`. The policy
+/// used to be read from the app's FIRST container and applied to all of it:
+/// `stacks/paperwork/paperless-db` labels postgres `manual` and redis `auto`,
+/// so depending on container order Postgres got the nightly recreate its
+/// label forbids, or redis never updated. A service whose name cannot be
+/// passed to compose as it is makes a mixed app skip rather than guess.
+pub fn auto_scope(policies: &[(String, String)]) -> AutoScope {
+    let auto: Vec<&(String, String)> = policies.iter().filter(|(p, _)| p == "auto").collect();
+    if auto.is_empty() {
+        return AutoScope::Skip;
+    }
+    if auto.len() == policies.len() {
+        return AutoScope::All;
+    }
+    let nameable = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    if auto.iter().any(|(_, s)| !nameable(s)) {
+        return AutoScope::Skip;
+    }
+    let mut only: Vec<String> = auto.iter().map(|(_, s)| s.clone()).collect();
+    only.sort();
+    only.dedup();
+    AutoScope::Only(only)
+}
+
+/// fix-117: `(policy, service)` for every container of the app.
+async fn service_policies(
     exec: &dyn Executor,
     vmid: u16,
     stack: &str,
     app: &str,
-) -> Result<String, CoreError> {
+) -> Result<Vec<(String, String)>, CoreError> {
     let script = format!(
-        "cd '/opt/{}/{}' && docker compose ps -q | head -1 | xargs -r docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.policy\"}}}}'",
+        "cd '/opt/{}/{}' && docker compose ps -q | xargs -r docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.policy\"}}}}|{{{{index .Config.Labels \"com.docker.compose.service\"}}}}'",
         stack, app
     );
     let out = super::util_pct_sh(exec, vmid, &script, 60).await?;
-    Ok(out.stdout.trim().to_string())
+    Ok(out
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| match l.split_once('|') {
+            Some((p, s)) => (p.trim().to_string(), s.trim().to_string()),
+            None => (l.to_string(), String::new()),
+        })
+        .collect())
+}
+
+/// fix-118 (compose-update-verify-weak, 2026-09-27): F300, ported from the
+/// native units. The verify after `up -d` asked "did one service start",
+/// read once, right away: a two-service app with a crashed Postgres, or a
+/// container in a restart loop that is `running` for part of every cycle,
+/// passed as a good update. This asks whether the app STAYS up:
+///
+/// - every service in `want` (the ones that ran before the update) is
+///   running within 30 s,
+/// - and stays running through a 60 s settle window,
+/// - with every container's `RestartCount` unchanged — a counter, which no
+///   lucky sampling can hide a restart loop from,
+/// - and no container `unhealthy`; one whose healthcheck is still `starting`
+///   gets up to two more minutes to say `healthy`.
+///
+/// `services` is the fix-117 scope (` svc1 svc2`, or empty for the app).
+/// Each failure prints its own token, so the 04:00 reader can tell "never
+/// came up" from "came up and died".
+pub fn settle_script(stack: &str, app: &str, want: &[String], services: &str) -> String {
+    format!(
+        "cd '/opt/{stack}/{app}' || exit 1; \
+         want='{want}'; \
+         running() {{ docker compose ps --services --status running{svcs} | sort; }}; \
+         missing() {{ r=$(running); for w in $want; do echo \"$r\" | grep -qx \"$w\" || echo \"$w\"; done; }}; \
+         counts() {{ docker compose ps -q{svcs} | xargs -r docker inspect --format '{{{{.Name}}}} {{{{.RestartCount}}}}' | sort; }}; \
+         health() {{ docker compose ps -q{svcs} | xargs -r docker inspect --format '{{{{.Name}}}} {{{{if .State.Health}}}}{{{{.State.Health.Status}}}}{{{{end}}}}'; }}; \
+         i=0; while [ -n \"$(missing)\" ] && [ $i -lt 15 ]; do sleep 2; i=$((i+1)); done; \
+         m=$(missing); [ -z \"$m\" ] || {{ echo NOT_RUNNING $m; exit 1; }}; \
+         r0=$(counts); i=0; \
+         while [ $i -lt 12 ]; do sleep 5; \
+           m=$(missing); [ -z \"$m\" ] || {{ echo DIED_IN_WINDOW $m; exit 1; }}; \
+           [ \"$(counts)\" = \"$r0\" ] || {{ echo RESTART_LOOP; exit 1; }}; \
+           u=$(health | grep ' unhealthy$'); [ -z \"$u\" ] || {{ echo UNHEALTHY $u; exit 1; }}; \
+           i=$((i+1)); done; \
+         i=0; while health | grep -q ' starting$'; do \
+           [ $i -ge 24 ] && {{ echo NEVER_HEALTHY; exit 1; }}; sleep 5; i=$((i+1)); done; \
+         u=$(health | grep ' unhealthy$'); [ -z \"$u\" ] || {{ echo UNHEALTHY $u; exit 1; }}; \
+         echo HEALTHY",
+        stack = stack,
+        app = app,
+        want = want.join(" "),
+        svcs = services
+    )
+}
+
+/// fix-118: the services that were running before the update — the ones the
+/// settle check requires afterwards. A service that was already down is not
+/// the update's to raise.
+async fn running_services(
+    exec: &dyn Executor,
+    vmid: u16,
+    stack: &str,
+    app: &str,
+    services: &str,
+) -> Result<Vec<String>, CoreError> {
+    let out = super::util_pct_sh(
+        exec,
+        vmid,
+        &format!(
+            "cd '/opt/{}/{}' && docker compose ps --services --status running{}",
+            stack, app, services
+        ),
+        60,
+    )
+    .await?;
+    let mut names: Vec<String> = out
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|l| {
+            !l.is_empty()
+                && l.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        })
+        .map(str::to_string)
+        .collect();
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+/// fix-118: run the settle check. The outer error is the executor's; the
+/// inner one is the check's verdict.
+async fn settle(
+    exec: &dyn Executor,
+    vmid: u16,
+    stack: &str,
+    app: &str,
+    want: &[String],
+    services: &str,
+) -> Result<Result<(), String>, CoreError> {
+    let out =
+        super::util_pct_sh(exec, vmid, &settle_script(stack, app, want, services), 330).await?;
+    if out.success() {
+        return Ok(Ok(()));
+    }
+    let why = format!("{} {}", out.stdout.trim(), out.stderr.trim());
+    Ok(Err(why.trim().to_string()))
+}
+
+/// fix-118: did `up -d` start different images from the ones captured?
+fn images_changed(before: &[CapturedImage], after: &[CapturedImage]) -> bool {
+    let ids = |v: &[CapturedImage]| {
+        let mut ids: Vec<String> = v.iter().map(|c| c.image_id.clone()).collect();
+        ids.sort();
+        ids
+    };
+    ids(before) != ids(after)
 }
 
 async fn verify_app(
@@ -114,6 +273,7 @@ async fn pre_update_copy_of(
     m: &StackManifest,
     app: &str,
     captured: &[CapturedImage],
+    services: &str,
 ) -> Result<CopyOutcome, CoreError> {
     let paths = app_data_paths(m, app);
     if paths.is_empty() {
@@ -126,9 +286,9 @@ async fn pre_update_copy_of(
         exec,
         m.vmid,
         &format!(
-            "cd '/opt/{}/{}' && docker compose config --images | xargs -r docker image inspect \
-             --format '{{{{.Id}}}}'",
-            m.stack_name, app
+            "cd '/opt/{}/{}' && docker compose config --images{} | xargs -r docker image \
+             inspect --format '{{{{.Id}}}}'",
+            m.stack_name, app, services
         ),
         60,
     )
@@ -298,11 +458,13 @@ pub async fn update(
         let vmid = m.vmid;
 
         // Policy gate (D9): scheduled runs only touch policy=auto apps.
+        // fix-117: read per service, not from the first container.
         let policy_step = format!("{} :: policy", app);
+        let mut scope = AutoScope::All;
         let skipped = step!(runner, &policy_step, {
             if auto {
-                let policy = app_policy(exec, vmid, &stack, app).await?;
-                if policy != "auto" {
+                scope = auto_scope(&service_policies(exec, vmid, &stack, app).await?);
+                if scope == AutoScope::Skip {
                     return Ok(StepOutcome::Unchanged);
                 }
             }
@@ -315,12 +477,37 @@ pub async fn update(
             );
             continue;
         }
+        // fix-117: the services this run may touch, as compose arguments; an
+        // empty string is the whole app, exactly as before.
+        let services: String = match &scope {
+            AutoScope::Only(only) => {
+                runner.log(
+                    Level::Info,
+                    format!(
+                        "[update] {}: only {} carry policy 'auto'; the other services keep \
+                         their label and are not pulled or recreated",
+                        app,
+                        only.join(", ")
+                    ),
+                );
+                format!(" {}", only.join(" "))
+            }
+            _ => String::new(),
+        };
 
         // B6: capture the running images so a bad update can be undone.
         let mut captured: Vec<CapturedImage> = Vec::new();
         let cap_step = format!("{} :: capture", app);
         step!(runner, &cap_step, {
             captured = capture_app(exec, vmid, &stack, app).await?;
+            Ok(StepOutcome::Unchanged)
+        });
+
+        // fix-118: what ran before, which is what must run after.
+        let mut ran_before: Vec<String> = Vec::new();
+        let ran_step = format!("{} :: running before", app);
+        step!(runner, &ran_step, {
+            ran_before = running_services(exec, vmid, &stack, app, &services).await?;
             Ok(StepOutcome::Unchanged)
         });
 
@@ -357,7 +544,10 @@ pub async fn update(
             let out = super::util_pct_sh(
                 exec,
                 vmid,
-                &format!("cd '/opt/{}/{}' && docker compose pull -q", stack, app),
+                &format!(
+                    "cd '/opt/{}/{}' && docker compose pull -q{}",
+                    stack, app, services
+                ),
                 600,
             )
             .await?;
@@ -398,7 +588,7 @@ pub async fn update(
             let copy_step = format!("{} :: pre-update copy", app);
             let skip_why = std::sync::Mutex::new(None::<String>);
             step!(runner, &copy_step, {
-                match pre_update_copy_of(ctx, exec, m, app, &captured).await? {
+                match pre_update_copy_of(ctx, exec, m, app, &captured, &services).await? {
                     CopyOutcome::NotNeeded => Ok(StepOutcome::Unchanged),
                     CopyOutcome::Copied(dest) => {
                         pre_update_copy = Some(dest);
@@ -432,10 +622,10 @@ pub async fn update(
         let stop_step = format!("{} :: stop-first", app);
         step!(runner, &stop_step, {
             let script = format!(
-                "cd '/opt/{}/{}' && for c in $(docker compose ps -q); do \
+                "cd '/opt/{}/{}' && for c in $(docker compose ps -q{}); do \
                    if [ \"$(docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.stop-first\"}}}}' $c)\" = true ]; then \
                      docker stop -t 60 $c; fi; done; true",
-                stack, app
+                stack, app, services
             );
             let out = super::util_pct_sh(exec, vmid, &script, 180).await?;
             Ok(if out.stdout.trim().is_empty() {
@@ -450,10 +640,19 @@ pub async fn update(
             let out = super::util_pct_sh(
                 exec,
                 vmid,
-                &format!(
-                    "cd '/opt/{}/{}' && docker compose up -d --remove-orphans",
-                    stack, app
-                ),
+                &if services.is_empty() {
+                    format!(
+                        "cd '/opt/{}/{}' && docker compose up -d --remove-orphans",
+                        stack, app
+                    )
+                } else {
+                    // fix-117: only the auto services, and not the services
+                    // they depend on, which keep their own label.
+                    format!(
+                        "cd '/opt/{}/{}' && docker compose up -d --no-deps{}",
+                        stack, app, services
+                    )
+                },
                 600,
             )
             .await?;
@@ -477,10 +676,30 @@ pub async fn update(
         });
 
         let verify_step = format!("{} :: verify", app);
+        let mut settle_why: Option<String> = None;
         step!(runner, &verify_step, {
-            if verify_app(exec, vmid, &stack, app).await? {
+            // fix-118: the quick reading first; then, when `up -d` started a
+            // new image, whether the app stays up (F300). A night that brought
+            // nothing new costs no settle window.
+            let mut healthy = verify_app(exec, vmid, &stack, app).await?;
+            if healthy {
+                let after = capture_app(exec, vmid, &stack, app).await?;
+                if images_changed(&captured, &after) {
+                    if let Err(why) =
+                        settle(exec, vmid, &stack, app, &ran_before, &services).await?
+                    {
+                        settle_why = Some(why);
+                        healthy = false;
+                    }
+                }
+            }
+            if healthy {
                 return Ok(StepOutcome::Unchanged);
             }
+            let settled = match &settle_why {
+                Some(why) => format!(" (settle check: {})", why),
+                None => String::new(),
+            };
             // Failed after update → roll back to the captured images (B6).
             if captured.is_empty() {
                 return Err(CoreError::Other(format!(
@@ -502,8 +721,8 @@ pub async fn update(
                 exec,
                 vmid,
                 &format!(
-                    "cd '/opt/{}/{}' && {}docker compose up -d --force-recreate",
-                    stack, app, retags
+                    "cd '/opt/{}/{}' && {}docker compose up -d --force-recreate{}",
+                    stack, app, retags, services
                 ),
                 300,
             )
@@ -519,16 +738,22 @@ pub async fn update(
                 ),
                 None => String::new(),
             };
-            if verify_app(exec, vmid, &stack, app).await? {
+            // fix-118: the rollback is held to the same settle check.
+            let back = verify_app(exec, vmid, &stack, app).await?
+                && settle(exec, vmid, &stack, app, &ran_before, &services)
+                    .await?
+                    .is_ok();
+            if back {
                 Err(CoreError::Other(format!(
-                    "{} unhealthy after update — ROLLED BACK to previous image, now healthy. \
+                    "{} unhealthy after update{} — ROLLED BACK to previous image, now healthy. \
                      The new image is bad; check its release notes{}",
-                    app, kept
+                    app, settled, kept
                 )))
             } else {
                 Err(CoreError::Other(format!(
-                    "{} unhealthy after update AND after rollback — manual intervention needed{}",
-                    app, kept
+                    "{} unhealthy after update{} AND after rollback — manual intervention \
+                     needed{}",
+                    app, settled, kept
                 )))
             }
         });

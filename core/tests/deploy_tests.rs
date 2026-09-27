@@ -60,6 +60,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest: manifest(vmid, stack),
         files: vec![FileBlob {
             path: "syncthing/docker-compose.yml".into(),
@@ -2871,6 +2872,135 @@ mod native_from_zero {
         );
         exec.respond_always("test -x '/usr/local/bin/kyu'", CmdOutput::ok("yes"));
         exec.respond_always("systemctl is-active kyu", CmdOutput::ok("active"));
+    }
+
+    // ── fix-146 (native-empty-rebuild, Kenny 2026-09-27, form "Keuzes
+    // helpers"): a native unit whose data directories are empty while its
+    // repository has snapshots gets the newest one back BEFORE it starts, as
+    // a compose stack's empty directories already do (E3).
+
+    fn kyu_service(own_copy: bool) -> homelab_core::native::NativeServiceManifest {
+        homelab_core::native::NativeServiceManifest {
+            stack_name: "drill".into(),
+            vmid: 118,
+            hostname: "118-app-drill".into(),
+            unit: "kyu".into(),
+            binary: "/usr/local/bin/kyu".into(),
+            env_file: None,
+            data_dirs: vec!["/appdata/drill/kyu-config".into()],
+            update_cmd: None,
+            stateless: false,
+            release_repo: None,
+            release_asset: None,
+            backup_from_newest: own_copy
+                .then(|| "/appdata/drill/kyu-config/kyu.backup-*.db".to_string()),
+            backup_pause: false,
+            update_policy: Default::default(),
+            metrics: None,
+        }
+    }
+
+    fn empty_unit_with_history(exec: &MockExecutor) {
+        native_ready(exec);
+        exec.enqueue("systemctl is-active kyu", CmdOutput::ok("inactive"));
+        exec.respond_always("-mindepth 1", CmdOutput::ok(""));
+        exec.respond_always(
+            "homelab-backups/kyu-config RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw \
+             RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache restic snapshots --json",
+            CmdOutput::ok(r#"[{"short_id":"abc12345","time":"2026-09-26T02:00:00Z"}]"#),
+        );
+    }
+
+    fn position(calls: &[String], needle: &str) -> Option<usize> {
+        calls.iter().position(|c| c.contains(needle))
+    }
+
+    #[tokio::test]
+    async fn fix_146_an_empty_native_unit_is_restored_before_it_starts() {
+        let exec = MockExecutor::new();
+        empty_unit_with_history(&exec);
+        let mut sp = native_spec();
+        sp.native_manifests.insert("kyu".into(), kyu_service(false));
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let _ = deploy(&ctx(&exec, &sink, &j), &sp).await;
+        let calls = exec.calls();
+        let dump = position(&calls, "restic dump latest /kyu-data.tar")
+            .unwrap_or_else(|| panic!("the unit's archive is restored: {:#?}", calls));
+        assert!(
+            calls[dump].contains("pct exec 118 -- tar -xf - -C /"),
+            "unpacked inside the container, so owners stay the container's: {}",
+            calls[dump]
+        );
+        let start = position(&calls, "systemctl enable --now kyu")
+            .unwrap_or_else(|| panic!("and then the unit starts: {:#?}", calls));
+        assert!(dump < start, "{:#?}", calls);
+    }
+
+    #[tokio::test]
+    async fn fix_146_a_unit_with_data_is_left_as_it_is() {
+        let exec = MockExecutor::new();
+        empty_unit_with_history(&exec);
+        exec.respond_first(
+            "-mindepth 1",
+            CmdOutput::ok("/appdata/drill/kyu-config/kyu.db\n"),
+        );
+        let mut sp = native_spec();
+        sp.native_manifests.insert("kyu".into(), kyu_service(false));
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let _ = deploy(&ctx(&exec, &sink, &j), &sp).await;
+        assert!(exec.calls_containing("restic dump").is_empty());
+    }
+
+    #[tokio::test]
+    async fn fix_146_a_unit_archived_from_its_own_copy_is_restored_and_left_stopped() {
+        let exec = MockExecutor::new();
+        empty_unit_with_history(&exec);
+        let mut sp = native_spec();
+        sp.native_manifests.insert("kyu".into(), kyu_service(true));
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let _ = deploy(&ctx(&exec, &sink, &j), &sp).await;
+        assert!(!exec
+            .calls_containing("restic dump latest /kyu-data.tar")
+            .is_empty());
+        assert!(
+            exec.calls_containing("systemctl enable --now kyu")
+                .is_empty(),
+            "its archive holds the service's own copy, which has to become the live file \
+             by hand first (op-11): {:?}",
+            exec.calls()
+        );
+        assert!(
+            sink.lines().iter().any(|l| l.contains("op-11")),
+            "and the transcript says what to do"
+        );
+    }
+
+    /// fix-147: a native unit whose backup could not be checked is
+    /// remembered as well, keyed by stack and unit.
+    #[tokio::test]
+    async fn fix_147_a_native_check_that_fails_is_remembered() {
+        let exec = MockExecutor::new();
+        empty_unit_with_history(&exec);
+        exec.respond_first(
+            "restic snapshots --json",
+            CmdOutput::failed(1, "Fatal: unable to open repository"),
+        );
+        let mut sp = native_spec();
+        sp.native_manifests.insert("kyu".into(), kyu_service(false));
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let _ = deploy(&ctx(&exec, &sink, &j), &sp).await;
+        let st: homelab_core::state::HostState =
+            serde_json::from_str(&exec.file("/var/lib/homelab/state.json").unwrap_or_default())
+                .unwrap_or_default();
+        let rec = st
+            .restore_check_failures
+            .get("drill:kyu")
+            .unwrap_or_else(|| panic!("{:?}", st.restore_check_failures));
+        assert!(rec.why.contains("unable to open repository"), "{}", rec.why);
     }
 
     /// fix-28: the client stages the NEWEST release of every native; a deploy

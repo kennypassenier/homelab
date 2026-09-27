@@ -346,13 +346,7 @@ pub async fn install_native(
         if !had_previous {
             return Ok(StepOutcome::Unchanged);
         }
-        let out = util_pct_sh(
-            exec,
-            m.vmid,
-            &format!("cp -p {} {}", shq(&m.binary), shq(&prev)),
-            120,
-        )
-        .await?;
+        let out = util_pct_sh(exec, m.vmid, &preserve_script(&m.binary, &prev), 120).await?;
         if !out.success() {
             return Err(CoreError::Other(format!(
                 "cannot preserve the running {} — refusing to replace a binary with no way back",
@@ -399,6 +393,11 @@ pub async fn install_native(
             }
             Err(why) => {
                 let _ = util_pct_sh(exec, m.vmid, &format!("rm -f {}", shq(&staged)), 30).await;
+                // fix-114: nothing is installed, so the kept previous binary
+                // from before this run is the kept one again.
+                if had_previous {
+                    let _ = util_pct_sh(exec, m.vmid, &restore_set_aside_script(&prev), 30).await;
+                }
                 Err(CoreError::SafetyAbort(format!(
                     "{} :: the staged copy was removed; the running {} is untouched",
                     why, m.unit
@@ -466,6 +465,7 @@ pub async fn install_native(
             u = unit
         );
         let rb = util_pct_sh(exec, m.vmid, &rollback, 180).await?;
+        let _ = util_pct_sh(exec, m.vmid, &restore_set_aside_script(&prev), 60).await;
         Err(CoreError::Other(format!(
             "the installed {} did not come up healthy — rolled back to the previous binary ({})",
             m.unit,
@@ -495,11 +495,18 @@ pub async fn install_native(
         Ok(StepOutcome::Changed)
     });
 
-    step!(runner, "drop the stale rollback copy", {
+    // fix-114: keep exactly one previous binary, as a supervised update does.
+    step!(runner, "keep one previous binary", {
         if !had_previous {
             return Ok(StepOutcome::Unchanged);
         }
-        let out = util_pct_sh(exec, m.vmid, &drop_stale_rollback_script(&prev), 60).await?;
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &keep_one_previous_script(&m.binary, &prev),
+            60,
+        )
+        .await?;
         if !out.success() {
             // Not fatal: the service is up and correct, this only leaves a
             // copy on disk. Reported after the step rather than failing a
@@ -513,7 +520,10 @@ pub async fn install_native(
     if stale_kept {
         runner.log(
             Level::Warn,
-            format!("could not remove {} — a stale copy stays on disk", prev),
+            format!(
+                "could not settle the kept previous binary at {} — check it and {}.old by hand",
+                prev, prev
+            ),
         );
     }
 
@@ -535,6 +545,121 @@ pub async fn install_native(
     runner.finish_ok()
 }
 
+/// fix-146 (native-empty-rebuild, Kenny 2026-09-27, form "Keuzes helpers"):
+/// what the deploy found about a native unit's data before starting it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EmptyUnit {
+    /// Its data directories hold something: nothing to do.
+    HasData,
+    /// Empty, and its repository has no snapshot (or does not exist): a new
+    /// service.
+    Fresh,
+    /// Empty; the newest snapshot was unpacked back into the container.
+    Restored,
+    /// Unpacked, but the unit must not start yet: why.
+    RestoredHold(String),
+    /// Empty, and whether a snapshot exists could not be read: why.
+    CheckFailed(String),
+    /// Empty with history, and the restore failed: why.
+    RestoreFailed(String),
+}
+
+/// fix-146: a rebuilt container starts its native units with empty data
+/// directories until somebody restores them by hand (op-11), while a compose
+/// stack's empty directories are refilled on deploy (E3). The unit then
+/// starts empty and fix-63 has to refuse that night's backup. Now the deploy
+/// asks first: empty, with history, means the newest snapshot is unpacked
+/// back into the container — the op-11 procedure, `restic dump` piped into
+/// `tar` inside the container so owners stay the container's own — BEFORE
+/// the unit starts.
+///
+/// A unit archived from its own copy (`backup_from_newest`, kyu) gets that
+/// copy back, not a live store: the copy has to become the live file by hand
+/// (the stack file's restore note names it), so that unit is left stopped.
+pub async fn restore_empty_unit(
+    exec: &dyn Executor,
+    cfg: &crate::ops::backup::BackupCfg,
+    m: &NativeServiceManifest,
+) -> Result<EmptyUnit, CoreError> {
+    if m.stateless || m.data_dirs.is_empty() {
+        return Ok(EmptyUnit::HasData);
+    }
+    let dirs = m
+        .data_dirs
+        .iter()
+        .map(|d| shq(d))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let probe = util_pct_sh(
+        exec,
+        m.vmid,
+        &format!("find {} -mindepth 1 2>/dev/null | head -1", dirs),
+        60,
+    )
+    .await?;
+    if !probe.stdout.trim().is_empty() {
+        return Ok(EmptyUnit::HasData);
+    }
+    let listing = exec
+        .run(&crate::ops::backup::restic_cmd(
+            cfg,
+            &m.unit,
+            &["snapshots", "--json"],
+            120,
+        ))
+        .await;
+    // fix-54's rule: only an empty list and restic's "repository does not
+    // exist" (exit 10) mean there is nothing to restore.
+    let history = match listing {
+        Ok(out) if out.success() => crate::ops::backup::parse_snapshots_json(&out.stdout),
+        Ok(out) if out.code == 10 => Vec::new(),
+        Ok(out) => {
+            return Ok(EmptyUnit::CheckFailed(format!(
+                "rc={} :: {}",
+                out.code,
+                crate::executor::trace_line(out.stderr.trim())
+            )))
+        }
+        Err(e) => return Ok(EmptyUnit::CheckFailed(e.to_string())),
+    };
+    if history.is_empty() {
+        return Ok(EmptyUnit::Fresh);
+    }
+    let script = format!(
+        "set -o pipefail; env RESTIC_REPOSITORY={base}/{unit}-config RESTIC_PASSWORD_FILE={pw} \
+         RESTIC_CACHE_DIR={cache} restic dump latest /{unit}-data.tar | \
+         pct exec {vmid} -- tar -xf - -C /",
+        base = cfg.restic_base,
+        unit = m.unit,
+        pw = cfg.password_file,
+        cache = crate::ops::backup::RESTIC_CACHE_DIR,
+        vmid = m.vmid
+    );
+    let out = exec
+        .run(&Cmd::new("sh", &["-c", &script], cfg.restore_timeout_s))
+        .await;
+    match out {
+        Ok(o) if o.success() => {}
+        Ok(o) => {
+            return Ok(EmptyUnit::RestoreFailed(format!(
+                "rc={} :: {}",
+                o.code,
+                crate::executor::trace_line(o.stderr.trim())
+            )))
+        }
+        Err(e) => return Ok(EmptyUnit::RestoreFailed(e.to_string())),
+    }
+    if let Some(glob) = &m.backup_from_newest {
+        return Ok(EmptyUnit::RestoredHold(format!(
+            "its archive is the service's own copy ({}), not a live store: put the newest \
+             copy in place as the live file as the stack file's restore note says \
+             (docs/OPERATIONS_RUNBOOK.md op-11), then start it",
+            glob
+        )));
+    }
+    Ok(EmptyUnit::Restored)
+}
+
 /// C7 nightly backup for a native stack. The data lives INSIDE the
 /// container (adoption never restarts a service, so a bind-mount to
 /// /appdata was never an option); the snapshot therefore streams
@@ -551,6 +676,22 @@ pub async fn backup_native(
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
+
+    // fix-115 (drill-includes-stateless-native, 2026-09-27): a unit that
+    // declares it keeps nothing has nothing to archive. The tar of no
+    // directory failed every night it was tried, which failed the whole
+    // stack's night and held back its updates; and the repository it would
+    // have created is one the drill then rehearsed for nothing.
+    if m.stateless && m.data_dirs.is_empty() && m.backup_from_newest.is_none() {
+        runner.log(
+            Level::Info,
+            format!(
+                "[backup] {} is stateless — nothing to archive, no repository",
+                m.unit
+            ),
+        );
+        return runner.finish_ok();
+    }
 
     step!(runner, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
@@ -671,50 +812,125 @@ pub async fn backup_native(
         )))
     });
 
-    step!(runner, "snapshot", {
-        let dirs = match &own_copy {
-            Some(f) => shq(f),
-            None => m
-                .data_dirs
-                .iter()
-                .map(|d| shq(d))
-                .collect::<Vec<_>>()
-                .join(" "),
-        };
-        // pipefail is load-bearing: without it a dead `pct exec tar` still
-        // yields a "successful" empty snapshot — a backup that lies.
-        // F171: RESTIC_CACHE_DIR was missing here while `backup.rs` has set
-        // it for every compose stack since it was written. This path builds
-        // the same environment by hand, and hand-built copies drift: without
-        // a cache directory restic finds neither $XDG_CACHE_HOME nor $HOME
-        // in the host's service environment, warns about it on every single
-        // run, and re-fetches metadata from Google Drive that it should have
-        // had locally. Measured 2026-09-02 in the T12 drill — the warning
-        // was in the output of every native backup and nobody had read it.
-        let script = format!(
-            "set -o pipefail; pct exec {} -- tar -cf - {} | \
+    // fix-113 (native-tar-no-quiesce, 2026-09-27): a run killed mid-snapshot
+    // leaves a stale lock, as on the compose path; restic only removes locks
+    // of processes that are gone, so this is always safe.
+    step!(runner, "clear stale locks", {
+        let _ = exec
+            .run(&crate::ops::backup::restic_cmd(
+                cfg,
+                &m.unit,
+                &["unlock"],
+                120,
+            ))
+            .await;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    // fix-113: a service declared `backup_pause` is stopped for the tar, so
+    // its store is not archived mid-write. Stopping first and failing loudly
+    // when it will not stop: a tar of a store still being written is the
+    // torn backup this exists to prevent.
+    let unit = format!("{}.service", m.unit);
+    if m.backup_pause {
+        step!(runner, "pause the service", {
+            let out = util_pct_sh(exec, m.vmid, &format!("systemctl stop {}", unit), 120).await?;
+            if !out.success() {
+                return Err(CoreError::Other(format!(
+                    "{} would not stop for its backup ({}) — nothing was archived",
+                    unit,
+                    out.stderr.trim()
+                )));
+            }
+            Ok(StepOutcome::Changed)
+        });
+    }
+
+    let snapshot_result = runner
+        .step("snapshot", || async {
+            let dirs = match &own_copy {
+                Some(f) => shq(f),
+                None => m
+                    .data_dirs
+                    .iter()
+                    .map(|d| shq(d))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            };
+            // pipefail is load-bearing: without it a dead `pct exec tar` still
+            // yields a "successful" empty snapshot — a backup that lies.
+            // F171: RESTIC_CACHE_DIR was missing here while `backup.rs` has set
+            // it for every compose stack since it was written. This path builds
+            // the same environment by hand, and hand-built copies drift: without
+            // a cache directory restic finds neither $XDG_CACHE_HOME nor $HOME
+            // in the host's service environment, warns about it on every single
+            // run, and re-fetches metadata from Google Drive that it should have
+            // had locally. Measured 2026-09-02 in the T12 drill — the warning
+            // was in the output of every native backup and nobody had read it.
+            let script = format!(
+                "set -o pipefail; pct exec {} -- tar -cf - {} | \
              env RESTIC_REPOSITORY={}/{}-config RESTIC_PASSWORD_FILE={} \
              RESTIC_CACHE_DIR={} \
              restic backup --stdin --stdin-filename {}-data.tar",
-            // D25: named after the SERVICE, not the stack. T5 puts several
-            // services on one container, and a per-stack repository would
-            // fold them into one — so moving any of them elsewhere would
-            // leave its history behind, which is what D25 exists to prevent.
-            m.vmid,
-            dirs,
-            cfg.restic_base,
-            m.unit,
-            cfg.password_file,
-            crate::ops::backup::RESTIC_CACHE_DIR,
-            m.unit
-        );
-        crate::executor::run_ok(
-            exec,
-            &Cmd::new("sh", &["-c", &script], cfg.snapshot_timeout_s),
-        )
-        .await?;
-        Ok(StepOutcome::Changed)
-    });
+                // D25: named after the SERVICE, not the stack. T5 puts several
+                // services on one container, and a per-stack repository would
+                // fold them into one — so moving any of them elsewhere would
+                // leave its history behind, which is what D25 exists to prevent.
+                m.vmid,
+                dirs,
+                cfg.restic_base,
+                m.unit,
+                cfg.password_file,
+                crate::ops::backup::RESTIC_CACHE_DIR,
+                m.unit
+            );
+            crate::executor::run_ok(
+                exec,
+                &Cmd::new("sh", &["-c", &script], cfg.snapshot_timeout_s),
+            )
+            .await?;
+            Ok(StepOutcome::Changed)
+        })
+        .await;
+
+    // fix-113: the paused service is started again whatever the snapshot
+    // did, as `backup` resumes what it quiesced: a backup that leaves a
+    // service off is worse than one that fails.
+    if m.backup_pause {
+        step!(runner, "resume the service", {
+            let out = util_pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "systemctl start {u}; sleep 2; [ \"$(systemctl is-active {u})\" = active ]",
+                    u = unit
+                ),
+                120,
+            )
+            .await?;
+            if !out.success() {
+                return Err(CoreError::Other(format!(
+                    "{} did not come back after its backup — the service is DOWN and needs \
+                     hands now",
+                    unit
+                )));
+            }
+            Ok(StepOutcome::Changed)
+        });
+    }
+    if let Err(e) = snapshot_result {
+        return runner.finish_err("snapshot", &e);
+    }
+
+    // W2 / fix-113: the stack file's own retention, as compose stacks have
+    // had since W2. Read here so every caller gets it without being told.
+    let tiers = match crate::state::StateStore::new(ctx.exec, &ctx.state_dir)
+        .load()
+        .await
+    {
+        Ok(state) => crate::ops::backup::stack_tiers(&state, &m.stack_name, &cfg.tiers),
+        Err(_) => cfg.tiers.clone(),
+    };
 
     step!(runner, "retention", {
         let out = crate::executor::run_ok(
@@ -723,7 +939,7 @@ pub async fn backup_native(
         )
         .await?;
         let snapshots = crate::ops::backup::parse_snapshots_json(&out.stdout);
-        let doomed = crate::retention::forget_list(&snapshots, &cfg.tiers, ctx.now_unix);
+        let doomed = crate::retention::forget_list(&snapshots, &tiers, ctx.now_unix);
         if doomed.is_empty() {
             return Ok(StepOutcome::Unchanged);
         }
@@ -997,6 +1213,47 @@ pub fn listed_sha(sums: &str, filename: &str) -> Option<String> {
             _ => None,
         }
     })
+}
+
+/// fix-116: the tag of `repo`'s latest release and the checksum its
+/// SHA256SUMS lists for `asset`. Used only to decide that nothing needs to be
+/// done; installing still goes through the signed path (`release_update`) or
+/// the service's own verb.
+async fn latest_listed_sha(
+    exec: &dyn Executor,
+    repo: &str,
+    asset: &str,
+) -> Result<(String, String), String> {
+    let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    let out = exec
+        .run(&Cmd::new(
+            "curl",
+            &[
+                "-sSL",
+                "-m",
+                "30",
+                "-H",
+                "Accept: application/vnd.github+json",
+                &url,
+            ],
+            60,
+        ))
+        .await
+        .map_err(|e| e.to_string())?;
+    if !out.success() {
+        return Err(out.stderr.trim().to_string());
+    }
+    let refs = parse_latest_release(&out.stdout, asset)?;
+    let sums = exec
+        .run(&Cmd::new("curl", &["-sSL", "-m", "60", &refs.sums_url], 90))
+        .await
+        .map_err(|e| e.to_string())?;
+    if !sums.success() {
+        return Err(sums.stderr.trim().to_string());
+    }
+    let sha = listed_sha(&sums.stdout, asset)
+        .ok_or_else(|| format!("SHA256SUMS of {} lists no '{}'", refs.tag, asset))?;
+    Ok((refs.tag, sha))
 }
 
 /// B1: the orchestrator's own update of a native service, from the host.
@@ -1297,7 +1554,7 @@ pub async fn update_native(
     });
 
     let mut before = String::new();
-    step!(runner, "preserve binary", {
+    step!(runner, "read the installed binary", {
         let sum = util_pct_sh(
             exec,
             m.vmid,
@@ -1306,13 +1563,41 @@ pub async fn update_native(
         )
         .await?;
         before = sum.stdout.trim().to_string();
-        let out = util_pct_sh(
-            exec,
-            m.vmid,
-            &format!("cp -p {} {}", shq(&m.binary), shq(&prev)),
-            60,
-        )
-        .await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    // fix-116 (native-update-copies-binary-nightly, 2026-09-27): the binary
+    // was copied aside and the service's own update run every night for every
+    // service, 40 MB for kyu on CT 109's small rootfs, even when the latest
+    // release was the one installed. The release is asked first, as
+    // `release_update` does, and a service already on it is left alone. When
+    // the release cannot be read the service's own update decides, as before.
+    if let Some(repo) = &m.release_repo {
+        match latest_listed_sha(exec, repo, m.asset_name()).await {
+            Ok((tag, listed)) if !before.is_empty() && listed.eq_ignore_ascii_case(&before) => {
+                runner.log(
+                    Level::Info,
+                    format!(
+                        "[update] {} already runs {} of {} — nothing copied, no update run",
+                        m.unit, tag, repo
+                    ),
+                );
+                return runner.finish_ok();
+            }
+            Ok(_) => {}
+            Err(why) => runner.log(
+                Level::Info,
+                format!(
+                    "[update] could not read the latest release of {} ({}) — the service's own \
+                     update decides",
+                    repo, why
+                ),
+            ),
+        }
+    }
+
+    step!(runner, "preserve binary", {
+        let out = util_pct_sh(exec, m.vmid, &preserve_script(&m.binary, &prev), 60).await?;
         if !out.success() {
             return Err(CoreError::Other(format!(
                 "cannot preserve {} — refusing to update without a rollback copy",
@@ -1353,6 +1638,9 @@ pub async fn update_native(
         // The armed rollback: restore the preserved binary from OUTSIDE the
         // (dead) app, restart, and report the failure loudly either way.
         let rb = util_pct_sh(exec, m.vmid, &rollback_script(&unit, &prev, &m.binary), 180).await?;
+        // fix-114: the binary running now is the one kept before this run,
+        // so the previous one from before it is the kept one again.
+        let _ = util_pct_sh(exec, m.vmid, &restore_set_aside_script(&prev), 60).await;
         Err(CoreError::Other(format!(
             "new {} version did not come up healthy — rolled back to the previous binary ({}); \
              investigate before the next nightly run",
@@ -1365,9 +1653,17 @@ pub async fn update_native(
         )))
     });
 
+    // fix-114: exactly one previous binary stays, the way back when this
+    // release misbehaves after its health window.
     let mut stale_kept = false;
-    step!(runner, "drop the stale rollback copy", {
-        let out = util_pct_sh(exec, m.vmid, &drop_stale_rollback_script(&prev), 60).await?;
+    step!(runner, "keep one previous binary", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &keep_one_previous_script(&m.binary, &prev),
+            60,
+        )
+        .await?;
         if !out.success() {
             stale_kept = true;
             return Ok(StepOutcome::Unchanged);
@@ -1378,7 +1674,10 @@ pub async fn update_native(
     if stale_kept {
         runner.log(
             Level::Warn,
-            format!("could not remove {} — a stale copy stays on disk", prev),
+            format!(
+                "could not settle the kept previous binary at {} — check it and {}.old by hand",
+                prev, prev
+            ),
         );
     }
 
@@ -1413,4 +1712,194 @@ pub async fn update_native(
         format!("[update] {} self-update supervised — healthy", m.stack_name),
     );
     runner.finish_ok()
+}
+
+/// fix-114 (native-rollback-copies-deleted, 2026-09-27): set the kept
+/// previous binary aside, then copy the running one to its place. An update
+/// that turns out not to change the binary puts the set-aside one back
+/// (`keep_one_previous_script`), so an unchanged night never replaces N-1
+/// with N. A failed copy puts it back at once. A set-aside copy that is
+/// already there was left by a run that stopped half way, and is older than
+/// the one in place: it is kept, not overwritten.
+pub fn preserve_script(binary: &str, prev: &str) -> String {
+    format!(
+        "if [ -f {p} ] && [ ! -f {old} ]; then mv -f {p} {old}; fi; cp -p {b} {p} || \
+         {{ if [ -f {old} ]; then mv -f {old} {p}; fi; exit 1; }}",
+        p = shq(prev),
+        old = shq(&format!("{}.old", prev)),
+        b = shq(binary)
+    )
+}
+
+/// fix-114: after a healthy run, exactly one previous binary stays beside
+/// the program. When the binary changed, the copy taken before the run is
+/// that previous one and the older one goes; when it did not change, the
+/// previous binary from before the run comes back.
+///
+/// This reverses the deletion fix-10 added for a 2 GB rootfs: a release that
+/// starts fine and misbehaves an hour later had no N-1 binary on disk, on the
+/// notification path. CT 109 has 4 GB now, and the kit's own `.prev` (the
+/// same version a second time) still goes.
+pub fn keep_one_previous_script(binary: &str, prev: &str) -> String {
+    format!(
+        "if cmp -s {b} {p}; then if [ -f {old} ]; then mv -f {old} {p}; else rm -f {p}; fi; \
+         else rm -f {old}; fi",
+        b = shq(binary),
+        p = shq(prev),
+        old = shq(&format!("{}.old", prev))
+    )
+}
+
+/// fix-114: after a rollback, the previous binary from before the failed run
+/// is the kept one again.
+fn restore_set_aside_script(prev: &str) -> String {
+    format!(
+        "if [ -f {old} ]; then mv -f {old} {p}; fi",
+        old = shq(&format!("{}.old", prev)),
+        p = shq(prev)
+    )
+}
+
+/// fix-114: `homelab rollback-native <stack>/<unit>` — go back to the kept
+/// previous binary by hand, when a release that passed its health window
+/// misbehaves later. The unit is stopped, the kept binary copied into place
+/// and held to the same health check as an update; if it does not come up,
+/// the binary that was running goes back. The version rolled back from
+/// becomes the kept one, so running it again returns. The stack's automatic
+/// updates are parked (fix-59), or the next night would reinstall the release
+/// that was just rolled back; `homelab enable <stack>` resumes them.
+pub async fn rollback_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
+    let op = format!("rollback-{}", m.unit);
+    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+    let unit = format!("{}.service", m.unit);
+    let prev = format!("{}.homelab-prev", m.binary);
+    let swap = format!("{}.homelab-rollback", m.binary);
+
+    step!(runner, "guard target", {
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    step!(runner, "a previous binary is kept", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!(
+                "test -f {p} && ! cmp -s {b} {p} && echo yes || echo no",
+                p = shq(&prev),
+                b = shq(&m.binary)
+            ),
+            60,
+        )
+        .await?;
+        if out.stdout.trim() != "yes" {
+            return Err(CoreError::SafetyAbort(format!(
+                "no previous binary of {} is kept at {} (or it is the one running) — nothing \
+                 was stopped",
+                m.unit, prev
+            )));
+        }
+        Ok(StepOutcome::Unchanged)
+    });
+
+    step!(runner, "roll back", {
+        let script = format!(
+            "systemctl stop {u}; cp -p {b} {swap} && cp -p {p} {b}",
+            u = unit,
+            b = shq(&m.binary),
+            swap = shq(&swap),
+            p = shq(&prev)
+        );
+        let out = util_pct_sh(exec, m.vmid, &script, 180).await?;
+        if !out.success() {
+            let _ = util_pct_sh(exec, m.vmid, &format!("systemctl start {}", unit), 60).await;
+            return Err(CoreError::Other(format!(
+                "could not put the kept binary of {} in place ({}) — the unit was started \
+                 again on the binary it had",
+                m.unit,
+                out.stderr.trim()
+            )));
+        }
+        let health = util_pct_sh(exec, m.vmid, &health_script(&unit), 180).await?;
+        if health.success() {
+            return Ok(StepOutcome::Changed);
+        }
+        let back =
+            util_pct_sh(exec, m.vmid, &rollback_script(&unit, &swap, &m.binary), 180).await?;
+        Err(CoreError::Other(format!(
+            "the kept binary of {} did not come up healthy ({}) — {}",
+            m.unit,
+            health.stdout.trim(),
+            if back.success() {
+                "the binary that was running is back and active"
+            } else {
+                "putting the running binary back ALSO FAILED — the service needs hands NOW"
+            }
+        )))
+    });
+
+    step!(runner, "keep the other as previous", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("mv -f {} {}", shq(&swap), shq(&prev)),
+            60,
+        )
+        .await?;
+        Ok(if out.success() {
+            StepOutcome::Changed
+        } else {
+            StepOutcome::Unchanged
+        })
+    });
+
+    let now = ctx.now_unix;
+    let stack = m.stack_name.clone();
+    step!(runner, "park automatic updates", {
+        crate::state::StateStore::new(ctx.exec, &ctx.state_dir)
+            .update(|s| {
+                s.updates_parked.insert(stack.clone(), now);
+            })
+            .await?;
+        Ok(StepOutcome::Changed)
+    });
+
+    runner.log(
+        Level::Warn,
+        format!(
+            "[rollback] {} runs its previous binary again; automatic updates of {} are parked \
+             until `homelab enable {}`",
+            m.unit, m.stack_name, m.stack_name
+        ),
+    );
+    runner.finish_ok()
+}
+
+/// fix-114: which unit of a native stack a per-unit verb acts on — the one
+/// named, or the only one there is.
+pub fn select_unit(
+    services: &[NativeServiceManifest],
+    unit: Option<&str>,
+) -> Result<NativeServiceManifest, String> {
+    let names = || {
+        services
+            .iter()
+            .map(|s| s.unit.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match unit {
+        Some(u) => services
+            .iter()
+            .find(|s| s.unit == u)
+            .cloned()
+            .ok_or_else(|| format!("no unit '{}' on this stack (it has: {})", u, names())),
+        None if services.len() == 1 => Ok(services[0].clone()),
+        None => Err(format!(
+            "this stack has several units ({}) — name one as <stack>/<unit>",
+            names()
+        )),
+    }
 }

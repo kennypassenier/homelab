@@ -33,6 +33,7 @@ flowchart TD
 - **The state directory** holds `state.json` (what is deployed where), `repo/` (a git history of every file each deploy sent), `secrets/` (the vault, below), `tls-cert.pem` and `tls-key.pem` (the daemon's certificate), `journal.jsonl` and `incidents/` (operation records) and `restic-cache/`.
 - **The vault** `/var/lib/homelab/secrets`: `restic.pw` (the one password for every repository), `<stack>/<app>.env` for each compose app that has an `.env`, and `<stack>/<dir>/<file>` for each env or credential file a native unit reads, where `<dir>` is the directory that file sits in (two units may both read a `token.env`).
 - **Backups** are restic repositories behind `rclone:gdrive:homelab-backups`. The name is `<owner>-config`: one per owning app for a compose stack, one per unit for a native stack, `host-meta-config` for the daemon's own state, and `<name>-config` for each `[[device_backups]]` entry in `/etc/homelab/host.toml`. Every repository opens with the same password file `/var/lib/homelab/secrets/restic.pw`. (`BackupCfg::default()` in core/src/ops/backup.rs; `restic_base` and `restic_password_file` in `/etc/homelab/host.toml` override both.)
+- **A second copy** of every repository, when `second_copy_dataset` is set in `/etc/homelab/host.toml` (fix-96): each night after the backups, `restic copy` writes `<owner>-config` into a local repository of the same name on that ZFS dataset (`HDD4TB/restic` mounts at `/HDD4TB/restic`), with the same password file and the same retention, and the ZFS replication carries it to its replica pool. When Google Drive is unreachable or damaged, use it in place of `rclone:gdrive:homelab-backups` in every command below: `RESTIC_REPOSITORY=/HDD4TB/restic/<owner>-config`. One repository per night is checked with `restic check` on both copies (core/src/ops/secondcopy.rs).
 - **App data** lives on the host under `/appdata/<stack>/<app>-config` and is bind-mounted into the container at the same path, so a container can be rebuilt without touching it.
 - **ZFS pools** referenced by the stack files: `HDD12TB` (mounted by downloader, media), `HDD18TB` (mounted by downloader, media), `HDD2TB` (mounted by gateway), `HDD4TB` (mounted by media). Replication jobs are the `[[zfs_jobs]]` entries in `/etc/homelab/host.toml` (Layer 5).
 - **Guests this suite never touches**, whatever a stack file says: vmid 100, 101, 102, 103 (`DEFAULT_NO_TOUCH` in core/src/safety.rs; a `no_touch` list in `/etc/homelab/host.toml` can only add to it). They come back from Proxmox's own backups, not from this runbook.
@@ -212,7 +213,7 @@ pct exec <vmid> -- systemctl enable --now <unit>
 
 The program comes from the unit's GitHub release (named per unit in the Stacks section). On a workstation: `gh release download --repo <release_repo> --pattern <asset> --pattern SHA256SUMS`, then `sha256sum -c --ignore-missing SHA256SUMS`, then copy it to the host.
 
-When the daemon is up, `homelab deploy stacks/<stack>` rebuilds a native stack too: it creates the container, writes each `<unit>/<unit>.service`, creates the unit's account, places the program from the unit's release where none exists (it never replaces one), puts back env and credential files from the vault, and starts a unit only when all of that is present. A unit left unstarted is named in the output; a missing program is installed with `homelab install-native stacks/<stack>/<unit>` (or `stacks/<stack>` for the unit whose `service.yml` sits at the top).
+When the daemon is up, `homelab deploy stacks/<stack>` rebuilds a native stack too: it creates the container, writes each `<unit>/<unit>.service`, creates the unit's account, places the program from the unit's release where none exists (it never replaces one), puts back env and credential files from the vault, and starts a unit only when all of that is present. A unit that is not running and whose data directories are empty gets its newest snapshot unpacked back first (fix-146); a unit archived from its own copy (`backup_from_newest`, kyu) is then left stopped until that copy is put in place as the live file. A unit left unstarted is named in the output; a missing program is installed with `homelab install-native stacks/<stack>/<unit>` (or `stacks/<stack>` for the unit whose `service.yml` sits at the top).
 
 ## Layer 3: Restore the daemon's own state (host-meta)
 
@@ -223,18 +224,31 @@ Do this first when the host itself was lost: every later step needs the vault it
 /var/lib/homelab/state.json     # what is deployed where
 /var/lib/homelab/tls-cert.pem   # the certificate the clients pin
 /var/lib/homelab/tls-key.pem
-/var/lib/homelab/repo           # the git history of every deployed file
+/var/lib/homelab/repo           # the history of every deployed file
 /etc/homelab/host.toml     # token, webhooks, zfs_jobs and every other setting
-/usr/local/bin/smart-textfile-collector.py     # these three only when present
-/etc/systemd/system/smart-collector.service
-/etc/systemd/system/smart-collector.timer
 ```
 
-Not in it: the `homelab-host` program and its unit file (Layer 1), rclone's own configuration, `journal.jsonl`, `incidents/` and `restic-cache/`.
+and, each only when it was present on the host (`HOST_META_EXTRAS` in core/src/ops/backup.rs): the SMART collector, the network bridges, Proxmox's storage and job definitions, the VM configurations (Home Assistant's USB passthrough), the swappiness drop-in and rclone's own configuration:
+
+```sh
+/usr/local/bin/smart-textfile-collector.py
+/etc/systemd/system/smart-collector.service
+/etc/systemd/system/smart-collector.timer
+/etc/network/interfaces
+/etc/pve/storage.cfg
+/etc/pve/jobs.cfg
+/etc/pve/qemu-server
+/etc/sysctl.d/99-homelab-swappiness.conf
+/root/.config/rclone/rclone.conf
+```
+
+Not in it: the `homelab-host` program and its unit file (Layer 1), `journal.jsonl`, `incidents/` and `restic-cache/`.
 
 **The password is inside the thing it opens.** `restic.pw` is in this repository, and the same password opens every repository, so an offline copy of it is the one thing this whole runbook cannot do without. The code keeps no second copy. The offline copy is in Kenny's Bitwarden: the one statement in this document that no code can confirm.
 
-**rclone first.** restic reaches Google Drive through rclone's remote `gdrive`, whose configuration is in no backup. On a fresh host install `restic` and `rclone`, run `rclone config` to create the remote `gdrive` again, then:
+**Do not start the daemon before this restore.** A daemon that starts on an empty host takes a host-meta snapshot of that empty state in its first night, and from then on `latest` is the empty host. So pick the snapshot by its ID, never by `latest`.
+
+**rclone first.** restic reaches Google Drive through rclone's remote `gdrive`. Its configuration is in this repository, which cannot be opened without it: on a fresh host install `restic` and `rclone`, run `rclone config` to create the remote `gdrive` again (or restore from the second copy, when its pool survived), then:
 
 ```sh
 rclone lsd gdrive:homelab-backups          # the remote works and the folder is there
@@ -243,12 +257,12 @@ install -d -m 700 /var/lib/homelab/secrets
 export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/host-meta-config
 export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
 export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
-restic snapshots
-restic ls latest | head -50
-restic restore latest --target /
+restic snapshots                      # the newest one from before the loss: note its ID
+restic ls <ID> | head -50
+restic restore <ID> --target /
 ```
 
-The snapshot stores absolute paths, so `--target /` puts every file back where it was. Then start the daemon (Layer 1, when its program is not there yet) and do Layer 1's pin check: the restored certificate keeps the fingerprint the clients already pin.
+The snapshot stores absolute paths, so `--target /` puts every file back where it was. Only then start the daemon (Layer 1, when its program is not there yet) and do Layer 1's pin check: the restored certificate keeps the fingerprint the clients already pin.
 
 ## Layer 4: Restore a stack's data
 
@@ -259,13 +273,14 @@ export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
 export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
 ```
 
-**A compose stack.** When the daemon is up, `homelab restore stacks/<stack> [snapshot]` does the following, and by hand it is the same (`restore` in core/src/ops/backup.rs). It asks for the stack name first (`--yes` for scripts) and, with the stack down, copies the current data to `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it (fix-64; `--no-safety-copy` skips that copy):
+**A compose stack.** When the daemon is up, `homelab restore stacks/<stack> [snapshot]` does the following, and by hand it is the same (`restore` in core/src/ops/backup.rs). It asks for the stack name first (`--yes` for scripts) and, with the stack down, copies the current data to `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it (fix-64; `--no-safety-copy` skips that copy). With that copy taken it empties each data directory first, so no file the snapshot lacks stays behind. `--app <app>` restores one app and leaves the others running. A stack with several repositories is restored to one night: the newest `run-<unix time>` tag every one of its repositories has, or the night of the snapshot ID given (fix-112):
 
 ```sh
 pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose down'   # every app
 export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<app>-config                   # every repository of the stack
-restic snapshots
-restic restore latest --target /
+restic snapshots --tag run-<unix time>                          # the same night in each
+find /appdata/<stack>/<app>-config -mindepth 1 -delete          # only after copying it aside
+restic restore <ID> --target /
 pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose up -d'  # every app, in order
 ```
 

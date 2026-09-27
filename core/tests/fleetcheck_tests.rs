@@ -52,6 +52,16 @@ fn check(state: &HostState, live: &LiveFacts) -> Vec<homelab_core::ops::fleetche
     if s.last_restore_drill == 0 {
         s.last_restore_drill = NOW;
     }
+    // fix-96: likewise the rotating restic check, which says "never" about a
+    // fixture that does not mention it.
+    if s.last_integrity_check == 0 {
+        s.last_integrity_check = NOW;
+    }
+    // fix-111: and the host-meta backup, which a fixture with stacks would
+    // otherwise report as never taken.
+    if s.last_host_meta == 0 {
+        s.last_host_meta = NOW;
+    }
     // Same treatment for the seeder: a fixture that says nothing about it
     // would otherwise report "never ran" in every test here. The tests that
     // ARE about it call `evaluate_seed` directly.
@@ -112,6 +122,7 @@ fn y4_a_healthy_fleet_is_silent() {
         coverage: Vec::new(),
         boot: Vec::new(),
         host_memory: None,
+        second_copy_dataset: None,
     };
     assert!(check(&st, &live).is_empty(), "{:?}", check(&st, &live));
 }
@@ -178,6 +189,7 @@ fn y4_finds_a_stack_file_aimed_at_someone_elses_container() {
         coverage: Vec::new(),
         boot: Vec::new(),
         host_memory: None,
+        second_copy_dataset: None,
         ..Default::default()
     };
     let found = check(&st, &live);
@@ -1109,6 +1121,51 @@ fn the_full_round_carries_the_restore_drill() {
         "or it is another mechanism wired to nothing: {:?}",
         findings
     );
+}
+
+/// fix-96 (single-offsite-copy-no-integrity-check, 2026-09-27): a failed
+/// second copy and a failed `restic check` ride the same round.
+#[test]
+fn the_full_round_carries_the_second_copy_and_the_checks() {
+    let mut st = HostState {
+        last_restore_drill: NOW,
+        last_second_copy: NOW - 3600,
+        last_integrity_check: NOW - 3600,
+        ..Default::default()
+    };
+    st.second_copies.insert(
+        "kyu".into(),
+        homelab_core::state::CopyRecord {
+            last_attempt: NOW - 3600,
+            last_ok: NOW - 3 * 86400,
+            last_error: Some("unable to open repository".into()),
+        },
+    );
+    st.integrity.insert(
+        "actual".into(),
+        homelab_core::state::IntegrityRecord {
+            last_check: NOW - 3600,
+            drive_error: Some("pack is damaged".into()),
+            ..Default::default()
+        },
+    );
+    let live = LiveFacts {
+        second_copy_dataset: Some("HDD4TB/restic".into()),
+        ..Default::default()
+    };
+    let findings = check(&st, &live);
+    for subject in [
+        "second copy · kyu",
+        "second copy",
+        "restic check · actual (Google Drive)",
+    ] {
+        assert!(
+            findings.iter().any(|f| f.subject == subject),
+            "{} missing: {:?}",
+            subject,
+            findings
+        );
+    }
 }
 
 /// T49 · a monitor that outlives its stack, reported where somebody sees it.

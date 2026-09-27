@@ -57,6 +57,7 @@ fn spec_with_secret() -> DeploySpec {
     env.insert("app".into(), format!("API_KEY={}\n", SECRET));
     DeploySpec {
         native_binaries: Default::default(),
+        native_manifests: Default::default(),
         manifest,
         files: vec![FileBlob {
             path: "app/docker-compose.yml".into(),

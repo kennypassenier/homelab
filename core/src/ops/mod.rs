@@ -27,6 +27,7 @@ pub mod registry_cache;
 pub mod resize;
 pub mod restoredrill;
 pub mod retired;
+pub mod secondcopy;
 pub mod selfupdate;
 pub mod template;
 pub mod today;

@@ -42,6 +42,7 @@ fn kyu_manifest() -> NativeServiceManifest {
         update_cmd: Some("kyu update".into()),
         stateless: false,
         backup_from_newest: None,
+        backup_pause: false,
         update_policy: Default::default(),
         metrics: None,
         release_repo: None,
@@ -345,6 +346,7 @@ async fn t5_a_stack_holds_several_native_services() {
         data_dirs: vec![],
         stateless: true,
         backup_from_newest: None,
+        backup_pause: false,
         update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
@@ -378,6 +380,7 @@ async fn t5_a_stack_holds_several_native_services() {
         data_dirs: vec![],
         stateless: true,
         backup_from_newest: None,
+        backup_pause: false,
         update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
@@ -466,6 +469,7 @@ async fn d25_native_backup_uses_the_service_name_for_its_repo() {
         data_dirs: vec!["/etc/kyu-runner".into()],
         stateless: false,
         backup_from_newest: None,
+        backup_pause: false,
         update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
@@ -694,7 +698,12 @@ async fn a_first_install_that_fails_says_there_is_nothing_to_roll_back_to() {
     // and this test is about an unhealthy one — and the activation script
     // contains `systemctl is-active`, which that harness already answers.
     exec.respond_first("journalctl", CmdOutput::ok("kyu: address in use\n"));
-    exec.respond_first("mv -f", CmdOutput::failed(1, "did not start"));
+    // fix-114: keyed on the move into place, since setting the kept
+    // previous binary aside is a `mv -f` too.
+    exec.respond_first(
+        "mv -f '/usr/local/bin/kyu.homelab-new'",
+        CmdOutput::failed(1, "did not start"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = homelab_core::ops::native::install_native(
@@ -736,7 +745,10 @@ async fn a_reinstall_that_fails_returns_to_the_binary_that_was_running() {
     exec.respond_always("base64 -d", CmdOutput::ok(""));
     exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
     exec.respond_first("cp -p", CmdOutput::ok(""));
-    exec.respond_first("mv -f", CmdOutput::failed(1, "did not start"));
+    exec.respond_first(
+        "mv -f '/usr/local/bin/kyu.homelab-new'",
+        CmdOutput::failed(1, "did not start"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = homelab_core::ops::native::install_native(
@@ -999,13 +1011,14 @@ fn the_service_is_handed_its_own_program_directory() {
     );
 }
 
-/// `.homelab-prev` is read only by the run that writes it. Nothing deleted it,
-/// so every deploy left a full copy of the program on disk forever — beside
-/// the `.prev` the chassis kit keeps of the same version. 220 MB of programs
-/// on CT 109's 2.0 GB rootfs, 70 MB of it the duplicate, disk at 98%.
+/// `.homelab-prev` used to be deleted once the run proved healthy (fix-10,
+/// for CT 109's 2.0 GB rootfs). fix-114 (native-rollback-copies-deleted,
+/// 2026-09-27) keeps exactly one previous binary instead: a release that
+/// passes its ten-second window and misbehaves an hour later needs it. The
+/// kit's own `.prev`, the same version a second time, still goes.
 #[tokio::test]
-async fn a_healthy_update_does_not_leave_its_rollback_copy_behind() {
-    use homelab_core::ops::native::update_native;
+async fn a_healthy_update_keeps_one_previous_binary_and_drops_the_kits_copy() {
+    use homelab_core::ops::native::{drop_stale_rollback_script, update_native};
     let exec = MockExecutor::new();
     exec.enqueue("sha256sum", CmdOutput::ok("aaaa\n"));
     exec.respond_always("sha256sum", CmdOutput::ok("bbbb\n"));
@@ -1015,18 +1028,21 @@ async fn a_healthy_update_does_not_leave_its_rollback_copy_behind() {
     let j = NullJournal;
     let report = update_native(&ctx(&exec, &sink, &j), &kyu_manifest(), None).await;
     assert!(report.ok, "{:?}", report.error);
-    assert_eq!(
-        exec.calls_containing("rm -f '/usr/local/bin/kyu.homelab-prev'")
-            .len(),
-        1,
-        "the within-run copy is removed once the run proved healthy: {:?}",
+    assert!(
+        !exec
+            .calls()
+            .iter()
+            .any(|c| c.ends_with(&drop_stale_rollback_script(
+                "/usr/local/bin/kyu.homelab-prev"
+            ))),
+        "the previous binary stays after a healthy update: {:?}",
         exec.calls()
-    ); // fix-10: and so is the kit's own copy — the same version, kept twice.
+    );
     assert_eq!(
         exec.calls_containing("rm -f '/usr/local/bin/kyu.prev'")
             .len(),
         1,
-        "the kit's copy goes with it after a healthy update: {:?}",
+        "the kit's copy goes after a healthy update: {:?}",
         exec.calls()
     );
 }
@@ -1176,7 +1192,8 @@ async fn t87_a_binary_that_needs_a_newer_glibc_is_refused_before_anything_moves(
         exec.calls()
     );
     assert!(
-        exec.calls_containing("mv -f").is_empty(),
+        exec.calls_containing("mv -f '/usr/local/bin/kyu.homelab-new'")
+            .is_empty(),
         "nothing may be moved into place: {:?}",
         exec.calls()
     );
@@ -1403,8 +1420,9 @@ fn fix_58_a_manual_native_with_an_update_cmd_gets_no_nightly_update() {
         !n.own_cmd,
         "manual: the unit's own update verb must not run either"
     );
-    // `self` (almanac): its own verb and nothing else; `auto` keeps both, as
-    // before.
+    // `self` (almanac): its own verb and nothing else. fix-148 (Kenny,
+    // 2026-09-27, form "Keuzes helpers"): `auto` gets the signed release
+    // update only; the unit's own verb runs only under `self`.
     let own = NativeServiceManifest {
         update_policy: UpdatePolicy::OwnVerb,
         ..manual.clone()
@@ -1416,7 +1434,10 @@ fn fix_58_a_manual_native_with_an_update_cmd_gets_no_nightly_update() {
         ..manual.clone()
     }
     .nightly_updates();
-    assert!(auto.own_cmd && auto.release);
+    assert!(
+        auto.release && !auto.own_cmd,
+        "auto: the signed release update, and not the unit's own verb as well"
+    );
     // `self` without a verb to run is a stack file mistake.
     let why = validate_native(&NativeServiceManifest {
         update_policy: UpdatePolicy::OwnVerb,

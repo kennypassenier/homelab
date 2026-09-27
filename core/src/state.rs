@@ -219,6 +219,74 @@ pub struct HostState {
     /// is asked at most once a night.
     #[serde(default)]
     pub upstream_releases: BTreeMap<String, crate::ops::pins::UpstreamRelease>,
+    /// fix-96 (single-offsite-copy-no-integrity-check, 2026-09-27): when the
+    /// nightly copy of every repository into the second repository set last
+    /// ran, and what each repository's copy did. 0 = never.
+    #[serde(default)]
+    pub last_second_copy: u64,
+    #[serde(default)]
+    pub second_copies: BTreeMap<String, CopyRecord>,
+    /// fix-96: when the rotating `restic check` last ran, and its record per
+    /// repository (both copies).
+    #[serde(default)]
+    pub last_integrity_check: u64,
+    #[serde(default)]
+    pub integrity: BTreeMap<String, IntegrityRecord>,
+    /// fix-147 (restore-check-failure, 2026-09-27): data a deploy found
+    /// empty and whose backup it could not check, keyed by `<stack>:<path>`
+    /// or `<stack>:<unit>`. Kept until a later check of the same thing
+    /// succeeds.
+    #[serde(default)]
+    pub restore_check_failures: BTreeMap<String, RestoreCheckFailure>,
+}
+
+/// fix-147: one empty data directory (or native unit) whose backup a deploy
+/// could not check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoreCheckFailure {
+    pub stack: String,
+    /// The directory, or the native unit, that was found empty.
+    pub what: String,
+    /// Unix time of the deploy that could not check it.
+    pub at: u64,
+    /// What the check said.
+    pub why: String,
+}
+
+/// fix-96: what the nightly `restic copy` of one repository did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CopyRecord {
+    /// Unix time of the last attempt, copied or not.
+    #[serde(default)]
+    pub last_attempt: u64,
+    /// Unix time of the last copy that completed.
+    #[serde(default)]
+    pub last_ok: u64,
+    /// Why the last attempt failed. None = it did not.
+    #[serde(default)]
+    pub last_error: Option<String>,
+}
+
+/// fix-96: what `restic check` last said about one repository, per copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct IntegrityRecord {
+    /// Unix time of the last check of this repository, passed or not.
+    #[serde(default)]
+    pub last_check: u64,
+    /// Unix time of the last check that also read a subset of the data.
+    #[serde(default)]
+    pub last_data_read: u64,
+    /// Which slice (`n` of `--read-data-subset=n/t`) the next data read takes,
+    /// so successive reads walk the whole repository instead of sampling.
+    #[serde(default)]
+    pub next_subset: u32,
+    /// Why the last check of the Google Drive copy failed. None = it passed.
+    #[serde(default)]
+    pub drive_error: Option<String>,
+    /// Why the last check of the second copy failed. None = it passed or was
+    /// not checked.
+    #[serde(default)]
+    pub local_error: Option<String>,
 }
 
 /// fix-62: what the restore drill knows about one repository.

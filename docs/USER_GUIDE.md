@@ -1656,13 +1656,24 @@ and the run fails, because catching up would mean rolling the replica back
 **Status:** Built, with Grafana Alloy in place of promtail.
 
 When `loki_url` is set in `/etc/homelab/host.toml`, every deploy, native or
-compose, installs Alloy in the container (`core/src/ops/deploy.rs:1958-1967`,
+compose, installs Alloy in the container. `loki_url` is the base address
+Alloy pushes to (`/loki/api/v1/push` is added to it); since Loki moved to the
+metrics stack (fix-90, 2026-09-27) it is `http://10.10.10.13:3100`, and it was
+`http://10.10.10.4:3100` while Loki ran on the gateway. Changing it reaches a
+container at that stack's next deploy, which renders its Alloy config again.
+That port takes pushes only since fix-93, so the coverage check in
+`homelab check` asks Loki from inside its container instead: set
+`loki_vmid = 113` beside `loki_url`, and the host runs the query there on
+`127.0.0.1:3101`; unset, it asks `loki_url` from the host as before (`core/src/ops/deploy.rs:1958-1967`,
 `core/src/ops/logshipper.rs`). An install that fails does not fail the
 deploy; it logs a warning that the container is shipping no logs
 (`core/src/ops/deploy.rs:1968-1978`). A stack may open syslog receivers for
 devices that cannot run a shipper, with `syslog_receivers:` entries of `host`,
 `listen` (port 1024 or higher), `protocol` (`udp`/`tcp`) and `format`
-(`rfc5424`/`rfc3164`) (`core/src/manifest.rs:95-137,509-563`);
+(`rfc5424`/`rfc3164`), and optionally `allow_from`, a list of sender IP
+addresses whose lines are kept; every other sender's lines are dropped before
+they reach Loki (fix-93; the gateway allows OPNsense's 10.10.10.1 only)
+(`core/src/manifest.rs:95-137,509-563`);
 `stacks/gateway/lxc-compose.yml:144` is the example.
 
 #### F2 · Live log streaming in the TUI
@@ -1703,12 +1714,17 @@ After every host operation, and once at start, the host POSTs one JSON event
 #### F4 · Metrics stack
 
 **Status:** Built as an ordinary stack. `stacks/metrics` runs prometheus,
-alertmanager and pve-exporter (`stacks/metrics/lxc-compose.yml:53`). With
+alertmanager, pve-exporter, loki and grafana (`stacks/metrics/lxc-compose.yml`;
+loki and grafana since fix-90, 2026-09-27, before that on the gateway). With
 `metrics_targets_dir` set on the host, every deploy writes the stack's
 Prometheus target file and destroy and forget remove it
 (`core/src/ops/deploy.rs:521-544`, `core/src/ops/destroy.rs:218-228`). With
 `grafana_dashboards_dir` set, every deploy writes the stack's generated Grafana
-dashboard into the gateway, and destroy and forget remove it
+dashboard into the container Grafana runs in, and destroy and forget remove
+it. `grafana_vmid` in `host.toml` names that container; unset it is the
+gateway (`gateway_vmid`), where Grafana ran until fix-90. After the move the
+two lines read `grafana_vmid = 113` and
+`grafana_dashboards_dir = "/opt/metrics/grafana/provisioning/dashboards-generated"`
 (`core/src/ops/deploy.rs:1994-2046`, `core/src/ops/destroy.rs:233-262`).
 `homelab dashboard <stack> <app>...` prints the same dashboard JSON locally,
 without a token, for a container not yet under management

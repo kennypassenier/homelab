@@ -12,10 +12,12 @@ fn inputs() -> FactsInputs {
         kuma_monitors_file: None,
         state_dir: "/var/lib/homelab".into(),
         gateway_vmid: 104,
+        grafana_vmid: 104,
         gateway_routes_dir: "/appdata/gateway/traefik-config/routes".into(),
         no_touch: vec![100, 101],
         prometheus_url: None,
         loki_url: None,
+        loki_vmid: None,
         logs_window: "24h".into(),
         grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
@@ -447,10 +449,87 @@ async fn coverage_asks_loki_for_every_stack_without_a_promtail_app() {
         CmdOutput::ok(r#"{"data":{"result":[{"value":[1,"42"]}]}}"#),
     );
     let mut inp = inputs();
-    inp.loki_url = Some("http://10.10.10.4:3100".into());
+    inp.loki_url = Some("http://10.10.10.13:3100".into());
     let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
     let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
     assert_eq!(media.logs_recent, Some(false), "{:?}", exec.calls());
     let kyu = facts.coverage.iter().find(|c| c.stack == "kyu").unwrap();
     assert_eq!(kyu.logs_recent, Some(true), "{:?}", exec.calls());
+}
+
+/// fix-90 (2026-09-27, gateway-shared-no-limits): Grafana runs on the
+/// metrics container now, so the question which generated dashboards it
+/// serves is asked there, not on the gateway.
+/// covers: fix-90
+#[tokio::test]
+async fn fix_90_the_dashboard_question_is_asked_where_grafana_runs() {
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "media": {"vmid": 106, "hostname": "106-app-media", "apps": ["jellyfin"], "applied_at": 1, "manifest": null}
+            }
+        })
+        .to_string(),
+    );
+    exec.respond_always(
+        "api/search?tag=generated",
+        CmdOutput::ok(r#"[{"uid":"homelab-media"}]"#),
+    );
+    let mut inp = inputs();
+    inp.prometheus_url = Some("http://10.10.10.13:9090".into());
+    inp.grafana_dashboards_dir =
+        Some("/opt/metrics/grafana/provisioning/dashboards-generated".into());
+    inp.grafana_vmid = 113;
+    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
+    let asked = exec.calls_containing("api/search?tag=generated");
+    assert!(
+        asked.iter().any(|c| c.starts_with("pct exec 113 -- ")),
+        "{asked:?}"
+    );
+    let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
+    assert_eq!(media.dashboard_provisioned, Some(true));
+}
+
+/// fix-93 (expert panel 2026-09-27, loki-unauthenticated-open): the LAN port
+/// takes pushes only, so the host can no longer read Loki from outside. With
+/// `loki_vmid` set it asks from inside Loki's container, on the loopback port
+/// the stack publishes there, and the push address stays what Alloy uses.
+/// covers: fix-93
+#[tokio::test]
+async fn fix_93_the_log_question_is_asked_inside_lokis_container() {
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "media": {"vmid": 106, "hostname": "106-app-media", "apps": ["jellyfin"], "applied_at": 1, "manifest": null}
+            }
+        })
+        .to_string(),
+    );
+    exec.respond_always(
+        "stack%3D%22media%22%2Ccontainer_name",
+        CmdOutput::ok(r#"{"data":{"result":[{"value":[1,"42"]}]}}"#),
+    );
+    let mut inp = inputs();
+    inp.loki_url = Some("http://10.10.10.13:3100".into());
+    inp.loki_vmid = Some(113);
+    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
+    let asked = exec.calls_containing("loki/api/v1/query");
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    let inside = format!(
+        "{}/loki/api/v1/query?",
+        homelab_core::ops::logshipper::LOKI_QUERY_LOOPBACK
+    );
+    assert!(
+        asked[0].starts_with("pct exec 113 -- curl ") && asked[0].contains(&inside),
+        "{asked:?}"
+    );
+    assert!(!asked[0].contains("10.10.10.13:3100"), "{asked:?}");
+    let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
+    assert_eq!(media.logs_recent, Some(true));
 }

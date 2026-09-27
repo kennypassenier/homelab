@@ -570,11 +570,11 @@ fn the_generated_page_is_valid_yaml() {
                 }],
             ),
             (
-                "gateway".into(),
+                "metrics".into(),
                 vec![Entry {
                     app: "grafana".into(),
                     host: "grafana.kp-soft.dev".into(),
-                    backend: Some("http://10.10.10.4:3000".into()),
+                    backend: Some("http://10.10.10.13:3000".into()),
                 }],
             ),
         ],

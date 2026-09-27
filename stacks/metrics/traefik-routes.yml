@@ -8,6 +8,11 @@
 # Like every *.kp-soft.dev name they sit behind Cloudflare Access, so this
 # does not put Prometheus or Alertmanager on the open internet — it puts them
 # behind the same interactive login as Grafana, which reads the same data.
+#
+# Grafana's own route came here from the gateway's file with Grafana itself
+# (fix-90, 2026-09-27). Same router name on purpose: while both files exist
+# during the move, Traefik's file provider keeps the first definition and
+# skips the second, instead of two routers racing for one hostname.
 
 http:
   routers:
@@ -19,6 +24,10 @@ http:
       rule: "Host(`alerts.kp-soft.dev`)"
       entryPoints: [web]
       service: alertmanager
+    grafana:
+      rule: "Host(`grafana.kp-soft.dev`)"
+      entryPoints: [web]
+      service: grafana
 
   services:
     prometheus:
@@ -29,3 +38,7 @@ http:
       loadBalancer:
         servers:
           - url: "http://10.10.10.13:9093"
+    grafana:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.13:3000"

@@ -6,7 +6,7 @@ fn cfg() -> String {
     config(
         "kyu",
         "109-app-kyu",
-        "http://10.10.10.4:3100/loki/api/v1/push",
+        "http://10.10.10.13:3100/loki/api/v1/push",
         &[],
     )
 }
@@ -62,11 +62,11 @@ fn it_points_at_the_loki_it_was_given_and_nowhere_else() {
     let c = config(
         "media",
         "106-app-media",
-        "http://10.10.10.4:3100/loki/api/v1/push",
+        "http://10.10.10.13:3100/loki/api/v1/push",
         &[],
     );
     assert!(
-        c.contains("http://10.10.10.4:3100/loki/api/v1/push"),
+        c.contains("http://10.10.10.13:3100/loki/api/v1/push"),
         "{}",
         c
     );
@@ -148,27 +148,27 @@ mod push_endpoint {
     #[test]
     fn the_base_address_becomes_the_push_endpoint() {
         assert_eq!(
-            push_url("http://10.10.10.4:3100"),
-            "http://10.10.10.4:3100/loki/api/v1/push",
+            push_url("http://10.10.10.13:3100"),
+            "http://10.10.10.13:3100/loki/api/v1/push",
             "host.toml holds the base address, and pushing there is a 404"
         );
         assert_eq!(
-            push_url("http://10.10.10.4:3100/"),
-            "http://10.10.10.4:3100/loki/api/v1/push"
+            push_url("http://10.10.10.13:3100/"),
+            "http://10.10.10.13:3100/loki/api/v1/push"
         );
     }
 
     #[test]
     fn an_address_that_already_names_the_path_is_left_alone() {
-        let full = "http://10.10.10.4:3100/loki/api/v1/push";
+        let full = "http://10.10.10.13:3100/loki/api/v1/push";
         assert_eq!(push_url(full), full, "never second-guess an explicit one");
     }
 
     #[test]
     fn the_generated_config_carries_the_push_path_and_not_the_base() {
-        let c = config("kyu", "109-app-kyu", "http://10.10.10.4:3100", &[]);
+        let c = config("kyu", "109-app-kyu", "http://10.10.10.13:3100", &[]);
         assert!(
-            c.contains("url = \"http://10.10.10.4:3100/loki/api/v1/push\""),
+            c.contains("url = \"http://10.10.10.13:3100/loki/api/v1/push\""),
             "{}",
             c
         );
@@ -240,7 +240,7 @@ loki_write_dropped_bytes_total{component_id="loki.write.default"} 0
 /// The dashboards filter on `job`, so the label has to be forced.
 #[test]
 fn the_journal_job_label_is_forced_and_not_left_to_alloy() {
-    let c = config("kyu", "109-app-kyu", "http://10.10.10.4:3100", &[]);
+    let c = config("kyu", "109-app-kyu", "http://10.10.10.13:3100", &[]);
     let relabel = c
         .split("loki.relabel \"journal\"")
         .nth(1)
@@ -272,6 +272,7 @@ mod syslog_receiver {
             listen: "0.0.0.0:1514".into(),
             protocol: "udp".into(),
             format: "rfc5424".into(),
+            allow_from: vec![],
         }
     }
 
@@ -282,7 +283,7 @@ mod syslog_receiver {
         let c = config(
             "gateway",
             "104-app-gateway",
-            "http://10.10.10.4:3100",
+            "http://10.10.10.13:3100",
             &[opnsense()],
         );
         assert!(c.contains("loki.source.syslog"), "{}", c);
@@ -313,12 +314,55 @@ mod syslog_receiver {
         );
     }
 
+    /// fix-93 (expert panel 2026-09-27, loki-unauthenticated-open): the
+    /// receiver took lines from any sender on the LAN, so any container could
+    /// write lines labelled as the firewall. With `allow_from` only those
+    /// addresses are kept; the rest are dropped before they reach Loki. A
+    /// `keep` among the source's own relabel rules does not drop anything
+    /// (run against Alloy 1.20.0 the same day: the refused line arrived), so
+    /// the filter is a pipeline `loki.relabel` between the source and the
+    /// writer, on a `sender` label the source copies and the filter removes.
+    /// covers: fix-93
+    #[test]
+    fn fix_93_a_receiver_keeps_only_the_senders_it_names() {
+        let mut r = opnsense();
+        r.allow_from = vec!["10.10.10.1".into()];
+        let c = config(
+            "gateway",
+            "104-app-gateway",
+            "http://10.10.10.13:3100",
+            &[r],
+        );
+        let copy = "  rule {\n    source_labels = [\"__syslog_connection_ip_address\"]\n    target_label  = \"sender\"\n  }\n";
+        assert!(c.contains(copy), "{c}");
+        assert!(
+            c.contains("  forward_to    = [loki.relabel.syslog_opnsense_sender.receiver]\n"),
+            "{c}"
+        );
+        let filter = "loki.relabel \"syslog_opnsense_sender\" {\n  forward_to = [loki.write.default.receiver]\n  rule {\n    source_labels = [\"sender\"]\n    regex         = \"10\\\\.10\\\\.10\\\\.1\"\n    action        = \"keep\"\n  }\n  rule {\n    regex  = \"sender\"\n    action = \"labeldrop\"\n  }\n}\n";
+        assert!(c.contains(filter), "{c}");
+        assert_eq!(
+            c.matches("loki.write.default.receiver").count(),
+            4,
+            "the filter, not the source, now reaches the writer:\n{c}"
+        );
+        // Unset, nothing is filtered, as before.
+        let c = config(
+            "gateway",
+            "104-app-gateway",
+            "http://10.10.10.13:3100",
+            &[opnsense()],
+        );
+        assert!(!c.contains("__syslog_connection_ip_address"), "{c}");
+        assert!(!c.contains("syslog_opnsense_sender"), "{c}");
+    }
+
     /// Ten other containers render this same file. A receiver that leaked
     /// into all of them would open UDP 1514 on every one and, worse, label
     /// whatever arrived there as OPNsense.
     #[test]
     fn a_stack_that_declares_no_receiver_opens_no_port() {
-        let c = config("kyu", "109-app-kyu", "http://10.10.10.4:3100", &[]);
+        let c = config("kyu", "109-app-kyu", "http://10.10.10.13:3100", &[]);
         assert!(!c.contains("loki.source.syslog"), "{}", c);
         assert!(!c.contains("1514"), "{}", c);
     }
@@ -332,11 +376,12 @@ mod syslog_receiver {
             listen: "0.0.0.0:1515".into(),
             protocol: "udp".into(),
             format: "rfc3164".into(),
+            allow_from: vec![],
         };
         let c = config(
             "gateway",
             "104-app-gateway",
-            "http://10.10.10.4:3100",
+            "http://10.10.10.13:3100",
             &[opnsense(), second],
         );
         assert_eq!(c.matches("loki.source.syslog \"").count(), 2, "{}", c);
@@ -445,7 +490,7 @@ fn the_readability_probe_asks_about_the_running_service_not_a_new_session() {
 /// by `container_name`; the file path is dropped.
 #[test]
 fn the_docker_pipeline_drops_the_per_container_filename_label() {
-    let c = config("media", "106-app-media", "http://10.10.10.4:3100", &[]);
+    let c = config("media", "106-app-media", "http://10.10.10.13:3100", &[]);
     let docker = &c[c.find("loki.process \"docker\"").unwrap()..];
     let docker = &docker[..docker.find("forward_to").unwrap()];
     assert!(docker.contains("stage.label_drop"), "{docker}");
@@ -458,7 +503,7 @@ fn the_docker_pipeline_drops_the_per_container_filename_label() {
 /// landed in Loki at one instant. Docker writes the real time in `time`.
 #[test]
 fn container_lines_keep_the_time_docker_wrote() {
-    let c = config("media", "106-app-media", "http://10.10.10.4:3100", &[]);
+    let c = config("media", "106-app-media", "http://10.10.10.13:3100", &[]);
     let docker = &c[c.find("loki.process \"docker\"").unwrap()..];
     let docker = &docker[..docker.find("forward_to").unwrap()];
     assert!(docker.contains("time = \"time\""), "{docker}");

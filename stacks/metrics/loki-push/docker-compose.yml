@@ -1,0 +1,29 @@
+# Loki's front on the LAN (fix-93, loki-unauthenticated-open, 2026-09-27).
+# Loki has no authentication of its own (`auth_enabled: false`), so what
+# reaches its port can read, write and delete. This front takes the LAN port
+# Alloy already pushes to and passes on POST /loki/api/v1/push and GET /ready
+# only; nginx.conf says why each line is there.
+#
+# An app of its own rather than a second service in loki/: the update policy
+# is read from the first container of an app, and this one should follow
+# nginx's patches nightly while Loki itself moves only by a deliberate edit.
+services:
+  loki-push:
+    image: nginx:alpine
+    container_name: loki-push
+    networks:
+      - metrics_net
+    ports:
+      - "3100:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    labels:
+      # Like goaccess-report: a plain web server with nightly patches and the
+      # nightly run's rollback, holding no state of its own.
+      - "com.homelab.update.policy=auto"
+
+networks:
+  metrics_net:
+    external: true
+    name: metrics_net

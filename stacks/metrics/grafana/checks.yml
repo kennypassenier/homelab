@@ -18,8 +18,8 @@ checks:
   # coverage question (never-decreases-false-positives, 2026-09-27).
   - name: "dashboards"
     command: >-
-      U=$(grep -h GRAFANA_GF_ADMIN_USER /opt/gateway/grafana/.env | cut -d= -f2);
-      P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD /opt/gateway/grafana/.env | cut -d= -f2);
+      U=$(grep -h GRAFANA_GF_ADMIN_USER /opt/metrics/grafana/.env | cut -d= -f2);
+      P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD /opt/metrics/grafana/.env | cut -d= -f2);
       printf 'user = "%s:%s"\n' "$U" "$P" |
       curl -s -m 15 -K - "http://127.0.0.1:3000/api/search?type=dash-db&limit=500" |
       grep -o '"uid"' | wc -l
@@ -28,8 +28,8 @@ checks:
 
   - name: "datasources"
     command: >-
-      U=$(grep -h GRAFANA_GF_ADMIN_USER /opt/gateway/grafana/.env | cut -d= -f2);
-      P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD /opt/gateway/grafana/.env | cut -d= -f2);
+      U=$(grep -h GRAFANA_GF_ADMIN_USER /opt/metrics/grafana/.env | cut -d= -f2);
+      P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD /opt/metrics/grafana/.env | cut -d= -f2);
       printf 'user = "%s:%s"\n' "$U" "$P" |
       curl -s -m 15 -K - http://127.0.0.1:3000/api/datasources |
       grep -o '"uid"' | wc -l
@@ -42,10 +42,11 @@ checks:
   # Was a manual check until 2026-09-03 (form G1): "open the overview
   # dashboard and see whether the graphs show data". A dashboard that exists
   # is not a dashboard that shows something — and the thing it would show is
-  # a Prometheus query, which can be asked directly.
+  # a Prometheus query, which can be asked directly. On loopback since
+  # fix-90 (2026-09-27): Grafana and Prometheus share this container now.
   - name: "de vloot levert cijfers aan Prometheus"
     command: >-
-      n=$(curl -s -m 10 -G http://10.10.10.13:9090/api/v1/query
+      n=$(curl -s -m 10 -G http://127.0.0.1:9090/api/v1/query
       --data-urlencode 'query=count(up{job="node"} == 1)'
       | grep -oE '"[0-9]+"\]' | grep -oE '[0-9]+');
       [ -n "$n" ] && [ "$n" -ge 10 ] && echo ok

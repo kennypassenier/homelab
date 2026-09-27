@@ -88,6 +88,10 @@ struct FileConfig {
     /// is deliberate: an unasked question must never become a finding.
     prometheus_url: Option<String>,
     loki_url: Option<String>,
+    /// fix-93 (2026-09-27): the container Loki runs in. Loki's LAN port
+    /// takes pushes only since then, so the coverage check asks from inside
+    /// this container. Absent = asked at `loki_url` from the host.
+    loki_vmid: Option<u16>,
     /// How far back the log-coverage question looks. A quiet service is not
     /// a broken one: `homepage` and `kp-soft` ship a few hundred lines a day
     /// and none at all in a given hour, and the first version of this check
@@ -101,6 +105,10 @@ struct FileConfig {
     no_touch: Option<Vec<u16>>,
     gateway_vmid: Option<u16>,
     gateway_routes_dir: Option<String>,
+    /// fix-90 (2026-09-27): the container Grafana runs in, where the
+    /// generated dashboards are written. Absent = the gateway, where Grafana
+    /// ran until it moved to the metrics stack.
+    grafana_vmid: Option<u16>,
     /// Route A (Kenny, form J1, 2026-09-02): devices this suite may not
     /// touch, that can nevertheless hand over their own configuration. One
     /// GET per night, straight into restic. Absent = nothing is fetched.
@@ -201,6 +209,8 @@ struct Config {
     /// is deliberate: an unasked question must never become a finding.
     prometheus_url: Option<String>,
     loki_url: Option<String>,
+    /// fix-93: where the log question is asked; see the file field.
+    loki_vmid: Option<u16>,
     /// Window for the log-coverage question; see the file field.
     logs_window: String,
     /// D5: git remote URL for the offsite intent mirror; None = off.
@@ -283,6 +293,7 @@ const KNOWN_TOP: &[&str] = &[
     "notify_fallback_auth_bearer",
     "prometheus_url",
     "loki_url",
+    "loki_vmid",
     "logs_window",
     "retention",
     "exec_enabled",
@@ -290,6 +301,7 @@ const KNOWN_TOP: &[&str] = &[
     "no_touch",
     "gateway_vmid",
     "gateway_routes_dir",
+    "grafana_vmid",
     "zfs_jobs",
     "registry_cache",
     "restic_base",
@@ -441,6 +453,7 @@ fn load_config_from(path: String) -> Config {
         notify_fallback_auth_bearer: file.notify_fallback_auth_bearer.clone(),
         prometheus_url: file.prometheus_url.clone(),
         loki_url: file.loki_url.clone(),
+        loki_vmid: file.loki_vmid,
         logs_window: file.logs_window.clone().unwrap_or_else(default_logs_window),
         mirror_remote: file.mirror_remote,
         safety: {
@@ -464,6 +477,8 @@ fn load_config_from(path: String) -> Config {
             if let Some(dir) = file.gateway_routes_dir {
                 sc.gateway_routes_dir = dir;
             }
+            // fix-90: unset, Grafana is on the gateway, wherever that is.
+            sc.grafana_vmid = file.grafana_vmid.unwrap_or(sc.gateway_vmid);
             sc
         },
         zfs_jobs: file.zfs_jobs.unwrap_or_default(),
@@ -559,6 +574,8 @@ fn render_settings_toml(
         prometheus_url: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         loki_url: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        loki_vmid: Option<u16>,
         logs_window: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         mirror_remote: Option<&'a String>,
@@ -568,6 +585,8 @@ fn render_settings_toml(
         gateway_vmid: Option<u16>,
         #[serde(skip_serializing_if = "Option::is_none")]
         gateway_routes_dir: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        grafana_vmid: Option<u16>,
         #[serde(skip_serializing_if = "<[_]>::is_empty")]
         zfs_jobs: &'a [homelab_core::ops::zfs::ZfsJob],
         // F208: these three were absent, so every settings save silently
@@ -619,6 +638,7 @@ fn render_settings_toml(
         notify_fallback_auth_bearer: config.notify_fallback_auth_bearer.as_ref(),
         prometheus_url: config.prometheus_url.as_ref(),
         loki_url: config.loki_url.as_ref(),
+        loki_vmid: config.loki_vmid,
         logs_window: (config.logs_window != default_logs_window()).then_some(&config.logs_window),
         mirror_remote: config.mirror_remote.as_ref(),
         no_touch: (config.safety.no_touch != SafetyConfig::default().no_touch)
@@ -628,6 +648,10 @@ fn render_settings_toml(
         gateway_routes_dir: (config.safety.gateway_routes_dir
             != SafetyConfig::default().gateway_routes_dir)
             .then_some(&config.safety.gateway_routes_dir),
+        // Written only when it differs from the default, which is the
+        // gateway itself (fix-90).
+        grafana_vmid: (config.safety.grafana_vmid != config.safety.gateway_vmid)
+            .then_some(config.safety.grafana_vmid),
         zfs_jobs: &config.zfs_jobs,
         registry_cache: config.registry_cache.as_ref(),
         watched_backups: &config.watched_backups,
@@ -1222,13 +1246,15 @@ port = 5003
             exec_enabled: true,
             notify_auth_bearer: Some("a-token-that-must-survive-a-save".into()),
             prometheus_url: Some("http://10.10.10.13:9090".into()),
-            loki_url: Some("http://10.10.10.4:3100".into()),
+            loki_url: Some("http://10.10.10.13:3100".into()),
+            loki_vmid: Some(113),
             logs_window: "6h".into(),
             mirror_remote: Some("git@github.com:k/m.git".into()),
             safety: SafetyConfig {
                 no_touch: vec![100, 101],
                 gateway_vmid: 112,
                 gateway_routes_dir: "/appdata/platform/traefik-config/routes".into(),
+                grafana_vmid: 113,
             },
             registry_cache: Some(homelab_core::ops::registry_cache::CacheCfg {
                 host: "10.10.10.17".into(),
@@ -1337,6 +1363,34 @@ port = 5003
             parsed.gateway_routes_dir.as_deref(),
             Some("/appdata/platform/traefik-config/routes")
         );
+        // fix-90: where Grafana runs, once it left the gateway.
+        assert_eq!(parsed.grafana_vmid, Some(113));
+        // fix-93: where the log question is asked, now that the LAN port
+        // takes pushes only.
+        assert_eq!(parsed.loki_vmid, Some(113));
+    }
+
+    /// fix-90 (2026-09-27, gateway-shared-no-limits): Grafana moved to the
+    /// metrics container. `grafana_vmid` says where; unset, it is the
+    /// gateway, which is where Grafana ran until then.
+    /// covers: fix-90
+    #[test]
+    fn fix_90_grafana_vmid_is_read_and_defaults_to_the_gateway() {
+        std::fs::write(
+            "/tmp/homelab-fix90-test.toml",
+            "token = \"0123456789abcdef0123\"\ngrafana_vmid = 113\n",
+        )
+        .unwrap();
+        let cfg = load_config_from("/tmp/homelab-fix90-test.toml".into());
+        assert_eq!(cfg.safety.grafana_vmid, 113);
+        std::fs::write(
+            "/tmp/homelab-fix90-test.toml",
+            "token = \"0123456789abcdef0123\"\ngateway_vmid = 112\n",
+        )
+        .unwrap();
+        let cfg = load_config_from("/tmp/homelab-fix90-test.toml".into());
+        assert_eq!(cfg.safety.grafana_vmid, 112);
+        let _ = std::fs::remove_file("/tmp/homelab-fix90-test.toml");
     }
 
     /// H8: the probe layer feeds real data — stale backups and a dead
@@ -3970,10 +4024,12 @@ async fn gather_live_facts(
         kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         state_dir: state.config.state_dir.clone(),
         gateway_vmid: state.config.safety.gateway_vmid,
+        grafana_vmid: state.config.safety.grafana_vmid,
         gateway_routes_dir: state.config.safety.gateway_routes_dir.clone(),
         no_touch: state.config.safety.no_touch.to_vec(),
         prometheus_url: state.config.prometheus_url.clone(),
         loki_url: state.config.loki_url.clone(),
+        loki_vmid: state.config.loki_vmid,
         logs_window: sane_window(&state.config.logs_window),
         grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         now_unix: std::time::SystemTime::now()

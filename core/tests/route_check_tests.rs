@@ -294,6 +294,8 @@ async fn the_gatherer_lists_every_file_in_the_routes_directory() {
         watched_backups: vec![],
         kuma_monitors_file: None,
         state_dir: "/var/lib/homelab".into(),
+        grafana_vmid: 104,
+        loki_vmid: None,
         gateway_vmid: 104,
         gateway_routes_dir: "/appdata/gateway/traefik-config/routes".into(),
         no_touch: vec![100, 101],

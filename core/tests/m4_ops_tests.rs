@@ -4289,3 +4289,68 @@ async fn gap_33_requested_guards_check_the_hostname_and_skip_docker_on_a_native_
     assert!(exec.calls_containing("systemctl restart docker").is_empty());
     assert!(exec.calls_containing("daemon.json").is_empty());
 }
+
+/// fix-90 (2026-09-27, gateway-shared-no-limits): Grafana left the gateway
+/// for the metrics container. The generated dashboard is written and removed
+/// where Grafana runs, and a deploy of either container keeps the directory
+/// it holds for other stacks — routes on the gateway, dashboards on Grafana's.
+/// covers: fix-90
+#[tokio::test]
+async fn fix_90_the_dashboard_is_written_where_grafana_runs() {
+    use homelab_core::ops::deploy::{deploy, generated_dirs};
+    let dir = "/opt/metrics/grafana/provisioning/dashboards-generated";
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut c = ctx(&exec, &sink, &j);
+    c.grafana_dashboards_dir = Some(dir.into());
+    c.safety.grafana_vmid = 113;
+    let report = deploy(&c, &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok, "{:?}", report.error);
+    let pushed = exec.calls_containing(&format!("{dir}/homelab-test.json"));
+    assert!(
+        pushed.iter().any(|c| c.starts_with("pct push 113 ")),
+        "pushed into Grafana's container: {pushed:?}"
+    );
+    assert!(
+        !pushed.iter().any(|c| c.contains(" 104 ")),
+        "not into the gateway: {pushed:?}"
+    );
+
+    let exec = MockExecutor::new();
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
+    exec.respond_always("pct status", CmdOutput::ok("status: stopped"));
+    let mut c = ctx(&exec, &sink, &j);
+    c.grafana_dashboards_dir = Some(dir.into());
+    c.safety.grafana_vmid = 113;
+    let report = destroy(&c, &manifest(108, "test"), "test", true).await;
+    assert!(report.ok, "{:?}", report.error);
+    let removed = exec.calls_containing("homelab-test.json");
+    assert!(
+        removed
+            .iter()
+            .any(|c| c.starts_with("pct exec 113 -- rm -f")),
+        "{removed:?}"
+    );
+
+    let safety = homelab_core::safety::SafetyConfig {
+        grafana_vmid: 113,
+        ..Default::default()
+    };
+    assert_eq!(
+        generated_dirs(&safety, Some(dir), 113),
+        vec![dir.to_string()]
+    );
+    assert_eq!(
+        generated_dirs(&safety, Some(dir), 104),
+        vec![safety.gateway_routes_dir.clone()]
+    );
+    // Unset, Grafana is where it always was: on the gateway.
+    let old = homelab_core::safety::SafetyConfig::default();
+    assert_eq!(old.grafana_vmid, old.gateway_vmid);
+    assert_eq!(
+        generated_dirs(&old, Some(dir), 104),
+        vec![old.gateway_routes_dir.clone(), dir.to_string()]
+    );
+}

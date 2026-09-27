@@ -41,10 +41,18 @@ pub struct FactsInputs {
     pub kuma_monitors_file: Option<String>,
     pub state_dir: String,
     pub gateway_vmid: u16,
+    /// Where Grafana runs, and so where the dashboard question is asked
+    /// (fix-90: the metrics container since 2026-09-27, the gateway before).
+    pub grafana_vmid: u16,
     pub gateway_routes_dir: String,
     pub no_touch: Vec<u16>,
     pub prometheus_url: Option<String>,
     pub loki_url: Option<String>,
+    /// fix-93: the container Loki runs in. Set, the log question is asked
+    /// from inside it on [`crate::ops::logshipper::LOKI_QUERY_LOOPBACK`],
+    /// because the LAN port takes pushes only; unset, it is asked at
+    /// `loki_url` from the host, as before.
+    pub loki_vmid: Option<u16>,
     pub logs_window: String,
     pub grafana_dashboards_dir: Option<String>,
     /// Now, in seconds since the epoch. Core never reads a clock.
@@ -180,11 +188,11 @@ pub fn parse_growth(vmid: u16, hostname: &str, stdout: &str) -> Option<GrowthFac
 /// caused the fault this question exists to catch (F149).
 ///
 /// `None` means the question could not be asked at all — never an empty
-/// answer, so a gateway that is down does not turn every stack into a
+/// answer, so a Grafana that is down does not turn every stack into a
 /// finding.
 pub async fn grafana_generated_uids(
     exec: &dyn Executor,
-    gateway_vmid: u16,
+    grafana_vmid: u16,
     dashboards_dir: &str,
 ) -> Option<Vec<String>> {
     let app_dir = std::path::Path::new(dashboards_dir).parent()?.to_str()?;
@@ -200,7 +208,7 @@ pub async fn grafana_generated_uids(
     let out = exec
         .run(&Cmd::new(
             "pct",
-            &["exec", &gateway_vmid.to_string(), "--", "sh", "-c", &script],
+            &["exec", &grafana_vmid.to_string(), "--", "sh", "-c", &script],
             60,
         ))
         .await
@@ -588,7 +596,7 @@ pub async fn gather_live_facts(
     let loki = inp.loki_url.clone();
     let window = &inp.logs_window;
     let provisioned: Option<Vec<String>> = match inp.grafana_dashboards_dir.as_deref() {
-        Some(dir) => grafana_generated_uids(exec, inp.gateway_vmid, dir).await,
+        Some(dir) => grafana_generated_uids(exec, inp.grafana_vmid, dir).await,
         None => None,
     };
     if prom.is_some() || loki.is_some() {
@@ -628,6 +636,13 @@ pub async fn gather_live_facts(
                     "unit"
                 };
                 if let Some(base) = loki.as_deref() {
+                    // fix-93: the LAN port takes pushes only, so with Loki's
+                    // container named the question goes in there, to the
+                    // loopback port that carries the full API.
+                    let base = match inp.loki_vmid {
+                        Some(_) => crate::ops::logshipper::LOKI_QUERY_LOOPBACK,
+                        None => base,
+                    };
                     // A label matcher is not decoration (F79): lines kept
                     // arriving for months without the label the dashboards
                     // query by. Counting LABELLED lines is the question that
@@ -639,8 +654,25 @@ pub async fn gather_live_facts(
                         label,
                         window
                     );
+                    let cmd = match inp.loki_vmid {
+                        Some(vmid) => Cmd::new(
+                            "pct",
+                            &[
+                                "exec",
+                                &vmid.to_string(),
+                                "--",
+                                "curl",
+                                "-s",
+                                "-m",
+                                "10",
+                                &q,
+                            ],
+                            30,
+                        ),
+                        None => Cmd::new("curl", &["-s", "-m", "10", &q], 20),
+                    };
                     c.logs_recent = Some(
-                        exec.run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
+                        exec.run(&cmd)
                             .await
                             .map(|o| o.stdout.contains("\"value\""))
                             .unwrap_or(false),

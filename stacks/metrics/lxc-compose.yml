@@ -1,3 +1,9 @@
+# Everything that watches the house: Prometheus and Alertmanager, and since
+# 2026-09-27 Loki and Grafana too (fix-90; Kenny's triage answer to
+# gateway-shared-no-limits: "Loki en Grafana naar CT 113 verhuizen"). On the
+# gateway a Loki query storm competed with Traefik in one cgroup, and when
+# the front door went down the logs and dashboards that would explain it went
+# down with it. The target layout had planned this move since D68.
 stack_name: metrics
 vmid: 113
 hostname: 113-app-metrics
@@ -8,7 +14,13 @@ network:
   vlan: 10
 resources:
   cores: 2
-  memory_mb: 1024
+  # fix-90: Loki and Grafana arrive from the gateway. Measured 2026-09-27,
+  # 14-day peaks from cadvisor: this container's programs 415 MB, Loki 342
+  # MB, Grafana 527 MB (typical: 397, 199 and 224). 2560 MB keeps about half
+  # free at those peaks; at 1024 the two newcomers alone would fill it, and a
+  # container at 512 MB thrashed during a deploy the same day. Raised with
+  # `homelab resize`, which a deploy does not do by itself. Was 1024 MB.
+  memory_mb: 2560
   # W1 (Kenny, 2026-09-02): none. Measured that night, the container's own
 
   # programs used between 4% and 37% of this limit — nothing here has ever
@@ -52,10 +64,33 @@ storage:
     mount_point: /appdata/metrics/alertmanager-config
     host_owner_uid: 165534
     app: alertmanager
+  # fix-90: Loki's log database, moved from /appdata/gateway/loki-config.
+  # 110001, not 100000: Loki's image runs as uid 10001, and 10001 inside an
+  # unprivileged container is 110001 on the host. Declared 100000 first on
+  # the gateway — container root — which passes validation and hands Loki's
+  # database to a user it is not; it crash-looped with `permission denied`.
+  - host_path: /appdata/metrics/loki-config
+    mount_point: /appdata/metrics/loki-config
+    host_owner_uid: 110001
+    # Not backed up (Kenny, triage 2026-09-27, fix-81): log chunks are not
+    # restored, and copying them stopped Loki every night, losing the lines
+    # sent while it was down. Its configuration is in the repository.
+    no_backup: "Loki log chunks and index; not restored, configuration is in the repository"
+    app: loki
+  # fix-90: Grafana's database (users, preferences, anything made in the
+  # browser), moved from /appdata/gateway/grafana-config. Backed up: the
+  # repository is named after the app (D25), so `grafana-config` keeps its
+  # whole history across the move. 101000 is the image's uid 1000 on the host.
+  - host_path: /appdata/metrics/grafana-config
+    mount_point: /appdata/metrics/grafana-config
+    host_owner_uid: 101000
+    app: grafana
 # alertmanager was deployed by hand on 2026-08-30 and was missing here, so a
-# deploy of this stack would not have started it.
-apps: [prometheus, alertmanager, pve-exporter]
-latch_secrets: [pve-exporter]
+# deploy of this stack would not have started it. Loki before Grafana: the
+# datasource Grafana provisions at start should already answer. loki-push is
+# Loki's front on the LAN port (fix-93): pushes and /ready, nothing else.
+apps: [prometheus, alertmanager, pve-exporter, loki, loki-push, grafana]
+latch_secrets: [pve-exporter, grafana]
 
 # Pushes traefik-routes.yml to the gateway's watched routes directory.
 gateway_route:

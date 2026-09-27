@@ -8,7 +8,9 @@ datasources:
     uid: prometheus
     type: prometheus
     access: proxy
-    url: http://10.10.10.13:9090
+    # By container name: Grafana shares metrics_net with Prometheus since
+    # fix-90 (2026-09-27), so the address no longer leaves the container.
+    url: http://prometheus:9090
     isDefault: false
     editable: false
     jsonData:

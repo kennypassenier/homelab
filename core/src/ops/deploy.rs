@@ -141,21 +141,25 @@ pub async fn orphan_files(
 }
 
 /// Directories inside container `vmid` that the orchestrator fills on behalf
-/// of OTHER stacks: on the gateway, the generated Grafana dashboards (T2)
-/// and the route fragments (H1). Their files are in no stack's file list, so
-/// without this every gateway deploy would take them for its own orphans and
-/// remove every other stack's dashboard.
+/// of OTHER stacks: on the gateway the route fragments (H1), and in Grafana's
+/// container the generated dashboards (T2). Their files are in no stack's
+/// file list, so without this a deploy of either container would take them
+/// for its own orphans and remove every other stack's route or dashboard.
+/// The two were one container until Grafana moved to the metrics stack
+/// (fix-90, 2026-09-27).
 pub fn generated_dirs(
     safety: &crate::safety::SafetyConfig,
     grafana_dashboards_dir: Option<&str>,
     vmid: u16,
 ) -> Vec<String> {
-    if vmid != safety.gateway_vmid {
-        return Vec::new();
+    let mut v = Vec::new();
+    if vmid == safety.gateway_vmid {
+        v.push(safety.gateway_routes_dir.clone());
     }
-    let mut v = vec![safety.gateway_routes_dir.clone()];
-    if let Some(d) = grafana_dashboards_dir {
-        v.push(d.to_string());
+    if vmid == safety.grafana_vmid {
+        if let Some(d) = grafana_dashboards_dir {
+            v.push(d.to_string());
+        }
     }
     v
 }
@@ -2197,7 +2201,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     }
 
     // ── T2: the stack brings its own dashboard. Written into Grafana's
-    // provisioning directory on the gateway, where the watcher picks it up
+    // provisioning directory in Grafana's container (the gateway until
+    // fix-90 moved Grafana to the metrics stack), where the watcher picks it up
     // within ten seconds. Provisioned dashboards are files, not database
     // rows: they survive a rebuild of that container and they diff in review.
     // Best-effort, like the discovery file — Grafana being down is not a
@@ -2213,7 +2218,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 if native { &m.natives } else { &m.apps },
                 native,
             );
-            match push_content(exec, ctx.safety.gateway_vmid, &dest, &body, "644").await {
+            match push_content(exec, ctx.safety.grafana_vmid, &dest, &body, "644").await {
                 Ok(changed) => {
                     if changed {
                         log_info(format!("[t2] {} (provisioning watcher reloads)", dest));
@@ -2231,7 +2236,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                             if old != dest {
                                 let _ = pct_sh(
                                     exec,
-                                    ctx.safety.gateway_vmid,
+                                    ctx.safety.grafana_vmid,
                                     &format!("rm -f {}", crate::ops::util::shq(&old)),
                                     30,
                                 )

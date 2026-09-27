@@ -1,0 +1,43 @@
+# Loki receives from every container's Alloy. Its data under
+# loki-config/data is a log DATABASE, not configuration — Kenny chose to
+# carry it across the gateway's rebuild (form G2), because a rebuild is
+# exactly the event you later want to be able to look back at. On the metrics
+# stack since 2026-09-27 (fix-90, gateway-shared-no-limits).
+services:
+  loki:
+    # 3.7.8, the newest 3.7 release (2026-09-17), pinned by digest: moving
+    # it is a deliberate edit of this line (fix-93, Kenny's deep-dive answer
+    # to alloy-not-updated-loki-stale-pin, 2026-09-27). It ran 3.0.0 of
+    # 2024-04-08, pinned to match promtail, which the fleet left on
+    # 2026-09-02.
+    image: grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193
+    container_name: loki
+    networks:
+      - metrics_net
+    # Loopback only (fix-93; Kenny's answer to loki-unauthenticated-open,
+    # 2026-09-27: "alleen afleveren, lezen intern, wissen uit"). Measured
+    # that day, CT 116, the container strangers can reach, read 19,681 lines
+    # of the house's logs in an hour through the LAN port. The LAN now meets
+    # loki-push, which lets through pushes and /ready only; Grafana reads by
+    # name on metrics_net, and the service checks and the host's coverage
+    # question read here, from inside this container.
+    ports:
+      - "127.0.0.1:3101:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - /appdata/metrics/loki-config/data:/loki
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+    restart: unless-stopped
+    labels:
+      # Y1/Z1: UPDATE_POLICY.md puts this in the MANUAL class - a silent
+      # failure here is expensive. The label read auto until 2026-09-02
+      # (F192), so the ratified decision and the fleet disagreed for as long
+      # as both existed.
+      - "com.homelab.update.policy=manual"
+
+# The stack's one network, created by the deploy: Grafana reaches Loki on it
+# by container name.
+networks:
+  metrics_net:
+    external: true
+    name: metrics_net

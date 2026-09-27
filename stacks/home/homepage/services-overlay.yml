@@ -195,7 +195,7 @@ group_order: [Media, Papierwerk, Huis, Eigen, Infrastructuur]
     description: Grafieken
     widget:
       type: grafana
-      url: http://10.10.10.4:3000
+      url: http://10.10.10.13:3000
       username: "{{HOMEPAGE_VAR_GF_ADMIN_USER}}"
       password: "{{HOMEPAGE_VAR_GF_ADMIN_PASSWORD}}"
 

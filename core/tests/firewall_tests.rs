@@ -726,6 +726,8 @@ async fn the_facts_read_every_recorded_stacks_firewall_file() {
         watched_backups: vec![],
         kuma_monitors_file: None,
         state_dir: "/var/lib/homelab".into(),
+        grafana_vmid: 104,
+        loki_vmid: None,
         gateway_vmid: 104,
         gateway_routes_dir: "/appdata/gateway/traefik-config/routes".into(),
         no_touch: vec![100, 101],

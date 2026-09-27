@@ -1,6 +1,6 @@
 //! Print the Alloy configuration the deploy would render for one stack.
 //!
-//! `cargo run -q -p homelab-core --example render_alloy -- stacks/gateway/lxc-compose.yml http://10.10.10.4:3100`
+//! `cargo run -q -p homelab-core --example render_alloy -- stacks/gateway/lxc-compose.yml http://10.10.10.13:3100`
 //!
 //! Exists for gap-11: the only way to see what a deploy will write to
 //! `/etc/alloy/config.alloy` was to deploy, and the gateway is the one stack

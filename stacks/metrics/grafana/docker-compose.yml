@@ -1,6 +1,7 @@
-# Grafana. Still on the gateway; the target layout moves it to the metrics
-# stack after this rebuild (form H2), because a database migration inside the
-# one window where nothing is reachable is the wrong trade.
+# Grafana. On the metrics stack since 2026-09-27 (fix-90, Kenny's triage
+# answer to gateway-shared-no-limits), beside the Prometheus and Loki it
+# reads; it ran on the gateway until then, and moved only after that
+# container's rebuild (form H2).
 services:
   grafana:
     # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
@@ -8,7 +9,7 @@ services:
     image: grafana/grafana:13.2.1@sha256:f772d434e8fab0049deb2b1b30abd43342bcfca1537614aa8d36080232cf4283
     container_name: grafana
     networks:
-      - gateway_net
+      - metrics_net
     user: "1000:1000"
     ports:
       - "3000:3000"
@@ -21,7 +22,7 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/homelab-overview.json
     volumes:
-      - /appdata/gateway/grafana-config:/var/lib/grafana
+      - /appdata/metrics/grafana-config:/var/lib/grafana
       # One mount, not two. The dashboards the ORCHESTRATOR generates live in
       # `provisioning/dashboards-generated/` — a sibling of the committed
       # `dashboards/`, so the repository owns one directory and the deploy
@@ -40,18 +41,15 @@ services:
       # answers 0 and the API is the only honest count.
       - "com.homelab.backup.pause=true"
       # Y1/Z1: UPDATE_POLICY.md puts this in the MANUAL class - a silent
-      # failure here is expensive, and the gateway is the one container
-      # whose breakage takes every other name down with it. The label
-      # read auto until 2026-09-02 (F192), so the ratified decision and
-      # the fleet disagreed for as long as both existed.
+      # failure here is expensive. The label read auto until 2026-09-02
+      # (F192), so the ratified decision and the fleet disagreed for as long
+      # as both existed.
       - "com.homelab.update.policy=manual"
       - "com.homelab.update.upstream=github.com/grafana/grafana"
 
-# One network for the whole stack, created by the deploy. Without it every app
-# is its own compose project on its own default network, and Traefik cannot
-# reach CrowdSec — at which point the bouncer plugin fails closed and answers
-# 403 to everything. That is what happened on 2026-09-01.
+# The stack's one network, created by the deploy: Grafana reaches Prometheus
+# and Loki on it by container name.
 networks:
-  gateway_net:
+  metrics_net:
     external: true
-    name: gateway_net
+    name: metrics_net

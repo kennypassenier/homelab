@@ -344,15 +344,13 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 ### gateway (vmid 104)
 
 - Container: hostname `104-app-gateway`, ip `10.10.10.4/24` on `vmbr0` VLAN 10, 4 core(s), 5120 MiB RAM, 0 MiB swap, 30 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 5.
-- Apps (docker compose, started in this order): traefik, cloudflared, crowdsec, grafana, loki, goaccess. Files in the container under `/opt/gateway/<app>/`.
+- Apps (docker compose, started in this order): traefik, cloudflared, crowdsec, goaccess. Files in the container under `/opt/gateway/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/gateway`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
   - `rclone:gdrive:homelab-backups/traefik-config`: `/appdata/gateway/traefik-config`
   - `rclone:gdrive:homelab-backups/crowdsec-config`: `/appdata/gateway/crowdsec-config`
-  - `rclone:gdrive:homelab-backups/grafana-config`: `/appdata/gateway/grafana-config`
   - `rclone:gdrive:homelab-backups/goaccess-config`: `/appdata/gateway/goaccess-config`
 - Holds nothing by declaration (`no_data`), so no repository: `/appdata/gateway/cloudflared-config`.
-- NOT backed up, on purpose: `/appdata/gateway/loki-config`. The stack file's reason: Loki log chunks and index; not restored, configuration is in the repository.
 - Host directory mounted in, never created or backed up by this suite: `/HDD2TB/logs/traefik` at `/mnt/traefik-logs` (Traefik access + rotated logs. Regenerable, deliberately outside the backup).
 
 ### home (vmid 115)
@@ -414,12 +412,14 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### metrics (vmid 113)
 
-- Container: hostname `113-app-metrics`, ip `10.10.10.13/24` on `vmbr0` VLAN 10, 2 core(s), 1024 MiB RAM, 0 MiB swap, 16 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 60.
-- Apps (docker compose, started in this order): prometheus, alertmanager, pve-exporter. Files in the container under `/opt/metrics/<app>/`.
+- Container: hostname `113-app-metrics`, ip `10.10.10.13/24` on `vmbr0` VLAN 10, 2 core(s), 2560 MiB RAM, 0 MiB swap, 16 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 60.
+- Apps (docker compose, started in this order): prometheus, alertmanager, pve-exporter, loki, loki-push, grafana. Files in the container under `/opt/metrics/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/metrics`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
   - `rclone:gdrive:homelab-backups/alertmanager-config`: `/appdata/metrics/alertmanager-config`
+  - `rclone:gdrive:homelab-backups/grafana-config`: `/appdata/metrics/grafana-config`
 - NOT backed up, on purpose: `/appdata/metrics/prometheus-config`. The stack file's reason: Prometheus TSDB and generated scrape targets; regenerable, configuration is in the repository.
+- NOT backed up, on purpose: `/appdata/metrics/loki-config`. The stack file's reason: Loki log chunks and index; not restored, configuration is in the repository.
 
 ### paperwork (vmid 114)
 

@@ -59,11 +59,13 @@ OK_TRAEFIK = ["404"]  # the correct answer for a host header it does not route
 APPLICATION_MONITORS = [
     # (name, url, accepted status codes)
     ("gateway · traefik", "http://10.10.10.4:80/", OK_TRAEFIK),
-    ("gateway · grafana", "http://10.10.10.4:3000/api/health", OK),
-    ("gateway · loki", "http://10.10.10.4:3100/ready", OK),
     ("uptime · web", "http://10.10.10.7:3001/", OK_REDIRECT),
     ("metrics · prometheus", "http://10.10.10.13:9090/-/healthy", OK),
     ("metrics · alertmanager", "http://10.10.10.13:9093/-/healthy", OK),
+    # Moved from the gateway with the services (fix-90, 2026-09-27); the
+    # names follow the stack, so Kuma starts these two with a fresh history.
+    ("metrics · grafana", "http://10.10.10.13:3000/api/health", OK),
+    ("metrics · loki", "http://10.10.10.13:3100/ready", OK),
     ("media · jellyfin", "http://10.10.10.6:8096/health", OK),
     ("media · seerr", "http://10.10.10.6:5055/api/v1/status", OK),
     ("media · sonarr", "http://10.10.10.6:8989/ping", OK),

@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::WebPkiSupportedAlgorithms;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use sha2::{Digest, Sha256};
@@ -27,6 +28,7 @@ pub fn fingerprint(cert: &CertificateDer) -> String {
 pub struct PinnedVerifier {
     expected: Option<String>,
     observed: std::sync::Mutex<Option<String>>,
+    algorithms: WebPkiSupportedAlgorithms,
 }
 
 impl PinnedVerifier {
@@ -34,6 +36,8 @@ impl PinnedVerifier {
         Arc::new(Self {
             expected,
             observed: std::sync::Mutex::new(None),
+            algorithms: rustls::crypto::aws_lc_rs::default_provider()
+                .signature_verification_algorithms,
         })
     }
     pub fn observed(&self) -> Option<String> {
@@ -62,35 +66,29 @@ impl ServerCertVerifier for PinnedVerifier {
         }
     }
 
-    // Self-signed certs still carry valid TLS signatures; accept the standard
-    // schemes (the pin, not a CA chain, is what establishes trust here).
+    // fix-34: the handshake signature is what proves the server holds the
+    // private key of the certificate it presented. The pin only says WHICH
+    // certificate is trusted; a certificate is public, so without this check
+    // an impostor replaying the real host's certificate passed the pin and
+    // received the bearer token. Until 2026-09-27 both methods returned
+    // "valid" without looking.
     fn verify_tls12_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
     }
     fn verify_tls13_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
     }
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        vec![
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA384,
-            SignatureScheme::RSA_PKCS1_SHA512,
-            SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::ECDSA_NISTP384_SHA384,
-            SignatureScheme::RSA_PSS_SHA256,
-            SignatureScheme::RSA_PSS_SHA384,
-            SignatureScheme::RSA_PSS_SHA512,
-            SignatureScheme::ED25519,
-        ]
+        self.algorithms.supported_schemes()
     }
 }

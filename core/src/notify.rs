@@ -183,3 +183,50 @@ pub fn route<'a>(primary: Option<&'a str>, fallback: Option<&'a str>) -> Vec<&'a
     }
     v
 }
+
+/// Where route `route`'s bearer header is written for curl to read (fix-35).
+pub fn header_file_path(state_dir: &str, route: usize) -> String {
+    format!("{}/secrets/notify-route-{}.header", state_dir, route)
+}
+
+/// The header file's content: one header line, read by `curl -H @file`.
+pub fn header_file_content(token: &str) -> String {
+    format!("authorization: Bearer {}\n", token)
+}
+
+/// The curl arguments for one notification POST.
+///
+/// fix-35: the bearer token used to travel as `-H "authorization: Bearer
+/// <token>"`, which put it in curl's argv, readable by every process on the
+/// host through `/proc/<pid>/cmdline` for as long as curl ran. It now goes
+/// through a 0600 header file that curl reads with `-H @<path>`; argv only
+/// ever names the path.
+pub fn curl_args(payload: &str, url: &str, header_file: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "-m",
+        "5",
+        "-s",
+        "-o",
+        "/dev/null",
+        // The status is the whole point: -o /dev/null throws the body away,
+        // and without this the exit code alone cannot tell a 200 from a 404
+        // on a topic that no longer exists.
+        "-w",
+        "%{http_code}",
+        "-X",
+        "POST",
+        "-H",
+        "Content-Type: application/json",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    if let Some(path) = header_file {
+        args.push("-H".into());
+        args.push(format!("@{}", path));
+    }
+    args.push("-d".into());
+    args.push(payload.into());
+    args.push(url.into());
+    args
+}

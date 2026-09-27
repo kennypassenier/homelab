@@ -368,7 +368,12 @@ fn unknown_keys(raw: &toml::Table) -> Vec<String> {
 }
 
 fn load_config() -> Config {
-    let path = std::env::var("HOMELAB_CONFIG").unwrap_or_else(|_| "/etc/homelab/host.toml".into());
+    load_config_from(
+        std::env::var("HOMELAB_CONFIG").unwrap_or_else(|_| "/etc/homelab/host.toml".into()),
+    )
+}
+
+fn load_config_from(path: String) -> Config {
     // A missing file is legal — every field has a default. A file that
     // exists but does not parse is not: the old code answered that with
     // `FileConfig::default()`, so a single typo turned every configured
@@ -851,6 +856,23 @@ mod tests {
         }
         assert!(cfg.safety.no_touch.contains(&200));
         assert!(cfg.safety.no_touch.contains(&201));
+    }
+
+    /// fix-36: a vmid host.toml adds to the no-touch list is refused by
+    /// remote exec too, not only by the operations.
+    #[test]
+    fn fix_36_remote_exec_refuses_a_vmid_the_config_added_to_the_no_touch_list() {
+        let raw = "token = \"0123456789abcdef0123\"\nexec_enabled = true\nno_touch = [200]\n";
+        // Loaded by path, not through HOMELAB_CONFIG: tests run in parallel
+        // and another test sets that variable.
+        std::fs::write("/tmp/homelab-fix36-test.toml", raw).unwrap();
+        let cfg = load_config_from("/tmp/homelab-fix36-test.toml".into());
+        assert!(
+            exec_allowed(&cfg, 200).is_err(),
+            "vmid 200 is on the configured no-touch list; exec must refuse it"
+        );
+        assert!(exec_allowed(&cfg, 101).is_err());
+        assert!(exec_allowed(&cfg, 150).is_ok());
     }
 
     /// F186: the exact file that was live on 2026-09-02. Two OPNsense keys
@@ -2825,6 +2847,13 @@ async fn notify(
     notify_raw(state, exec, payload).await;
 }
 
+/// fix-36: remote exec checks the no-touch list the daemon actually runs
+/// with. It used `SafetyConfig::default()`, so a vmid host.toml added to the
+/// list (F8 lets config widen it) was still reachable through `homelab exec`.
+fn exec_allowed(config: &Config, vmid: u16) -> Result<(), homelab_core::error::CoreError> {
+    homelab_core::safety::exec_guard(config.exec_enabled, &config.safety, vmid)
+}
+
 /// Lower-level webhook POST used by notify() and the boot notification.
 ///
 /// G16: this used to be `let _ = exec.run(...)` — a fire-and-forget curl with
@@ -2850,30 +2879,26 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
         } else {
             state.config.notify_fallback_auth_bearer.clone()
         };
-        let auth = bearer.map(|t| format!("authorization: Bearer {}", t));
-        let mut args: Vec<&str> = vec![
-            "-m",
-            "5",
-            "-s",
-            "-o",
-            "/dev/null",
-            // The status is the whole point: -o /dev/null throws the body
-            // away, and without this the exit code alone cannot tell a 200
-            // from a 404 on a topic that no longer exists.
-            "-w",
-            "%{http_code}",
-            "-X",
-            "POST",
-            "-H",
-            "Content-Type: application/json",
-        ];
-        if let Some(a) = auth.as_deref() {
-            args.push("-H");
-            args.push(a);
-        }
-        args.push("-d");
-        args.push(&payload);
-        args.push(url);
+        // fix-35: the token goes to curl through a 0600 header file, never
+        // through argv (see homelab_core::notify::curl_args).
+        let header_file = match bearer {
+            Some(t) => {
+                let path = homelab_core::notify::header_file_path(&state.config.state_dir, i);
+                match exec
+                    .write_file(&path, &homelab_core::notify::header_file_content(&t), 0o600)
+                    .await
+                {
+                    Ok(()) => Some(path),
+                    Err(e) => {
+                        last = format!("cannot write the header file {}: {}", path, e);
+                        continue;
+                    }
+                }
+            }
+            None => None,
+        };
+        let owned = homelab_core::notify::curl_args(&payload, url, header_file.as_deref());
+        let args: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
         let out = exec.run(&Cmd::new("curl", &args, 10)).await;
         let (ran, code) = match &out {
             Ok(o) => (true, o.stdout.clone()),
@@ -3918,11 +3943,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             .await
         }
         Rpc::ExecIn { vmid, command } => {
-            if let Err(e) = homelab_core::safety::exec_guard(
-                state.config.exec_enabled,
-                &SafetyConfig::default(),
-                vmid,
-            ) {
+            if let Err(e) = exec_allowed(&state.config, vmid) {
                 return RpcResponse {
                     id: req.id,
                     ok: false,

@@ -84,6 +84,124 @@ pub struct LiveFacts {
     /// fix-26: storage directories whose owner on disk is not the declared
     /// `host_owner_uid`. Only mismatches are kept.
     pub owners: Vec<OwnerFact>,
+    /// fix-142: what the client's stack files say, one digest per stack.
+    /// Empty from a client older than this field, and in the nightly round,
+    /// which has no repository; the repository comparison is then skipped.
+    pub digests: Vec<StackDigest>,
+    /// fix-142: the host's intent-history copy of each stack the client sent,
+    /// stack → container-bound path → sha256. A stack with no copy is absent.
+    pub intent_files:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+}
+
+/// fix-142: one stack directory as the client reads it, for comparison with
+/// what the host last applied.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StackDigest {
+    /// The stack's name (its directory name).
+    pub stack: String,
+    /// The parsed `lxc-compose.yml`; None for a stack with only a
+    /// `service.yml`. Sent whole rather than hashed so the host compares it
+    /// through its own type, and a client one release older does not make
+    /// every stack look changed.
+    #[serde(default)]
+    pub manifest: Option<crate::manifest::StackManifest>,
+    /// Every file a deploy would send into the container → sha256 hex.
+    #[serde(default)]
+    pub files: std::collections::BTreeMap<String, String>,
+}
+
+/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): the
+/// repository against what the host applied.
+///
+/// The check used to receive only `(dir, vmid)` pairs; whether the files
+/// matched what was deployed was computed only by the TUI's badge and inside
+/// `apply`, which then acted on it. An edited but undeployed stack, or a
+/// declared one never deployed, stayed invisible until something deployed
+/// it. Now each difference is a Drift finding naming what differs:
+/// the manifest (compared through the host's own type), and every
+/// container-bound file changed, new or gone against the host's intent copy.
+///
+/// Only what was asked: no digests (an older client, or the nightly round,
+/// which has no repository) means no comparison; a stack whose intent copy
+/// could not be read is compared on its manifest alone.
+pub fn evaluate_repo_drift(state: &HostState, live: &LiveFacts) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for d in &live.digests {
+        let Some(st) = state.stacks.get(&d.stack) else {
+            // Never deployed. A vmid that is a live container nobody manages
+            // is already reported by the stack-file check above.
+            let vmid = d.manifest.as_ref().map(|m| m.vmid);
+            let taken = vmid.is_some_and(|v| live.containers.iter().any(|(c, _)| *c == v));
+            if d.manifest.is_some() && !taken {
+                out.push(Finding {
+                    severity: Severity::Drift,
+                    subject: d.stack.clone(),
+                    what: format!(
+                        "is declared in stacks/{} (vmid {}) but was never deployed",
+                        d.stack,
+                        vmid.unwrap_or_default()
+                    ),
+                    remedy: format!(
+                        "`homelab apply` would create it; deploy it with `homelab deploy \
+                         stacks/{0}`, or remove stacks/{0}/ if it is not meant to exist",
+                        d.stack
+                    ),
+                });
+            }
+            continue;
+        };
+        let mut parts: Vec<String> = Vec::new();
+        if let (Some(local), Some(applied)) = (d.manifest.as_ref(), st.manifest.as_ref()) {
+            if serde_json::to_value(local).ok() != serde_json::to_value(applied).ok() {
+                parts.push("lxc-compose.yml differs".into());
+            }
+        }
+        if let Some(copy) = live.intent_files.get(&d.stack) {
+            let list = |names: Vec<&String>| -> String {
+                names
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let changed: Vec<&String> = d
+                .files
+                .iter()
+                .filter(|(p, h)| copy.get(*p).is_some_and(|c| c != *h))
+                .map(|(p, _)| p)
+                .collect();
+            let added: Vec<&String> = d.files.keys().filter(|p| !copy.contains_key(*p)).collect();
+            let gone: Vec<&String> = copy.keys().filter(|p| !d.files.contains_key(*p)).collect();
+            if !changed.is_empty() {
+                parts.push(format!("changed: {}", list(changed)));
+            }
+            if !added.is_empty() {
+                parts.push(format!("new: {}", list(added)));
+            }
+            if !gone.is_empty() {
+                parts.push(format!("gone from the files: {}", list(gone)));
+            }
+        }
+        if parts.is_empty() {
+            continue;
+        }
+        out.push(Finding {
+            severity: Severity::Drift,
+            subject: d.stack.clone(),
+            what: format!(
+                "the files differ from what the host applied on {} — {}",
+                crate::state::ymd(st.applied_at),
+                parts.join("; ")
+            ),
+            remedy: format!(
+                "`homelab deploy stacks/{}` (or `homelab apply`) to apply them, or put the \
+                 files back as they were",
+                d.stack
+            ),
+        });
+    }
+    out
 }
 
 /// fix-26: one storage directory owned by someone other than its stack file
@@ -764,6 +882,9 @@ pub fn evaluate(
             });
         }
     }
+
+    // fix-142: the files against what the host applied.
+    out.extend(evaluate_repo_drift(state, live));
 
     out.extend(evaluate_growth(
         &live.growth,

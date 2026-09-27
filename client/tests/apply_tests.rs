@@ -4,7 +4,30 @@
 //! directory is gone is offered for destruction — never destroyed without the
 //! operator typing its name.
 
-use homelab_client::apply::{plan, ApplyPlan};
+use homelab_client::apply::{plan, plan_exit_code, ApplyPlan};
+
+/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): `apply`
+/// could only act; `apply --plan` prints the plan and answers with an exit
+/// code a script can test: 0 in sync, 2 something to deploy or destroy.
+#[test]
+fn fix_142_apply_plan_exits_zero_in_sync_and_two_when_changes_are_pending() {
+    let in_sync = ApplyPlan {
+        deploy: vec![],
+        unchanged: s(&["syncthing"]),
+        destroy: vec![],
+    };
+    assert_eq!(plan_exit_code(&in_sync), 0);
+    let to_deploy = ApplyPlan {
+        deploy: s(&["media"]),
+        ..in_sync.clone()
+    };
+    assert_eq!(plan_exit_code(&to_deploy), 2);
+    let to_destroy = ApplyPlan {
+        destroy: s(&["drill"]),
+        ..in_sync
+    };
+    assert_eq!(plan_exit_code(&to_destroy), 2);
+}
 
 fn s(v: &[&str]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()

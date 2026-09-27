@@ -52,3 +52,15 @@ pub fn plan(
     out.destroy.dedup();
     out
 }
+
+/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): the exit
+/// code of `homelab apply --plan`, which prints the plan and changes
+/// nothing: 0 when the host runs exactly what the files say, 2 when a
+/// deploy or a destruction is pending. `apply` itself could only act.
+pub fn plan_exit_code(plan: &ApplyPlan) -> i32 {
+    if plan.deploy.is_empty() && plan.destroy.is_empty() {
+        0
+    } else {
+        2
+    }
+}

@@ -153,6 +153,42 @@ pub fn stack_source(dir: &Path) -> Option<homelab_proto::SourceRev> {
     })
 }
 
+/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): a stack
+/// directory as `homelab check` sends it, for comparison with what the host
+/// last applied: the parsed manifest (None with only a `service.yml`) and a
+/// sha256 of every file a deploy would send into the container.
+///
+/// Built from the same `collect` a deploy uses, so the two cannot disagree
+/// about which files count; `.env` content is read by `collect` but never
+/// leaves this function, and latch is not asked (F291: a check must not
+/// depend on a credential it does not need).
+pub fn stack_digest(dir: &Path) -> Result<homelab_core::ops::fleetcheck::StackDigest, String> {
+    let stack = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| format!("{}: not a stack directory", dir.display()))?;
+    let manifest = if dir.join("lxc-compose.yml").exists() {
+        Some(build_manifest(dir)?)
+    } else {
+        None
+    };
+    let mut files: Vec<FileBlob> = Vec::new();
+    let mut env: BTreeMap<String, String> = BTreeMap::new();
+    let mut checks: BTreeMap<String, homelab_core::checks::ServiceChecks> = BTreeMap::new();
+    collect(dir, dir, &mut files, &mut env, &mut checks)?;
+    Ok(homelab_core::ops::fleetcheck::StackDigest {
+        stack,
+        manifest,
+        files: files
+            .into_iter()
+            .map(|f| {
+                let h = homelab_core::manifest::sha256_hex(f.content.as_bytes());
+                (f.path, h)
+            })
+            .collect(),
+    })
+}
+
 /// fix-141: what `deploy`/`apply` print before sending a stack whose files
 /// differ from the commit. A warning, not a refusal: deploying a change
 /// before committing it is a normal way to try it, and the host records it

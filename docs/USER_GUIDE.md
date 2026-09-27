@@ -2107,6 +2107,20 @@ delivery failed. Two came with the declarative cleanup (2026-09-27):
 - `noted`, one per retired stack, app or unit: what it left and the wipe
   command (`core/src/ops/retired.rs:190-219`); section 3, `homelab wipe`.
 
+Since fix-142 (2026-09-27) the client also sends what each stack directory
+says: the parsed `lxc-compose.yml` and a sha256 of every file a deploy would
+push into the container (no `.env`, no latch). The host compares them with
+the stack's recorded manifest and its intent-history copy under
+`/var/lib/homelab/repo/stacks/<stack>/` (`evaluate_repo_drift` in
+`core/src/ops/fleetcheck.rs`):
+
+- `drift`, `the files differ from what the host applied on <date> — lxc-compose.yml differs; changed: <files>; new: <files>; gone from the files: <files>`,
+  remedy `` `homelab deploy stacks/<stack>` (or `homelab apply`) to apply them ``;
+- `drift`, `is declared in stacks/<stack> (vmid <n>) but was never deployed`.
+
+Secrets are not compared (they would need latch); `homelab apply --plan`
+compares them too. The nightly check has no repository, so it raises neither.
+
 The host runs the same check after every nightly run and notifies only when a
 finding is not `noted` (`host/src/main.rs:2646-2690`).
 
@@ -2166,7 +2180,12 @@ as the operation `forget` under the operation lock
 ```bash
 homelab apply                    # reads ./stacks
 homelab apply ~/Projects/homelab/stacks --no-backup
+homelab apply --plan             # the plan only; exit 0 in sync, 2 pending
 ```
+
+`--plan` (fix-142) prints the plan below and stops: nothing is deployed or
+destroyed, and the exit code says whether anything would be (0 in sync, 2
+changes pending), so a script can ask.
 
 Asks the host for its state, builds and validates every stack directory that
 has an `lxc-compose.yml` (latch and `gh` included), and stops before sending

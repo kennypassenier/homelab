@@ -406,6 +406,7 @@ impl Model {
         self.today_pending = true;
         self.outbox.push(Command::Today {
             stack_files: crate::spec::stack_files_with_vmids("stacks"),
+            digests: vec![],
         });
     }
 
@@ -1700,7 +1701,12 @@ fn start_fleet_check(model: &mut Model) {
         ok: false,
         result: String::new(),
     });
-    model.outbox.push(Command::FleetCheck { stack_files });
+    // fix-142: the TUI has its own drift badge; the repository comparison
+    // runs from `homelab check`.
+    model.outbox.push(Command::FleetCheck {
+        stack_files,
+        digests: vec![],
+    });
 }
 
 fn start_deploy(model: &mut Model) {

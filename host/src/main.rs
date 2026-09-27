@@ -3927,6 +3927,7 @@ async fn gather_today(
     exec: &RealExecutor,
     state: &AppState,
     stack_files: &[(String, u16)],
+    digests: Vec<homelab_core::ops::fleetcheck::StackDigest>,
 ) -> homelab_core::ops::today::Today {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -3940,7 +3941,8 @@ async fn gather_today(
     )
     .await;
     let checks = homelab_core::doctor::diagnose(&probes);
-    let live = gather_live_facts(exec, state, stack_files).await;
+    let mut live = gather_live_facts(exec, state, stack_files).await;
+    live.digests = digests;
     let incidents: Vec<String> = std::fs::read_dir(format!("{}/incidents", state.config.state_dir))
         .map(|rd| {
             let mut names: Vec<String> = rd
@@ -4673,8 +4675,13 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             })
             .await
         }
-        Rpc::FleetCheck { stack_files } => {
-            let live = gather_live_facts(&exec, state, &stack_files).await;
+        Rpc::FleetCheck {
+            stack_files,
+            digests,
+        } => {
+            let mut live = gather_live_facts(&exec, state, &stack_files).await;
+            // fix-142: what the client's files say, for the repository comparison.
+            live.digests = digests;
             let snapshot =
                 match homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir)
                     .load()
@@ -4711,11 +4718,16 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         // travels inside it as `unread`, so the TUI can tell this reply from
         // any other by its shape and never mistakes a failure of it for the
         // end of an operation it has open.
-        Rpc::Today { stack_files } => RpcResponse {
+        Rpc::Today {
+            stack_files,
+            digests,
+        } => RpcResponse {
             id: req.id,
             ok: true,
-            message: serde_json::to_string(&gather_today(&exec, state, &stack_files).await)
-                .unwrap_or_default(),
+            message: serde_json::to_string(
+                &gather_today(&exec, state, &stack_files, digests).await,
+            )
+            .unwrap_or_default(),
             deferred: None,
         },
         // T69: the operator answered a suspended step. Delivering it is all

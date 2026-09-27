@@ -237,12 +237,20 @@ pub enum Command {
     /// whether every gateway route reaches something that answers.
     FleetCheck {
         stack_files: Vec<(String, u16)>,
+        /// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift):
+        /// what each stack's files say, so the check can compare them with
+        /// what the host last applied. Empty from an older client.
+        #[serde(default)]
+        digests: Vec<homelab_core::ops::fleetcheck::StackDigest>,
     },
     /// fix-68: doctor, the fleet check (with its manual checks) and the open
     /// incident bundles as one list and one verdict. The reply's message is
     /// a JSON `homelab_core::ops::today::Today`, rendered by the caller.
     Today {
         stack_files: Vec<(String, u16)>,
+        /// fix-142: as in `FleetCheck`.
+        #[serde(default)]
+        digests: Vec<homelab_core::ops::fleetcheck::StackDigest>,
     },
     /// H8 (light): flip a stack's enabled flag. Disabled = nightly scheduler
     /// skips it + onboot cleared; enabled = back in rotation + onboot per

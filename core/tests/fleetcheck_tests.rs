@@ -6,8 +6,8 @@
 
 use homelab_core::manifest::StackManifest;
 use homelab_core::ops::fleetcheck::{
-    evaluate, evaluate_boot, evaluate_coverage, evaluate_growth, BootFact, CoverageFact,
-    GrowthFact, GrowthLimits, LiveFacts, RouteFact, Severity,
+    evaluate, evaluate_boot, evaluate_coverage, evaluate_growth, evaluate_repo_drift, BootFact,
+    CoverageFact, GrowthFact, GrowthLimits, LiveFacts, RouteFact, Severity, StackDigest,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -95,6 +95,8 @@ fn y4_a_healthy_fleet_is_silent() {
     )]);
     let live = LiveFacts {
         seed: Default::default(),
+        digests: vec![],
+        intent_files: Default::default(),
         pools: vec![],
         big_logs: vec![],
         owners: vec![],
@@ -1516,4 +1518,164 @@ fn gap_32_noted_findings_alone_do_not_make_the_check_fail() {
         host.contains("ok: homelab_core::ops::fleetcheck::check_passes(&findings)"),
         "the host's `homelab check` must answer with the same rule"
     );
+}
+
+// ── fix-142: the repository against what the host applied ──────────────────
+
+fn digest(stack: &str, m: Option<StackManifest>, files: &[(&str, &str)]) -> StackDigest {
+    StackDigest {
+        stack: stack.into(),
+        manifest: m,
+        files: files
+            .iter()
+            .map(|(p, h)| (p.to_string(), h.to_string()))
+            .collect(),
+    }
+}
+
+type IntentFiles = std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>;
+
+fn intent(stack: &str, files: &[(&str, &str)]) -> IntentFiles {
+    let mut out = IntentFiles::new();
+    out.insert(
+        stack.to_string(),
+        files
+            .iter()
+            .map(|(p, h)| (p.to_string(), h.to_string()))
+            .collect(),
+    );
+    out
+}
+
+fn applied_home(m: StackManifest) -> HostState {
+    let mut st = stack(115, "115-app-home", true, NOW - 3600);
+    st.manifest = Some(m);
+    st.applied_at = 1_788_000_000 - 86_400;
+    state(vec![("home", st)])
+}
+
+/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): the check
+/// sent only `(dir, vmid)` pairs and never compared the files with what the
+/// host applied, so an edited but undeployed stack stayed invisible until the
+/// next deploy acted on it. Each kind of difference is named.
+#[test]
+fn fix_142_an_edited_but_undeployed_stack_is_drift_and_names_what_differs() {
+    let applied = boot_manifest(115, true, 3, 1024, 2);
+    let st = applied_home(applied.clone());
+    let mut edited = applied;
+    edited.resources.memory_mb = 2048;
+    let live = LiveFacts {
+        stack_files: vec![("stacks/home".into(), 115)],
+        containers: vec![(115, "115-app-home".into())],
+        digests: vec![digest(
+            "home",
+            Some(edited),
+            &[
+                ("app/docker-compose.yml", "aaa"),
+                ("app/config.yml", "new-hash"),
+                ("app/added.yml", "ccc"),
+            ],
+        )],
+        intent_files: intent(
+            "home",
+            &[
+                ("app/docker-compose.yml", "aaa"),
+                ("app/config.yml", "old-hash"),
+                ("app/removed.yml", "ddd"),
+            ],
+        ),
+        ..Default::default()
+    };
+    let got = evaluate_repo_drift(&st, &live);
+    assert_eq!(got.len(), 1, "{got:#?}");
+    let f = &got[0];
+    assert_eq!(f.severity, Severity::Drift);
+    assert_eq!(f.subject, "home");
+    for needle in [
+        "lxc-compose.yml",
+        "app/config.yml",
+        "app/added.yml",
+        "app/removed.yml",
+        "2026-08-28",
+    ] {
+        assert!(f.what.contains(needle), "names {needle}: {}", f.what);
+    }
+    assert!(
+        !f.what.contains("app/docker-compose.yml"),
+        "an unchanged file is not named: {}",
+        f.what
+    );
+    assert!(
+        f.remedy.contains("homelab deploy stacks/home"),
+        "{}",
+        f.remedy
+    );
+    // And through the whole check.
+    assert!(check(&st, &live).iter().any(|x| x == f));
+}
+
+/// fix-142: files equal to what the host applied say nothing.
+#[test]
+fn fix_142_a_stack_equal_to_what_was_applied_is_quiet() {
+    let m = boot_manifest(115, true, 3, 1024, 2);
+    let st = applied_home(m.clone());
+    let live = LiveFacts {
+        digests: vec![digest(
+            "home",
+            Some(m),
+            &[("app/docker-compose.yml", "aaa")],
+        )],
+        intent_files: intent("home", &[("app/docker-compose.yml", "aaa")]),
+        ..Default::default()
+    };
+    assert!(evaluate_repo_drift(&st, &live).is_empty());
+}
+
+/// fix-142: a stack file the host has never applied is drift too; `apply`
+/// would create it (the drill stack's shape, apply-no-confirm-creates-drill).
+#[test]
+fn fix_142_a_declared_stack_that_was_never_deployed_is_drift() {
+    let st = state(vec![]);
+    let live = LiveFacts {
+        stack_files: vec![("stacks/drill".into(), 119)],
+        digests: vec![digest(
+            "drill",
+            Some(boot_manifest(119, false, 9, 512, 1)),
+            &[],
+        )],
+        ..Default::default()
+    };
+    let got = evaluate_repo_drift(&st, &live);
+    assert_eq!(got.len(), 1, "{got:#?}");
+    assert_eq!(got[0].severity, Severity::Drift);
+    assert_eq!(got[0].subject, "drill");
+    assert!(got[0].what.contains("never"), "{}", got[0].what);
+    assert!(got[0].remedy.contains("homelab apply"), "{}", got[0].remedy);
+}
+
+/// fix-142: no digests (an older client, or the nightly round, which has no
+/// repository) means no comparison, not "everything changed".
+#[test]
+fn fix_142_without_digests_there_is_no_repository_comparison() {
+    let st = applied_home(boot_manifest(115, true, 3, 1024, 2));
+    let live = LiveFacts {
+        stack_files: vec![("stacks/home".into(), 115)],
+        intent_files: intent("home", &[("app/docker-compose.yml", "aaa")]),
+        ..Default::default()
+    };
+    assert!(evaluate_repo_drift(&st, &live).is_empty());
+}
+
+/// fix-142: a stack with only a `service.yml` sends no manifest; its record
+/// has none either, and that is not a difference.
+#[test]
+fn fix_142_a_stack_without_a_manifest_compares_its_files_only() {
+    let mut st = stack(118, "118-app-inbox", true, NOW - 3600);
+    st.manifest = None;
+    let st = state(vec![("inbox", st)]);
+    let live = LiveFacts {
+        digests: vec![digest("inbox", None, &[])],
+        ..Default::default()
+    };
+    assert!(evaluate_repo_drift(&st, &live).is_empty());
 }

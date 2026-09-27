@@ -308,6 +308,7 @@ async fn main() {
         "check" => {
             let base = args.get(2).cloned().unwrap_or_else(|| "stacks".into());
             let stack_files = crate::spec::stack_files_with_vmids(&base);
+            let digests = stack_digests(&stack_files);
             // Kenny ran this from inside `stacks/` on 2026-09-02 and it said
             // "0 stack file(s)" in passing, then reported the host's half as
             // if it were the whole answer. Half a check that looks like a
@@ -332,7 +333,15 @@ async fn main() {
                     C_RESET
                 );
             }
-            rpc(&host, &token, Command::FleetCheck { stack_files }).await;
+            rpc(
+                &host,
+                &token,
+                Command::FleetCheck {
+                    stack_files,
+                    digests,
+                },
+            )
+            .await;
         }
         // fix-68 (four-answers-to-is-anything-wrong, 2026-09-27): the morning
         // question in one verb. `check`, `doctor`, `incidents` and `checks`
@@ -341,6 +350,7 @@ async fn main() {
         "today" => {
             let base = args.get(2).cloned().unwrap_or_else(|| "stacks".into());
             let stack_files = crate::spec::stack_files_with_vmids(&base);
+            let digests = stack_digests(&stack_files);
             if stack_files.is_empty() {
                 println!(
                     "{}▶ today :: no stack files under '{}' — the check reads only what the \
@@ -356,9 +366,16 @@ async fn main() {
                     C_RESET
                 );
             }
-            let reply = rpc_reply(&host, &token, Command::Today { stack_files })
-                .await
-                .unwrap_or_else(|| die("the host did not answer"));
+            let reply = rpc_reply(
+                &host,
+                &token,
+                Command::Today {
+                    stack_files,
+                    digests,
+                },
+            )
+            .await
+            .unwrap_or_else(|| die("the host did not answer"));
             let today: homelab_core::ops::today::Today = serde_json::from_str(&reply.message)
                 .unwrap_or_else(|_| die(&format!("the host answered: {}", reply.message)));
             let color = if today.needs_you() { C_YELLOW } else { C_GREEN };
@@ -767,6 +784,7 @@ async fn main() {
                 .cloned()
                 .unwrap_or_else(|| "stacks".into());
             let skip_backup = args.iter().any(|a| a == "--no-backup");
+            let plan_only = args.iter().any(|a| a == "--plan");
             let base_path = Path::new(&base);
             if !base_path.is_dir() {
                 die(&format!(
@@ -831,6 +849,11 @@ async fn main() {
                     "{}  ✗ {} — in host state, no {}/{}/{}",
                     C_YELLOW, n, base, n, C_RESET
                 );
+            }
+            // fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift):
+            // the plan alone, with an exit code a script can test.
+            if plan_only {
+                std::process::exit(homelab_client::apply::plan_exit_code(&plan));
             }
             for name in &plan.deploy {
                 let Some(sp) = specs.remove(name) else {
@@ -1235,6 +1258,7 @@ async fn main() {
             );
             println!("  homelab destroy stacks/<name>       gated destroy (C2; from the host's record when the dir is gone)");
             println!("  homelab apply [stacks/] [--no-backup]  deploy what changed, destroy what left the files after its name is typed (ask-8)");
+            println!("  homelab apply [stacks/] --plan  print the plan only; exit 0 in sync, 2 changes pending (fix-142)");
             println!("  homelab wipe <stack>[/<app>]        delete what a retired stack or app kept: backups, /appdata, vault (ask-9)");
             println!("  homelab prune-orphans stacks/<name>  remove files the repo dropped (H2b; the deploy does this itself now)");
             println!(
@@ -1548,6 +1572,24 @@ fn read_typed(prompt: &str) -> String {
 
 /// Ship one stack: its native binaries one per message (T85), then the
 /// deploy itself. `true` when the host reported the deploy done and ok.
+/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): what each
+/// stack directory says, for the host to compare with what it applied. A
+/// directory that does not read is said out loud and left out; the rest of
+/// the check still runs.
+fn stack_digests(stack_files: &[(String, u16)]) -> Vec<homelab_core::ops::fleetcheck::StackDigest> {
+    let mut out = Vec::new();
+    for (dir, _) in stack_files {
+        match spec::stack_digest(Path::new(dir)) {
+            Ok(d) => out.push(d),
+            Err(e) => eprintln!(
+                "{}  {} not compared with the host: {}{}",
+                C_YELLOW, dir, e, C_RESET
+            ),
+        }
+    }
+    out
+}
+
 async fn deploy_spec(host: &str, token: &str, mut spec: homelab_proto::DeploySpec) -> bool {
     println!(
         "{}▶ deploy {} :: vmid {} :: {} file(s), {} env(s){}",

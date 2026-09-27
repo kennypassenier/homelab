@@ -182,6 +182,33 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
         Ok(StepOutcome::Changed)
     });
 
+    // gap-27: an adopted service's env file gets a copy in the host's vault,
+    // like a deployed one, so a lost container can get it back. Read without
+    // echoing it (fix-39); nothing in the container is written.
+    step!(runner, "seal env file", {
+        let Some(env) = &m.env_file else {
+            return Ok(StepOutcome::Unchanged);
+        };
+        let got = crate::executor::pct_sh_secret(
+            exec,
+            m.vmid,
+            &format!("cat {} 2>/dev/null || true", crate::ops::util::shq(env)),
+            60,
+        )
+        .await?;
+        if got.stdout.trim().is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let vault = format!(
+            "{}/secrets/{}/{}",
+            ctx.state_dir,
+            m.stack_name,
+            crate::ops::deploy::vault_key(env)
+        );
+        exec.write_file(&vault, &got.stdout, 0o600).await?;
+        Ok(StepOutcome::Changed)
+    });
+
     step!(runner, "record state", {
         let store = crate::state::StateStore::new(exec, &ctx.state_dir);
         let mut state = store.load().await?;

@@ -111,9 +111,10 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
                 health: Health::Fail,
                 detail: "a secret file on the container has no copy in the host's vault".into(),
                 remedy: Some(format!(
-                    "redeploy {} (`homelab deploy stacks/{}`) so the vault takes a copy; without \
-                     it a lost container cannot get its secrets back without latch (gap-27)",
-                    s.name, s.name
+                    "redeploy {} (`homelab deploy stacks/{}`, or `homelab adopt stacks/{}` for an \
+                     adopted service) so the vault takes a copy; without it a lost container \
+                     cannot get its secrets back without latch (gap-27)",
+                    s.name, s.name, s.name
                 )),
             });
         }

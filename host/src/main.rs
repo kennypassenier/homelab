@@ -3739,7 +3739,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                             runner.log(
                                 homelab_core::sink::Level::Info,
                                 format!(
-                                    "[guards] {} — docker log caps, journald limits, logrotate, apt autoclean, weekly prune",
+                                    "[guards] {} — runaway guards applied (the docker ones only where the stack runs docker)",
                                     vmid
                                 ),
                             );

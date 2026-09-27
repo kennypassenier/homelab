@@ -84,6 +84,38 @@ fn c7_validation_catches_the_lies() {
     assert!(validate_native(&no_data).is_err(), "undeclared state");
 }
 
+/// gap-27 follow-up: adoption also seals the service's env file into the
+/// host's vault, read without echoing it (fix-39). inbox on CT 118 was
+/// adopted only, so the doctor's env check, made real on the Phase 9 form,
+/// found its env file in no vault and adoption was the one verb it gets.
+///
+/// covers: gap-27
+#[tokio::test]
+async fn gap_27_adopt_seals_the_env_file_into_the_vault_without_echoing_it() {
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always(
+        "cat '/etc/kyu/kyu.env'",
+        CmdOutput::ok("KYU_TOKEN=adopt-secret-gap27\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        exec.file("/var/lib/homelab/secrets/kyu/kyu/kyu.env")
+            .as_deref(),
+        Some("KYU_TOKEN=adopt-secret-gap27\n")
+    );
+    assert!(
+        !sink
+            .lines()
+            .iter()
+            .any(|l| l.contains("adopt-secret-gap27")),
+        "the value must reach no transcript"
+    );
+}
+
 #[tokio::test]
 async fn c7_adopt_records_state_without_touching_the_service() {
     let exec = MockExecutor::new();

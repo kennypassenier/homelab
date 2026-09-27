@@ -60,7 +60,8 @@ endif
 	@git rev-parse "v$(VERSION)" >/dev/null 2>&1 && { echo "tag v$(VERSION) already exists"; exit 1; } || true
 	# Release only from a base CI has actually passed.
 	#
-	# Branch protection on main requires the `check` and `msrv` jobs, but
+	# Branch protection on main requires the `check` job (msrv was removed
+	# 2026-09-10, d318ada), but
 	# `enforce_admins` is off so `make release` can push directly — which
 	# means those required checks do not apply to a direct push at all. The
 	# almanac project hit the same thing on 2026-09-02 and flagged it. On this
@@ -69,7 +70,7 @@ endif
 	# commit — but "protected" overstated what was true, and a red tip could
 	# have been tagged and shipped to the host with nothing objecting.
 	#
-	# Reads EVERY check on the commit, not `check` and `msrv` by name. The
+	# Reads EVERY check on the commit, not `check` by name. The
 	# almanac project sat on four days of red CI across seven releases
 	# because its `gates` job was green and a second job nobody was reading
 	# was not — and a guard that knows two job names by heart would have

@@ -61,7 +61,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.58.3** (2026-09-27 ~12:25 local, fix-34..38: TLS signature check, notify token off argv, exec honours the configured no-touch list, per-unit vault copies, quoted transcripts); v3.58.2 at 11:27 local (fix-32: no credential in curl argv); v3.58.1 at ~09:40 local (fix-30: no 40 MB transcript lines); v3.58.0 at 06:40 local (fix-28/29); v3.57.0 on 2026-09-26 23:22 local (fix-26/27); v3.56.0 the same evening (fix-24 log rotation); v3.55.0 on 2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **552 tests in 36 suites** (counted 2026-09-27 at v3.57.1), CI green — and green now
+- **Released and live at v3.58.4** (2026-09-27 afternoon: gap-19/21/22/24/25/27/28/29/33 from the Phase 8 rewrites); v3.58.3 (2026-09-27 ~12:25 local, fix-34..38: TLS signature check, notify token off argv, exec honours the configured no-touch list, per-unit vault copies, quoted transcripts); v3.58.2 at 11:27 local (fix-32: no credential in curl argv); v3.58.1 at ~09:40 local (fix-30: no 40 MB transcript lines); v3.58.0 at 06:40 local (fix-28/29); v3.57.0 on 2026-09-26 23:22 local (fix-26/27); v3.56.0 the same evening (fix-24 log rotation); v3.55.0 on 2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **552 tests in 36 suites** (counted 2026-09-27 at v3.57.1), CI green — and green now
   means something: CI ran without `--locked` until that day, so it built
   whatever crates.io served rather than what the lockfile pins (F235).
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.
@@ -198,8 +198,9 @@ CI re-runs the same gates on every push; red blocks merge. Layer 1 was
 added 2026-08-28 after v3.0.1–v3.1.1 were committed from a session opened
 elsewhere, where layer 2 silently did not load.
 
-3. **branch protection** on `main` (2026-08-28): the `check` and `msrv`
-   CI jobs are required. `enforce_admins` is deliberately off so
+3. **branch protection** on `main` (2026-08-28): the `check` CI job is
+   required (the `msrv` job was removed 2026-09-10, d318ada; nothing checks
+   the declared rust-version 1.88 since, gap-30). `enforce_admins` is deliberately off so
    `make release` can still push directly; a red gate blocks any merge.
 
 ## Build & ship

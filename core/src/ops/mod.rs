@@ -13,6 +13,7 @@ pub mod fleetcheck;
 pub mod fleetfiles;
 pub mod guards;
 pub mod hardware;
+pub mod homeaddress;
 pub mod homepage;
 pub mod logshipper;
 pub mod manualchecks;

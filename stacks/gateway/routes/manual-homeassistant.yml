@@ -1,0 +1,28 @@
+# Traefik route for Home Assistant (VM 101, 10.10.10.2:8123).
+# Manual route: Home Assistant is not deployed by Ansible, so this file is
+# maintained by hand instead of being rendered at deploy time. Kept separate
+# from manual-routes.yml so removing it is a single file deletion.
+#
+# Home Assistant MUST trust this proxy or it rejects every forwarded request.
+# Add to its configuration.yaml and restart:
+#   http:
+#     use_x_forwarded_for: true
+#     trusted_proxies:
+#       - 10.10.10.4/32
+#
+# Plain http upstream, unlike the OPNsense route: Home Assistant serves 8123
+# without TLS on the LAN and does not redirect to https, so the redirect loop
+# that forced https there cannot happen here.
+
+http:
+  routers:
+    homeassistant:
+      rule: "Host(`ha.kp-soft.dev`)"
+      entryPoints: [web]
+      service: homeassistant
+
+  services:
+    homeassistant:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.2:8123"

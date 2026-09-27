@@ -27,6 +27,7 @@ fn stack(vmid: u16, hostname: &str, enabled: bool, last_backup: u64) -> StackSta
         incomplete_step: None,
         enabled,
         route_file: None,
+        extra_route_files: Vec::new(),
     }
 }
 
@@ -935,6 +936,7 @@ mod incomplete_deploys {
             natives: Vec::new(),
             incomplete_step: step.map(|x| x.to_string()),
             route_file: None,
+            extra_route_files: Vec::new(),
         };
         st.stacks.insert("drill".into(), s);
         st

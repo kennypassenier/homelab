@@ -108,6 +108,7 @@ fn native_kyu_spec() -> DeploySpec {
             },
         ],
         env: std::collections::BTreeMap::new(),
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     }

@@ -63,6 +63,7 @@ fn spec_with_secret() -> DeploySpec {
             mode: None,
         }],
         env,
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     }

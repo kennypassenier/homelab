@@ -1837,6 +1837,28 @@ dropped `gateway_route:` or moved to another vmid, which removes the old
 `core/tests/declarative_cleanup_tests.rs:349,372`). The front page follows,
 since it is rendered from these files (section 4).
 
+A route file that keeps a name of its own is an `extra_routes` entry (fix-91,
+2026-09-27). It exists for the files that were written by hand on the
+gateway before the repository held them: almanac's route became an ordinary
+`gateway_route`, and `manual-kyu.yml` (stack kyu), `manual-homeassistant.yml`
+and `manual-routes.yml` (stack gateway) keep their names, because a rename
+would leave the old file routing the same hostname beside the new one. Each
+is read from `routes/<filename>` in the stack directory and never enters the
+container:
+
+```yaml
+extra_routes:
+  - filename: manual-routes.yml
+    external: ["https://10.10.5.1", "https://10.10.5.250:8006"]
+```
+
+`external` names each backend in the file that is not a stack's own
+container, exactly as the file writes it (Home Assistant, OPNsense,
+Proxmox). A deploy writes the files, records them in host state and retires
+one the stack stops declaring; destroy and forget remove the recorded ones.
+A file on the gateway that no deploy recorded is never removed
+(`client/tests/route_files_tests.rs`, `core/tests/route_files_tests.rs`).
+
 #### H2 · OPNsense Kea DHCP reservations
 
 **Status:** Removed. Built and then removed (FEATURES.md amendment of

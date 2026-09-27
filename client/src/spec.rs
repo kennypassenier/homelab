@@ -23,6 +23,16 @@ struct StackFile {
     manifest: StackManifest,
     #[serde(default)]
     gateway_route: Option<GatewayRouteFile>,
+    /// fix-91 (routes-outside-repo-unvalidated, 2026-09-27): route files kept
+    /// under a name of their own, each read from `routes/<filename>` beside
+    /// this file. They exist for the files that were written by hand on the
+    /// gateway before the repository held them: renaming one to
+    /// `<vmid>-app-<stack>.yml` would leave the old file routing the same
+    /// hostname until someone deleted it by hand, so they keep the name they
+    /// have. The deploy records them and a destroy removes them, which is
+    /// what the derived name guarantees for `gateway_route`.
+    #[serde(default)]
+    extra_routes: Vec<GatewayRouteFile>,
     /// D12: apps whose .env comes from latch instead of a plaintext file.
     /// Client-side sugar only — the wire and the host vault see the same
     /// env content either way.
@@ -30,11 +40,101 @@ struct StackFile {
     latch_secrets: Vec<String>,
 }
 
+/// `deny_unknown_fields` for the same reason as on `StackFile`: a misspelt
+/// `external:` would otherwise vanish and the route would be judged as if
+/// it declared nothing.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GatewayRouteFile {
     filename: String,
     #[serde(default = "default_gw")]
     gateway_vmid: u16,
+    /// fix-91: backends this file routes to on purpose that are not a stack
+    /// homelab manages, each exactly as the file names it (Home Assistant,
+    /// OPNsense, Proxmox).
+    #[serde(default)]
+    external: Vec<String>,
+}
+
+/// A route file a stack declares, with where it goes.
+struct DeclaredRoute {
+    decl: homelab_core::routes::RouteDecl,
+    gateway_vmid: u16,
+    /// `gateway_route` rather than one of the `extra_routes`.
+    primary: bool,
+}
+
+/// Every route file `stack_file` declares, read from `dir`.
+fn declared_routes(dir: &Path, stack_file: &StackFile) -> Result<Vec<DeclaredRoute>, String> {
+    let stack = &stack_file.manifest.stack_name;
+    let mut out = Vec::new();
+    if let Some(g) = stack_file.gateway_route.as_ref() {
+        // The filename is declared here and independently DERIVED by
+        // destroy (`<vmid>-app-<stack>.yml`), which has no access to this
+        // field — the manifest that reaches the host does not carry it.
+        // As long as the two can disagree, a stack that names its file
+        // anything else deploys fine and leaves a router behind when it is
+        // destroyed, still answering for a hostname that has moved. That
+        // is F115 exactly. Requiring them to agree removes the class
+        // rather than the symptom.
+        let derived = format!("{}-app-{}.yml", stack_file.manifest.vmid, stack);
+        if g.filename != derived {
+            return Err(format!(
+                "gateway_route.filename is '{}' but destroy removes '{}' — \
+                 they must match, or the route outlives the stack",
+                g.filename, derived
+            ));
+        }
+        let route_path = dir.join("traefik-routes.yml");
+        let content = std::fs::read_to_string(&route_path)
+            .map_err(|e| format!("gateway_route set but {}: {}", route_path.display(), e))?;
+        out.push(DeclaredRoute {
+            decl: homelab_core::routes::RouteDecl {
+                stack: stack.clone(),
+                filename: g.filename.clone(),
+                content,
+                external: g.external.clone(),
+            },
+            gateway_vmid: g.gateway_vmid,
+            primary: true,
+        });
+    }
+    for g in &stack_file.extra_routes {
+        if g.filename.contains('/') || g.filename.contains("..") {
+            return Err(format!(
+                "extra_routes filename '{}' must be a bare file name",
+                g.filename
+            ));
+        }
+        let route_path = dir.join("routes").join(&g.filename);
+        let content = std::fs::read_to_string(&route_path)
+            .map_err(|e| format!("extra_routes names {}: {}", route_path.display(), e))?;
+        out.push(DeclaredRoute {
+            decl: homelab_core::routes::RouteDecl {
+                stack: stack.clone(),
+                filename: g.filename.clone(),
+                content,
+                external: g.external.clone(),
+            },
+            gateway_vmid: g.gateway_vmid,
+            primary: false,
+        });
+    }
+    Ok(out)
+}
+
+/// fix-91: every route file a stack directory declares, without secrets,
+/// latch or network — what the gateway would be given, and what the fleet
+/// route check (fix-92) reads.
+pub fn route_files(dir: &Path) -> Result<Vec<homelab_core::routes::RouteDecl>, String> {
+    let manifest_path = dir.join("lxc-compose.yml");
+    let raw = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("cannot read {}: {}", manifest_path.display(), e))?;
+    let stack_file = parse_stack_file(&raw, &manifest_path)?;
+    Ok(declared_routes(dir, &stack_file)?
+        .into_iter()
+        .map(|d| d.decl)
+        .collect())
 }
 
 fn default_gw() -> u16 {
@@ -153,38 +253,22 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
     )?;
     notes.extend(env_sources(&from_disk, &stack_file.latch_secrets, &env));
 
-    let gateway_route = match stack_file.gateway_route.as_ref() {
-        Some(g) => {
-            // The filename is declared here and independently DERIVED by
-            // destroy (`<vmid>-app-<stack>.yml`), which has no access to this
-            // field — the manifest that reaches the host does not carry it.
-            // As long as the two can disagree, a stack that names its file
-            // anything else deploys fine and leaves a router behind when it is
-            // destroyed, still answering for a hostname that has moved. That
-            // is F115 exactly. Requiring them to agree removes the class
-            // rather than the symptom.
-            let derived = format!(
-                "{}-app-{}.yml",
-                stack_file.manifest.vmid, stack_file.manifest.stack_name
-            );
-            if g.filename != derived {
-                return Err(format!(
-                    "gateway_route.filename is '{}' but destroy removes '{}' — \
-                     they must match, or the route outlives the stack",
-                    g.filename, derived
-                ));
-            }
-            let route_path = dir.join("traefik-routes.yml");
-            let content = std::fs::read_to_string(&route_path)
-                .map_err(|e| format!("gateway_route set but {}: {}", route_path.display(), e))?;
-            Some(GatewayRoute {
-                gateway_vmid: g.gateway_vmid,
-                filename: g.filename.clone(),
-                content,
-            })
+    // The external declarations stay here: they are the client's plan-time
+    // question (fix-92), and the host writes a route the same either way.
+    let mut gateway_route = None;
+    let mut extra_routes = Vec::new();
+    for d in declared_routes(dir, &stack_file)? {
+        let route = GatewayRoute {
+            gateway_vmid: d.gateway_vmid,
+            filename: d.decl.filename,
+            content: d.decl.content,
+        };
+        if d.primary {
+            gateway_route = Some(route);
+        } else {
+            extra_routes.push(route);
         }
-        None => None,
-    };
+    }
 
     // The programs are staged by `build_spec`, and only there.
     let native_binaries = BTreeMap::new();
@@ -194,6 +278,7 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
         files,
         env,
         gateway_route,
+        extra_routes,
         checks,
         native_binaries,
     })
@@ -279,6 +364,12 @@ fn collect(
         let path: PathBuf = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
         if path.is_dir() {
+            // fix-91: `routes/` at the top holds the stack's extra route
+            // files — orchestrator input like traefik-routes.yml, bound for
+            // the gateway and not for this container.
+            if dir == root && name == "routes" {
+                continue;
+            }
             collect(root, &path, files, env, checks)?;
             continue;
         }

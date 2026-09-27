@@ -420,6 +420,14 @@ pub struct DeploySpec {
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub gateway_route: Option<GatewayRoute>,
+    /// fix-91 (routes-outside-repo-unvalidated, 2026-09-27): route files the
+    /// stack keeps under a name of their own rather than the derived
+    /// `<vmid>-app-<stack>.yml` — the files that were written by hand on the
+    /// gateway before the repository held them. Kept under that name so
+    /// bringing them in changes nothing live; written, recorded and retired
+    /// exactly like `gateway_route`.
+    #[serde(default)]
+    pub extra_routes: Vec<GatewayRoute>,
     /// J1-J3: per-app health checks, keyed by app name. Orchestrator input
     /// like the manifest itself — it never enters the container, because what
     /// "healthy" means is the homelab's question about the service rather
@@ -845,7 +853,10 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
             ));
         }
     }
-    if let Some(route) = &spec.gateway_route {
+    // fix-91: the extra routes pass the same filename rule, and no name is
+    // written twice in one deploy — the second write would silently win.
+    let mut route_names: Vec<&str> = Vec::new();
+    for route in spec.gateway_route.iter().chain(spec.extra_routes.iter()) {
         if route.filename.contains('/')
             || route.filename.contains("..")
             || !route.filename.ends_with(".yml")
@@ -855,6 +866,13 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
                 route.filename
             ));
         }
+        if route_names.contains(&route.filename.as_str()) {
+            problems.push(format!(
+                "gateway route filename '{}' is declared twice",
+                route.filename
+            ));
+        }
+        route_names.push(&route.filename);
     }
 
     // A bind mount may not target a path INSIDE another bind mount of the

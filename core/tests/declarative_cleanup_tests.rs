@@ -87,6 +87,7 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
             mode: None,
         }],
         env: BTreeMap::new(),
+        extra_routes: Vec::new(),
         gateway_route: Some(GatewayRoute {
             gateway_vmid: 104,
             filename: format!("{}-app-{}.yml", vmid, stack),
@@ -129,6 +130,7 @@ fn record(m: &StackManifest) -> StackState {
         natives: Vec::new(),
         incomplete_step: None,
         route_file: None,
+        extra_route_files: Vec::new(),
     }
 }
 

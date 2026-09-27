@@ -250,6 +250,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
                 enabled: true,
                 incomplete_step: None,
                 route_file: None,
+                extra_route_files: Vec::new(),
             },
         );
         store.save(state).await?;

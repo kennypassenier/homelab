@@ -99,6 +99,7 @@ async fn mark_incomplete(
                     enabled: true,
                     native: None,
                     route_file: None,
+                    extra_route_files: Vec::new(),
                     natives: Vec::new(),
                     incomplete_step: Some(step.to_string()),
                 },
@@ -1941,21 +1942,35 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     });
 
     // ── H1: the single allowed cross-stack write. ────────────────────────
-    if let Some(route) = &spec.gateway_route {
+    // fix-91 (routes-outside-repo-unvalidated, 2026-09-27): the stack's
+    // `extra_routes` go the same way, under the name each already has on the
+    // gateway, so a file brought into the repository is rewritten with the
+    // bytes it already holds.
+    let routes: Vec<&manifest::GatewayRoute> = spec
+        .gateway_route
+        .iter()
+        .chain(spec.extra_routes.iter())
+        .collect();
+    if !routes.is_empty() {
         step!(runner, exec, ctx, m, "gateway route", {
-            let dest =
-                safety::check_gateway_route(&ctx.safety, route.gateway_vmid, &route.filename)?;
-            // H6 hardening: when the routes dir lives under /appdata/ it is a
-            // HOST path bind-mounted into the gateway — write it host-side so
-            // route fragments survive gateway recreation. The legacy /opt
-            // path keeps the pct-push behavior until the platform migration.
-            let changed = if ctx.safety.gateway_routes_dir.starts_with("/appdata/") {
-                exec.write_file(&dest, &route.content, 0o644).await?;
-                true
-            } else {
-                push_content(exec, route.gateway_vmid, &dest, &route.content, "644").await?
-            };
-            log_info(format!("[route] {} (file-provider watch reloads)", dest));
+            let mut changed = false;
+            for route in &routes {
+                let dest =
+                    safety::check_gateway_route(&ctx.safety, route.gateway_vmid, &route.filename)?;
+                // H6 hardening: when the routes dir lives under /appdata/ it is a
+                // HOST path bind-mounted into the gateway — write it host-side so
+                // route fragments survive gateway recreation. The legacy /opt
+                // path keeps the pct-push behavior until the platform migration.
+                if ctx.safety.gateway_routes_dir.starts_with("/appdata/") {
+                    exec.write_file(&dest, &route.content, 0o644).await?;
+                    changed = true;
+                } else if push_content(exec, route.gateway_vmid, &dest, &route.content, "644")
+                    .await?
+                {
+                    changed = true;
+                }
+                log_info(format!("[route] {} (file-provider watch reloads)", dest));
+            }
             Ok(if changed {
                 StepOutcome::Changed
             } else {
@@ -1975,17 +1990,20 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // retired, when the stack no longer declares it or now writes another
     // name (a changed vmid). A route written by hand on the gateway is never
     // this stack's to remove.
-    let stale_routes: Vec<String> = match prior.as_ref().and_then(|p| p.route_file.clone()) {
-        Some(written) => {
-            let keep = spec.gateway_route.as_ref().map(|r| r.filename.clone());
-            if Some(&written) != keep.as_ref() {
-                vec![written]
-            } else {
-                Vec::new()
-            }
-        }
-        None => Vec::new(),
-    };
+    // fix-91: the recorded `extra_routes` files follow the same rule — every
+    // file this stack's last deploy recorded and this deploy does not write.
+    let declared: Vec<&str> = routes.iter().map(|r| r.filename.as_str()).collect();
+    let stale_routes: Vec<String> = prior
+        .as_ref()
+        .map(|p| {
+            p.route_file
+                .iter()
+                .chain(p.extra_route_files.iter())
+                .filter(|f| !declared.contains(&f.as_str()))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
     if !stale_routes.is_empty() {
         step!(runner, exec, ctx, m, "retire gateway route", {
             let mut changed = false;
@@ -2787,6 +2805,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 // fix-41: the route this deploy wrote, the only one a later
                 // deploy may retire.
                 route_file: spec.gateway_route.as_ref().map(|r| r.filename.clone()),
+                // fix-91: the extra route files it wrote, for the same reason.
+                extra_route_files: spec
+                    .extra_routes
+                    .iter()
+                    .map(|r| r.filename.clone())
+                    .collect(),
             },
         );
         store.save(state).await?;

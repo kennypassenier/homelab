@@ -1,0 +1,24 @@
+# One route for a service the orchestrator cannot yet express: kyu is a native
+# systemd service on CT 109, and a native stack has no gateway_route field
+# (H3 — giving native stacks routes is a small feature of its own, queued).
+#
+# Uptime Kuma used to be here too, pointing at 10.10.10.4:3001 because it ran
+# on the gateway. It moved to its own container on 2026-09-01 (D68) and now
+# carries its own route file, so that half is gone: two files claiming
+# kuma.kp-soft.dev, one of them at a dead address, is the F115 shape.
+#
+# Captured in the repository as well, because a fix that lives only on the
+# running machine is a fix with an expiry date.
+
+http:
+  routers:
+    kyu:
+      rule: "Host(`kyu.kp-soft.dev`)"
+      entryPoints: [web]
+      service: kyu
+
+  services:
+    kyu:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.9:8080"

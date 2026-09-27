@@ -23,6 +23,7 @@ fn stack(applied_at: u64, last_backup: u64) -> StackState {
         natives: Vec::new(),
         incomplete_step: None,
         route_file: None,
+        extra_route_files: Vec::new(),
     }
 }
 

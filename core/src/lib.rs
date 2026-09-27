@@ -19,6 +19,7 @@ pub mod notify;
 pub mod ops;
 pub mod release_sig;
 pub mod retention;
+pub mod routes;
 pub mod runner;
 pub mod safety;
 pub mod sink;

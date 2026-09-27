@@ -1,0 +1,37 @@
+# Manual static routes for non-Ansible managed services.
+# These routes are NOT automatically removed when stacks are destroyed.
+# Edit this file and redeploy the platform stack to apply changes.
+
+http:
+  routers:
+    opnsense:
+      rule: "Host(`opn.kp-soft.dev`)"
+      entryPoints: [web]
+      service: opnsense
+
+    proxmox:
+      rule: "Host(`prox.kp-soft.dev`)"
+      entryPoints: [web]
+      service: proxmox
+
+  services:
+    opnsense:
+      loadBalancer:
+        servers:
+          # https, NOT http. OPNsense 301-redirects every http request to https and
+          # preserves the Host header, so http://10.10.5.1 produced an endless loop:
+          # opn.kp-soft.dev -> Cloudflare (https) -> tunnel -> Traefik web (http) ->
+          # OPNsense -> 301 to https://opn.kp-soft.dev -> round again. 120 such 301s
+          # were sitting in the access log. Fixed 2026-08-10.
+          - url: "https://10.10.5.1"
+        serversTransport: "insecureTransport"
+
+    proxmox:
+      loadBalancer:
+        servers:
+          - url: "https://10.10.5.250:8006"
+        serversTransport: "insecureTransport"
+
+  serversTransports:
+    insecureTransport:
+      insecureSkipVerify: true

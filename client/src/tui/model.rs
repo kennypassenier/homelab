@@ -1443,6 +1443,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
             manifest,
             files: vec![],
             env: Default::default(),
+            extra_routes: Vec::new(),
             gateway_route: None,
             checks: Default::default(),
         },

@@ -140,3 +140,14 @@ apps: []
 # which it did not before: losing the container would have lost the only
 # copy of the file that makes the service exist.
 natives: [kyu, kyu-runner, http-switchboard]
+
+# fix-91 (expert panel, routes-outside-repo-unvalidated, 2026-09-27):
+# kyu.kp-soft.dev. Written by hand on the gateway as manual-kyu.yml;
+# routes/manual-kyu.yml is that file byte for byte, read from CT 104 the day
+# it was brought in. Its own comment says a native stack cannot carry a
+# route — no longer true, but it is kept as it is so the first deploy changes
+# nothing. It keeps its name rather than becoming 109-app-kyu.yml: a rename
+# would leave the old file routing the same hostname beside the new one
+# until someone removed it by hand.
+extra_routes:
+  - filename: manual-kyu.yml

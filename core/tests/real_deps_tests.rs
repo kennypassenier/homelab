@@ -177,6 +177,7 @@ fn spec(files_content: &str) -> DeploySpec {
             mode: None,
         }],
         env: Default::default(),
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     }

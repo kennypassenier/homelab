@@ -425,230 +425,889 @@ pub fn scan_local_stacks(base: &Path) -> Vec<(String, PathBuf)> {
     out.sort();
     out
 }
-/// The repositories a stack's data actually lives in, named the way restic
-/// names them. One per owning app, not one per stack — the runbook said the
-/// latter and was wrong for every stack in the fleet.
-fn restic_repos(m: &homelab_core::manifest::StackManifest) -> String {
-    let groups = homelab_core::ops::backup::owner_groups(m);
-    if groups.is_empty() {
-        return "no /appdata paths — nothing to restore".to_string();
-    }
-    groups
-        .iter()
-        .map(|(owner, _)| format!("`…:{}-config`", owner))
-        .collect::<Vec<_>>()
-        .join(", ")
+// ── E7: the disaster-recovery runbook ───────────────────────────────────────
+//
+// Rewritten at the Phase 8 gate (Kenny, "Herschrijven", 2026-09-27): every
+// command below is taken from the code that does the same thing when the
+// daemon is up, and every path and name is read from that code or from the
+// stack files rather than typed into the prose. Where the code keeps no
+// answer (where the offline password copy is kept) the text says so.
+
+/// The host's state directory. Derived from the restic password file, which
+/// `BackupCfg::default()` places in `<state_dir>/secrets/`, so the document
+/// and the backup code cannot name two different directories.
+fn runbook_state_dir(bcfg: &homelab_core::ops::backup::BackupCfg) -> String {
+    Path::new(&bcfg.password_file)
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "/var/lib/homelab".into())
 }
 
-/// How this stack comes back, which is not the same command for every stack.
-///
-/// A native stack has no compose apps and `homelab deploy` is not its path:
-/// kyu and almanac are systemd units, adopted rather than deployed. The
-/// runbook said "deploy" for all thirteen — harmless while everything works,
-/// and exactly the wrong instruction at the moment it is read.
-fn recreate_line(dir_name: &str, m: &homelab_core::manifest::StackManifest) -> String {
-    if m.apps.is_empty() {
-        format!(
-            "`homelab adopt stacks/{}` — native services; the unit files and \
-             binaries come from the service's own release, not from a compose pull",
-            dir_name
-        )
-    } else {
-        format!(
-            "`homelab deploy stacks/{}` (or by hand per Layer 2)",
-            dir_name
-        )
+/// `rclone:<remote>:<path>` split into the remote name and the folder, so
+/// the rclone check in Layer 3 names the same remote restic will use.
+fn rclone_parts(restic_base: &str) -> Option<(String, String)> {
+    let rest = restic_base.strip_prefix("rclone:")?;
+    let (remote, path) = rest.split_once(':')?;
+    Some((remote.to_string(), path.to_string()))
+}
+
+/// The vault file deploy.rs keeps for a file a native unit reads: the
+/// basename only, under `<state_dir>/secrets/<stack>/` (`vault_key` in
+/// core/src/ops/deploy.rs). Repeated here because that function is private;
+/// the runbook must name the same file the deploy restores from.
+fn vault_file(vault: &str, stack: &str, path: &str) -> String {
+    format!(
+        "{}/{}/{}",
+        vault,
+        stack,
+        path.rsplit('/').next().unwrap_or(path)
+    )
+}
+
+/// Where a native unit's `service.yml` sits, for `homelab adopt`, which reads
+/// `<dir>/service.yml`. A stack with one unit keeps it at the top; a stack
+/// with several gives each unit a directory (see `native_services`).
+fn native_service_dir(stack_dir: &Path, dir_name: &str, unit: &str) -> Option<String> {
+    let top = stack_dir.join("service.yml");
+    let sub = stack_dir.join(unit).join("service.yml");
+    let unit_of = |p: &Path| -> Option<String> {
+        let raw = std::fs::read_to_string(p).ok()?;
+        serde_yaml::from_str::<homelab_proto::NativeServiceManifest>(&raw)
+            .ok()
+            .map(|m| m.unit)
+    };
+    if unit_of(&sub).as_deref() == Some(unit) {
+        return Some(format!("stacks/{}/{}", dir_name, unit));
     }
+    if unit_of(&top).as_deref() == Some(unit) {
+        return Some(format!("stacks/{}", dir_name));
+    }
+    None
+}
+
+fn is_native_stack(m: &homelab_core::manifest::StackManifest) -> bool {
+    m.native_only || (m.apps.is_empty() && !m.natives.is_empty())
+}
+
+/// One stack's section. Compose and native stacks come back by different
+/// routes, and the data of each lives in a different shape of snapshot, so
+/// the two are written differently.
+fn runbook_stack_section(
+    stack_dir: &Path,
+    dir_name: &str,
+    m: &homelab_core::manifest::StackManifest,
+    bcfg: &homelab_core::ops::backup::BackupCfg,
+    vault: &str,
+) -> String {
+    let mut s = format!("### {} (vmid {})\n\n", m.stack_name, m.vmid);
+    s.push_str(&format!(
+        "- Container: hostname `{}`, ip `{}` on `{}`{}, {} core(s), {} MiB RAM, {} MiB swap, \
+         {} GiB disk on `{}`, {} template `{}`, boot order {}.\n",
+        m.hostname,
+        m.network.ip,
+        m.network.bridge,
+        m.network
+            .vlan
+            .map(|v| format!(" VLAN {}", v))
+            .unwrap_or_default(),
+        m.resources.cores,
+        m.resources.memory_mb,
+        m.resources.swap_mb,
+        m.resources.disk_gb,
+        m.resources.storage,
+        if m.lxc.unprivileged {
+            "unprivileged,"
+        } else {
+            "privileged,"
+        },
+        m.lxc.template,
+        m.boot
+            .order
+            .map(|o| o.to_string())
+            .unwrap_or_else(|| "unset".into()),
+    ));
+
+    let groups = homelab_core::ops::backup::owner_groups(m);
+    let native = is_native_stack(m);
+    if native {
+        s.push_str("- Runs no docker: native systemd services only.\n");
+        let services = native_services(stack_dir);
+        if services.is_empty() {
+            s.push_str(&format!(
+                "- No `service.yml` was found in `stacks/{}`, so `homelab adopt stacks/{}` \
+                 and `homelab install-native` have nothing to read until one is written. \
+                 Rebuild the container by the native route in Layer 2.\n",
+                dir_name, dir_name
+            ));
+        }
+        // Several units may read files with the same basename; the vault keeps
+        // one file per basename per stack, so say which ones share.
+        let mut claims: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (svc, unit_file) in &services {
+            let mut files: Vec<String> = Vec::new();
+            if let Some(uf) = unit_file {
+                let need = homelab_core::native::unit_prereqs(uf);
+                files.extend(need.env_files.iter().cloned());
+                files.extend(need.credentials.iter().cloned());
+            } else if let Some(e) = &svc.env_file {
+                files.push(e.clone());
+            }
+            files.sort();
+            files.dedup();
+            for f in files {
+                claims
+                    .entry(vault_file(vault, &m.stack_name, &f))
+                    .or_default()
+                    .push(format!("{} (`{}`)", svc.unit, f));
+            }
+        }
+        for (svc, unit_file) in &services {
+            let adopt_dir = native_service_dir(stack_dir, dir_name, &svc.unit)
+                .unwrap_or_else(|| format!("stacks/{}", dir_name));
+            s.push_str(&format!("- Unit `{}`:\n", svc.unit));
+            s.push_str(&format!(
+                "  - program `{}`, {}; update policy {}.\n",
+                svc.binary,
+                match &svc.release_repo {
+                    Some(r) => format!(
+                        "from the GitHub release `{}` (asset `{}`)",
+                        r,
+                        svc.asset_name()
+                    ),
+                    None => "no release_repo, so no recorded source for the binary".into(),
+                },
+                match svc.update_policy {
+                    homelab_core::native::UpdatePolicy::Auto => "auto",
+                    homelab_core::native::UpdatePolicy::Manual => "manual",
+                }
+            ));
+            // The deploy reads `<unit>/<unit>.service` and nothing else; the
+            // top-level spot is where `native_services` also looks.
+            let in_unit_dir = stack_dir
+                .join(&svc.unit)
+                .join(format!("{}.service", svc.unit));
+            let unit_rel = if in_unit_dir.exists() {
+                format!("`stacks/{}/{}/{}.service`", dir_name, svc.unit, svc.unit)
+            } else if unit_file.is_some() {
+                format!(
+                    "`stacks/{}/{}.service` (NOT where the deploy looks, which is \
+                     `{}/{}.service`)",
+                    dir_name, svc.unit, svc.unit, svc.unit
+                )
+            } else {
+                "NOT FOUND".to_string()
+            };
+            s.push_str(&format!(
+                "  - unit file {} in the repository; the container's copy is \
+                 `/etc/systemd/system/{}.service`.\n",
+                unit_rel, svc.unit
+            ));
+            if svc.stateless || svc.data_dirs.is_empty() {
+                s.push_str("  - data: none, declared stateless, so no repository.\n");
+            } else {
+                let what = match &svc.backup_from_newest {
+                    Some(glob) => format!(
+                        "the newest file matching `{}` (the service's own verified copy, \
+                         refused when older than {} h), not the live directory. That copy is \
+                         a complete database: put it back as the live file and delete any \
+                         `-wal`/`-shm` beside it (the comment above `backup_from_newest` in \
+                         `{}/service.yml` names the file)",
+                        glob,
+                        homelab_core::ops::native::MAX_OWN_COPY_AGE_S / 3600,
+                        adopt_dir
+                    ),
+                    None => format!(
+                        "a tar of {}",
+                        svc.data_dirs
+                            .iter()
+                            .map(|d| format!("`{}`", d))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                };
+                s.push_str(&format!(
+                    "  - data: repository `{}/{}-config`, archive `/{}-data.tar` holding {}.\n",
+                    bcfg.restic_base, svc.unit, svc.unit, what
+                ));
+            }
+            let mine: Vec<(&String, &Vec<String>)> = claims
+                .iter()
+                .filter(|(_, who)| who.iter().any(|w| w.starts_with(&format!("{} ", svc.unit))))
+                .collect();
+            for (vf, who) in mine {
+                let path = who
+                    .iter()
+                    .find(|w| w.starts_with(&format!("{} ", svc.unit)))
+                    .cloned()
+                    .unwrap_or_default();
+                if who.len() > 1 {
+                    s.push_str(&format!(
+                        "  - vault copy of {}: `{}`, SHARED with {}. The vault keeps one file \
+                         per basename per stack, so it holds whichever unit's file was \
+                         written last; check it against each unit before a rebuild relies on it.\n",
+                        path,
+                        vf,
+                        who.iter()
+                            .filter(|w| !w.starts_with(&format!("{} ", svc.unit)))
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                } else {
+                    s.push_str(&format!("  - vault copy of {}: `{}`.\n", path, vf));
+                }
+            }
+            s.push_str(&format!(
+                "  - re-register a running unit after the daemon lost its state (needs the \
+                 daemon): `homelab adopt {}`. Adoption only records a service that is \
+                 already active; it never starts one.\n",
+                adopt_dir
+            ));
+        }
+        if services.is_empty() {
+            // The stack names its re-registration command even with no
+            // service file, so the gap above is read next to it.
+            s.push_str(&format!(
+                "- Re-register (needs the daemon and a service.yml): `homelab adopt stacks/{}`.\n",
+                dir_name
+            ));
+        }
+        s.push_str(
+            "- Rebuild: the native route in Layer 2, then this stack's data by Layer 4 \
+             (native services).\n",
+        );
+    } else {
+        s.push_str(&format!(
+            "- Apps (docker compose, started in this order): {}. Files in the container \
+             under `/opt/{}/<app>/`.\n",
+            m.apps.join(", "),
+            m.stack_name
+        ));
+        s.push_str(&format!(
+            "- Rebuild (needs the daemon): `homelab deploy stacks/{}`, which also refills \
+             every empty data directory from its latest snapshot before the apps start. \
+             Without the daemon: Layer 2.\n",
+            dir_name
+        ));
+        if groups.is_empty() {
+            s.push_str("- Data: no backed-up paths, so nothing to restore.\n");
+        } else {
+            s.push_str("- Data, one restic repository per owning app:\n");
+            for (owner, paths) in &groups {
+                s.push_str(&format!(
+                    "  - `{}/{}-config`: {}\n",
+                    bcfg.restic_base,
+                    owner,
+                    paths
+                        .iter()
+                        .map(|p| format!("`{}`", p))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+        }
+    }
+    for st in &m.storage {
+        if let Some(why) = &st.no_backup {
+            let why = why.trim().trim_end_matches('.');
+            s.push_str(&format!(
+                "- NOT backed up, on purpose: `{}`. The stack file's reason: {}.\n",
+                st.host_path, why
+            ));
+        } else if st.no_data {
+            s.push_str(&format!(
+                "- Holds nothing by declaration (`no_data`), so no repository: `{}`.\n",
+                st.host_path
+            ));
+        }
+    }
+    for dm in &m.data_mounts {
+        s.push_str(&format!(
+            "- Host directory mounted in, never created or backed up by this suite: `{}` at \
+             `{}`{}.\n",
+            dm.host_path,
+            dm.mount_point,
+            dm.note
+                .as_deref()
+                .map(|n| format!(" ({})", n.trim().trim_end_matches('.')))
+                .unwrap_or_default()
+        ));
+    }
+    s.push('\n');
+    s
 }
 
 /// E7: generate the disaster-recovery runbook from the local stacks dir.
-/// Deliberately plain markdown with copy-pasteable commands — this document
+/// Deliberately plain markdown with copy-pasteable commands: this document
 /// must be useful when the TUI, the host daemon, or the whole host is down.
 /// Returns the number of stacks included.
 pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, String> {
+    use homelab_core::ops::backup::{BackupCfg, RESTIC_CACHE_DIR};
     let stacks = scan_local_stacks(stacks_dir);
-    let mut doc = String::new();
-    doc.push_str(
-        "# Disaster-recovery runbook\n\n\
-         *Generated by `homelab runbook` — regenerate after every stack change.*\n\n\
-         This document assumes the worst: the TUI is gone, the host daemon is\n\
-         down, maybe the whole Proxmox host is fresh. Everything below is plain\n\
-         shell on the Proxmox host (root) unless stated otherwise.\n\n\
-         ## Layer 0 — What runs where\n\n\
-         - Proxmox host `10.10.5.250` (ssh root, key auth).\n\
-         - **Four** ZFS pools are attached to the Proxmox host, not two. This\n\
-           line said two until 2026-09-02, and following it after a host loss\n\
-           would have re-attached half the storage. Read off the machine that\n\
-           day: `HDD12TB` (10.9T), `HDD18TB` (16.4T), `HDD4TB` (3.62T),\n\
-           `HDD2TB` (1.81T).\n\
-         - CT 103 (infra-fileserver), which shares everything over Samba, has\n\
-           a subvolume on **three** of them: `HDD12TB/subvol-103-disk-0`\n\
-           (8.40T), `HDD18TB/subvol-103-disk-0` (4.78T) and\n\
-           `HDD4TB/subvol-103-disk-0` (45.3G) — 13.2 TB in total. `HDD2TB`\n\
-           carries paperless's media and consume datasets. Losing a container\n\
-           never loses this data; losing the host means re-attaching **all\n\
-           four** pools first.\n\
-         - `HDD18TB/replica/...` holds the E8 replicas of the 2TB and 4TB\n\
-           pools; `HDD18TB/REPLICA_*` the frozen ones from the retired cron\n\
-           script. A replica is a COPY and is never the thing to mount at a\n\
-           live path — one of them was set to do exactly that (F177), so\n\
-           check `canmount` before mounting any of them.\n\
-         - App config data lives on the host under `/appdata/<stack>/…`,\n\
-           bind-mounted into each container — it survives container recreation\n\
-           and is what restic backs up.\n\
-         - Host daemon: `homelab-host.service`, config `/etc/homelab/host.toml`\n\
-           (token), state + git intent repo + incidents under `/var/lib/homelab`.\n\n\
-         ## Layer 1 — Recover the host daemon\n\n\
-         ```sh\n\
-         systemctl status homelab-host       # is it running?\n\
-         journalctl -u homelab-host -n 50    # why not?\n\
-         curl -sk https://127.0.0.1:8443/api/health\n\
-         ```\n\
-         Reinstall if needed: build `homelab-host` (Debian 12 target), copy to\n\
-         `/usr/local/bin/homelab-host`, keep the existing `/etc/homelab/host.toml`\n\
-         and systemd unit, `systemctl daemon-reload && systemctl restart homelab-host`.\n\
-         The TLS cert lives in `/var/lib/homelab` — keep it to keep the client pin.\n\n\
-         ## Layer 2 — Recover a stack without the daemon\n\n\
-         Every stack is just an LXC + docker compose files. By hand:\n\
-         ```sh\n\
-         pct list                              # what exists\n\
-         pct start <vmid>\n\
-         pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose up -d'\n\
-         ```\n\
-         The exact files the daemon deployed are in git: `/var/lib/homelab/repo`.\n\n\
-         ## Layer 3 — Restore data from backup\n\n\
-         ## Layer 3 — Restore the HOST itself\n\
-         \n\
-         Do this one FIRST when the host is gone, because everything below\n\
-         needs it. The repository is `host-meta-config` and it holds:\n\
-         \n\
-         ```sh\n\
-         /var/lib/homelab/repo        # every applied compose file + its history\n\
-         /var/lib/homelab/secrets     # the vault, INCLUDING restic.pw\n\
-         /var/lib/homelab/state.json  # what was deployed where\n\
-         /var/lib/homelab/tls-*.pem   # keep these to keep the client pin\n\
-         /etc/homelab/host.toml       # the token and every setting\n\
-         ```\n\
-         \n\
-         **The chicken and egg, and it is real:** `restic.pw` lives INSIDE this\n\
-         repository, so it cannot be used to open it. The offline copy is in\n\
-         Kenny's Bitwarden. Without that, nothing below can be read either —\n\
-         every repository uses the same password.\n\
-         \n\
-         This layer did not exist until 2026-09-02. The runbook named the\n\
-         per-stack repositories and never mentioned the one holding the keys\n\
-         to all of them, and `host.toml` was in no backup at all.\n\
-         \n\
-         Every `/appdata/<stack>` is a plain directory on `pve-root`, so a\n\
-         single restic restore covers all of them and the order does not\n\
-         matter. That was NOT true until 2026-09-02:\n\
-         `/appdata/paperwork/paperless-config` was a mounted ZFS dataset, and\n\
-         restoring into it before mounting would have hidden the result\n\
-         (F182). Kenny levelled it with the rest; the old dataset is frozen at\n\
-         `/HDD2TB/paperless-config-frozen` with `canmount=off` so it can never\n\
-         come back over that path.\n\
-         \n\
-         \n\
-         ## Layer 4 — Restore a stack's data\n\
-         \n\
-         Restic repos are per OWNING APP, not per stack:\n\
-         `rclone:gdrive:homelab-backups/<app>-config` — the exact names per\n\
-         stack are listed below. Verified 2026-09-02: every repository this\n\
-         document names does exist.\n\
-         ```sh\n\
-         export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<app>-config\n\
-         export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw\n\
-         restic snapshots\n\
-         restic restore latest --target /\n\
-         ```\n\
-         \n\
-         **A restore brings back what was retired after the snapshot** (gap-16).\n\
-         almanac retires a source by renaming its profile to `*.toml.retired`\n\
-         in `/appdata/almanac/almanac-config/profiles/`, at runtime and without\n\
-         a deploy. A snapshot taken before that rename still holds the live\n\
-         `*.toml`, so restoring it makes almanac load the retired source again.\n\
-         After restoring almanac, compare `ls profiles/` with the list of\n\
-         retired sources before starting the service.\n\
-         \n\
-         ## Stacks\n\n",
-    );
-    let mut included = 0usize;
+    let bcfg = BackupCfg::default();
+    let su = homelab_core::ops::selfupdate::SelfUpdateCfg::default();
+    let state = runbook_state_dir(&bcfg);
+    let vault = format!("{}/secrets", state);
+    let base = bcfg.restic_base.clone();
+    let pw = bcfg.password_file.clone();
+    // Where host.toml lives when HOMELAB_CONFIG does not say otherwise:
+    // `load_config` in host/src/main.rs, and the one path outside the state
+    // directory that `backup_host_meta` snapshots.
+    let host_toml = "/etc/homelab/host.toml";
+    let port = "8443"; // `load_config`: listen defaults to 0.0.0.0:8443
+    let (remote, folder) =
+        rclone_parts(&base).unwrap_or_else(|| ("<remote>".into(), "<folder>".into()));
+    let client_host = crate::repo_config::load(stacks_dir)
+        .ok()
+        .flatten()
+        .and_then(|(_, c)| c.host);
+    let no_touch = homelab_core::safety::DEFAULT_NO_TOUCH
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // Parse every stack once; the fleet-wide facts are read off the set.
+    let mut parsed: Vec<(
+        String,
+        PathBuf,
+        Option<homelab_core::manifest::StackManifest>,
+    )> = Vec::new();
     for (name, path) in &stacks {
         let raw = std::fs::read_to_string(path.join("lxc-compose.yml"))
             .map_err(|e| format!("{}: {}", name, e))?;
-        // Legacy v1 stacks in the same dir don't parse as v2 manifests —
-        // list them as such rather than aborting the whole runbook.
-        let m: homelab_core::manifest::StackManifest = match serde_yaml::from_str(&raw) {
-            Ok(m) => m,
-            Err(_) => {
-                doc.push_str(&format!(
-                    "### {} — LEGACY (v1 manifest, not deployable by v2)\n\n\
-                     Recover by hand per Layer 2, or migrate it to a v2 stack first.\n\n",
-                    name
-                ));
-                continue;
-            }
-        };
-        included += 1;
-        doc.push_str(&format!(
-            "### {} (vmid {})\n\n\
-             - hostname `{}`, ip `{}`\n\
-             - resources: {} core(s), {} MiB RAM, {} MiB swap, {} GiB disk\n\
-             - apps: {}\n\
-             - recreate from scratch: {}\n\
-             - data restore from: {}\n{}\n",
-            m.stack_name,
-            m.vmid,
-            m.hostname,
-            m.network.ip,
-            m.resources.cores,
-            m.resources.memory_mb,
-            m.resources.swap_mb,
-            m.resources.disk_gb,
-            if m.apps.is_empty() {
-                "none — native services under systemd, not compose".to_string()
-            } else {
-                m.apps.join(", ")
-            },
-            recreate_line(name, &m),
-            restic_repos(&m),
-            not_kept(&m),
-        ));
+        let m = serde_yaml::from_str::<homelab_core::manifest::StackManifest>(&raw).ok();
+        parsed.push((name.clone(), path.clone(), m));
     }
-    doc.push_str(
-        "## Full-host rebuild order\n\n\
-         1. Install Proxmox, restore network config (vmbr0, VLAN 10).\n\
-         2. Re-attach `/HDD12TB` + `/HDD18TB` mounts.\n\
-         3. Restore `/etc/homelab/host.toml` + `/var/lib/homelab` (or accept a\n\
-            new TLS cert + re-pin the client, and a fresh token).\n\
-         4. Recreate no-touch guests from Proxmox backups (HA VM 101 first).\n\
-         5. `homelab deploy` each stack above; restic restore fills the data.\n",
-    );
-    std::fs::write(out_path, &doc).map_err(|e| e.to_string())?;
-    Ok(included)
-}
-
-/// Z3: what this stack deliberately does NOT keep, and why.
-///
-/// A runbook that lists only what can be restored quietly implies everything
-/// else is covered. Naming the exceptions is the difference between reading
-/// "the cache is not in the backup, on purpose, because it re-downloads" at
-/// 3am and concluding the backup is broken.
-fn not_kept(m: &homelab_core::manifest::StackManifest) -> String {
-    let lines: Vec<String> = m
-        .storage
+    let manifests: Vec<&homelab_core::manifest::StackManifest> =
+        parsed.iter().filter_map(|(_, _, m)| m.as_ref()).collect();
+    let mut networks: Vec<String> = manifests
         .iter()
-        .filter_map(|s| {
-            s.no_backup
-                .as_ref()
-                .map(|why| format!("- NOT backed up: `{}` — {}", s.host_path, why))
+        .map(|m| {
+            format!(
+                "`{}`{} (gateway `{}`)",
+                m.network.bridge,
+                m.network
+                    .vlan
+                    .map(|v| format!(" VLAN {}", v))
+                    .unwrap_or_default(),
+                m.network.gateway
+            )
         })
         .collect();
-    if lines.is_empty() {
-        String::new()
-    } else {
-        lines.join("\n") + "\n"
+    networks.sort();
+    networks.dedup();
+    let mut templates: Vec<String> = manifests
+        .iter()
+        .map(|m| {
+            format!(
+                "`{}` ({})",
+                m.lxc.template,
+                if m.lxc.unprivileged {
+                    "unprivileged"
+                } else {
+                    "privileged"
+                }
+            )
+        })
+        .collect();
+    templates.sort();
+    templates.dedup();
+    // Pools: the first path component of every data mount, with the stacks
+    // that mount something from it.
+    let mut pools: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for m in &manifests {
+        for dm in &m.data_mounts {
+            if let Some(first) = dm.host_path.trim_start_matches('/').split('/').next() {
+                if !first.is_empty() {
+                    let e = pools.entry(first.to_string()).or_default();
+                    if !e.contains(&m.stack_name) {
+                        e.push(m.stack_name.clone());
+                    }
+                }
+            }
+        }
     }
+    let pools_line = if pools.is_empty() {
+        "none of the stack files mount a host directory from a pool".to_string()
+    } else {
+        pools
+            .iter()
+            .map(|(p, who)| format!("`{}` (mounted by {})", p, who.join(", ")))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut boot: Vec<(u16, u16, String)> = manifests
+        .iter()
+        .map(|m| {
+            (
+                m.boot.order.unwrap_or(u16::MAX),
+                m.vmid,
+                m.stack_name.clone(),
+            )
+        })
+        .collect();
+    boot.sort();
+
+    let mut doc = String::new();
+    doc.push_str("# Disaster-recovery runbook\n\n");
+    doc.push_str(
+        "*Generated by `homelab runbook` from the stack files under `stacks/`, \
+         `config/client.toml` and the code named in each section. Do not edit by hand: \
+         regenerate after changing a stack file or the backup code, and a test fails \
+         until you do.*\n\n",
+    );
+    doc.push_str(
+        "Written for the worst case: the TUI is unavailable, the `homelab-host` daemon is \
+         down, and the Proxmox host may be a fresh install. Every step is a shell command \
+         run as root on the Proxmox host unless it says otherwise. A step that uses the \
+         `homelab` client says *needs the daemon*, and has a shell equivalent beside it.\n\n\
+         Placeholders: `<vmid>`, `<stack>`, `<app>` and `<unit>` are filled in from the \
+         Stacks section near the end.\n\n",
+    );
+
+    // ── Layer 0 ──
+    doc.push_str("## Layer 0: What runs where\n\n");
+    doc.push_str(&format!(
+        "- **The daemon.** `homelab-host`, a systemd service on the Proxmox host. Program \
+         `{cur}`; the one before the last self-update is kept at `{prev}`. Configuration \
+         `{toml}` (the `HOMELAB_CONFIG` variable overrides the path). State directory \
+         `{state}` (the `state_dir` setting overrides it). Listens on port {port} over TLS.\n\
+         - **Clients** reach the daemon at {client}. The address and the certificate pin are \
+         in `config/client.toml` in the repository; each machine's token is `HOMELAB_TOKEN` \
+         in `~/.config/homelab/env`.\n\
+         - **The state directory** holds `state.json` (what is deployed where), `repo/` (a git \
+         history of every file each deploy sent), `secrets/` (the vault, below), \
+         `tls-cert.pem` and `tls-key.pem` (the daemon's certificate), `journal.jsonl` and \
+         `incidents/` (operation records) and `restic-cache/`.\n\
+         - **The vault** `{vault}`: `restic.pw` (the one password for every repository), \
+         `<stack>/<app>.env` for each compose app that has an `.env`, and \
+         `<stack>/<file>` for each env or credential file a native unit reads.\n\
+         - **Backups** are restic repositories behind `{base}`. The name is \
+         `<owner>-config`: one per owning app for a compose stack, one per unit for a native \
+         stack, `host-meta-config` for the daemon's own state, and `<name>-config` for each \
+         `[[device_backups]]` entry in `{toml}`. Every repository opens with the same \
+         password file `{pw}`. (`BackupCfg::default()` in core/src/ops/backup.rs; \
+         `restic_base` and `restic_password_file` in `{toml}` override both.)\n\
+         - **App data** lives on the host under `/appdata/<stack>/<app>-config` and is \
+         bind-mounted into the container at the same path, so a container can be rebuilt \
+         without touching it.\n\
+         - **ZFS pools** referenced by the stack files: {pools}. Replication jobs are the \
+         `[[zfs_jobs]]` entries in `{toml}` (Layer 5).\n\
+         - **Guests this suite never touches**, whatever a stack file says: vmid {no_touch} \
+         (`DEFAULT_NO_TOUCH` in core/src/safety.rs; a `no_touch` list in `{toml}` can only \
+         add to it). They come back from Proxmox's own backups, not from this runbook.\n\n",
+        cur = su.current,
+        prev = su.prev,
+        toml = host_toml,
+        state = state,
+        port = port,
+        client = client_host
+            .as_deref()
+            .map(|h| format!("`{}`", h))
+            .unwrap_or_else(|| {
+                "the address in `config/client.toml` (not found beside this stacks directory)"
+                    .into()
+            }),
+        vault = vault,
+        base = base,
+        pw = pw,
+        pools = pools_line,
+        no_touch = no_touch,
+    ));
+
+    // ── Layer 1 ──
+    doc.push_str("## Layer 1: Recover the host daemon\n\n");
+    doc.push_str(&format!(
+        "Is it running, and if not, why:\n\n```sh\n\
+         systemctl status {svc}\n\
+         journalctl -u {svc} -n 50 --no-pager\n\
+         curl -sk https://127.0.0.1:{port}/api/health     # answers: ok\n\
+         curl -sk https://127.0.0.1:{port}/api/version\n\
+         ```\n\n\
+         The daemon refuses to start, and says so in the journal, when `{toml}` does not \
+         parse as TOML, when it is not a valid host config, or when the token is shorter \
+         than 16 characters. A key it does not know is a `WARNING` line, not a refusal.\n\n\
+         **A self-update that never came up.** A self-update copies the running program to \
+         `{prev}`, installs the new one, and writes `{marker}`; the new program deletes the \
+         marker once it has served for a few seconds. A marker that is still there means the \
+         update was never accepted. Put the previous program back:\n\n```sh\n\
+         ls -l {cur} {prev} {marker}\n\
+         {prev} --selfcheck                 # prints its version when it can run\n\
+         install -m 755 {prev} {cur}\n\
+         rm -f {marker}\n\
+         systemctl restart {svc}\n\
+         ```\n\n\
+         **No usable program at all.** Fetch the released one on a workstation with an \
+         authenticated `gh` (the release carries `homelab-host` and `SHA256SUMS`), check it, \
+         copy it over, and install it on the host:\n\n```sh\n\
+         # workstation\n\
+         gh release download --repo {repo} --pattern homelab-host --pattern SHA256SUMS\n\
+         sha256sum -c --ignore-missing SHA256SUMS\n\
+         scp homelab-host root@<proxmox-host>:{cur}.new\n\
+         # Proxmox host\n\
+         {cur}.new --selfcheck && install -m 755 {cur}.new {cur}\n\
+         systemctl restart {svc}\n\
+         ```\n\n\
+         To build it instead, `make host-binary` in the repository builds it against \
+         Debian 12 in docker and leaves it at `target-debian/release/homelab-host`.\n\n\
+         **The unit file** `/etc/systemd/system/{svc}.service` is not in this repository and \
+         not in any backup this code makes. If it is gone, this is what the program needs: \
+         root (it runs `pct`, `zfs` and `restic`), and nothing on its command line, because \
+         it reads `{toml}` by default.\n\n```ini\n\
+         [Unit]\n\
+         Description=homelab host daemon\n\
+         Wants=network-online.target\n\
+         After=network-online.target\n\n\
+         [Service]\n\
+         ExecStart={cur}\n\
+         Restart=on-failure\n\n\
+         [Install]\n\
+         WantedBy=multi-user.target\n\
+         ```\n\n\
+         The self-update rollback hook (an `OnFailure=` unit that puts `{prev}` back while \
+         `{marker}` exists) is not in the repository either; without it a failed self-update \
+         is undone by hand as above.\n\n\
+         **The certificate pin.** The daemon's certificate is `{state}/tls-cert.pem` with \
+         `{state}/tls-key.pem`; when either is missing at start it makes a new pair \
+         (host/src/tls.rs). Clients refuse a certificate whose SHA-256 fingerprint differs \
+         from the `pin` in `config/client.toml`, and from the copy each machine keeps in \
+         `~/.config/homelab/pin`. Compare:\n\n```sh\n\
+         journalctl -u {svc} | grep 'TLS fingerprint' | tail -1\n\
+         openssl x509 -in {state}/tls-cert.pem -noout -fingerprint -sha256\n\
+         ```\n\n\
+         with `pin` in `config/client.toml` on a workstation. If they differ because the pair \
+         was regenerated, either restore both files from `host-meta-config` (Layer 3) and \
+         restart, or accept the new certificate: write the new fingerprint into `pin` in \
+         `config/client.toml`, and delete `~/.config/homelab/pin` on every client machine \
+         (a machine pin that disagrees with the repository pin is refused, not replaced).\n\n\
+         **The token** is `token` in `{toml}` (or `HOMELAB_TOKEN` in the daemon's \
+         environment). A new token means updating `HOMELAB_TOKEN` in \
+         `~/.config/homelab/env` on every client machine.\n\n",
+        svc = su.service,
+        port = port,
+        toml = host_toml,
+        cur = su.current,
+        prev = su.prev,
+        marker = su.marker,
+        repo = crate::release::REPO,
+        state = state,
+    ));
+
+    // ── Layer 2 ──
+    doc.push_str("## Layer 2: Recover a stack without the daemon\n\n");
+    doc.push_str(&format!(
+        "Every stack is one LXC container. Start it and look:\n\n```sh\n\
+         pct list\n\
+         pct start <vmid>\n\
+         ```\n\n\
+         **A compose stack.** The deploy puts each app's files in `/opt/<stack>/<app>/` \
+         inside the container and starts the apps in the order the stack file lists them. \
+         By hand:\n\n```sh\n\
+         pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose up -d'\n\
+         pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose ps'\n\
+         ```\n\n\
+         If the files are gone from the container, the last deployed copy of every file is \
+         in the daemon's git history at `{state}/repo/stacks/<stack>/`, one commit per \
+         deploy. A file under `rootfs/` belongs at the same absolute path in the container \
+         (`rootfs/etc/x` goes to `/etc/x`); every other file goes to `/opt/<stack>/`. The \
+         app's `.env` is not in that history; when the app has one, its copy is in the vault:\n\n```sh\n\
+         git -C {state}/repo log --oneline -- stacks/<stack>\n\
+         pct exec <vmid> -- mkdir -p /opt/<stack>/<app>\n\
+         pct push <vmid> {state}/repo/stacks/<stack>/<app>/docker-compose.yml /opt/<stack>/<app>/docker-compose.yml\n\
+         pct push <vmid> {vault}/<stack>/<app>.env /opt/<stack>/<app>/.env --perms 600\n\
+         ```\n\n\
+         When the daemon is up, `homelab deploy stacks/<stack>` does all of this from the \
+         repository, and recreates the container first when it is missing.\n\n\
+         **A native stack** runs systemd units and no docker. By hand:\n\n```sh\n\
+         pct exec <vmid> -- systemctl status <unit>\n\
+         pct exec <vmid> -- journalctl -u <unit> -n 50 --no-pager\n\
+         ```\n\n\
+         A unit starts only when its program, its account and the files named by \
+         `EnvironmentFile=` and `LoadCredential=` exist. The deploy prepares them in this \
+         order before it starts anything; by hand it is the same order:\n\n```sh\n\
+         pct push <vmid> {state}/repo/stacks/<stack>/<unit>/<unit>.service /etc/systemd/system/<unit>.service\n\
+         pct exec <vmid> -- useradd --system --no-create-home --shell /usr/sbin/nologin <user>   # User= in the unit\n\
+         pct push <vmid> {vault}/<stack>/<file> <path-the-unit-reads> --perms 600\n\
+         pct push <vmid> ./<asset> <program-path> --perms 755   # the verified release binary, see below\n\
+         pct exec <vmid> -- systemctl daemon-reload\n\
+         pct exec <vmid> -- systemctl enable --now <unit>\n\
+         ```\n\n\
+         The program comes from the unit's GitHub release (named per unit in the Stacks \
+         section). On a workstation: `gh release download --repo <release_repo> --pattern \
+         <asset> --pattern SHA256SUMS`, then `sha256sum -c --ignore-missing SHA256SUMS`, then \
+         copy it to the host.\n\n\
+         When the daemon is up, `homelab deploy stacks/<stack>` rebuilds a native stack too: \
+         it creates the container, writes each `<unit>/<unit>.service`, creates the unit's \
+         account, places the program from the unit's release where none exists (it never \
+         replaces one), puts back env and credential files from the vault, and starts a unit \
+         only when all of that is present. A unit left unstarted is named in the output; a \
+         missing program is installed with `homelab install-native stacks/<stack>/<unit>` (or \
+         `stacks/<stack>` for the unit whose `service.yml` sits at the top).\n\n",
+        state = state,
+        vault = vault,
+    ));
+
+    // ── Layer 3 ──
+    doc.push_str("## Layer 3: Restore the daemon's own state (host-meta)\n\n");
+    doc.push_str(&format!(
+        "Do this first when the host itself was lost: every later step needs the vault it \
+         brings back. The repository is `{base}/host-meta-config`, written nightly and by \
+         `homelab backup-host-meta` (`backup_host_meta` in core/src/ops/backup.rs). A \
+         snapshot holds:\n\n```sh\n\
+         {state}/secrets        # the vault, including restic.pw\n\
+         {state}/state.json     # what is deployed where\n\
+         {state}/tls-cert.pem   # the certificate the clients pin\n\
+         {state}/tls-key.pem\n\
+         {state}/repo           # the git history of every deployed file\n\
+         {toml}     # token, webhooks, zfs_jobs and every other setting\n\
+         /usr/local/bin/smart-textfile-collector.py     # these three only when present\n\
+         /etc/systemd/system/smart-collector.service\n\
+         /etc/systemd/system/smart-collector.timer\n\
+         ```\n\n\
+         Not in it: the `homelab-host` program and its unit file (Layer 1), rclone's own \
+         configuration, `journal.jsonl`, `incidents/` and `restic-cache/`.\n\n\
+         **The password is inside the thing it opens.** `restic.pw` is in this repository, \
+         and the same password opens every repository, so an offline copy of it is the one \
+         thing this whole runbook cannot do without. The code keeps no second copy. The \
+         offline copy is in Kenny's Bitwarden: the one statement in this document that no \
+         code can confirm.\n\n\
+         **rclone first.** restic reaches Google Drive through rclone's remote `{remote}`, \
+         whose configuration is in no backup. On a fresh host install `restic` and `rclone`, \
+         run `rclone config` to create the remote `{remote}` again, then:\n\n```sh\n\
+         rclone lsd {remote}:{folder}          # the remote works and the folder is there\n\
+         install -d -m 700 {vault}\n\
+         # write the offline copy of the password to {pw}, mode 600\n\
+         export RESTIC_REPOSITORY={base}/host-meta-config\n\
+         export RESTIC_PASSWORD_FILE={pw}\n\
+         export RESTIC_CACHE_DIR={cache}\n\
+         restic snapshots\n\
+         restic ls latest | head -50\n\
+         restic restore latest --target /\n\
+         ```\n\n\
+         The snapshot stores absolute paths, so `--target /` puts every file back where it \
+         was. Then start the daemon (Layer 1, when its program is not there yet) and do \
+         Layer 1's pin check: the restored certificate keeps the fingerprint the \
+         clients already pin.\n\n",
+        base = base,
+        state = state,
+        toml = host_toml,
+        remote = remote,
+        folder = folder,
+        vault = vault,
+        pw = pw,
+        cache = RESTIC_CACHE_DIR,
+    ));
+
+    // ── Layer 4 ──
+    doc.push_str("## Layer 4: Restore a stack's data\n\n");
+    doc.push_str(&format!(
+        "Repositories are named per owning app (or per native unit), not per stack: \
+         `{base}/<app>-config`. The exact names are in the Stacks section. Set once per \
+         shell:\n\n```sh\n\
+         export RESTIC_PASSWORD_FILE={pw}\n\
+         export RESTIC_CACHE_DIR={cache}\n\
+         ```\n\n\
+         **A compose stack.** When the daemon is up, `homelab restore stacks/<stack> \
+         [snapshot]` does the following, and by hand it is the same (`restore` in \
+         core/src/ops/backup.rs):\n\n```sh\n\
+         pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose down'   # every app\n\
+         export RESTIC_REPOSITORY={base}/<app>-config                   # every repository of the stack\n\
+         restic snapshots\n\
+         restic restore latest --target /\n\
+         pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose up -d'  # every app, in order\n\
+         ```\n\n\
+         The snapshots store the absolute host paths (`/appdata/<stack>/<app>-config`), so \
+         `--target /` puts the files back in place with the owners they had. The code starts \
+         the apps again even when the restore failed, and so should you. A rebuild does not \
+         need this step: `homelab deploy` restores each data directory it finds empty from \
+         that path's latest snapshot before the apps start, and when that fails it continues \
+         with the directory EMPTY and prints `AUTO-RESTORE FAILED` for it.\n\n\
+         **A native stack.** The nightly backup of a native unit is not a directory \
+         snapshot: it streams `tar` out of the container into restic, stored as one file \
+         `/<unit>-data.tar` (`backup_native` in core/src/ops/native.rs). Unpack it back \
+         inside the container, so file owners stay the container's own:\n\n```sh\n\
+         export RESTIC_REPOSITORY={base}/<unit>-config\n\
+         restic snapshots --path /<unit>-data.tar\n\
+         pct exec <vmid> -- systemctl stop <unit>\n\
+         restic dump --path /<unit>-data.tar latest /<unit>-data.tar | pct exec <vmid> -- tar -xf - -C /\n\
+         pct exec <vmid> -- systemctl start <unit>\n\
+         ```\n\n\
+         Do not use `homelab restore` for a native stack. It runs the compose route above: \
+         it stops no unit (it stops compose apps, and there are none) and runs `restic \
+         restore latest --target /`, which writes the archive itself to `/<unit>-data.tar` on \
+         the host and unpacks nothing. For the same reason a rebuild's automatic restore \
+         finds no snapshot for a native unit's directory and leaves it empty: its data \
+         always comes back by the commands above.\n\n\
+         **A restore brings back what was retired after the snapshot** (gap-16). almanac \
+         retires a source by renaming its profile to `*.toml.retired` in \
+         `/appdata/almanac/almanac-config/profiles/`, at runtime and without a deploy. A \
+         snapshot taken before that rename still holds the live `*.toml`, so restoring it \
+         makes almanac load the retired source again. After restoring almanac, compare \
+         `ls /appdata/almanac/almanac-config/profiles/` with the list of retired sources \
+         before starting the service.\n\n",
+        base = base,
+        pw = pw,
+        cache = RESTIC_CACHE_DIR,
+    ));
+
+    // ── Layer 5 ──
+    doc.push_str("## Layer 5: ZFS replicas\n\n");
+    doc.push_str(&format!(
+        "The daemon replicates the datasets named in `[[zfs_jobs]]` (`source`, `target`) in \
+         `{toml}` every night, and on `homelab zfs-replicate` (core/src/ops/zfs.rs). Each run \
+         takes `zfs snapshot -r <source>@{prefix}YYYYMMDD-HHMM`, sends the difference from \
+         the newest snapshot both sides share with `zfs send -RI ... | zfs receive -F -x \
+         mountpoint <target>`, and prunes only snapshots whose name starts with `{prefix}`, \
+         on both sides. A target with no snapshots at all gets a full send.\n\n\
+         `-x mountpoint` keeps a replica from arriving with its source's mountpoint, which \
+         would put the copy at the live path (F177, a replica claiming the live path of what \
+         it copies). A replica received before that change can still carry it, so check \
+         before mounting anything:\n\n```sh\n\
+         grep -A2 zfs_jobs {toml}\n\
+         zpool import                                   # pools a fresh install can see\n\
+         zfs list -r -o name,mountpoint,canmount,mounted <target>\n\
+         zfs list -H -t snapshot -o name -s creation -r <source> | tail -3\n\
+         ```\n\n\
+         A replica is a copy for reading. Never give it a mountpoint a stack uses.\n\n\
+         When a source and its target share no snapshot and the target already holds \
+         snapshots, the job stops rather than re-seeding, because a re-seed destroys that \
+         history. The choice is a person's: find out why the chain broke, or wipe the target \
+         with `zfs destroy -r <target>` and run the job again for a fresh full send.\n\n",
+        toml = host_toml,
+        prefix = homelab_core::ops::zfs::SNAP_PREFIX,
+    ));
+
+    // ── Stacks ──
+    doc.push_str("## Stacks\n\n");
+    doc.push_str(&format!(
+        "One section per directory under `stacks/`, read from its `lxc-compose.yml` and, for \
+         a native stack, each unit's `service.yml` and `.service` file. Repository names \
+         use the default base `{}`.\n\n",
+        base
+    ));
+    let mut included = 0usize;
+    for (name, path, m) in &parsed {
+        let Some(m) = m else {
+            doc.push_str(&format!(
+                "### {} (LEGACY: not a v2 stack file, not deployable by this version)\n\n\
+                 Recover it by hand per Layer 2, or migrate it to a v2 stack file first.\n\n",
+                name
+            ));
+            continue;
+        };
+        included += 1;
+        doc.push_str(&runbook_stack_section(path, name, m, &bcfg, &vault));
+    }
+
+    // A directory with a service.yml and no lxc-compose.yml is a service that
+    // was adopted into a container this suite did not build and cannot
+    // rebuild. `scan_local_stacks` skips it, so it is listed here instead of
+    // vanishing from the one document read after a loss.
+    let mut adopted_only: Vec<(String, homelab_proto::NativeServiceManifest)> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(stacks_dir) {
+        let mut dirs: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
+        dirs.sort();
+        for d in dirs {
+            if !d.is_dir() || d.join("lxc-compose.yml").exists() {
+                continue;
+            }
+            let name = d
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            for (svc, _) in native_services(&d) {
+                adopted_only.push((name.clone(), svc));
+            }
+        }
+    }
+    if !adopted_only.is_empty() {
+        doc.push_str(
+            "## Adopted services without a container file
+
+",
+        );
+        doc.push_str(
+            "These directories hold a `service.yml` and no `lxc-compose.yml`: the service was \
+             adopted into a container this suite did not build, so nothing here can rebuild \
+             the container. Once adopted, its data is backed up nightly like any native unit's (Layer 4).\n\n",
+        );
+        for (dir_name, svc) in &adopted_only {
+            doc.push_str(&format!(
+                "- **{}** (vmid {}, hostname `{}`): unit `{}`, program `{}`; data {}; \
+                 re-register with `homelab adopt stacks/{}` (needs the daemon).\n",
+                svc.stack_name,
+                svc.vmid,
+                svc.hostname,
+                svc.unit,
+                svc.binary,
+                if svc.stateless || svc.data_dirs.is_empty() {
+                    "none".to_string()
+                } else {
+                    format!(
+                        "in `{}/{}-config` as `/{}-data.tar`, a tar of {}",
+                        bcfg.restic_base,
+                        svc.unit,
+                        svc.unit,
+                        svc.data_dirs
+                            .iter()
+                            .map(|d| format!("`{}`", d))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                },
+                dir_name
+            ));
+        }
+        doc.push('\n');
+    }
+
+    // ── Full host ──
+    doc.push_str("## Full-host rebuild order\n\n");
+    doc.push_str(&format!(
+        "1. Install Proxmox and recreate the networks the stack files use: {nets}. Clients \
+         expect the daemon at {client}.\n\
+         2. Import the ZFS pools the stack files mount from ({pools}), and any pool named in \
+         `[[zfs_jobs]]`. Check replica mountpoints before anything mounts (Layer 5).\n\
+         3. Install `restic` and `rclone`, recreate the rclone remote `{remote}`, write \
+         `{pw}` from the offline copy, and restore `host-meta-config` (Layer 3).\n\
+         4. Put back the `homelab-host` program and its unit file, start it, and check the \
+         certificate fingerprint against the pin (Layer 1).\n\
+         5. Restore the guests this suite never touches (vmid {no_touch}) from Proxmox's own \
+         backups: `qmrestore` for a VM, `pct restore` for a container.\n\
+         6. Rebuild the templates the stacks clone: {templates}. `homelab template-build \
+         <vmid> <version>` builds an unprivileged one at that vmid, and \
+         `homelab template-build <vmid> <version> --privileged` a privileged one.\n\
+         7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), \
+         in boot order: {order}. A compose stack refills its empty data directories from \
+         restic while it deploys; a native stack's data comes back by Layer 4 afterwards.\n",
+        nets = if networks.is_empty() {
+            "none found".to_string()
+        } else {
+            networks.join(", ")
+        },
+        client = client_host
+            .as_deref()
+            .map(|h| format!("`{}`", h))
+            .unwrap_or_else(|| "the address in `config/client.toml`".into()),
+        pools = pools_line,
+        remote = remote,
+        pw = pw,
+        no_touch = no_touch,
+        templates = if templates.is_empty() {
+            "none found".to_string()
+        } else {
+            templates.join(", ")
+        },
+        order = boot
+            .iter()
+            .map(|(_, vmid, n)| format!("{} ({})", n, vmid))
+            .collect::<Vec<_>>()
+            .join(", "),
+    ));
+    std::fs::write(out_path, &doc).map_err(|e| e.to_string())?;
+    Ok(included)
 }
 
 // ── D11: stack export/import bundles ────────────────────────────────────────

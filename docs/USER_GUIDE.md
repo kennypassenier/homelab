@@ -1571,13 +1571,23 @@ homelab zfs-replicate
 ```
 
 or wait for the nightly run. Snapshots are recursive and named
-`homelab-YYYYMMDD-HHMM` (`core/src/ops/zfs.rs:42,96-99`). With a common
-snapshot the job sends incrementally (`zfs send -RI`); with an empty target it
-seeds (`zfs send -R`); with no common snapshot and a target that already holds
-snapshots it **refuses** and tells you how to wipe the target yourself
-(`core/src/ops/zfs.rs:255-292`, test `core/tests/zfs_tests.rs:168`). No jobs
-at all is an error, not a success (`core/src/ops/zfs.rs:171-176`). Retention
-uses the same tiers as restic (G8).
+`homelab-YYYYMMDD-HHMM` (`core/src/ops/zfs.rs`). Every dataset is sent on its
+own, never as one `-R` stream: incrementally from the replica's newest
+snapshot (`zfs send -I`), or as a full seed when the replica dataset does not
+exist yet or holds no snapshots. With no common snapshot and a target that
+already holds snapshots it **refuses** and tells you how to wipe the target
+yourself (test `e8_refuses_to_reseed_over_an_existing_history`). No jobs at
+all is an error, not a success. The source's retention uses the same tiers as
+restic (G8); the replica has its own, longer tiers and keeps whatever either
+policy keeps.
+
+The replica keeps its own history (fix-85): a snapshot or a whole dataset
+destroyed on the source stays on the replica, and a dataset whose source is
+gone is never pruned and is named in a warning each night. If the replica's
+newest snapshot of a dataset has left the source, that dataset is not sent
+and the run fails, because catching up would mean rolling the replica back
+(tests `a_dataset_destroyed_on_the_source_survives_on_the_replica`,
+`a_replica_whose_newest_snapshot_left_the_source_is_refused_not_rolled_back`).
 
 ### F · Observability
 

@@ -968,17 +968,34 @@ Put `[[zfs_jobs]]` tables after every top-level key: a key written below a
 
 **Runs** nightly (op-1 step 7) and on demand with `homelab zfs-replicate`
 (`host/src/main.rs:3789-3808`). Per job: `zfs snapshot -r
-<source>@homelab-YYYYMMDD-HHMM`, then an incremental send from the newest
-snapshot both sides share, or a full seed when the target holds no
-snapshots at all; received with `-x mountpoint` so a replica never claims
-its source's live mountpoint; then retention on both sides with the same
-tiers as restic, destroying only snapshots with the `homelab-` prefix
-(`core/src/ops/zfs.rs:161-353`).
+<source>@homelab-YYYYMMDD-HHMM`, then every dataset of the source is sent on
+its own (never one `-R` stream): an incremental from the replica dataset's
+newest snapshot, or a full seed when that dataset does not exist yet or
+holds no snapshots at all; received with `-x mountpoint` so a replica never
+claims its source's live mountpoint. Retention then runs on the source with
+the restic tiers and on the replica with its own longer tiers, keeping what
+either policy keeps; both destroy only snapshots with the `homelab-` prefix
+(`core/src/ops/zfs.rs`, `plan_replication`, `replica_forget`).
+
+**The replica keeps its own history** (fix-85, 2026-09-27). A snapshot
+destroyed on the source stays on the replica. A dataset destroyed on the
+source stays on the replica, is never sent into or pruned, and every run
+logs `"<replica dataset> is kept although its source <dataset> no longer
+exists"`. That line is the place to recover from: `zfs send` it back, or
+destroy it by hand once it is no longer wanted.
+
+**When the replica's newest snapshot left the source.** `"<target>@<snap>
+is the replica's newest snapshot and <source> no longer has it."` The
+dataset is not sent, the rest are, and the job fails. Receiving from the
+older shared snapshot would roll the replica back and destroy `<snap>`, so
+it is a person's call: find out why the source lost it, and only to accept
+losing it on the replica too, `zfs rollback -r <target>@<shared>` (**point
+of no return**) and `homelab zfs-replicate`.
 
 **When it refuses.** `"<source> and <target> share no snapshot, but
 <target> already holds <n> snapshot(s) (subtree included). Re-seeding would
 destroy that history, so this job stops here."`
-(`core/src/ops/zfs.rs:281-291`). The incremental chain broke. Host:
+(`core/src/ops/zfs.rs`, `no_common_base`). The incremental chain broke. Host:
 
 1. Read-only look at both sides:
 
@@ -993,7 +1010,7 @@ destroy that history, so this job stops here."`
    `homelab zfs-replicate` from the workstation.
 
 `"no zfs jobs configured (zfs_jobs in host.toml)"` means `homelab
-zfs-replicate` ran with no jobs (`core/src/ops/zfs.rs:171-176`).
+zfs-replicate` ran with no jobs (`core/src/ops/zfs.rs:432-437`).
 
 ---
 

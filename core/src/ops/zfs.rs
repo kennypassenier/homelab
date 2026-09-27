@@ -93,6 +93,267 @@ pub fn common_base(source: &[String], target: &[String]) -> Option<String> {
     // send is impossible and the caller must decide, not guess.
 }
 
+// fix-85 (expert panel, zfs-replica-mirrors-mistakes, 2026-09-27): the
+// replica keeps its own history.
+//
+// Until then every job was ONE `zfs send -RI | zfs receive -F`. A
+// replication stream (-R) received with -F destroys on the target every
+// snapshot and file system that no longer exists on the source
+// (zfs-receive(8)), so the replica was a mirror: measured on pve that day,
+// every replica dataset held exactly its source's snapshots and no hold. A
+// mistaken `zfs destroy -r HDD4TB/backups` would have reached
+// HDD18TB/replica/HDD4TB/backups the next night.
+//
+// Now every dataset of the source subtree is sent on its own, without -R, so
+// no stream carries the source's idea of what should exist. What the source
+// lost stays on the replica: a dataset the source no longer has is an
+// orphan, left untouched and never pruned; a snapshot the source destroyed
+// is kept until the replica's OWN retention (longer than the source's)
+// thins it.
+
+/// What one run does with one dataset of a job's subtree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DatasetStep {
+    /// Send everything from `base` up to the new snapshot. `base` is the
+    /// target's newest snapshot, never an older one (see `plan_replication`).
+    Incremental { base: String },
+    /// The target dataset does not exist yet: a full send creates it.
+    Seed,
+    /// The target exists with no snapshot anywhere in its subtree, so there
+    /// is no history on it to lose: a full send over it.
+    SeedEmpty,
+    /// The target already holds the new snapshot.
+    UpToDate,
+    /// Not sent; the replica is left exactly as it is. The run fails with
+    /// this text, after the other datasets were sent.
+    Refuse(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DatasetPlan {
+    pub source: String,
+    pub target: String,
+    pub step: DatasetStep,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReplicaPlan {
+    /// One entry per source dataset, parents before their children.
+    pub datasets: Vec<DatasetPlan>,
+    /// Target datasets whose source dataset no longer exists. Never sent
+    /// into, never pruned: they are the copy of what the source lost.
+    pub orphans: Vec<String>,
+}
+
+/// `zfs list` names grouped per dataset, snapshot names in listing order
+/// (oldest first when listed with `-s creation`). A line without `@` names a
+/// dataset with no snapshots; it is kept as an empty entry.
+fn group_by_dataset(list_stdout: &str) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for name in list_stdout
+        .lines()
+        .filter_map(|l| l.split_whitespace().next())
+    {
+        match name.split_once('@') {
+            Some((ds, snap)) => out
+                .entry(ds.to_string())
+                .or_default()
+                .push(snap.to_string()),
+            None => {
+                out.entry(name.to_string()).or_default();
+            }
+        }
+    }
+    out
+}
+
+/// `root` or a dataset under it, rebased onto `onto`.
+fn rebase(ds: &str, root: &str, onto: &str) -> Option<String> {
+    if ds == root {
+        Some(onto.to_string())
+    } else {
+        ds.strip_prefix(&format!("{}/", root))
+            .map(|rest| format!("{}/{}", onto, rest))
+    }
+}
+
+/// Decide, per dataset, what one run sends. Pure: the inputs are the stdout
+/// of `zfs list -H -t snapshot -o name -s creation -r <source>` (taken after
+/// the run's own `zfs snapshot -r`, so every source dataset appears),
+/// `zfs list -H -o name -t filesystem,volume -r <target>` (empty when the
+/// target does not exist), and the snapshot listing of the target.
+pub fn plan_replication(
+    job: &ZfsJob,
+    label: &str,
+    source_snaps: &str,
+    target_datasets: &str,
+    target_snaps: &str,
+) -> ReplicaPlan {
+    let src = group_by_dataset(source_snaps);
+    let tgt = group_by_dataset(target_snaps);
+    let mut exists: std::collections::BTreeSet<String> = tgt.keys().cloned().collect();
+    exists.extend(group_by_dataset(target_datasets).into_keys());
+
+    let mut plan = ReplicaPlan::default();
+    // BTreeMap order puts a parent before its children (a name sorts before
+    // every name it is a prefix of), so a seeded parent exists by the time
+    // its child is received.
+    for (s_ds, s_snaps) in &src {
+        let Some(t_ds) = rebase(s_ds, &job.source, &job.target) else {
+            continue;
+        };
+        let empty = Vec::new();
+        let t_snaps = tgt.get(&t_ds).unwrap_or(&empty);
+        let refused_parent = plan.datasets.iter().find(|p| {
+            matches!(p.step, DatasetStep::Refuse(_)) && t_ds.starts_with(&format!("{}/", p.target))
+        });
+        let step = if let Some(p) = refused_parent {
+            DatasetStep::Refuse(format!(
+                "{} is not sent because its parent {} was not replicated this run",
+                s_ds, p.source
+            ))
+        } else if !exists.contains(&t_ds) {
+            DatasetStep::Seed
+        } else if t_snaps.is_empty() {
+            // Emptiness is a property of the whole SUBTREE: the retired
+            // script's retention deleted parent snapshots while children kept
+            // theirs, so a populated replica can present an empty parent.
+            let subtree: usize = tgt
+                .iter()
+                .filter(|(d, _)| d.starts_with(&format!("{}/", t_ds)))
+                .map(|(_, v)| v.len())
+                .sum();
+            if subtree == 0 {
+                DatasetStep::SeedEmpty
+            } else {
+                DatasetStep::Refuse(no_common_base(s_ds, &t_ds, subtree))
+            }
+        } else {
+            let newest = t_snaps.last().expect("checked non-empty");
+            if newest == label {
+                DatasetStep::UpToDate
+            } else if s_snaps.contains(newest) {
+                DatasetStep::Incremental {
+                    base: newest.clone(),
+                }
+            } else if let Some(shared) = common_base(s_snaps, t_snaps) {
+                // The source lost the replica's newest snapshot (destroyed by
+                // hand, or rolled back). An incremental from the older shared
+                // one can only be received by rolling the replica back to it,
+                // which destroys the replica's newer snapshots: the very thing
+                // fix-85 exists to prevent. Stop and leave it to a person.
+                DatasetStep::Refuse(format!(
+                    "{t}@{n} is the replica's newest snapshot and {s} no longer has it. The \
+                     newest snapshot both still share is {b}; receiving from there would roll \
+                     {t} back and destroy {t}@{n} and every snapshot after {b}. {s} is not \
+                     replicated, and {t} is kept exactly as it is. Decide deliberately: find \
+                     out why the source lost {n}; to accept losing it on the replica too, run \
+                     `zfs rollback -r {t}@{b}` yourself and re-run.",
+                    t = t_ds,
+                    n = newest,
+                    s = s_ds,
+                    b = shared
+                ))
+            } else {
+                let subtree: usize = tgt
+                    .iter()
+                    .filter(|(d, _)| *d == &t_ds || d.starts_with(&format!("{}/", t_ds)))
+                    .map(|(_, v)| v.len())
+                    .sum();
+                DatasetStep::Refuse(no_common_base(s_ds, &t_ds, subtree))
+            }
+        };
+        plan.datasets.push(DatasetPlan {
+            source: s_ds.clone(),
+            target: t_ds,
+            step,
+        });
+    }
+    plan.orphans = exists
+        .into_iter()
+        .filter(|t| {
+            rebase(t, &job.target, &job.source)
+                .map(|s| !src.contains_key(&s))
+                .unwrap_or(false)
+        })
+        .collect();
+    plan
+}
+
+fn no_common_base(src: &str, tgt: &str, snaps: usize) -> String {
+    // The dangerous case the old script powered through.
+    format!(
+        "{} and {} share no snapshot, but {} already holds {} snapshot(s) (subtree \
+         included). Re-seeding would destroy that history, so this job stops here. Decide \
+         deliberately: investigate why the chain broke, or wipe the target yourself with \
+         `zfs destroy -r {}` and re-run for a fresh seed.",
+        src, tgt, tgt, snaps, tgt
+    )
+}
+
+/// The replica's own tiers (fix-85): denser than the source's default at
+/// every age (daily for two weeks, weekly for about four months, then monthly
+/// forever), because HDD18TB is where history is meant to outlive the
+/// source's shorter memory.
+pub fn replica_tiers() -> Vec<crate::retention::RetentionTier> {
+    use crate::retention::RetentionTier;
+    vec![
+        RetentionTier {
+            every_days: 1,
+            span_days: Some(14),
+        },
+        RetentionTier {
+            every_days: 7,
+            span_days: Some(120),
+        },
+        RetentionTier {
+            every_days: 30,
+            span_days: None,
+        },
+    ]
+}
+
+/// What the replica forgets: only what BOTH its own tiers and the source's
+/// tiers would forget. The source's tiers are live settings; taking the
+/// intersection means a longer source policy can never make the replica the
+/// shorter memory of the two. `forget_list` is used as it is (fix-42).
+pub fn replica_forget(
+    snapshots: &[(String, u64)],
+    source_tiers: &[crate::retention::RetentionTier],
+    now: u64,
+) -> Vec<String> {
+    let by_source = crate::retention::forget_list(snapshots, source_tiers, now);
+    crate::retention::forget_list(snapshots, &replica_tiers(), now)
+        .into_iter()
+        .filter(|id| by_source.contains(id))
+        .collect()
+}
+
+/// Full snapshot names (`ds@homelab-…`) to destroy, per dataset of a
+/// snapshot listing, deciding with `forget`. Only our own prefix is ever a
+/// candidate; datasets not in `only` (when given) are skipped entirely.
+fn prune_victims(
+    list_stdout: &str,
+    only: Option<&std::collections::BTreeSet<String>>,
+    now: u64,
+    forget: impl Fn(&[(String, u64)]) -> Vec<String>,
+) -> Vec<String> {
+    let mut victims = Vec::new();
+    for (ds, snaps) in group_by_dataset(list_stdout) {
+        if only.is_some_and(|o| !o.contains(&ds)) {
+            continue;
+        }
+        // One retention decision per dataset, applied to its own snaps.
+        let ours: Vec<(String, u64)> = snaps
+            .iter()
+            .filter(|s| s.starts_with(SNAP_PREFIX))
+            .map(|s| (format!("{}@{}", ds, s), snap_time(s, now)))
+            .collect();
+        victims.extend(forget(&ours));
+    }
+    victims
+}
+
 /// `homelab-20260827-1845` → unix time, so the shared retention engine can
 /// rank snapshots without a date library on the host.
 pub fn snap_time(name: &str, now: u64) -> u64 {
@@ -211,137 +472,174 @@ pub async fn replicate(
             Ok(StepOutcome::Changed)
         });
 
+        let list_snaps = |ds: &str| {
+            let ds = ds.to_string();
+            async move {
+                exec.run(&Cmd::new(
+                    "zfs",
+                    &[
+                        "list", "-H", "-t", "snapshot", "-o", "name", "-s", "creation", "-r", &ds,
+                    ],
+                    120,
+                ))
+                .await
+            }
+        };
+
+        // Filled by the replicate step for what follows it: the target
+        // datasets this run replicated (only those are pruned, with the
+        // replica's tiers) and the ones whose source is gone.
+        let mut replicated: std::collections::BTreeSet<String> = Default::default();
+        let mut orphans: Vec<String> = Vec::new();
+
         let step_name = format!("replicate {} → {}", src, tgt);
         step!(runner, &step_name, {
-            let list = |ds: &str| {
-                let ds = ds.to_string();
-                async move {
-                    exec.run(&Cmd::new(
-                        "zfs",
-                        &[
-                            "list", "-H", "-t", "snapshot", "-o", "name", "-s", "creation", "-r",
-                            &ds,
-                        ],
-                        120,
-                    ))
-                    .await
+            let src_out = list_snaps(&src).await?;
+            let tgt_out = list_snaps(&tgt).await?;
+            let tgt_ds_out = exec
+                .run(&Cmd::new(
+                    "zfs",
+                    &[
+                        "list",
+                        "-H",
+                        "-o",
+                        "name",
+                        "-t",
+                        "filesystem,volume",
+                        "-r",
+                        &tgt,
+                    ],
+                    120,
+                ))
+                .await?;
+            // A target that does not exist fails both listings; it is then
+            // absent from the plan's view and gets seeded.
+            let or_empty = |o: &crate::executor::CmdOutput| {
+                if o.success() {
+                    o.stdout.clone()
+                } else {
+                    String::new()
                 }
             };
-            let src_snaps = parse_snap_names(&list(&src).await?.stdout, &src);
-            let tgt_out = list(&tgt).await?;
-            let target_exists = tgt_out.success();
-            let tgt_snaps = parse_snap_names(&tgt_out.stdout, &tgt);
-            // Emptiness is a property of the whole SUBTREE, not just the top
-            // dataset: the retired script's retention deleted parent
-            // snapshots while children kept theirs, so a populated replica
-            // can present an empty-looking parent. A full send into that is
-            // exactly what must never be attempted.
-            let subtree_snaps = tgt_out.stdout.lines().filter(|l| l.contains('@')).count();
+            let plan = plan_replication(
+                job,
+                &label,
+                &src_out.stdout,
+                &or_empty(&tgt_ds_out),
+                &or_empty(&tgt_out),
+            );
+            orphans = plan.orphans.clone();
 
-            match common_base(&src_snaps, &tgt_snaps) {
-                Some(base) => {
-                    // Incremental: only the delta crosses the wire.
-                    let from = format!("{}@{}", src, base);
-                    // F177: `-x mountpoint`. `zfs send -R` carries the
-                    // source's properties, and `receive` applies them — so a
-                    // replica arrives claiming the LIVE path its source is
-                    // mounted at. Found 2026-09-02 while following the DR
-                    // runbook: `HDD18TB/replica/HDD2TB/paperless-config` and
-                    // the real `HDD2TB/paperless-config` both had
-                    // mountpoint=/appdata/paperwork/paperless-config with
-                    // canmount=on. Which one wins after a reboot is not
-                    // decided anywhere. If the copy wins, paperless runs on
-                    // stale data, writes into the replica, and the next
-                    // replication run overwrites those writes — with nothing
-                    // anywhere saying so.
-                    //
-                    // Excluding the property rather than forcing canmount=off
-                    // leaves the replica mountable under the replica tree,
-                    // where reading it is safe and deliberate.
-                    let script = format!(
-                        "zfs send -RI {} {} | zfs receive -F -x mountpoint {}",
-                        shell_quote(&from),
-                        shell_quote(&snap),
-                        shell_quote(&tgt)
-                    );
-                    run_ok(exec, &Cmd::new("sh", &["-c", &script], 6 * 3600)).await?;
-                    Ok(StepOutcome::Changed)
-                }
-                None if !target_exists || subtree_snaps == 0 => {
-                    // First-time seed: nothing on the target to lose.
-                    // F177, same reason as the incremental branch above.
-                    let script = format!(
-                        "zfs send -R {} | zfs receive -F -x mountpoint {}",
-                        shell_quote(&snap),
-                        shell_quote(&tgt)
-                    );
-                    run_ok(exec, &Cmd::new("sh", &["-c", &script], 12 * 3600)).await?;
-                    Ok(StepOutcome::Changed)
-                }
-                None => {
-                    // The dangerous case the old script powered through.
-                    Err(CoreError::SafetyAbort(format!(
-                        "{} and {} share no snapshot, but {} already holds {} snapshot(s) \
-                         (subtree included). Re-seeding would destroy that history, so this \
-                         job stops here. Decide deliberately: investigate why the chain broke, \
-                         or wipe the target yourself with `zfs destroy -r {}` and re-run for a \
-                         fresh seed.",
-                        src, tgt, tgt, subtree_snaps, tgt
-                    )))
-                }
+            let mut refusals: Vec<String> = Vec::new();
+            let mut changed = false;
+            for d in &plan.datasets {
+                let new = format!("{}@{}", d.source, label);
+                // fix-85: never `-R`. Each stream carries one dataset and no
+                // opinion about what else should exist on the target, so
+                // `receive` has nothing to delete. The stream carries no
+                // properties either (that came with -R); a new replica
+                // dataset inherits HDD18TB's.
+                //
+                // F177: `-x mountpoint` stays on every receive. A replica
+                // must never arrive claiming the live path its source is
+                // mounted at: found 2026-09-02 while following the DR
+                // runbook, `HDD18TB/replica/HDD2TB/paperless-config` and the
+                // real one both had mountpoint=/appdata/paperwork/
+                // paperless-config with canmount=on, and nothing decides
+                // which wins after a reboot.
+                let (script, timeout) = match &d.step {
+                    DatasetStep::Incremental { base } => (
+                        // `-F` rolls back stray writes made on the mounted
+                        // replica since its newest snapshot. On a plain
+                        // stream it would also destroy target snapshots
+                        // newer than the base, which is why the plan only
+                        // ever takes the target's newest snapshot as base
+                        // and refuses otherwise.
+                        format!(
+                            "zfs send -I {} {} | zfs receive -F -x mountpoint {}",
+                            shell_quote(&format!("{}@{}", d.source, base)),
+                            shell_quote(&new),
+                            shell_quote(&d.target)
+                        ),
+                        6 * 3600,
+                    ),
+                    DatasetStep::Seed => (
+                        format!(
+                            "zfs send {} | zfs receive -x mountpoint {}",
+                            shell_quote(&new),
+                            shell_quote(&d.target)
+                        ),
+                        12 * 3600,
+                    ),
+                    // Exists with no snapshot in its whole subtree: nothing
+                    // on it to lose, and a full stream needs -F to land on an
+                    // existing dataset.
+                    DatasetStep::SeedEmpty => (
+                        format!(
+                            "zfs send {} | zfs receive -F -x mountpoint {}",
+                            shell_quote(&new),
+                            shell_quote(&d.target)
+                        ),
+                        12 * 3600,
+                    ),
+                    DatasetStep::UpToDate => {
+                        replicated.insert(d.target.clone());
+                        continue;
+                    }
+                    DatasetStep::Refuse(why) => {
+                        refusals.push(why.clone());
+                        continue;
+                    }
+                };
+                run_ok(exec, &Cmd::new("sh", &["-c", &script], timeout)).await?;
+                replicated.insert(d.target.clone());
+                changed = true;
             }
+            if !refusals.is_empty() {
+                // The other datasets were sent; the refused ones stay as they
+                // are and the night fails, so a person looks at them.
+                return Err(CoreError::SafetyAbort(refusals.join(" ")));
+            }
+            Ok(if changed {
+                StepOutcome::Changed
+            } else {
+                StepOutcome::Unchanged
+            })
         });
 
-        // Retention on both sides, using the same tiered engine as restic.
-        for ds in [&src, &tgt] {
-            let step_name = format!("prune {}", ds);
-            step!(runner, &step_name, {
-                let out = exec
-                    .run(&Cmd::new(
-                        "zfs",
-                        &[
-                            "list", "-H", "-t", "snapshot", "-o", "name", "-s", "creation", "-r",
-                            ds,
-                        ],
-                        120,
-                    ))
-                    .await?;
-                // Prune per dataset: recursive snapshots share our name, so
-                // grouping by full name keeps parents and children in step.
-                let mut victims: Vec<String> = Vec::new();
-                let names: Vec<String> = out
-                    .stdout
-                    .lines()
-                    .filter_map(|l| l.split_whitespace().next())
-                    .filter(|n| n.contains(&format!("@{}", SNAP_PREFIX)))
-                    .map(|n| n.to_string())
-                    .collect();
-                // One retention decision per dataset, applied to its own snaps.
-                let mut by_ds: std::collections::BTreeMap<String, Vec<(String, u64)>> =
-                    Default::default();
-                for full in &names {
-                    let Some((d, s)) = full.split_once('@') else {
-                        continue;
-                    };
-                    by_ds
-                        .entry(d.to_string())
-                        .or_default()
-                        .push((full.clone(), snap_time(s, ctx.now_unix)));
-                }
-                for (_, snaps) in by_ds {
-                    victims.extend(crate::retention::forget_list(&snaps, tiers, ctx.now_unix));
-                }
-                for v in &victims {
-                    // Never recursive: each snapshot was listed explicitly.
-                    let _ = exec.run(&Cmd::new("zfs", &["destroy", v], 300)).await?;
-                }
-                if victims.is_empty() {
-                    Ok(StepOutcome::Unchanged)
-                } else {
-                    Ok(StepOutcome::Changed)
-                }
-            });
+        for o in &orphans {
+            runner.log(
+                Level::Warn,
+                format!(
+                    "[zfs] {} is kept although its source {} no longer exists; it is never \
+                     sent into or pruned. Destroy it by hand once it is no longer wanted.",
+                    o,
+                    rebase(o, &tgt, &src).unwrap_or_default()
+                ),
+            );
         }
+
+        // Retention: the source with its own tiers, the replica with its
+        // longer ones (fix-85), each deciding per dataset with forget_list.
+        let step_name = format!("prune {}", src);
+        step!(runner, &step_name, {
+            let out = list_snaps(&src).await?;
+            let victims = prune_victims(&out.stdout, None, ctx.now_unix, |s| {
+                crate::retention::forget_list(s, tiers, ctx.now_unix)
+            });
+            destroy_each(exec, &victims).await
+        });
+        let step_name = format!("prune {}", tgt);
+        step!(runner, &step_name, {
+            let out = list_snaps(&tgt).await?;
+            // Only what this run replicated: an orphan is the last copy of
+            // something the source lost, and a refused dataset waits for a
+            // person as it is.
+            let victims = prune_victims(&out.stdout, Some(&replicated), ctx.now_unix, |s| {
+                replica_forget(s, tiers, ctx.now_unix)
+            });
+            destroy_each(exec, &victims).await
+        });
 
         runner.log(
             Level::Info,
@@ -350,6 +648,18 @@ pub async fn replicate(
     }
 
     runner.finish_ok()
+}
+
+async fn destroy_each(exec: &dyn Executor, victims: &[String]) -> Result<StepOutcome, CoreError> {
+    for v in victims {
+        // Never recursive: each snapshot was listed explicitly.
+        let _ = exec.run(&Cmd::new("zfs", &["destroy", v], 300)).await?;
+    }
+    Ok(if victims.is_empty() {
+        StepOutcome::Unchanged
+    } else {
+        StepOutcome::Changed
+    })
 }
 
 fn shell_quote(s: &str) -> String {

@@ -839,6 +839,7 @@ dependencies = [
  "futures-util",
  "homelab-core",
  "homelab-proto",
+ "libc",
  "rcgen",
  "serde",
  "serde_json",

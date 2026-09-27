@@ -271,6 +271,32 @@ async fn recording_sink_tees_and_records() {
     assert_eq!(rec.events().len(), 1);
 }
 
+/// fix-53 (expert panel, timeout-leaves-container-work-running, 2026-09-27):
+/// the host's timeout ended the wait for `pct exec`, not the script inside
+/// the container. A slow `docker compose pull` went on running next to the
+/// prune and the second pull of the registry-cache fallback. The limit now
+/// holds inside the container as well.
+#[tokio::test]
+async fn fix_53_a_container_script_carries_its_own_time_limit() {
+    use homelab_core::executor::{pct_sh, pct_sh_secret};
+    let exec = MockExecutor::new();
+    pct_sh(&exec, 110, "docker compose pull", 600)
+        .await
+        .unwrap();
+    pct_sh_secret(&exec, 110, "cat /opt/x/.env", 30)
+        .await
+        .unwrap();
+    let calls = exec.calls();
+    assert_eq!(
+        calls[0],
+        "pct exec 110 -- timeout -k 10 600 sh -c docker compose pull"
+    );
+    assert_eq!(
+        calls[1],
+        "pct exec 110 -- timeout -k 10 30 sh -c cat /opt/x/.env"
+    );
+}
+
 // fix-38: commands.sh joined arguments with single spaces, so an argument
 // holding a whole shell script came back as separate words. Replayed, the
 // line `pct exec 110 -- sh -c cd '/opt/x' && docker compose up -d` runs

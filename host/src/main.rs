@@ -839,6 +839,53 @@ mod tests {
         assert_eq!(code, 0);
     }
 
+    /// fix-53 (expert panel, timeout-leaves-container-work-running,
+    /// 2026-09-27): a timeout killed only the direct child (`pct`), not what
+    /// it had started (`lxc-attach` and the script), so a "timed out" step
+    /// went on changing the container. Everything the command started must
+    /// be gone once the timeout is reported.
+    #[tokio::test]
+    async fn fix_53_a_timeout_kills_everything_the_command_started() {
+        use homelab_core::executor::Executor;
+        let pidfile =
+            std::env::temp_dir().join(format!("homelab-fix53-{}.pid", std::process::id()));
+        let _ = std::fs::remove_file(&pidfile);
+        let script = format!("sleep 30 & echo $! > '{}'; wait", pidfile.display());
+        let got = super::RealExecutor
+            .run(&Cmd::new("sh", &["-c", &script], 1))
+            .await;
+        assert!(
+            matches!(got, Err(CoreError::Timeout { .. })),
+            "the wait ends as a timeout: {:?}",
+            got
+        );
+        let pid = std::fs::read_to_string(&pidfile)
+            .expect("the script recorded its child")
+            .trim()
+            .to_string();
+        let _ = std::fs::remove_file(&pidfile);
+        // An exit is not instant; a zombie awaiting its reaper counts as gone.
+        let mut alive = true;
+        for _ in 0..20 {
+            let stat = std::fs::read_to_string(format!("/proc/{}/stat", pid)).unwrap_or_default();
+            alive = !stat.is_empty() && !stat.contains(") Z ");
+            if !alive {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if alive {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid])
+                .status();
+        }
+        assert!(
+            !alive,
+            "the command's own child {} outlived the timeout",
+            pid
+        );
+    }
+
     /// covers: F208
     ///
     /// G1 of the Phase-7 gate. Saving a setting from the TUI rewrites the
@@ -1664,18 +1711,42 @@ impl Executor for RealExecutor {
         // pipeline; here we only trace at the log level for non-pipeline calls.
         let rendered = cmd.rendered();
         tracing::trace!("run {}", rendered);
-        let fut = Command::new(&cmd.program)
+        // fix-53 (expert panel, timeout-leaves-container-work-running,
+        // 2026-09-27): the command leads a process group of its own, and a
+        // timeout kills that whole group. `kill_on_drop` alone reached only
+        // the direct child (`pct`), not the `lxc-attach` and script it had
+        // started, so a "timed out" step went on changing the container.
+        let child = Command::new(&cmd.program)
             .args(&cmd.args)
             .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .kill_on_drop(true)
-            .output();
-        let out = tokio::time::timeout(Duration::from_secs(cmd.timeout_s), fut)
-            .await
-            .map_err(|_| CoreError::Timeout {
-                rendered: rendered.clone(),
-                seconds: cmd.timeout_s,
-            })?
+            .process_group(0)
+            .spawn()
             .map_err(|e| CoreError::Other(format!("spawn {}: {}", rendered, e)))?;
+        let group = child.id();
+        let out = match tokio::time::timeout(
+            Duration::from_secs(cmd.timeout_s),
+            child.wait_with_output(),
+        )
+        .await
+        {
+            Ok(out) => out.map_err(|e| CoreError::Other(format!("wait {}: {}", rendered, e)))?,
+            Err(_) => {
+                if let Some(pgid) = group.and_then(|p| i32::try_from(p).ok()) {
+                    // SAFETY: killpg only sends a signal; the group is the one
+                    // this call created for the child it spawned.
+                    unsafe {
+                        libc::killpg(pgid, libc::SIGKILL);
+                    }
+                }
+                return Err(CoreError::Timeout {
+                    rendered: rendered.clone(),
+                    seconds: cmd.timeout_s,
+                });
+            }
+        };
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let stderr = String::from_utf8_lossy(&out.stderr).to_string();
         Ok(CmdOutput {

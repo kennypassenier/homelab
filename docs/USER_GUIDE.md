@@ -69,10 +69,16 @@ Drawn from `client/src/main.rs` (`main`) and `client/src/repo_config.rs` (`load`
 that prints where its address came from (`client/src/main.rs:1190-1194`):
 
 ```text
-● HOST v<version> (proto <n>) — link up
+● HOST v<version> (<host build>) · proto <n> — link up
+  client v<version> (<client build>)
   via <host:port> (<source>)
 ✓ pong
 ```
+
+A build is `git describe --tags --dirty` of the tree the binary was
+compiled from (`v3.60.0` for a release, `v3.60.0-3-g1a2b3c4-dirty` for a
+hand build with uncommitted changes; fix-141). `homelab status` prints the
+same two lines. A host from before that change says `build not reported`.
 
 `<source>` is one of `HOMELAB_HOST in the environment`, the path of
 `config/client.toml`, `~/.config/homelab/env` or `built-in default`
@@ -1243,7 +1249,12 @@ change after a reboot (`core/src/ops/deploy.rs:865`).
 **Status:** Built, narrower than FEATURES.md.
 
 Every deploy writes the stack's files into `/var/lib/homelab/repo/stacks/<stack>/`
-and commits them as `deploy <stack>`; secrets are not among them (A5). A
+and commits them as `deploy <stack> (<commit> [+ N uncommitted file(s)])`,
+with the full commit, every uncommitted path and the client's build in the
+message body; `homelab status` shows the same summary as `applied_source`
+(fix-141). A client that does not send its commit leaves `source not
+reported`. The client warns before it deploys uncommitted files but does not
+refuse. Secrets are not among the files (A5). A
 commit that fails for any reason other than "nothing to commit" fails the
 deploy, because history, mirror and plan all depend on it
 (`core/src/ops/deploy.rs:907-970`). There is no revert verb: the deploy always
@@ -1674,6 +1685,14 @@ its data, which paths are deliberately not backed up), and a full-host rebuild
 order (`client/src/spec.rs:496-740,745-1311`). It prints
 `✓ runbook written — <out> (<n> stack(s))`. The current output is
 [DR_RUNBOOK.md](DR_RUNBOOK.md).
+
+The same is done for the update policy (fix-144): `homelab update-policy`
+rewrites the section between the `BEGIN generated`/`END generated` markers
+of `docs/deployment/UPDATE_POLICY.md` from the stack files (every compose
+service with its `com.homelab.update.policy` label and image, every native
+unit with its `update_policy` and what the nightly round does with it) and
+prints `✓ update policy written — <out> (<n> row(s))`. A test fails while
+the committed section is stale.
 
 #### E8 · ZFS snapshots and replication
 
@@ -2282,6 +2301,28 @@ delivery failed. Two came with the declarative cleanup (2026-09-27):
 - `noted`, one per retired stack, app or unit: what it left and the wipe
   command (`core/src/ops/retired.rs:190-219`); section 3, `homelab wipe`.
 
+Since fix-142 (2026-09-27) the client also sends what each stack directory
+says: the parsed `lxc-compose.yml` and a sha256 of every file a deploy would
+push into the container (no `.env`, no latch). The host compares them with
+the stack's recorded manifest and its intent-history copy under
+`/var/lib/homelab/repo/stacks/<stack>/` (`evaluate_repo_drift` in
+`core/src/ops/fleetcheck.rs`):
+
+- `drift`, `the files differ from what the host applied on <date> — lxc-compose.yml differs; changed: <files>; new: <files>; gone from the files: <files>`,
+  remedy `` `homelab deploy stacks/<stack>` (or `homelab apply`) to apply them ``;
+- `drift`, `is declared in stacks/<stack> (vmid <n>) but was never deployed`.
+
+Secrets are not compared (they would need latch); `homelab apply --plan`
+compares them too. The nightly check has no repository, so it raises neither.
+
+After the host's answer, `homelab check` compares the Cloudflare edge with
+`captured/gateway/` using the read-only token at
+`~/.config/cloudflare/kp-soft.token` (fix-143): `edge: Cloudflare agrees with
+captured/gateway/`, or `edge: <n> finding(s)` in the same format (`broken`
+for an Access app that now lets everyone in). Without the token it prints
+`edge: not compared — <why>` and fails nothing. See
+`docs/deployment/CLOUDFLARE.md`.
+
 The host runs the same check after every nightly run and notifies only when a
 finding is not `noted` (`host/src/main.rs:2646-2690`).
 
@@ -2341,7 +2382,12 @@ as the operation `forget` under the operation lock
 ```bash
 homelab apply                    # reads ./stacks
 homelab apply ~/Projects/homelab/stacks --no-backup
+homelab apply --plan             # the plan only; exit 0 in sync, 2 pending
 ```
+
+`--plan` (fix-142) prints the plan below and stops: nothing is deployed or
+destroyed, and the exit code says whether anything would be (0 in sync, 2
+changes pending), so a script can ask.
 
 Asks the host for its state, builds and validates every stack directory that
 has an `lxc-compose.yml` (latch and `gh` included), and stops before sending

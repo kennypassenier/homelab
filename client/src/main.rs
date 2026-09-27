@@ -242,6 +242,7 @@ async fn run(explicit_host: Option<String>) {
         "help"
             | "plan"
             | "runbook"
+            | "update-policy"
             | "dashboard"
             | "presets"
             | "export"
@@ -424,6 +425,7 @@ async fn run(explicit_host: Option<String>) {
                 .cloned()
                 .unwrap_or_else(|| stacks_base().display().to_string());
             let stack_files = crate::spec::stack_files_with_vmids(&base);
+            let digests = stack_digests(&stack_files);
             // Kenny ran this from inside `stacks/` on 2026-09-02 and it said
             // "0 stack file(s)" in passing, then reported the host's half as
             // if it were the whole answer. Half a check that looks like a
@@ -449,7 +451,47 @@ async fn run(explicit_host: Option<String>) {
                     C_RESET
                 );
             }
-            rpc(&host, &token, Command::FleetCheck { stack_files }).await;
+            let fleet_ok = rpc_with(
+                &host,
+                &token,
+                Command::FleetCheck {
+                    stack_files,
+                    digests,
+                },
+            )
+            .await;
+            // fix-143 (expert panel 2026-09-27, edge-changes-unnoticed): the
+            // Cloudflare edge against captured/gateway/, from here because
+            // the read-only token and the capture both live on this side.
+            let captured = Path::new(&base).join("../captured/gateway");
+            let edge_ok = match homelab_client::edge::check_edge(&captured) {
+                homelab_client::edge::EdgeOutcome::NotCompared(why) => {
+                    println!("{}edge: not compared — {}{}", C_DIM, why, C_RESET);
+                    true
+                }
+                homelab_client::edge::EdgeOutcome::Compared(findings) if findings.is_empty() => {
+                    println!("edge: Cloudflare agrees with captured/gateway/");
+                    true
+                }
+                homelab_client::edge::EdgeOutcome::Compared(findings) => {
+                    println!("edge: {} finding(s)", findings.len());
+                    for f in &findings {
+                        println!(
+                            "  [{}] {} — {}\n      remedy: {}",
+                            match f.severity {
+                                homelab_core::ops::fleetcheck::Severity::Broken => "broken",
+                                homelab_core::ops::fleetcheck::Severity::Drift => "drift",
+                                homelab_core::ops::fleetcheck::Severity::Noted => "noted",
+                            },
+                            f.subject,
+                            f.what,
+                            f.remedy
+                        );
+                    }
+                    homelab_core::ops::fleetcheck::check_passes(&findings)
+                }
+            };
+            std::process::exit(if fleet_ok && edge_ok { 0 } else { 1 });
         }
         // fix-68 (four-answers-to-is-anything-wrong, 2026-09-27): the morning
         // question in one verb. `check`, `doctor`, `incidents` and `checks`
@@ -461,6 +503,7 @@ async fn run(explicit_host: Option<String>) {
                 .cloned()
                 .unwrap_or_else(|| stacks_base().display().to_string());
             let stack_files = crate::spec::stack_files_with_vmids(&base);
+            let digests = stack_digests(&stack_files);
             if stack_files.is_empty() {
                 println!(
                     "{}▶ today :: no stack files under '{}' — the check reads only what the \
@@ -477,9 +520,16 @@ async fn run(explicit_host: Option<String>) {
                     C_RESET
                 );
             }
-            let reply = rpc_reply(&host, &token, Command::Today { stack_files })
-                .await
-                .unwrap_or_else(|| die("the host did not answer"));
+            let reply = rpc_reply(
+                &host,
+                &token,
+                Command::Today {
+                    stack_files,
+                    digests,
+                },
+            )
+            .await
+            .unwrap_or_else(|| die("the host did not answer"));
             let today: homelab_core::ops::today::Today = serde_json::from_str(&reply.message)
                 .unwrap_or_else(|_| die(&format!("the host answered: {}", reply.message)));
             let color = if today.needs_you() { C_YELLOW } else { C_GREEN };
@@ -903,6 +953,7 @@ async fn run(explicit_host: Option<String>) {
             // used to be printed and deployed in the same breath.
             let dry_run = args.iter().any(|a| a == "--dry-run");
             let assume_yes = args.iter().any(|a| a == "--yes");
+            let plan_only = args.iter().any(|a| a == "--plan");
             let base_path = Path::new(&base);
             if !base_path.is_dir() {
                 die(&format!(
@@ -1011,6 +1062,11 @@ async fn run(explicit_host: Option<String>) {
                     "{}  ✗ {} — in host state, no {}/{}/{}",
                     C_YELLOW, n, base, n, C_RESET
                 );
+            }
+            // fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift):
+            // the plan alone, with an exit code a script can test.
+            if plan_only {
+                std::process::exit(homelab_client::apply::plan_exit_code(&plan));
             }
             let answer = if dry_run || assume_yes || plan.deploy.is_empty() {
                 None
@@ -1368,6 +1424,25 @@ async fn run(explicit_host: Option<String>) {
                 Err(e) => die(&format!("runbook: {}", e)),
             }
         }
+        // fix-144 (expert panel 2026-09-27, update-policy-doc-drift): the
+        // policy table in UPDATE_POLICY.md is written from the stack files,
+        // like the runbook, and a test fails when the committed one is stale.
+        "update-policy" => {
+            let out = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| "docs/deployment/UPDATE_POLICY.md".into());
+            match homelab_client::updatepolicy::write_update_policy(
+                Path::new("stacks"),
+                Path::new(&out),
+            ) {
+                Ok(n) => println!(
+                    "{}✓ update policy written{} — {} ({} row(s))",
+                    C_GREEN, C_RESET, out, n
+                ),
+                Err(e) => die(&format!("update-policy: {}", e)),
+            }
+        }
         "prune-orphans" => {
             // Kenny's H2b made this the only remover of files the repository
             // no longer has; since ask-8 (2026-09-27) the deploy removes them
@@ -1645,6 +1720,8 @@ async fn rpc_exchange(
     // (Config) may see RpcDone first — wait for the payload before exiting.
     let awaits_payload = matches!(command, Command::GetConfig | Command::GetState);
     let is_ping = matches!(command, Command::Ping);
+    // fix-141: ping and status also name the client's own build.
+    let names_builds = matches!(command, Command::Ping | Command::Status);
     let mut payload_seen = false;
     let mut done: Option<bool> = None;
     // fix-67: the pin, the frame ceiling and the version gate live in one
@@ -1709,11 +1786,32 @@ async fn rpc_exchange(
                      or it times out as unattended"
                 );
             }
-            ServerMsg::Hello { version, proto } => {
+            ServerMsg::Hello {
+                version,
+                proto,
+                build,
+            } => {
+                // fix-141 (expert panel 2026-09-27,
+                // changes-reach-prod-without-ci): "v3.59.3" named the release
+                // and a hand build alike; the build tells them apart.
                 println!(
-                    "{}● HOST v{} (proto {}) — link up{}",
-                    C_GREEN, version, proto, C_RESET
+                    "{}● HOST {} · proto {} — link up{}",
+                    C_GREEN,
+                    homelab_client::link::version_label(&version, build.as_deref()),
+                    proto,
+                    C_RESET
                 );
+                if names_builds {
+                    println!(
+                        "{}  client {}{}",
+                        C_DIM,
+                        homelab_client::link::version_label(
+                            env!("CARGO_PKG_VERSION"),
+                            Some(homelab_client::BUILD)
+                        ),
+                        C_RESET
+                    );
+                }
                 // Only on ping: which door was knocked on, and who said so.
                 // The rest of the verbs stay quiet about it.
                 if is_ping {
@@ -1857,6 +1955,24 @@ fn read_typed(prompt: &str) -> String {
 
 /// Ship one stack: its native binaries one per message (T85), then the
 /// deploy itself. `true` when the host reported the deploy done and ok.
+/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): what each
+/// stack directory says, for the host to compare with what it applied. A
+/// directory that does not read is said out loud and left out; the rest of
+/// the check still runs.
+fn stack_digests(stack_files: &[(String, u16)]) -> Vec<homelab_core::ops::fleetcheck::StackDigest> {
+    let mut out = Vec::new();
+    for (dir, _) in stack_files {
+        match spec::stack_digest(Path::new(dir)) {
+            Ok(d) => out.push(d),
+            Err(e) => eprintln!(
+                "{}  {} not compared with the host: {}{}",
+                C_YELLOW, dir, e, C_RESET
+            ),
+        }
+    }
+    out
+}
+
 async fn deploy_spec(host: &str, token: &str, mut spec: homelab_proto::DeploySpec) -> bool {
     println!(
         "{}▶ deploy {} :: vmid {} :: {} file(s), {} env(s){}",
@@ -1867,6 +1983,16 @@ async fn deploy_spec(host: &str, token: &str, mut spec: homelab_proto::DeploySpe
         spec.env.len(),
         C_RESET
     );
+    // fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci):
+    // `deploy` and `apply` send the working tree; say so when it is not a
+    // commit. A warning, not a refusal (Kenny's batch, 2026-09-27).
+    if let Some(w) = spec
+        .source
+        .as_ref()
+        .and_then(|s| spec::uncommitted_warning(&spec.manifest.stack_name, s))
+    {
+        eprintln!("{}{}{}", C_YELLOW, w, C_RESET);
+    }
     // T85: each native binary goes over the link on its own, then the deploy
     // follows with the map emptied — the host fills it back in from what was
     // staged. Three binaries in one message measured 94.7 MiB against a

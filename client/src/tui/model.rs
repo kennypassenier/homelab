@@ -472,6 +472,7 @@ impl Model {
         self.today_pending = true;
         self.outbox.push(Command::Today {
             stack_files: crate::spec::stack_files_with_vmids(&self.stacks_dir.to_string_lossy()),
+            digests: vec![],
         });
     }
 
@@ -1413,6 +1414,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
     };
     Ok((
         homelab_proto::DeploySpec {
+            source: None,
             // The TUI never stages release binaries: a wizard preview is not
             // a deploy, and downloading megabytes to draw a screen would be
             // wrong. `homelab deploy` is what carries them.
@@ -1818,7 +1820,12 @@ fn start_fleet_check(model: &mut Model) {
         ok: false,
         result: String::new(),
     });
-    model.outbox.push(Command::FleetCheck { stack_files });
+    // fix-142: the TUI has its own drift badge; the repository comparison
+    // runs from `homelab check`.
+    model.outbox.push(Command::FleetCheck {
+        stack_files,
+        digests: vec![],
+    });
 }
 
 fn start_deploy(model: &mut Model) {

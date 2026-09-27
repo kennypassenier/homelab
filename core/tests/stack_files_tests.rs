@@ -228,8 +228,11 @@ fn every_template_is_one_of_the_golden_ones_that_exist() {
         let Some(vmid) = t.strip_prefix("clone:") else {
             continue;
         };
+        // 995/996 are the Debian 13 pair built 2026-09-10 (measured with
+        // `pct list` on 2026-09-27: 995-998 all present); inbox, which runs
+        // Debian 13, is the first stack file to name one (fix-145).
         assert!(
-            ["997", "998"].contains(&vmid.trim()),
+            ["995", "996", "997", "998"].contains(&vmid.trim()),
             "stacks/{} clones {} — 999 is the retired v1 image and anything else \
              does not exist on this host",
             name,
@@ -436,6 +439,11 @@ mod kuma_seeder {
             (
                 "drill",
                 "a throwaway container, created and destroyed in the same sitting",
+            ),
+            (
+                "inbox",
+                "a chassis-rs scratch service this project only backs up (Kenny, Phase 9 \
+                 form 2026-09-27: Grenzen zetten); the host ping covers reachability",
             ),
         ];
         let watched: Vec<String> = application_monitors()
@@ -1116,6 +1124,83 @@ fn every_declared_upstream_is_one_the_nightly_round_can_ask() {
     }
 }
 
+/// fix-143 (expert panel 2026-09-27, edge-changes-unnoticed): the external
+/// monitors accepted `200-299` as well as the 302 to Cloudflare's login, and
+/// followed redirects, so with the wildcard Access app deleted or flipped to
+/// bypass `fin` and `docs` would answer 200 and stay green while the house
+/// was public. They now accept only the 302 and follow nothing; and a canary
+/// asks `sp.kp-soft.dev` (open by design) for its sync status without a
+/// token, which must stay 401 (measured 2026-09-27: 401; `/` and `/health`
+/// answer 200 by design).
+#[test]
+fn fix_143_the_external_monitors_accept_only_the_access_redirect() {
+    let dir = stacks_dir().join("uptime").join("kuma-seeder");
+    let script = r#"
+import json, seed
+out = []
+for name, url, accepted in seed.APPLICATION_MONITORS:
+    if url.startswith("https://"):
+        o = seed.monitor_options(accepted)
+        out.append([url, o["accepted_statuscodes"], o["maxredirects"]])
+print(json.dumps(sorted(out)))
+"#;
+    let out = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .env("PYTHONPATH", &dir)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .output()
+        .expect("python3");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        r#"[["https://docs.kp-soft.dev/", ["302"], 0], ["https://fin.kp-soft.dev/", ["302"], 0], ["https://sp.kp-soft.dev/api/sync/status", ["401"], 0]]"#
+    );
+}
+
+/// fix-143: the seeder only added a monitor that was missing and corrected
+/// its address, so the two external monitors already in Uptime Kuma would
+/// have kept accepting 200 whatever the file said. It now corrects the
+/// accepted codes and the redirect limit of a declared monitor too.
+#[test]
+fn fix_143_the_seeder_corrects_accepted_codes_on_existing_monitors() {
+    let dir = stacks_dir().join("uptime").join("kuma-seeder");
+    let script = r#"
+import json, seed
+monitors = [
+    {"id": 1, "name": "extern · fin.kp-soft.dev", "url": "https://fin.kp-soft.dev/",
+     "accepted_statuscodes": ["200-299", "302"], "maxredirects": 10},
+    {"id": 2, "name": "extern · docs.kp-soft.dev", "url": "https://docs.kp-soft.dev/",
+     "accepted_statuscodes": ["302"], "maxredirects": 0},
+    {"id": 3, "name": "media · jellyfin", "url": "http://10.10.10.6:8096/health",
+     "accepted_statuscodes": ["200-299"], "maxredirects": 10},
+    {"id": 4, "name": "host · gateway", "hostname": "10.10.10.4"},
+    {"id": 5, "name": "not declared", "url": "http://x/", "accepted_statuscodes": ["418"]},
+]
+print(json.dumps([(m["id"], c) for m, c in seed.plan_options(monitors)]))
+"#;
+    let out = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .env("PYTHONPATH", &dir)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .output()
+        .expect("python3");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        r#"[[1, {"accepted_statuscodes": ["302"], "maxredirects": 0}]]"#
+    );
+}
+
 /// The deploy of 2026-09-27 19:42 recreated Uptime Kuma and its seeder
 /// together; the seeder's first round found Kuma not yet listening
 /// (`UptimeKumaException: unable to connect`) and then slept its full hour,
@@ -1212,4 +1297,55 @@ fn fix_93_loki_takes_only_pushes_from_the_lan_and_deletes_nothing() {
         .find(|r| r.host == "opnsense")
         .unwrap();
     assert_eq!(r.allow_from, vec!["10.10.10.1".to_string()]);
+}
+
+/// fix-145 (expert panel 2026-09-27, inbox-ct118-unmanaged): inbox had only
+/// a `service.yml`, so its container (cores, memory, disk, network, boot,
+/// protection) was under no management and nothing could rebuild it; the DR
+/// text said "re-register with `homelab adopt`", which assumes a container
+/// someone built by hand. Its container file declares CT 118 exactly as it
+/// runs, measured read-only on 2026-09-27 (`pct config 118`, the unit file,
+/// /etc/os-release): Kenny's "Grenzen zetten" makes inbox a chassis-rs
+/// scratch service this project only backs up, so the file changes nothing
+/// about it — it does not start on boot (`onboot: 0`), is not protected,
+/// has no startup order and no bind mount.
+#[test]
+fn fix_145_inbox_declares_ct_118_as_it_runs_today() {
+    let dir = stacks_dir().join("inbox");
+    let raw = std::fs::read_to_string(dir.join("lxc-compose.yml")).expect("a container file");
+    let m: StackManifest = serde_yaml::from_str(&raw).unwrap();
+    validate_manifest(&m).unwrap();
+    assert_eq!((m.stack_name.as_str(), m.vmid), ("inbox", 118));
+    assert_eq!(m.hostname, "118-app-inbox");
+    assert_eq!(m.network.ip, "10.10.10.18/24");
+    assert_eq!(m.network.gateway, "10.10.10.1");
+    assert_eq!(m.network.bridge, "vmbr0");
+    assert_eq!(m.network.vlan, Some(10));
+    assert_eq!(
+        (
+            m.resources.cores,
+            m.resources.memory_mb,
+            m.resources.swap_mb,
+            m.resources.disk_gb
+        ),
+        (1, 512, 0, 4)
+    );
+    assert_eq!(m.resources.storage, "local-lvm");
+    assert!(m.lxc.unprivileged);
+    assert_eq!(m.lxc.features, "nesting=1");
+    assert!(!m.lxc.protection, "pct config 118 has no protection line");
+    // Debian 13 inside (13.1, measured): the Debian 13 unprivileged template.
+    assert_eq!(m.lxc.template, "clone:996");
+    assert!(!m.boot.onboot, "onboot: 0 on the machine");
+    assert_eq!(m.boot.order, None, "no startup line on the machine");
+    assert!(m.native_only);
+    assert_eq!(m.natives, vec!["inbox".to_string()]);
+    assert!(m.apps.is_empty() && m.storage.is_empty() && m.data_mounts.is_empty());
+    // The unit file, byte for byte what CT 118 runs, or a deploy would
+    // rewrite it.
+    let unit = std::fs::read(dir.join("inbox/inbox.service")).expect("the unit file");
+    assert_eq!(
+        homelab_core::manifest::sha256_hex(&unit),
+        "469fabcc71edda36ef1c87d836ce9c7db40888ead6a8a9e92700c552a5a0f039"
+    );
 }

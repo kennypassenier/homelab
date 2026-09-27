@@ -89,6 +89,7 @@ async fn mark_incomplete(
             state.stacks.insert(
                 m.stack_name.clone(),
                 StackState {
+                    applied_source: None,
                     vmid: m.vmid,
                     hostname: m.hostname.clone(),
                     apps: m.apps.clone(),
@@ -690,6 +691,27 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             return Ok(StepOutcome::Unchanged);
         };
         let path = crate::ops::discovery::target_file(dir, &m.stack_name);
+        // fix-145 (expert panel 2026-09-27, inbox-ct118-unmanaged): a native
+        // stack whose every unit is declared unmeasured (`metrics: false`,
+        // inbox under Kenny's "Grenzen zetten") runs no node exporter, so a
+        // target here would be an endpoint nothing answers on and an alert
+        // that never clears. The fleet check already respects the flag.
+        let unmeasured = m.apps.is_empty()
+            && crate::state::StateStore::new(exec, &ctx.state_dir)
+                .load()
+                .await
+                .ok()
+                .and_then(|s| s.stacks.get(&m.stack_name).cloned())
+                .is_some_and(|st| {
+                    !st.natives.is_empty() && st.natives.iter().all(|n| n.metrics == Some(false))
+                });
+        if unmeasured {
+            log_info(format!(
+                "[t1] {} is declared unmeasured (metrics: false) — no scrape target",
+                m.stack_name
+            ));
+            return Ok(StepOutcome::Unchanged);
+        }
         // A stack with apps runs docker; a native-service stack does not.
         let body =
             crate::ops::discovery::targets_json(&m.stack_name, &m.network.ip, !m.apps.is_empty());
@@ -1490,7 +1512,21 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             .await?;
         }
         run_ok(exec, &Cmd::new("git", &["-C", &repo, "add", "-A"], 30)).await?;
-        let msg = format!("deploy {}", m.stack_name);
+        // fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci):
+        // the message said only `deploy <stack>`, so the history could not
+        // say which commit went live or that some files were in none.
+        let msg = match spec.source.as_ref() {
+            Some(src) => format!(
+                "deploy {} ({})\n\n{}",
+                m.stack_name,
+                src.summary(),
+                src.commit_body()
+            ),
+            None => format!(
+                "deploy {}\n\nsource not reported (a client older than fix-141)\n",
+                m.stack_name
+            ),
+        };
         let commit = exec
             .run(&Cmd::new(
                 "git",
@@ -3133,6 +3169,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         state.stacks.insert(
             m.stack_name.clone(),
             StackState {
+                // fix-141: which commit this is, for `homelab status`.
+                applied_source: spec.source.as_ref().map(|s| s.summary()),
                 vmid: m.vmid,
                 hostname: m.hostname.clone(),
                 apps: m.apps.clone(),

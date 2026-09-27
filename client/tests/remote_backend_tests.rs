@@ -77,6 +77,7 @@ async fn fake_host(version: &str) -> FakeHost {
     let hello = serde_json::to_string(&ServerMsg::Hello {
         version: version.to_string(),
         proto: homelab_proto::PROTO_VERSION,
+        build: None,
     })
     .unwrap();
     tokio::spawn(async move {

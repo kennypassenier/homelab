@@ -58,6 +58,10 @@ flowchart LR
 - Four workspace members (`Cargo.toml:3`); the release builds only
   `homelab-host` and `homelab` (`.github/workflows/release.yml:26`).
   `tui-preview`, a mockup on simulated data, sits outside the workspace (`exclude`, fix-135).
+
+- Five workspace members (`Cargo.toml:3`); the release builds only
+  `homelab-host` and `homelab` (`.github/workflows/release.yml`, `build` job).
+  `tui-preview` is a mockup on simulated data (`tui-preview/Cargo.toml:5`).
 - Containers are reached only through `pct exec` (`core/src/executor.rs:161-174`)
   and `pct push` of a staged file (`core/src/ops/util.rs:99-107`).
 - Frames are bare JSON: the host opens with `ServerMsg::Hello`
@@ -353,7 +357,7 @@ sequenceDiagram
 **What the host trusts.** `homelab self-update` and `homelab install-native`
 send a base64 binary, and all verification is the client's:
 `homelab release-update` checks the host binary against `SHA256SUMS` only,
-and says so (`client/src/release.rs:57-62`; `release.yml:32` publishes no
+and says so (`client/src/release.rs:57-62`; `release.yml` publishes no
 signature); `install-native` from a release also requires
 `SHA256SUMS.minisig` signed with the ecosystem key
 (`client/src/release.rs:79-169`, `core/src/release_sig.rs:10-40`);
@@ -488,7 +492,7 @@ Verification: `SHA256SUMS.minisig` over `SHA256SUMS` with the compiled
 | AR7 | `OperatorError` what, why, remedy | `core/src/error.rs:41-45` |
 | AR8 | no template engine (amended 2026-09-27) | string substitution in `client/src/scaffold.rs` |
 | AR9 | hard CI gates | `ci.yml:29-42`: fmt, clippy `-D warnings`, tests |
-| AR10 | tagged releases with sha256 | `release.yml:1-40`, no signature |
+| AR10 | tagged releases with sha256 | `release.yml`: a read-only `build` job, a `publish` job that alone can write; no signature |
 | AR11 | TOML config, YAML manifests | `host/src/main.rs:369-396`; `client/src/spec.rs:54-56` |
 | AR12 | serial mutations | `host/src/main.rs:1667,2944` |
 | AR13 | journal names interrupted ops | `core/src/incidents.rs:117-137` |

@@ -250,7 +250,124 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
     // GitHub being down must not stop a running stack from being reconciled,
     // and the host refuses to START a unit whose program is absent anyway.
     spec.native_binaries = stage_native_binaries(dir, &spec.manifest.natives);
+    // fix-141: where these files came from, recorded by the host.
+    spec.source = stack_source(dir);
     Ok(spec)
+}
+
+/// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): the
+/// commit a stack directory is read from, and every file under it that
+/// differs from that commit (modified, staged or untracked; ignored files
+/// such as a local `.env` are not). None outside a git tree.
+///
+/// `deploy` and `apply` send what is on disk, not what is committed, and
+/// nothing said so: a stack file could be live that exists in no commit.
+/// The host records this with the deploy; the client warns about it.
+pub fn stack_source(dir: &Path) -> Option<homelab_proto::SourceRev> {
+    let git = |args: &[&str]| -> Option<String> {
+        let o = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            // The stack directory's own repository, whatever a calling
+            // hook exported.
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_WORK_TREE")
+            .args(args)
+            .output()
+            .ok()?;
+        o.status
+            .success()
+            .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    let commit = git(&["rev-parse", "HEAD"])?.trim().to_string();
+    // `-z`: paths verbatim, one `XY path` entry per NUL; without renames an
+    // entry is always one path, relative to the repository root.
+    let status = git(&[
+        "status",
+        "--porcelain",
+        "-z",
+        "--untracked-files=all",
+        "--no-renames",
+        "--",
+        ".",
+    ])?;
+    let mut uncommitted: Vec<String> = status
+        .split('\0')
+        .filter(|e| e.len() > 3)
+        .map(|e| e[3..].to_string())
+        .collect();
+    uncommitted.sort();
+    Some(homelab_proto::SourceRev {
+        commit,
+        uncommitted,
+        client: crate::BUILD.to_string(),
+    })
+}
+
+/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): a stack
+/// directory as `homelab check` sends it, for comparison with what the host
+/// last applied: the parsed manifest (None with only a `service.yml`) and a
+/// sha256 of every file a deploy would send into the container.
+///
+/// Built from the same `collect` a deploy uses, so the two cannot disagree
+/// about which files count; `.env` content is read by `collect` but never
+/// leaves this function, and latch is not asked (F291: a check must not
+/// depend on a credential it does not need).
+pub fn stack_digest(dir: &Path) -> Result<homelab_core::ops::fleetcheck::StackDigest, String> {
+    let stack = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| format!("{}: not a stack directory", dir.display()))?;
+    let manifest = if dir.join("lxc-compose.yml").exists() {
+        Some(build_manifest(dir)?)
+    } else {
+        None
+    };
+    let mut files: Vec<FileBlob> = Vec::new();
+    let mut env: BTreeMap<String, String> = BTreeMap::new();
+    let mut checks: BTreeMap<String, homelab_core::checks::ServiceChecks> = BTreeMap::new();
+    collect(dir, dir, &mut files, &mut env, &mut checks)?;
+    Ok(homelab_core::ops::fleetcheck::StackDigest {
+        stack,
+        manifest,
+        files: files
+            .into_iter()
+            .map(|f| {
+                let h = homelab_core::manifest::sha256_hex(f.content.as_bytes());
+                (f.path, h)
+            })
+            .collect(),
+    })
+}
+
+/// fix-141: what `deploy`/`apply` print before sending a stack whose files
+/// differ from the commit. A warning, not a refusal: deploying a change
+/// before committing it is a normal way to try it, and the host records it
+/// either way.
+pub fn uncommitted_warning(stack: &str, src: &homelab_proto::SourceRev) -> Option<String> {
+    if src.uncommitted.is_empty() {
+        return None;
+    }
+    const SHOWN: usize = 5;
+    let mut names = src
+        .uncommitted
+        .iter()
+        .take(SHOWN)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if src.uncommitted.len() > SHOWN {
+        names.push_str(&format!(" and {} more", src.uncommitted.len() - SHOWN));
+    }
+    Some(format!(
+        "⚠ {}: {} uncommitted file(s) go live that exist in no commit ({}); the host \
+         records this deploy as {} — commit them to make it reproducible",
+        stack,
+        src.uncommitted.len(),
+        names,
+        src.summary()
+    ))
 }
 
 /// fix-69 (tui-refresh-blocks-on-downloads, 2026-09-27): the intent hash of a
@@ -326,6 +443,7 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
     let native_binaries = BTreeMap::new();
 
     Ok(DeploySpec {
+        source: None,
         manifest: stack_file.manifest,
         files,
         env,

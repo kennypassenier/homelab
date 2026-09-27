@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 pub use homelab_core::manifest::{
     BootSpec, DeploySpec, FileBlob, GatewayRoute, LxcSpec, MountSpec, NetworkSpec, ResourceSpec,
-    StackManifest,
+    SourceRev, StackManifest,
 };
 pub use homelab_core::native::NativeServiceManifest;
 pub use homelab_core::retention::RetentionTier;
@@ -261,12 +261,20 @@ pub enum Command {
     /// whether every gateway route reaches something that answers.
     FleetCheck {
         stack_files: Vec<(String, u16)>,
+        /// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift):
+        /// what each stack's files say, so the check can compare them with
+        /// what the host last applied. Empty from an older client.
+        #[serde(default)]
+        digests: Vec<homelab_core::ops::fleetcheck::StackDigest>,
     },
     /// fix-68: doctor, the fleet check (with its manual checks) and the open
     /// incident bundles as one list and one verdict. The reply's message is
     /// a JSON `homelab_core::ops::today::Today`, rendered by the caller.
     Today {
         stack_files: Vec<(String, u16)>,
+        /// fix-142: as in `FleetCheck`.
+        #[serde(default)]
+        digests: Vec<homelab_core::ops::fleetcheck::StackDigest>,
     },
     /// H8 (light): flip a stack's enabled flag. Disabled = nightly scheduler
     /// skips it + onboot cleared; enabled = back in rotation + onboot per
@@ -427,6 +435,12 @@ pub enum ServerMsg {
     Hello {
         version: String,
         proto: u32,
+        /// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci):
+        /// `git describe --dirty` of the tree the host was built from, so a
+        /// hand-built binary no longer passes for the release of the same
+        /// version. None from a host older than this field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        build: Option<String>,
     },
     Log {
         level: LogLevel,
@@ -512,6 +526,7 @@ mod wire_tests {
     #[test]
     fn frames_are_bare_json_and_the_version_rides_in_hello() {
         let hello = serde_json::to_value(ServerMsg::Hello {
+            build: None,
             version: "3.60.0".into(),
             proto: PROTO_VERSION,
         })

@@ -559,3 +559,39 @@ async fn fix_93_the_log_question_is_asked_inside_lokis_container() {
     let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
     assert_eq!(media.logs_recent, Some(true));
 }
+
+/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): the host's
+/// intent-history copy of each stack the client named, hashed file by file,
+/// so the check can say which files differ. A stack whose copy cannot be
+/// read is absent, never "has no files".
+#[tokio::test]
+async fn fix_142_the_intent_copy_is_read_file_by_file() {
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "/var/lib/homelab/repo/stacks/home",
+        CmdOutput::ok(
+            "aaa111  ./app/docker-compose.yml\n\
+             bbb222  ./rootfs/usr/local/bin/tool\n",
+        ),
+    );
+    exec.respond_always(
+        "/var/lib/homelab/repo/stacks/gone",
+        CmdOutput::failed(1, "sh: cd: can't cd"),
+    );
+    exec.respond_always("/var/lib/homelab/repo/stacks/empty", CmdOutput::ok(""));
+    let got = intent_files(
+        &exec,
+        "/var/lib/homelab",
+        &["home".to_string(), "gone".to_string(), "empty".to_string()],
+    )
+    .await;
+    let home = got.get("home").expect("home read");
+    assert_eq!(home.len(), 2);
+    assert_eq!(home["app/docker-compose.yml"], "aaa111");
+    assert_eq!(home["rootfs/usr/local/bin/tool"], "bbb222");
+    assert!(!got.contains_key("gone"), "unread is absent: {got:?}");
+    assert!(got.get("empty").is_some_and(|m| m.is_empty()), "{got:?}");
+    // A name that could leave the repository is never asked about.
+    let odd = intent_files(&exec, "/var/lib/homelab", &["../etc".to_string()]).await;
+    assert!(odd.is_empty());
+}

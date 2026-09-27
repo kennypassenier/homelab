@@ -710,7 +710,73 @@ pub async fn gather_live_facts_with(
             }
         }
     }
+    // fix-142: the intent copy of every stack the client named, for the
+    // repository comparison. Nothing is read when no stack files came (the
+    // nightly round).
+    let names: Vec<String> = stack_files
+        .iter()
+        .map(|(d, _)| {
+            let d = d.trim_end_matches('/');
+            d.rsplit('/').next().unwrap_or(d).to_string()
+        })
+        .collect();
+    facts.intent_files = intent_files(exec, &inp.state_dir, &names).await;
     (facts, notes)
+}
+
+/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): the host's
+/// intent-history copy of each named stack (`<state_dir>/repo/stacks/<name>/`,
+/// what the last deploy sent), as container-bound path → sha256.
+///
+/// A stack whose copy cannot be read is left out rather than entered empty:
+/// "no files" would make every file of the stack look new. Names are the
+/// client's directory names, so anything but a plain stack name is skipped
+/// before it can become a path.
+pub async fn intent_files(
+    exec: &dyn Executor,
+    state_dir: &str,
+    stacks: &[String],
+) -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
+    let mut out = std::collections::BTreeMap::new();
+    for name in stacks {
+        let plain = !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if !plain {
+            continue;
+        }
+        let dir = format!("{}/repo/stacks/{}", state_dir, name);
+        let Ok(o) = exec
+            .run(&Cmd::new(
+                "sh",
+                &[
+                    "-c",
+                    &format!("cd '{}' && find . -type f -exec sha256sum {{}} +", dir),
+                ],
+                60,
+            ))
+            .await
+        else {
+            continue;
+        };
+        if !o.success() {
+            continue;
+        }
+        let files = o
+            .stdout
+            .lines()
+            .filter_map(|l| {
+                let (hash, path) = l.split_once("  ")?;
+                Some((
+                    path.trim_start_matches("./").to_string(),
+                    hash.trim().to_string(),
+                ))
+            })
+            .collect();
+        out.insert(name.clone(), files);
+    }
+    out
 }
 
 /// gap-27: the secret files on a stack's container that have no copy in the

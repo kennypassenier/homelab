@@ -714,9 +714,11 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
 2. **Release.** `make release VERSION=x.y.z`. Runs `make gate`, stamps the
    version, commits `release: vx.y.z [meta]`, tags and pushes
    (`Makefile:105-118`). **Point of no return:** the push. The tag starts
-   `.github/workflows/release.yml`, which runs the gate again and
-   publishes `homelab-host`, `homelab` and `SHA256SUMS`
-   (`.github/workflows/release.yml:6-40`). Watch with `gh run watch`.
+   `.github/workflows/release.yml`: its `build` job refuses a tag that is
+   not the version in `Cargo.toml` or not on `main`, runs the gate again
+   with `--locked` and builds with a read-only token; its `publish` job
+   then publishes `homelab-host`, `homelab` and `SHA256SUMS`
+   (`.github/workflows/release.yml`). Watch with `gh run watch`.
 3. **Roll out to the host.** `homelab release-update` (newest) or
    `homelab release-update vx.y.z`; or TUI key `u` when the dashboard shows
    `"HOST UPDATE <tag> available"` (`client/src/main.rs:808-834`,
@@ -763,7 +765,7 @@ sequenceDiagram
     W->>W: gate, stamp the version, commit, tag
     W->>G: push with the tag
     Note over W,G: point of no return
-    G->>G: release.yml runs the gate, builds, writes SHA256SUMS
+    G->>G: release.yml checks the tag, runs the gate, builds, writes SHA256SUMS
     O->>W: homelab release-update
     W->>G: gh release download
     G-->>W: homelab-host and SHA256SUMS

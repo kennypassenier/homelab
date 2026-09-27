@@ -25,6 +25,7 @@ fn one_stack() -> homelab_core::state::HostState {
     st.stacks.insert(
         "media".into(),
         homelab_core::state::StackState {
+            applied_source: None,
             vmid: 106,
             hostname: "106-app-media".into(),
             apps: Vec::new(),

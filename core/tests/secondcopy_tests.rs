@@ -106,6 +106,7 @@ fn stack_state(
     last_backup: u64,
 ) -> StackState {
     StackState {
+        applied_source: None,
         extra_route_files: Vec::new(),
         vmid: 110,
         hostname: "110-app-x".into(),

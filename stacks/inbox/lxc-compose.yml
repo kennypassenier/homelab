@@ -1,0 +1,106 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# CT 118 holds one native service: inbox, the example service of the
+# chassis-rs project, a scratch service this project only backs up (Kenny,
+# Phase 9 form 2026-09-27, inbox-guards: "Grenzen zetten"). `service.yml`
+# beside this file describes the service; this file describes the container.
+#
+# fix-145 (expert panel 2026-09-27, inbox-ct118-unmanaged): until this file
+# existed, CT 118's cores, memory, disk, network, boot and protection were
+# under no management, and after a host loss nothing could recreate it — the
+# DR text said "re-register with `homelab adopt`", which assumes somebody
+# built the container by hand first.
+#
+# Every value below is what CT 118 has right now, read with `pct config 118`
+# on 2026-09-27, so a deploy of this file does not change the container. In
+# particular it does NOT start on boot (onboot: 0), is not protected, has no
+# startup order and no bind mount: its data lives in the container's own
+# rootfs (/var/lib/inbox) and reaches restic through the native backup.
+#
+# Rebuilding it, in order:
+#   1. this manifest recreates the container (Debian 13 inside, 13.1
+#      measured, hence the Debian 13 template);
+#   2. the service's data comes back from its own restic repository by hand,
+#      as docs/OPERATIONS_RUNBOOK.md op-11 describes;
+#   3. the binary is installed the way C7 installs it (`homelab
+#      install-native`); chassis-rs has no release pipeline this project
+#      uses yet, see service.yml.
+
+stack_name: inbox
+vmid: 118
+hostname: 118-app-inbox
+native_only: true
+
+network:
+  ip: 10.10.10.18/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+resources:
+  cores: 1
+  memory_mb: 512
+  swap_mb: 0
+  disk_gb: 4
+  storage: local-lvm
+
+lxc:
+  template: clone:996
+  unprivileged: true
+  features: nesting=1
+  protection: false
+
+boot:
+  onboot: false
+
+storage: []
+
+apps: []
+
+# The unit file lives in inbox/inbox.service, byte for byte what CT 118 runs
+# (sha256 469fabcc…, measured 2026-09-27), so the deploy's unit step finds
+# nothing to write.
+natives: [inbox]
+
+firewall:
+  enabled: false
+  comment: |-
+    CT 118 (inbox), one native chassis-rs service on :8080.
+    Declared from what the container showed on 2026-09-27 21:03 local (fix-89
+    shape, fix-145): `ss -ltnup` lists 0.0.0.0:8080, 22 and loopback-only 25
+    and 9000; no established flow at that moment; Alloy is not installed, so a
+    deploy that installs it needs the Loki rule below.
+  rules:
+    - comment: "pve's rescue address: never from a container"
+      dir: out
+      action: DROP
+      dest: 10.10.10.250
+    - comment: "the neighbours it uses"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.13
+      proto: tcp
+      dport: "3100"
+      note: Loki push (Alloy, once installed; Loki moves to the metrics stack)
+    - comment: "every other neighbour in VLAN 10 stays out of reach"
+      dir: out
+      action: DROP
+      dest: 10.10.10.0/24
+    - comment: "who may reach the container"
+      dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: icmp
+      note: Uptime Kuma ping
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: tcp
+      dport: "8080"
+      note: Uptime Kuma HTTP monitor
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.10
+      proto: tcp
+      dport: "22,8080"
+      note: Kenny's desktop (ssh and the service)

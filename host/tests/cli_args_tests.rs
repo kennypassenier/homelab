@@ -42,7 +42,24 @@ fn run(args: &[&str]) -> (i32, String, String) {
 fn corr_rogue_daemon_version_prints_the_version_and_exits() {
     let (code, out, _) = run(&["--version"]);
     assert_eq!(code, 0);
-    assert_eq!(out.trim(), env!("CARGO_PKG_VERSION"));
+    // fix-141: the build follows the version, in brackets.
+    assert!(out.trim().starts_with(env!("CARGO_PKG_VERSION")), "{out}");
+}
+
+/// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): a
+/// hand-built binary and the release both said "3.59.3". `--version` names
+/// the build (`git describe --dirty`); `--selfcheck`, which the self-update
+/// reads, stays the bare version.
+#[test]
+fn fix_141_version_names_the_build_it_was_made_from() {
+    let build = env!("HOMELAB_BUILD");
+    assert!(!build.is_empty());
+    let (code, out, _) = run(&["--version"]);
+    assert_eq!(code, 0);
+    assert_eq!(
+        out.trim(),
+        format!("{} ({})", env!("CARGO_PKG_VERSION"), build)
+    );
 }
 
 #[test]

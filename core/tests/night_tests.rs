@@ -30,6 +30,7 @@ fn service(unit: &str, policy: &str) -> NativeServiceManifest {
 
 fn stack(manifest: Option<StackManifest>, natives: Vec<NativeServiceManifest>) -> StackState {
     StackState {
+        applied_source: None,
         extra_route_files: Vec::new(),
         vmid: 119,
         hostname: "119-app-drill".into(),

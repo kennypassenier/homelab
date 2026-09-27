@@ -11,6 +11,7 @@ use homelab_core::sink::{NullSink, PipelineEvent, Sink, VecSink};
 
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         native_manifests: Default::default(),
         manifest: StackManifest {

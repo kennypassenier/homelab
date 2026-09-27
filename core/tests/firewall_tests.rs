@@ -327,6 +327,7 @@ fn manifest(vmid: u16, stack: &str, spec: Option<FirewallSpec>) -> StackManifest
 
 fn spec(vmid: u16, stack: &str, fwspec: Option<FirewallSpec>) -> DeploySpec {
     DeploySpec {
+        source: None,
         native_manifests: Default::default(),
         native_binaries: Default::default(),
         manifest: manifest(vmid, stack, fwspec),
@@ -625,6 +626,7 @@ fn state_with(stack: &str, vmid: u16, spec: Option<FirewallSpec>) -> HostState {
     st.stacks.insert(
         stack.into(),
         StackState {
+            applied_source: None,
             vmid,
             hostname: m.hostname.clone(),
             apps: m.apps.clone(),

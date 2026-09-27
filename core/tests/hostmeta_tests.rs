@@ -94,6 +94,7 @@ fn fleet_with(last_host_meta: u64) -> HostState {
     st.stacks.insert(
         "kyu".into(),
         StackState {
+            applied_source: None,
             extra_route_files: Vec::new(),
             vmid: 109,
             hostname: "109-app-kyu".into(),

@@ -54,6 +54,16 @@ DELETE_CAP_FRACTION = 0.25
 OK = ["200-299"]
 OK_REDIRECT = ["200-299", "302"]
 OK_TRAEFIK = ["404"]  # the correct answer for a host header it does not route
+# fix-143 (expert panel 2026-09-27, edge-changes-unnoticed): from outside, a
+# name behind Cloudflare Access must answer with the redirect to its login
+# and nothing else. `200-299` was accepted too, and redirects were followed,
+# so a deleted or bypassed Access app left the monitors green while the
+# house was public. Both are checked with no redirect followed.
+OK_ACCESS = ["302"]
+# The canary: sp.kp-soft.dev is open to everyone by design (SuperSync
+# Bypass), so the app's own authentication is all that stands there. Its
+# sync status without a token must stay 401 (measured 2026-09-27).
+OK_UNAUTHENTICATED = ["401"]
 
 # Every endpoint below was probed and answered before it was written down.
 APPLICATION_MONITORS = [
@@ -97,11 +107,15 @@ APPLICATION_MONITORS = [
     ("registry · docker.io cache", "http://10.10.10.17:5000/v2/", OK),
     ("kp-soft · site", "http://10.10.10.16:8080/up", OK),
     # Through cloudflared and Traefik. Every *.kp-soft.dev name sits behind
-    # Cloudflare Access, so a healthy answer is the 302 to its login page.
+    # Cloudflare Access, so a healthy answer is the 302 to its login page,
+    # and only that (fix-143): a 200 means Access is not in front any more.
     # The edge is one wildcard route, so a single external check already sees
     # the tunnel fail; two guard against a fluke in one of them.
-    ("extern · fin.kp-soft.dev", "https://fin.kp-soft.dev/", OK_REDIRECT),
-    ("extern · docs.kp-soft.dev", "https://docs.kp-soft.dev/", OK_REDIRECT),
+    ("extern · fin.kp-soft.dev", "https://fin.kp-soft.dev/", OK_ACCESS),
+    ("extern · docs.kp-soft.dev", "https://docs.kp-soft.dev/", OK_ACCESS),
+    # fix-143: the one name open to everyone must still refuse a stranger.
+    ("extern · sp.kp-soft.dev refuses without a token",
+     "https://sp.kp-soft.dev/api/sync/status", OK_UNAUTHENTICATED),
 ]
 
 
@@ -244,6 +258,37 @@ def ensure_ha_notification(api):
     return created.get("id"), "added"
 
 
+def monitor_options(accepted):
+    """The HTTP options a declared monitor gets from its accepted codes.
+
+    fix-143: a monitor that must see exactly one answer from the edge (the
+    Access redirect, or the canary's 401) follows no redirect, or it would
+    judge wherever the redirect leads instead. Everything else keeps Kuma's
+    default of 10.
+    """
+    exact = accepted in (OK_ACCESS, OK_UNAUTHENTICATED)
+    return {"accepted_statuscodes": accepted, "maxredirects": 0 if exact else 10}
+
+
+def plan_options(monitors):
+    """(monitor, changes) for declared HTTP monitors whose accepted codes or
+    redirect limit differ from the file (tested).
+
+    The seeder only ever added a missing monitor and corrected its address,
+    so a change to what a monitor accepts never reached one that existed.
+    """
+    wanted = {name: monitor_options(accepted) for name, _, accepted in APPLICATION_MONITORS}
+    out = []
+    for m in monitors:
+        want = wanted.get(m["name"])
+        if not want or not m.get("url"):
+            continue
+        changes = {k: v for k, v in want.items() if m.get(k) != v}
+        if changes:
+            out.append((m, changes))
+    return out
+
+
 def is_owned(m):
     return any(t.get("name") == OWNER_TAG for t in (m.get("tags") or []))
 
@@ -298,7 +343,7 @@ def seed_once(api, host_monitors, have_generated_list):
             continue
         api.add_monitor(type=MonitorType.HTTP, name=name, url=url,
                         interval=60, maxretries=2,
-                        accepted_statuscodes=accepted, **notify)
+                        **monitor_options(accepted), **notify)
         added += 1
         print(f"[seed]   + {name}", flush=True)
 
@@ -333,6 +378,11 @@ def seed_once(api, host_monitors, have_generated_list):
         api.edit_monitor(m["id"], **{field: want})
         fixed.append(m["name"])
         print(f"[seed]   ~ {m['name']} now points at {want}", flush=True)
+    # fix-143: what a declared monitor accepts is the file's too.
+    for m, changes in plan_options(monitors):
+        api.edit_monitor(m["id"], **changes)
+        fixed.append(m["name"])
+        print(f"[seed]   ~ {m['name']} now {changes}", flush=True)
     removed = []
     for m in to_delete:
         api.delete_monitor(m["id"])

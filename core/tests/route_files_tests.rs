@@ -96,6 +96,7 @@ fn extra(filename: &str, content: &str) -> GatewayRoute {
 /// kyu's shape after fix-91.
 fn spec(vmid: u16, stack: &str, extras: Vec<GatewayRoute>) -> DeploySpec {
     DeploySpec {
+        source: None,
         native_manifests: Default::default(),
         native_binaries: Default::default(),
         manifest: manifest(vmid, stack),
@@ -135,6 +136,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 
 fn record(m: &StackManifest) -> StackState {
     StackState {
+        applied_source: None,
         vmid: m.vmid,
         hostname: m.hostname.clone(),
         apps: m.apps.clone(),

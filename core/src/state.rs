@@ -65,6 +65,12 @@ pub struct StackState {
     /// running and unknown is worse than one that is plainly broken.
     #[serde(default)]
     pub incomplete_step: Option<String>,
+    /// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): the
+    /// commit the last deploy was read from, with "+ N uncommitted file(s)"
+    /// when the stack directory differed from it (`SourceRev::summary`).
+    /// None for a deploy from a client that did not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_source: Option<String>,
 }
 
 /// A unix timestamp as `YYYY-MM-DD`, for messages that have to say when a

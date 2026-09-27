@@ -13,6 +13,7 @@ fn state_with_stack(applied_at: u64) -> HostState {
     st.stacks.insert(
         "media".into(),
         StackState {
+            applied_source: None,
             vmid: 106,
             hostname: "106-app-media".into(),
             apps: Vec::new(),

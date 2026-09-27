@@ -184,6 +184,7 @@ retention:
     st.stacks.insert(
         "almanac".into(),
         homelab_core::state::StackState {
+            applied_source: None,
             extra_route_files: Vec::new(),
             vmid: 112,
             hostname: "112-app-almanac".into(),

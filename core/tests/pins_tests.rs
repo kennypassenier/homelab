@@ -24,6 +24,7 @@ const TRAEFIK_DIGEST: &str =
 
 fn stack(vmid: u16, name: &str) -> StackState {
     StackState {
+        applied_source: None,
         vmid,
         hostname: format!("{}-app-{}", vmid, name),
         apps: vec!["app".into()],

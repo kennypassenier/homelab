@@ -51,6 +51,7 @@ fn a_stateless_unit_has_no_repository_to_copy() {
     st.stacks.insert(
         "drill".into(),
         StackState {
+            applied_source: None,
             extra_route_files: Vec::new(),
             vmid: 119,
             hostname: "119-app-drill".into(),

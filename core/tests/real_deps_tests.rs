@@ -176,6 +176,7 @@ fn spec(files_content: &str) -> DeploySpec {
     };
     m.hostname = m.canonical_hostname();
     DeploySpec {
+        source: None,
         native_binaries: Default::default(),
         native_manifests: Default::default(),
         manifest: m,

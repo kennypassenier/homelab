@@ -141,7 +141,8 @@ whole fleet is described in this repo and managed by this orchestrator.
 ## Success criteria (S)
 
 - **S1** Every container except the untouchable ones is described in this
-  repo, appears in `homelab state`, and its rebuild-from-zero has been
+  repo, appears in `homelab status` (written as
+  "homelab state" until 2026-09-27; no such verb ever existed), and its rebuild-from-zero has been
   drilled at least once.
 - **S2** No service regressed: every endpoint in the vault's "Home Network
   Services" answers as before, and Jellyfin still transcodes in hardware.

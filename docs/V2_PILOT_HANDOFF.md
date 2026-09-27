@@ -91,7 +91,8 @@ Every step below touches the Proxmox host. In order:
 - **Planned feature — golden template builder** (post-pilot, decided
   2026-08-10). Design: hybrid — the idempotent bootstrap in `host/src/main.rs`
   stays the single source of truth; a custom template is only a cache of its
-  slow steps. `homelab template build` (new RPC) will: create a temp CT from
+  slow steps. `homelab template-build` (new RPC; planned as "template build",
+  built with the hyphen) will: create a temp CT from
   the base Debian template → run bootstrap + runaway guards → shut down →
   `pct template` / vzdump export as `debian-12-homelab-vN.tar.zst` → clean up
   the temp CT (the ONLY destroy the system will ever do, gated to its own

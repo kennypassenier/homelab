@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**530 tests across 28 suites.**
+**532 tests across 29 suites.**
 
 ## Accepted limitations
 
@@ -621,6 +621,13 @@ Covers: F177
 - `e8_empty_target_is_seeded_incremental_otherwise`
 - `e8_no_jobs_is_an_error_not_a_silent_success`
 - `a_replica_never_inherits_the_path_its_source_lives_at` — F177: a replica must never arrive claiming the path its source is mounted at.
+
+### `client/tests/doc_commands_tests.rs`
+
+A document that states behaviour is executed, not reviewed (dev procedure, Phase 8). Every `homelab <verb>` a person can copy out of the documents must name a verb the client actually dispatches; a renamed or planned-but- never-built verb in a guide is how a runbook ships a command that answers "unknown command" in the middle of a recovery.
+
+- `every_homelab_command_in_the_documents_names_a_verb_the_client_dispatches`
+- `the_extractor_finds_block_lines_inline_spans_and_skips_prose`
 
 ### `client/tests/latch_secrets_tests.rs`
 

@@ -42,3 +42,34 @@ async fn fix_30_a_forty_megabyte_line_is_cut_to_its_start_and_its_size() {
         "and it says how much was left out"
     );
 }
+
+/// fix-39, second layer: whatever path prints a secret-named assignment
+/// (`docker inspect … .Config.Env` did so on 2026-09-01 for paperless, mail
+/// and postgres passwords), the transcript masks its value. `Cmd::quiet` is
+/// the first layer; this catches the paths nobody marked.
+///
+/// covers: fix-39
+#[test]
+fn fix_39_secret_named_assignments_are_masked_in_output_lines() {
+    use homelab_core::executor::trace_line;
+    let got = trace_line(
+        "|PAPERLESS_CONSUMER_POLLING=30 PAPERLESS_SECRET_KEY=abcd1234 POSTGRES_PASSWORD=hunter22",
+    );
+    assert!(got.contains("PAPERLESS_CONSUMER_POLLING=30"), "{got}");
+    assert!(got.contains("PAPERLESS_SECRET_KEY=<redacted>"), "{got}");
+    assert!(got.contains("POSTGRES_PASSWORD=<redacted>"), "{got}");
+    assert!(
+        !got.contains("abcd1234") && !got.contains("hunter22"),
+        "{got}"
+    );
+    assert_eq!(trace_line("KYU_TOKEN=3be9f"), "KYU_TOKEN=<redacted>");
+    assert_eq!(
+        trace_line("KYU_LISTEN=0.0.0.0:8080"),
+        "KYU_LISTEN=0.0.0.0:8080"
+    );
+    // A pattern that only names the key, as a grep does, has no value to hide.
+    assert_eq!(
+        trace_line("grep '^REGISTRY_TOKEN=' f"),
+        "grep '^REGISTRY_TOKEN=' f"
+    );
+}

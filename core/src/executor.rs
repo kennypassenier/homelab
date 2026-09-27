@@ -129,9 +129,60 @@ pub struct TracingExecutor<'a> {
 /// kyu). No reader needs more than the start of a line to know what it was.
 pub const TRACE_LINE_MAX: usize = 300;
 
+/// fix-39, second layer: the value of any `NAME=value` whose name says it is
+/// a secret (TOKEN, SECRET, PASSWORD, PASSWD, KEY, CREDENTIAL) becomes
+/// `<redacted>`. `Cmd::quiet` keeps known secret reads out entirely; this
+/// catches the paths nobody marked, such as `docker inspect` printing a
+/// container's environment on 2026-09-01. A name with an empty value (a grep
+/// pattern like `'^REGISTRY_TOKEN='`) is left alone.
+fn mask_secret_assignments(l: &str) -> String {
+    const MARKERS: [&str; 6] = ["TOKEN", "SECRET", "PASSWORD", "PASSWD", "KEY", "CREDENTIAL"];
+    let mut out = String::with_capacity(l.len());
+    let bytes = l.as_bytes();
+    let mut i = 0;
+    while i < l.len() {
+        // A NAME is [A-Z0-9_]+ starting at a word boundary.
+        let at_boundary = i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+        if at_boundary && (bytes[i].is_ascii_uppercase() || bytes[i] == b'_') {
+            let mut j = i;
+            while j < l.len()
+                && (bytes[j].is_ascii_uppercase() || bytes[j].is_ascii_digit() || bytes[j] == b'_')
+            {
+                j += 1;
+            }
+            if j < l.len() && bytes[j] == b'=' {
+                let name = &l[i..j];
+                let mut k = j + 1;
+                while k < l.len()
+                    && !bytes[k].is_ascii_whitespace()
+                    && bytes[k] != b'\''
+                    && bytes[k] != b'"'
+                {
+                    k += 1;
+                }
+                if k > j + 1 && MARKERS.iter().any(|m| name.contains(m)) {
+                    out.push_str(name);
+                    out.push_str("=<redacted>");
+                    i = k;
+                    continue;
+                }
+            }
+            out.push_str(&l[i..j]);
+            i = j;
+            continue;
+        }
+        let ch = l[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
 /// A line as the transcript shows it: whole when short, else its start and
 /// the size of what was left out.
 pub fn trace_line(l: &str) -> String {
+    let masked = mask_secret_assignments(l);
+    let l = masked.as_str();
     if l.len() <= TRACE_LINE_MAX {
         return l.to_string();
     }

@@ -3716,7 +3716,10 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                                 .map(|(name, st)| homelab_core::ops::guards::ManagedTarget {
                                     name: name.clone(),
                                     vmid: st.vmid,
-                                    docker: st.manifest.as_ref().map(|m| !m.native_only).unwrap_or(true),
+                                    // A stack with no stored manifest was adopted
+                                    // (`homelab adopt` stores none): a native
+                                    // service, so no docker guards (CT 118).
+                                    docker: st.manifest.as_ref().map(|m| !m.native_only).unwrap_or(false),
                                 })
                                 .collect();
                             homelab_core::ops::guards::apply_for_managed(

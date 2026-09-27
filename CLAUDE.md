@@ -51,7 +51,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **Orchestrator: retrospective form answered 2026-09-26** (all six as recommended; `docs/RETROSPECTIVE.md` §4). Part A run headless the same evening (`docs/TEST_RUN_PART_A.md`, Kenny: Akkoord); the dev-procedure diff is on its main (a25f706); all eight findings fixed with tests first and released as v3.57.1 (installed on WSL from the verified release asset; Garuda is on the GARUDA.md list). **Deployment: waiting on Kenny: the correction form of 2026-09-27 (fix-28 — a kyu-stack deploy installs the latest release of every native, whatever its policy; fix-29 — the nightly round installs a release before it is signed)**, plus the four manual checks (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). **Do not run `homelab deploy stacks/kyu` until fix-28 is built** — it would ship the newest release of all three natives. Live 2026-09-27: http-switchboard 3.2.0 by hand (step-15, reload proven), kyu 4.0.0 via the nightly auto policy (step-16, signature verified afterwards); fix-24 closed (first unforced Traefik rotation read). Open measurement: the next deploy that restarts Loki (fix-27). Waits for a first escrow step: gap-15 guard. |
+| Next action | **Orchestrator: retrospective form answered 2026-09-26** (all six as recommended; `docs/RETROSPECTIVE.md` §4). Part A run headless the same evening (`docs/TEST_RUN_PART_A.md`, Kenny: Akkoord); the dev-procedure diff is on its main (a25f706); all eight findings fixed with tests first and released as v3.57.1 (installed on WSL from the verified release asset; Garuda is on the GARUDA.md list). **Deployment: waiting on Kenny: the four manual checks** (paperwork ×2, media posters, **kyu-e576**, `homelab checks answer e576228c ok`). v3.58.0 live since 2026-09-27 06:40 local: a deploy never replaces an installed native binary (fix-28, measured), and native releases must carry the ecosystem minisign signature (fix-29; the orchestrator's own releases stay checksum-only, stated gap). CT 109 runs kyu 4.0.0, kyu-runner 1.0.0, http-switchboard 3.2.0. **Measurements open:** the next native release that appears unsigned must be skipped (fix-29); the next deploy that restarts Loki must pass without a question (fix-27). Waits for a first escrow step: gap-15 guard. |
 
 
 **The deployment project is the active work.** It brings the whole fleet under
@@ -61,7 +61,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.57.0** (2026-09-26 23:22 local, fix-26/27); v3.56.0 the same evening (fix-24 log rotation); v3.55.0 on 2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **552 tests in 36 suites** (counted 2026-09-27 at v3.57.1), CI green — and green now
+- **Released and live at v3.58.0** (2026-09-27 06:40 local, fix-28/29); v3.57.0 on 2026-09-26 23:22 local (fix-26/27); v3.56.0 the same evening (fix-24 log rotation); v3.55.0 on 2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **552 tests in 36 suites** (counted 2026-09-27 at v3.57.1), CI green — and green now
   means something: CI ran without `--locked` until that day, so it built
   whatever crates.io served rather than what the lockfile pins (F235).
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.

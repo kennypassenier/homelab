@@ -153,6 +153,19 @@ pub struct RegistryLogin {
 }
 
 impl StackManifest {
+    /// fix-130 (expert panel, doctor-checks-too-little, 2026-09-27): the
+    /// stack declares nothing to back up: every storage mount is `no_backup`
+    /// or `no_data`, and it runs no native service (those are backed up as a
+    /// whole). Doctor then says so instead of quoting a backup age that
+    /// protects nothing.
+    pub fn backs_up_nothing(&self) -> bool {
+        self.natives.is_empty()
+            && self
+                .storage
+                .iter()
+                .all(|s| s.no_data || s.no_backup.is_some())
+    }
+
     pub fn canonical_hostname(&self) -> String {
         format!("{}-app-{}", self.vmid, self.stack_name)
     }

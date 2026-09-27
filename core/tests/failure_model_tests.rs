@@ -231,6 +231,7 @@ fn f6_doctor_healthy_system_is_ok() {
             backup_age_h: Some(3),
             container_present: true,
             env_sealed: true,
+            nothing_to_back_up: false,
         }],
         offsite_configured: true,
         offsite_token_valid: true,
@@ -253,6 +254,7 @@ fn f6_doctor_flags_each_problem_with_remedy() {
             backup_age_h: Some(72), // warn
             container_present: true,
             env_sealed: false, // fail
+            nothing_to_back_up: false,
         }],
         offsite_configured: true,
         offsite_token_valid: false,                   // fail
@@ -340,6 +342,84 @@ fn fix_120_doctor_names_refused_connections() {
         line.detail
     );
     assert!(line.remedy.is_some());
+}
+
+/// fix-130 (expert panel, doctor-checks-too-little, 2026-09-27): doctor
+/// answered backups and the Drive token only, and said Ok for a stack that
+/// backs up nothing. Each new probe gets a line: an Ok that says what it saw,
+/// or a warning with a remedy.
+#[test]
+fn fix_130_doctor_reports_exposure_files_privilege_host_meta_drill_and_space() {
+    use homelab_core::doctor::{DrillProbe, DriveSpace, Exposure, Freshness, Privileged};
+    const GIB: u64 = 1 << 30;
+    let p = Probes {
+        state_parses: true,
+        managed_stacks: vec![StackProbe {
+            name: "registry".into(),
+            backup_age_h: Some(12),
+            container_present: true,
+            env_sealed: true,
+            nothing_to_back_up: true,
+        }],
+        exposure: Some(Exposure {
+            listen: "0.0.0.0:8443".into(),
+            exec_enabled: true,
+        }),
+        loose_files: Some(vec!["/etc/homelab/host.toml (644)".into()]),
+        privileged: Some(Privileged {
+            vmids: vec![105, 106, 108],
+            outside_policy: vec![108],
+        }),
+        host_meta: Some(Freshness { age_h: None }),
+        restore_drill: Some(DrillProbe {
+            age_h: Some(100 * 24),
+            interval_h: 90 * 24,
+            failing: vec!["kyu-config: the restore itself failed".into()],
+        }),
+        password_file_ok: Some(false),
+        drive: Some(DriveSpace {
+            total: 100 * GIB,
+            free: 2 * GIB,
+            trashed: 30 * GIB,
+        }),
+        ..Default::default()
+    };
+    let checks = doctor::diagnose(&p);
+    let line = |name: &str| {
+        checks
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap_or_else(|| panic!("no '{}' line in {:?}", name, checks))
+            .clone()
+    };
+    let exposure = line("daemon exposure");
+    assert_eq!(exposure.health, Health::Ok);
+    assert!(exposure.detail.contains("0.0.0.0:8443") && exposure.detail.contains("exec on"));
+    assert_eq!(line("file modes").health, Health::Warn);
+    assert!(line("file modes").detail.contains("host.toml"));
+    let privileged = line("privileged containers");
+    assert_eq!(privileged.health, Health::Warn);
+    assert!(privileged.detail.contains("108"), "{}", privileged.detail);
+    assert_eq!(line("host-meta backup").health, Health::Warn);
+    let drill = line("restore drill");
+    assert_eq!(drill.health, Health::Warn);
+    assert!(drill.detail.contains("kyu-config"), "{}", drill.detail);
+    assert_eq!(line("restic password file").health, Health::Fail);
+    let drive = line("Drive space");
+    assert_eq!(drive.health, Health::Fail, "{}", drive.detail);
+    assert!(drive.detail.contains("trash"), "{}", drive.detail);
+    let registry = line("stack registry backup");
+    assert_eq!(registry.health, Health::Ok);
+    assert!(
+        registry.detail.contains("nothing to back up (declared)"),
+        "{}",
+        registry.detail
+    );
+    for c in &checks {
+        if c.health != Health::Ok {
+            assert!(c.remedy.is_some(), "check '{}' has no remedy", c.name);
+        }
+    }
 }
 
 // ── RecordingSink tees to inner sink AND records ────────────────────────────

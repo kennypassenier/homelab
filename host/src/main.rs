@@ -1494,6 +1494,84 @@ port = 5003
         AppState::new(config, log_tx)
     }
 
+    /// fix-130 (expert panel, doctor-checks-too-little, 2026-09-27): the new
+    /// doctor probes read the machine: file modes, privileged containers
+    /// (never a no-touch guest's configuration), the host-meta and drill
+    /// records in state, the password file and Drive's space.
+    #[tokio::test]
+    async fn fix_130_the_new_doctor_probes_read_the_machine() {
+        use homelab_core::executor::{CmdOutput, MockExecutor};
+        let now = 1_800_000_000u64;
+        let exec = MockExecutor::new();
+        exec.seed_file(
+            "/var/lib/homelab/state.json",
+            &format!(
+                r#"{{"schema_version":1,"stacks":{{}},"last_host_meta":{},
+                "last_restore_drill":{},"restore_drills":{{"kyu-config":{{"last_attempt":{},"last_pass":0,"last_error":"the restore itself failed"}}}}}}"#,
+                now - 30 * 3600,
+                now - 10 * 86_400,
+                now - 86_400
+            ),
+        );
+        exec.respond_always(
+            "stat -c",
+            CmdOutput::ok("644 /etc/homelab/host.toml\n600 /var/lib/homelab/tls-key.pem\n700 /var/lib/homelab/incidents\n"),
+        );
+        exec.respond_always("unprivileged: 1", CmdOutput::ok("105\n106\n108\n"));
+        exec.respond_always("test -s", CmdOutput::ok(""));
+        exec.respond_always("listremotes", CmdOutput::ok("gdrive:\n"));
+        exec.respond_always(
+            "about gdrive:",
+            CmdOutput::ok(r#"{"total":107374182400,"used":90000000000,"trashed":2147483648,"free":17374182400}"#),
+        );
+        let pc = ProbeContext {
+            listen: "0.0.0.0:8443".into(),
+            exec_enabled: false,
+            config_path: "/etc/homelab/host.toml".into(),
+            password_file: "/var/lib/homelab/secrets/restic.pass".into(),
+            privileged_vmids: vec![105, 106],
+            no_touch: vec![100, 101, 102, 103],
+            drill_interval_s: 90 * 86_400,
+            state_dir: "/var/lib/homelab".into(),
+        };
+        // As `gather_probes` leaves it when the gdrive remote exists.
+        let mut probes = homelab_core::doctor::Probes {
+            offsite_configured: true,
+            ..Default::default()
+        };
+        gather_security_probes(&exec, &pc, now, &mut probes).await;
+        assert_eq!(
+            probes.loose_files,
+            Some(vec!["/etc/homelab/host.toml (644)".to_string()])
+        );
+        let pv = probes.privileged.expect("privileged probed");
+        assert_eq!(
+            (pv.vmids, pv.outside_policy),
+            (vec![105, 106, 108], vec![108])
+        );
+        let listing = exec.calls_containing("unprivileged: 1");
+        assert!(
+            listing.iter().all(|c| c.contains("100|101|102|103")),
+            "no-touch configurations are skipped, not read: {:?}",
+            listing
+        );
+        assert_eq!(probes.host_meta.and_then(|h| h.age_h), Some(30));
+        let drill = probes.restore_drill.expect("drill probed");
+        assert_eq!(drill.age_h, Some(240));
+        assert!(
+            drill.failing[0].starts_with("kyu-config"),
+            "{:?}",
+            drill.failing
+        );
+        assert_eq!(probes.password_file_ok, Some(true));
+        let drive = probes.drive.expect("drive probed");
+        assert_eq!((drive.total, drive.trashed), (107374182400, 2147483648));
+        assert_eq!(
+            probes.exposure.map(|e| e.listen),
+            Some("0.0.0.0:8443".into())
+        );
+    }
+
     /// A session over a real socket on a free local port, with `handler` in
     /// place of `handle_rpc`. Returns the address to connect to.
     async fn serve_on_loopback<H, Fut>(handler: H) -> SocketAddr
@@ -4970,6 +5048,7 @@ async fn gather_today(
     )
     .await;
     probes.failed_auth = Some(state.auth_failures.snapshot());
+    gather_security_probes(exec, &ProbeContext::of(&state.config), now, &mut probes).await;
     let checks = homelab_core::doctor::diagnose(&probes);
     let live = gather_live_facts(exec, state, stack_files).await;
     let incidents: Vec<String> = std::fs::read_dir(format!("{}/incidents", state.config.state_dir))
@@ -6138,6 +6217,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             )
             .await;
             probes.failed_auth = Some(state.auth_failures.snapshot());
+            gather_security_probes(&exec, &ProbeContext::of(&state.config), now, &mut probes).await;
             let checks = homelab_core::doctor::diagnose(&probes);
             let overall = homelab_core::doctor::overall(&checks);
             let mut msg = format!("doctor: {:?}\n", overall);
@@ -6271,6 +6351,159 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
     }
 }
 
+/// fix-130: what the new doctor probes need from the configuration.
+struct ProbeContext {
+    listen: String,
+    exec_enabled: bool,
+    config_path: String,
+    password_file: String,
+    privileged_vmids: Vec<u16>,
+    no_touch: Vec<u16>,
+    drill_interval_s: u64,
+    state_dir: String,
+}
+
+impl ProbeContext {
+    fn of(config: &Config) -> Self {
+        ProbeContext {
+            listen: config.listen.to_string(),
+            exec_enabled: config.exec_enabled,
+            config_path: config.config_path.clone(),
+            password_file: config.backup.password_file.clone(),
+            privileged_vmids: config.safety.privileged_vmids.clone().unwrap_or_default(),
+            no_touch: config.safety.no_touch.clone(),
+            drill_interval_s: config.restore_drill_interval_s,
+            state_dir: config.state_dir.clone(),
+        }
+    }
+}
+
+/// fix-130 (expert panel, doctor-checks-too-little, 2026-09-27): the probes
+/// doctor lacked. Cheap reads only: `stat`, one loop over the container
+/// configurations, state, `test -s` and one `rclone about`. A probe that
+/// cannot be read stays `None`, so doctor leaves its line out rather than
+/// guess.
+async fn gather_security_probes(
+    exec: &dyn Executor,
+    pc: &ProbeContext,
+    now_unix: u64,
+    probes: &mut homelab_core::doctor::Probes,
+) {
+    use homelab_core::doctor::{DrillProbe, DriveSpace, Exposure, Freshness, Privileged};
+    probes.exposure = Some(Exposure {
+        listen: pc.listen.clone(),
+        exec_enabled: pc.exec_enabled,
+    });
+
+    // Private files: group or world bits set is a finding. A path that does
+    // not exist prints nothing on stdout, which is right: absent is not loose.
+    let private = [
+        pc.config_path.clone(),
+        pc.password_file.clone(),
+        format!("{}/secrets", pc.state_dir),
+        format!("{}/tls-key.pem", pc.state_dir),
+        format!("{}/audit.log", pc.state_dir),
+        format!("{}/incidents", pc.state_dir),
+    ];
+    let mut args: Vec<&str> = vec!["-c", "%a %n"];
+    args.extend(private.iter().map(String::as_str));
+    if let Ok(out) = exec.run(&Cmd::new("stat", &args, 20)).await {
+        probes.loose_files = Some(
+            out.stdout
+                .lines()
+                .filter_map(|l| l.split_once(' '))
+                .filter(|(mode, _)| u32::from_str_radix(mode, 8).is_ok_and(|m| m & 0o077 != 0))
+                .map(|(mode, path)| format!("{} ({})", path, mode))
+                .collect(),
+        );
+    }
+
+    // Privileged containers. Templates are left out (the golden -priv
+    // template is privileged on purpose and never runs), and the no-touch
+    // guests' configurations are not even read: the list is law.
+    let skip = pc
+        .no_touch
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join("|");
+    let script = format!(
+        "for f in /etc/pve/lxc/*.conf; do v=$(basename \"$f\" .conf); \
+         case \"$v\" in {}) continue;; esac; \
+         grep -q '^template: 1' \"$f\" && continue; \
+         grep -q '^unprivileged: 1' \"$f\" || echo \"$v\"; done",
+        if skip.is_empty() { "-".into() } else { skip }
+    );
+    if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 20)).await {
+        let mut vmids: Vec<u16> = out
+            .stdout
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect();
+        vmids.sort_unstable();
+        let outside_policy = vmids
+            .iter()
+            .copied()
+            .filter(|v| !pc.privileged_vmids.contains(v))
+            .collect();
+        probes.privileged = Some(Privileged {
+            vmids,
+            outside_policy,
+        });
+    }
+
+    // Host-meta and the restore drill, from the record.
+    if let Ok(raw) = exec
+        .read_file(&format!("{}/state.json", pc.state_dir))
+        .await
+    {
+        if let Ok(hs) = serde_json::from_str::<homelab_core::state::HostState>(&raw) {
+            let age = |t: u64| (t > 0).then(|| now_unix.saturating_sub(t) / 3600);
+            probes.host_meta = Some(Freshness {
+                age_h: age(hs.last_host_meta),
+            });
+            probes.restore_drill = Some(DrillProbe {
+                age_h: age(hs.last_restore_drill),
+                interval_h: pc.drill_interval_s / 3600,
+                failing: hs
+                    .restore_drills
+                    .iter()
+                    .filter_map(|(repo, r)| {
+                        r.last_error.as_ref().map(|e| format!("{}: {}", repo, e))
+                    })
+                    .collect(),
+            });
+        }
+    }
+
+    // Present and not empty; the content never leaves the file.
+    probes.password_file_ok = exec
+        .run(&Cmd::new("test", &["-s", &pc.password_file], 10))
+        .await
+        .ok()
+        .map(|o| o.success());
+
+    // Drive's space, trash included: pruned packs stay in the trash and
+    // count against the quota until it is emptied.
+    if probes.offsite_configured {
+        if let Ok(out) = exec
+            .run(&Cmd::new("rclone", &["about", "gdrive:", "--json"], 60))
+            .await
+        {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out.stdout) {
+                let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+                if n("total") > 0 {
+                    probes.drive = Some(DriveSpace {
+                        total: n("total"),
+                        free: n("free"),
+                        trashed: n("trashed"),
+                    });
+                }
+            }
+        }
+    }
+}
+
 /// Gather doctor probes (F6). I/O stays here; the verdict logic is in core.
 /// H8 hardening: the probe layer now feeds REAL data — backup freshness per
 /// stack from state.json, offsite reachability via a quick rclone listing,
@@ -6311,6 +6544,9 @@ async fn gather_probes(
                         .then(|| now_unix.saturating_sub(st.last_backup) / 3600),
                     container_present: present,
                     env_sealed,
+                    // fix-130: a native stack's services are backed up whole.
+                    nothing_to_back_up: !st.is_native()
+                        && st.manifest.as_ref().is_some_and(|m| m.backs_up_nothing()),
                 });
             }
         }
@@ -6400,5 +6636,12 @@ async fn gather_probes(
         interrupted_ops: interrupted,
         // fix-120: filled in by the caller, which holds the counter.
         failed_auth: None,
+        exposure: None,
+        loose_files: None,
+        privileged: None,
+        host_meta: None,
+        restore_drill: None,
+        password_file_ok: None,
+        drive: None,
     }
 }

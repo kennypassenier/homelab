@@ -1678,8 +1678,19 @@ homelab doctor
 or the DOCTOR tab. Checks (`core/src/doctor.rs:45-188`): host disk free
 (`Warn` under 20 %, `Fail` under 10 %), whether `state.json` parses, per stack
 whether the container exists and how old its last backup is (`Warn` over 48
-hours or never), the Google Drive token when configured, mirror lag when
-known, and interrupted operations. Output (`host/src/main.rs:4136-4163`):
+hours or never; a stack whose every mount is `no_backup` or `no_data` says
+`nothing to back up (declared)`), the Google Drive token when configured,
+mirror lag when known, and interrupted operations. Since fix-120 and fix-130
+also: `refused connections` (401s since the daemon started), `daemon
+exposure` (listen address, remote exec on or off; informational), `file
+modes` (host.toml, the restic password file, the secrets directory, the TLS
+key, audit.log and the incidents directory must be root-only), `privileged
+containers` (`Warn` for one outside `privileged_vmids`; templates and
+no-touch guests are not read), `host-meta backup` (`Warn` over 48 hours or
+never), `restore drill` (`Warn` when overdue or a repository's last drill
+failed), `restic password file` (`Fail` when missing or empty) and `Drive
+space` from `rclone about` (`Warn` under 10 % free, `Fail` under 5 %, with
+what the trash holds). Output (`host/src/main.rs`, `Rpc::Doctor`):
 
 ```text
 doctor: <Ok|Warn|Fail>

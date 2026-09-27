@@ -2596,6 +2596,23 @@ async fn a_vmid_that_is_a_qemu_vm_is_refused_even_when_it_is_not_on_the_list() {
     assert!(msg.contains("9000") && msg.contains("QEMU"), "{}", msg);
 }
 
+/// fix-130 (expert panel, doctor-checks-too-little, 2026-09-27): doctor
+/// said `registry backup — last backup 12h ago` for a stack that keeps
+/// nothing. A stack declares nothing to back up when every mount is
+/// `no_backup` or `no_data`.
+#[test]
+fn fix_130_a_stack_whose_every_mount_is_excluded_backs_up_nothing() {
+    let mut m = manifest(117, "registry");
+    assert!(!m.backs_up_nothing(), "a normal mount is backed up");
+    m.storage[0].no_backup = Some("a pull-through cache, re-downloadable".into());
+    assert!(m.backs_up_nothing());
+    m.storage[0].no_backup = None;
+    m.storage[0].no_data = true;
+    assert!(m.backs_up_nothing());
+    m.storage.clear();
+    assert!(m.backs_up_nothing(), "no mounts, nothing to keep");
+}
+
 /// fix-120 (expert panel, api-token-is-root, 2026-09-27): the API token is
 /// root on pve as long as a stack file may ask for a privileged container or
 /// bind any host path into one. The host's own policy decides; a stack file

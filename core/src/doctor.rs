@@ -36,6 +36,64 @@ pub struct Probes {
     /// fix-120: connections the daemon refused for their token since it
     /// started; `None` when not asked.
     pub failed_auth: Option<FailedAuth>,
+    // fix-130 (expert panel, doctor-checks-too-little, 2026-09-27): doctor
+    // answered backups and the Drive token only. Each probe below is `None`
+    // when not asked, so an older caller keeps its old report.
+    /// Where the daemon listens and whether remote exec is on.
+    pub exposure: Option<Exposure>,
+    /// Private files readable by group or others, as `path (mode)`.
+    pub loose_files: Option<Vec<String>>,
+    /// Privileged containers, and those among them the host policy
+    /// (`privileged_vmids`, fix-120) does not name.
+    pub privileged: Option<Privileged>,
+    /// Age of the host-meta snapshot (vault, state, TLS, intent repo).
+    pub host_meta: Option<Freshness>,
+    /// The restore drill: when one last proved a restore, and what fails.
+    pub restore_drill: Option<DrillProbe>,
+    /// The restic password file exists and is not empty.
+    pub password_file_ok: Option<bool>,
+    /// Google Drive's space, from `rclone about`.
+    pub drive: Option<DriveSpace>,
+}
+
+/// fix-130: how the daemon faces the network.
+#[derive(Debug, Clone, Default)]
+pub struct Exposure {
+    pub listen: String,
+    pub exec_enabled: bool,
+}
+
+/// fix-130: privileged containers on the host.
+#[derive(Debug, Clone, Default)]
+pub struct Privileged {
+    pub vmids: Vec<u16>,
+    pub outside_policy: Vec<u16>,
+}
+
+/// fix-130: how old something is; `age_h: None` = it never happened.
+#[derive(Debug, Clone, Default)]
+pub struct Freshness {
+    pub age_h: Option<u64>,
+}
+
+/// fix-130: the restore drill's standing.
+#[derive(Debug, Clone, Default)]
+pub struct DrillProbe {
+    /// Hours since a drill last proved a restore; None = never.
+    pub age_h: Option<u64>,
+    /// How long a passed drill counts for, in hours.
+    pub interval_h: u64,
+    /// Repositories whose last drill proved nothing, with the reason.
+    pub failing: Vec<String>,
+}
+
+/// fix-130: space on the offsite remote, in bytes.
+#[derive(Debug, Clone, Default)]
+pub struct DriveSpace {
+    pub total: u64,
+    pub free: u64,
+    /// In the trash: pruned packs Drive still counts against the quota.
+    pub trashed: u64,
 }
 
 /// fix-120 (expert panel, api-token-is-root, 2026-09-27): what the 401
@@ -56,6 +114,10 @@ pub struct StackProbe {
     /// Container exists at the expected vmid.
     pub container_present: bool,
     pub env_sealed: bool,
+    /// fix-130: the stack declares nothing to back up (every mount
+    /// `no_backup` or `no_data`, no native service), so its backup age says
+    /// nothing either way.
+    pub nothing_to_back_up: bool,
 }
 
 pub fn diagnose(p: &Probes) -> Vec<Check> {
@@ -133,6 +195,17 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
                     s.name, s.name, s.name
                 )),
             });
+        }
+        if s.nothing_to_back_up {
+            // fix-130: `registry backup — last backup 12h ago` read as a
+            // protected stack for a cache that is deliberately not kept.
+            checks.push(Check {
+                name: format!("stack {} backup", s.name),
+                health: Health::Ok,
+                detail: "nothing to back up (declared): every mount no_backup or no_data".into(),
+                remedy: None,
+            });
+            continue;
         }
         match s.backup_age_h {
             Some(h) if h > 48 => checks.push(Check {
@@ -249,12 +322,170 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
         });
     }
 
+    checks.extend(security_and_recovery(p));
+
     if !p.interrupted_ops.is_empty() {
         checks.push(Check {
             name: "interrupted operations".into(),
             health: Health::Warn,
             detail: p.interrupted_ops.join(", "),
             remedy: Some("re-run the listed operation(s); re-running is always safe (B1)".into()),
+        });
+    }
+
+    checks
+}
+
+/// fix-130 (expert panel, doctor-checks-too-little, 2026-09-27): the lines
+/// for the probes doctor did not have: how the daemon faces the network,
+/// file modes, privileged containers, the host-meta snapshot, the restore
+/// drill, the restic password file and Drive's space.
+fn security_and_recovery(p: &Probes) -> Vec<Check> {
+    let mut checks = Vec::new();
+    let ok = |name: &str, detail: String| Check {
+        name: name.into(),
+        health: Health::Ok,
+        detail,
+        remedy: None,
+    };
+    let bad = |name: &str, health: Health, detail: String, remedy: &str| Check {
+        name: name.into(),
+        health,
+        detail,
+        remedy: Some(remedy.into()),
+    };
+
+    if let Some(e) = &p.exposure {
+        // Informational: where it listens is a decision (the rescue leg on
+        // VLAN 10), not a fault doctor can judge.
+        checks.push(ok(
+            "daemon exposure",
+            format!(
+                "listens on {}; remote exec {}",
+                e.listen,
+                if e.exec_enabled { "on" } else { "off" }
+            ),
+        ));
+    }
+
+    if let Some(loose) = &p.loose_files {
+        checks.push(if loose.is_empty() {
+            ok(
+                "file modes",
+                "config, secrets, TLS key and records are root-only".into(),
+            )
+        } else {
+            bad(
+                "file modes",
+                Health::Warn,
+                format!("readable beyond root: {}", loose.join(", ")),
+                "chmod go-rwx on each (0600 files, 0700 directories); the daemon fixes its \
+                 own records at start (fix-125), the rest were made by hand",
+            )
+        });
+    }
+
+    if let Some(pv) = &p.privileged {
+        let list = |v: &[u16]| {
+            v.iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        checks.push(if pv.outside_policy.is_empty() {
+            ok(
+                "privileged containers",
+                if pv.vmids.is_empty() {
+                    "none".into()
+                } else {
+                    format!("{}, all named in privileged_vmids", list(&pv.vmids))
+                },
+            )
+        } else {
+            bad(
+                "privileged containers",
+                Health::Warn,
+                format!(
+                    "{} privileged but not in host.toml's privileged_vmids",
+                    list(&pv.outside_policy)
+                ),
+                "a privileged container is root on the host: name it in privileged_vmids if \
+                 it is meant, otherwise rebuild it unprivileged",
+            )
+        });
+    }
+
+    if let Some(hm) = &p.host_meta {
+        checks.push(match hm.age_h {
+            Some(h) if h <= 48 => ok("host-meta backup", format!("last snapshot {}h ago", h)),
+            age => bad(
+                "host-meta backup",
+                Health::Warn,
+                match age {
+                    Some(h) => format!("last snapshot {}h ago", h),
+                    None => "never snapshotted".into(),
+                },
+                "the vault (with the only restic password), state and TLS are in it: \
+                 `homelab backup-host-meta`, then see why the nightly one did not run",
+            ),
+        });
+    }
+
+    if let Some(d) = &p.restore_drill {
+        let overdue = d.age_h.is_none_or(|h| h > d.interval_h);
+        let when = match d.age_h {
+            Some(h) => format!("last proved a restore {} days ago", h / 24),
+            None => "never proved a restore".into(),
+        };
+        checks.push(if !overdue && d.failing.is_empty() {
+            ok("restore drill", when)
+        } else {
+            let mut detail = when;
+            if !d.failing.is_empty() {
+                detail.push_str(&format!("; failing: {}", d.failing.join("; ")));
+            }
+            bad(
+                "restore drill",
+                Health::Warn,
+                detail,
+                "a backup nobody restored is a hypothesis: read the failure, fix the \
+                 repository, and let the nightly drill pass (it takes one repository a night)",
+            )
+        });
+    }
+
+    if let Some(usable) = p.password_file_ok {
+        checks.push(if usable {
+            ok("restic password file", "present".into())
+        } else {
+            bad(
+                "restic password file",
+                Health::Fail,
+                "missing or empty".into(),
+                "no backup can be written or read without it: restore it from Bitwarden \
+                 into the configured restic_password_file, 0600",
+            )
+        });
+    }
+
+    if let Some(d) = &p.drive {
+        const GIB: u64 = 1 << 30;
+        let pct = (d.free.saturating_mul(100))
+            .checked_div(d.total)
+            .unwrap_or(0);
+        let detail = format!(
+            "{} GiB free of {} GiB ({}%); {} GiB in the trash",
+            d.free / GIB,
+            d.total / GIB,
+            pct,
+            d.trashed / GIB
+        );
+        let remedy = "empty Drive's trash (pruned packs stay there and count against the \
+                      quota: `rclone cleanup gdrive:`), then look at retention or the plan";
+        checks.push(match pct {
+            p if p < 5 => bad("Drive space", Health::Fail, detail, remedy),
+            p if p < 10 => bad("Drive space", Health::Warn, detail, remedy),
+            _ => ok("Drive space", detail),
         });
     }
 

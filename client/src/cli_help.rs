@@ -65,7 +65,7 @@ pub const VERBS: &[Verb] = &[
     v(Daily, "checks", "[answer <id> ok|nok [note]]", "list, or answer, the checks only a person can do", "homelab checks answer 3f2a9c1e ok"),
     v(Daily, "status", "", "the fleet as the host records it", "homelab status"),
     v(Daily, "doctor", "", "the host's own diagnosis: state, backups, offsite, disk", "homelab doctor"),
-    v(Daily, "incidents", "", "the bundles failed operations left behind", "homelab incidents"),
+    v(Daily, "incidents", "[show <name>]", "the bundles failed operations left behind; `show` prints one: the error, the versions and the end of its transcript", "homelab incidents show 1790530911-deploy-uptime"),
     v(Daily, "ping", "", "is the host there, which version, and where the address came from", "homelab ping"),
     v(Daily, "tui", "[--offline]", "the terminal interface; --offline runs it against a demo host", "homelab tui"),
     v(ChangeAStack, "plan", "stacks/<name>", "validate a stack here and print what a deploy would send", "homelab plan almanac"),

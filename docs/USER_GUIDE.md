@@ -449,8 +449,9 @@ without a `.env` in the payload gets the host's vault copy if there is one
 and otherwise none (`core/src/ops/deploy.rs:1140-1151`). Only a failed
 *nightly* run disables a stack (H8).
 
-List the bundles with `homelab incidents` or `i` in the TUI
-(`host/src/main.rs:4255-4277`).
+List the bundles with `homelab incidents` or `i` in the TUI, and read one
+with `homelab incidents show <name>` (fix-131). Bundles older than 90 days,
+and all but the newest 200, are removed by the daemon.
 
 #### A4 · TLS with a pinned certificate on the client-host line
 
@@ -463,8 +464,10 @@ certificate it creates once in `/var/lib/homelab/tls-cert.pem` and
 `Authorization: Bearer <token>`; without it the answer is 401
 `missing or invalid bearer token` (`host/src/main.rs:2717-2723`). The daemon
 refuses to start with a token shorter than 16 characters
-(`host/src/main.rs:409-419`). `/api/health` and `/api/version` answer without
-a token (`host/src/main.rs:1864-1865`). Pinning is described in 0.1; test
+(`host/src/main.rs:409-419`). `/api/health` answers without a token;
+`/api/version` needs it since fix-126 (`app_router`). Every refusal is a
+journal line `401 on <path> from <address>` and counts toward the `refused
+connections` line of `homelab doctor` (fix-120). Pinning is described in 0.1; test
 `client/tests/tls_pin_tests.rs:33`.
 
 #### A5 · Secrets vault on the host
@@ -493,7 +496,13 @@ Off until `exec_enabled = true` is set in `/etc/homelab/host.toml` on the host
 `remote exec is disabled (set exec_enabled = true in host.toml to allow it)`
 (`core/src/safety.rs:121`). Every call is appended to
 `/var/lib/homelab/audit.log` as `<unix-time> exec vmid=<n> cmd="<command>"`
-before it runs (`host/src/main.rs:3965-3979`). The command runs through
+before it runs, and the same line goes to the journal (`exec_audit_line`).
+The command is recorded after the shared secret masker (fix-124):
+`NAME=value` for a name holding TOKEN, SECRET, KEY, PASS, BEARER or
+CREDENTIAL, a password in a URL and `Bearer <token>` become `<redacted>`.
+Anything else is recorded as typed and kept on pve, so do not put a bare
+password on an exec command line; read it from a file inside the container
+instead (`cat /run/secret | tool --password-stdin`). The command runs through
 `sh -c` inside the container with a 120-second limit
 (`host/src/main.rs:3981`). A vmid on the no-touch list, compiled or added in
 `host.toml`, is refused even with exec on (`core/src/safety.rs:124-129`,
@@ -1567,8 +1576,9 @@ finds a snapshot, and restores it before the app starts.
 
 **Status:** Built.
 
-The host looks every 20 minutes. In the configured hour (host local time) it
-plans the night (`host/src/main.rs:2257-2333,2000-2035`):
+The host looks a minute after it starts, then every 20 minutes. In the
+configured hour or the hour after it (host local time; the second hour
+catches up a night a restart interrupted, fix-129) it plans the night (`host/src/main.rs:2257-2333,2000-2035`):
 
 1. Backups of every **enabled** stack whose last backup is more than 20 hours
    old (`host/src/main.rs:1952-1954,2008-2013`), three at a time by default
@@ -1767,8 +1777,8 @@ without a token, for a container not yet under management
 #### F5 · Health API
 
 **Status:** Built, narrower than FEATURES.md. `GET /api/health` answers `ok`
-and `GET /api/version` the version, both without a token
-(`host/src/main.rs:1863-1867`). Host metrics travel over the authenticated
+without a token; `GET /api/version` answers the version to a caller with the
+bearer token and 401 to anyone else (fix-126, `app_router`). Host metrics travel over the authenticated
 WebSocket (C6), not over HTTP.
 
 ```bash
@@ -1789,8 +1799,19 @@ homelab doctor
 or the DOCTOR tab. Checks (`core/src/doctor.rs:45-188`): host disk free
 (`Warn` under 20 %, `Fail` under 10 %), whether `state.json` parses, per stack
 whether the container exists and how old its last backup is (`Warn` over 48
-hours or never), the Google Drive token when configured, mirror lag when
-known, and interrupted operations. Output (`host/src/main.rs:4136-4163`):
+hours or never; a stack whose every mount is `no_backup` or `no_data` says
+`nothing to back up (declared)`), the Google Drive token when configured,
+mirror lag when known, and interrupted operations. Since fix-120 and fix-130
+also: `refused connections` (401s since the daemon started), `daemon
+exposure` (listen address, remote exec on or off; informational), `file
+modes` (host.toml, the restic password file, the secrets directory, the TLS
+key, audit.log and the incidents directory must be root-only), `privileged
+containers` (`Warn` for one outside `privileged_vmids`; templates and
+no-touch guests are not read), `host-meta backup` (`Warn` over 48 hours or
+never), `restore drill` (`Warn` when overdue or a repository's last drill
+failed), `restic password file` (`Fail` when missing or empty) and `Drive
+space` from `rclone about` (`Warn` under 10 % free, `Fail` under 5 %, with
+what the trash holds). Output (`host/src/main.rs`, `Rpc::Doctor`):
 
 ```text
 doctor: <Ok|Warn|Fail>
@@ -2412,7 +2433,8 @@ and stores it with restic; without that list it answers
 ### `homelab status`, `homelab incidents`, `homelab testplan`
 
 `status` prints `pct list` and the raw `state.json` (`host/src/main.rs:3227-3240`).
-`incidents` lists the incident bundle directories (A3). `testplan` rebuilds
+`incidents` lists the incident bundle directories (A3); `incidents show
+<name>` prints one bundle's error, versions and transcript end (fix-131). `testplan` rebuilds
 `docs/deployment/TEST_PLAN.md` from the test files and the realization plan;
 run it from the repository root (`client/src/main.rs:882-898`).
 

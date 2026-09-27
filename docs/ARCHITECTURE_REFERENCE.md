@@ -214,6 +214,15 @@ sequenceDiagram
   fix-36), so vmids `host.toml` added are refused too; it has no hostname
   guard, because it names a vmid rather than a stack. `homelab patch` and
   requested guards run the hostname guard since gap-33.
+- Host policy (fix-120): a deploy refuses a privileged container on a vmid
+  not in `privileged_vmids`, and a `data_mounts:` path outside
+  `data_mount_roots` (whole path components; a `.` or `..` component is
+  refused). Both live in `host.toml`, which no RPC changes; without the keys
+  the daemon uses what the fleet ran on 2026-09-27, `[105, 106]` and the four
+  data-mount directories (`core/src/safety.rs`, `check_host_policy`).
+- The token: compared as SHA-256 digests (constant time). Every refusal is a
+  `warn` line `401 on <path> from <peer>`, counted since start and shown by
+  `homelab doctor` as `refused connections` (fix-120).
 
 **State (AR4).** `state.json` has `schema_version` (`core/src/state.rs:12`).
 Missing file: empty fleet. Unparseable: copied to `state.json.corrupt` and
@@ -221,7 +230,7 @@ refused. Newer schema: refused (`:198-223`). The real `write_file` writes
 `<path>.tmp` (created with its final mode since fix-37), fsyncs, sets the
 mode, renames (`host/src/main.rs`, `write_file`);
 the mode comes after the content, so a 0600 file briefly has the default
-mode. The TLS key avoids that by creating with 0600 (`host/src/tls.rs:32-43`).
+mode. The TLS pair is written through a temp file created with its final mode (0600 for the key), fsynced and renamed, key first; a pair that is not whole at start is replaced whole (fix-128, `host/src/tls.rs`).
 
 **Fail direction.** Operations fail closed: the first failed step ends them.
 Notification and the intent-mirror push run after the op and cannot fail it
@@ -405,7 +414,10 @@ latch call in the workspace is the client's `latch cat`
   `arm rollback marker` (`/var/lib/homelab/selfupdate.pending`),
   `schedule restart` via `systemd-run` two seconds later
   (`core/src/ops/selfupdate.rs:39-121`). The new daemon deletes the marker
-  after five seconds of running (`host/src/main.rs:1851-1859`).
+  once it has answered its first authenticated request, from a daemon that
+  started after the marker was armed (`accept_pending_update`, fix-121);
+  `homelab release-update` waits up to 150 s for that and exits non-zero on
+  a rollback or no answer.
 - **Rollback.** Putting `.prev` back while the marker exists is the job of a
   systemd `OnFailure=` unit (`selfupdate.rs:4-7`). That unit and
   `homelab-host.service` are in neither this repository nor the host-meta
@@ -425,7 +437,7 @@ stateDiagram-v2
     Installed --> Armed: write selfupdate.pending
     Armed --> RestartScheduled: systemd-run, restart in 2 s
     RestartScheduled --> NewServing: systemctl restart
-    NewServing --> Accepted: 5 s of serving, marker deleted
+    NewServing --> Accepted: first authenticated request answered, marker deleted
     NewServing --> RolledBack: unit fails while the marker exists
     Failed --> [*]
     Accepted --> [*]
@@ -439,7 +451,7 @@ stateDiagram-v2
         It ships inside the binary (core/assets/host-units).
     end note
 ```
-<sub>Source: `core/src/ops/selfupdate.rs`, `host/src/main.rs` (`Rpc::SelfUpdateHost`, marker cleared after 5 s).</sub>
+<sub>Source: `core/src/ops/selfupdate.rs`, `host/src/main.rs` (`Rpc::SelfUpdateHost`, marker cleared by the first answered request, fix-121).</sub>
 - **Watchdog (B7).** `READY=1`, then `WATCHDOG=1` every 10 seconds
   (`host/src/main.rs:1862-1868`); nothing is sent when `NOTIFY_SOCKET` is
   unset (`:1734-1747`). Whether systemd enforces it depends on the unit on
@@ -481,7 +493,7 @@ Verification: `SHA256SUMS.minisig` over `SHA256SUMS` with the compiled
 | AR12 | serial mutations | `host/src/main.rs:1667,2944` |
 | AR13 | journal names interrupted ops | `core/src/incidents.rs:117-137` |
 | AR14 | incident bundle per failure | `core/src/incidents.rs:56-110` |
-| AR15 | journald plus a JSONL ring | stderr only (`host/src/main.rs:1758-1763`); no ring found |
+| AR15 | journald plus a JSONL ring | stderr to the journal, no colour codes; every line of an operation inside `rpc{id,stack}` or `stack{stack}` and `op{op}` spans, step starts and finishes logged (fix-122, `journal_subscriber`, `run_op_locked`); no ring, no runtime debug toggle |
 | AR16 | frame capture, `commands.sh` replay | replay yes (`core/src/incidents.rs:39-52`); no frame-capture toggle found |
 | AR17 | dependency policy | a process rule |
 | AR18 | MSRV 1.88 with its own CI job | `Cargo.toml:7` says 1.88; builds use 1.97 (`rust-toolchain.toml:13`); `ci.yml` has one job, `check` (`:17`), while its comment says branch protection requires an `msrv` context (`:6-9`) |
@@ -499,8 +511,8 @@ Looks wrong, is deliberate:
   (`core/src/ops/deploy.rs:662-677`); an existing container gets its mounts
   reconciled, not its devices (`:681-700`).
 - **`exec_enabled` is not remote.** The client can change backup hour,
-  webhook and retention (`proto/src/lib.rs:239-246`); `exec_enabled` is
-  edited in `host.toml` (`host/src/main.rs:175-176`).
+  webhook and retention (`proto/src/lib.rs:239-246`); `exec_enabled`,
+  `privileged_vmids` and `data_mount_roots` are edited in `host.toml`.
 
 ## 8. Where to add things
 

@@ -937,6 +937,12 @@ const CLI_ONLY: &[(&str, &str)] = &[
         "one-line version print; the TUI shows it in the header already",
     ),
     (
+        "IncidentShow",
+        "fix-131: reading one bundle's error and transcript tail is a terminal \
+         job, done after a failure line named the bundle; the TUI's incidents \
+         view lists them. A viewer in the TUI would be a new screen nobody asked for",
+    ),
+    (
         "PruneOrphans",
         "removes files after somebody has read the list the deploy printed — the \
          same reasoning as DestroyStack: deleting should mean leaving the \

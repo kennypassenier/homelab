@@ -111,9 +111,12 @@ operation cut off half way is logged at the next start with
 
 Nothing to do by hand. This is what runs, so the morning can be read.
 
-**When.** The scheduler wakes every 20 minutes (`host/src/main.rs:2260`)
-and does nothing unless `backup_hour` is set and the host's local hour
-(`date +%H`) equals it (`host/src/main.rs:2262-2284`). Without a
+**When.** The scheduler looks a minute after the daemon starts, then
+every 20 minutes, and does nothing unless `backup_hour` is set and the
+host's local hour (`date +%H`) is inside the night window: `backup_hour` and
+the hour after it (fix-129, `in_night_window`). The second hour is a
+catch-up, so a daemon restarted during the first (a self-update, a crash, a
+power cut) still runs what is due instead of skipping the night. Without a
 `backup_hour` the daemon logs `"scheduler idle (backup_hour not set)"` at
 start (`host/src/main.rs:1854-1860`). `homelab config` prints the hour as
 `nightly run : HH:00`, or `off` (`client/src/main.rs:1242-1246`).
@@ -126,7 +129,7 @@ next tick, no restart (`client/src/tui/model.rs:945-1010`,
 **Which stacks.** A stack is due when it is enabled and its last backup is
 at least 20 hours old (`host/src/main.rs:1952-1954`, `:2008-2013`).
 
-**In order, inside the backup hour:**
+**In order, inside the night window:**
 
 1. **Backups** of every due stack, `backup_concurrency` at a time (default
    3, `host/src/main.rs:675-677`), under one hold of the lock
@@ -170,7 +173,7 @@ at least 20 hours old (`host/src/main.rs:1952-1954`, `:2008-2013`).
 7. **ZFS** snapshots and replication, when `zfs_jobs` is set
    (`host/src/main.rs:2612-2626`). See op-13.
 8. **Fleet check**: the stored record held against the machine. It runs on
-   every tick inside the backup hour, also when nothing was due, and sends
+   every tick inside the night window, also when nothing was due, and sends
    a `fleet-check` notification when anything is more than "noted"
    (`host/src/main.rs:2628-2693`, `core/src/ops/fleetcheck.rs:501-507`).
    The hour has up to three ticks and this path does not go through the
@@ -181,7 +184,7 @@ The same round as one picture, from the scheduler's tick to the fleet check:
 
 ```mermaid
 flowchart TD
-    tick([Tick every 20 min]) --> hour{backup_hour set and<br/>equal to local hour?}
+    tick([Tick 1 min after start,<br/>then every 20 min]) --> hour{backup_hour set and<br/>local hour in the 2-hour window?}
     hour -- no --> wait([Wait for the next tick])
     hour -- yes --> plan[Nightly plan<br/>enabled stacks whose last<br/>backup is 20 h or older]
     plan --> backups[1 · Backups of due stacks<br/>backup_concurrency at a time<br/>under one lock hold]
@@ -239,7 +242,8 @@ names `homelab release-update`. The steps below are the parts it merges.
    there so kept data is never forgotten (op-6 step 6).
 2. `homelab doctor`. Host disk, state file, backup age per stack, the Drive
    remote, mirror lag, interrupted operations (`core/src/doctor.rs:45-188`).
-3. `homelab incidents`. One directory per failed operation.
+3. `homelab incidents`. One directory per failed operation;
+   `homelab incidents show <name>` reads one (fix-131).
 4. `homelab checks`. The questions only a person can answer; record one
    with `homelab checks answer <id> ok|nok [note]`, or accept a deliberate
    `nok` for a while with `homelab checks answer <id> accept <days> <reason>`
@@ -724,8 +728,11 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
    `/usr/local/bin/homelab-host.prev`, the new one installed, a rollback
    marker armed and a restart scheduled 2 s later
    (`core/src/ops/selfupdate.rs:39-131`). The new daemon removes the marker
-   after 5 s of serving and logs `"self-update accepted"`
-   (`host/src/main.rs:1882-1891`).
+   once it has answered its first authenticated request and logs
+   `"self-update accepted"` (fix-121). `homelab release-update` waits up to
+   150 s for the shipped version to answer, pings it (that is the request
+   that accepts it) and exits non-zero when the old version came back (a
+   rollback) or nothing answered.
 5. **Verify.** `homelab ping` prints the host version and `"link up"`
    (`client/src/main.rs:1183-1194`).
 6. **New client** on every workstation, from the verified release asset:
@@ -769,7 +776,8 @@ sequenceDiagram
         H->>S: systemd-run, restart in 2 s
         H-->>W: report
         S->>H: restart homelab-host
-        alt serves for 5 s
+        W->>H: waits for the new version, then ping
+        alt answers the ping
             H->>H: remove the marker, log self-update accepted
         else dies with the marker in place
             S->>S: OnFailure unit restores .prev (core/assets/host-units)

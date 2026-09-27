@@ -213,6 +213,26 @@ pub fn route<'a>(primary: Option<&'a str>, fallback: Option<&'a str>) -> Vec<&'a
     v
 }
 
+/// fix-123 (expert panel, webhook-id-in-warn-line, 2026-09-27): a route as
+/// a log line may show it: scheme, host and port, never the path, query or
+/// credentials. `notification route <url> failed` put the Home Assistant
+/// webhook id, which fix-25 treats as a secret, into the pve journal on
+/// every failed delivery.
+pub fn route_for_log(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return "<not a URL>".into();
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or("");
+    let withheld = rest.len() > authority.len();
+    format!(
+        "{}://{}{}",
+        scheme,
+        host,
+        if withheld { "/<path withheld>" } else { "" }
+    )
+}
+
 /// Where route `route`'s bearer header is written for curl to read (fix-35).
 pub fn header_file_path(state_dir: &str, route: usize) -> String {
     format!("{}/secrets/notify-route-{}.header", state_dir, route)

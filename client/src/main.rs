@@ -815,7 +815,22 @@ async fn main() {
         }
         "status" => rpc(&host, &token, Command::Status).await,
         "doctor" => rpc(&host, &token, Command::Doctor).await,
-        "incidents" => rpc(&host, &token, Command::Incidents).await,
+        // fix-131: `incidents show <name>` reads one bundle; it took a root
+        // shell on pve before.
+        "incidents" => match (args.get(2).map(String::as_str), args.get(3)) {
+            (None, _) => rpc(&host, &token, Command::Incidents).await,
+            (Some("show"), Some(name)) => {
+                rpc(&host, &token, Command::IncidentShow { name: name.clone() }).await
+            }
+            (Some("show"), None) => {
+                die("usage: homelab incidents show <name> (the names `homelab incidents` lists)")
+            }
+            (Some(other), _) => die(&format!(
+                "unknown: homelab incidents {} :: `homelab incidents` lists, `homelab incidents \
+                 show <name>` reads one",
+                other
+            )),
+        },
         "plan" => {
             // D6/D10: validate locally and show what would be sent — no network.
             let dir = &stack_dir(
@@ -1205,7 +1220,12 @@ async fn main() {
                         "{}✓ checksum verified — shipping over the line{}",
                         C_GREEN, C_RESET
                     );
-                    rpc(&host, &token, Command::SelfUpdateHost { binary_b64 }).await;
+                    // fix-121: done means the shipped version answered, not
+                    // that a restart was scheduled.
+                    let expected = homelab_client::release::expected_host_version(&tag);
+                    let ok = rpc_with(&host, &token, Command::SelfUpdateHost { binary_b64 }).await
+                        && wait_for_updated_host(&host, &token, expected).await;
+                    std::process::exit(if ok { 0 } else { 1 });
                 }
                 Err(e) => die(&e),
             }
@@ -1257,7 +1277,11 @@ async fn main() {
                 bytes.len() / 1024,
                 C_RESET
             );
-            rpc(&host, &token, Command::SelfUpdateHost { binary_b64 }).await;
+            // fix-121: the version inside a local file is not known here, so
+            // whatever answers after the restart is the one checked.
+            let ok = rpc_with(&host, &token, Command::SelfUpdateHost { binary_b64 }).await
+                && wait_for_updated_host(&host, &token, None).await;
+            std::process::exit(if ok { 0 } else { 1 });
         }
         "dashboard" => {
             // T2's generator, run locally for a stack the orchestrator does
@@ -1436,6 +1460,103 @@ async fn main() {
 async fn rpc(host: &str, token: &str, command: Command) {
     let ok = rpc_with(host, token, command).await;
     std::process::exit(if ok { 0 } else { 1 });
+}
+
+/// The version a host announces in its Hello, or None when it cannot be
+/// reached or says nothing within a few seconds.
+async fn host_version(host: &str, token: &str) -> Option<String> {
+    let link = homelab_client::link::connect(
+        host,
+        token,
+        REPO_PIN.get().and_then(|p| p.as_deref()),
+        homelab_client::repo_config::built_in_pin(),
+    )
+    .await
+    .ok()?;
+    let (_, mut rx) = link.ws.split();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while let Some(Ok(Message::Text(text))) = rx.next().await {
+            if let Ok(ServerMsg::Hello { version, .. }) = serde_json::from_str(&text) {
+                return Some(version);
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// fix-121 (expert panel, self-update-acceptance-weak, 2026-09-27): after a
+/// self-update, watch the host come back. `true` once the shipped version
+/// (`expected`; any restarted daemon when unknown) has answered a ping, which
+/// is also what accepts the update on the host; `false` when the old version
+/// came back (the rollback ran) or nothing answered in time. It used to
+/// return as soon as the restart was scheduled, and a rollback was visible
+/// only in a notification.
+async fn wait_for_updated_host(host: &str, token: &str, expected: Option<String>) -> bool {
+    use homelab_client::release::{after_update, AfterUpdate};
+    // The old daemon may finish a running operation first (up to 60 s,
+    // fix-52), then the restart and a possible rollback follow.
+    const WAIT_S: u64 = 150;
+    println!(
+        "{}… waiting up to {} s for the host to come back{}{}",
+        C_DIM,
+        WAIT_S,
+        expected
+            .as_deref()
+            .map(|v| format!(" as v{}", v))
+            .unwrap_or_default(),
+        C_RESET
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(WAIT_S);
+    let mut seen_down = false;
+    let mut last: Option<String> = None;
+    while std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let answered = host_version(host, token).await;
+        if answered.is_none() {
+            seen_down = true;
+        } else {
+            last = answered.clone();
+        }
+        match after_update(expected.as_deref(), seen_down, answered.as_deref()) {
+            AfterUpdate::Wait => continue,
+            AfterUpdate::Answered => {
+                // The round trip that accepts the update on the host.
+                let ok = rpc_with(host, token, Command::Ping).await;
+                if ok {
+                    println!(
+                        "{}✓ self-update accepted — the new host answered{}",
+                        C_GREEN, C_RESET
+                    );
+                }
+                return ok;
+            }
+            AfterUpdate::RolledBack(v) => {
+                eprintln!(
+                    "{}✗ the host came back as v{}, not v{}: the self-update was rolled back \
+                     :: `journalctl -u homelab-host` on pve says why the new binary failed{}",
+                    C_RED,
+                    v,
+                    expected.as_deref().unwrap_or("?"),
+                    C_RESET
+                );
+                return false;
+            }
+        }
+    }
+    eprintln!(
+        "{}✗ no confirmation within {} s (last answer: {}) :: the update is not accepted \
+         until the new daemon answers a request; `homelab ping` retries that, \
+         `journalctl -u homelab-host` on pve shows what it is doing{}",
+        C_RED,
+        WAIT_S,
+        last.map(|v| format!("v{}", v))
+            .unwrap_or_else(|| "none".into()),
+        C_RESET
+    );
+    false
 }
 
 /// One command over the link; `true` when the host reported it done and ok.

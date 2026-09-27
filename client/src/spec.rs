@@ -1170,15 +1170,16 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          systemctl status {svc}\n\
          journalctl -u {svc} -n 50 --no-pager\n\
          curl -sk https://127.0.0.1:{port}/api/health     # answers: ok\n\
-         curl -sk https://127.0.0.1:{port}/api/version\n\
+         {cur} --version        # the installed version (/api/version takes the token)\n\
          ```\n\n\
          The daemon refuses to start, and says so in the journal, when `{toml}` does not \
          parse as TOML, when it is not a valid host config, or when the token is shorter \
          than 16 characters. A key it does not know is a `WARNING` line, not a refusal.\n\n\
          **A self-update that never came up.** A self-update copies the running program to \
          `{prev}`, installs the new one, and writes `{marker}`; the new program deletes the \
-         marker once it has served for a few seconds. A marker that is still there means the \
-         update was never accepted. Put the previous program back:\n\n```sh\n\
+         marker once it has answered its first authenticated request. A marker that is still \
+         there means no client has had an answer from the new program yet; when `homelab ping` \
+         cannot get one either, put the previous program back:\n\n```sh\n\
          ls -l {cur} {prev} {marker}\n\
          {prev} --selfcheck                 # prints its version when it can run\n\
          install -m 755 {prev} {cur}\n\
@@ -1200,7 +1201,8 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          Debian 12 in docker and leaves it at `target-debian/release/homelab-host`.\n\n\
          {units}\
          **The certificate pin.** The daemon's certificate is `{state}/tls-cert.pem` with \
-         `{state}/tls-key.pem`; when either is missing at start it makes a new pair \
+         `{state}/tls-key.pem`; when either is missing, empty or unreadable at start it makes a \
+         new pair, each file written whole (fix-128) \
          (host/src/tls.rs). The client trusts one certificate: the fingerprint built into \
          the client, taken from `pin` in `config/client.toml` when it was compiled. It refuses \
          any other, on a first connection too, and it also refuses when that `pin` or the \

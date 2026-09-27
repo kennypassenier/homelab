@@ -20,6 +20,22 @@ use crate::manifest::StackManifest;
 /// not the canonical `<vmid>-app-<stack>`, which every legacy stack fails.
 pub const DEFAULT_NO_TOUCH: &[u16] = &[100, 101, 102, 103];
 
+/// fix-120 (expert panel, api-token-is-root, 2026-09-27): the privileged
+/// containers the fleet runs today, downloader (105) and media (106), both
+/// for their disk and device access. The daemon uses this list when
+/// `host.toml` names none, so the policy arrived without changing a deploy.
+pub const FLEET_PRIVILEGED_VMIDS: &[u16] = &[105, 106];
+
+/// fix-120: the host directories the fleet's `data_mounts:` borrow today.
+/// Same role as [`FLEET_PRIVILEGED_VMIDS`]: the default when `host.toml`
+/// names none.
+pub const FLEET_DATA_MOUNT_ROOTS: &[&str] = &[
+    "/HDD18TB/subvol-103-disk-0",
+    "/HDD12TB/subvol-103-disk-0",
+    "/HDD4TB/jellyfin-metadata",
+    "/HDD2TB/logs/traefik",
+];
+
 #[derive(Debug, Clone)]
 pub struct SafetyConfig {
     pub no_touch: Vec<u16>,
@@ -31,6 +47,16 @@ pub struct SafetyConfig {
     /// host.toml's `grafana_vmid` names it, and unset it follows
     /// `gateway_vmid`, where Grafana ran before.
     pub grafana_vmid: u16,
+    /// fix-120: the vmids a deploy may create as a PRIVILEGED container. A
+    /// privileged container is root on the host, and a stack file is
+    /// something anyone holding the API token can send, so it may not ask for
+    /// one on its own. `None` = no host policy, which is what the library and
+    /// its tests assume; the daemon always sets it.
+    pub privileged_vmids: Option<Vec<u16>>,
+    /// fix-120: host directories a `data_mounts:` entry may borrow, each with
+    /// everything under it. A bind mount of `/` or `/etc/pve` is root on the
+    /// host just as a privileged container is. `None` = no host policy.
+    pub data_mount_roots: Option<Vec<String>>,
 }
 
 impl Default for SafetyConfig {
@@ -40,6 +66,8 @@ impl Default for SafetyConfig {
             gateway_vmid: 104,
             gateway_routes_dir: "/opt/traefik-config/routes".into(),
             grafana_vmid: 104,
+            privileged_vmids: None,
+            data_mount_roots: None,
         }
     }
 }
@@ -64,6 +92,7 @@ pub async fn check_deploy_target(
             manifest.hostname, expected
         )));
     }
+    check_host_policy(cfg, manifest)?;
 
     let vm = manifest.vmid.to_string();
     // A QEMU VM on this id is always fatal — protects every VM including ones
@@ -93,6 +122,50 @@ pub async fn check_deploy_target(
         )));
     }
     Ok(true)
+}
+
+/// fix-120 (expert panel, api-token-is-root, 2026-09-27): what a stack file
+/// may ask of the host beyond an ordinary container. The policy lives in
+/// `host.toml`, which no RPC can change, so a token holder can run apps but
+/// cannot build a container that is root on the host.
+pub fn check_host_policy(cfg: &SafetyConfig, manifest: &StackManifest) -> Result<(), CoreError> {
+    if let Some(allowed) = &cfg.privileged_vmids {
+        if !manifest.lxc.unprivileged && !allowed.contains(&manifest.vmid) {
+            return Err(CoreError::SafetyAbort(format!(
+                "vmid {} asks for a privileged container, and host.toml's privileged_vmids {:?} \
+                 does not name it — a privileged container is root on the host, so the host \
+                 decides (add the vmid there by ssh if it is meant)",
+                manifest.vmid, allowed
+            )));
+        }
+    }
+    if let Some(roots) = &cfg.data_mount_roots {
+        for dm in &manifest.data_mounts {
+            if !under_a_root(&dm.host_path, roots) {
+                return Err(CoreError::SafetyAbort(format!(
+                    "data mount '{}' is outside host.toml's data_mount_roots {:?} — a bind \
+                     mount of a host directory is host access, so the host decides (add the \
+                     directory there by ssh if it is meant)",
+                    dm.host_path, roots
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `path` is one of `roots` or inside one, compared by whole components.
+/// Any `.` or `..` component refuses outright: it could step out of a root
+/// that the string prefix still matches.
+fn under_a_root(path: &str, roots: &[String]) -> bool {
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    if !path.starts_with('/') || parts.iter().any(|p| *p == "." || *p == "..") {
+        return false;
+    }
+    roots.iter().any(|root| {
+        let r: Vec<&str> = root.split('/').filter(|p| !p.is_empty()).collect();
+        !r.is_empty() && parts.len() >= r.len() && parts[..r.len()] == r[..]
+    })
 }
 
 /// Gate for the single allowed cross-stack write (H1).

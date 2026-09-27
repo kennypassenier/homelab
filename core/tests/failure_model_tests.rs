@@ -118,6 +118,51 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
     assert!(script.contains("pct create 110"), "script:\n{}", script);
 }
 
+/// fix-125 (expert panel, bundles-audit-world-readable, 2026-09-27): every
+/// bundle file was written 0644, so any local account on pve could read the
+/// transcripts and replay scripts of failed operations, which carried
+/// secrets until they were masked on 2026-09-27. Files are 0600 (the replay
+/// script 0700), and the bundle and incidents directories are made 0700.
+#[tokio::test]
+async fn fix_125_an_incident_bundle_is_readable_by_root_only() {
+    let exec = MockExecutor::new();
+    exec.seed_file("/var/lib/homelab/state.json", "{}");
+    exec.seed_file("/var/lib/homelab/journal.jsonl", "{}\n");
+    let report = homelab_core::runner::OperationReport {
+        op: "deploy-x".into(),
+        ok: false,
+        steps: vec![],
+        error: None,
+        deferred: None,
+    };
+    let dir = incidents::write_bundle(&exec, "/var/lib/homelab", 1, &report, &[], "host=x\n")
+        .await
+        .expect("bundle written");
+    for f in [
+        "report.json",
+        "events.jsonl",
+        "state-at-failure.json",
+        "journal-tail.jsonl",
+        "versions.txt",
+    ] {
+        assert_eq!(
+            exec.file_mode(&format!("{}/{}", dir, f)),
+            Some(0o600),
+            "{} must be 0600",
+            f
+        );
+    }
+    assert_eq!(exec.file_mode(&format!("{}/commands.sh", dir)), Some(0o700));
+    let chmods = exec.calls_containing("chmod 700");
+    assert!(
+        chmods
+            .iter()
+            .any(|c| c.contains("/var/lib/homelab/incidents ") && c.contains(&dir)),
+        "the incidents directory and the bundle are made 0700: {:?}",
+        exec.calls()
+    );
+}
+
 #[test]
 fn ar16_commands_script_extracts_only_run_lines() {
     let events = vec![
@@ -188,12 +233,14 @@ fn f6_doctor_healthy_system_is_ok() {
             backup_age_h: Some(3),
             container_present: true,
             env_sealed: true,
+            nothing_to_back_up: false,
         }],
         offsite_configured: true,
         offsite_token_valid: true,
         mirror_behind: Some(0),
         interrupted_ops: vec![],
         host_units_drift: None,
+        ..Default::default()
     };
     let checks = doctor::diagnose(&p);
     assert_eq!(doctor::overall(&checks), Health::Ok);
@@ -209,12 +256,14 @@ fn f6_doctor_flags_each_problem_with_remedy() {
             backup_age_h: Some(72), // warn
             container_present: true,
             env_sealed: false, // fail
+            nothing_to_back_up: false,
         }],
         offsite_configured: true,
         offsite_token_valid: false,                   // fail
         mirror_behind: Some(2),                       // warn
         interrupted_ops: vec!["deploy-media".into()], // warn
         host_units_drift: None,
+        ..Default::default()
     };
     let checks = doctor::diagnose(&p);
     assert_eq!(doctor::overall(&checks), Health::Fail);
@@ -247,6 +296,7 @@ fn gap_27_the_dead_drive_token_remedy_does_not_promise_local_backups() {
         mirror_behind: Some(0),
         interrupted_ops: vec![],
         host_units_drift: None,
+        ..Default::default()
     };
     let checks = doctor::diagnose(&p);
     let remedy = checks
@@ -256,6 +306,180 @@ fn gap_27_the_dead_drive_token_remedy_does_not_promise_local_backups() {
         .expect("a remedy");
     assert!(!remedy.contains("local backups still run"), "{remedy}");
     assert!(remedy.contains("no backup"), "{remedy}");
+}
+
+/// fix-120 (expert panel, api-token-is-root, 2026-09-27): a refused token
+/// used to leave no trace. Doctor says how many were refused and from where,
+/// and says "none" when there were none, so the line is always read.
+#[test]
+fn fix_120_doctor_names_refused_connections() {
+    let quiet = Probes {
+        state_parses: true,
+        failed_auth: Some(doctor::FailedAuth::default()),
+        ..Default::default()
+    };
+    let line = doctor::diagnose(&quiet)
+        .into_iter()
+        .find(|c| c.name == "refused connections")
+        .expect("a refused-connections line");
+    assert_eq!(line.health, Health::Ok);
+
+    let probed = Probes {
+        state_parses: true,
+        failed_auth: Some(doctor::FailedAuth {
+            count: 3,
+            last_peer: Some("10.10.10.23:51234".into()),
+            last_at: 1_800_000_000,
+        }),
+        ..Default::default()
+    };
+    let line = doctor::diagnose(&probed)
+        .into_iter()
+        .find(|c| c.name == "refused connections")
+        .expect("a refused-connections line");
+    assert_eq!(line.health, Health::Warn);
+    assert!(
+        line.detail.contains('3') && line.detail.contains("10.10.10.23"),
+        "{}",
+        line.detail
+    );
+    assert!(line.remedy.is_some());
+}
+
+/// fix-130 (expert panel, doctor-checks-too-little, 2026-09-27): doctor
+/// answered backups and the Drive token only, and said Ok for a stack that
+/// backs up nothing. Each new probe gets a line: an Ok that says what it saw,
+/// or a warning with a remedy.
+#[test]
+fn fix_130_doctor_reports_exposure_files_privilege_host_meta_drill_and_space() {
+    use homelab_core::doctor::{DrillProbe, DriveSpace, Exposure, Freshness, Privileged};
+    const GIB: u64 = 1 << 30;
+    let p = Probes {
+        state_parses: true,
+        managed_stacks: vec![StackProbe {
+            name: "registry".into(),
+            backup_age_h: Some(12),
+            container_present: true,
+            env_sealed: true,
+            nothing_to_back_up: true,
+        }],
+        exposure: Some(Exposure {
+            listen: "0.0.0.0:8443".into(),
+            exec_enabled: true,
+        }),
+        loose_files: Some(vec!["/etc/homelab/host.toml (644)".into()]),
+        privileged: Some(Privileged {
+            vmids: vec![105, 106, 108],
+            outside_policy: vec![108],
+        }),
+        host_meta: Some(Freshness { age_h: None }),
+        restore_drill: Some(DrillProbe {
+            age_h: Some(100 * 24),
+            interval_h: 90 * 24,
+            failing: vec!["kyu-config: the restore itself failed".into()],
+        }),
+        password_file_ok: Some(false),
+        drive: Some(DriveSpace {
+            total: 100 * GIB,
+            free: 2 * GIB,
+            trashed: 30 * GIB,
+        }),
+        ..Default::default()
+    };
+    let checks = doctor::diagnose(&p);
+    let line = |name: &str| {
+        checks
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap_or_else(|| panic!("no '{}' line in {:?}", name, checks))
+            .clone()
+    };
+    let exposure = line("daemon exposure");
+    assert_eq!(exposure.health, Health::Ok);
+    assert!(exposure.detail.contains("0.0.0.0:8443") && exposure.detail.contains("exec on"));
+    assert_eq!(line("file modes").health, Health::Warn);
+    assert!(line("file modes").detail.contains("host.toml"));
+    let privileged = line("privileged containers");
+    assert_eq!(privileged.health, Health::Warn);
+    assert!(privileged.detail.contains("108"), "{}", privileged.detail);
+    assert_eq!(line("host-meta backup").health, Health::Warn);
+    let drill = line("restore drill");
+    assert_eq!(drill.health, Health::Warn);
+    assert!(drill.detail.contains("kyu-config"), "{}", drill.detail);
+    assert_eq!(line("restic password file").health, Health::Fail);
+    let drive = line("Drive space");
+    assert_eq!(drive.health, Health::Fail, "{}", drive.detail);
+    assert!(drive.detail.contains("trash"), "{}", drive.detail);
+    let registry = line("stack registry backup");
+    assert_eq!(registry.health, Health::Ok);
+    assert!(
+        registry.detail.contains("nothing to back up (declared)"),
+        "{}",
+        registry.detail
+    );
+    for c in &checks {
+        if c.health != Health::Ok {
+            assert!(c.remedy.is_some(), "check '{}' has no remedy", c.name);
+        }
+    }
+}
+
+/// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
+/// nothing pruned the incident bundles (90 on pve that day). Bundles older
+/// than the age limit go, and past the count limit the oldest go; a name
+/// that is not `<unix-ts>-<op>` is not the pruner's to judge and stays.
+#[test]
+fn fix_131_old_and_surplus_incident_bundles_are_pruned() {
+    let day = 86_400u64;
+    let now = 1_800_000_000u64;
+    let names: Vec<String> = vec![
+        format!("{}-deploy-media", now - 100 * day),
+        format!("{}-backup-kyu", now - 10 * day),
+        format!("{}-deploy-gateway", now - 9 * day),
+        format!("{}-update-home", now - day),
+        "notes-by-hand".into(),
+    ];
+    let gone = incidents::bundles_to_prune(&names, now, 90, 2);
+    assert_eq!(
+        gone,
+        vec![names[0].clone(), names[1].clone()],
+        "the 100-day-old one by age, then the oldest beyond two"
+    );
+    assert!(incidents::bundles_to_prune(&names[1..], now, 90, 200).is_empty());
+}
+
+/// fix-131: journal.jsonl grew for good and was read whole at every start.
+/// Past the limit it keeps its newest lines, and the last record of every
+/// operation still marked running, so an interrupted operation is still
+/// reported after the compaction.
+#[test]
+fn fix_131_a_compacted_journal_keeps_its_tail_and_every_interrupted_op() {
+    let mut journal = String::from(
+        "{\"ts\":1,\"op\":\"deploy-media\",\"step\":\"pull images\",\"status\":\"running\"}\n",
+    );
+    for i in 0..2000 {
+        journal.push_str(&format!(
+            "{{\"ts\":{},\"op\":\"backup-kyu\",\"step\":\"snapshot\",\"status\":\"complete\"}}\n",
+            10 + i
+        ));
+    }
+    assert!(incidents::compact_journal(&journal, journal.len() + 1).is_none());
+    let small = incidents::compact_journal(&journal, 40_000).expect("compacted");
+    assert!(small.len() <= 40_000, "{} bytes", small.len());
+    assert!(
+        small.ends_with("\"status\":\"complete\"}\n"),
+        "the newest lines stay"
+    );
+    assert!(
+        small
+            .lines()
+            .all(|l| serde_json::from_str::<serde_json::Value>(l).is_ok()),
+        "whole lines only"
+    );
+    assert_eq!(
+        interrupted_ops(&small),
+        vec![("deploy-media".to_string(), "pull images".to_string())]
+    );
 }
 
 // ── RecordingSink tees to inner sink AND records ────────────────────────────

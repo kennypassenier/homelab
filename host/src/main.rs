@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -103,6 +103,14 @@ struct FileConfig {
     exec_enabled: Option<bool>,
     mirror_remote: Option<String>,
     no_touch: Option<Vec<u16>>,
+    /// fix-120 (api-token-is-root, 2026-09-27): vmids a deploy may make a
+    /// privileged container. Absent = the ones the fleet runs today
+    /// (`homelab_core::safety::FLEET_PRIVILEGED_VMIDS`). ssh-edited only,
+    /// like exec_enabled: a policy the token could change is no policy.
+    privileged_vmids: Option<Vec<u16>>,
+    /// fix-120: host directories `data_mounts:` may borrow. Absent = the ones
+    /// the fleet uses today (`FLEET_DATA_MOUNT_ROOTS`).
+    data_mount_roots: Option<Vec<String>>,
     gateway_vmid: Option<u16>,
     gateway_routes_dir: Option<String>,
     /// fix-90 (2026-09-27): the container Grafana runs in, where the
@@ -299,6 +307,8 @@ const KNOWN_TOP: &[&str] = &[
     "exec_enabled",
     "mirror_remote",
     "no_touch",
+    "privileged_vmids",
+    "data_mount_roots",
     "gateway_vmid",
     "gateway_routes_dir",
     "grafana_vmid",
@@ -479,6 +489,19 @@ fn load_config_from(path: String) -> Config {
             }
             // fix-90: unset, Grafana is on the gateway, wherever that is.
             sc.grafana_vmid = file.grafana_vmid.unwrap_or(sc.gateway_vmid);
+            // fix-120: the daemon always runs with a policy; without the
+            // keys it is what the fleet uses today, so nothing is refused
+            // that deployed yesterday.
+            sc.privileged_vmids = Some(
+                file.privileged_vmids
+                    .unwrap_or_else(|| homelab_core::safety::FLEET_PRIVILEGED_VMIDS.to_vec()),
+            );
+            sc.data_mount_roots = Some(file.data_mount_roots.unwrap_or_else(|| {
+                homelab_core::safety::FLEET_DATA_MOUNT_ROOTS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            }));
             sc
         },
         zfs_jobs: file.zfs_jobs.unwrap_or_default(),
@@ -525,6 +548,19 @@ fn load_config_from(path: String) -> Config {
             "watched_backups entry {} matches no device_backups writer — it will report \
              'holds no files at all' whatever happens",
             w
+        );
+    }
+    // fix-126: said at every start until the route moves to TLS.
+    for route in plaintext_bearer_routes(
+        cfg.initial_settings.notify_webhook.as_deref(),
+        cfg.notify_auth_bearer.as_deref(),
+        cfg.notify_fallback_webhook.as_deref(),
+        cfg.notify_fallback_auth_bearer.as_deref(),
+    ) {
+        tracing::warn!(
+            "notification route {} sends its bearer token over plain HTTP — anything on that \
+             network segment can read it; an https:// route (kyu behind Traefik) closes this",
+            route
         );
     }
     cfg
@@ -581,6 +617,12 @@ fn render_settings_toml(
         mirror_remote: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         no_touch: Option<&'a Vec<u16>>,
+        // fix-120: a settings save that dropped these would quietly put the
+        // fleet defaults back in place of what Kenny wrote.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        privileged_vmids: Option<&'a Vec<u16>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data_mount_roots: Option<&'a Vec<String>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         gateway_vmid: Option<u16>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -643,6 +685,16 @@ fn render_settings_toml(
         mirror_remote: config.mirror_remote.as_ref(),
         no_touch: (config.safety.no_touch != SafetyConfig::default().no_touch)
             .then_some(&config.safety.no_touch),
+        privileged_vmids: config
+            .safety
+            .privileged_vmids
+            .as_ref()
+            .filter(|v| v.as_slice() != homelab_core::safety::FLEET_PRIVILEGED_VMIDS),
+        data_mount_roots: config.safety.data_mount_roots.as_ref().filter(|v| {
+            !v.iter()
+                .map(String::as_str)
+                .eq(homelab_core::safety::FLEET_DATA_MOUNT_ROOTS.iter().copied())
+        }),
         gateway_vmid: (config.safety.gateway_vmid != SafetyConfig::default().gateway_vmid)
             .then_some(config.safety.gateway_vmid),
         gateway_routes_dir: (config.safety.gateway_routes_dir
@@ -1134,6 +1186,99 @@ mod tests {
         assert!(exec_allowed(&cfg, 150).is_ok());
     }
 
+    /// fix-120 (expert panel, api-token-is-root, 2026-09-27): without the two
+    /// keys the host runs with what the fleet uses today, so the policy lands
+    /// without refusing a single existing deploy; with them it runs with
+    /// exactly what the file says.
+    #[test]
+    fn fix_120_host_policy_defaults_to_the_fleet_and_follows_host_toml() {
+        let dir = std::env::temp_dir().join(format!("homelab-fix120-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bare = dir.join("bare.toml");
+        std::fs::write(&bare, "token = \"0123456789abcdef0123\"\n").unwrap();
+        let cfg = load_config_from(bare.to_string_lossy().into_owned());
+        assert_eq!(
+            cfg.safety.privileged_vmids.as_deref(),
+            Some(homelab_core::safety::FLEET_PRIVILEGED_VMIDS)
+        );
+        assert_eq!(
+            cfg.safety.data_mount_roots,
+            Some(
+                homelab_core::safety::FLEET_DATA_MOUNT_ROOTS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+            )
+        );
+        let set = dir.join("set.toml");
+        std::fs::write(
+            &set,
+            "token = \"0123456789abcdef0123\"\nprivileged_vmids = [106]\n\
+             data_mount_roots = [\"/HDD18TB/media\"]\n",
+        )
+        .unwrap();
+        let cfg = load_config_from(set.to_string_lossy().into_owned());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(cfg.safety.privileged_vmids, Some(vec![106]));
+        assert_eq!(
+            cfg.safety.data_mount_roots,
+            Some(vec!["/HDD18TB/media".to_string()])
+        );
+    }
+
+    /// fix-120: the token compare is the digest compare, and a wrong token of
+    /// any length is refused.
+    #[test]
+    fn fix_120_the_bearer_check_refuses_every_near_miss() {
+        let token = "0123456789abcdef0123";
+        assert!(bearer_ok(Some("Bearer 0123456789abcdef0123"), token));
+        for bad in [
+            "Bearer 0123456789abcdef012",
+            "Bearer 0123456789abcdef01234",
+            "Bearer 0123456789abcdef0124",
+            "Bearer ",
+            "bearer 0123456789abcdef0123",
+            "",
+        ] {
+            assert!(!bearer_ok(Some(bad), token), "{:?}", bad);
+        }
+    }
+
+    /// fix-120: a connection refused for its token used to leave no trace at
+    /// all, so a probe from a compromised container or a stolen token tried
+    /// from a new machine was invisible. Every refusal is counted with the
+    /// address it came from, for `homelab doctor`.
+    #[tokio::test]
+    async fn fix_120_a_refused_connection_is_counted_with_its_peer() {
+        let path = format!("/tmp/homelab-fix120-router-{}.toml", std::process::id());
+        std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
+        let state = test_state(load_config_from(path.clone()));
+        let _ = std::fs::remove_file(&path);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = app_router(state.clone());
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap()
+        });
+        let refused = tokio_tungstenite::connect_async(format!("ws://{}/api/ws", addr)).await;
+        assert!(refused.is_err(), "no token, no session");
+        let seen = state.auth_failures.snapshot();
+        assert_eq!(seen.count, 1, "the refusal is counted");
+        assert!(
+            seen.last_peer
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("127.0.0.1"),
+            "and names where it came from: {:?}",
+            seen.last_peer
+        );
+    }
+
     /// F186: the exact file that was live on 2026-09-02. Two OPNsense keys
     /// were appended after the last `[[registry_cache.upstreams]]` table, so
     /// TOML made them fields of the lscr.io mirror and serde dropped them —
@@ -1255,6 +1400,8 @@ port = 5003
                 gateway_vmid: 112,
                 gateway_routes_dir: "/appdata/platform/traefik-config/routes".into(),
                 grafana_vmid: 113,
+                privileged_vmids: Some(vec![105, 106, 107]),
+                data_mount_roots: Some(vec!["/HDD18TB/media".into()]),
             },
             registry_cache: Some(homelab_core::ops::registry_cache::CacheCfg {
                 host: "10.10.10.17".into(),
@@ -1358,6 +1505,12 @@ port = 5003
         );
         assert_eq!(parsed.retention.as_ref().map(|r| r.len()), Some(3));
         assert_eq!(parsed.no_touch, Some(vec![100, 101]));
+        // fix-120: the host policy survives a settings save.
+        assert_eq!(parsed.privileged_vmids, Some(vec![105, 106, 107]));
+        assert_eq!(
+            parsed.data_mount_roots,
+            Some(vec!["/HDD18TB/media".to_string()])
+        );
         assert_eq!(parsed.gateway_vmid, Some(112));
         assert_eq!(
             parsed.gateway_routes_dir.as_deref(),
@@ -1432,6 +1585,184 @@ port = 5003
             .any(|c| c.health != homelab_core::doctor::Health::Ok));
     }
 
+    /// The daemon's shared state around `config`, as `main` builds it.
+    fn test_state(config: Config) -> AppState {
+        let (log_tx, _) = broadcast::channel(64);
+        AppState::new(config, log_tx)
+    }
+
+    /// fix-130 (expert panel, doctor-checks-too-little, 2026-09-27): the new
+    /// doctor probes read the machine: file modes, privileged containers
+    /// (never a no-touch guest's configuration), the host-meta and drill
+    /// records in state, the password file and Drive's space.
+    #[tokio::test]
+    async fn fix_130_the_new_doctor_probes_read_the_machine() {
+        use homelab_core::executor::{CmdOutput, MockExecutor};
+        let now = 1_800_000_000u64;
+        let exec = MockExecutor::new();
+        exec.seed_file(
+            "/var/lib/homelab/state.json",
+            &format!(
+                r#"{{"schema_version":1,"stacks":{{}},"last_host_meta":{},
+                "last_restore_drill":{},"restore_drills":{{"kyu-config":{{"last_attempt":{},"last_pass":0,"last_error":"the restore itself failed"}}}}}}"#,
+                now - 30 * 3600,
+                now - 10 * 86_400,
+                now - 86_400
+            ),
+        );
+        exec.respond_always(
+            "stat -c",
+            CmdOutput::ok("644 /etc/homelab/host.toml\n600 /var/lib/homelab/tls-key.pem\n700 /var/lib/homelab/incidents\n"),
+        );
+        exec.respond_always("unprivileged: 1", CmdOutput::ok("105\n106\n108\n"));
+        exec.respond_always("test -s", CmdOutput::ok(""));
+        exec.respond_always("listremotes", CmdOutput::ok("gdrive:\n"));
+        exec.respond_always(
+            "about gdrive:",
+            CmdOutput::ok(r#"{"total":107374182400,"used":90000000000,"trashed":2147483648,"free":17374182400}"#),
+        );
+        let pc = ProbeContext {
+            listen: "0.0.0.0:8443".into(),
+            exec_enabled: false,
+            config_path: "/etc/homelab/host.toml".into(),
+            password_file: "/var/lib/homelab/secrets/restic.pass".into(),
+            privileged_vmids: vec![105, 106],
+            no_touch: vec![100, 101, 102, 103],
+            drill_interval_s: 90 * 86_400,
+            state_dir: "/var/lib/homelab".into(),
+        };
+        // As `gather_probes` leaves it when the gdrive remote exists.
+        let mut probes = homelab_core::doctor::Probes {
+            offsite_configured: true,
+            ..Default::default()
+        };
+        gather_security_probes(&exec, &pc, now, &mut probes).await;
+        assert_eq!(
+            probes.loose_files,
+            Some(vec!["/etc/homelab/host.toml (644)".to_string()])
+        );
+        let pv = probes.privileged.expect("privileged probed");
+        assert_eq!(
+            (pv.vmids, pv.outside_policy),
+            (vec![105, 106, 108], vec![108])
+        );
+        let listing = exec.calls_containing("unprivileged: 1");
+        assert!(
+            listing.iter().all(|c| c.contains("100|101|102|103")),
+            "no-touch configurations are skipped, not read: {:?}",
+            listing
+        );
+        assert_eq!(probes.host_meta.and_then(|h| h.age_h), Some(30));
+        let drill = probes.restore_drill.expect("drill probed");
+        assert_eq!(drill.age_h, Some(240));
+        assert!(
+            drill.failing[0].starts_with("kyu-config"),
+            "{:?}",
+            drill.failing
+        );
+        assert_eq!(probes.password_file_ok, Some(true));
+        let drive = probes.drive.expect("drive probed");
+        assert_eq!((drive.total, drive.trashed), (107374182400, 2147483648));
+        assert_eq!(
+            probes.exposure.map(|e| e.listen),
+            Some("0.0.0.0:8443".into())
+        );
+    }
+
+    /// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
+    /// `homelab incidents` listed names only; reading a bundle took a root
+    /// shell on pve. `incidents show <name>` brings the error, the versions
+    /// and the end of the transcript to the workstation, and a name that is
+    /// not a plain bundle name is refused before it becomes a path.
+    #[tokio::test]
+    async fn fix_131_incident_show_reads_one_bundle_and_nothing_else() {
+        let dir = std::env::temp_dir().join(format!("homelab-fix131-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let bundle = dir.join("incidents/1800000000-deploy-media");
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(
+            bundle.join("report.json"),
+            r#"{"op":"deploy-media","steps":[],"ok":false,"error":{"what":"pull images failed","why":"image not found","remedy":"check the tag"}}"#,
+        )
+        .unwrap();
+        std::fs::write(bundle.join("versions.txt"), "host=3.60.0\nproto=1\n").unwrap();
+        // Written the way `write_bundle` writes them.
+        let line = |m: &str| {
+            let ev = PipelineEvent::Line {
+                level: homelab_core::sink::Level::Info,
+                source: "HOST".into(),
+                msg: m.into(),
+            };
+            format!("{}\n", serde_json::to_string(&ev).unwrap())
+        };
+        std::fs::write(
+            bundle.join("events.jsonl"),
+            format!(
+                "{}{}",
+                line("[run ] docker compose pull"),
+                line("image not found")
+            ),
+        )
+        .unwrap();
+        let toml = dir.join("host.toml");
+        std::fs::write(
+            &toml,
+            format!(
+                "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        let state = test_state(load_config_from(toml.to_string_lossy().into_owned()));
+        let show = |name: &str| RpcRequest {
+            id: 3,
+            command: Rpc::IncidentShow { name: name.into() },
+        };
+        let got = handle_rpc(&state, show("1800000000-deploy-media")).await;
+        let refused = handle_rpc(&state, show("../../etc")).await;
+        let missing = handle_rpc(&state, show("1800000001-deploy-x")).await;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(got.ok, "{}", got.message);
+        for want in [
+            "pull images failed",
+            "image not found",
+            "check the tag",
+            "host=3.60.0",
+            "docker compose pull",
+        ] {
+            assert!(
+                got.message.contains(want),
+                "{} missing from:\n{}",
+                want,
+                got.message
+            );
+        }
+        assert!(
+            !refused.ok && refused.message.contains("not a bundle name"),
+            "{}",
+            refused.message
+        );
+        assert!(!missing.ok, "{}", missing.message);
+    }
+
+    /// fix-131: the pruner removes what `bundles_to_prune` names, on disk.
+    #[test]
+    fn fix_131_old_bundles_are_removed_from_disk() {
+        let dir = std::env::temp_dir().join(format!("homelab-fix131p-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let now = 1_800_000_000u64;
+        let old = dir.join(format!("incidents/{}-deploy-media", now - 100 * 86_400));
+        let young = dir.join(format!("incidents/{}-deploy-kyu", now - 86_400));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&young).unwrap();
+        std::fs::write(old.join("report.json"), "{}").unwrap();
+        let removed = prune_incidents(&dir.to_string_lossy(), now);
+        let (old_gone, young_kept) = (!old.exists(), young.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(removed, 1);
+        assert!(old_gone && young_kept);
+    }
+
     /// A session over a real socket on a free local port, with `handler` in
     /// place of `handle_rpc`. Returns the address to connect to.
     async fn serve_on_loopback<H, Fut>(handler: H) -> SocketAddr
@@ -1441,22 +1772,26 @@ port = 5003
     {
         // Loaded by path, not through HOMELAB_CONFIG, for the reason fix-36's
         // test gives: tests run in parallel and another one sets it.
-        let path = format!("/tmp/homelab-loopback-test-{}.toml", std::process::id());
+        // One file per call: tests run in parallel, and a shared path let one
+        // test read the file while another was rewriting it.
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let path = format!(
+            "/tmp/homelab-loopback-test-{}-{}.toml",
+            std::process::id(),
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
-        let config = load_config_from(path);
-        let (log_tx, _) = broadcast::channel(64);
-        let state = AppState {
-            config: config.clone(),
-            log_tx,
-            op_lock: Arc::new(Mutex::new(())),
-            busy: Arc::new(std::sync::Mutex::new(None)),
-            pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-            settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
-            damper: Arc::new(std::sync::Mutex::new(
-                homelab_core::notify::NotifyDamper::new(20 * 3600),
-            )),
-        };
+        let config = load_config_from(path.clone());
+        let _ = std::fs::remove_file(&path);
+        serve_state_on_loopback(test_state(config), handler).await
+    }
+
+    /// [`serve_on_loopback`] around a state the test built itself.
+    async fn serve_state_on_loopback<H, Fut>(state: AppState, handler: H) -> SocketAddr
+    where
+        H: Fn(AppState, RpcRequest) -> Fut + Clone + Send + Sync + 'static,
+        Fut: std::future::Future<Output = RpcResponse> + Send + 'static,
+    {
         let app = Router::new()
             .route(
                 "/ws",
@@ -1550,6 +1885,473 @@ port = 5003
         );
     }
 
+    /// fix-127 (expert panel, websocket-edge-cases, 2026-09-27): the session
+    /// read `while let Some(Ok(Message::Text(..)))`, so the first Ping,
+    /// Pong or Binary frame ended it. A keepalive ping from a client or a
+    /// proxy closed the line without a word.
+    #[tokio::test]
+    async fn fix_127_a_ping_or_binary_frame_does_not_end_the_session() {
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let addr = serve_on_loopback(|st, req| async move { handle_rpc(&st, req).await }).await;
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+            .await
+            .expect("connect to the loopback session");
+        let (mut tx, mut rx) = ws.split();
+        tx.send(WsMsg::Ping(vec![1, 2, 3].into())).await.unwrap();
+        tx.send(WsMsg::Binary(vec![0xff; 8].into())).await.unwrap();
+        let req = RpcRequest {
+            id: 7,
+            command: Rpc::Ping,
+        };
+        tx.send(WsMsg::Text(serde_json::to_string(&req).unwrap().into()))
+            .await
+            .unwrap();
+        let answered = tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(Ok(frame)) = rx.next().await {
+                if let WsMsg::Text(t) = frame {
+                    if let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t) {
+                        return r.id == 7 && r.ok;
+                    }
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+        assert!(
+            answered,
+            "the request after a ping and a binary frame is answered"
+        );
+    }
+
+    /// Asks a question, and while it waits floods the broadcast channel far
+    /// past its capacity, so a slow reader lags past the question.
+    async fn flooding_asker(st: AppState, req: RpcRequest) -> RpcResponse {
+        if matches!(req.command, Rpc::Answer { .. }) {
+            return handle_rpc(&st, req).await;
+        }
+        // Spawned before the question is sent, so on this single-threaded
+        // test runtime it runs as soon as the asker waits: after the Ask is
+        // in the channel, before the session's forwarder has taken it out.
+        let flood = st.log_tx.clone();
+        tokio::spawn(async move {
+            for i in 0..500 {
+                let _ = flood.send(ServerMsg::Log {
+                    level: homelab_proto::LogLevel::Debug,
+                    source: "HOST".into(),
+                    msg: format!("noise {}", i),
+                });
+            }
+        });
+        asking_handler(st, req).await
+    }
+
+    /// fix-127: a client that reads slower than the host writes lags the
+    /// broadcast channel, and the forwarder skipped what it missed without
+    /// a word, questions included, so the operation waited for an answer to
+    /// a question the operator never saw and ended Unattended. Now the
+    /// client is told how much it missed and every open question is sent
+    /// again.
+    #[tokio::test]
+    async fn fix_127_a_lagging_client_still_gets_the_open_question() {
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let addr = serve_on_loopback(flooding_asker).await;
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+            .await
+            .expect("connect to the loopback session");
+        let (mut tx, mut rx) = ws.split();
+        let frame = |req: RpcRequest| WsMsg::Text(serde_json::to_string(&req).unwrap().into());
+        tx.send(frame(RpcRequest {
+            id: 1,
+            command: Rpc::Ping,
+        }))
+        .await
+        .unwrap();
+        let mut told_of_the_gap = false;
+        let verdict = tokio::time::timeout(Duration::from_secs(20), async {
+            while let Some(Ok(WsMsg::Text(t))) = rx.next().await {
+                match serde_json::from_str::<ServerMsg>(&t).unwrap() {
+                    ServerMsg::Ask { id, .. } => {
+                        tx.send(frame(RpcRequest {
+                            id: 2,
+                            command: Rpc::Answer { id, allow: true },
+                        }))
+                        .await
+                        .unwrap();
+                    }
+                    ServerMsg::Log { msg, .. } if msg.contains("dropped") => told_of_the_gap = true,
+                    ServerMsg::RpcDone(r) if r.id == 1 => return r.message,
+                    _ => {}
+                }
+            }
+            "the connection closed".to_string()
+        })
+        .await
+        .expect("the operation never finished");
+        assert_eq!(verdict, "Allow", "the question reached the operator");
+        assert!(
+            told_of_the_gap,
+            "and the client was told it missed messages"
+        );
+    }
+
+    /// A state whose `state_dir` is a fresh directory of its own, holding a
+    /// self-update marker armed at `armed_at`.
+    fn state_with_marker(tag: &str, armed_at: u64) -> (AppState, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("homelab-{}-{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml = dir.join("host.toml");
+        std::fs::write(
+            &toml,
+            format!(
+                "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        let marker = dir.join("selfupdate.pending");
+        std::fs::write(
+            &marker,
+            format!("{{\"to_version\":\"9.9.9\",\"armed_at\":{}}}\n", armed_at),
+        )
+        .unwrap();
+        (
+            test_state(load_config_from(toml.to_string_lossy().into_owned())),
+            marker,
+        )
+    }
+
+    /// One Ping over a real session, answered.
+    async fn ping_over(addr: SocketAddr) {
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+            .await
+            .expect("connect to the loopback session");
+        let (mut tx, mut rx) = ws.split();
+        let req = RpcRequest {
+            id: 1,
+            command: Rpc::Ping,
+        };
+        tx.send(WsMsg::Text(serde_json::to_string(&req).unwrap().into()))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(Ok(WsMsg::Text(t))) = rx.next().await {
+                if let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t) {
+                    assert!(r.ok);
+                    return;
+                }
+            }
+            panic!("the connection closed before the ping was answered");
+        })
+        .await
+        .expect("the ping was answered");
+        // The acceptance runs after the answer is queued; give it its turn.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    /// fix-121 (expert panel, self-update-acceptance-weak, 2026-09-27): a new
+    /// daemon was accepted after five seconds alive, before anything had
+    /// talked to it, so a binary that ran but could not serve a client was
+    /// kept. It is accepted now by the first authenticated request it
+    /// answers.
+    #[tokio::test]
+    async fn fix_121_a_self_update_is_accepted_by_an_answered_request() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let (state, marker) = state_with_marker("fix121-new", now - 100);
+        let addr =
+            serve_state_on_loopback(state, |st, req| async move { handle_rpc(&st, req).await })
+                .await;
+        assert!(marker.exists(), "precondition: the update is pending");
+        ping_over(addr).await;
+        let accepted = !marker.exists();
+        let _ = std::fs::remove_dir_all(marker.parent().unwrap());
+        assert!(
+            accepted,
+            "an answered request from the new daemon accepts the update"
+        );
+    }
+
+    /// fix-121: the daemon that ARMED the marker answers the self-update
+    /// request itself; that answer must not accept the binary that replaces
+    /// it.
+    #[tokio::test]
+    async fn fix_121_the_old_daemon_never_accepts_its_successor() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let (state, marker) = state_with_marker("fix121-old", now + 100);
+        let addr =
+            serve_state_on_loopback(state, |st, req| async move { handle_rpc(&st, req).await })
+                .await;
+        ping_over(addr).await;
+        let kept = marker.exists();
+        let _ = std::fs::remove_dir_all(marker.parent().unwrap());
+        assert!(kept, "armed after this daemon started: not its own");
+    }
+
+    /// fix-124 (expert panel, exec-logged-verbatim, 2026-09-27): a remote
+    /// exec is recorded in audit.log and the journal before it runs, and was
+    /// recorded verbatim, so a password typed on the command line was kept
+    /// on pve indefinitely. The record still names the vmid and the command,
+    /// with the values the shared masker recognises taken out.
+    #[test]
+    fn fix_124_an_exec_command_is_masked_before_it_is_recorded() {
+        let line = exec_audit_line(
+            1_800_000_000,
+            108,
+            "PGPASSWORD=hunter2-x9 psql -h db -c 'select 1'; curl -H 'Authorization: Bearer tk-77' x",
+        );
+        assert!(
+            !line.contains("hunter2-x9") && !line.contains("tk-77"),
+            "{}",
+            line
+        );
+        assert!(
+            line.starts_with("1800000000 exec vmid=108 ") && line.contains("psql -h db"),
+            "the record still says what ran where: {}",
+            line
+        );
+        assert!(
+            line.ends_with('\n') && line.lines().count() == 1,
+            "{:?}",
+            line
+        );
+    }
+
+    /// fix-125 (expert panel, bundles-audit-world-readable, 2026-09-27):
+    /// audit.log (every exec command) and the incident bundles were readable
+    /// by any local account on pve. A new audit.log is created 0600, and at
+    /// start the daemon takes group and world access off what exists.
+    #[test]
+    fn fix_125_the_audit_log_and_existing_bundles_are_made_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let set = |p: &std::path::Path, m: u32| {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap()
+        };
+        let dir = std::env::temp_dir().join(format!("homelab-fix125-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let bundle = dir.join("incidents/1800000000-deploy-x");
+        std::fs::create_dir_all(&bundle).unwrap();
+        for (f, m) in [("report.json", 0o644), ("commands.sh", 0o755)] {
+            std::fs::write(bundle.join(f), "x").unwrap();
+            set(&bundle.join(f), m);
+        }
+        set(&dir.join("incidents"), 0o755);
+        set(&bundle, 0o755);
+        std::fs::write(dir.join("audit.log"), "old\n").unwrap();
+        set(&dir.join("audit.log"), 0o644);
+
+        tighten_private_paths(&dir.to_string_lossy());
+        let fresh = dir.join("fresh-audit.log");
+        append_audit(&fresh.to_string_lossy(), "1 exec vmid=108 cmd=\"ls\"\n").unwrap();
+
+        let got = [
+            mode(&dir.join("incidents")),
+            mode(&bundle),
+            mode(&bundle.join("report.json")),
+            mode(&bundle.join("commands.sh")),
+            mode(&dir.join("audit.log")),
+            mode(&fresh),
+        ];
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(got, [0o700, 0o700, 0o600, 0o700, 0o600, 0o600]);
+    }
+
+    /// One plain HTTP GET against `addr`, with an optional bearer token;
+    /// returns the status code and the body.
+    async fn http_get(addr: SocketAddr, path: &str, token: Option<&str>) -> (u16, String) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let auth = token
+            .map(|t| format!("Authorization: Bearer {}\r\n", t))
+            .unwrap_or_default();
+        s.write_all(
+            format!(
+                "GET {} HTTP/1.1\r\nHost: x\r\n{}Connection: close\r\n\r\n",
+                path, auth
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).await.unwrap();
+        let code = out
+            .split_whitespace()
+            .nth(1)
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(0);
+        let body = out.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+        (code, body)
+    }
+
+    /// fix-126 (expert panel, unauth-version-plaintext-kyu, 2026-09-27):
+    /// `/api/version` told any neighbour which release runs, which is what a
+    /// probe needs to pick a known fault. It now takes the token like the
+    /// line itself; `/api/health` stays open, it says only `ok`.
+    #[tokio::test]
+    async fn fix_126_the_version_endpoint_needs_the_token() {
+        let path = format!("/tmp/homelab-fix126-{}.toml", std::process::id());
+        std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
+        let state = test_state(load_config_from(path.clone()));
+        let _ = std::fs::remove_file(&path);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = app_router(state.clone());
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap()
+        });
+        let (code, body) = http_get(addr, "/api/version", None).await;
+        assert_eq!(code, 401, "no token, no version: {}", body);
+        assert!(!body.contains(VERSION), "{}", body);
+        assert_eq!(state.auth_failures.snapshot().count, 1, "and it is counted");
+        let (code, body) = http_get(addr, "/api/version", Some("0123456789abcdef0123")).await;
+        assert_eq!((code, body.trim()), (200, VERSION));
+        assert_eq!(http_get(addr, "/api/health", None).await.0, 200);
+    }
+
+    /// fix-126: a notification route that sends the bearer token over plain
+    /// HTTP is named at start. The token to kyu crossed VLAN 10 in clear
+    /// text, where an ARP-spoofing container reads it.
+    #[test]
+    fn fix_126_a_bearer_sent_over_plain_http_is_named() {
+        let routes = plaintext_bearer_routes(
+            Some("http://10.10.10.9:8080/publish/notify.kenny"),
+            Some("tok"),
+            Some("http://10.10.5.101:8123/api/webhook/abc"),
+            None,
+        );
+        assert_eq!(routes.len(), 1, "{:?}", routes);
+        assert!(
+            routes[0].starts_with("http://10.10.10.9:8080"),
+            "{:?}",
+            routes
+        );
+        assert!(
+            !routes[0].contains("notify.kenny"),
+            "path withheld: {:?}",
+            routes
+        );
+        assert!(plaintext_bearer_routes(
+            Some("https://kyu.example/publish"),
+            Some("tok"),
+            None,
+            None
+        )
+        .is_empty());
+        assert!(
+            plaintext_bearer_routes(Some("http://127.0.0.1:8080/x"), Some("tok"), None, None)
+                .is_empty(),
+            "loopback never crosses a wire"
+        );
+    }
+
+    /// A `MakeWriter` into a shared buffer, to read what the journal gets.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+        type Writer = Captured;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// fix-122 (expert panel, journal-lines-lack-op-context, 2026-09-27):
+    /// three backups run at once at night, and their journal lines carried
+    /// only `source=HOST` and the message, so `image not found` could not be
+    /// tied to one of them; the lines also carried ANSI colour codes, which
+    /// break `grep` on the journal. Every line of an operation now names the
+    /// operation and its stack, steps are logged as they start and finish,
+    /// and no escape code reaches the journal.
+    #[test]
+    fn fix_122_journal_lines_name_their_operation_and_stack_without_colour() {
+        use homelab_core::runner::{Runner, StepOutcome};
+        use tracing::Instrument;
+        let out = Captured::default();
+        let subscriber = journal_subscriber(out.clone(), "info");
+        let dir = std::env::temp_dir().join(format!("homelab-fix122-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml = dir.join("host.toml");
+        std::fs::write(
+            &toml,
+            format!(
+                "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        let state = test_state(load_config_from(toml.to_string_lossy().into_owned()));
+        tracing::subscriber::with_default(subscriber, || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(
+                    async {
+                        run_op_locked(&state, &RealExecutor, 0, "scheduled-backup", |ctx| {
+                            Box::pin(async move {
+                                let mut r = Runner::new("backup-paperwork", ctx.sink, ctx.journal);
+                                let _ = r
+                                    .step("snapshot", || async {
+                                        ctx.sink.emit(PipelineEvent::Line {
+                                            level: homelab_core::sink::Level::Warn,
+                                            source: "HOST".into(),
+                                            msg: "image not found".into(),
+                                        });
+                                        Ok(StepOutcome::Changed)
+                                    })
+                                    .await;
+                                r.finish_ok()
+                            })
+                        })
+                        .await
+                    }
+                    .instrument(stack_span("paperwork")),
+                );
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        let text = String::from_utf8(out.0.lock().unwrap().clone()).unwrap();
+        assert!(!text.contains('\u{1b}'), "no colour codes:\n{}", text);
+        let line = text
+            .lines()
+            .find(|l| l.contains("image not found"))
+            .unwrap_or_else(|| panic!("the line reached the journal:\n{}", text));
+        assert!(
+            line.contains("stack=paperwork") && line.contains("op=scheduled-backup"),
+            "the line names its stack and operation: {}",
+            line
+        );
+        assert!(
+            text.lines()
+                .any(|l| l.contains("snapshot") && l.contains("stack=paperwork")),
+            "the step's start and finish are journal lines too:\n{}",
+            text
+        );
+    }
+
     #[test]
     fn h12_scheduler_clock_logic() {
         // Weird `date` output never silently disables the scheduler.
@@ -1558,9 +2360,51 @@ port = 5003
         assert_eq!(parse_local_hour("99"), None);
         let now = 1_800_000_000u64;
         assert!(backup_due(4, 4, now - 25 * 3600, now));
-        assert!(!backup_due(4, 5, now - 25 * 3600, now), "wrong hour");
+        assert!(
+            !backup_due(4, 7, now - 25 * 3600, now),
+            "outside the night window (fix-129)"
+        );
         assert!(!backup_due(4, 4, now - 3600, now), "backed up an hour ago");
         assert!(backup_due(4, 4, 0, now), "never backed up");
+    }
+
+    /// fix-129 (expert panel, restart-skips-night, 2026-09-27): a backup was
+    /// due only while the local hour equalled `backup_hour`, and the first
+    /// check came twenty minutes after start. A self-update, crash or power
+    /// cut inside that hour cost the whole night: no backups, updates,
+    /// host-meta or fleet check. What was not done in the hour is caught up
+    /// in the next one, and the first check comes a minute after start.
+    #[test]
+    fn fix_129_a_night_missed_by_a_restart_is_caught_up_before_morning() {
+        let now = 1_800_000_000u64;
+        let stale = now - 25 * 3600;
+        assert!(
+            backup_due(4, 5, stale, now),
+            "04:xx lost, caught up at 05:xx"
+        );
+        assert!(!backup_due(4, 6, stale, now), "not into the day");
+        assert!(!backup_due(4, 3, stale, now), "not before the hour");
+        assert!(backup_due(23, 0, stale, now), "the window wraps midnight");
+        assert!(
+            !backup_due(4, 5, now - 3600, now),
+            "done in the hour: not again"
+        );
+        let st = NightlyState {
+            last_host_meta: stale,
+            last_zfs: now,
+            last_restore_drill: now,
+            restore_drill_interval_s: 90 * 24 * 3600,
+            zfs_configured: false,
+            devices_configured: false,
+        };
+        assert_eq!(
+            nightly_plan(4, 5, now, &[("a".into(), true, stale)], &st),
+            vec![NightlyTask::Stack("a".into()), NightlyTask::HostMeta]
+        );
+        assert!(
+            Duration::from_secs(SCHEDULER_FIRST_CHECK_S) <= Duration::from_secs(60),
+            "the first look comes soon after a start, not a tick later"
+        );
     }
 
     /// G14: the drill rides the backup hour and only when it is due.
@@ -1579,7 +2423,7 @@ port = 5003
             "never drilled, and it is the hour: it must be planned"
         );
         assert!(
-            !nightly_plan(4, 5, 1_000_000, &[], &never).contains(&NightlyTask::RestoreDrill),
+            !nightly_plan(4, 7, 1_000_000, &[], &never).contains(&NightlyTask::RestoreDrill),
             "a restore pulls a whole snapshot back — not outside the backup hour"
         );
         let fresh = NightlyState {
@@ -1730,10 +2574,10 @@ port = 5003
         );
         assert!(plan.is_empty());
 
-        // Wrong hour: nothing at all.
+        // Outside the night window (fix-129: 04:00-06:00): nothing at all.
         assert!(nightly_plan(
             4,
-            5,
+            7,
             now,
             &[("a".into(), true, stale)],
             &NightlyState {
@@ -2090,28 +2934,47 @@ impl Sink for BroadcastSink {
     fn emit(&self, event: PipelineEvent) {
         let msg = match event {
             PipelineEvent::Line { level, source, msg } => {
-                tracing::info!(source = %source, "{}", msg);
+                // fix-122: at the line's own level, so `grep WARN` on the
+                // journal finds the warnings an operation printed.
+                use homelab_core::sink::Level;
+                match level {
+                    Level::Error => tracing::error!(source = %source, "{}", msg),
+                    Level::Warn => tracing::warn!(source = %source, "{}", msg),
+                    Level::Debug => tracing::debug!(source = %source, "{}", msg),
+                    Level::Info => tracing::info!(source = %source, "{}", msg),
+                }
                 ServerMsg::Log {
                     level: level.into(),
                     source,
                     msg,
                 }
             }
-            PipelineEvent::StepStarted { op, step } => ServerMsg::Log {
-                level: homelab_proto::LogLevel::Info,
-                source: "HOST".into(),
-                msg: format!("[sync][run ] {} :: {}", op, step),
-            },
-            PipelineEvent::StepFinished { op, step, changed } => ServerMsg::Log {
-                level: homelab_proto::LogLevel::Info,
-                source: "HOST".into(),
-                msg: format!(
+            // fix-122: step starts and ends reach the journal too; they went
+            // only to connected clients, so a night's journal had the lines
+            // of a step but not which step they belonged to.
+            PipelineEvent::StepStarted { op, step } => {
+                let msg = format!("[sync][run ] {} :: {}", op, step);
+                tracing::info!("{}", msg);
+                ServerMsg::Log {
+                    level: homelab_proto::LogLevel::Info,
+                    source: "HOST".into(),
+                    msg,
+                }
+            }
+            PipelineEvent::StepFinished { op, step, changed } => {
+                let msg = format!(
                     "[sync][exit] {} :: {} :: {}",
                     op,
                     step,
                     if changed { "changed" } else { "ok (no change)" }
-                ),
-            },
+                );
+                tracing::info!("{}", msg);
+                ServerMsg::Log {
+                    level: homelab_proto::LogLevel::Info,
+                    source: "HOST".into(),
+                    msg,
+                }
+            }
             PipelineEvent::Bytes {
                 op,
                 label,
@@ -2170,11 +3033,166 @@ struct AppState {
     damper: Arc<std::sync::Mutex<homelab_core::notify::NotifyDamper>>,
     /// T69: questions a step is waiting on, by id. The client's answer
     /// arrives as an ordinary RPC and is delivered through one of these.
-    pending_asks:
-        Arc<std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::oneshot::Sender<bool>>>>,
+    pending_asks: Arc<std::sync::Mutex<std::collections::HashMap<u64, PendingAsk>>>,
     /// Monotonic id for those questions. Not a clock: two questions in the
     /// same second must still be distinguishable.
     next_ask_id: Arc<std::sync::atomic::AtomicU64>,
+    /// fix-120: connections refused for their token since this daemon
+    /// started, for `homelab doctor`.
+    auth_failures: Arc<AuthFailures>,
+    /// fix-121: when this daemon started. A self-update marker armed before
+    /// this moment names this binary as the new one; one armed later was
+    /// armed by this daemon for its successor.
+    started_at: u64,
+}
+
+impl AppState {
+    fn new(config: Config, log_tx: broadcast::Sender<ServerMsg>) -> Self {
+        AppState {
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
+            config,
+            log_tx,
+            op_lock: Arc::new(Mutex::new(())),
+            busy: Arc::new(std::sync::Mutex::new(None)),
+            pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            damper: Arc::new(std::sync::Mutex::new(
+                homelab_core::notify::NotifyDamper::new(20 * 3600),
+            )),
+            auth_failures: Arc::new(AuthFailures::default()),
+        }
+    }
+}
+
+/// T69: a question waiting for its answer.
+struct PendingAsk {
+    reply: tokio::sync::oneshot::Sender<bool>,
+    /// fix-127: the question as sent, so a client that lagged past it gets
+    /// it again.
+    ask: ServerMsg,
+}
+
+/// fix-120 (expert panel, api-token-is-root, 2026-09-27): the 401 branch
+/// logged nothing, so a probe from a compromised container or a stolen token
+/// tried from a new machine left no trace. Kept in memory: a flood of bad
+/// attempts must not turn into a flood of state writes.
+#[derive(Default)]
+struct AuthFailures {
+    count: std::sync::atomic::AtomicU64,
+    last: std::sync::Mutex<Option<(String, u64)>>,
+}
+
+impl AuthFailures {
+    /// Count one refusal from `peer` and return the running total.
+    fn record(&self, peer: &str, now: u64) -> u64 {
+        *self.last.lock().unwrap_or_else(PoisonError::into_inner) = Some((peer.to_string(), now));
+        self.count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1
+    }
+
+    /// What has been seen, in the shape doctor reads.
+    fn snapshot(&self) -> homelab_core::doctor::FailedAuth {
+        let last = self
+            .last
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        homelab_core::doctor::FailedAuth {
+            count: self.count.load(std::sync::atomic::Ordering::Relaxed),
+            last_peer: last.as_ref().map(|(p, _)| p.clone()),
+            last_at: last.map(|(_, t)| t).unwrap_or(0),
+        }
+    }
+}
+
+/// fix-121 (expert panel, self-update-acceptance-weak, 2026-09-27): accept a
+/// pending self-update once this daemon has answered an authenticated
+/// request. It used to be accepted after five seconds alive, before the TLS
+/// line had carried anything, so a binary that ran but could not serve a
+/// client was kept and the client could not ship the next fix.
+///
+/// Until a request is answered the marker stays armed, so a daemon that dies
+/// or crash-loops meanwhile is rolled back by the OnFailure unit as before.
+/// Only a marker armed before this daemon started is its own: the daemon that
+/// armed it answers the self-update request itself, and that answer must not
+/// accept its successor.
+fn accept_pending_update(state_dir: &str, started_at: u64) {
+    let marker = format!("{}/selfupdate.pending", state_dir);
+    let Ok(raw) = std::fs::read_to_string(&marker) else {
+        return;
+    };
+    let armed_at = serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|v| v.get("armed_at").and_then(|a| a.as_u64()))
+        .unwrap_or(0);
+    if armed_at >= started_at {
+        return;
+    }
+    match std::fs::remove_file(&marker) {
+        Ok(()) => info!(
+            "self-update accepted — v{} answered an authenticated request",
+            VERSION
+        ),
+        Err(e) => tracing::warn!("self-update: could not clear {} :: {}", marker, e),
+    }
+}
+
+/// fix-126 (expert panel, unauth-version-plaintext-kyu, 2026-09-27):
+/// notification routes that send a bearer token over plain HTTP to another
+/// machine, shown as `route_for_log` shows them. The kyu publish token
+/// crossed VLAN 10 in clear text, where any container that can ARP-spoof
+/// reads it. Moving the route to TLS is a change on the machines, so the
+/// daemon says it at start rather than refusing.
+fn plaintext_bearer_routes(
+    primary: Option<&str>,
+    primary_bearer: Option<&str>,
+    fallback: Option<&str>,
+    fallback_bearer: Option<&str>,
+) -> Vec<String> {
+    let loopback = |url: &str| {
+        let host = homelab_core::notify::route_for_log(url);
+        let host = host.trim_start_matches("http://");
+        host.starts_with("127.") || host.starts_with("localhost") || host.starts_with("[::1]")
+    };
+    [(primary, primary_bearer), (fallback, fallback_bearer)]
+        .into_iter()
+        .filter_map(|(url, bearer)| Some((url?, bearer?)))
+        .filter(|(url, _)| url.starts_with("http://") && !loopback(url))
+        .map(|(url, _)| homelab_core::notify::route_for_log(url))
+        .collect()
+}
+
+/// The daemon's routes. One function for `main` and the tests, so a test of
+/// the 401 path runs the real one.
+fn app_router(state: AppState) -> Router {
+    Router::new()
+        .route("/api/health", get(|| async { "ok" }))
+        .route("/api/version", get(version_endpoint))
+        .route("/api/ws", get(ws_upgrade))
+        .with_state(state)
+}
+
+/// fix-126: the version for a caller holding the token. It was open, and it
+/// told any neighbour on the VLAN which release runs.
+async fn version_endpoint(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    if bearer_ok(
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+        &state.config.token,
+    ) {
+        VERSION.into_response()
+    } else {
+        log_refused(&state, peer, "/api/version");
+        (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response()
+    }
 }
 
 /// T69: the asker that reaches a watching operator over the live line.
@@ -2202,17 +3220,24 @@ impl homelab_core::ask::Asker for LiveAsker<'_> {
             .next_ask_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        if let Ok(mut g) = self.state.pending_asks.lock() {
-            g.insert(id, tx);
-        }
-        let _ = self.state.log_tx.send(ServerMsg::Ask {
+        let ask = ServerMsg::Ask {
             id,
             op: q.op.clone(),
             step: q.step.clone(),
             what: q.what.clone(),
             if_allowed: q.if_allowed.clone(),
             if_stopped: q.if_stopped.clone(),
-        });
+        };
+        if let Ok(mut g) = self.state.pending_asks.lock() {
+            g.insert(
+                id,
+                PendingAsk {
+                    reply: tx,
+                    ask: ask.clone(),
+                },
+            );
+        }
+        let _ = self.state.log_tx.send(ask);
         let answer = match tokio::time::timeout(Duration::from_secs(self.timeout_s), rx).await {
             Ok(Ok(true)) => Answer::Allow,
             Ok(Ok(false)) => Answer::Stop,
@@ -2227,6 +3252,68 @@ impl homelab_core::ask::Asker for LiveAsker<'_> {
             g.remove(&id);
         }
         answer
+    }
+}
+
+/// The daemon's log subscriber, writing to `writer` (stderr, which systemd
+/// puts in the journal).
+///
+/// fix-122 (expert panel, journal-lines-lack-op-context, 2026-09-27): no
+/// ANSI colour. tracing-subscriber colours by default, so a journal line
+/// read `\x1b[33m WARN\x1b[0m` and `grep 'WARN scheduler'` found nothing.
+fn journal_subscriber<W>(writer: W, default_filter: &str) -> impl tracing::Subscriber + Send + Sync
+where
+    W: for<'a> tracing_subscriber::fmt::MakeWriter<'a> + Send + Sync + 'static,
+{
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| default_filter.into()),
+        )
+        .with_ansi(false)
+        .with_writer(writer)
+        .finish()
+}
+
+/// fix-122: the span that names the stack an operation works on. Every
+/// journal line inside it carries `stack=<name>`, which is what tells three
+/// concurrent nightly backups apart.
+fn stack_span(stack: &str) -> tracing::Span {
+    tracing::info_span!("stack", stack = %stack)
+}
+
+/// fix-122: the span a request runs in: its id, and its stack when it has
+/// one (a request about the host or the fleet has none, and says nothing).
+fn rpc_span(req: &RpcRequest) -> tracing::Span {
+    let span = tracing::info_span!("rpc", id = req.id, stack = tracing::field::Empty);
+    if let Some(stack) = rpc_stack(&req.command) {
+        span.record("stack", stack.as_str());
+    }
+    span
+}
+
+/// fix-122: the stack a request is about, for its span. `None` for requests
+/// about the host or the whole fleet.
+fn rpc_stack(command: &Rpc) -> Option<String> {
+    match command {
+        Rpc::DeployStack(spec) => Some(spec.manifest.stack_name.clone()),
+        Rpc::DestroyStack { manifest, .. }
+        | Rpc::RestoreStack { manifest, .. }
+        | Rpc::UpdateStack { manifest, .. }
+        | Rpc::PruneOrphans { manifest, .. } => Some(manifest.stack_name.clone()),
+        Rpc::BackupStack(m) | Rpc::ApplyResources(m) => Some(m.stack_name.clone()),
+        Rpc::StageNativeBinary { stack, .. }
+        | Rpc::BackupNative { stack }
+        | Rpc::UpdateNative { stack }
+        | Rpc::ReleaseUpdateNative { stack }
+        | Rpc::ForgetStack { stack }
+        | Rpc::DestroyRecorded { stack, .. }
+        | Rpc::SetStackEnabled { stack, .. }
+        | Rpc::GetApplied { stack } => Some(stack.clone()),
+        Rpc::InstallNative { manifest, .. } | Rpc::AdoptService(manifest) => {
+            Some(manifest.stack_name.clone())
+        }
+        _ => None,
     }
 }
 
@@ -2347,27 +3434,27 @@ async fn main() {
         }
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+    {
+        use tracing_subscriber::util::SubscriberInitExt as _;
+        journal_subscriber(std::io::stderr, "info").init();
+    }
 
     let config = load_config();
     let (log_tx, _) = broadcast::channel(4096);
-    let state = AppState {
-        config: config.clone(),
-        log_tx,
-        op_lock: Arc::new(Mutex::new(())),
-        busy: Arc::new(std::sync::Mutex::new(None)),
-        pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-        settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
-        damper: Arc::new(std::sync::Mutex::new(
-            homelab_core::notify::NotifyDamper::new(20 * 3600),
-        )),
-    };
+    let state = AppState::new(config.clone(), log_tx);
+
+    // fix-125: records written before the private modes existed.
+    tighten_private_paths(&config.state_dir);
+    // fix-131: bound the daemon's own records before anything runs, so
+    // nothing writes the journal while it is cut.
+    compact_journal_file(&config.state_dir);
+    prune_incidents(
+        &config.state_dir,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    );
 
     // AR13: surface any operation the previous run left mid-flight.
     let mut interrupted: Vec<String> = Vec::new();
@@ -2423,35 +3510,54 @@ async fn main() {
     };
     let op_lock = state.op_lock.clone();
 
-    let app = Router::new()
-        .route("/api/health", get(|| async { "ok" }))
-        .route("/api/version", get(|| async { VERSION }))
-        .route("/api/ws", get(ws_upgrade))
-        .with_state(state);
+    let app = app_router(state);
 
     // A4: TLS with a self-signed cert; the client pins this fingerprint.
-    let (certs, fingerprint) =
-        tls::ensure_cert(&config.state_dir, "homelab-host").expect("tls cert");
+    // fix-128: a clear line instead of a panic when even a new pair cannot be
+    // made or loaded (a full or read-only disk); systemd restarts and the
+    // journal says why.
+    let (certs, fingerprint) = match tls::ensure_cert(&config.state_dir, "homelab-host") {
+        Ok(pair) => pair,
+        Err(e) => {
+            error!(
+                "FATAL: cannot make or read the TLS certificate in {} :: {} — check that the \
+                 directory is writable and the disk is not full",
+                config.state_dir, e
+            );
+            std::process::exit(1);
+        }
+    };
     info!(
         "homelab-host v{} listening on {} (TLS)",
         VERSION, config.listen
     );
     info!("TLS fingerprint SHA256:{}", fingerprint);
     let tls_config =
-        axum_server::tls_rustls::RustlsConfig::from_pem_file(&certs.cert_pem, &certs.key_pem)
+        match axum_server::tls_rustls::RustlsConfig::from_pem_file(&certs.cert_pem, &certs.key_pem)
             .await
-            .expect("load tls");
+        {
+            Ok(c) => c,
+            Err(e) => {
+                error!(
+                    "FATAL: {} and {} do not load as a TLS pair :: {} — move both aside and \
+                 restart; the daemon makes a new pair (clients must then re-pin)",
+                    certs.cert_pem, certs.key_pem, e
+                );
+                std::process::exit(1);
+            }
+        };
 
-    // H5: accept the self-update only after surviving 5s of real serving —
-    // a binary that binds and then dies must leave the marker for OnFailure.
-    let marker = format!("{}/selfupdate.pending", config.state_dir);
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        if std::path::Path::new(&marker).exists() {
-            let _ = std::fs::remove_file(&marker);
-            info!("self-update accepted — now running v{}", VERSION);
-        }
-    });
+    // H5 / fix-121: a pending self-update is accepted by the first
+    // authenticated request this daemon answers (`accept_pending_update`),
+    // no longer by five seconds alive. Until then the marker stays armed, so
+    // a binary that binds and then dies is still rolled back by OnFailure.
+    if std::path::Path::new(&format!("{}/selfupdate.pending", config.state_dir)).exists() {
+        info!(
+            "self-update pending — v{} is accepted by the first authenticated request it \
+             answers; until then a crash-loop rolls it back",
+            VERSION
+        );
+    }
 
     // fix-52: bind first, so READY=1 means the port is open. It was sent
     // before the socket existed, and a bind failure then looked like a
@@ -2473,7 +3579,9 @@ async fn main() {
     });
 
     let code = supervise(
-        server.serve(app.into_make_service()),
+        // fix-120: with the peer address, so a refused connection says where
+        // it came from.
+        server.serve(app.into_make_service_with_connect_info::<SocketAddr>()),
         scheduler,
         terminate_signal(),
         op_lock,
@@ -2526,8 +3634,29 @@ fn parse_local_hour(date_stdout: &str) -> Option<u8> {
     date_stdout.trim().parse::<u8>().ok().filter(|h| *h < 24)
 }
 
+/// fix-129 (expert panel, restart-skips-night, 2026-09-27): seconds from
+/// start to the scheduler's first look. It waited a whole tick (20 min), so
+/// a restart late in the backup hour missed the hour altogether. A minute
+/// leaves the boot notification and the network their head start.
+const SCHEDULER_FIRST_CHECK_S: u64 = 60;
+
+/// fix-129: how many hours the nightly window lasts, starting at
+/// `backup_hour`. The second hour is a catch-up: a daemon restarted (a
+/// self-update, a crash, a power cut) in the first hour picks up there what
+/// is still due, instead of skipping the night. With `backup_hour = 4` the
+/// window ends at 06:00, before the house wakes up.
+const NIGHT_WINDOW_HOURS: u8 = 2;
+
+/// fix-129: is `local_hour` inside the nightly window that opens at
+/// `cfg_hour`? Wraps midnight.
+fn in_night_window(cfg_hour: u8, local_hour: u8) -> bool {
+    (local_hour + 24 - cfg_hour) % 24 < NIGHT_WINDOW_HOURS
+}
+
 fn backup_due(cfg_hour: u8, local_hour: u8, last_backup: u64, now: u64) -> bool {
-    local_hour == cfg_hour && now.saturating_sub(last_backup) >= 20 * 3600
+    // fix-129: due and not yet run since the last window, anywhere in the
+    // window; it was only in the configured hour itself.
+    in_night_window(cfg_hour, local_hour) && now.saturating_sub(last_backup) >= 20 * 3600
 }
 
 /// One unit of work in a nightly run.
@@ -2626,9 +3755,10 @@ fn nightly_plan(
     if st.devices_configured && backup_due(cfg_hour, local_hour, st.last_host_meta, now) {
         plan.push(NightlyTask::DeviceConfig);
     }
-    // G14: at most one per round, and only in the backup hour — a restore
-    // pulls a whole snapshot back over the same link the backups just used.
-    if local_hour == cfg_hour
+    // G14: at most one per round, and only in the nightly window (fix-129)
+    // — a restore pulls a whole snapshot back over the same link the
+    // backups just used.
+    if in_night_window(cfg_hour, local_hour)
         && homelab_core::ops::restoredrill::due(
             st.last_restore_drill,
             now,
@@ -2766,10 +3896,36 @@ fn orphan_watchers(
         .collect()
 }
 
+/// fix-120 (api-token-is-root, 2026-09-27): compared as SHA-256 digests with
+/// every byte folded in, so neither the length nor the first differing byte
+/// shows in the time the answer takes. It was a plain `==` on a formatted
+/// string, which stops at the first difference.
 fn bearer_ok(header: Option<&str>, token: &str) -> bool {
-    header
-        .map(|v| v == format!("Bearer {}", token))
-        .unwrap_or(false)
+    use sha2::{Digest, Sha256};
+    let Some(given) = header else {
+        return false;
+    };
+    let want = Sha256::digest(format!("Bearer {}", token).as_bytes());
+    let got = Sha256::digest(given.as_bytes());
+    want.iter()
+        .zip(got.iter())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
+}
+
+/// fix-120: say that a connection was refused for its token, and from where.
+fn log_refused(state: &AppState, peer: SocketAddr, path: &str) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let n = state.auth_failures.record(&peer.to_string(), now);
+    tracing::warn!(
+        "401 on {} from {}: missing or wrong bearer token ({} refused since this daemon started)",
+        path,
+        peer,
+        n
+    );
 }
 
 /// E4: check every 20 minutes; when the local hour matches `hour` and a
@@ -2821,44 +3977,52 @@ async fn run_backup_batch(
     let phase_started = std::time::Instant::now();
     let stacks_in_phase = jobs.len();
     let results: Vec<(String, NightBackup)> = futures_util::stream::iter(jobs)
-        .map(|job| async move {
-            let name = job.stack.clone();
-            let outcome = match job.what {
-                BackupWhat::Compose(manifest) => {
-                    let cfg = job.cfg.clone();
-                    let r = run_op_locked(state, exec, 0, "scheduled-backup", |ctx| {
-                        Box::pin(async move {
-                            homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await
-                        })
-                    })
-                    .await;
-                    NightBackup::of(r.ok, r.deferred.as_deref())
-                }
-                // T5: several services share one container, so all of them are
-                // backed up and one failure fails the night for the stack —
-                // they share a container and a fate. Sequential WITHIN a
-                // stack: they are on the same container, so overlapping their
-                // pauses would stop that container twice over.
-                BackupWhat::Native(services) => {
-                    let mut worst = NightBackup::Done;
-                    for native in services {
+        .map(|job| {
+            // fix-122: the three backups interleave; their lines say whose.
+            use tracing::Instrument as _;
+            let span = stack_span(&job.stack);
+            async move {
+                let name = job.stack.clone();
+                let outcome = match job.what {
+                    BackupWhat::Compose(manifest) => {
                         let cfg = job.cfg.clone();
-                        let r = run_op_locked(state, exec, 0, "scheduled-backup-native", |ctx| {
+                        let r = run_op_locked(state, exec, 0, "scheduled-backup", |ctx| {
                             Box::pin(async move {
-                                homelab_core::ops::native::backup_native(ctx, &native, &cfg).await
+                                homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await
                             })
                         })
                         .await;
-                        worst = worst.worse_of(NightBackup::of(r.ok, r.deferred.as_deref()));
+                        NightBackup::of(r.ok, r.deferred.as_deref())
                     }
-                    worst
+                    // T5: several services share one container, so all of them are
+                    // backed up and one failure fails the night for the stack —
+                    // they share a container and a fate. Sequential WITHIN a
+                    // stack: they are on the same container, so overlapping their
+                    // pauses would stop that container twice over.
+                    BackupWhat::Native(services) => {
+                        let mut worst = NightBackup::Done;
+                        for native in services {
+                            let cfg = job.cfg.clone();
+                            let r =
+                                run_op_locked(state, exec, 0, "scheduled-backup-native", |ctx| {
+                                    Box::pin(async move {
+                                        homelab_core::ops::native::backup_native(ctx, &native, &cfg)
+                                            .await
+                                    })
+                                })
+                                .await;
+                            worst = worst.worse_of(NightBackup::of(r.ok, r.deferred.as_deref()));
+                        }
+                        worst
+                    }
+                };
+                if let NightBackup::Deferred(why) = &outcome {
+                    info!("scheduler: backup for {} stood aside — {}", name, why);
                 }
-            };
-            if let NightBackup::Deferred(why) = &outcome {
-                info!("scheduler: backup for {} stood aside — {}", name, why);
+                BusyMark::step(state);
+                (name, outcome)
             }
-            BusyMark::step(state);
-            (name, outcome)
+            .instrument(span)
         })
         .buffer_unordered(limit)
         .collect()
@@ -2887,9 +4051,14 @@ enum BackupWhat {
 }
 
 async fn scheduler_loop(state: AppState) {
+    // fix-122: the nightly updates run inside a span naming their stack.
+    use tracing::Instrument as _;
     let exec = RealExecutor;
+    // fix-129: the first look soon after start, then every 20 minutes.
+    let mut wait = Duration::from_secs(SCHEDULER_FIRST_CHECK_S);
     loop {
-        tokio::time::sleep(Duration::from_secs(20 * 60)).await;
+        tokio::time::sleep(wait).await;
+        wait = Duration::from_secs(20 * 60);
         spawn_mirror_push(&state); // D5 retry queue: try again every tick
         let (hour, tiers) = {
             let s = state
@@ -2914,7 +4083,7 @@ async fn scheduler_loop(state: AppState) {
             tracing::error!("scheduler: cannot determine local hour ('date' failed) — nightly run skipped THIS TICK; investigate");
             continue;
         };
-        if local_hour != hour {
+        if !in_night_window(hour, local_hour) {
             continue;
         }
         let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
@@ -3060,6 +4229,7 @@ async fn scheduler_loop(state: AppState) {
                             homelab_core::ops::native::release_update(ctx, &native).await
                         })
                     })
+                    .instrument(stack_span(&name))
                     .await;
                     update_ok &= r.ok;
                 }
@@ -3070,6 +4240,7 @@ async fn scheduler_loop(state: AppState) {
                             homelab_core::ops::native::update_native(ctx, &n2, applied).await
                         })
                     })
+                    .instrument(stack_span(&name))
                     .await;
                     update_ok &= r.ok;
                 }
@@ -3124,6 +4295,7 @@ async fn scheduler_loop(state: AppState) {
                     async move { homelab_core::ops::update::update(ctx, &m2, None, true).await },
                 )
             })
+            .instrument(stack_span(&name))
             .await;
             // H8: a failed nightly update parks the stack's updates — one
             // loud message, then silence instead of a fresh failure every
@@ -3361,6 +4533,19 @@ async fn scheduler_loop(state: AppState) {
                 }
             }
         }
+
+        // fix-131: the daemon's own records, bounded every night. Under the
+        // operation lock, so no operation appends to the journal while it
+        // is cut; off the async workers, since both are plain file work.
+        {
+            let _guard = state.op_lock.lock().await;
+            let dir = state.config.state_dir.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                compact_journal_file(&dir);
+                prune_incidents(&dir, now);
+            })
+            .await;
+        }
     }
 }
 
@@ -3381,6 +4566,7 @@ pub const MAX_WS_FRAME: usize = 256 * 1024 * 1024;
 
 async fn ws_upgrade(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
@@ -3389,6 +4575,7 @@ async fn ws_upgrade(
         &state.config.token,
     );
     if !authed {
+        log_refused(&state, peer, "/api/ws");
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
     }
     // H5 self-update ships the whole host binary in one message, and the
@@ -3466,11 +4653,33 @@ where
 
     let mut log_rx = state.log_tx.subscribe();
     let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<ServerMsg>(256);
+    let asks = state.pending_asks.clone();
     let forward = tokio::spawn(async move {
         loop {
             tokio::select! {
-                Ok(msg) = log_rx.recv() => {
-                    if tx.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() { break; }
+                received = log_rx.recv() => {
+                    let msgs = match received {
+                        Ok(msg) => vec![msg],
+                        // fix-127 (websocket-edge-cases, 2026-09-27): a client
+                        // slower than the host lags the channel. The skipped
+                        // messages were dropped in silence, questions
+                        // included, so an operation waited on an answer to a
+                        // question nobody saw. Say how much was missed, and
+                        // send every open question again.
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!("a client lagged: {} message(s) to it dropped", n);
+                            lag_catch_up(n, &asks)
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    };
+                    let mut gone = false;
+                    for msg in msgs {
+                        if tx.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() {
+                            gone = true;
+                            break;
+                        }
+                    }
+                    if gone { break; }
                 }
                 Some(msg) = out_rx.recv() => {
                     if tx.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() { break; }
@@ -3496,14 +4705,38 @@ where
         let state = state.clone();
         let handler = handler.clone();
         tokio::spawn(async move {
+            use tracing::Instrument as _;
             while let Some(req) = work_rx.recv().await {
-                let resp = handler(state.clone(), req).await;
+                let span = rpc_span(&req);
+                let resp = handler(state.clone(), req).instrument(span).await;
                 let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+                // fix-121: an answered request is what accepts an update.
+                accept_pending_update(&state.config.state_dir, state.started_at);
             }
         })
     };
 
-    while let Some(Ok(Message::Text(text))) = rx.next().await {
+    while let Some(frame) = rx.next().await {
+        // fix-127 (websocket-edge-cases, 2026-09-27): only Close and a read
+        // error end the session. The loop matched Text alone, so the first
+        // Ping (a client or proxy keepalive), Pong or Binary frame ended it
+        // without a word. Pings are answered by the WebSocket layer itself.
+        let text = match frame {
+            Ok(Message::Text(text)) => text,
+            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => continue,
+            Ok(Message::Binary(b)) => {
+                tracing::warn!(
+                    "a binary frame of {} bytes was ignored — requests are JSON text",
+                    b.len()
+                );
+                continue;
+            }
+            Ok(Message::Close(_)) => break,
+            Err(e) => {
+                info!("session ended on a read error :: {}", e);
+                break;
+            }
+        };
         let req = match serde_json::from_str::<RpcRequest>(&text) {
             Ok(r) => r,
             Err(e) => {
@@ -3518,8 +4751,11 @@ where
         if runs_beside_the_queue(&req.command) {
             let (out_tx, state, handler) = (out_tx.clone(), state.clone(), handler.clone());
             tokio::spawn(async move {
-                let resp = handler(state, req).await;
+                use tracing::Instrument as _;
+                let span = rpc_span(&req);
+                let resp = handler(state.clone(), req).instrument(span).await;
                 let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+                accept_pending_update(&state.config.state_dir, state.started_at);
             });
         } else if work_tx.send(req).is_err() {
             break;
@@ -3531,6 +4767,29 @@ where
     drop(work_tx);
     let _ = worker.await;
     forward.abort();
+}
+
+/// fix-127: what a client that lagged past `n` messages is sent instead: a
+/// warning that says so, then every question still waiting for an answer,
+/// oldest first.
+fn lag_catch_up(
+    n: u64,
+    asks: &std::sync::Mutex<std::collections::HashMap<u64, PendingAsk>>,
+) -> Vec<ServerMsg> {
+    let mut out = vec![ServerMsg::Log {
+        level: homelab_proto::LogLevel::Warn,
+        source: "HOST".into(),
+        msg: format!(
+            "{} message(s) to this client were dropped because it read too slowly; \
+             open questions are sent again",
+            n
+        ),
+    }];
+    let guard = asks.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut open: Vec<(&u64, &PendingAsk)> = guard.iter().collect();
+    open.sort_by_key(|(id, _)| **id);
+    out.extend(open.into_iter().map(|(_, p)| p.ask.clone()));
+    out
 }
 
 /// fix-66: requests that must not wait behind the one in flight. An answer
@@ -3657,6 +4916,82 @@ async fn notify(
 /// fix-36: remote exec checks the no-touch list the daemon actually runs
 /// with. It used `SafetyConfig::default()`, so a vmid host.toml added to the
 /// list (F8 lets config widen it) was still reachable through `homelab exec`.
+/// Append one line to audit.log.
+///
+/// fix-125 (expert panel, bundles-audit-world-readable, 2026-09-27): a new
+/// file is created 0600. It was created with the default mode, 0644, and it
+/// records every exec command.
+fn append_audit(path: &str, line: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(path)?
+        .write_all(line.as_bytes())
+}
+
+/// fix-125: at start, take group and world access off the daemon's private
+/// records that already exist: audit.log, journal.jsonl and the incident
+/// bundles (0700 directories, 0600 files, the replay scripts 0700). Before
+/// fix-125 all of them were created readable by every account on pve, and a
+/// new mode for new files leaves the old ones as they were. Best effort: a
+/// path that cannot be changed is said once and skipped.
+fn tighten_private_paths(state_dir: &str) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let set = |p: &std::path::Path, mode: u32| {
+        let Ok(meta) = std::fs::symlink_metadata(p) else {
+            return;
+        };
+        if meta.file_type().is_symlink() || meta.permissions().mode() & 0o777 == mode {
+            return;
+        }
+        if let Err(e) = std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)) {
+            tracing::warn!("could not make {} private :: {}", p.display(), e);
+        }
+    };
+    let base = std::path::Path::new(state_dir);
+    set(&base.join("audit.log"), 0o600);
+    set(&base.join("journal.jsonl"), 0o600);
+    let incidents = base.join("incidents");
+    set(&incidents, 0o700);
+    for bundle in std::fs::read_dir(&incidents)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let path = bundle.path();
+        if !path.is_dir() {
+            set(&path, 0o600);
+            continue;
+        }
+        set(&path, 0o700);
+        for file in std::fs::read_dir(&path).into_iter().flatten().flatten() {
+            let f = file.path();
+            let is_script = f.extension().is_some_and(|e| e == "sh");
+            set(&f, if is_script { 0o700 } else { 0o600 });
+        }
+    }
+}
+
+/// The audit.log line for one remote exec, which the journal repeats.
+///
+/// fix-124 (expert panel, exec-logged-verbatim, 2026-09-27): the command
+/// passes the shared secret masker first. It was recorded verbatim, so a
+/// password typed on an exec command line stayed on pve for good. The
+/// masker knows shapes (`NAME=value` for secret-looking names, URL
+/// passwords, `Bearer <token>`), not every secret: a bare password argument
+/// still lands, which the user guide says.
+fn exec_audit_line(ts: u64, vmid: u16, command: &str) -> String {
+    format!(
+        "{} exec vmid={} cmd={:?}\n",
+        ts,
+        vmid,
+        homelab_core::executor::mask_secrets(command)
+    )
+}
+
 fn exec_allowed(config: &Config, vmid: u16) -> Result<(), homelab_core::error::CoreError> {
     homelab_core::safety::exec_guard(config.exec_enabled, &config.safety, vmid)
 }
@@ -3729,7 +5064,12 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
             }
             homelab_core::notify::Delivery::Failed(why) => {
                 last = why;
-                tracing::warn!("notification route {} failed: {}", url, last);
+                // fix-123: the route's host only; a webhook path is its id.
+                tracing::warn!(
+                    "notification route {} failed: {}",
+                    homelab_core::notify::route_for_log(url),
+                    last
+                );
             }
         }
     }
@@ -3893,6 +5233,29 @@ where
         Box<dyn std::future::Future<Output = homelab_core::runner::OperationReport> + Send + 'a>,
     >,
 {
+    // fix-122 (journal-lines-lack-op-context, 2026-09-27): every journal
+    // line of the operation, its steps and its failure carries `op=<label>`;
+    // the caller's span adds the stack.
+    use tracing::Instrument as _;
+    run_op_body(state, exec, req_id, label, op)
+        .instrument(tracing::info_span!("op", op = %label))
+        .await
+}
+
+async fn run_op_body<F>(
+    state: &AppState,
+    exec: &RealExecutor,
+    req_id: u64,
+    label: &str,
+    op: F,
+) -> RpcResponse
+where
+    F: for<'a> FnOnce(
+        &'a OpCtx<'a>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = homelab_core::runner::OperationReport> + Send + 'a>,
+    >,
+{
     let broadcast = BroadcastSink {
         log_tx: state.log_tx.clone(),
     };
@@ -4035,7 +5398,7 @@ async fn gather_today(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let probes = gather_probes(
+    let mut probes = gather_probes(
         exec,
         &state.config.state_dir,
         state.config.mirror_remote.as_deref(),
@@ -4043,6 +5406,8 @@ async fn gather_today(
         &|line: &str| progress_line(state, line),
     )
     .await;
+    probes.failed_auth = Some(state.auth_failures.snapshot());
+    gather_security_probes(exec, &ProbeContext::of(&state.config), now, &mut probes).await;
     let checks = homelab_core::doctor::diagnose(&probes);
     let live = gather_live_facts(exec, state, stack_files).await;
     let incidents: Vec<String> = std::fs::read_dir(format!("{}/incidents", state.config.state_dir))
@@ -4821,7 +6186,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .lock()
                 .ok()
                 .and_then(|mut g| g.remove(&id))
-                .map(|tx| tx.send(allow).is_ok())
+                .map(|p| p.reply.send(allow).is_ok())
                 .unwrap_or(false);
             RpcResponse {
                 id: req.id,
@@ -5041,17 +6406,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let audit = format!("{} exec vmid={} cmd={:?}\n", ts, vmid, command);
+            let audit = exec_audit_line(ts, vmid, &command);
             let audit_path = format!("{}/audit.log", state.config.state_dir);
-            let _ = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&audit_path)
-                .and_then(|mut f| {
-                    use std::io::Write as _;
-                    f.write_all(audit.as_bytes())
-                });
-            info!("A6 exec vmid={} cmd={:?}", vmid, command);
+            if let Err(e) = append_audit(&audit_path, &audit) {
+                tracing::warn!("audit.log: could not record the exec :: {}", e);
+            }
+            info!("A6 {}", audit.trim_end());
             match homelab_core::executor::pct_sh(&exec, vmid, &command, 120).await {
                 Ok(out) => RpcResponse {
                     id: req.id,
@@ -5219,7 +6579,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let probes = gather_probes(
+            let mut probes = gather_probes(
                 &exec,
                 &state.config.state_dir,
                 state.config.mirror_remote.as_deref(),
@@ -5227,6 +6587,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 &|line: &str| progress_line(state, line),
             )
             .await;
+            probes.failed_auth = Some(state.auth_failures.snapshot());
+            gather_security_probes(&exec, &ProbeContext::of(&state.config), now, &mut probes).await;
             let checks = homelab_core::doctor::diagnose(&probes);
             let overall = homelab_core::doctor::overall(&checks);
             let mut msg = format!("doctor: {:?}\n", overall);
@@ -5334,6 +6696,19 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // fix-131: one bundle, read on the workstation.
+        Rpc::IncidentShow { name } => {
+            let (ok, message) = match incident_text(&state.config.state_dir, &name) {
+                Ok(text) => (true, text),
+                Err(why) => (false, why),
+            };
+            RpcResponse {
+                id: req.id,
+                ok,
+                message,
+                deferred: None,
+            }
+        }
         Rpc::Incidents => {
             let dir = format!("{}/incidents", state.config.state_dir);
             let list = std::fs::read_dir(&dir)
@@ -5355,6 +6730,299 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     format!("incidents:\n  {}", list.join("\n  "))
                 },
                 deferred: None,
+            }
+        }
+    }
+}
+
+/// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
+/// remove the bundles older than `BUNDLE_MAX_AGE_DAYS` and those beyond the
+/// newest `BUNDLE_MAX_COUNT`; returns how many went. Nothing pruned them.
+fn prune_incidents(state_dir: &str, now: u64) -> usize {
+    use homelab_core::incidents::{bundles_to_prune, BUNDLE_MAX_AGE_DAYS, BUNDLE_MAX_COUNT};
+    let dir = format!("{}/incidents", state_dir);
+    let names: Vec<String> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    let mut removed = 0;
+    for name in bundles_to_prune(&names, now, BUNDLE_MAX_AGE_DAYS, BUNDLE_MAX_COUNT) {
+        match std::fs::remove_dir_all(format!("{}/{}", dir, name)) {
+            Ok(()) => removed += 1,
+            Err(e) => tracing::warn!("incidents: could not remove {} :: {}", name, e),
+        }
+    }
+    if removed > 0 {
+        info!(
+            "incidents: removed {} bundle(s) older than {} days or beyond the newest {}",
+            removed, BUNDLE_MAX_AGE_DAYS, BUNDLE_MAX_COUNT
+        );
+    }
+    removed
+}
+
+/// fix-131: cut journal.jsonl back when it has outgrown its limit
+/// (`incidents::compact_journal`), written whole through a temp file.
+/// Called only while nothing writes the journal: at start, and under the
+/// operation lock.
+fn compact_journal_file(state_dir: &str) {
+    let path = format!("{}/journal.jsonl", state_dir);
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Some(cut) = homelab_core::incidents::compact_journal(
+        &content,
+        homelab_core::incidents::JOURNAL_MAX_BYTES,
+    ) else {
+        return;
+    };
+    let tmp = format!("{}.compact.tmp", path);
+    let written = (|| -> std::io::Result<()> {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let _ = std::fs::remove_file(&tmp);
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(cut.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, &path)
+    })();
+    match written {
+        Ok(()) => info!(
+            "journal.jsonl: cut from {} to {} bytes, interrupted operations kept",
+            content.len(),
+            cut.len()
+        ),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            tracing::warn!("journal.jsonl: could not compact :: {}", e);
+        }
+    }
+}
+
+/// fix-131: one incident bundle as text: what failed, the versions, the
+/// end of the transcript and where the rest is. `name` must be a bundle
+/// name as `homelab incidents` lists it, checked before it becomes a path.
+fn incident_text(state_dir: &str, name: &str) -> Result<String, String> {
+    const TAIL: usize = 60;
+    let plain = !name.is_empty()
+        && name.split_once('-').is_some_and(|(ts, op)| {
+            !op.is_empty() && !ts.is_empty() && ts.chars().all(|c| c.is_ascii_digit())
+        })
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !plain {
+        return Err(format!(
+            "'{}' is not a bundle name :: `homelab incidents` lists them (<unix-time>-<operation>)",
+            name
+        ));
+    }
+    let dir = format!("{}/incidents/{}", state_dir, name);
+    if !std::path::Path::new(&dir).is_dir() {
+        return Err(format!(
+            "no bundle named {} :: `homelab incidents` lists the ones kept (bundles older than {} \
+             days are removed)",
+            name,
+            homelab_core::incidents::BUNDLE_MAX_AGE_DAYS
+        ));
+    }
+    let read = |f: &str| std::fs::read_to_string(format!("{}/{}", dir, f)).unwrap_or_default();
+    let mask = homelab_core::executor::mask_secrets;
+    let mut out = format!("incident {}\n", name);
+    if let Ok(report) = serde_json::from_str::<serde_json::Value>(&read("report.json")) {
+        let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
+        out.push_str(&format!("  operation: {}\n", s(&report["op"])));
+        let err = &report["error"];
+        if !err.is_null() {
+            out.push_str(&format!("  what:   {}\n", mask(&s(&err["what"]))));
+            out.push_str(&format!("  why:    {}\n", mask(&s(&err["why"]))));
+            out.push_str(&format!("  remedy: {}\n", mask(&s(&err["remedy"]))));
+        }
+    }
+    let versions = read("versions.txt");
+    out.push_str(&format!(
+        "  versions: {}\n",
+        versions.split_whitespace().collect::<Vec<_>>().join(" ")
+    ));
+    let lines: Vec<String> = read("events.jsonl")
+        .lines()
+        .filter_map(|l| serde_json::from_str::<PipelineEvent>(l).ok())
+        .filter_map(|e| match e {
+            PipelineEvent::Line { msg, .. } => Some(mask(&msg)),
+            _ => None,
+        })
+        .collect();
+    let from = lines.len().saturating_sub(TAIL);
+    out.push_str(&format!(
+        "last {} of {} transcript line(s):\n",
+        lines.len() - from,
+        lines.len()
+    ));
+    for l in &lines[from..] {
+        out.push_str(&format!("  {}\n", l));
+    }
+    out.push_str(&format!(
+        "the whole bundle, root only on the host: {} (commands.sh replays what ran)\n",
+        dir
+    ));
+    Ok(out)
+}
+
+/// fix-130: what the new doctor probes need from the configuration.
+struct ProbeContext {
+    listen: String,
+    exec_enabled: bool,
+    config_path: String,
+    password_file: String,
+    privileged_vmids: Vec<u16>,
+    no_touch: Vec<u16>,
+    drill_interval_s: u64,
+    state_dir: String,
+}
+
+impl ProbeContext {
+    fn of(config: &Config) -> Self {
+        ProbeContext {
+            listen: config.listen.to_string(),
+            exec_enabled: config.exec_enabled,
+            config_path: config.config_path.clone(),
+            password_file: config.backup.password_file.clone(),
+            privileged_vmids: config.safety.privileged_vmids.clone().unwrap_or_default(),
+            no_touch: config.safety.no_touch.clone(),
+            drill_interval_s: config.restore_drill_interval_s,
+            state_dir: config.state_dir.clone(),
+        }
+    }
+}
+
+/// fix-130 (expert panel, doctor-checks-too-little, 2026-09-27): the probes
+/// doctor lacked. Cheap reads only: `stat`, one loop over the container
+/// configurations, state, `test -s` and one `rclone about`. A probe that
+/// cannot be read stays `None`, so doctor leaves its line out rather than
+/// guess.
+async fn gather_security_probes(
+    exec: &dyn Executor,
+    pc: &ProbeContext,
+    now_unix: u64,
+    probes: &mut homelab_core::doctor::Probes,
+) {
+    use homelab_core::doctor::{DrillProbe, DriveSpace, Exposure, Freshness, Privileged};
+    probes.exposure = Some(Exposure {
+        listen: pc.listen.clone(),
+        exec_enabled: pc.exec_enabled,
+    });
+
+    // Private files: group or world bits set is a finding. A path that does
+    // not exist prints nothing on stdout, which is right: absent is not loose.
+    let private = [
+        pc.config_path.clone(),
+        pc.password_file.clone(),
+        format!("{}/secrets", pc.state_dir),
+        format!("{}/tls-key.pem", pc.state_dir),
+        format!("{}/audit.log", pc.state_dir),
+        format!("{}/incidents", pc.state_dir),
+    ];
+    let mut args: Vec<&str> = vec!["-c", "%a %n"];
+    args.extend(private.iter().map(String::as_str));
+    if let Ok(out) = exec.run(&Cmd::new("stat", &args, 20)).await {
+        probes.loose_files = Some(
+            out.stdout
+                .lines()
+                .filter_map(|l| l.split_once(' '))
+                .filter(|(mode, _)| u32::from_str_radix(mode, 8).is_ok_and(|m| m & 0o077 != 0))
+                .map(|(mode, path)| format!("{} ({})", path, mode))
+                .collect(),
+        );
+    }
+
+    // Privileged containers. Templates are left out (the golden -priv
+    // template is privileged on purpose and never runs), and the no-touch
+    // guests' configurations are not even read: the list is law.
+    let skip = pc
+        .no_touch
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join("|");
+    let script = format!(
+        "for f in /etc/pve/lxc/*.conf; do v=$(basename \"$f\" .conf); \
+         case \"$v\" in {}) continue;; esac; \
+         grep -q '^template: 1' \"$f\" && continue; \
+         grep -q '^unprivileged: 1' \"$f\" || echo \"$v\"; done",
+        if skip.is_empty() { "-".into() } else { skip }
+    );
+    if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 20)).await {
+        let mut vmids: Vec<u16> = out
+            .stdout
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect();
+        vmids.sort_unstable();
+        let outside_policy = vmids
+            .iter()
+            .copied()
+            .filter(|v| !pc.privileged_vmids.contains(v))
+            .collect();
+        probes.privileged = Some(Privileged {
+            vmids,
+            outside_policy,
+        });
+    }
+
+    // Host-meta and the restore drill, from the record.
+    if let Ok(raw) = exec
+        .read_file(&format!("{}/state.json", pc.state_dir))
+        .await
+    {
+        if let Ok(hs) = serde_json::from_str::<homelab_core::state::HostState>(&raw) {
+            let age = |t: u64| (t > 0).then(|| now_unix.saturating_sub(t) / 3600);
+            probes.host_meta = Some(Freshness {
+                age_h: age(hs.last_host_meta),
+            });
+            probes.restore_drill = Some(DrillProbe {
+                age_h: age(hs.last_restore_drill),
+                interval_h: pc.drill_interval_s / 3600,
+                failing: hs
+                    .restore_drills
+                    .iter()
+                    .filter_map(|(repo, r)| {
+                        r.last_error.as_ref().map(|e| format!("{}: {}", repo, e))
+                    })
+                    .collect(),
+            });
+        }
+    }
+
+    // Present and not empty; the content never leaves the file.
+    probes.password_file_ok = exec
+        .run(&Cmd::new("test", &["-s", &pc.password_file], 10))
+        .await
+        .ok()
+        .map(|o| o.success());
+
+    // Drive's space, trash included: pruned packs stay in the trash and
+    // count against the quota until it is emptied.
+    if probes.offsite_configured {
+        if let Ok(out) = exec
+            .run(&Cmd::new("rclone", &["about", "gdrive:", "--json"], 60))
+            .await
+        {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out.stdout) {
+                let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+                if n("total") > 0 {
+                    probes.drive = Some(DriveSpace {
+                        total: n("total"),
+                        free: n("free"),
+                        trashed: n("trashed"),
+                    });
+                }
             }
         }
     }
@@ -5404,6 +7072,9 @@ async fn gather_probes(
                         .then(|| now_unix.saturating_sub(st.last_backup) / 3600),
                     container_present: present,
                     env_sealed,
+                    // fix-130: a native stack's services are backed up whole.
+                    nothing_to_back_up: !st.is_native()
+                        && st.manifest.as_ref().is_some_and(|m| m.backs_up_nothing()),
                 });
             }
         }
@@ -5493,5 +7164,14 @@ async fn gather_probes(
         offsite_token_valid,
         mirror_behind,
         interrupted_ops: interrupted,
+        // fix-120: filled in by the caller, which holds the counter.
+        failed_auth: None,
+        exposure: None,
+        loose_files: None,
+        privileged: None,
+        host_meta: None,
+        restore_drill: None,
+        password_file_ok: None,
+        drive: None,
     }
 }

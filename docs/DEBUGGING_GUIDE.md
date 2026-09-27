@@ -98,14 +98,14 @@ flowchart LR
 | Trace | Where | Written by | When | Answers |
 |---|---|---|---|---|
 | failure line | your terminal | client prints the host's reply (`client/src/main.rs:1267-1270`) | every failed command | what failed, why, what to do, where the bundle is |
-| incident bundle | `/var/lib/homelab/incidents/<unix-ts>-<op>/` | `core/src/incidents.rs:56-110`, called from `host/src/main.rs:3066` | a mutating operation fails (not when it is deferred) | the full context of one failure |
+| incident bundle | `/var/lib/homelab/incidents/<unix-ts>-<op>/` | `core/src/incidents.rs:56-110`, called from `host/src/main.rs:3066` | a mutating operation fails (not when it is deferred) | the full context of one failure; root only (0700 directories, 0600 files, fix-125) |
 | operation journal | `/var/lib/homelab/journal.jsonl` | `host/src/main.rs:1659-1681` | before and after every step of every mutating operation | which step an operation was in, including one that never finished |
 | daemon log | stderr of `homelab-host` (`host/src/main.rs:1780-1785`) | `tracing` calls throughout `host/src/main.rs` | always | startup faults, scheduler decisions, notification delivery, and every transcript line (below) |
 | live transcript | streamed to every connected client | `host/src/main.rs:1611-1655` | while an operation runs | the exact commands and the first lines of their output |
 | state record | `/var/lib/homelab/state.json` | `core/src/state.rs:198-231` | after operations, the scheduler, notifications | what the orchestrator believes about each stack |
-| fleet check | `homelab check` output; daemon log each night | `core/src/ops/fleetcheck.rs:510-715`, `host/src/main.rs:2629-2682` | on demand, and after every nightly tick in the backup hour | where the record and reality disagree |
-| doctor | `homelab doctor` output | `core/src/doctor.rs:45-188`, probes at `host/src/main.rs:4275-4385` | on demand | host disk, state file, backups, offsite, mirror, interrupted operations |
-| exec audit | `/var/lib/homelab/audit.log` | `host/src/main.rs:3955-3969` | every `homelab exec` that passed its guard | who ran what inside which container |
+| fleet check | `homelab check` output; daemon log each night | `core/src/ops/fleetcheck.rs:510-715`, `host/src/main.rs:2629-2682` | on demand, and after every nightly tick in the night window | where the record and reality disagree |
+| doctor | `homelab doctor` output | `core/src/doctor.rs:45-188`, probes at `host/src/main.rs:4275-4385` | on demand | host disk, state file, backups, offsite, mirror, interrupted operations; refused connections, exposure, file modes, privileged containers, host-meta, restore drill, password file, Drive space (fix-120, fix-130) |
+| exec audit | `/var/lib/homelab/audit.log` | `host/src/main.rs:3955-3969` | every `homelab exec` that passed its guard | who ran what inside which container; 0600, the command masked (fix-124, fix-125) |
 | intent history | `/var/lib/homelab/repo` (git) | deploy step `commit intent` (`core/src/ops/deploy.rs:894-960`) | every deploy | which files each deploy applied |
 | notification | the configured webhook | `host/src/main.rs:2822-2925` | after every mutating operation, at boot, on auto-disable, on nightly findings | the same verdict, off the machine |
 
@@ -256,19 +256,25 @@ Four things about these files that are easy to get wrong:
    `core/src/executor.rs`). Bundles written before that version joined
    arguments with single spaces; read the next subsection before running a
    line from one of those.
-4. **Nothing prunes bundles.** No code in this repository removes
-   directories under `incidents/` or trims `journal.jsonl`; they grow until
-   someone removes them.
+4. **Bundles and the journal are bounded (fix-131).** At start and after
+   every nightly tick the daemon removes bundles older than 90 days and all
+   but the newest 200, and cuts `journal.jsonl` back to its newest ~2 MiB
+   once it passes 4 MiB, keeping the last record of every operation still
+   marked running (`incidents::bundles_to_prune`, `compact_journal`). Neither
+   is in a backup; a bundle worth keeping longer is copied off by hand.
 
 ### Worked example: reading the bundle from section 2
 
-`homelab incidents` lists bundle names only, sorted
-(`host/src/main.rs:4244-4266`); there is no verb that returns their contents.
-Reading them takes a shell on the Proxmox host.
+`homelab incidents` lists the bundle names, sorted; `homelab incidents
+show <name>` prints one: the operation, what failed, why and the remedy, the
+versions, and the last 60 transcript lines, masked (fix-131). The rest of the
+bundle (the state at the failure, the journal tail, `commands.sh`) is read on
+the Proxmox host.
 
 ```bash
 # workstation
 homelab incidents
+homelab incidents show 1760000000-deploy-syncthing
 ```
 
 ```bash
@@ -431,7 +437,7 @@ reaches curl through a mode-600 header file,
 | `interrupted operation '<op>' at step '<step>'` | warn | see section 4 | `host/src/main.rs:1805-1809` |
 | `scheduler armed: daily backup + auto-updates at <hh>:00` | info | nightly round configured | `host/src/main.rs:1844-1847` |
 | `scheduler idle (backup_hour not set)` | info | no nightly round at all | `host/src/main.rs:1848` |
-| `self-update accepted` | info | a new binary survived 5 s of serving and cleared the rollback marker | `host/src/main.rs:1871-1880` |
+| `self-update accepted` | info | a new binary answered its first authenticated request and cleared the rollback marker (fix-121) | `host/src/main.rs:1871-1880` |
 | `<label> failed: <what>` | error | a mutating operation failed; a bundle was written | `host/src/main.rs:3064` |
 | `<label> stood aside: <why>` | info | deferred, no bundle | `host/src/main.rs:3048` |
 | `unparseable request dropped :: <e> :: <text>` | error | the host could not parse a client frame; the client waits forever for a reply | `host/src/main.rs:2755-2765` |
@@ -443,7 +449,9 @@ reaches curl through a mode-600 header file,
 | `scheduler: backup for <stack> stood aside` | info | a nightly backup deferred | `host/src/main.rs:2216` |
 | `fleet check: repo and reality agree` | info | the nightly check found nothing alarming | `host/src/main.rs:2648-2655` |
 | `fleet check: <b> broken · <d> drift · ...` | warn | the nightly check found something; it also went out as a notification | `host/src/main.rs:2657-2679` |
-| `notification route <url> failed: <why>` | warn | one webhook route did not answer 2xx; the URL carries the webhook id, so do not paste this line anywhere shared | `host/src/main.rs:2918-2921` |
+| `notification route <scheme>://<host:port>/<path withheld> failed: <why>` | warn | one webhook route did not answer 2xx; the path (a Home Assistant webhook id) is withheld since fix-123, the full URL is `notify_webhook` or `notify_fallback_webhook` in `host.toml` | `host/src/main.rs`, `notify_raw` |
+| `a client lagged: <n> message(s) to it dropped` | warn | a connected client read slower than the host wrote; it was told so and sent every open question again (fix-127) | `host/src/main.rs`, `serve_ws` |
+| `401 on <path> from <address>: missing or wrong bearer token (<n> refused since this daemon started)` | warn | a connection without the right token; `homelab doctor` counts them under `refused connections` (fix-120) | `host/src/main.rs`, `log_refused` |
 | `notification took the fallback route: the primary said <why>` | warn | primary failed, fallback delivered | `host/src/main.rs:2909-2914` |
 | `mirror push failed (will retry): <e>` | warn | the intent repo did not reach its mirror; retried every tick | `host/src/main.rs:2781-2785`, `2250` |
 | `A6 exec vmid=<n> cmd=<cmd>` | info | a `homelab exec` ran | `host/src/main.rs:3969` |
@@ -718,8 +726,10 @@ round, the answer is immediately unattended
 The last one is a warning, not a fatal error: the daemon starts, without the
 setting.
 
-After a self-update, the new binary must serve for 5 s before it deletes the
-rollback marker (`host/src/main.rs:1871-1880`). If it does not, the marker
+After a self-update, the new binary deletes the rollback marker when it has
+answered its first authenticated request (fix-121; `homelab release-update`
+sends that request, and so does any client that connects). Until then the
+marker
 stays for the unit's `OnFailure=` handler, which lives outside this
 repository (section 0).
 
@@ -839,8 +849,9 @@ Two things the update's transcript will not tell you directly:
 
 ### 8.7 The nightly round
 
-The scheduler wakes every 20 minutes. It only works in the configured
-`backup_hour`, and a stack is due when its last backup is at least 20 hours
+The scheduler looks a minute after start, then every 20 minutes. It only
+works in the night window, `backup_hour` and the hour after it (fix-129),
+and a stack is due when its last backup is at least 20 hours
 old (`host/src/main.rs:2246-2273`, `1941-1943`). Parked stacks are left out
 (`host/src/main.rs:1997-2002`).
 

@@ -45,12 +45,12 @@ Is it running, and if not, why:
 systemctl status homelab-host
 journalctl -u homelab-host -n 50 --no-pager
 curl -sk https://127.0.0.1:8443/api/health     # answers: ok
-curl -sk https://127.0.0.1:8443/api/version
+/usr/local/bin/homelab-host --version        # the installed version (/api/version takes the token)
 ```
 
 The daemon refuses to start, and says so in the journal, when `/etc/homelab/host.toml` does not parse as TOML, when it is not a valid host config, or when the token is shorter than 16 characters. A key it does not know is a `WARNING` line, not a refusal.
 
-**A self-update that never came up.** A self-update copies the running program to `/usr/local/bin/homelab-host.prev`, installs the new one, and writes `/var/lib/homelab/selfupdate.pending`; the new program deletes the marker once it has served for a few seconds. A marker that is still there means the update was never accepted. Put the previous program back:
+**A self-update that never came up.** A self-update copies the running program to `/usr/local/bin/homelab-host.prev`, installs the new one, and writes `/var/lib/homelab/selfupdate.pending`; the new program deletes the marker once it has answered its first authenticated request. A marker that is still there means no client has had an answer from the new program yet; when `homelab ping` cannot get one either, put the previous program back:
 
 ```sh
 ls -l /usr/local/bin/homelab-host /usr/local/bin/homelab-host.prev /var/lib/homelab/selfupdate.pending
@@ -154,7 +154,7 @@ else
 fi
 ```
 
-**The certificate pin.** The daemon's certificate is `/var/lib/homelab/tls-cert.pem` with `/var/lib/homelab/tls-key.pem`; when either is missing at start it makes a new pair (host/src/tls.rs). The client trusts one certificate: the fingerprint built into the client, taken from `pin` in `config/client.toml` when it was compiled. It refuses any other, on a first connection too, and it also refuses when that `pin` or the copy a machine keeps in `~/.config/homelab/pin` disagrees with it. Compare:
+**The certificate pin.** The daemon's certificate is `/var/lib/homelab/tls-cert.pem` with `/var/lib/homelab/tls-key.pem`; when either is missing, empty or unreadable at start it makes a new pair, each file written whole (fix-128) (host/src/tls.rs). The client trusts one certificate: the fingerprint built into the client, taken from `pin` in `config/client.toml` when it was compiled. It refuses any other, on a first connection too, and it also refuses when that `pin` or the copy a machine keeps in `~/.config/homelab/pin` disagrees with it. Compare:
 
 ```sh
 journalctl -u homelab-host | grep 'TLS fingerprint' | tail -1

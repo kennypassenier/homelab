@@ -41,6 +41,12 @@ pub enum Command {
     Doctor,
     /// AR14: list captured incident bundles.
     Incidents,
+    /// fix-131: one bundle, readable from the workstation: the error, the
+    /// versions and the end of the transcript. `name` is a directory name
+    /// from `Incidents`.
+    IncidentShow {
+        name: String,
+    },
     /// Structured fleet snapshot for the TUI dashboard.
     GetState,
     /// C2: gated destroy. `confirm` must equal the stack name.

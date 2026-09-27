@@ -4478,6 +4478,28 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 },
             }
         }
+        Rpc::RollbackNative { stack, unit } => {
+            match native_from_state(&state.config.state_dir, &stack)
+                .await
+                .and_then(|(services, _)| {
+                    homelab_core::ops::native::select_unit(&services, unit.as_deref())
+                }) {
+                Ok(m) => {
+                    run_mutating_op(state, &exec, req.id, "rollback-native", |ctx| {
+                        Box::pin(async move {
+                            homelab_core::ops::native::rollback_native(ctx, &m).await
+                        })
+                    })
+                    .await
+                }
+                Err(msg) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: msg,
+                    deferred: None,
+                },
+            }
+        }
         Rpc::ReleaseUpdateNative { stack } => {
             match native_from_state(&state.config.state_dir, &stack).await {
                 Ok((services, _)) => {

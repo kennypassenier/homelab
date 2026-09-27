@@ -927,6 +927,12 @@ fn the_runbook_warns_that_a_restore_revives_retired_almanac_profiles() {
 /// wrong; leaving the question unanswered is.
 const CLI_ONLY: &[(&str, &str)] = &[
     (
+        "RollbackNative",
+        "fix-114: replaces a running program and parks the stack's updates, done \
+         when a release misbehaves after its health window — deliberately a typed \
+         command naming the unit, not a key press in the stack list",
+    ),
+    (
         "Ping",
         "the client's own connection probe, not an operation",
     ),

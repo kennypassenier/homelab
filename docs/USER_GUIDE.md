@@ -942,6 +942,7 @@ The verbs:
 | `homelab backup-native <stack>` | archives the service's state from inside the container into restic | `core/src/ops/native.rs:515-665` |
 | `homelab update-native <stack>` | runs the service's own `update_cmd` under supervision | `core/src/ops/native.rs:1174-1333` |
 | `homelab release-update-native <stack>` | installs the latest release when its checksum differs from the installed binary | `core/src/ops/native.rs:931-1131` |
+| `homelab rollback-native <stack>[/<unit>]` | goes back to the one previous binary every healthy install or update keeps beside the program (`<binary>.homelab-prev`, fix-114), under the same health check, and parks the stack's automatic updates until `homelab enable <stack>`; running it again returns to the version rolled back from | `core/src/ops/native.rs` (`rollback_native`) |
 
 `backup-native`, `update-native` and `release-update-native` act on the copy
 of the service files the host recorded at adoption, and on every service of

@@ -681,13 +681,13 @@ pub fn evaluate(
                 severity: Severity::Broken,
                 subject: name.clone(),
                 what: format!(
-                    "automatic updates parked since {} after a failed nightly update; the \
-                     nightly backup still runs",
+                    "automatic updates parked since {} after a failed nightly update or a \
+                     `homelab rollback-native` (fix-114); the nightly backup still runs",
                     crate::state::ymd(*since)
                 ),
                 remedy: format!(
-                    "read that night's update transcript, fix or pin the image, then \
-                     `homelab enable {}` resumes the updates",
+                    "read that night's update transcript, fix or pin the image or release, \
+                     then `homelab enable {}` resumes the updates",
                     name
                 ),
             });

@@ -410,6 +410,14 @@ async fn main() {
             )
             .await;
         }
+        // fix-114: back to a native unit's kept previous binary.
+        "rollback-native" => {
+            let arg = args
+                .get(2)
+                .unwrap_or_else(|| die("usage: homelab rollback-native <stack>[/<unit>]"));
+            let (stack, unit) = homelab_client::stack_and_unit(arg);
+            rpc(&host, &token, Command::RollbackNative { stack, unit }).await;
+        }
         // Route A: ask every configured device for its own configuration now,
         // instead of waiting for 04:00 to find out whether it works.
         "backup-devices" => rpc(&host, &token, Command::BackupDevices).await,
@@ -1277,6 +1285,7 @@ async fn main() {
             println!("  homelab resize stacks/<name>        apply changed resources (H4)");
             println!("  homelab config                      show the host's settings (G8)");
             println!("  homelab release-update-native <stack> install the latest release of each service (B1)");
+            println!("  homelab rollback-native <stack>[/<unit>] back to the kept previous binary; parks the stack's updates");
             println!("  homelab backup-devices              fetch each device's own config now");
             println!(
                 "  homelab testplan                    regenerate docs/deployment/TEST_PLAN.md"

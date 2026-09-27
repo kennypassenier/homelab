@@ -89,3 +89,15 @@ pub fn restore_args(rest: &[String]) -> Result<RestoreArgs, String> {
 pub fn rpc_can_exit(awaits_payload: bool, payload_seen: bool, rpc_done_ok: bool) -> bool {
     rpc_done_ok && (!awaits_payload || payload_seen)
 }
+
+/// fix-114 (native-rollback-copies-deleted, 2026-09-27): `<stack>/<unit>`
+/// or `<stack>` for `homelab rollback-native`; a leading `stacks/` and a
+/// trailing slash are accepted, so the path to the stack directory works.
+pub fn stack_and_unit(arg: &str) -> (String, Option<String>) {
+    let trimmed = arg.trim().trim_end_matches('/');
+    let rest = trimmed.strip_prefix("stacks/").unwrap_or(trimmed);
+    match rest.split_once('/') {
+        Some((stack, unit)) if !unit.is_empty() => (stack.to_string(), Some(unit.to_string())),
+        _ => (rest.to_string(), None),
+    }
+}

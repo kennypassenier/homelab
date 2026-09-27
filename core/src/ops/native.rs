@@ -345,13 +345,7 @@ pub async fn install_native(
         if !had_previous {
             return Ok(StepOutcome::Unchanged);
         }
-        let out = util_pct_sh(
-            exec,
-            m.vmid,
-            &format!("cp -p {} {}", shq(&m.binary), shq(&prev)),
-            120,
-        )
-        .await?;
+        let out = util_pct_sh(exec, m.vmid, &preserve_script(&m.binary, &prev), 120).await?;
         if !out.success() {
             return Err(CoreError::Other(format!(
                 "cannot preserve the running {} — refusing to replace a binary with no way back",
@@ -398,6 +392,11 @@ pub async fn install_native(
             }
             Err(why) => {
                 let _ = util_pct_sh(exec, m.vmid, &format!("rm -f {}", shq(&staged)), 30).await;
+                // fix-114: nothing is installed, so the kept previous binary
+                // from before this run is the kept one again.
+                if had_previous {
+                    let _ = util_pct_sh(exec, m.vmid, &restore_set_aside_script(&prev), 30).await;
+                }
                 Err(CoreError::SafetyAbort(format!(
                     "{} :: the staged copy was removed; the running {} is untouched",
                     why, m.unit
@@ -465,6 +464,7 @@ pub async fn install_native(
             u = unit
         );
         let rb = util_pct_sh(exec, m.vmid, &rollback, 180).await?;
+        let _ = util_pct_sh(exec, m.vmid, &restore_set_aside_script(&prev), 60).await;
         Err(CoreError::Other(format!(
             "the installed {} did not come up healthy — rolled back to the previous binary ({})",
             m.unit,
@@ -494,11 +494,18 @@ pub async fn install_native(
         Ok(StepOutcome::Changed)
     });
 
-    step!(runner, "drop the stale rollback copy", {
+    // fix-114: keep exactly one previous binary, as a supervised update does.
+    step!(runner, "keep one previous binary", {
         if !had_previous {
             return Ok(StepOutcome::Unchanged);
         }
-        let out = util_pct_sh(exec, m.vmid, &drop_stale_rollback_script(&prev), 60).await?;
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &keep_one_previous_script(&m.binary, &prev),
+            60,
+        )
+        .await?;
         if !out.success() {
             // Not fatal: the service is up and correct, this only leaves a
             // copy on disk. Reported after the step rather than failing a
@@ -512,7 +519,10 @@ pub async fn install_native(
     if stale_kept {
         runner.log(
             Level::Warn,
-            format!("could not remove {} — a stale copy stays on disk", prev),
+            format!(
+                "could not settle the kept previous binary at {} — check it and {}.old by hand",
+                prev, prev
+            ),
         );
     }
 
@@ -1380,13 +1390,7 @@ pub async fn update_native(
         )
         .await?;
         before = sum.stdout.trim().to_string();
-        let out = util_pct_sh(
-            exec,
-            m.vmid,
-            &format!("cp -p {} {}", shq(&m.binary), shq(&prev)),
-            60,
-        )
-        .await?;
+        let out = util_pct_sh(exec, m.vmid, &preserve_script(&m.binary, &prev), 60).await?;
         if !out.success() {
             return Err(CoreError::Other(format!(
                 "cannot preserve {} — refusing to update without a rollback copy",
@@ -1427,6 +1431,9 @@ pub async fn update_native(
         // The armed rollback: restore the preserved binary from OUTSIDE the
         // (dead) app, restart, and report the failure loudly either way.
         let rb = util_pct_sh(exec, m.vmid, &rollback_script(&unit, &prev, &m.binary), 180).await?;
+        // fix-114: the binary running now is the one kept before this run,
+        // so the previous one from before it is the kept one again.
+        let _ = util_pct_sh(exec, m.vmid, &restore_set_aside_script(&prev), 60).await;
         Err(CoreError::Other(format!(
             "new {} version did not come up healthy — rolled back to the previous binary ({}); \
              investigate before the next nightly run",
@@ -1439,9 +1446,17 @@ pub async fn update_native(
         )))
     });
 
+    // fix-114: exactly one previous binary stays, the way back when this
+    // release misbehaves after its health window.
     let mut stale_kept = false;
-    step!(runner, "drop the stale rollback copy", {
-        let out = util_pct_sh(exec, m.vmid, &drop_stale_rollback_script(&prev), 60).await?;
+    step!(runner, "keep one previous binary", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &keep_one_previous_script(&m.binary, &prev),
+            60,
+        )
+        .await?;
         if !out.success() {
             stale_kept = true;
             return Ok(StepOutcome::Unchanged);
@@ -1452,7 +1467,10 @@ pub async fn update_native(
     if stale_kept {
         runner.log(
             Level::Warn,
-            format!("could not remove {} — a stale copy stays on disk", prev),
+            format!(
+                "could not settle the kept previous binary at {} — check it and {}.old by hand",
+                prev, prev
+            ),
         );
     }
 
@@ -1487,4 +1505,194 @@ pub async fn update_native(
         format!("[update] {} self-update supervised — healthy", m.stack_name),
     );
     runner.finish_ok()
+}
+
+/// fix-114 (native-rollback-copies-deleted, 2026-09-27): set the kept
+/// previous binary aside, then copy the running one to its place. An update
+/// that turns out not to change the binary puts the set-aside one back
+/// (`keep_one_previous_script`), so an unchanged night never replaces N-1
+/// with N. A failed copy puts it back at once. A set-aside copy that is
+/// already there was left by a run that stopped half way, and is older than
+/// the one in place: it is kept, not overwritten.
+pub fn preserve_script(binary: &str, prev: &str) -> String {
+    format!(
+        "if [ -f {p} ] && [ ! -f {old} ]; then mv -f {p} {old}; fi; cp -p {b} {p} || \
+         {{ if [ -f {old} ]; then mv -f {old} {p}; fi; exit 1; }}",
+        p = shq(prev),
+        old = shq(&format!("{}.old", prev)),
+        b = shq(binary)
+    )
+}
+
+/// fix-114: after a healthy run, exactly one previous binary stays beside
+/// the program. When the binary changed, the copy taken before the run is
+/// that previous one and the older one goes; when it did not change, the
+/// previous binary from before the run comes back.
+///
+/// This reverses the deletion fix-10 added for a 2 GB rootfs: a release that
+/// starts fine and misbehaves an hour later had no N-1 binary on disk, on the
+/// notification path. CT 109 has 4 GB now, and the kit's own `.prev` (the
+/// same version a second time) still goes.
+pub fn keep_one_previous_script(binary: &str, prev: &str) -> String {
+    format!(
+        "if cmp -s {b} {p}; then if [ -f {old} ]; then mv -f {old} {p}; else rm -f {p}; fi; \
+         else rm -f {old}; fi",
+        b = shq(binary),
+        p = shq(prev),
+        old = shq(&format!("{}.old", prev))
+    )
+}
+
+/// fix-114: after a rollback, the previous binary from before the failed run
+/// is the kept one again.
+fn restore_set_aside_script(prev: &str) -> String {
+    format!(
+        "if [ -f {old} ]; then mv -f {old} {p}; fi",
+        old = shq(&format!("{}.old", prev)),
+        p = shq(prev)
+    )
+}
+
+/// fix-114: `homelab rollback-native <stack>/<unit>` — go back to the kept
+/// previous binary by hand, when a release that passed its health window
+/// misbehaves later. The unit is stopped, the kept binary copied into place
+/// and held to the same health check as an update; if it does not come up,
+/// the binary that was running goes back. The version rolled back from
+/// becomes the kept one, so running it again returns. The stack's automatic
+/// updates are parked (fix-59), or the next night would reinstall the release
+/// that was just rolled back; `homelab enable <stack>` resumes them.
+pub async fn rollback_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
+    let op = format!("rollback-{}", m.unit);
+    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+    let unit = format!("{}.service", m.unit);
+    let prev = format!("{}.homelab-prev", m.binary);
+    let swap = format!("{}.homelab-rollback", m.binary);
+
+    step!(runner, "guard target", {
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    step!(runner, "a previous binary is kept", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!(
+                "test -f {p} && ! cmp -s {b} {p} && echo yes || echo no",
+                p = shq(&prev),
+                b = shq(&m.binary)
+            ),
+            60,
+        )
+        .await?;
+        if out.stdout.trim() != "yes" {
+            return Err(CoreError::SafetyAbort(format!(
+                "no previous binary of {} is kept at {} (or it is the one running) — nothing \
+                 was stopped",
+                m.unit, prev
+            )));
+        }
+        Ok(StepOutcome::Unchanged)
+    });
+
+    step!(runner, "roll back", {
+        let script = format!(
+            "systemctl stop {u}; cp -p {b} {swap} && cp -p {p} {b}",
+            u = unit,
+            b = shq(&m.binary),
+            swap = shq(&swap),
+            p = shq(&prev)
+        );
+        let out = util_pct_sh(exec, m.vmid, &script, 180).await?;
+        if !out.success() {
+            let _ = util_pct_sh(exec, m.vmid, &format!("systemctl start {}", unit), 60).await;
+            return Err(CoreError::Other(format!(
+                "could not put the kept binary of {} in place ({}) — the unit was started \
+                 again on the binary it had",
+                m.unit,
+                out.stderr.trim()
+            )));
+        }
+        let health = util_pct_sh(exec, m.vmid, &health_script(&unit), 180).await?;
+        if health.success() {
+            return Ok(StepOutcome::Changed);
+        }
+        let back =
+            util_pct_sh(exec, m.vmid, &rollback_script(&unit, &swap, &m.binary), 180).await?;
+        Err(CoreError::Other(format!(
+            "the kept binary of {} did not come up healthy ({}) — {}",
+            m.unit,
+            health.stdout.trim(),
+            if back.success() {
+                "the binary that was running is back and active"
+            } else {
+                "putting the running binary back ALSO FAILED — the service needs hands NOW"
+            }
+        )))
+    });
+
+    step!(runner, "keep the other as previous", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("mv -f {} {}", shq(&swap), shq(&prev)),
+            60,
+        )
+        .await?;
+        Ok(if out.success() {
+            StepOutcome::Changed
+        } else {
+            StepOutcome::Unchanged
+        })
+    });
+
+    let now = ctx.now_unix;
+    let stack = m.stack_name.clone();
+    step!(runner, "park automatic updates", {
+        crate::state::StateStore::new(ctx.exec, &ctx.state_dir)
+            .update(|s| {
+                s.updates_parked.insert(stack.clone(), now);
+            })
+            .await?;
+        Ok(StepOutcome::Changed)
+    });
+
+    runner.log(
+        Level::Warn,
+        format!(
+            "[rollback] {} runs its previous binary again; automatic updates of {} are parked \
+             until `homelab enable {}`",
+            m.unit, m.stack_name, m.stack_name
+        ),
+    );
+    runner.finish_ok()
+}
+
+/// fix-114: which unit of a native stack a per-unit verb acts on — the one
+/// named, or the only one there is.
+pub fn select_unit(
+    services: &[NativeServiceManifest],
+    unit: Option<&str>,
+) -> Result<NativeServiceManifest, String> {
+    let names = || {
+        services
+            .iter()
+            .map(|s| s.unit.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match unit {
+        Some(u) => services
+            .iter()
+            .find(|s| s.unit == u)
+            .cloned()
+            .ok_or_else(|| format!("no unit '{}' on this stack (it has: {})", u, names())),
+        None if services.len() == 1 => Ok(services[0].clone()),
+        None => Err(format!(
+            "this stack has several units ({}) — name one as <stack>/<unit>",
+            names()
+        )),
+    }
 }

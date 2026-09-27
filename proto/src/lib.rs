@@ -164,6 +164,13 @@ pub enum Command {
     ReleaseUpdateNative {
         stack: String,
     },
+    /// fix-114: go back to a native unit's kept previous binary, and park the
+    /// stack's automatic updates. `unit: None` = the stack's only unit.
+    RollbackNative {
+        stack: String,
+        #[serde(default)]
+        unit: Option<String>,
+    },
     /// T69: the operator's answer to a suspended step. `allow` false means
     /// stop; a question that is never answered times out on the host into
     /// `Unattended`, which is not the same thing and says so.

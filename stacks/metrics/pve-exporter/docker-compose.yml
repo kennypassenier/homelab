@@ -10,8 +10,12 @@ services:
       - .env
     environment:
       - PVE_VERIFY_SSL=false
+    # Loopback only (expert panel 2026-09-27, pve-exporter-forwards-token):
+    # `/pve?target=` is chosen by the caller and the exporter sends its API
+    # token to that target, so anyone on the LAN could collect it. Prometheus
+    # reaches it by name on metrics_net; the check on this CT uses loopback.
     ports:
-      - "9221:9221"
+      - "127.0.0.1:9221:9221"
     labels:
       - com.homelab.update.policy=manual
     networks:

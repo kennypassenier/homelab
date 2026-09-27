@@ -28,6 +28,12 @@ scrape_configs:
     static_configs:
       - targets: ["alertmanager:9093"]
 
+  # Traefik's own counters, on an entrypoint of its own (traefik-no-metrics):
+  # requests and 5xx per service, which nothing measured before.
+  - job_name: traefik
+    static_configs:
+      - targets: ["10.10.10.4:8082"]
+
   - job_name: pve
     metrics_path: /pve
     params:
@@ -76,6 +82,13 @@ scrape_configs:
       # The hypervisor is not a stack and no deploy will ever write it.
       - targets: ["10.10.5.250:9100"]
         labels: {host: pve, role: hypervisor}
+    # Every container's node exporter reports the host's ZFS pools again:
+    # 12,773 of 13,797 node_zfs_* series came from role="lxc" (expert panel
+    # 2026-09-27, zfs-metrics-duplicated). The pools are counted once, on pve.
+    metric_relabel_configs:
+      - source_labels: [role, __name__]
+        regex: "lxc;node_zfs_.*"
+        action: drop
 
   - job_name: cadvisor
     file_sd_configs:

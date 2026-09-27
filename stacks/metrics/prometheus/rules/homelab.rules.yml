@@ -154,3 +154,41 @@ groups:
         annotations:
           summary: "Alertmanager failed to deliver {{ $value | printf \"%.0f\" }} notification(s) via {{ $labels.integration }}"
           description: "Alerts are not reaching the phone. Check the kyu token and CT 109."
+
+      # ── Storage as Proxmox sees it ───────────────────────────────────
+      # pve-exporter already reports every Proxmox storage, including
+      # local-lvm where every container's root disk lives, which no node
+      # exporter can see (expert panel 2026-09-27, pve-exporter-data-unused).
+      - alert: PveStorageAlmostFull
+        expr: pve_disk_usage_bytes{id=~"storage/.*"} / pve_disk_size_bytes{id=~"storage/.*"} > 0.85
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Proxmox storage {{ $labels.id }} is over 85% full"
+          description: "{{ $value | humanizePercentage }} used on {{ $labels.id }}."
+
+      # ── Messages that are not being picked up ────────────────────────
+      # A live consumer keeps its pending count near zero. 28,343 waited on
+      # the idle `ha` subscription and nothing looked (expert panel
+      # 2026-09-27, kyu-backlog-invisible); this watches the consumers the
+      # alert chain depends on.
+      - alert: KyuBacklogGrowing
+        expr: kyu_deliveries{state="pending", subscription=~"switchboard|ha-runner"} > 20
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kyu: {{ $value }} messages wait for {{ $labels.subscription }} on {{ $labels.topic }}"
+          description: "The consumer {{ $labels.subscription }} is not taking messages off {{ $labels.topic }}."
+
+      - alert: TraefikServerErrors
+        # Sustained 5xx from one service behind the gateway.
+        expr: sum by (service) (rate(traefik_service_requests_total{code=~"5.."}[10m])) > 0.1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }} answers 5xx ({{ $value | printf \"%.2f\" }}/s)"
+          description: "Traefik sees sustained server errors from {{ $labels.service }}."
+

@@ -658,3 +658,34 @@ fn alertmanager_sends_one_alert_per_notification() {
         .unwrap();
     assert!(am.contains("group_by: [\"...\"]"), "{am}");
 }
+
+/// Expert panel 2026-09-27, the Gewenst list: pve-exporter-forwards-token,
+/// zfs-metrics-duplicated, traefik-no-metrics, access-log-query-tokens,
+/// pve-exporter-data-unused, kyu-backlog-invisible.
+#[test]
+fn the_gewenst_metrics_and_gateway_changes_are_in_the_stack_files() {
+    let read = |p: &str| std::fs::read_to_string(stacks_dir().join(p)).unwrap();
+    let pve = read("metrics/pve-exporter/docker-compose.yml");
+    assert!(
+        pve.contains("\"127.0.0.1:9221:9221\""),
+        "the exporter hands its token to whoever names a target; only this CT may ask"
+    );
+    let prom = read("metrics/prometheus/prometheus.yml");
+    assert!(prom.contains("job_name: traefik"));
+    assert!(
+        prom.contains("node_zfs_.*"),
+        "the pools are counted once, on pve, not by every container"
+    );
+    let traefik = read("gateway/traefik/docker-compose.yml");
+    assert!(traefik.contains("--metrics.prometheus=true"));
+    let goaccess = read("gateway/goaccess/docker-compose.yml");
+    assert!(goaccess.contains("--no-query-string"));
+    let rules = read("metrics/prometheus/rules/homelab.rules.yml");
+    for alert in [
+        "PveStorageAlmostFull",
+        "KyuBacklogGrowing",
+        "TraefikServerErrors",
+    ] {
+        assert!(rules.contains(&format!("alert: {alert}")), "{alert}");
+    }
+}

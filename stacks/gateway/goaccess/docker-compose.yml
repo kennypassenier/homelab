@@ -12,6 +12,10 @@ services:
     command:
       - '--log-format={"ClientHost":"%h","StartUTC":"%dT%t.%^","RequestMethod":"%m","RequestPath":"%U","RequestProtocol":"%H","DownstreamStatus":"%s","DownstreamContentSize":"%b","RequestHost":"%v"}'
       - "--date-format=%Y-%m-%d"
+      # Jellyfin and Home Assistant clients put tokens in query strings, and
+      # the report shows every path it saw (expert panel 2026-09-27,
+      # access-log-query-tokens).
+      - "--no-query-string"
       - "--time-format=%H:%M:%S"
       - "--real-time-html"
       # The LAN address, not the public hostname (Kenny, form B2c). GoAccess

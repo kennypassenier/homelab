@@ -45,6 +45,13 @@ services:
       # The ACCESS log stays a file on purpose: CrowdSec parses it and
       # GoAccess reports on it, so it has two readers that need it on disk.
       - "--ping=true"
+      # Traefik's own counters (expert panel 2026-09-27, traefik-no-metrics),
+      # on an entrypoint of their own so they never share :80 with the
+      # tunnel's traffic.
+      - "--entrypoints.metrics.address=:8082"
+      - "--metrics.prometheus=true"
+      - "--metrics.prometheus.entryPoint=metrics"
+      - "--metrics.prometheus.addServicesLabels=true"
     env_file:
       - .env
     environment:
@@ -61,6 +68,7 @@ services:
     ports:
       - "80:80"
       - "8090:8080"
+      - "8082:8082"
     restart: unless-stopped
     labels:
       # A definition, not a route — the entrypoint flag above names it

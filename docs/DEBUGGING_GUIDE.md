@@ -503,10 +503,13 @@ line under it when there is one (`host/src/main.rs:4139-4145`). The command
 exits 1 only when a check is `Fail`; a warning still exits 0
 (`host/src/main.rs:4148`, `client/src/main.rs:1267-1275`).
 
-Two limits:
+One per-stack check to know, and one limit:
 
-- The per-stack env check can never fire: the host always reports
-  `env_sealed: true` (`host/src/main.rs:4303`).
+- `stack <name> env` fails when a secret file on the container (a compose
+  app's `/opt/<stack>/<app>/.env`, a native unit's env file) has no copy in
+  the host's vault; the remedy is a redeploy, which takes the copy. Until
+  v3.58.7 the host reported every stack as sealed, so this check never fired
+  (gap-27, `unsealed_secret_files` in `core/src/ops/facts.rs`).
 - The offsite check only runs when `rclone listremotes` shows a remote
   named exactly `gdrive:` (`host/src/main.rs:4310-4332`).
 

@@ -308,3 +308,85 @@ async fn g6_an_empty_fleet_yields_empty_facts_not_findings() {
         notes
     );
 }
+
+/// inbox-guards (Kenny, Phase 9 form 2026-09-27): a native service whose
+/// service.yml says `metrics: false` is deliberately not measured. Prometheus
+/// is not asked about it, and the fleet check notes it instead of reporting
+/// drift every run.
+///
+/// covers: step-20
+#[tokio::test]
+async fn step_20_a_service_declared_unmeasured_is_not_asked_and_is_noted() {
+    use homelab_core::ops::fleetcheck::{evaluate_coverage, Severity};
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "inbox": {"vmid": 118, "hostname": "118-app-inbox", "apps": ["inbox"], "applied_at": 1, "manifest": null,
+                    "natives": [{"stack_name": "inbox", "vmid": 118, "hostname": "118-app-inbox", "unit": "inbox",
+                                 "binary": "/opt/inbox/bin/inbox", "metrics": false}]}
+            }
+        })
+        .to_string(),
+    );
+    let mut inp = inputs();
+    inp.prometheus_url = Some("http://10.10.10.13:9090/".into());
+    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
+    assert!(
+        exec.calls_containing("up%7Bstack%3D%22inbox%22").is_empty(),
+        "Prometheus must not be asked about a service declared unmeasured"
+    );
+    let findings = evaluate_coverage(&facts.coverage);
+    assert_eq!(findings.len(), 1, "{:?}", findings);
+    assert_eq!(findings[0].severity, Severity::Noted);
+    assert!(
+        findings[0].what.contains("deliberately"),
+        "{:?}",
+        findings[0]
+    );
+}
+
+/// gap-27 (Kenny, Phase 9 form 2026-09-27: "Echt maken"): the doctor's env
+/// check was fed "sealed" for every stack and could never fire. A stack is
+/// sealed when every secret file its containers hold (a compose app's `.env`,
+/// a native unit's env file) has a copy in the host's vault, so a lost
+/// container can be rebuilt without latch.
+///
+/// covers: gap-27
+#[tokio::test]
+async fn gap_27_a_secret_file_without_a_vault_copy_is_named_unsealed() {
+    use homelab_core::ops::facts::unsealed_secret_files;
+    let st: homelab_core::state::StackState = serde_json::from_value(serde_json::json!({
+        "vmid": 116, "hostname": "116-app-kp-soft", "apps": ["web", "db"], "applied_at": 1,
+        "manifest": null,
+        "natives": [{"stack_name": "kp-soft", "vmid": 116, "hostname": "116-app-kp-soft",
+                     "unit": "job", "binary": "/usr/local/bin/job",
+                     "env_file": "/appdata/kp-soft/job-config/job.env"}]
+    }))
+    .unwrap();
+    let exec = MockExecutor::new();
+    // web has an .env on the container, db has none, the native unit has one.
+    exec.respond_always("test -s '/opt/kp-soft/web/.env'", CmdOutput::ok("yes"));
+    exec.respond_always("test -s '/opt/kp-soft/db/.env'", CmdOutput::ok(""));
+    exec.respond_always(
+        "test -s '/appdata/kp-soft/job-config/job.env'",
+        CmdOutput::ok("yes"),
+    );
+    let missing = unsealed_secret_files(&exec, "/var/lib/homelab", "kp-soft", &st).await;
+    assert_eq!(
+        missing,
+        vec![
+            "/opt/kp-soft/web/.env".to_string(),
+            "/appdata/kp-soft/job-config/job.env".to_string()
+        ]
+    );
+    exec.seed_file("/var/lib/homelab/secrets/kp-soft/web.env", "X=1\n");
+    exec.seed_file(
+        "/var/lib/homelab/secrets/kp-soft/job-config/job.env",
+        "Y=1\n",
+    );
+    let missing = unsealed_secret_files(&exec, "/var/lib/homelab", "kp-soft", &st).await;
+    assert!(missing.is_empty(), "{missing:?}");
+}

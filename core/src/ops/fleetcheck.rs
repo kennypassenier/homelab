@@ -256,6 +256,9 @@ pub struct CoverageFact {
     /// no generated dashboard yet" (F149). So the reader is asked, not the
     /// writer: does Grafana list a dashboard with this stack's uid.
     pub dashboard_provisioned: Option<bool>,
+    /// Its service.yml says `metrics: false`: deliberately not measured, so
+    /// Prometheus is not asked and the check notes it (Phase 9, inbox).
+    pub unmeasured_by_choice: bool,
 }
 
 /// One container's resource picture, as read off the machine.
@@ -1043,6 +1046,17 @@ pub fn evaluate_incomplete(state: &HostState) -> Vec<Finding> {
 pub fn evaluate_coverage(facts: &[CoverageFact]) -> Vec<Finding> {
     let mut out = Vec::new();
     for c in facts {
+        if c.unmeasured_by_choice {
+            out.push(Finding {
+                severity: Severity::Noted,
+                subject: c.stack.clone(),
+                what:
+                    "deliberately not measured by Prometheus (`metrics: false` in its service.yml)"
+                        .into(),
+                remedy: "nothing, unless that decision changes: remove the line and add a target"
+                    .into(),
+            });
+        }
         if c.scraped == Some(false) {
             out.push(Finding {
                 severity: Severity::Drift,

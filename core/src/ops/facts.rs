@@ -546,7 +546,11 @@ pub async fn gather_live_facts(
                     stack: name.clone(),
                     ..Default::default()
                 };
-                if let Some(base) = prom.as_deref() {
+                // Phase 9 (inbox): a native service declared unmeasured is
+                // not asked about; the check notes the decision instead.
+                c.unmeasured_by_choice =
+                    !st.natives.is_empty() && st.natives.iter().all(|n| n.metrics == Some(false));
+                if let (Some(base), false) = (prom.as_deref(), c.unmeasured_by_choice) {
                     let q = format!(
                         "{}/api/v1/query?query=max(up%7Bstack%3D%22{}%22%7D)",
                         base.trim_end_matches('/'),
@@ -593,4 +597,74 @@ pub async fn gather_live_facts(
         }
     }
     (facts, notes)
+}
+
+/// gap-27: the secret files on a stack's container that have no copy in the
+/// host's vault. A compose app's `/opt/<stack>/<app>/.env` is sealed at
+/// `<state_dir>/secrets/<stack>/<app>.env`; a native unit's env file at the
+/// path the deploy's own `vault_key` names. A file that is not on the
+/// container is nothing to seal; a container that cannot be asked yields no
+/// finding, because an unasked question must never become one.
+pub async fn unsealed_secret_files(
+    exec: &dyn Executor,
+    state_dir: &str,
+    stack: &str,
+    st: &crate::state::StackState,
+) -> Vec<String> {
+    let mut wanted: Vec<(String, String)> = Vec::new();
+    for app in &st.apps {
+        if st.natives.iter().any(|n| &n.unit == app) {
+            continue;
+        }
+        wanted.push((
+            format!("/opt/{}/{}/.env", stack, app),
+            format!("{}/secrets/{}/{}.env", state_dir, stack, app),
+        ));
+    }
+    for n in &st.natives {
+        if let Some(env) = &n.env_file {
+            wanted.push((
+                env.clone(),
+                format!(
+                    "{}/secrets/{}/{}",
+                    state_dir,
+                    stack,
+                    crate::ops::deploy::vault_key(env)
+                ),
+            ));
+        }
+    }
+    let mut missing = Vec::new();
+    for (on_container, in_vault) in wanted {
+        let there = exec
+            .run(&Cmd::new(
+                "pct",
+                &[
+                    "exec",
+                    &st.vmid.to_string(),
+                    "--",
+                    "sh",
+                    "-c",
+                    &format!(
+                        "test -s {} && echo yes || true",
+                        crate::ops::util::shq(&on_container)
+                    ),
+                ],
+                30,
+            ))
+            .await;
+        let Ok(out) = there else { continue };
+        if out.stdout.trim() != "yes" {
+            continue;
+        }
+        let sealed = exec
+            .read_file(&in_vault)
+            .await
+            .map(|c| !c.trim().is_empty())
+            .unwrap_or(false);
+        if !sealed {
+            missing.push(on_container);
+        }
+    }
+    missing
 }

@@ -1586,6 +1586,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
         stateless: false,
         backup_from_newest: None,
         update_policy: Default::default(),
+        metrics: None,
         release_repo: None,
         release_asset: None,
     };

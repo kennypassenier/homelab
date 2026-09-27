@@ -109,10 +109,11 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
             checks.push(Check {
                 name: format!("stack {} env", s.name),
                 health: Health::Fail,
-                detail: "no sealed .env".into(),
+                detail: "a secret file on the container has no copy in the host's vault".into(),
                 remedy: Some(format!(
-                    "provide {}'s .env; deploy fails closed without it (A3)",
-                    s.name
+                    "redeploy {} (`homelab deploy stacks/{}`) so the vault takes a copy; without \
+                     it a lost container cannot get its secrets back without latch (gap-27)",
+                    s.name, s.name
                 )),
             });
         }

@@ -373,6 +373,7 @@ fn a_stack_with_no_prometheus_target_is_reported() {
         scraped: Some(false),
         logs_recent: Some(true),
         dashboard_provisioned: None,
+        unmeasured_by_choice: false,
     }]);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].severity, Severity::Drift);
@@ -393,6 +394,7 @@ fn a_dashboard_grafana_never_received_is_reported() {
         scraped: Some(true),
         logs_recent: Some(true),
         dashboard_provisioned: Some(false),
+        unmeasured_by_choice: false,
     }]);
     assert_eq!(out.len(), 1);
     assert!(
@@ -414,6 +416,7 @@ fn an_unasked_dashboard_question_is_never_a_finding() {
         scraped: Some(true),
         logs_recent: Some(true),
         dashboard_provisioned: None,
+        unmeasured_by_choice: false,
     }]);
     assert!(
         out.is_empty(),
@@ -437,6 +440,7 @@ fn a_stack_whose_logs_never_arrive_is_reported() {
         scraped: Some(true),
         logs_recent: Some(false),
         dashboard_provisioned: None,
+        unmeasured_by_choice: false,
     }]);
     assert_eq!(out.len(), 1);
     assert!(
@@ -463,12 +467,14 @@ fn an_unasked_question_is_never_a_finding() {
             scraped: Some(true),
             logs_recent: None,
             dashboard_provisioned: None,
+            unmeasured_by_choice: false,
         },
         CoverageFact {
             stack: "almanac".into(),
             scraped: None,
             logs_recent: None,
             dashboard_provisioned: None,
+            unmeasured_by_choice: false,
         },
     ]);
     assert!(out.is_empty(), "expected silence, got {:?}", out);
@@ -482,6 +488,7 @@ fn a_covered_stack_is_silent() {
         scraped: Some(true),
         logs_recent: Some(true),
         dashboard_provisioned: None,
+        unmeasured_by_choice: false,
     }]);
     assert!(out.is_empty(), "{:?}", out);
 }

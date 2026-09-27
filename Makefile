@@ -96,6 +96,16 @@ endif
 		*,success,*) echo "  · CI on HEAD: $$st" ;; \
 		*) echo "  · no CI verdict on HEAD yet (unpushed, or the API did not answer) — continuing" ;; \
 	esac
+	# gap-30 (Kenny, Phase 9 form 2026-09-27: "In make release"): the MSRV
+	# Cargo.toml promises is checked once per release, with that compiler.
+	# The CI job that did this was removed on 2026-09-10 (d318ada) and nothing
+	# took its place. `rustup toolchain install <msrv> --profile minimal`
+	# once per machine.
+	@msrv=$$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml); \
+	echo "  · MSRV $$msrv: cargo +$$msrv check"; \
+	cargo +$$msrv check --workspace --locked --quiet || { \
+		echo "refusing: the code no longer builds with Rust $$msrv, which Cargo.toml promises (rust-version)"; \
+		echo "  either fix the code or raise rust-version deliberately"; exit 1; }
 	# DRY=1 stops here: every check has run, nothing has a side effect yet.
 	#
 	# `ifndef`, not a shell `exit 0`. The first version used the latter and
@@ -107,7 +117,7 @@ endif
 	# There was no rehearsal mode at all before 2026-09-02, and a target
 	# whose only mode is "do it for real" gets rehearsed in production.
 ifdef DRY
-	@echo "✓ dry run for v$(VERSION): version and tag checks passed; the gate (fmt, clippy, tests) was NOT run; nothing tagged or pushed"
+	@echo "✓ dry run for v$(VERSION): version, tag, CI and MSRV checks passed; the gate (fmt, clippy, tests) was NOT run; nothing tagged or pushed"
 else
 	$(MAKE) gate
 	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml

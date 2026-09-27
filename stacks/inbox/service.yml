@@ -16,3 +16,7 @@ data_dirs:
 # (the drill server on Kenny's PC is not a release host); the nightly run backs up only.
 release_repo: kennypassenier/chassis-rs
 release_asset: inbox
+# Deliberately not measured by Prometheus (Kenny, Phase 9 form 2026-09-27,
+# inbox-guards: "Grenzen zetten"): a scratch service of chassis-rs that this
+# project only backs up. The fleet check notes it instead of reporting drift.
+metrics: false

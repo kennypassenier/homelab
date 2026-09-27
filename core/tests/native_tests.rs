@@ -43,6 +43,7 @@ fn kyu_manifest() -> NativeServiceManifest {
         stateless: false,
         backup_from_newest: None,
         update_policy: Default::default(),
+        metrics: None,
         release_repo: None,
         release_asset: None,
     }

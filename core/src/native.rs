@@ -81,6 +81,11 @@ pub struct NativeServiceManifest {
     /// checksum differs from the installed binary; `manual` = never.
     #[serde(default)]
     pub update_policy: UpdatePolicy,
+    /// `false` = this service is deliberately not measured by Prometheus
+    /// (Kenny, Phase 9 form 2026-09-27, inbox on CT 118). The fleet check
+    /// then reports it as `noted` instead of as drift. Absent = measured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<bool>,
 }
 
 impl NativeServiceManifest {

@@ -4332,12 +4332,18 @@ async fn gather_probes(
                     .await
                     .map(|o| o.success())
                     .unwrap_or(false);
+                // gap-27: sealed = every secret file on the container has a
+                // vault copy. It was hard-coded true, so the check never fired.
+                let env_sealed = !present
+                    || homelab_core::ops::facts::unsealed_secret_files(exec, state_dir, name, st)
+                        .await
+                        .is_empty();
                 managed_stacks.push(StackProbe {
                     name: name.clone(),
                     backup_age_h: (st.last_backup > 0)
                         .then(|| now_unix.saturating_sub(st.last_backup) / 3600),
                     container_present: present,
-                    env_sealed: true,
+                    env_sealed,
                 });
             }
         }

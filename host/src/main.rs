@@ -7,7 +7,7 @@
 use std::io::Write;
 use std::net::SocketAddr;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -761,6 +761,82 @@ mod tests {
             .collect();
         let _ = std::fs::remove_dir_all(&dir);
         assert!(leftovers.is_empty(), "no temp files left: {:?}", leftovers);
+    }
+
+    /// fix-52 (expert panel, background-tasks-unsupervised, 2026-09-27): the
+    /// scheduler was spawned and its handle dropped, so one panic in it ended
+    /// the nightly backups for good while the daemon kept serving and the
+    /// watchdog kept being fed. A dead scheduler must end the process with a
+    /// failure, so systemd restarts it with a live one.
+    #[tokio::test]
+    async fn fix_52_a_dead_scheduler_ends_the_daemon_with_a_failure() {
+        let scheduler = tokio::spawn(async { panic!("scheduler bug") });
+        let code = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::supervise(
+                std::future::pending::<std::io::Result<()>>(),
+                scheduler,
+                std::future::pending::<()>(),
+                Arc::new(Mutex::new(())),
+                Duration::from_secs(1),
+            ),
+        )
+        .await
+        .expect("supervision ends when the scheduler dies");
+        assert_ne!(code, 0, "and it ends as a failure");
+    }
+
+    /// fix-52 and adoption norm N1: SIGTERM lets the running operation finish
+    /// (up to a bound) and then exits 0, instead of killing a step mid-way.
+    #[tokio::test]
+    async fn fix_52_sigterm_waits_for_the_running_operation_then_exits_zero() {
+        let op_lock = Arc::new(Mutex::new(()));
+        let held = op_lock.clone().lock_owned().await;
+        let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let f2 = finished.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            f2.store(true, std::sync::atomic::Ordering::SeqCst);
+            drop(held);
+        });
+        let scheduler = tokio::spawn(std::future::pending::<()>());
+        let code = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::supervise(
+                std::future::pending::<std::io::Result<()>>(),
+                scheduler,
+                std::future::ready(()),
+                op_lock.clone(),
+                Duration::from_secs(3),
+            ),
+        )
+        .await
+        .expect("supervision ends on SIGTERM");
+        assert_eq!(code, 0);
+        assert!(
+            finished.load(std::sync::atomic::Ordering::SeqCst),
+            "it waited for the operation holding the lock"
+        );
+        // Having waited, it keeps the lock: nothing queued after the signal
+        // starts before the process exits.
+        assert!(op_lock.try_lock().is_err(), "the lock stays held");
+        // A hung operation does not hold the exit forever.
+        let op_lock = Arc::new(Mutex::new(()));
+        let _stuck = op_lock.clone().lock_owned().await;
+        let scheduler = tokio::spawn(std::future::pending::<()>());
+        let code = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::supervise(
+                std::future::pending::<std::io::Result<()>>(),
+                scheduler,
+                std::future::ready(()),
+                op_lock,
+                Duration::from_millis(100),
+            ),
+        )
+        .await
+        .expect("the drain wait is bounded");
+        assert_eq!(code, 0);
     }
 
     /// covers: F208
@@ -1847,6 +1923,84 @@ fn sd_notify(msg: &str) {
     }
 }
 
+/// Run the daemon until something ends it, and say with which exit code.
+///
+/// fix-52 (expert panel, background-tasks-unsupervised, 2026-09-27): main
+/// used to await the server alone. The scheduler's handle was dropped, so a
+/// panic in it ended every nightly backup for good while the daemon went on
+/// serving and feeding the watchdog; and nothing handled SIGTERM, so
+/// `systemctl stop` or a self-update restart killed a step mid-way.
+///
+/// - The scheduler ending in any way is a failure (exit 1): systemd's
+///   `Restart=always` brings the daemon back with a live scheduler.
+/// - SIGTERM waits for the operation holding `op_lock`, at most `drain`,
+///   then exits 0 (adoption norm N1). The lock is fair, so no operation
+///   queued after the signal starts.
+async fn supervise<S>(
+    serve: S,
+    scheduler: tokio::task::JoinHandle<()>,
+    shutdown: impl std::future::Future<Output = ()>,
+    op_lock: Arc<Mutex<()>>,
+    drain: Duration,
+) -> i32
+where
+    S: std::future::Future<Output = std::io::Result<()>>,
+{
+    tokio::select! {
+        served = serve => {
+            match served {
+                Ok(()) => error!("server stopped without an error — exiting so systemd restarts it"),
+                Err(e) => error!("server stopped :: {}", e),
+            }
+            1
+        }
+        ended = scheduler => {
+            let how = match ended {
+                Err(e) if e.is_panic() => "panicked",
+                Err(_) => "was cancelled",
+                Ok(()) => "returned",
+            };
+            error!(
+                "scheduler task {} — exiting so systemd restarts the daemon with a live scheduler",
+                how
+            );
+            1
+        }
+        () = shutdown => {
+            info!(
+                "SIGTERM: waiting up to {}s for the running operation to finish",
+                drain.as_secs()
+            );
+            match tokio::time::timeout(drain, op_lock.lock_owned()).await {
+                Ok(guard) => {
+                    // Held until the process exits: nothing starts after this.
+                    std::mem::forget(guard);
+                    info!("SIGTERM: no operation running — exiting");
+                }
+                Err(_) => tracing::warn!(
+                    "SIGTERM: an operation is still running after {}s — exiting anyway; the next start reports it as interrupted",
+                    drain.as_secs()
+                ),
+            }
+            0
+        }
+    }
+}
+
+/// fix-52: resolves on SIGTERM. If the handler cannot be installed the
+/// daemon keeps running as it did before, and says so.
+async fn terminate_signal() {
+    match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+        Ok(mut sig) => {
+            sig.recv().await;
+        }
+        Err(e) => {
+            tracing::warn!("no SIGTERM handler ({}) — a stop kills the running step", e);
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // H5: the self-update gate runs `staged --selfcheck` before installing.
@@ -1931,9 +2085,10 @@ async fn main() {
     // E4: nightly scheduler — backups for every managed stack + auto-policy
     // updates, driven from state.json manifests (no client needed). Reads the
     // live settings each tick, so G8 edits apply without a restart.
-    {
+    // fix-52: the handle is kept; `supervise` ends the process if it ends.
+    let scheduler = {
         let sched_state = state.clone();
-        tokio::spawn(async move { scheduler_loop(sched_state).await });
+        let handle = tokio::spawn(async move { scheduler_loop(sched_state).await });
         match config.initial_settings.backup_hour {
             Some(hour) => info!(
                 "scheduler armed: daily backup + auto-updates at {:02}:00",
@@ -1941,7 +2096,9 @@ async fn main() {
             ),
             None => info!("scheduler idle (backup_hour not set)"),
         }
-    }
+        handle
+    };
+    let op_lock = state.op_lock.clone();
 
     let app = Router::new()
         .route("/api/health", get(|| async { "ok" }))
@@ -1973,6 +2130,15 @@ async fn main() {
         }
     });
 
+    // fix-52: bind first, so READY=1 means the port is open. It was sent
+    // before the socket existed, and a bind failure then looked like a
+    // daemon that had started.
+    let listener = tokio::net::TcpListener::bind(config.listen)
+        .await
+        .and_then(|l| l.into_std())
+        .expect("bind listen address");
+    let server = axum_server::from_tcp_rustls(listener, tls_config).expect("serve");
+
     // B7: tell systemd we're ready, then feed its watchdog. If this loop
     // ever stops (deadlock/hang), systemd kills and restarts the daemon.
     sd_notify("READY=1");
@@ -1983,10 +2149,15 @@ async fn main() {
         }
     });
 
-    axum_server::bind_rustls(config.listen, tls_config)
-        .serve(app.into_make_service())
-        .await
-        .expect("serve");
+    let code = supervise(
+        server.serve(app.into_make_service()),
+        scheduler,
+        terminate_signal(),
+        op_lock,
+        Duration::from_secs(60),
+    )
+    .await;
+    std::process::exit(code);
 }
 
 /// H16: parse capacity numbers (C6) from `free -m`, `nproc` and
@@ -2343,7 +2514,10 @@ async fn scheduler_loop(state: AppState) {
         tokio::time::sleep(Duration::from_secs(20 * 60)).await;
         spawn_mirror_push(&state); // D5 retry queue: try again every tick
         let (hour, tiers) = {
-            let s = state.settings.read().unwrap();
+            let s = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner);
             match s.backup_hour {
                 Some(h) => (h, s.retention.clone()),
                 None => continue, // scheduler disabled
@@ -2874,7 +3048,7 @@ async fn notify_auto_disabled(state: &AppState, exec: &RealExecutor, stack: &str
     if !state
         .damper
         .lock()
-        .unwrap()
+        .unwrap_or_else(PoisonError::into_inner)
         .should_send(&op, false, Some(why), now)
     {
         return;
@@ -2904,7 +3078,7 @@ async fn notify(
     if !state
         .damper
         .lock()
-        .unwrap()
+        .unwrap_or_else(PoisonError::into_inner)
         .should_send(&report.op, report.ok, error.as_deref(), now)
     {
         return;
@@ -2930,7 +3104,12 @@ fn exec_allowed(config: &Config, vmid: u16) -> Result<(), homelab_core::error::C
 /// records the outcome in state so an unreachable notification path becomes a
 /// finding instead of a silence.
 async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
-    let primary = state.settings.read().unwrap().notify_webhook.clone();
+    let primary = state
+        .settings
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .notify_webhook
+        .clone();
     let fallback = state.config.notify_fallback_webhook.clone();
     let urls = homelab_core::notify::route(primary.as_deref(), fallback.as_deref());
     if urls.is_empty() {
@@ -3424,7 +3603,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         }
         Rpc::BackupStack(manifest) => {
             let cfg = homelab_core::ops::backup::BackupCfg {
-                tiers: state.settings.read().unwrap().retention.clone(),
+                tiers: state
+                    .settings
+                    .read()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .retention
+                    .clone(),
                 ..state.config.backup.clone()
             };
             let stack = manifest.stack_name.clone();
@@ -3481,7 +3665,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             .await
         }
         Rpc::BackupHostMeta => {
-            let tiers = state.settings.read().unwrap().retention.clone();
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
             let cfg = homelab_core::ops::backup::BackupCfg {
                 tiers,
                 ..state.config.backup.clone()
@@ -3530,7 +3719,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         Rpc::BackupNative { stack } => {
             match native_from_state(&state.config.state_dir, &stack).await {
                 Ok((services, _)) => {
-                    let tiers = state.settings.read().unwrap().retention.clone();
+                    let tiers = state
+                        .settings
+                        .read()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .retention
+                        .clone();
                     let cfg = homelab_core::ops::backup::BackupCfg {
                         tiers,
                         ..state.config.backup.clone()
@@ -3920,7 +4114,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
         }
         Rpc::ZfsReplicate => {
-            let tiers = state.settings.read().unwrap().retention.clone();
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
             let jobs = state.config.zfs_jobs.clone();
             let resp = run_mutating_op(state, &exec, req.id, "zfs-replicate", |ctx| {
                 Box::pin(async move { homelab_core::ops::zfs::replicate(ctx, &jobs, &tiers).await })
@@ -3947,7 +4146,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     deferred: None,
                 };
             }
-            let tiers = state.settings.read().unwrap().retention.clone();
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
             let mut lines = Vec::new();
             let mut ok = true;
             for dev in devices {
@@ -4185,7 +4389,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
         }
         Rpc::GetConfig => {
-            let view = state.settings.read().unwrap().clone();
+            let view = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
             let _ = state.log_tx.send(ServerMsg::Config(Box::new(view)));
             RpcResponse {
                 id: req.id,
@@ -4216,7 +4424,10 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
             match persist_settings(&state.config, &view) {
                 Ok(()) => {
-                    *state.settings.write().unwrap() = *view;
+                    *state
+                        .settings
+                        .write()
+                        .unwrap_or_else(PoisonError::into_inner) = *view;
                     info!("settings updated via G8");
                     RpcResponse {
                         id: req.id,

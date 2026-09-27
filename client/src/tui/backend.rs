@@ -10,7 +10,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::Connector;
 
-use homelab_proto::{Command, RpcRequest, ServerMsg};
+use homelab_proto::{Command, LogLevel, RpcRequest, ServerMsg};
 
 use crate::tls;
 
@@ -103,10 +103,18 @@ impl Backend for RemoteBackend {
                 .await;
 
             let mut req_id = 1u64;
+            // fix-66: requests that were answers. The host now reads an answer
+            // while the operation that asked is still running, so its reply
+            // arrives first; the model pairs replies with requests by order,
+            // and would take it for the operation's own end.
+            let mut answers: std::collections::HashSet<u64> = Default::default();
             loop {
                 tokio::select! {
                     Some(cmd) = cmd_rx.recv() => {
                         req_id += 1;
+                        if matches!(cmd, Command::Answer { .. }) {
+                            answers.insert(req_id);
+                        }
                         let req = RpcRequest { id: req_id, command: cmd };
                         if tx.send(Message::Text(serde_json::to_string(&req).unwrap().into())).await.is_err() {
                             let _ = evt_tx.send(BackendEvent::Disconnected("send failed".into())).await;
@@ -117,6 +125,14 @@ impl Backend for RemoteBackend {
                         match msg {
                             Some(Ok(Message::Text(t))) => {
                                 if let Ok(sm) = serde_json::from_str::<ServerMsg>(&t) {
+                                    let sm = match sm {
+                                        ServerMsg::RpcDone(r) if answers.remove(&r.id) => ServerMsg::Log {
+                                            level: if r.ok { LogLevel::Info } else { LogLevel::Warn },
+                                            source: "HOST".into(),
+                                            msg: r.message,
+                                        },
+                                        other => other,
+                                    };
                                     if evt_tx.send(BackendEvent::Server(sm)).await.is_err() { break; }
                                 }
                             }

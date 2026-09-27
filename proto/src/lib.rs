@@ -156,6 +156,12 @@ pub enum Command {
     /// stop; a question that is never answered times out on the host into
     /// `Unattended`, which is not the same thing and says so.
     Answer {
+        /// fix-66: on the wire as `question`. A command is flattened into
+        /// `RpcRequest`, whose own `id` is the request's; a field called `id`
+        /// here wrote a second `id` key into the same object, the host could
+        /// not parse the frame and dropped it, and no answer ever arrived
+        /// (found 2026-09-27 by the first round-trip test).
+        #[serde(rename = "question")]
         id: u64,
         allow: bool,
     },

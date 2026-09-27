@@ -3593,3 +3593,46 @@ async fn gap_24_a_new_repository_whose_password_does_not_open_host_meta_is_refus
     assert!(text.contains("host-meta"), "{text}");
     assert!(exec.calls_containing("restic backup").is_empty());
 }
+
+/// gap-25: a pull that failed inside the container (a registry that is down,
+/// a tag that no longer exists) was ignored: `up` then restarted the old
+/// image, verify passed, and the report said the app was updated. The pull's
+/// exit status now counts: nothing is stopped or recreated after it fails,
+/// and the transcript says the app was NOT updated. The run itself stays ok,
+/// so an hour of registry outage does not park the stack (H8) and stop its
+/// backups.
+///
+/// covers: gap-25
+#[tokio::test]
+async fn gap_25_a_failed_pull_stops_the_update_before_anything_is_restarted() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_first("busy-check", CmdOutput::ok("<no value>\n"));
+    exec.respond_always(
+        "docker inspect --format",
+        CmdOutput::ok("sha256:aaa myimg:latest\n"),
+    );
+    exec.respond_always(
+        "compose pull",
+        CmdOutput::failed(1, "Error response from daemon: manifest unknown"),
+    );
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, false).await;
+    assert!(
+        report.ok,
+        "a registry outage must not fail (and park) the stack"
+    );
+    assert!(
+        sink.lines().iter().any(|l| l.contains("NOT updated")),
+        "the transcript must say the app was not updated: {:?}",
+        sink.lines()
+    );
+    assert!(
+        exec.calls_containing("compose up").is_empty()
+            && exec.calls_containing("docker stop").is_empty(),
+        "nothing may be restarted after the pull failed: {:?}",
+        exec.calls()
+    );
+}

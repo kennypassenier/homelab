@@ -584,10 +584,12 @@ upgrade a binary that is already installed. The transcript says
 
 Two things the update's transcript will not tell you directly:
 
-- The pull, stop-first and up steps only fail on a timeout or a command that
-  could not start; a non-zero exit from inside the container does not fail
-  them (`core/src/ops/update.rs:180-227`, `core/src/executor.rs:57-63`). The
-  verify step is what notices a bad result.
+- A pull that fails inside the container leaves that app as it was and logs
+  `[update] <app> NOT updated: docker compose pull failed (…)`; the run
+  itself stays ok, so the stack is not parked (gap-25, v3.58.4). A failed
+  `up` is logged as `docker compose up for <app> exited <n>` and left to the
+  verify step, which rolls back (`core/src/ops/update.rs`). Stop-first
+  ignores its exit status on purpose (`; true`).
 - In a scheduled update only apps whose policy is `auto` are touched;
   others are logged as skipped (`core/src/ops/update.rs:126-143`).
 

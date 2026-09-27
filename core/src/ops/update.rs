@@ -178,16 +178,39 @@ pub async fn update(
         // rather than the download — which over a residential uplink is the
         // difference between seconds and minutes.
         let pull_step = format!("{} :: pull", app);
+        let pull_failed = std::sync::Mutex::new(None::<String>);
         step!(runner, &pull_step, {
-            super::util_pct_sh(
+            let out = super::util_pct_sh(
                 exec,
                 vmid,
                 &format!("cd '/opt/{}/{}' && docker compose pull -q", stack, app),
                 600,
             )
             .await?;
+            // gap-25: the exit status counts. A failed pull used to be
+            // followed by `up` on the old image, a passing verify, and a
+            // report saying the app was updated. It is not an error either:
+            // a registry that is down for an hour must not park every stack
+            // (H8) and stop its backups, so the app is left running as it
+            // was and the transcript says it was not updated.
+            if !out.success() {
+                *pull_failed.lock().unwrap() = Some(out.stderr.trim().to_string());
+                return Ok(StepOutcome::Unchanged);
+            }
             Ok(StepOutcome::Changed)
         });
+        let failed = pull_failed.lock().unwrap().take();
+        if let Some(why) = failed {
+            runner.log(
+                Level::Warn,
+                format!(
+                    "[update] {} NOT updated: docker compose pull failed ({}); nothing was \
+                     stopped or recreated, the running version is untouched",
+                    app, why
+                ),
+            );
+            continue;
+        }
 
         // O9: a container labelled `com.homelab.update.stop-first=true` is
         // stopped cleanly before the new image comes up, instead of being
@@ -213,7 +236,7 @@ pub async fn update(
 
         let up_step = format!("{} :: up", app);
         step!(runner, &up_step, {
-            super::util_pct_sh(
+            let out = super::util_pct_sh(
                 exec,
                 vmid,
                 &format!(
@@ -223,6 +246,22 @@ pub async fn update(
                 600,
             )
             .await?;
+            // gap-25: a failed `up` is named here but does not abort: the
+            // verify step after it is what rolls back to the captured image,
+            // and aborting now would skip that rollback.
+            if !out.success() {
+                ctx.sink.emit(crate::sink::PipelineEvent::Line {
+                    level: Level::Warn,
+                    source: "HOST".into(),
+                    msg: format!(
+                        "[update] docker compose up for {} exited {}: {} — verify decides \
+                         whether to roll back",
+                        app,
+                        out.code,
+                        out.stderr.trim()
+                    ),
+                });
+            }
             Ok(StepOutcome::Changed)
         });
 

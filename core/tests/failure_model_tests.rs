@@ -116,6 +116,51 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
     assert!(script.contains("pct create 110"), "script:\n{}", script);
 }
 
+/// fix-125 (expert panel, bundles-audit-world-readable, 2026-09-27): every
+/// bundle file was written 0644, so any local account on pve could read the
+/// transcripts and replay scripts of failed operations, which carried
+/// secrets until they were masked on 2026-09-27. Files are 0600 (the replay
+/// script 0700), and the bundle and incidents directories are made 0700.
+#[tokio::test]
+async fn fix_125_an_incident_bundle_is_readable_by_root_only() {
+    let exec = MockExecutor::new();
+    exec.seed_file("/var/lib/homelab/state.json", "{}");
+    exec.seed_file("/var/lib/homelab/journal.jsonl", "{}\n");
+    let report = homelab_core::runner::OperationReport {
+        op: "deploy-x".into(),
+        ok: false,
+        steps: vec![],
+        error: None,
+        deferred: None,
+    };
+    let dir = incidents::write_bundle(&exec, "/var/lib/homelab", 1, &report, &[], "host=x\n")
+        .await
+        .expect("bundle written");
+    for f in [
+        "report.json",
+        "events.jsonl",
+        "state-at-failure.json",
+        "journal-tail.jsonl",
+        "versions.txt",
+    ] {
+        assert_eq!(
+            exec.file_mode(&format!("{}/{}", dir, f)),
+            Some(0o600),
+            "{} must be 0600",
+            f
+        );
+    }
+    assert_eq!(exec.file_mode(&format!("{}/commands.sh", dir)), Some(0o700));
+    let chmods = exec.calls_containing("chmod 700");
+    assert!(
+        chmods
+            .iter()
+            .any(|c| c.contains("/var/lib/homelab/incidents ") && c.contains(&dir)),
+        "the incidents directory and the bundle are made 0700: {:?}",
+        exec.calls()
+    );
+}
+
 #[test]
 fn ar16_commands_script_extracts_only_run_lines() {
     let events = vec![

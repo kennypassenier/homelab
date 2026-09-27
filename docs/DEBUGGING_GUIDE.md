@@ -98,14 +98,14 @@ flowchart LR
 | Trace | Where | Written by | When | Answers |
 |---|---|---|---|---|
 | failure line | your terminal | client prints the host's reply (`client/src/main.rs:1267-1270`) | every failed command | what failed, why, what to do, where the bundle is |
-| incident bundle | `/var/lib/homelab/incidents/<unix-ts>-<op>/` | `core/src/incidents.rs:56-110`, called from `host/src/main.rs:3066` | a mutating operation fails (not when it is deferred) | the full context of one failure |
+| incident bundle | `/var/lib/homelab/incidents/<unix-ts>-<op>/` | `core/src/incidents.rs:56-110`, called from `host/src/main.rs:3066` | a mutating operation fails (not when it is deferred) | the full context of one failure; root only (0700 directories, 0600 files, fix-125) |
 | operation journal | `/var/lib/homelab/journal.jsonl` | `host/src/main.rs:1659-1681` | before and after every step of every mutating operation | which step an operation was in, including one that never finished |
 | daemon log | stderr of `homelab-host` (`host/src/main.rs:1780-1785`) | `tracing` calls throughout `host/src/main.rs` | always | startup faults, scheduler decisions, notification delivery, and every transcript line (below) |
 | live transcript | streamed to every connected client | `host/src/main.rs:1611-1655` | while an operation runs | the exact commands and the first lines of their output |
 | state record | `/var/lib/homelab/state.json` | `core/src/state.rs:198-231` | after operations, the scheduler, notifications | what the orchestrator believes about each stack |
 | fleet check | `homelab check` output; daemon log each night | `core/src/ops/fleetcheck.rs:510-715`, `host/src/main.rs:2629-2682` | on demand, and after every nightly tick in the backup hour | where the record and reality disagree |
 | doctor | `homelab doctor` output | `core/src/doctor.rs:45-188`, probes at `host/src/main.rs:4275-4385` | on demand | host disk, state file, backups, offsite, mirror, interrupted operations |
-| exec audit | `/var/lib/homelab/audit.log` | `host/src/main.rs:3955-3969` | every `homelab exec` that passed its guard | who ran what inside which container |
+| exec audit | `/var/lib/homelab/audit.log` | `host/src/main.rs:3955-3969` | every `homelab exec` that passed its guard | who ran what inside which container; 0600, the command masked (fix-124, fix-125) |
 | intent history | `/var/lib/homelab/repo` (git) | deploy step `commit intent` (`core/src/ops/deploy.rs:894-960`) | every deploy | which files each deploy applied |
 | notification | the configured webhook | `host/src/main.rs:2822-2925` | after every mutating operation, at boot, on auto-disable, on nightly findings | the same verdict, off the machine |
 

@@ -51,6 +51,12 @@ pub fn commands_script(events: &[PipelineEvent]) -> String {
     out
 }
 
+/// fix-125 (expert panel, bundles-audit-world-readable, 2026-09-27): the
+/// mode of every bundle file. They were 0644, readable by any local account
+/// on pve, and they hold transcripts that carried secrets until those were
+/// masked on 2026-09-27.
+pub const PRIVATE: u32 = 0o600;
+
 /// Write a bundle under `<state_dir>/incidents/<ts>-<op>/`. Returns the
 /// bundle directory path.
 pub async fn write_bundle(
@@ -65,7 +71,7 @@ pub async fn write_bundle(
 
     let report_json =
         serde_json::to_string_pretty(report).map_err(|e| CoreError::State(e.to_string()))?;
-    exec.write_file(&format!("{}/report.json", dir), &report_json, 0o644)
+    exec.write_file(&format!("{}/report.json", dir), &report_json, PRIVATE)
         .await?;
 
     let mut events_jsonl = String::new();
@@ -74,18 +80,18 @@ pub async fn write_bundle(
             .push_str(&serde_json::to_string(ev).map_err(|e| CoreError::State(e.to_string()))?);
         events_jsonl.push('\n');
     }
-    exec.write_file(&format!("{}/events.jsonl", dir), &events_jsonl, 0o644)
+    exec.write_file(&format!("{}/events.jsonl", dir), &events_jsonl, PRIVATE)
         .await?;
 
     exec.write_file(
         &format!("{}/commands.sh", dir),
         &commands_script(events),
-        0o755,
+        0o700,
     )
     .await?;
 
     if let Ok(state) = exec.read_file(&format!("{}/state.json", state_dir)).await {
-        exec.write_file(&format!("{}/state-at-failure.json", dir), &state, 0o644)
+        exec.write_file(&format!("{}/state-at-failure.json", dir), &state, PRIVATE)
             .await?;
     }
     if let Ok(journal) = exec
@@ -101,11 +107,22 @@ pub async fn write_bundle(
             .rev()
             .collect::<Vec<_>>()
             .join("\n");
-        exec.write_file(&format!("{}/journal-tail.jsonl", dir), &tail, 0o644)
+        exec.write_file(&format!("{}/journal-tail.jsonl", dir), &tail, PRIVATE)
             .await?;
     }
-    exec.write_file(&format!("{}/versions.txt", dir), versions, 0o644)
+    exec.write_file(&format!("{}/versions.txt", dir), versions, PRIVATE)
         .await?;
+    // fix-125: the directories too. write_file creates them with the
+    // default mode (0755), which lets any account list the bundles. Best
+    // effort: the files inside are 0600 already, the bundle is worth more
+    // than this, and the daemon repeats it at every start.
+    let _ = exec
+        .run(&crate::executor::Cmd::new(
+            "chmod",
+            &["700", &format!("{}/incidents", state_dir), &dir],
+            10,
+        ))
+        .await;
     Ok(dir)
 }
 

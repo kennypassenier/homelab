@@ -191,6 +191,19 @@ pub struct HostState {
     /// becomes something nobody knows is there.
     #[serde(default)]
     pub retired: BTreeMap<String, RetiredRecord>,
+    /// fix-94 (crowdsec-home-ip, 2026-09-27): the house's own public address
+    /// as the CrowdSec whitelist on the gateway holds it. None = no check has
+    /// run, or none has ever found an address to keep.
+    #[serde(default)]
+    pub home_address: Option<String>,
+    /// Unix time of the last check, whatever it found.
+    #[serde(default)]
+    pub home_address_checked: u64,
+    /// Why the last check could not read the router's WAN address. None = it
+    /// could. Kept so the fleet check can say the whitelist is running on a
+    /// last known value, and since when.
+    #[serde(default)]
+    pub home_address_error: Option<String>,
 }
 
 /// fix-62: what the restore drill knows about one repository.

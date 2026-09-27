@@ -494,9 +494,24 @@ only, `Automatic-Reboot "false"` and `Remove-Unused-Dependencies "true"`
 
 #### A8 · CrowdSec and bouncer on the gateway
 
-**Status:** No orchestrator code. CrowdSec is an ordinary app of the gateway
+**Status:** CrowdSec is an ordinary app of the gateway
 stack (`stacks/gateway/lxc-compose.yml:128`) with its own
 `stacks/gateway/crowdsec/checks.yml`; it is deployed like any other app.
+
+One piece of orchestrator code (fix-94): the house's own public address is
+kept in a CrowdSec whitelist, so a burst of traffic from home cannot get the
+house banned. After every gateway deploy that finishes, and in every nightly
+round that backs up the router's configuration, the host asks the router
+(the `device_backups` entry named `opnsense`, with its credential file and
+pin) for its WAN address via `api/interfaces/overview/interfacesInfo`, and
+compares it with
+`/appdata/gateway/crowdsec-config/parsers/s02-enrich/homelab-home-address.yaml`
+on the gateway. Only a different address rewrites the file; CrowdSec then
+tests its configuration and is reloaded with `SIGHUP`, and the log says
+`home address changed from <old> to <new>`. A file CrowdSec's test refuses is
+put back. An address that cannot be read keeps the last known one, removes
+nothing, and shows in `homelab check` as a `noted` finding with subject
+`crowdsec home address` (`core/src/ops/homeaddress.rs`).
 
 #### A9 · Multi-user / RBAC
 

@@ -76,6 +76,21 @@ pub struct DeviceBackup {
     pub ca_file: Option<String>,
 }
 
+/// How curl verifies the device, as separate arguments.
+///
+/// fix-94 (2026-09-27): shared with the home-address read, which asks the
+/// same router with the same credential and must trust it the same way.
+pub fn tls_args(dev: &DeviceBackup) -> Vec<String> {
+    match (&dev.pin, &dev.ca_file) {
+        // `-k` beside a pin is not a contradiction: it turns off the NAME
+        // check, which cannot succeed against an IP, while the pin does the
+        // verifying. curl enforces --pinnedpubkey regardless of -k.
+        (Some(pin), _) => vec!["-k".into(), "--pinnedpubkey".into(), pin.clone()],
+        (None, Some(ca)) => vec!["--cacert".into(), ca.clone()],
+        (None, None) => vec!["-k".into()],
+    }
+}
+
 /// A plausible answer that is not a configuration is the failure this guards
 /// against: an OPNsense login page is a 200 with HTML in it, and restic
 /// would store it without complaint.
@@ -95,25 +110,29 @@ pub async fn backup_device(
         format!("[device] asking {} for its configuration", dev.name),
     );
 
-    let verify = match (&dev.pin, &dev.ca_file) {
-        // `-k` beside a pin is not a contradiction: it turns off the NAME
-        // check, which cannot succeed against an IP, while the pin does the
-        // verifying. curl enforces --pinnedpubkey regardless of -k.
-        (Some(pin), _) => format!("-k --pinnedpubkey {}", crate::ops::util::shq(pin)),
-        (None, Some(ca)) => format!("--cacert {}", crate::ops::util::shq(ca)),
-        (None, None) => {
-            runner.log(
-                Level::Warn,
-                format!(
-                    "[device] {}: the certificate is NOT verified — a credential \
-                     that can read the whole configuration crosses the wire on \
-                     trust alone. Set ca_file to end that.",
-                    dev.name
-                ),
-            );
-            "-k".to_string()
-        }
-    };
+    if dev.pin.is_none() && dev.ca_file.is_none() {
+        runner.log(
+            Level::Warn,
+            format!(
+                "[device] {}: the certificate is NOT verified — a credential \
+                 that can read the whole configuration crosses the wire on \
+                 trust alone. Set ca_file to end that.",
+                dev.name
+            ),
+        );
+    }
+    // Flags bare, values quoted: the script below is a `sh -c` string.
+    let verify = tls_args(dev)
+        .iter()
+        .map(|a| {
+            if a.starts_with('-') {
+                a.clone()
+            } else {
+                crate::ops::util::shq(a)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
 
     // The repository has to exist before anything is piped into it.
     //

@@ -24,7 +24,13 @@ use crate::sink::{Level, PipelineEvent, Sink};
 /// `{{.Name}}` makes docker write `"attrs":{"tag":"jellyfin"}` on every line.
 /// The option is read when a container is CREATED, so an existing container
 /// keeps logging untagged until it is recreated.
+///
+/// `live-restore` (expert panel 2026-09-27, docker-no-live-restore): a change
+/// to this file restarts docker, and without it that stopped every container
+/// on the machine. The first deploy that adds it still restarts them once,
+/// because the daemon being stopped is the one that did not have it.
 pub const DOCKER_DAEMON_JSON: &str = r#"{
+  "live-restore": true,
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "10m",

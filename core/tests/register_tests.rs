@@ -47,7 +47,13 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
             if p.is_dir() {
                 // target-debian is the cross-build directory; .git is large
                 // and holds no sources.
-                if name.starts_with("target") || name == ".git" || name == "node_modules" {
+                // .claude holds helper worktrees: other checkouts of this
+                // repository, whose markers are not this tree's (2026-09-27).
+                if name.starts_with("target")
+                    || name == ".git"
+                    || name == ".claude"
+                    || name == "node_modules"
+                {
                     continue;
                 }
                 walk(&p, out);

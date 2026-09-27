@@ -134,6 +134,12 @@ loki.process "docker" {{
   stage.labels {{
     values = {{ stream = "", container_name = "" }}
   }}
+  // The file path carries the container's 64-hex id, so every recreate
+  // opened new streams for the same app (expert panel 2026-09-27,
+  // loki-label-hygiene). Nothing queries it; container_name is the key.
+  stage.label_drop {{
+    values = ["filename"]
+  }}
   stage.output {{
     source = "output"
   }}

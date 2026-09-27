@@ -3633,3 +3633,11 @@ async fn a_deploy_grants_alloy_read_access_and_says_so_when_it_still_cannot_read
         sink.lines()
     );
 }
+
+/// Expert panel 2026-09-27 (docker-no-live-restore): every change to
+/// daemon.json restarts docker, and without live-restore that stops every
+/// container on the machine with it.
+#[test]
+fn docker_keeps_containers_running_across_its_own_restart() {
+    assert!(homelab_core::ops::guards::DOCKER_DAEMON_JSON.contains("\"live-restore\": true"));
+}

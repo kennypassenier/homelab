@@ -438,3 +438,16 @@ fn the_readability_probe_asks_about_the_running_service_not_a_new_session() {
     assert!(s.contains("systemctl show -p MainPID --value alloy"), "{s}");
     assert!(s.contains("CapAmb"), "{s}");
 }
+
+/// Expert panel 2026-09-27 (loki-label-hygiene): `loki.source.file` adds a
+/// `filename` label carrying the container's 64-hex id, so every recreate of
+/// a container opened new Loki streams for the same app. The dashboards ask
+/// by `container_name`; the file path is dropped.
+#[test]
+fn the_docker_pipeline_drops_the_per_container_filename_label() {
+    let c = config("media", "106-app-media", "http://10.10.10.4:3100", &[]);
+    let docker = &c[c.find("loki.process \"docker\"").unwrap()..];
+    let docker = &docker[..docker.find("forward_to").unwrap()];
+    assert!(docker.contains("stage.label_drop"), "{docker}");
+    assert!(docker.contains("\"filename\""), "{docker}");
+}

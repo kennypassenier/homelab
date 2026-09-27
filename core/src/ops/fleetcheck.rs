@@ -540,6 +540,36 @@ pub fn nightly_report_due(
     fingerprint != last_fingerprint || now.saturating_sub(last_sent) >= NIGHTLY_REPORT_REPEAT_S
 }
 
+/// fix-147 (restore-check-failure, Kenny 2026-09-27, form "Keuzes helpers"):
+/// a deploy that found data empty and could not check its backup goes on
+/// (backup-target trouble never blocks a deploy, E3), so the service may be
+/// running on empty data while a history exists. fix-54 made that a warning
+/// in the transcript; this keeps it standing, on its stack, until a later
+/// check of the same directory or unit succeeds (a deploy, or a restore).
+pub fn evaluate_restore_checks(state: &HostState) -> Vec<Finding> {
+    state
+        .restore_check_failures
+        .values()
+        .map(|r| Finding {
+            severity: Severity::Broken,
+            subject: r.stack.clone(),
+            what: format!(
+                "the deploy of {} found {} empty and could not check its backup ({}) — it \
+                 started without that data, and a history may exist",
+                crate::state::ymd(r.at),
+                r.what,
+                r.why
+            ),
+            remedy: format!(
+                "check the backup target, then restore the data if it held any (`homelab \
+                 restore stacks/{} --app <app>`, or op-11 for a native unit); a later deploy \
+                 whose check of it succeeds, or a restore, clears this",
+                r.stack
+            ),
+        })
+        .collect()
+}
+
 /// fix-111: older than this, the host-meta backup has stopped: two nights.
 pub const HOST_META_MAX_AGE_S: u64 = 48 * 3600;
 
@@ -825,6 +855,7 @@ pub fn evaluate(
         crate::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S,
     ));
     out.extend(evaluate_host_meta(state, now_unix));
+    out.extend(evaluate_restore_checks(state));
     // fix-96: the second copy and the rotating restic check.
     out.extend(crate::ops::secondcopy::evaluate_copies(
         state,

@@ -204,6 +204,25 @@ pub struct HostState {
     pub last_integrity_check: u64,
     #[serde(default)]
     pub integrity: BTreeMap<String, IntegrityRecord>,
+    /// fix-147 (restore-check-failure, 2026-09-27): data a deploy found
+    /// empty and whose backup it could not check, keyed by `<stack>:<path>`
+    /// or `<stack>:<unit>`. Kept until a later check of the same thing
+    /// succeeds.
+    #[serde(default)]
+    pub restore_check_failures: BTreeMap<String, RestoreCheckFailure>,
+}
+
+/// fix-147: one empty data directory (or native unit) whose backup a deploy
+/// could not check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoreCheckFailure {
+    pub stack: String,
+    /// The directory, or the native unit, that was found empty.
+    pub what: String,
+    /// Unix time of the deploy that could not check it.
+    pub at: u64,
+    /// What the check said.
+    pub why: String,
 }
 
 /// fix-96: what the nightly `restic copy` of one repository did.

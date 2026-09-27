@@ -222,6 +222,51 @@ fn legacy_vault_key(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).to_string()
 }
 
+/// fix-147 (restore-check-failure, 2026-09-27): remember each empty
+/// directory or native unit whose backup could not be checked, and forget
+/// each one whose check succeeded. Keys are `<stack>:<path or unit>`. A
+/// failure to record is said, never fatal: it must not block a deploy either.
+pub(crate) async fn record_restore_checks(
+    ctx: &OpCtx<'_>,
+    stack: &str,
+    failed: &[(String, String)],
+    ok: &[String],
+) {
+    if failed.is_empty() && ok.is_empty() {
+        return;
+    }
+    let now = ctx.now_unix;
+    let recorded = crate::state::StateStore::new(ctx.exec, &ctx.state_dir)
+        .update(|s| {
+            for what in ok {
+                s.restore_check_failures
+                    .remove(&format!("{}:{}", stack, what));
+            }
+            for (what, why) in failed {
+                s.restore_check_failures.insert(
+                    format!("{}:{}", stack, what),
+                    crate::state::RestoreCheckFailure {
+                        stack: stack.to_string(),
+                        what: what.clone(),
+                        at: now,
+                        why: why.clone(),
+                    },
+                );
+            }
+        })
+        .await;
+    if let Err(e) = recorded {
+        ctx.sink.emit(PipelineEvent::Line {
+            level: Level::Warn,
+            source: "HOST".into(),
+            msg: format!(
+                "[e3] could not record the backup checks of {} :: {}",
+                stack, e
+            ),
+        });
+    }
+}
+
 pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let m = &spec.manifest;
     let op = format!("deploy-{}", m.stack_name);
@@ -430,6 +475,9 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         let bcfg = ctx.backup.clone();
         let mut restored_any = false;
         let mut failed_any = false;
+        // fix-147: which checks failed and which succeeded, recorded below.
+        let mut check_failed: Vec<(String, String)> = Vec::new();
+        let mut check_ok: Vec<String> = Vec::new();
         for mount in &m.storage {
             // An app that declares it keeps nothing is empty BY DESIGN, so
             // "empty, therefore restore it" is exactly the wrong conclusion.
@@ -492,6 +540,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 Ok(listed) => listed,
                 Err(why) => {
                     failed_any = true;
+                    check_failed.push((mount.host_path.clone(), why.clone()));
                     ctx.sink.emit(PipelineEvent::Line {
                         level: Level::Warn,
                         source: "HOST".into(),
@@ -503,6 +552,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     continue;
                 }
             };
+            check_ok.push(mount.host_path.clone());
             if listed.is_empty() || listed == "[]" {
                 log_info(format!(
                     "[e3] {} is empty and has no snapshot — fresh",
@@ -547,6 +597,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         if restored_any && !failed_any {
             log_info("[e3] auto-restore complete".into());
         }
+        record_restore_checks(ctx, &m.stack_name, &check_failed, &check_ok).await;
         Ok(if restored_any {
             StepOutcome::Changed
         } else {
@@ -2642,7 +2693,32 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             if !running {
                 if let Some(nm) = spec.native_manifests.get(unit) {
                     use crate::ops::native::EmptyUnit;
-                    match crate::ops::native::restore_empty_unit(exec, &ctx.backup, nm).await? {
+                    let found =
+                        crate::ops::native::restore_empty_unit(exec, &ctx.backup, nm).await?;
+                    // fix-147: a check that could not be made is remembered
+                    // until a later one of the same unit succeeds.
+                    match &found {
+                        EmptyUnit::HasData => {}
+                        EmptyUnit::CheckFailed(why) => {
+                            record_restore_checks(
+                                ctx,
+                                &m.stack_name,
+                                &[(unit.clone(), why.clone())],
+                                &[],
+                            )
+                            .await
+                        }
+                        _ => {
+                            record_restore_checks(
+                                ctx,
+                                &m.stack_name,
+                                &[],
+                                std::slice::from_ref(unit),
+                            )
+                            .await
+                        }
+                    }
+                    match found {
                         EmptyUnit::HasData => {}
                         EmptyUnit::Fresh => log_info(format!(
                             "[native] {}: data is empty and has no snapshot — fresh",

@@ -2871,6 +2871,31 @@ mod native_from_zero {
         );
     }
 
+    /// fix-147: a native unit whose backup could not be checked is
+    /// remembered as well, keyed by stack and unit.
+    #[tokio::test]
+    async fn fix_147_a_native_check_that_fails_is_remembered() {
+        let exec = MockExecutor::new();
+        empty_unit_with_history(&exec);
+        exec.respond_first(
+            "restic snapshots --json",
+            CmdOutput::failed(1, "Fatal: unable to open repository"),
+        );
+        let mut sp = native_spec();
+        sp.native_manifests.insert("kyu".into(), kyu_service(false));
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let _ = deploy(&ctx(&exec, &sink, &j), &sp).await;
+        let st: homelab_core::state::HostState =
+            serde_json::from_str(&exec.file("/var/lib/homelab/state.json").unwrap_or_default())
+                .unwrap_or_default();
+        let rec = st
+            .restore_check_failures
+            .get("drill:kyu")
+            .unwrap_or_else(|| panic!("{:?}", st.restore_check_failures));
+        assert!(rec.why.contains("unable to open repository"), "{}", rec.why);
+    }
+
     /// fix-28: the client stages the NEWEST release of every native; a deploy
     /// that found the program already there used to replace it, whatever
     /// the service's update_policy said.

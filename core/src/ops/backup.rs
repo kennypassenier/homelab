@@ -1550,6 +1550,14 @@ pub async fn restore_app(
         Ok(StepOutcome::Unchanged)
     });
 
+    // fix-147: a restore is a check of these directories that succeeded; a
+    // deploy's earlier failed check of them stops standing.
+    let restored: Vec<String> = groups
+        .iter()
+        .flat_map(|(_, paths)| paths.iter().cloned())
+        .collect();
+    crate::ops::deploy::record_restore_checks(ctx, &m.stack_name, &[], &restored).await;
+
     runner.log(
         Level::Info,
         format!("[restore] {} restored and verified", m.stack_name),

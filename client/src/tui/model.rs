@@ -1403,6 +1403,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
         data_mounts: Vec::new(),
         native_only: false,
         syslog_receivers: vec![],
+        firewall: None,
         natives: Vec::new(),
         stack_name: stack.name.clone(),
         vmid: stack.vmid,

@@ -58,6 +58,7 @@ fn native_kyu_spec() -> DeploySpec {
             data_mounts: Vec::new(),
             native_only: true,
             syslog_receivers: vec![],
+            firewall: None,
             natives: vec!["kyu".into()],
             stack_name: "kyu".into(),
             vmid: 109,

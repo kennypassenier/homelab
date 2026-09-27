@@ -1811,6 +1811,7 @@ port = 5003
                 data_mounts: Vec::new(),
                 native_only: false,
                 syslog_receivers: vec![],
+                firewall: None,
                 natives: Vec::new(),
                 stack_name: "x".into(),
                 vmid: 108,

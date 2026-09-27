@@ -152,3 +152,92 @@ registry_login:
 gateway_route:
   filename: 116-app-kp-soft.yml
   gateway_vmid: 104
+
+# fix-89: the container's Proxmox firewall, written by the deploy to
+# /etc/pve/firewall/116.fw (fix-88). It reproduces, rule for rule and comment
+# for comment, the file written by hand on 2026-09-20 and read back from pve
+# on 2026-09-27 (byte-identical to captured/pve-host/firewall/116.fw), plus
+# one rule Kenny added the same day. So its first deploy adds exactly that
+# rule and the provenance line, and nothing else moves.
+firewall:
+  enabled: true
+  comment: |-
+    /etc/pve/firewall/116.fw — CT 116 (kp-soft), the one container strangers
+    reach. Stateful, applied on its veth, so it sees NEIGHBOUR traffic inside
+    VLAN 10 that no OPNsense rule can (F183). Every rule below comes from a
+    measurement of 2026-09-20: ss on the container (no neighbour connections),
+    the containers' own configuration (almanac, registry cache), the gateway
+    route (8080, 8787), the Prometheus targets (8081, 9100) and the Uptime Kuma
+    ping. Kenny approved it on 2026-09-20 ("Klopt").
+  policy_in: DROP
+  policy_out: ACCEPT
+  # The management guard (DNS to 10.10.5.1, drop 10.10.5.0/24) would be three
+  # rules more than the live file carries, and Kenny asked for this
+  # container's first declared deploy to change nothing he did not decide.
+  # Measured 2026-09-27: from CT 116 both 10.10.5.250:8006 and the prox route
+  # through Traefik time out, because OPNsense's own rule for CT 116 closes
+  # the management network at the router.
+  management_open: >-
+    OPNsense's rule for CT 116 already closes 10.10.5.0/24 at the router
+    (measured 2026-09-27: 10.10.5.250:8006 times out); this declaration
+    reproduces the hand-made 116.fw of 2026-09-20 rule for rule
+  rules:
+    - comment: "1 · pve's rescue address first: never from the container that strangers reach"
+      dir: out
+      action: DROP
+      dest: 10.10.10.250
+    - comment: "2 · the neighbours it really uses: almanac (JobTracker events), registry cache (docker pulls)"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.12
+      proto: tcp
+      dport: 8080
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.17
+      proto: tcp
+      dport: "5000:5003"
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.4
+      proto: tcp
+      dport: 3100
+      note: Loki push (Alloy), added 2026-09-25
+    - comment: |-
+        3 · every other neighbour in VLAN 10 stays out of reach; what leaves the
+            VLAN (DNS 10.10.5.1, internet) crosses the router, where OPNsense rules apply
+      dir: out
+      action: DROP
+      dest: 10.10.10.0/24
+    - comment: |-
+        4 · who may reach the container: Traefik (site, JobTracker), Prometheus
+            (cadvisor, node exporter), Uptime Kuma (ping), Kenny's desktop (ssh)
+      dir: in
+      action: ACCEPT
+      source: 10.10.10.4
+      proto: tcp
+      dport: "8080,8787"
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.13
+      proto: tcp
+      dport: "8081,9100"
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: icmp
+    # Kenny, 2026-09-27 (form item kp-soft-kuma-firewall: "Kuma HTTP toelaten,
+    # firewall in de repo"): Uptime Kuma's declared monitor `kp-soft · site`
+    # (http://10.10.10.16:8080/up) could never pass while only its ping was
+    # let in.
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: tcp
+      dport: "8080,8787"
+      note: Uptime Kuma HTTP monitors (Kenny, 2026-09-27)
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.10
+      proto: tcp
+      dport: 22

@@ -43,6 +43,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         native_only: false,
         syslog_receivers: vec![],
         natives: Vec::new(),
+        firewall: None,
         stack_name: stack.into(),
         vmid,
         hostname: format!("{}-app-{}", vmid, stack),

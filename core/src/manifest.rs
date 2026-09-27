@@ -106,6 +106,134 @@ pub struct StackManifest {
     /// so it would be loaded; the orchestrator knew nothing about either.
     #[serde(default)]
     pub syslog_receivers: Vec<SyslogReceiver>,
+    /// fix-88: this container's Proxmox firewall, written by the deploy to
+    /// `/etc/pve/firewall/<vmid>.fw` (expert panel 2026-09-27,
+    /// flat-vlan-no-east-west-control and traefik-lan-host-header-bypass).
+    ///
+    /// Every container shared one flat VLAN with nothing between them: a
+    /// shell in any one of them reached every neighbour's ports, the Proxmox
+    /// and OPNsense logins directly, and the same logins again through
+    /// Traefik with a forged Host header (measured from CT 107: 200 on all
+    /// four). The only per-container ruleset was CT 116's, written by hand on
+    /// pve and known to no file here. Kenny's rule (2026-09-27): everything
+    /// declarative, nothing hand-made the repository does not know — so the
+    /// ruleset lives in the stack file and the deploy writes it.
+    ///
+    /// Absent = the repository declares no firewall for this container, and
+    /// the fleet check reports any `.fw` file found for it on pve. Skipped
+    /// when absent so a manifest without one hashes as it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firewall: Option<FirewallSpec>,
+}
+
+/// fix-88: a container's Proxmox firewall, as declared in its stack file.
+///
+/// The rendered file is a pure function of this (`crate::firewall::render`),
+/// so a hand edit on pve is visible as a difference and a deploy puts the
+/// declaration back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FirewallSpec {
+    /// Whether the deploy writes the file and switches the container's NIC
+    /// flag on. Required, so a declaration always says whether it is in
+    /// force: the rollout goes stack by stack, and a declaration that is
+    /// written but not applied has to be told apart from one that is.
+    pub enabled: bool,
+    /// The comment block at the top of the file, one `# ` line per line.
+    #[serde(default)]
+    pub comment: Option<String>,
+    /// Default DROP: a container accepts only what its rules name.
+    #[serde(default = "fw_drop")]
+    pub policy_in: FwAction,
+    /// Default ACCEPT: outbound is narrowed by DROP rules and by the
+    /// management guard, not by a whitelist of the internet.
+    #[serde(default = "fw_accept")]
+    pub policy_out: FwAction,
+    /// The management network 10.10.5.0/24 is closed by default, except DNS
+    /// to the router: the renderer appends that guard after the declared
+    /// rules, so a declared ACCEPT towards the management network still wins.
+    /// A container that must go without the guard says why here — the reason
+    /// is the value, like `no_backup`, so the guard cannot be switched off
+    /// without one.
+    #[serde(default)]
+    pub management_open: Option<String>,
+    #[serde(default)]
+    pub rules: Vec<FirewallRule>,
+}
+
+fn fw_drop() -> FwAction {
+    FwAction::Drop
+}
+
+fn fw_accept() -> FwAction {
+    FwAction::Accept
+}
+
+/// One line of the `[RULES]` section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FirewallRule {
+    pub dir: FwDir,
+    pub action: FwAction,
+    /// A single IPv4 address or a network in CIDR form.
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub dest: Option<String>,
+    #[serde(default)]
+    pub proto: Option<FwProto>,
+    /// Ports as Proxmox writes them: `8080`, `8080,8787` or `5000:5003`.
+    /// A bare number in YAML is accepted too.
+    #[serde(default, deserialize_with = "de_ports")]
+    pub dport: Option<String>,
+    /// Comment lines written above the rule.
+    #[serde(default)]
+    pub comment: Option<String>,
+    /// A comment on the rule's own line, after `#`; Proxmox keeps it as the
+    /// rule's comment.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FwDir {
+    In,
+    Out,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum FwAction {
+    Accept,
+    Drop,
+    Reject,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FwProto {
+    Tcp,
+    Udp,
+    Icmp,
+}
+
+/// `dport: 3100` and `dport: "8080,8787"` both read as a string.
+fn de_ports<'de, D>(d: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Ports {
+        N(u64),
+        S(String),
+    }
+    Ok(match Option::<Ports>::deserialize(d)? {
+        None => None,
+        Some(Ports::N(n)) => Some(n.to_string()),
+        Some(Ports::S(s)) => Some(s),
+    })
 }
 
 /// Where the credentials for a private registry come from.
@@ -515,6 +643,12 @@ fn compose_mount_targets(content: &str) -> Vec<(String, String, bool)> {
 }
 
 fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
+    // fix-88: a firewall Proxmox would reject or misread is refused before
+    // anything is written — a rule that silently means the whole VLAN is the
+    // failure a firewall exists to prevent.
+    if let Some(fw) = &m.firewall {
+        problems.extend(crate::firewall::problems(fw));
+    }
     // gap-11: a receiver the shipper could not open would pass the deploy —
     // Alloy logs a bind failure and keeps running — and the device's lines
     // would vanish with every step reporting success. So the manifest is

@@ -99,6 +99,7 @@ fn y4_a_healthy_fleet_is_silent() {
         big_logs: vec![],
         owners: vec![],
         route_files: vec![],
+        firewalls: vec![],
         watched_backups: vec![],
         containers: vec![(113, "113-app-metrics".into())],
         routes: vec![RouteFact {
@@ -510,6 +511,7 @@ fn boot_manifest(vmid: u16, onboot: bool, order: u16, mem: u32, cores: u16) -> S
         data_mounts: Vec::new(),
         native_only: false,
         syslog_receivers: vec![],
+        firewall: None,
         natives: Vec::new(),
         stack_name: "home".into(),
         vmid,

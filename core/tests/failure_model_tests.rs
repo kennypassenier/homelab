@@ -18,6 +18,7 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
             data_mounts: Vec::new(),
             native_only: false,
             syslog_receivers: vec![],
+            firewall: None,
             natives: Vec::new(),
             stack_name: stack.into(),
             vmid,

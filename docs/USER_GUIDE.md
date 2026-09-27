@@ -815,6 +815,50 @@ removed from the container by the next deploy; a `.service`, `.timer`,
 reloads afterwards (step `retire dropped`, `core/src/ops/deploy.rs:1044-1106`,
 `:1181-1183`). `stacks/kyu/rootfs/` is the example in the repository.
 
+A **`firewall:` block** declares the container's Proxmox firewall (fix-88).
+The deploy renders it to `/etc/pve/firewall/<vmid>.fw` and writes it only
+when the rendering differs from what pve holds:
+
+```yaml
+firewall:
+  enabled: true            # false = declared for the rollout, nothing written
+  comment: |-              # the file's header, one "# " line per line
+    CT 116 (kp-soft), the one container strangers reach.
+  policy_in: DROP          # default DROP
+  policy_out: ACCEPT       # default ACCEPT
+  # management_open: <reason>   # drops the management guard; a reason is required
+  rules:
+    - comment: the registry cache (docker pulls)
+      dir: out             # in | out
+      action: ACCEPT       # ACCEPT | DROP | REJECT
+      dest: 10.10.10.17    # one address or a network in CIDR form
+      proto: tcp           # tcp | udp | icmp
+      dport: "5000:5003"   # 8080, "8080,8787" or "5000:5003"
+      note: registry cache # written after the rule on its own line
+```
+
+- The file starts with a line naming the stack file it comes from, then the
+  declaration in order. Unless `management_open` gives a reason, three rules
+  follow the declared ones: DNS to 10.10.5.1 (udp and tcp 53) and a drop of
+  the management network 10.10.5.0/24. A declared ACCEPT towards that network
+  comes first and still passes.
+- The validator refuses a network with host bits set (`10.10.10.4/24`), a
+  port outside 1 to 65535 or a backwards range, a `dport` without `proto` or
+  with `icmp`, a note over more than one line, and a `management_open` reason
+  shorter than ten characters, naming the rule and the field.
+- On the gateway, a rule or `policy_in` that opens tcp port 80 is refused:
+  Traefik answers a forged Host header with the Proxmox and OPNsense logins,
+  and the tunnel reaches port 80 over the gateway's own docker network, which
+  the container's firewall never sees.
+- The step `firewall` runs before `provision container`, logs `unchanged` or
+  `written: +N -M` with every line that came and went, and switches net0 to
+  `firewall=1` when it is off; without that flag Proxmox applies none of the
+  rules. A new container is created with the flag on.
+- `homelab check` reports a file on pve that differs from the declaration the
+  last deploy recorded, a declared file that is absent, a NIC with
+  `firewall=0`, and a `.fw` file for a stack that does not enable one.
+  Declarations with `enabled: false` are listed in one noted line.
+
 **Worked example: check a stack without the host.**
 
 ```bash
@@ -1063,6 +1107,7 @@ steps in this order (`core/src/ops/deploy.rs`, the `step!` calls from line
 | `host storage` | creates `/appdata/...` directories and sets their owner |
 | `auto-restore check` | E3: refills empty data directories from their latest snapshot |
 | `metrics discovery` | writes this stack's Prometheus target file, when configured (F4) |
+| `firewall` | fix-88: writes `/etc/pve/firewall/<vmid>.fw` from the stack's `firewall:` block when it changed and switches net0 to `firewall=1`; only when the block says `enabled: true` |
 | `provision container` | creates or clones the container (C1, B8), attaches mounts and detaches the ones the stack no longer declares, H4 devices, W3 boot policy, protection flag; starts it if stopped |
 | `wait for systemd` | waits until the container reports running or degraded |
 | `bootstrap docker` | installs docker when missing; skipped for native-only stacks |

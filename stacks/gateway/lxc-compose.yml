@@ -170,3 +170,163 @@ syslog_receivers:
     listen: 0.0.0.0:1514
     protocol: udp
     format: rfc5424
+
+# fix-89: this container's Proxmox firewall (fix-88), declared but NOT in force:
+# Kenny's rollout goes one stack at a time, by setting `enabled: true` here and
+# deploying. Every rule comes from a flow measured on 2026-09-27; the test
+# core/tests/firewall_declarations_tests.rs holds the rules against that list.
+# The management network stays closed except DNS to 10.10.5.1 (the guard the
+# renderer appends) and what an ACCEPT below names.
+firewall:
+  enabled: false
+  comment: |-
+    CT 104 (gateway), the gateway: Traefik, cloudflared, CrowdSec, Grafana, Loki, GoAccess.
+    Declared from the flows measured 2026-09-27 (fix-89): tcpdump on pve's veths,
+    conntrack and ss in the container, the Prometheus targets, the Uptime Kuma
+    monitors, the Traefik routes and the stacks' own configuration.
+    Port 80 is open to nobody (traefik-lan-host-header-bypass): the tunnel reaches
+    Traefik over gateway_net inside this container (172.18.0.1 in the access log),
+    which never crosses the veth. Uptime Kuma's bare-Host monitor on :80 has to move
+    before this is enabled.
+  rules:
+    - comment: "pve's rescue address: never from a container"
+      dir: out
+      action: DROP
+      dest: 10.10.10.250
+    - comment: "the neighbours it uses"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.17
+      proto: tcp
+      dport: "5000:5003"
+      note: registry cache (docker pulls; the deploy probes all four)
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.5
+      proto: tcp
+      dport: "8080"
+      note: route qbit
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.6
+      proto: tcp
+      dport: "8096,8989,7878,6767,9696,5055"
+      note: media routes
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.7
+      proto: tcp
+      dport: "3001"
+      note: Uptime Kuma routes
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.8
+      proto: tcp
+      dport: "8384"
+      note: Syncthing GUI route
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.9
+      proto: tcp
+      dport: "8080"
+      note: kyu route
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.11
+      proto: tcp
+      dport: "1900"
+      note: SuperSync route
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.12
+      proto: tcp
+      dport: "8080"
+      note: almanac route
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.13
+      proto: tcp
+      dport: "9090,9093"
+      note: prom and alerts routes, Grafana's datasource
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.14
+      proto: tcp
+      dport: "5006,8080,8000"
+      note: paperwork routes
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.15
+      proto: tcp
+      dport: "3000"
+      note: homepage route
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.16
+      proto: tcp
+      dport: "8080,8787"
+      note: kp-soft routes (116.fw lets both in)
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.2
+      proto: tcp
+      dport: "8123"
+      note: Home Assistant route
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.5.1
+      proto: tcp
+      dport: "443"
+      note: hand-written route opn (OPNsense GUI)
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.5.250
+      proto: tcp
+      dport: "8006"
+      note: hand-written route prox (Proxmox GUI)
+    - comment: "every other neighbour in VLAN 10 stays out of reach"
+      dir: out
+      action: DROP
+      dest: 10.10.10.0/24
+    - comment: "who may reach the container"
+      dir: in
+      action: ACCEPT
+      source: 10.10.10.1
+      proto: udp
+      dport: "1514"
+      note: OPNsense syslog into Alloy
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.0/24
+      proto: tcp
+      dport: "3100"
+      note: Loki push from every container's Alloy and from pve
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.13
+      proto: tcp
+      dport: "8081,8082,9100"
+      note: Prometheus (cadvisor, traefik metrics, node exporter)
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: icmp
+      note: Uptime Kuma ping
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: tcp
+      dport: "3000,3100"
+      note: Uptime Kuma HTTP monitors (Grafana, Loki)
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.15
+      proto: tcp
+      dport: "3000"
+      note: homepage's Grafana widget
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.10
+      proto: tcp
+      dport: "22,7880,7881"
+      note: Kenny's desktop (ssh, GoAccess report and its websocket)

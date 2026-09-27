@@ -443,7 +443,7 @@ reaches curl through a mode-600 header file,
 | `scheduler: backup for <stack> stood aside` | info | a nightly backup deferred | `host/src/main.rs:2216` |
 | `fleet check: repo and reality agree` | info | the nightly check found nothing alarming | `host/src/main.rs:2648-2655` |
 | `fleet check: <n> finding(s)` | warn | the nightly check found something; it also went out as a notification | `host/src/main.rs:2657-2679` |
-| `notification route <url> failed: <why>` | warn | one webhook route did not answer 2xx; the URL carries the webhook id, so do not paste this line anywhere shared | `host/src/main.rs:2918-2921` |
+| `notification route <scheme>://<host:port>/<path withheld> failed: <why>` | warn | one webhook route did not answer 2xx; the path (a Home Assistant webhook id) is withheld since fix-123, the full URL is `notify_webhook` or `notify_fallback_webhook` in `host.toml` | `host/src/main.rs`, `notify_raw` |
 | `notification took the fallback route: the primary said <why>` | warn | primary failed, fallback delivered | `host/src/main.rs:2909-2914` |
 | `mirror push failed (will retry): <e>` | warn | the intent repo did not reach its mirror; retried every tick | `host/src/main.rs:2781-2785`, `2250` |
 | `A6 exec vmid=<n> cmd=<cmd>` | info | a `homelab exec` ran | `host/src/main.rs:3969` |

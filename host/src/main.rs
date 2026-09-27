@@ -4117,7 +4117,12 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
             }
             homelab_core::notify::Delivery::Failed(why) => {
                 last = why;
-                tracing::warn!("notification route {} failed: {}", url, last);
+                // fix-123: the route's host only; a webhook path is its id.
+                tracing::warn!(
+                    "notification route {} failed: {}",
+                    homelab_core::notify::route_for_log(url),
+                    last
+                );
             }
         }
     }

@@ -1131,9 +1131,11 @@ mod seeder_verdict {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].severity, Severity::Drift);
         assert!(out[0].what.contains("host · drill"), "{}", out[0].what);
+        // Since 2026-09-27 the seeder removes the monitors it owns; one that
+        // is still listed here was left on purpose, and the remedy says why.
         assert!(
-            out[0].remedy.contains("never deletes"),
-            "H2b is why this can only tell you: {}",
+            out[0].remedy.contains("truncated"),
+            "the remedy must say why the seeder left it: {}",
             out[0].remedy
         );
     }

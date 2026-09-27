@@ -526,3 +526,64 @@ fn a_receiver_the_shipper_could_not_open_is_refused_at_plan_time() {
         .to_string();
     assert!(msg.contains("sctp") && msg.contains("cef"), "{}", msg);
 }
+
+/// Kenny, 2026-09-27: the watch list is declarative, all of it. A monitor no
+/// file declares is removed (a hand-made one too: those belong in the file),
+/// a monitor whose address changed is corrected, and a desired list that
+/// suddenly shrinks by more than a quarter is refused as probably truncated.
+/// Runs the seeder's own planning function with python3.
+///
+/// covers: step-21
+#[test]
+fn step_21_the_seeder_keeps_uptime_kuma_equal_to_the_files() {
+    let dir = stacks_dir().join("uptime").join("kuma-seeder");
+    let script = r#"
+import json, seed
+tag = [{"name": "homelab-seeder"}]
+monitors = [
+    {"id": 1, "name": "host · gateway", "hostname": "10.10.10.4", "tags": tag},
+    {"id": 2, "name": "host · drill", "hostname": "10.10.10.19", "tags": []},
+    {"id": 3, "name": "gateway · traefik", "url": "http://10.10.10.4:8080/ping", "tags": tag},
+    {"id": 4, "name": "old · gone", "url": "http://10.10.10.99/", "tags": tag},
+    {"id": 5, "name": "my own check", "url": "http://example/", "tags": []},
+    {"id": 6, "name": "media · jellyfin", "url": "http://10.10.10.66:8096/health", "tags": []},
+]
+desired = {"host · gateway": "10.10.10.4", "gateway · traefik": "http://10.10.10.4:8080/ping",
+           "media · jellyfin": "http://10.10.10.6:8096/health"}
+desired.update({k: "x" for k in "abcdefghijklmn"})
+to_tag, to_delete, refused, to_fix = seed.plan_owned(monitors, desired, True)
+print(json.dumps([sorted(m["id"] for m in to_tag), sorted(m["id"] for m in to_delete), refused,
+                  [(m["id"], w) for m, w in to_fix]]))
+_, d2, r2, _ = seed.plan_owned(monitors, desired, False)
+print(json.dumps([len(d2), r2 is not None]))
+many = [{"id": i, "name": f"host · s{i}", "hostname": "h", "tags": tag} for i in range(10)]
+_, d3, r3, _ = seed.plan_owned(many, {"host · s0": "h"}, True)
+print(json.dumps([len(d3), r3 is not None]))
+"#;
+    let out = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .env("PYTHONPATH", &dir)
+        .output()
+        .expect("python3 must be available (it is in the CI image)");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines[0], r#"[[6], [2, 4, 5], null, [[6, "http://10.10.10.6:8096/health"]]]"#,
+        "tag the declared untagged one, remove everything no file declares (a hand-made \
+         monitor too, since 2026-09-27), and correct an address that changed"
+    );
+    assert_eq!(
+        lines[1], "[0, true]",
+        "without the generated list nothing is judged"
+    );
+    assert_eq!(
+        lines[2], "[0, true]",
+        "nine of ten gone at once is refused as a truncated list"
+    );
+}

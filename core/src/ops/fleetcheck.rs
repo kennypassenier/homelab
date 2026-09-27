@@ -1011,8 +1011,10 @@ pub fn evaluate_seed(fact: &SeedFact, max_age_s: u64) -> Vec<Finding> {
                 fact.stale.len(),
                 fact.stale.join(", ")
             ),
-            remedy: "remove them in Uptime Kuma if that is right — this suite never deletes \
-                     somebody's monitor (form H2b), so it can only tell you"
+            remedy: "the seeder removes the monitors it owns once their entry leaves the files \
+                     (2026-09-27); these it left, because the desired list looked truncated \
+                     (see `refused` in last-seed.json) — check the generated list, or remove \
+                     them in Uptime Kuma"
                 .into(),
         });
     }

@@ -31,7 +31,23 @@ import os
 import sys
 import time
 
-from uptime_kuma_api import UptimeKumaApi, MonitorType, NotificationType
+try:
+    from uptime_kuma_api import UptimeKumaApi, MonitorType, NotificationType
+except ImportError:  # the planning functions are tested without the client
+    UptimeKumaApi = MonitorType = NotificationType = None
+
+# Kenny, 2026-09-27: the watch list is declarative, all of it. Every monitor
+# Uptime Kuma holds is declared here or in the generated host list; one that
+# is not is removed, and one whose address changed is corrected. A monitor
+# made by hand belongs in APPLICATION_MONITORS like any other. This replaces
+# the 2026-09-01 rule (H2b) that the seeder never deletes a monitor. Every
+# monitor it manages carries this tag, so the Kuma UI shows which ones are
+# file-driven (all of them, from now on).
+OWNER_TAG = "homelab-seeder"
+# A desired list that suddenly lost more than this share of the owned
+# monitors is treated as truncated (a half-written file, a bug), not as a
+# fleet that shrank: nothing is removed and the run says why.
+DELETE_CAP_FRACTION = 0.25
 
 OK = ["200-299"]
 OK_REDIRECT = ["200-299", "302"]
@@ -55,6 +71,10 @@ APPLICATION_MONITORS = [
     ("downloader · qbittorrent", "http://10.10.10.5:8080/", OK),
     ("syncthing · web", "http://10.10.10.8:8384/rest/noauth/health", OK),
     ("almanac · healthz", "http://10.10.10.12:8080/healthz", OK),
+    # The hub itself. Made by hand in Uptime Kuma before the seeder existed;
+    # declared here on 2026-09-27 under the same name, so its history stays
+    # (Kenny: even a hand-made monitor is declared in a file).
+    ("kyu", "http://10.10.10.9:8080/healthz", OK),
     ("kyu · runner", "http://10.10.10.9:8082/healthz", OK),
     # The STRICT health deliberately: it answers 503 when the switchboard
     # cannot do its job, which is what a monitor should see. Container and
@@ -214,6 +234,43 @@ def ensure_ha_notification(api):
     return created.get("id"), "added"
 
 
+def is_owned(m):
+    return any(t.get("name") == OWNER_TAG for t in (m.get("tags") or []))
+
+
+def plan_owned(monitors, desired, judged):
+    """What to tag, remove and correct, as a pure function (tested).
+
+    `desired` maps a monitor name to its declared target (a URL for an HTTP
+    monitor, a hostname for a ping). Returns (to_tag, to_delete, refused,
+    to_fix): declared monitors that lack the tag; monitors no file declares;
+    a reason when removal was refused; and (monitor, target) pairs whose
+    address no longer matches the file (the F157 shape).
+    """
+    to_tag = [m for m in monitors if m["name"] in desired and not is_owned(m)]
+    to_fix = []
+    for m in monitors:
+        want = desired.get(m["name"]) if isinstance(desired, dict) else None
+        have = m.get("url") or m.get("hostname") or ""
+        if want and have and want != have:
+            to_fix.append((m, want))
+    if not judged:
+        return to_tag, [], "no generated host-monitor list, so nothing is judged", to_fix
+    to_delete = [m for m in monitors if m["name"] not in desired]
+    cap = max(3, int(len(monitors) * DELETE_CAP_FRACTION))
+    if len(to_delete) > cap:
+        return to_tag, [], (f"{len(to_delete)} monitors to remove is more than {cap}; "
+                            "the desired list looks truncated, so nothing is removed"), to_fix
+    return to_tag, to_delete, None, to_fix
+
+
+def ensure_owner_tag(api):
+    for t in api.get_tags():
+        if t.get("name") == OWNER_TAG:
+            return t["id"]
+    return api.add_tag(name=OWNER_TAG, color="#2f6fed")["id"]
+
+
 def seed_once(api, host_monitors, have_generated_list):
     have = {m["name"] for m in api.get_monitors()}
     added = skipped = 0
@@ -244,29 +301,46 @@ def seed_once(api, host_monitors, have_generated_list):
         added += 1
         print(f"[seed]   + {name}", flush=True)
 
-    # Reported, never deleted (H2b). A monitor named for a stack the fleet no
-    # longer has is the F158 shape: it stays green forever, or red forever,
-    # and either way it is furniture rather than information.
+    # Declarative (Kenny, 2026-09-27): a monitor this seeder owns whose entry
+    # left the files is removed; a hand-made one is only ever reported. The
+    # F158 shape (a monitor for a stack that is gone, red or green forever)
+    # is what this removes.
     #
-    # But ONLY when there is a list to compare against. Without the generated
+    # Only when there is a list to compare against. Without the generated
     # file, "not in the fleet" means "the file was missing", and on the first
     # live run that produced eleven warnings about stacks that all exist
-    # (F175). Absent data is not the same as an empty answer — deciding
-    # otherwise is exactly the failure shape this whole project keeps finding.
+    # (F175). Absent data is not the same as an empty answer.
+    desired = {n: url for n, url, _ in APPLICATION_MONITORS}
+    desired.update({n: host for n, host in host_monitors})
+    monitors = api.get_monitors()
+    to_tag, to_delete, refused, to_fix = plan_owned(monitors, desired, bool(have_generated_list))
+    if to_tag:
+        tag_id = ensure_owner_tag(api)
+        for m in to_tag:
+            api.add_monitor_tag(tag_id=tag_id, monitor_id=m["id"], value="")
+    fixed = []
+    for m, want in to_fix:
+        field = "url" if m.get("url") else "hostname"
+        api.edit_monitor(m["id"], **{field: want})
+        fixed.append(m["name"])
+        print(f"[seed]   ~ {m['name']} now points at {want}", flush=True)
+    removed = []
+    for m in to_delete:
+        api.delete_monitor(m["id"])
+        removed.append(m["name"])
+        print(f"[seed]   - {m['name']} (no file declares it)", flush=True)
+    if refused:
+        print(f"[seed] WARN: {refused}", flush=True)
+    # Left over only when removal was refused: reported for the fleet check.
     stale = []
-    if have_generated_list:
-        fleet = {n for n, _ in host_monitors}
-        stale = sorted(n for n in have
-                       if n.startswith("host · ") and n not in fleet)
-    else:
-        print("[seed] WARN: no generated host-monitor list, so nothing is "
-              "judged stale — a missing file is not an empty fleet", flush=True)
+    if have_generated_list and refused is not None:
+        stale = sorted(m["name"] for m in monitors if m["name"] not in desired)
     for name in stale:
-        print(f"[seed] WARN: '{name}' watches a stack the fleet does not "
-              "have — remove it in Uptime Kuma if that is right", flush=True)
+        print(f"[seed] WARN: '{name}' is declared nowhere and was not removed: "
+              + (refused or ""), flush=True)
 
     print(f"[seed] {added} added, {skipped} already existed, "
-          f"{len(stale)} stale", flush=True)
+          f"{len(fixed)} corrected, {len(removed)} removed, {len(stale)} stale", flush=True)
 
     # The verdict, written where something other than a human reading
     # container logs can find it.
@@ -282,6 +356,9 @@ def seed_once(api, host_monitors, have_generated_list):
         "added": added,
         "skipped": skipped,
         "stale": stale,
+        "removed": removed,
+        "corrected": fixed,
+        "refused": refused,
         "judged": bool(have_generated_list),
         "almanac_notification": almanac_state,
         "ha_notification": ha_state,

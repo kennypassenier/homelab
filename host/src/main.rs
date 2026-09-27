@@ -1186,7 +1186,8 @@ mod tests {
     async fn fix_120_a_refused_connection_is_counted_with_its_peer() {
         let path = format!("/tmp/homelab-fix120-router-{}.toml", std::process::id());
         std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
-        let state = test_state(load_config_from(path));
+        let state = test_state(load_config_from(path.clone()));
+        let _ = std::fs::remove_file(&path);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = app_router(state.clone());
@@ -2103,7 +2104,8 @@ port = 5003
     async fn fix_126_the_version_endpoint_needs_the_token() {
         let path = format!("/tmp/homelab-fix126-{}.toml", std::process::id());
         std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
-        let state = test_state(load_config_from(path));
+        let state = test_state(load_config_from(path.clone()));
+        let _ = std::fs::remove_file(&path);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = app_router(state.clone());

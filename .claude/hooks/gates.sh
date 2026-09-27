@@ -38,7 +38,15 @@ cargo clippy --workspace --all-targets -- -D warnings
 # program and `gate_glob` is a shell function, so the wrapper that way
 # round printed `env: 'gate_glob': No such file or directory` and the
 # suite never ran (2026-09-16).
-gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' -- \
+# The suite also validates inputs that are not Rust: every stack file
+# (core/tests/stack_files_tests.rs), the committed DR runbook and test plan
+# (client/tests/tui_snapshot_tests.rs), config/client.toml
+# (repo_config_tests.rs), templates and presets. Keyed on Rust alone, a
+# broken stack file was committed and deployed from the working tree before
+# any test saw it (expert panel 2026-09-27, local-gate-skips-stack-tests).
+gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
+  'stacks/*' 'templates/*' 'presets/*' 'config/*' 'proto/*' 'core/assets/*' \
+  'docs/DR_RUNBOOK.md' 'docs/deployment/TEST_PLAN.md' -- \
   env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
       -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
       cargo test --workspace

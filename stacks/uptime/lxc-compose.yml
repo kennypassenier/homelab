@@ -19,7 +19,12 @@ network:
 
 resources:
   cores: 1
-  memory_mb: 512
+  # 1024 since 2026-09-27 18:35: the deploy that gave Alloy read access to
+  # the container logs left Kuma, its seeder, cadvisor, the node exporter and
+  # Alloy in 512 MB with memory pressure at ~60% (/proc/pressure/memory
+  # avg60, measured) and docker and Kuma not answering. The same reading
+  # before the deploy was below 1%.
+  memory_mb: 1024
   # W1 (Kenny, 2026-09-02): none. Measured that night, the container's own
 
   # programs used between 4% and 37% of this limit — nothing here has ever

@@ -2501,7 +2501,11 @@ fn the_committed_test_plan_matches_a_fresh_generation() {
         .parent()
         .unwrap()
         .to_path_buf();
-    let out = std::env::temp_dir().join("homelab-testplan-check.md");
+    // Per process: parallel worktrees ran this at the same moment on
+    // 2026-09-27, each overwrote the other's file, and a fresh plan was
+    // reported stale by one line.
+    let out =
+        std::env::temp_dir().join(format!("homelab-testplan-check-{}.md", std::process::id()));
     homelab_client::testplan::generate_test_plan(
         &[&root.join("core/tests"), &root.join("client/tests")],
         &root.join("docs/deployment/REALIZATION_PLAN.md"),

@@ -446,7 +446,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### uptime (vmid 107)
 
-- Container: hostname `107-app-uptime`, ip `10.10.10.7/24` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 8 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 20.
+- Container: hostname `107-app-uptime`, ip `10.10.10.7/24` on `vmbr0` VLAN 10, 1 core(s), 1024 MiB RAM, 0 MiB swap, 8 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 20.
 - Apps (docker compose, started in this order): uptime-kuma, kuma-seeder. Files in the container under `/opt/uptime/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/uptime`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:

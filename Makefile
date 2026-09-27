@@ -63,6 +63,9 @@ endif
 		*) echo "VERSION must be plain x.y.z (no leading v)"; exit 1 ;; \
 	esac
 	@test -z "$$(git status --porcelain)" || { echo "working tree not clean — commit first"; exit 1; }
+	@# A release is cut from main only: `git push origin HEAD` pushed whatever
+	@# branch was checked out (expert panel 2026-09-27, make-release-guard-no-wait).
+	@test "$$(git rev-parse --abbrev-ref HEAD)" = main || { echo "refusing: releases are cut from main, not $$(git rev-parse --abbrev-ref HEAD)"; exit 1; }
 	@git rev-parse "v$(VERSION)" >/dev/null 2>&1 && { echo "tag v$(VERSION) already exists"; exit 1; } || true
 	# Release only from a base CI has actually passed.
 	#
@@ -86,6 +89,17 @@ endif
 	# refuse to release from a HEAD whose CI is red. Unknown is allowed and
 	# says so — a commit that was never pushed has no runs, and refusing that
 	# would make the rule unusable offline.
+	@# Wait while CI on HEAD is still running: measured on 2026-09-27, the
+	@# day's releases were tagged while the push's own CI was mid-run, so the
+	@# guard below read "no verdict" and let every one through
+	@# (make-release-guard-no-wait). 20 minutes at most.
+	@for i in $$(seq 1 40); do \
+		p=$$(gh api "repos/{owner}/{repo}/commits/$$(git rev-parse HEAD)/check-runs" \
+			--jq '[.check_runs[] | select(.status != "completed")] | length' 2>/dev/null || echo 0); \
+		[ "$${p:-0}" -eq 0 ] && break; \
+		[ $$i -eq 1 ] && echo "  · CI on HEAD still running ($$p check(s)) — waiting"; \
+		sleep 30; \
+	done
 	@st=$$(gh api "repos/{owner}/{repo}/commits/$$(git rev-parse HEAD)/check-runs" \
 		--jq '[.check_runs[] | select(.app.slug != "dependabot") | .conclusion] | join(",")' \
 		2>/dev/null | tr -cd 'a-z_,'); \
@@ -103,6 +117,9 @@ endif
 	# once per machine.
 	@msrv=$$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml); \
 	echo "  · MSRV $$msrv: cargo +$$msrv check"; \
+	rustup toolchain list | grep -q "^$$msrv" || { \
+		echo "refusing: Rust $$msrv is not installed here, so the MSRV check cannot run"; \
+		echo "  rustup toolchain install $$msrv --profile minimal"; exit 1; }; \
 	cargo +$$msrv check --workspace --locked --quiet || { \
 		echo "refusing: the code no longer builds with Rust $$msrv, which Cargo.toml promises (rust-version)"; \
 		echo "  either fix the code or raise rust-version deliberately"; exit 1; }

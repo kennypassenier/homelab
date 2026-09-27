@@ -20,3 +20,4 @@ browser_scripts/
 # Python bytecode from running a stack script locally
 __pycache__/
 *.pyc
+.claude/worktrees/

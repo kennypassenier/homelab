@@ -2409,11 +2409,7 @@ async fn scheduler_loop(state: AppState) {
                 let applied = Some(st.applied_at);
                 // B1: the orchestrator's own release update, for the
                 // services whose policy hands it to the orchestrator.
-                for native in st
-                    .natives
-                    .iter()
-                    .filter(|n| n.update_policy == homelab_core::native::UpdatePolicy::Auto)
-                {
+                for native in st.natives.iter().filter(|n| n.nightly_updates().release) {
                     let native = native.clone();
                     let r = run_mutating_op(&state, &exec, 0, "scheduled-release-update", |ctx| {
                         Box::pin(async move {
@@ -2423,7 +2419,7 @@ async fn scheduler_loop(state: AppState) {
                     .await;
                     update_ok &= r.ok;
                 }
-                for native in st.natives.clone() {
+                for native in st.natives.iter().filter(|n| n.nightly_updates().own_cmd) {
                     let n2 = native.clone();
                     let r = run_mutating_op(&state, &exec, 0, "scheduled-update-native", |ctx| {
                         Box::pin(async move {

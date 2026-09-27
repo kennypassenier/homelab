@@ -600,6 +600,7 @@ fn runbook_stack_section(
                 match svc.update_policy {
                     homelab_core::native::UpdatePolicy::Auto => "auto",
                     homelab_core::native::UpdatePolicy::Manual => "manual",
+                    homelab_core::native::UpdatePolicy::OwnVerb => "self",
                 }
             ));
             // The deploy reads `<unit>/<unit>.service` and nothing else; the

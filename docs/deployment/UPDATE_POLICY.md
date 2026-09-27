@@ -96,7 +96,12 @@ installed binary's checksum, and only a differing asset is downloaded,
 verified on the host and installed through the same staged, glibc-checked,
 rollback-armed path as `install-native`. `homelab release-update-native
 <stack>` runs it on demand. kyu and kyu-runner are `auto`; http-switchboard
-and almanac are `manual`, each with its reason in its file.
+is `manual`, each with its reason in its file. **Amended 2026-09-27
+(fix-58):** `manual` used to stop only the release update while the nightly
+round still ran every unit's own `update_cmd`, so http-switchboard updated
+itself every night. `manual` now means the nightly round does nothing, and
+almanac, whose own verb IS its update, is `self`: the `update_cmd` runs,
+no release is installed over it.
 
 ## Kenny's own Rust services
 

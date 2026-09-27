@@ -14,12 +14,22 @@ use serde::{Deserialize, Serialize};
 /// when it differs. Decided per service in UPDATE_POLICY.md: kyu and
 /// kyu-runner are the orchestrator's; http-switchboard stays manual while it
 /// sits on the alert path; almanac updates itself.
+///
+/// fix-58 (native-update-ignores-manual-policy, 2026-09-27): `manual` used to
+/// stop only the release update, and the nightly round still ran the unit's
+/// own `update_cmd` for every service — so the manual http-switchboard updated
+/// itself every night anyway. `manual` now means nothing runs, and a service
+/// that updates itself through its own verb says so with `self`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdatePolicy {
     #[default]
     Manual,
     Auto,
+    /// The nightly round runs the service's own `update_cmd` under the armed
+    /// rollback and never installs a release over it (almanac).
+    #[serde(rename = "self")]
+    OwnVerb,
 }
 
 /// Everything the homelab needs to know about one native service. One
@@ -93,6 +103,30 @@ impl NativeServiceManifest {
     pub fn asset_name(&self) -> &str {
         self.release_asset.as_deref().unwrap_or(&self.unit)
     }
+
+    /// Which of the two nightly update paths the scheduler runs for this
+    /// service. Decided here rather than in the scheduler loop so it is a
+    /// test instead of an assumption.
+    pub fn nightly_updates(&self) -> NightlyUpdates {
+        // fix-58: the policy gates both paths. `auto` keeps both, exactly as
+        // before; `manual` gets neither.
+        NightlyUpdates {
+            release: self.update_policy == UpdatePolicy::Auto,
+            own_cmd: matches!(
+                self.update_policy,
+                UpdatePolicy::Auto | UpdatePolicy::OwnVerb
+            ),
+        }
+    }
+}
+
+/// What the nightly round may do to one native service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NightlyUpdates {
+    /// B1: the orchestrator's own release update (signature-checked).
+    pub release: bool,
+    /// The service's `update_cmd`, run under the armed rollback.
+    pub own_cmd: bool,
 }
 
 fn lower_dashed(s: &str) -> bool {
@@ -168,6 +202,11 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
     if m.update_policy == UpdatePolicy::Auto && m.release_repo.is_none() {
         problems.push(
             "update_policy: auto without a release_repo — there is nothing to fetch nightly".into(),
+        );
+    }
+    if m.update_policy == UpdatePolicy::OwnVerb && m.update_cmd.is_none() {
+        problems.push(
+            "update_policy: self without an update_cmd — there is no verb to run nightly".into(),
         );
     }
     if let Some(glob) = &m.backup_from_newest {

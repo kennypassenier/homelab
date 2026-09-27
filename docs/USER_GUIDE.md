@@ -930,7 +930,7 @@ a container runs several (`stacks/kyu/kyu-runner/service.yml`)
 | `update_cmd` | its own self-update command; absent means never updated by the host | `core/src/native.rs:48` |
 | `release_repo`, `release_asset` | `owner/name` on GitHub and the asset (default: the unit name) | `core/src/native.rs:64-68,88-90` |
 | `backup_from_newest` | archive the newest file matching this glob instead of `data_dirs` | `core/src/native.rs:79` |
-| `update_policy` | `auto` or `manual` (default) | `core/src/native.rs:83` |
+| `update_policy` | `auto`, `self` or `manual` (default) | `core/src/native.rs` |
 
 The verbs:
 
@@ -976,8 +976,9 @@ Tests: `core/tests/native_tests.rs:1473,1508`.
 **Update policy** (deployment decision B1, `docs/deployment/UPDATE_POLICY.md`
 and `docs/deployment/REGISTER.md`, row B1): a service with `update_policy: auto`
 gets the latest signed release installed by the nightly run before its
-supervised self-update; `manual` services are never release-updated at night
-(`host/src/main.rs:2393-2408`). `update_policy: auto` without a
+supervised self-update; `self` services get only their own `update_cmd`; `manual`
+services are left alone at night, neither release-updated nor self-updated
+(fix-58, `NativeServiceManifest::nightly_updates`). `update_policy: auto` without a
 `release_repo` fails validation (`core/src/native.rs:163-167`). The host reads
 the policy from its own copy, so after changing it run
 `homelab adopt stacks/<name>` to refresh that copy

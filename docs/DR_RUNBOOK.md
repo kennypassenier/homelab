@@ -301,7 +301,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 - Container: hostname `112-app-almanac`, ip `10.10.10.12/24` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 50.
 - Runs no docker: native systemd services only.
 - Unit `almanac`:
-  - program `/opt/almanac/bin/almanac`, from the GitHub release `kennypassenier/almanac` (asset `almanac`); update policy manual.
+  - program `/opt/almanac/bin/almanac`, from the GitHub release `kennypassenier/almanac` (asset `almanac`); update policy self.
   - unit file `stacks/almanac/almanac/almanac.service` in the repository; the container's copy is `/etc/systemd/system/almanac.service`.
   - data: repository `rclone:gdrive:homelab-backups/almanac-config`, archive `/almanac-data.tar` holding a tar of `/appdata/almanac/almanac-config`.
   - vault copy of almanac (`/appdata/almanac/almanac-config/latch.env`): `/var/lib/homelab/secrets/almanac/almanac-config/latch.env`.

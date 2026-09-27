@@ -596,7 +596,7 @@ named is left running (`core/src/ops/deploy.rs:285-297`, test
 | Route | What runs | Which services |
 |---|---|---|
 | Nightly release install | Host asks the GitHub API for the latest release, requires `SHA256SUMS.minisig` signed with key 1C88AB06D43C0B16, compares the checksum with the installed binary, installs under an armed rollback (`core/src/ops/native.rs:919-1131`, `core/src/release_sig.rs:10-40`) | only `update_policy: auto` (`host/src/main.rs:2395-2399`) |
-| Nightly self-update | the service's own `update_cmd`; binary preserved, restart only when it changed, 20 s to come up then a settle window that also watches `NRestarts`, rollback from outside (`core/src/ops/native.rs:701-720`, `:1174-1333`) | every service with an `update_cmd`, whatever `update_policy` says (`host/src/main.rs:2409-2418`) |
+| Nightly self-update | the service's own `update_cmd`; binary preserved, restart only when it changed, 20 s to come up then a settle window that also watches `NRestarts`, rollback from outside (`core/src/ops/native.rs:701-720`, `:1174-1333`) | services with an `update_cmd` and `update_policy: auto` or `self`; never `manual` (fix-58, `NativeServiceManifest::nightly_updates`) |
 | `homelab release-update-native <stack>` | the release install, now | every service on the stack, policy not consulted (`host/src/main.rs:3521-3555`) |
 | `homelab install-native stacks/<stack>/<unit> [<tag>]` | one service, latest or a named tag, downloaded and verified on the workstation with `gh` (`client/src/release.rs:75-173`) | the one named |
 | `homelab update-native <stack>` | every `update_cmd`, now | every service on the stack |

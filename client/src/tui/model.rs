@@ -145,6 +145,24 @@ pub struct Confirm {
     pub prompt: String,
 }
 
+/// fix-102 (tui-single-keys-no-confirm, 2026-09-27): a single key whose
+/// consequence lasts — park a stack, update the host, drop a retention tier,
+/// quit with something unsaved or running — states that consequence and
+/// waits for `y`. Any other key keeps things as they are.
+pub struct YesNo {
+    pub title: String,
+    pub prompt: String,
+    pub action: YesNoAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum YesNoAction {
+    Park { stack: String, enabled: bool },
+    HostUpdate(String),
+    DeleteTier(usize),
+    Quit,
+}
+
 /// D6 change-plan preview: what a deploy would do, shown before it runs.
 /// ENTER executes, ESC cancels.
 pub struct Plan {
@@ -243,6 +261,11 @@ pub struct Model {
     pub transfers: Vec<Transfer>,
     /// Open typed confirmation, if any (restore).
     pub confirm: Option<Confirm>,
+    /// fix-102: an open y/N question, if any.
+    pub yes_no: Option<YesNo>,
+    /// fix-102: an operation window was sent to the background with ESC and
+    /// its reply has not come yet, so quitting would leave it unwatched.
+    pub background_op: bool,
     pub palette_open: bool,
     pub palette_input: String,
     pub palette_sel: usize,
@@ -349,6 +372,8 @@ impl Model {
             release_update_requested: None,
             native_install_requested: Vec::new(),
             confirm: None,
+            yes_no: None,
+            background_op: false,
             wizard: None,
             presets: crate::scaffold::synthetic_presets(),
             shell_target: 0,
@@ -660,6 +685,9 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                         return;
                     }
                 }
+                // fix-102: a reply with no window open ends the operation
+                // that was sent to the background (replies come in order).
+                model.background_op = false;
                 if model.tab == Tab::Doctor {
                     model.doctor_text = resp.message.lines().map(|s| s.to_string()).collect();
                 }
@@ -714,6 +742,15 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         }
         return;
     }
+    // fix-102: a y/N question swallows every key; only `y` acts.
+    if let Some(q) = model.yes_no.take() {
+        if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+            run_yes(model, q.action);
+        } else {
+            model.status_line = "cancelled — nothing was done".into();
+        }
+        return;
+    }
     if let Some(focus) = model.focus.as_mut() {
         match key.code {
             KeyCode::Up => focus.scroll = focus.scroll.saturating_add(1),
@@ -725,6 +762,7 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 } else {
                     model.status_line = "deploy keeps running — feed in LOG_STREAM".into();
                     model.focus = None;
+                    model.background_op = true;
                 }
             }
             KeyCode::Enter if focus.done => model.focus = None,
@@ -794,7 +832,7 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
 
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match (key.code, ctrl) {
-        (KeyCode::Char('q'), _) => model.should_quit = true,
+        (KeyCode::Char('q'), _) => ask_quit(model),
         // AZERTY: Ctrl+K for palette; also accept Ctrl+P.
         (KeyCode::Char('k'), true) | (KeyCode::Char('p'), true) => {
             model.palette_open = true;
@@ -865,15 +903,17 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             }
             KeyCode::Char('u') => {
                 if let Some(tag) = model.host_update_available().map(String::from) {
-                    model.focus = Some(Focus {
+                    // fix-102: one Shift away from SHIFT+U (update the
+                    // selected stack), so it asks first.
+                    model.yes_no = Some(YesNo {
                         title: format!("UPDATE HOST → {}", tag),
-                        feed: Vec::new(),
-                        scroll: 0,
-                        done: false,
-                        ok: false,
-                        result: String::new(),
+                        prompt: format!(
+                            "Update the host daemon from v{} to {}? It replaces its own \
+                             binary and restarts itself; a failed selfcheck rolls back.",
+                            model.host_version, tag
+                        ),
+                        action: YesNoAction::HostUpdate(tag),
                     });
-                    model.release_update_requested = Some(tag);
                 }
             }
             KeyCode::Char('D') => start_deploy(model),
@@ -929,16 +969,39 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 model.outbox.push(Command::Incidents);
             }
             KeyCode::Char('e') => {
-                // H8 (light): toggle the selected stack's enabled flag. The
-                // GetState refresh rides behind the op — the host handles
-                // RPCs in order, so it sees the new flag.
+                // H8 (light): toggle the selected stack's enabled flag.
+                // fix-102: it sits next to `r` and parking lasts, so the
+                // cost is stated and `y` is needed.
                 if let Some(fleet) = &model.fleet {
                     if let Some(s) = fleet.stacks.get(model.selected_stack) {
-                        model.outbox.push(Command::SetStackEnabled {
-                            stack: s.name.clone(),
-                            enabled: !s.enabled,
+                        let (title, prompt) = if s.enabled {
+                            (
+                                format!("PARK {}", s.name),
+                                format!(
+                                    "Park {}? No nightly backup and no nightly update, and \
+                                     onboot is cleared: after a power cut it stays down. \
+                                     Running containers are not touched.",
+                                    s.name
+                                ),
+                            )
+                        } else {
+                            (
+                                format!("UNPARK {}", s.name),
+                                format!(
+                                    "Unpark {}? Nightly backups and updates resume, and it \
+                                     starts again after a power cut.",
+                                    s.name
+                                ),
+                            )
+                        };
+                        model.yes_no = Some(YesNo {
+                            title,
+                            prompt,
+                            action: YesNoAction::Park {
+                                stack: s.name.clone(),
+                                enabled: !s.enabled,
+                            },
                         });
-                        model.outbox.push(Command::GetState);
                     }
                 }
             }
@@ -1087,11 +1150,26 @@ fn settings_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             model.settings_dirty = true;
         }
         KeyCode::Char('d') => {
+            // fix-102: a tier gone from the plan lets the next prune drop
+            // the snapshots only it kept, once saved; so it asks first.
             if row >= 1 && row < webhook_row && cfg.retention.len() > 1 {
                 let tier_idx = (row - 1) / 2;
-                cfg.retention.remove(tier_idx);
-                model.settings_row = model.settings_row.min(settings_rows(cfg) - 1);
-                model.settings_dirty = true;
+                let t = &cfg.retention[tier_idx];
+                let span = t
+                    .span_days
+                    .map(|d| format!("for {} days", d))
+                    .unwrap_or_else(|| "forever".into());
+                model.yes_no = Some(YesNo {
+                    title: format!("DELETE RETENTION TIER {}", tier_idx + 1),
+                    prompt: format!(
+                        "Delete tier {} (a snapshot every {} days, kept {})? Once saved, the \
+                         next prune may drop the snapshots only this tier kept.",
+                        tier_idx + 1,
+                        t.every_days,
+                        span
+                    ),
+                    action: YesNoAction::DeleteTier(tier_idx),
+                });
             }
         }
         KeyCode::Enter if row == webhook_row => {
@@ -1372,7 +1450,7 @@ fn run_action(model: &mut Model, id: &str) {
         }
         "fx" => model.fx = model.fx.cycle(),
         "help" => model.help_open = true,
-        "quit" => model.should_quit = true,
+        "quit" => ask_quit(model),
         _ => {}
     }
 }
@@ -1486,6 +1564,63 @@ fn confirm_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         }
         _ => {}
     }
+}
+
+/// fix-102: what a `y` to an open question does.
+fn run_yes(model: &mut Model, action: YesNoAction) {
+    match action {
+        YesNoAction::Park { stack, enabled } => {
+            // The GetState refresh rides behind the op — the host handles
+            // RPCs in order, so it sees the new flag.
+            model
+                .outbox
+                .push(Command::SetStackEnabled { stack, enabled });
+            model.outbox.push(Command::GetState);
+        }
+        YesNoAction::HostUpdate(tag) => {
+            model.focus = Some(Focus {
+                title: format!("UPDATE HOST → {}", tag),
+                feed: Vec::new(),
+                scroll: 0,
+                done: false,
+                ok: false,
+                result: String::new(),
+            });
+            model.release_update_requested = Some(tag);
+        }
+        YesNoAction::DeleteTier(idx) => {
+            if let Some(cfg) = model.settings.as_mut() {
+                if idx < cfg.retention.len() && cfg.retention.len() > 1 {
+                    cfg.retention.remove(idx);
+                    model.settings_row = model.settings_row.min(settings_rows(cfg) - 1);
+                    model.settings_dirty = true;
+                }
+            }
+        }
+        YesNoAction::Quit => model.should_quit = true,
+    }
+}
+
+/// fix-102: `q` quits at once unless that would lose something: settings not
+/// yet saved, or an operation sent to the background whose questions and
+/// result nobody would then see.
+fn ask_quit(model: &mut Model) {
+    let mut lost: Vec<&str> = Vec::new();
+    if model.background_op || model.staging_pending > 0 {
+        lost.push("an operation is still running and nobody would see its result");
+    }
+    if model.settings_dirty {
+        lost.push("settings changes are not saved (SHIFT+S saves them)");
+    }
+    if lost.is_empty() {
+        model.should_quit = true;
+        return;
+    }
+    model.yes_no = Some(YesNo {
+        title: "QUIT".into(),
+        prompt: format!("Quit anyway? {}.", lost.join("; ")),
+        action: YesNoAction::Quit,
+    });
 }
 
 /// The name of the stack the cursor is on, or None with a status line said.

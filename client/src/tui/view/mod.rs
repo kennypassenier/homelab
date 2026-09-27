@@ -90,6 +90,9 @@ pub fn draw(f: &mut Frame, model: &Model) {
     if let Some(c) = &model.confirm {
         draw_confirm(f, c);
     }
+    if let Some(q) = &model.yes_no {
+        draw_yes_no(f, q);
+    }
     if model.help_open {
         draw_help(f);
     }
@@ -135,6 +138,43 @@ fn draw_confirm(f: &mut Frame, c: &crate::tui::model::Confirm) {
         Line::from(""),
         Line::from(Span::styled(
             "  ENTER confirm · ESC cancel",
+            THEME.muted_style(),
+        )),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }),
+        inner,
+    );
+}
+
+/// fix-102: a one-key question. It states what `y` sets in motion; every
+/// other key cancels, so a stray keystroke does nothing.
+fn draw_yes_no(f: &mut Frame, q: &crate::tui::model::YesNo) {
+    let area = f.area();
+    let w = 76u16.min(area.width.saturating_sub(4));
+    let h = 8u16.min(area.height.saturating_sub(2));
+    let rect = Rect {
+        x: (area.width.saturating_sub(w)) / 2,
+        y: area.height / 3,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .border_type(BorderType::Double)
+        .border_style(Style::new().fg(THEME.yellow))
+        .title(Line::from(Span::styled(
+            format!(" >> {} << ", q.title),
+            Style::new().fg(THEME.yellow).add_modifier(Modifier::BOLD),
+        )))
+        .style(Style::new().bg(THEME.elevated).fg(THEME.text));
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let lines = vec![
+        Line::from(Span::styled(q.prompt.clone(), Style::new().fg(THEME.text))),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  y yes · any other key: no, nothing is done",
             THEME.muted_style(),
         )),
     ];

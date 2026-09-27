@@ -209,7 +209,7 @@ Source: `client/src/tui/model.rs:36-45,751-761`.
 | `CTRL+K` or `CTRL+P` | command palette (G3) | `client/src/tui/model.rs:716-720` |
 | `F2` | cycle effects `FX:OFF` → `FX:SUBTLE` → `FX:FULL` | `client/src/tui/model.rs:721-724`, `client/src/tui/fx.rs:26-39` |
 | `h` | key map; `ESC`, `h` or `ENTER` closes it | `client/src/tui/model.rs:652-657,725` |
-| `q` | quit | `client/src/tui/model.rs:714` |
+| `q` | quit; asks `y` first when settings are unsaved or an operation sent to the background still runs (fix-102) | `client/src/tui/model.rs:714` |
 
 On the SHELL tab, typing owns the keyboard: only `TAB`, `SHIFT+TAB`, `F2`,
 `CTRL+K` and `CTRL+P` pass through (`client/src/tui/model.rs:699-710`).
@@ -256,8 +256,8 @@ All of these act on the stack under the cursor.
 | `SHIFT+I` | install its native services from their releases (C7) | `client/src/tui/model.rs:824` |
 | `c` | fleet check over `stacks/` | `client/src/tui/model.rs:825` |
 | `i` | list incident bundles | `client/src/tui/model.rs:826-836` |
-| `e` | park or unpark for the nightly run (H8) | `client/src/tui/model.rs:837-850` |
-| `u` | update the host binary, only when a newer release is offered (H7) | `client/src/tui/model.rs:780-792` |
+| `e` | park or unpark for the nightly run (H8), after a `y` to a question that says what parking costs (fix-102) | `client/src/tui/model.rs:837-850` |
+| `u` | update the host binary, only when a newer release is offered (H7), after a `y` (fix-102) | `client/src/tui/model.rs:780-792` |
 | `n` | new-stack wizard (G2) | `client/src/tui/model.rs:852-872` |
 
 `SHIFT+A` and `SHIFT+I` work but are not listed in the `h` key map
@@ -301,7 +301,7 @@ before starting the TUI anywhere else:
 | DOCTOR | `r` or `ENTER` | run the doctor again | `client/src/tui/model.rs:906-910` |
 | SETTINGS | `UP`/`DOWN` | pick a row | `client/src/tui/model.rs:946-947` |
 | SETTINGS | `LEFT`/`RIGHT` | change the value | `client/src/tui/model.rs:948-978` |
-| SETTINGS | `a` / `d` | add / delete a retention tier | `client/src/tui/model.rs:979-1002` |
+| SETTINGS | `a` / `d` | add / delete a retention tier (`d` asks `y` first, fix-102) | `client/src/tui/model.rs:979-1002` |
 | SETTINGS | `ENTER` on the webhook row | edit it; `ENTER` keeps, `ESC` cancels | `client/src/tui/model.rs:1003-1005,1076-1097` |
 | SETTINGS | `SHIFT+S` | send the settings to the host | `client/src/tui/model.rs:1006-1010` |
 | SETTINGS | `r` | reload from the host | `client/src/tui/model.rs:1011` |

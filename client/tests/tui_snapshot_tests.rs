@@ -1511,10 +1511,14 @@ fn b6_update_badge_and_u_key_flow() {
     homelab_client::tui::model::update(&mut m, Msg::ReleaseTag(Some("v9.9.9".into())));
     let out = render(&m);
     assert!(out.contains("HOST UPDATE v9.9.9"), "badge must appear");
-    // U opens the focus window and requests staging.
+    // u asks first (fix-102); y opens the focus window and requests staging.
     homelab_client::tui::model::update(
         &mut m,
         Msg::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)),
+    );
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
     );
     assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
     assert!(m.focus.is_some());
@@ -2624,10 +2628,15 @@ fn a_key_named_on_screen_is_the_key_that_does_it() {
     assert!(out.contains("available — press u"), "ticker: {}", out);
     assert!(!out.contains("press U"));
     assert!(!out.contains("beschikbaar"), "English interface");
-    // The key the ticker names does what the ticker says.
+    // The key the ticker names does what the ticker says, after its y/N
+    // question (fix-102).
     homelab_client::tui::model::update(
         &mut m,
         Msg::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)),
+    );
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
     );
     assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
 
@@ -2968,4 +2977,127 @@ fn fix_68_the_day_s_list_fills_the_today_panel_and_leaves_an_open_operation_alon
     m.today = Some(Today::default());
     let out = render(&m);
     assert!(out.contains("NOTHING NEEDS YOU"), "{}", out);
+}
+
+fn press(m: &mut Model, code: crossterm::event::KeyCode) {
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    homelab_client::tui::model::update(m, Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+}
+
+/// tui-single-keys-no-confirm (expert panel, 2026-09-27): `e` parked a stack
+/// at once, next to `r`: no nightly backup and no start after a power cut,
+/// shown only as a small `[OFF]` badge. It now says that and waits for `y`;
+/// any other key keeps the stack as it is.
+/// covers: fix-102
+#[test]
+fn fix_102_parking_a_stack_says_what_it_costs_and_waits_for_y() {
+    use crossterm::event::KeyCode;
+    use homelab_proto::Command;
+    let mut m = ready_model();
+    press(&mut m, KeyCode::Char('e'));
+    assert!(
+        !m.outbox
+            .iter()
+            .any(|c| matches!(c, Command::SetStackEnabled { .. })),
+        "e parked the stack without asking"
+    );
+    let out = render(&m);
+    assert!(out.contains("No nightly backup"), "{}", out);
+    assert!(out.contains("power cut"), "{}", out);
+    press(&mut m, KeyCode::Char('n'));
+    assert!(m.outbox.is_empty(), "n must keep the stack as it is");
+    assert!(
+        m.status_line.contains("nothing was done"),
+        "{}",
+        m.status_line
+    );
+
+    press(&mut m, KeyCode::Char('e'));
+    press(&mut m, KeyCode::Char('y'));
+    assert!(m.outbox.iter().any(|c| matches!(
+        c,
+        Command::SetStackEnabled { stack, enabled: false } if stack == "syncthing"
+    )));
+}
+
+/// `u` started a host self-update at once, one Shift away from SHIFT+U
+/// (update the selected stack).
+/// covers: fix-102
+#[test]
+fn fix_102_the_host_update_key_asks_first() {
+    use crossterm::event::KeyCode;
+    let mut m = ready_model();
+    m.host_version = "2.6.0".into();
+    homelab_client::tui::model::update(&mut m, Msg::ReleaseTag(Some("v9.9.9".into())));
+    press(&mut m, KeyCode::Char('u'));
+    assert!(m.release_update_requested.is_none(), "u updated the host");
+    assert!(render(&m).contains("restarts itself"));
+    press(&mut m, KeyCode::Esc);
+    assert!(m.release_update_requested.is_none());
+    press(&mut m, KeyCode::Char('u'));
+    press(&mut m, KeyCode::Char('y'));
+    assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
+}
+
+/// Settings `d` deleted a retention tier with no question.
+/// covers: fix-102
+#[test]
+fn fix_102_deleting_a_retention_tier_asks_first() {
+    use crossterm::event::KeyCode;
+    use homelab_proto::{HostConfigView, ServerMsg};
+    let mut m = ready_model();
+    press(&mut m, KeyCode::Char('5'));
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Backend(homelab_client::tui::backend::BackendEvent::Server(
+            ServerMsg::Config(Box::new(HostConfigView {
+                backup_hour: Some(4),
+                notify_webhook: None,
+                retention: homelab_core::retention::default_tiers(),
+            })),
+        )),
+    );
+    let tiers = m.settings.as_ref().unwrap().retention.len();
+    press(&mut m, KeyCode::Down);
+    press(&mut m, KeyCode::Char('d'));
+    assert_eq!(m.settings.as_ref().unwrap().retention.len(), tiers);
+    press(&mut m, KeyCode::Char('n'));
+    assert_eq!(m.settings.as_ref().unwrap().retention.len(), tiers);
+    press(&mut m, KeyCode::Char('d'));
+    press(&mut m, KeyCode::Char('y'));
+    assert_eq!(m.settings.as_ref().unwrap().retention.len(), tiers - 1);
+}
+
+/// `q` quit with unsaved settings, and while an operation sent to the
+/// background still ran (it could then not answer a host question).
+/// covers: fix-102
+#[test]
+fn fix_102_quit_asks_when_something_would_be_lost() {
+    use crossterm::event::KeyCode;
+    let mut m = ready_model();
+    m.settings_dirty = true;
+    press(&mut m, KeyCode::Char('q'));
+    assert!(!m.should_quit, "q dropped unsaved settings");
+    assert!(render(&m).contains("not saved"));
+    press(&mut m, KeyCode::Char('y'));
+    assert!(m.should_quit);
+
+    let mut m = ready_model();
+    m.focus = Some(homelab_client::tui::model::Focus {
+        title: "DEPLOY syncthing".into(),
+        feed: Vec::new(),
+        scroll: 0,
+        done: false,
+        ok: false,
+        result: String::new(),
+    });
+    press(&mut m, KeyCode::Esc);
+    press(&mut m, KeyCode::Char('q'));
+    assert!(!m.should_quit, "q left a running operation behind");
+    press(&mut m, KeyCode::Char('n'));
+    assert!(!m.should_quit);
+
+    let mut m = ready_model();
+    press(&mut m, KeyCode::Char('q'));
+    assert!(m.should_quit, "nothing to lose: q quits at once");
 }

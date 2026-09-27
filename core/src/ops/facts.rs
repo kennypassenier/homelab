@@ -132,9 +132,11 @@ pub const GROWTH_PROBE: &str = concat!(
     "echo \"journal=$(du -sm /var/log/journal 2>/dev/null | cut -f1)\"; ",
     "echo \"dockerlogs=$(du -sm /var/lib/docker/containers 2>/dev/null | cut -f1)\"; ",
     // Both halves of the guard must be present. Checking only one is how
-    // a half-guarded container reads as guarded.
+    // a half-guarded container reads as guarded. The docker half only where
+    // docker runs: a native container (inbox on CT 118) gets the journald
+    // cap alone, by design (gap-33), and was reported unguarded forever.
     "if ls /etc/systemd/journald.conf.d/*.conf >/dev/null 2>&1 && ",
-    "grep -q max-size /etc/docker/daemon.json 2>/dev/null; ",
+    "{ ! command -v docker >/dev/null 2>&1 || grep -q max-size /etc/docker/daemon.json 2>/dev/null; }; ",
     "then echo guards=1; else echo guards=0; fi"
 );
 

@@ -390,3 +390,28 @@ async fn gap_27_a_secret_file_without_a_vault_copy_is_named_unsealed() {
     let missing = unsealed_secret_files(&exec, "/var/lib/homelab", "kp-soft", &st).await;
     assert!(missing.is_empty(), "{missing:?}");
 }
+
+/// gap-33 follow-up: a container without docker is guarded by the journald
+/// cap alone. The probe required the docker log cap everywhere, so inbox on
+/// CT 118 (no docker) was reported unguarded after its guards were applied.
+/// Runs the probe's guard clause in `sh` with no docker on PATH.
+///
+/// covers: gap-33
+#[test]
+fn gap_33_a_container_without_docker_needs_only_the_journald_cap() {
+    use homelab_core::ops::facts::GROWTH_PROBE;
+    let clause = GROWTH_PROBE
+        .split("if ls /etc/systemd")
+        .nth(1)
+        .expect("the guard clause");
+    // Replace the journald check with `true` (this machine's /etc is not a
+    // container's) and keep the docker half exactly as shipped.
+    let clause = format!("if true{}", &clause[clause.find(" && ").unwrap()..]);
+    let out = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(&clause)
+        .env("PATH", "/nonexistent")
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "guards=1");
+}

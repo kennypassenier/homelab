@@ -87,6 +87,15 @@ pub struct NativeServiceManifest {
     /// back as the live file and delete any `-wal`/`-shm` beside it.
     #[serde(default)]
     pub backup_from_newest: Option<String>,
+    /// fix-113 (native-tar-no-quiesce, 2026-09-27): stop the unit for the
+    /// length of the tar and start it again afterwards, whatever the snapshot
+    /// did. The native counterpart of the `com.homelab.backup.pause` label: a
+    /// service that writes its store at night is otherwise archived mid-write,
+    /// a torn file that looks like a backup. Off by default; the stack file
+    /// says which services need it (kyu has the better answer,
+    /// `backup_from_newest`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub backup_pause: bool,
     /// B1: `auto` = the nightly round installs the latest release when its
     /// checksum differs from the installed binary; `manual` = never.
     #[serde(default)]
@@ -172,6 +181,15 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
              declare at least one directory, or set `stateless: true` if it genuinely \
              keeps none (kyu-runner is the real case: its unit says so and it runs \
              under DynamicUser)"
+                .into(),
+        );
+    }
+    // fix-113: pausing a service that keeps nothing would stop it nightly for
+    // a backup that has nothing to take.
+    if m.stateless && m.backup_pause {
+        problems.push(
+            "backup_pause is set on a stateless service — there is nothing to archive, so \
+             nothing to pause for"
                 .into(),
         );
     }

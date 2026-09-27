@@ -128,6 +128,7 @@ fn stack_state(
                 release_repo: None,
                 release_asset: None,
                 backup_from_newest: None,
+                backup_pause: false,
                 update_policy: Default::default(),
                 metrics: None,
             })

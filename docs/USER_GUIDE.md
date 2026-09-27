@@ -930,6 +930,7 @@ a container runs several (`stacks/kyu/kyu-runner/service.yml`)
 | `update_cmd` | its own self-update command; absent means never updated by the host | `core/src/native.rs:48` |
 | `release_repo`, `release_asset` | `owner/name` on GitHub and the asset (default: the unit name) | `core/src/native.rs:64-68,88-90` |
 | `backup_from_newest` | archive the newest file matching this glob instead of `data_dirs` | `core/src/native.rs:79` |
+| `backup_pause` | stop the unit for the length of the nightly tar and start it again afterwards, whatever the snapshot did (fix-113); default off | `core/src/native.rs` |
 | `update_policy` | `auto`, `self` or `manual` (default) | `core/src/native.rs` |
 
 The verbs:

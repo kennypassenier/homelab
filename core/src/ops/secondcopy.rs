@@ -80,9 +80,14 @@ pub fn repo_policies(
             continue;
         }
         if st.is_native() {
-            // `backup_native` applies the fleet-wide tiers to every unit.
+            // fix-113: `backup_native` keeps the stack file's own policy too.
+            let tiers = st
+                .manifest
+                .as_ref()
+                .and_then(|m| m.retention.clone())
+                .unwrap_or_else(|| fleet.to_vec());
             for n in &st.natives {
-                add(n.unit.clone(), Some(fleet.to_vec()));
+                add(n.unit.clone(), Some(tiers.clone()));
             }
             continue;
         }

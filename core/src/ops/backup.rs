@@ -228,6 +228,23 @@ impl Default for BackupCfg {
     }
 }
 
+/// W2 / fix-113 (native-tar-no-quiesce, 2026-09-27): the retention a stack's
+/// repositories are kept by — the stack file's own policy when it states one,
+/// else the fleet-wide tiers. `backup` resolved this for compose stacks only;
+/// native units always got the fleet-wide tiers.
+pub fn stack_tiers(
+    state: &crate::state::HostState,
+    stack: &str,
+    fleet: &[crate::retention::RetentionTier],
+) -> Vec<crate::retention::RetentionTier> {
+    state
+        .stacks
+        .get(stack)
+        .and_then(|s| s.manifest.as_ref())
+        .and_then(|m| m.retention.clone())
+        .unwrap_or_else(|| fleet.to_vec())
+}
+
 /// Build a restic command from a BackupCfg (shared with deploy's E3
 /// auto-restore step).
 pub(crate) fn restic_cmd(cfg: &BackupCfg, stack: &str, args: &[&str], timeout: u64) -> Cmd {

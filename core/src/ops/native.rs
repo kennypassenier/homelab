@@ -670,50 +670,125 @@ pub async fn backup_native(
         )))
     });
 
-    step!(runner, "snapshot", {
-        let dirs = match &own_copy {
-            Some(f) => shq(f),
-            None => m
-                .data_dirs
-                .iter()
-                .map(|d| shq(d))
-                .collect::<Vec<_>>()
-                .join(" "),
-        };
-        // pipefail is load-bearing: without it a dead `pct exec tar` still
-        // yields a "successful" empty snapshot — a backup that lies.
-        // F171: RESTIC_CACHE_DIR was missing here while `backup.rs` has set
-        // it for every compose stack since it was written. This path builds
-        // the same environment by hand, and hand-built copies drift: without
-        // a cache directory restic finds neither $XDG_CACHE_HOME nor $HOME
-        // in the host's service environment, warns about it on every single
-        // run, and re-fetches metadata from Google Drive that it should have
-        // had locally. Measured 2026-09-02 in the T12 drill — the warning
-        // was in the output of every native backup and nobody had read it.
-        let script = format!(
-            "set -o pipefail; pct exec {} -- tar -cf - {} | \
+    // fix-113 (native-tar-no-quiesce, 2026-09-27): a run killed mid-snapshot
+    // leaves a stale lock, as on the compose path; restic only removes locks
+    // of processes that are gone, so this is always safe.
+    step!(runner, "clear stale locks", {
+        let _ = exec
+            .run(&crate::ops::backup::restic_cmd(
+                cfg,
+                &m.unit,
+                &["unlock"],
+                120,
+            ))
+            .await;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    // fix-113: a service declared `backup_pause` is stopped for the tar, so
+    // its store is not archived mid-write. Stopping first and failing loudly
+    // when it will not stop: a tar of a store still being written is the
+    // torn backup this exists to prevent.
+    let unit = format!("{}.service", m.unit);
+    if m.backup_pause {
+        step!(runner, "pause the service", {
+            let out = util_pct_sh(exec, m.vmid, &format!("systemctl stop {}", unit), 120).await?;
+            if !out.success() {
+                return Err(CoreError::Other(format!(
+                    "{} would not stop for its backup ({}) — nothing was archived",
+                    unit,
+                    out.stderr.trim()
+                )));
+            }
+            Ok(StepOutcome::Changed)
+        });
+    }
+
+    let snapshot_result = runner
+        .step("snapshot", || async {
+            let dirs = match &own_copy {
+                Some(f) => shq(f),
+                None => m
+                    .data_dirs
+                    .iter()
+                    .map(|d| shq(d))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            };
+            // pipefail is load-bearing: without it a dead `pct exec tar` still
+            // yields a "successful" empty snapshot — a backup that lies.
+            // F171: RESTIC_CACHE_DIR was missing here while `backup.rs` has set
+            // it for every compose stack since it was written. This path builds
+            // the same environment by hand, and hand-built copies drift: without
+            // a cache directory restic finds neither $XDG_CACHE_HOME nor $HOME
+            // in the host's service environment, warns about it on every single
+            // run, and re-fetches metadata from Google Drive that it should have
+            // had locally. Measured 2026-09-02 in the T12 drill — the warning
+            // was in the output of every native backup and nobody had read it.
+            let script = format!(
+                "set -o pipefail; pct exec {} -- tar -cf - {} | \
              env RESTIC_REPOSITORY={}/{}-config RESTIC_PASSWORD_FILE={} \
              RESTIC_CACHE_DIR={} \
              restic backup --stdin --stdin-filename {}-data.tar",
-            // D25: named after the SERVICE, not the stack. T5 puts several
-            // services on one container, and a per-stack repository would
-            // fold them into one — so moving any of them elsewhere would
-            // leave its history behind, which is what D25 exists to prevent.
-            m.vmid,
-            dirs,
-            cfg.restic_base,
-            m.unit,
-            cfg.password_file,
-            crate::ops::backup::RESTIC_CACHE_DIR,
-            m.unit
-        );
-        crate::executor::run_ok(
-            exec,
-            &Cmd::new("sh", &["-c", &script], cfg.snapshot_timeout_s),
-        )
-        .await?;
-        Ok(StepOutcome::Changed)
-    });
+                // D25: named after the SERVICE, not the stack. T5 puts several
+                // services on one container, and a per-stack repository would
+                // fold them into one — so moving any of them elsewhere would
+                // leave its history behind, which is what D25 exists to prevent.
+                m.vmid,
+                dirs,
+                cfg.restic_base,
+                m.unit,
+                cfg.password_file,
+                crate::ops::backup::RESTIC_CACHE_DIR,
+                m.unit
+            );
+            crate::executor::run_ok(
+                exec,
+                &Cmd::new("sh", &["-c", &script], cfg.snapshot_timeout_s),
+            )
+            .await?;
+            Ok(StepOutcome::Changed)
+        })
+        .await;
+
+    // fix-113: the paused service is started again whatever the snapshot
+    // did, as `backup` resumes what it quiesced: a backup that leaves a
+    // service off is worse than one that fails.
+    if m.backup_pause {
+        step!(runner, "resume the service", {
+            let out = util_pct_sh(
+                exec,
+                m.vmid,
+                &format!(
+                    "systemctl start {u}; sleep 2; [ \"$(systemctl is-active {u})\" = active ]",
+                    u = unit
+                ),
+                120,
+            )
+            .await?;
+            if !out.success() {
+                return Err(CoreError::Other(format!(
+                    "{} did not come back after its backup — the service is DOWN and needs \
+                     hands now",
+                    unit
+                )));
+            }
+            Ok(StepOutcome::Changed)
+        });
+    }
+    if let Err(e) = snapshot_result {
+        return runner.finish_err("snapshot", &e);
+    }
+
+    // W2 / fix-113: the stack file's own retention, as compose stacks have
+    // had since W2. Read here so every caller gets it without being told.
+    let tiers = match crate::state::StateStore::new(ctx.exec, &ctx.state_dir)
+        .load()
+        .await
+    {
+        Ok(state) => crate::ops::backup::stack_tiers(&state, &m.stack_name, &cfg.tiers),
+        Err(_) => cfg.tiers.clone(),
+    };
 
     step!(runner, "retention", {
         let out = crate::executor::run_ok(
@@ -722,7 +797,7 @@ pub async fn backup_native(
         )
         .await?;
         let snapshots = crate::ops::backup::parse_snapshots_json(&out.stdout);
-        let doomed = crate::retention::forget_list(&snapshots, &cfg.tiers, ctx.now_unix);
+        let doomed = crate::retention::forget_list(&snapshots, &tiers, ctx.now_unix);
         if doomed.is_empty() {
             return Ok(StepOutcome::Unchanged);
         }

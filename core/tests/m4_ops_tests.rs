@@ -802,6 +802,8 @@ use homelab_core::ops::patch::patch_fleet;
 #[tokio::test]
 async fn h6_patch_runs_apt_in_each_managed_stack_sequentially() {
     let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "alpha");
+    mock_hostname(&exec, 109, "beta");
     let sink = VecSink::new();
     let j = NullJournal;
     let targets = vec![("alpha".to_string(), 108u16), ("beta".to_string(), 109u16)];
@@ -816,6 +818,7 @@ async fn h6_patch_runs_apt_in_each_managed_stack_sequentially() {
 #[tokio::test]
 async fn h6_patch_never_touches_no_touch_vmids() {
     let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "ok");
     let sink = VecSink::new();
     let j = NullJournal;
     // Poisoned state: a no-touch vmid somehow ended up in the target list.
@@ -830,6 +833,8 @@ async fn h6_patch_never_touches_no_touch_vmids() {
 #[tokio::test]
 async fn h6_patch_fails_closed_on_apt_error() {
     let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "alpha");
+    mock_hostname(&exec, 109, "beta");
     exec.enqueue(
         "dist-upgrade",
         CmdOutput::failed(100, "Could not get lock /var/lib/dpkg/lock"),
@@ -3635,4 +3640,82 @@ async fn gap_25_a_failed_pull_stops_the_update_before_anything_is_restarted() {
         "nothing may be restarted after the pull failed: {:?}",
         exec.calls()
     );
+}
+
+/// gap-33: `homelab patch` ran apt in every vmid recorded in state without
+/// the A2 hostname guard every other mutating operation uses. A vmid reused
+/// by another container since it was recorded got its packages upgraded.
+///
+/// covers: gap-33
+#[tokio::test]
+async fn gap_33_patch_refuses_a_vmid_whose_hostname_is_not_the_stack_s() {
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "pct config 108",
+        CmdOutput::ok("hostname: 108-app-somebody-else\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let targets = vec![("alpha".to_string(), 108u16)];
+    let report = patch_fleet(&ctx(&exec, &sink, &j), &targets).await;
+    assert!(!report.ok, "a hostname mismatch must fail the patch");
+    assert!(
+        exec.calls_containing("dist-upgrade").is_empty(),
+        "apt must not run in someone else's container: {:?}",
+        exec.calls()
+    );
+}
+
+/// gap-33: guards applied on request (`homelab guards`, TUI `g`) skipped the
+/// A2 hostname guard, and always installed the docker guards, which on a
+/// native container (CT 109, CT 112) add a weekly prune timer that fails
+/// every week. They now apply only to a managed stack, after the hostname
+/// guard, with docker guards only where the stack runs docker.
+///
+/// covers: gap-33
+#[tokio::test]
+async fn gap_33_requested_guards_check_the_hostname_and_skip_docker_on_a_native_stack() {
+    use homelab_core::ops::guards::{apply_for_managed, ManagedTarget};
+    let targets = vec![
+        ManagedTarget {
+            name: "kyu".into(),
+            vmid: 109,
+            docker: false,
+        },
+        ManagedTarget {
+            name: "test".into(),
+            vmid: 108,
+            docker: true,
+        },
+    ];
+    let safety = homelab_core::safety::SafetyConfig::default();
+
+    // A vmid nobody manages is refused.
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    assert!(
+        apply_for_managed(&exec, &sink, &safety, &targets, 150, None)
+            .await
+            .is_err()
+    );
+    assert!(exec.calls_containing("pct push").is_empty());
+
+    // A hostname that is not the stack's is refused.
+    let exec = MockExecutor::new();
+    exec.respond_always("pct config 108", CmdOutput::ok("hostname: 108-app-other\n"));
+    assert!(
+        apply_for_managed(&exec, &sink, &safety, &targets, 108, None)
+            .await
+            .is_err()
+    );
+    assert!(exec.calls_containing("pct push").is_empty());
+
+    // A native stack gets no docker guards.
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 109, "kyu");
+    apply_for_managed(&exec, &sink, &safety, &targets, 109, None)
+        .await
+        .unwrap();
+    assert!(exec.calls_containing("systemctl restart docker").is_empty());
+    assert!(exec.calls_containing("daemon.json").is_empty());
 }

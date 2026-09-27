@@ -3705,7 +3705,29 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         homelab_core::runner::Runner::new("apply-guards", ctx.sink, ctx.journal);
                     match runner
                         .step("guards", || async {
-                            homelab_core::ops::guards::apply(ctx.exec, ctx.sink, vmid, true, ctx.registry_cache.as_ref()).await?;
+                            // gap-33: only a managed stack, after the A2
+                            // hostname guard, docker guards only where it
+                            // runs docker.
+                            let store = homelab_core::state::StateStore::new(ctx.exec, &ctx.state_dir);
+                            let snapshot = store.load().await.unwrap_or_default();
+                            let managed: Vec<homelab_core::ops::guards::ManagedTarget> = snapshot
+                                .stacks
+                                .iter()
+                                .map(|(name, st)| homelab_core::ops::guards::ManagedTarget {
+                                    name: name.clone(),
+                                    vmid: st.vmid,
+                                    docker: st.manifest.as_ref().map(|m| !m.native_only).unwrap_or(true),
+                                })
+                                .collect();
+                            homelab_core::ops::guards::apply_for_managed(
+                                ctx.exec,
+                                ctx.sink,
+                                &ctx.safety,
+                                &managed,
+                                vmid,
+                                ctx.registry_cache.as_ref(),
+                            )
+                            .await?;
                             Ok(homelab_core::runner::StepOutcome::Changed)
                         })
                         .await

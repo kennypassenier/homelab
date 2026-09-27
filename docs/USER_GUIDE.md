@@ -1880,5 +1880,5 @@ shows it.
 | 14 | `homelab new` and `homelab testplan` need a token although they never connect | `client/src/main.rs:144-150` |
 | 15 | `destroy`, `resize` and `prune-orphans` need latch for stacks with `latch_secrets` although they send no secret | `client/src/main.rs:487,923,953` |
 | 16 | Fixed in v3.58.4 (gap-29): the help line for `export\|import` says it writes or reads a stack-definition bundle | `client/src/main.rs` |
-| 17 | `homelab guards` and `homelab patch` skip the hostname guard (A2) | `host/src/main.rs:3687-3700`, `core/src/ops/patch.rs` |
+| 17 | Fixed in v3.58.4 (gap-33): `homelab patch` and requested guards check the A2 hostname guard, and requested guards skip the docker guards on a native stack | `core/src/ops/patch.rs`, `core/src/ops/guards.rs` (`apply_for_managed`) |
 | 18 | The DASHBOARD's online dot and app states are not measured: the host reports every recorded stack online and every app running | `host/src/main.rs:4216-4229` |

@@ -134,6 +134,40 @@ pub const PRUNE_SERVICE: &str = "[Unit]\nDescription=Prune stale Docker data (ho
 
 pub const PRUNE_TIMER: &str = "[Unit]\nDescription=Weekly Docker prune (homelab runaway guard)\n\n[Timer]\nOnCalendar=weekly\nRandomizedDelaySec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n";
 
+/// A stack the host manages, as `apply_for_managed` needs it.
+pub struct ManagedTarget {
+    pub name: String,
+    pub vmid: u16,
+    /// false for a native-only stack, which runs no docker.
+    pub docker: bool,
+}
+
+/// Guards applied on request (`homelab guards`, the TUI's `g`).
+///
+/// gap-33: that path skipped the A2 hostname guard every other mutating
+/// operation uses, and always installed the docker guards, which on a native
+/// container add a weekly prune timer that fails every week (see `apply`).
+/// Only a stack the host manages is touched, after the hostname guard, with
+/// docker guards only where it runs docker.
+pub async fn apply_for_managed(
+    exec: &dyn Executor,
+    sink: &dyn Sink,
+    safety: &crate::safety::SafetyConfig,
+    managed: &[ManagedTarget],
+    vmid: u16,
+    cache: Option<&crate::ops::registry_cache::CacheCfg>,
+) -> Result<(), CoreError> {
+    let Some(target) = managed.iter().find(|t| t.vmid == vmid) else {
+        return Err(CoreError::SafetyAbort(format!(
+            "vmid {} is not a stack this host manages :: guards are applied to managed stacks; \
+             `homelab deploy` one first, which applies them itself",
+            vmid
+        )));
+    };
+    crate::ops::guard_target(exec, safety, vmid, &format!("{}-app-{}", vmid, target.name)).await?;
+    apply(exec, sink, vmid, target.docker, cache).await
+}
+
 /// `docker` = false for a container that runs no docker at all: it gets the
 /// journald cap and nothing else. Installing the docker guards there put a
 /// weekly prune timer on CT 109 and CT 112 that has been failing ever since,

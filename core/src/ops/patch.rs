@@ -55,6 +55,11 @@ pub async fn patch_fleet(ctx: &OpCtx<'_>, targets: &[(String, u16)]) -> Operatio
         }
         let step_name = format!("patch {}", name);
         step!(runner, &step_name, {
+            // gap-33: the A2 hostname guard, as in every other mutating
+            // operation. State can name a vmid that another container has
+            // taken since; apt would then upgrade that one.
+            super::guard_target(exec, &ctx.safety, *vmid, &format!("{}-app-{}", vmid, name))
+                .await?;
             let out = super::util_pct_sh(exec, *vmid, PATCH_SCRIPT, 1800).await?;
             if !out.success() {
                 return Err(crate::error::CoreError::Other(format!(

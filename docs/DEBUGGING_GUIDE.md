@@ -165,10 +165,11 @@ Four things about these files that are easy to get wrong:
    cut and marked `truncated in the transcript`
    (`core/src/executor.rs:92-109`). Only commands run through the tracing
    executor appear at all (`core/src/executor.rs:75-145`).
-3. **`commands.sh` loses the quoting.** A command is rendered as its program
-   and arguments joined by single spaces (`core/src/executor.rs:25-27`), so
-   an argument that contained spaces is no longer one argument. Read the
-   next subsection before running any line of it.
+3. **`commands.sh` keeps the quoting since v3.58.3 (fix-38).** Every
+   argument that is not a plain word is single-quoted (`Cmd::shell_line` in
+   `core/src/executor.rs`). Bundles written before that version joined
+   arguments with single spaces; read the next subsection before running a
+   line from one of those.
 4. **Nothing prunes bundles.** No code in this repository removes
    directories under `incidents/` or trims `journal.jsonl`; they grow until
    someone removes them.
@@ -219,15 +220,23 @@ for the stack, because that record is written before the bundle
 
 ### Reproducing a command safely
 
-`pct exec <vmid> -- sh -c <script>` is how every in-container command runs
-(`core/src/executor.rs:160-173`). In `commands.sh` and in `events.jsonl` the
-script is not quoted, so this line from the example:
+`pct exec <vmid> -- sh -c <script>` is how every in-container command runs.
+Since v3.58.3 (fix-38) the transcript, `events.jsonl` and `commands.sh`
+quote the script as one argument:
+
+```text
+pct exec 110 -- sh -c 'cd '\''/opt/syncthing/app'\'' && docker compose up -d --remove-orphans'
+```
+
+which a shell reads back as exactly the arguments that ran (the test
+`fix_38_a_replayed_command_keeps_its_script_argument_whole` has `sh` do so).
+A bundle from an older version shows the same line unquoted:
 
 ```text
 pct exec 110 -- sh -c cd '/opt/syncthing/app' && docker compose up -d --remove-orphans
 ```
 
-run as written would hand the container only `cd`, and then run
+Run as written, that hands the container only `cd` and runs
 `docker compose up -d --remove-orphans` **on the Proxmox host itself**,
 because the host shell reads the `&&`. Put everything after `sh -c ` back
 into one argument before running it:
@@ -237,10 +246,8 @@ into one argument before running it:
 pct exec 110 -- sh -c "cd '/opt/syncthing/app' && docker compose up -d --remove-orphans"
 ```
 
-The same applies to any other argument with spaces: in the example, the
-`pct create` line carries `--description managed by homelab v2 :: stack syncthing`
-unquoted. Treat `commands.sh` as a record of what ran, not as a script to
-execute; its own header says to review it first
+Either way, treat `commands.sh` as a record of what ran first and a script
+second; its own header says to review it before executing
 (`core/src/incidents.rs:41`).
 
 ## 4. The operation journal

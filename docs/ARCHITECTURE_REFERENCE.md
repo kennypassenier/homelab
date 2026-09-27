@@ -83,13 +83,16 @@ backups side by side inside it (`:2155`).
 - Remote exec is off unless `exec_enabled = true` (`host/src/main.rs:430`,
   `core/src/safety.rs:114-131`); each call is appended to
   `<state_dir>/audit.log` first, best effort (`host/src/main.rs:3933-3947`).
-  The exec path passes `SafetyConfig::default()` (`:3923`): it refuses the
-  compiled list, not vmids `host.toml` added, and has no hostname guard.
+  The exec path checks the daemon's configured list (`exec_allowed`,
+  fix-36), so vmids `host.toml` added are refused too; it has no hostname
+  guard, because it names a vmid rather than a stack. `homelab patch` and
+  requested guards run the hostname guard since gap-33.
 
 **State (AR4).** `state.json` has `schema_version` (`core/src/state.rs:12`).
 Missing file: empty fleet. Unparseable: copied to `state.json.corrupt` and
 refused. Newer schema: refused (`:198-223`). The real `write_file` writes
-`<path>.tmp`, fsyncs, sets the mode, renames (`host/src/main.rs:1549-1570`);
+`<path>.tmp` (created with its final mode since fix-37), fsyncs, sets the
+mode, renames (`host/src/main.rs`, `write_file`);
 the mode comes after the content, so a 0600 file briefly has the default
 mode. The TLS key avoids that by creating with 0600 (`host/src/tls.rs:32-43`).
 
@@ -117,11 +120,14 @@ TUI uses the machine pin only (`client/src/tui/backend.rs:66`). Every
 websocket upgrade needs `Authorization: Bearer <token>`
 (`host/src/main.rs:2684-2690`).
 
-The pin compares the certificate the server presents, but
-`verify_tls12_signature` and `verify_tls13_signature` return valid without
-checking (`client/src/tls.rs:67-82`), so the handshake does not prove the
-server holds the key. Read the pin as "the certificate did not change", not
-as proof of the host's identity.
+The pin compares the certificate the server presents, and since v3.58.3
+(fix-34) `verify_tls12_signature` and `verify_tls13_signature` check the
+handshake signature with rustls' own verifiers over the aws-lc-rs
+algorithms (`client/src/tls.rs`), so the server must hold the certificate's
+key. Before that fix both returned valid without checking, and an impostor
+replaying the public certificate passed the pin.
+`client/tests/tls_pin_tests.rs` runs a real handshake against such an
+impostor.
 
 **What the host trusts.** `homelab self-update` and `homelab install-native`
 send a base64 binary, and all verification is the client's:
@@ -142,7 +148,8 @@ skips an unsigned release and verifies a signed one
 from `latch cat <stack>/<app>/.env --env $HOMELAB_LATCH_ENV --expand`, in
 memory, and prints where each came from (`client/src/spec.rs:316-414`). The
 deploy pushes it to `/opt/<stack>/<app>/.env` (mode 600) and keeps a vault
-copy at `<state_dir>/secrets/<stack>/<app>.env` (0600); an app the client
+copy at `<state_dir>/secrets/<stack>/<app>.env` (0600; a native unit's file
+at `<stack>/<parent dir>/<name>` since fix-37); an app the client
 sent nothing for gets the vault copy back
 (`core/src/ops/deploy.rs:1119-1139`). The intent repo gets files, not env
 (`:893-900`). The `pct push` staging file is 0600 and removed after the push
@@ -155,9 +162,10 @@ backup gives curl its credential file with `-K`
 `--password-stdin` (`core/src/ops/deploy.rs:1196-1200`). The guard,
 `core/tests/argv_secret_tests.rs` (fix-32), scans `core/src`, `host/src`,
 `client/src`, `stacks` and `presets` for one shape: `curl -u "$..."` or
-`--user "$..."` (`:36-49`, `:54`). It does not see the notification bearer,
-which the host passes as `-H "authorization: Bearer <token>"` in curl's argv
-(`host/src/main.rs:2853-2876`).
+`--user "$..."`. The notification bearer goes through a 0600 header file
+read with `curl -H @<file>` since v3.58.3 (fix-35,
+`homelab_core::notify::curl_args`, tested in
+`core/tests/notify_argv_tests.rs`); before that it was in curl's argv.
 
 **If a credential is gone.**
 

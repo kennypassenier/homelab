@@ -3641,3 +3641,12 @@ async fn a_deploy_grants_alloy_read_access_and_says_so_when_it_still_cannot_read
 fn docker_keeps_containers_running_across_its_own_restart() {
     assert!(homelab_core::ops::guards::DOCKER_DAEMON_JSON.contains("\"live-restore\": true"));
 }
+
+/// Kenny's triage answer 2026-09-27 (alloy-not-updated-loki-stale-pin:
+/// "Alloy automatisch"): unattended-upgrades took only Debian security, so
+/// Alloy, installed from Grafana's signed repository, stayed on 1.19.2 while
+/// 1.20.0 was out (measured on CT 106 the same evening).
+#[test]
+fn unattended_upgrades_also_take_alloy_from_grafanas_repository() {
+    assert!(homelab_core::ops::guards::UNATTENDED_UPGRADES.contains("site=apt.grafana.com"));
+}

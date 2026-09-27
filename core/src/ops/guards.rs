@@ -128,9 +128,16 @@ pub const APT_AUTOCLEAN: &str =
 /// suite is published under the `-security` codename while point releases
 /// arrive under the bare one, and a pattern that covers one and not the
 /// other is how this class of silence starts.
+///
+/// `site=apt.grafana.com` (Kenny's triage answer 2026-09-27): Alloy, the log
+/// shipper on every container, comes from Grafana's signed repository and
+/// was never updated (1.19.2 installed, 1.20.0 available on CT 106). Only
+/// Alloy is installed from that repository. Its release fields carry no
+/// usable origin (`o=. stable`), so the pattern matches on the site.
 pub const UNATTENDED_UPGRADES: &str = r#"Unattended-Upgrade::Origins-Pattern {
     "origin=Debian,codename=${distro_codename},label=Debian-Security";
     "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+    "site=apt.grafana.com,a=stable";
 };
 Unattended-Upgrade::Automatic-Reboot "false";
 Unattended-Upgrade::Remove-Unused-Dependencies "true";

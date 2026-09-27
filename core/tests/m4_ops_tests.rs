@@ -2397,6 +2397,41 @@ async fn h7_corrupt_state_fails_loud_and_quarantines() {
     assert!(!report.ok, "deploy must refuse to run over corrupt state");
 }
 
+/// fix-50 (expert panel, state-load-error-empty-fleet, 2026-09-27): only a
+/// MISSING state.json is a fresh install. A file that is there but cannot be
+/// read (EACCES, EIO, EMFILE) loaded as an empty fleet, and the next save
+/// erased the record of every managed stack.
+#[tokio::test]
+async fn fix_50_an_unreadable_state_file_is_an_error_not_an_empty_fleet() {
+    use homelab_core::state::StateStore;
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{}}"#,
+    );
+    exec.fail_read(
+        "/var/lib/homelab/state.json",
+        "Permission denied (os error 13)",
+    );
+    let store = StateStore::new(&exec, "/var/lib/homelab");
+    let err = store
+        .load()
+        .await
+        .expect_err("an unreadable state file must not load as an empty fleet");
+    assert!(format!("{}", err).contains("Permission denied"), "{}", err);
+    // And a deploy over it refuses rather than saving a one-stack fleet.
+    use homelab_core::ops::deploy::deploy;
+    deploy_mocks(&exec);
+    exec.respond_always("ls -A", CmdOutput::ok("config\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
+    assert!(
+        !report.ok,
+        "deploy must refuse to run over unreadable state"
+    );
+}
+
 #[tokio::test]
 async fn h7_newer_schema_refused_missing_file_is_fresh() {
     use homelab_core::state::StateStore;

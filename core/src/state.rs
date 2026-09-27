@@ -246,10 +246,21 @@ impl<'a> StateStore<'a> {
     /// fleet would stop all scheduled work and the next save would erase
     /// every other stack permanently (hardening H7). The corrupt content is
     /// preserved next to the original before failing.
+    ///
+    /// fix-50 (expert panel, state-load-error-empty-fleet, 2026-09-27): the
+    /// same holds for a file that exists and cannot be READ. Every read error
+    /// used to count as "missing", so an EACCES, EIO or EMFILE loaded the
+    /// empty fleet this comment warns about. Only `NotFound` is fresh now.
     pub async fn load(&self) -> Result<HostState, CoreError> {
         let raw = match self.exec.read_file(&self.path).await {
             Ok(raw) => raw,
-            Err(_) => return Ok(HostState::default()),
+            Err(CoreError::NotFound(_)) => return Ok(HostState::default()),
+            Err(e) => {
+                return Err(CoreError::State(format!(
+                    "state.json exists but cannot be read ({}) — refusing to continue with an empty fleet; fix the file's access before running mutating operations",
+                    e
+                )))
+            }
         };
         match serde_json::from_str::<HostState>(&raw) {
             Ok(mut state) if state.schema_version <= STATE_SCHEMA_VERSION => {

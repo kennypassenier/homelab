@@ -22,6 +22,12 @@ pub enum CoreError {
     #[error("state error: {0}")]
     State(String),
 
+    /// fix-50: a file that does not exist, kept apart from one that exists
+    /// and cannot be read. Only the first may be read as "nothing recorded
+    /// yet"; treating EACCES or EIO the same way loaded an empty fleet.
+    #[error("not found: {0}")]
+    NotFound(String),
+
     /// Not a fault: the operation deliberately did not run, and this says
     /// why. It exists because the two states an `ok: bool` can carry are both
     /// wrong for a backup that was skipped because somebody was watching
@@ -72,7 +78,7 @@ impl OperatorError {
                  command and output; re-run after fixing the cause."
                     .to_string(),
             ),
-            CoreError::State(msg) => (
+            CoreError::State(msg) | CoreError::NotFound(msg) => (
                 msg.clone(),
                 "Run doctor (F6) to compare recorded state with reality.".to_string(),
             ),

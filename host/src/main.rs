@@ -1609,9 +1609,15 @@ impl Executor for RealExecutor {
     }
 
     async fn read_file(&self, path: &str) -> Result<String, CoreError> {
-        tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| CoreError::State(format!("{}: {}", path, e)))
+        // fix-50: absence and unreadability are different answers; the state
+        // store may only treat the first as a fresh install.
+        tokio::fs::read_to_string(path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                CoreError::NotFound(format!("{}: {}", path, e))
+            } else {
+                CoreError::State(format!("{}: {}", path, e))
+            }
+        })
     }
 
     async fn sleep_ms(&self, ms: u64) {

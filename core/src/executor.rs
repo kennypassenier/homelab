@@ -103,7 +103,8 @@ pub trait Executor: Send + Sync {
     /// Atomically write a host-local file with the given mode.
     async fn write_file(&self, path: &str, content: &str, mode: u32) -> Result<(), CoreError>;
 
-    /// Read a host-local file; Err when it does not exist.
+    /// Read a host-local file; `Err(CoreError::NotFound)` when it does not
+    /// exist and any other error when it exists but cannot be read (fix-50).
     async fn read_file(&self, path: &str) -> Result<String, CoreError>;
 
     /// Sleep — routed through the trait so tests run instantly.
@@ -310,6 +311,8 @@ pub struct MockExecutor {
     container_created: Mutex<HashMap<String, String>>,
     /// Which app containers `docker compose up -d` has started.
     container_running: Mutex<std::collections::BTreeSet<String>>,
+    /// Paths whose read fails for a reason other than absence (EACCES, EIO).
+    read_errors: Mutex<HashMap<String, String>>,
 }
 
 impl MockExecutor {
@@ -373,6 +376,15 @@ impl MockExecutor {
 
     pub fn file_mode(&self, path: &str) -> Option<u32> {
         self.files.lock().unwrap().get(path).map(|(_, m)| *m)
+    }
+
+    /// Make every read of `path` fail with `why`, as a real read does on
+    /// EACCES or EIO: the file is there, it just cannot be read.
+    pub fn fail_read(&self, path: &str, why: &str) {
+        self.read_errors
+            .lock()
+            .unwrap()
+            .insert(path.to_string(), why.to_string());
     }
 
     pub fn seed_file(&self, path: &str, content: &str) {
@@ -556,12 +568,15 @@ impl Executor for MockExecutor {
     }
 
     async fn read_file(&self, path: &str) -> Result<String, CoreError> {
+        if let Some(why) = self.read_errors.lock().unwrap().get(path) {
+            return Err(CoreError::State(format!("{}: {}", path, why)));
+        }
         self.files
             .lock()
             .unwrap()
             .get(path)
             .map(|(c, _)| c.clone())
-            .ok_or_else(|| CoreError::State(format!("no such file: {}", path)))
+            .ok_or_else(|| CoreError::NotFound(format!("no such file: {}", path)))
     }
 
     async fn sleep_ms(&self, _ms: u64) {}

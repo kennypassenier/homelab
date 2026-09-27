@@ -122,7 +122,13 @@ impl Executor for HybridExec {
     }
 
     async fn read_file(&self, path: &str) -> Result<String, CoreError> {
-        std::fs::read_to_string(self.sandbox(path)).map_err(|e| CoreError::State(e.to_string()))
+        std::fs::read_to_string(self.sandbox(path)).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                CoreError::NotFound(e.to_string())
+            } else {
+                CoreError::State(e.to_string())
+            }
+        })
     }
 
     async fn sleep_ms(&self, _ms: u64) {}

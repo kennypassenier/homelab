@@ -13,6 +13,7 @@ use std::collections::HashMap;
 /// hand-built a third variant. Three shapes for one contract is how a
 /// consumer ends up parsing the two it happens to have seen.
 pub fn op_payload(op: &str, label: &str, ok: bool, error: Option<&str>, version: &str) -> String {
+    let error = error.map(notify_error_text);
     serde_json::json!({
         "source": "homelab-host",
         "op": op,
@@ -22,6 +23,34 @@ pub fn op_payload(op: &str, label: &str, ok: bool, error: Option<&str>, version:
         "version": version,
     })
     .to_string()
+}
+
+/// fix-57: the most error text one notification carries.
+pub const NOTIFY_ERROR_MAX: usize = 1024;
+
+/// fix-57 (expert panel, error-detail-unmasked-to-phone, 2026-09-27): what
+/// a notification says about a failure. The reason can be kilobytes of app
+/// output; it went whole to Home Assistant's event log, the logbook and the
+/// phone, and unmasked. Masked here whatever the caller did, and cut to
+/// [`NOTIFY_ERROR_MAX`] bytes with a pointer to where the whole text is.
+pub fn notify_error_text(error: &str) -> String {
+    let masked = error
+        .lines()
+        .map(crate::executor::mask_secrets)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if masked.len() <= NOTIFY_ERROR_MAX {
+        return masked;
+    }
+    let mut cut = NOTIFY_ERROR_MAX;
+    while !masked.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!(
+        "{}… ({} bytes in all; the full text is in the incident bundle)",
+        &masked[..cut],
+        masked.len()
+    )
 }
 
 /// Failure-repeat damping: an identical failing event inside the window is

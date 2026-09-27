@@ -21,6 +21,8 @@ tracing-subscriber.workspace = true
 rcgen = "0.13"
 sha2 = "0.10"
 base64 = "0.22"
+# fix-53: killpg, to end a timed-out command's whole process group.
+libc = "0.2"
 
 [dev-dependencies]
 tokio-tungstenite = "0.26"

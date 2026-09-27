@@ -1642,6 +1642,106 @@ async fn e3_nonempty_dirs_skip_restore_and_restic_failure_never_blocks() {
         .any(|l| l.contains("AUTO-RESTORE FAILED")));
 }
 
+/// fix-54 (expert panel, auto-restore-error-as-fresh, 2026-09-27): any
+/// failure of `restic snapshots` read as "no snapshot, fresh" at Info level.
+/// An unreachable Drive, an expired rclone token or a timeout during a
+/// rebuild then let an app initialise empty, and that night's backup became
+/// `latest`. Only restic's own "repository does not exist" (exit 10) or an
+/// empty snapshot list is fresh; anything else is a loud warning that the
+/// directory's history could not be checked. The deploy still goes on:
+/// backup-target trouble never blocks a deploy (the E3 spec).
+#[tokio::test]
+async fn fix_54_a_snapshot_check_that_fails_is_not_read_as_fresh() {
+    use homelab_core::ops::deploy::deploy;
+    let level_of = |sink: &VecSink, needle: &str| {
+        sink.events().into_iter().find_map(|e| match e {
+            homelab_core::sink::PipelineEvent::Line { level, msg, .. } if msg.contains(needle) => {
+                Some(level)
+            }
+            _ => None,
+        })
+    };
+    // Drive unreachable: not fresh, and said loudly.
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always(
+        "snapshots --last --json",
+        CmdOutput::failed(1, "Fatal: unable to open repository: rclone: couldn't list"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok, "still never blocks: {:?}", report.error);
+    assert!(
+        !sink.lines().iter().any(|l| l.contains("— fresh")),
+        "a failed check is not a fresh start: {:?}",
+        sink.lines()
+    );
+    assert_eq!(
+        level_of(&sink, "could not be checked"),
+        Some(homelab_core::sink::Level::Warn),
+        "{:?}",
+        sink.lines()
+    );
+    // A timeout of the check is the same.
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    struct TimesOut<'a>(&'a MockExecutor);
+    #[async_trait::async_trait]
+    impl homelab_core::executor::Executor for TimesOut<'_> {
+        async fn run(
+            &self,
+            cmd: &homelab_core::executor::Cmd,
+        ) -> Result<CmdOutput, homelab_core::error::CoreError> {
+            if cmd.rendered().contains("snapshots --last") {
+                return Err(homelab_core::error::CoreError::Timeout {
+                    rendered: cmd.rendered(),
+                    seconds: 120,
+                });
+            }
+            self.0.run(cmd).await
+        }
+        async fn write_file(
+            &self,
+            p: &str,
+            c: &str,
+            m: u32,
+        ) -> Result<(), homelab_core::error::CoreError> {
+            self.0.write_file(p, c, m).await
+        }
+        async fn read_file(&self, p: &str) -> Result<String, homelab_core::error::CoreError> {
+            self.0.read_file(p).await
+        }
+        async fn sleep_ms(&self, _ms: u64) {}
+    }
+    let slow = TimesOut(&exec);
+    let sink = VecSink::new();
+    let mut c = ctx(&exec, &sink, &j);
+    c.exec = &slow;
+    let report = deploy(&c, &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(!sink.lines().iter().any(|l| l.contains("— fresh")));
+    assert!(sink
+        .lines()
+        .iter()
+        .any(|l| l.contains("could not be checked")));
+    // restic's own "repository does not exist" is a fresh start.
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always(
+        "snapshots --last --json",
+        CmdOutput::failed(10, "Fatal: repository does not exist"),
+    );
+    let sink = VecSink::new();
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(sink.lines().iter().any(|l| l.contains("— fresh")));
+    assert!(!sink
+        .lines()
+        .iter()
+        .any(|l| l.contains("could not be checked")));
+}
+
 /// T40: `data_dirs` may only be empty when the service says so. kyu-runner is
 /// deliberately stateless — its own unit file says "no state directory, no
 /// disk to protect" and it runs under DynamicUser — so refusing it outright
@@ -2395,6 +2495,102 @@ async fn h7_corrupt_state_fails_loud_and_quarantines() {
     let j = NullJournal;
     let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
     assert!(!report.ok, "deploy must refuse to run over corrupt state");
+}
+
+/// fix-50 (expert panel, state-load-error-empty-fleet, 2026-09-27): only a
+/// MISSING state.json is a fresh install. A file that is there but cannot be
+/// read (EACCES, EIO, EMFILE) loaded as an empty fleet, and the next save
+/// erased the record of every managed stack.
+#[tokio::test]
+async fn fix_50_an_unreadable_state_file_is_an_error_not_an_empty_fleet() {
+    use homelab_core::state::StateStore;
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{}}"#,
+    );
+    exec.fail_read(
+        "/var/lib/homelab/state.json",
+        "Permission denied (os error 13)",
+    );
+    let store = StateStore::new(&exec, "/var/lib/homelab");
+    let err = store
+        .load()
+        .await
+        .expect_err("an unreadable state file must not load as an empty fleet");
+    assert!(format!("{}", err).contains("Permission denied"), "{}", err);
+    // And a deploy over it refuses rather than saving a one-stack fleet.
+    use homelab_core::ops::deploy::deploy;
+    deploy_mocks(&exec);
+    exec.respond_always("ls -A", CmdOutput::ok("config\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
+    assert!(
+        !report.ok,
+        "deploy must refuse to run over unreadable state"
+    );
+}
+
+/// An executor whose file reads and writes give way to other tasks, the way
+/// a real disk write does. MockExecutor never yields, so on its own it cannot
+/// show two load-modify-save sequences interleaving.
+struct YieldingExec(MockExecutor);
+
+#[async_trait::async_trait]
+impl homelab_core::executor::Executor for YieldingExec {
+    async fn run(
+        &self,
+        cmd: &homelab_core::executor::Cmd,
+    ) -> Result<CmdOutput, homelab_core::error::CoreError> {
+        self.0.run(cmd).await
+    }
+    async fn write_file(
+        &self,
+        path: &str,
+        content: &str,
+        mode: u32,
+    ) -> Result<(), homelab_core::error::CoreError> {
+        tokio::task::yield_now().await;
+        self.0.write_file(path, content, mode).await
+    }
+    async fn read_file(&self, path: &str) -> Result<String, homelab_core::error::CoreError> {
+        tokio::task::yield_now().await;
+        self.0.read_file(path).await
+    }
+    async fn sleep_ms(&self, _ms: u64) {}
+}
+
+/// fix-51 (expert panel, state-writes-race, 2026-09-27): the nightly batch
+/// runs three backups at once, and each records its notification outcome
+/// with a load-modify-save of state.json outside the op lock. Two of those
+/// interleaving meant one of them saved over the other's change.
+#[tokio::test]
+async fn fix_51_concurrent_state_updates_are_all_kept() {
+    use homelab_core::state::StateStore;
+    let exec = YieldingExec(MockExecutor::new());
+    let store = StateStore::new(&exec, "/var/lib/homelab-fix51");
+    let bump = || async {
+        store
+            .update(|s| s.restore_drill_index += 1)
+            .await
+            .expect("update");
+    };
+    tokio::join!(
+        bump(),
+        bump(),
+        bump(),
+        bump(),
+        bump(),
+        bump(),
+        bump(),
+        bump()
+    );
+    let after = store.load().await.unwrap();
+    assert_eq!(
+        after.restore_drill_index, 8,
+        "every one of eight concurrent updates must survive"
+    );
 }
 
 #[tokio::test]

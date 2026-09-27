@@ -103,7 +103,8 @@ pub trait Executor: Send + Sync {
     /// Atomically write a host-local file with the given mode.
     async fn write_file(&self, path: &str, content: &str, mode: u32) -> Result<(), CoreError>;
 
-    /// Read a host-local file; Err when it does not exist.
+    /// Read a host-local file; `Err(CoreError::NotFound)` when it does not
+    /// exist and any other error when it exists but cannot be read (fix-50).
     async fn read_file(&self, path: &str) -> Result<String, CoreError>;
 
     /// Sleep — routed through the trait so tests run instantly.
@@ -129,59 +130,199 @@ pub struct TracingExecutor<'a> {
 /// kyu). No reader needs more than the start of a line to know what it was.
 pub const TRACE_LINE_MAX: usize = 300;
 
-/// fix-39, second layer: the value of any `NAME=value` whose name says it is
-/// a secret (TOKEN, SECRET, PASSWORD, PASSWD, KEY, CREDENTIAL) becomes
-/// `<redacted>`. `Cmd::quiet` keeps known secret reads out entirely; this
-/// catches the paths nobody marked, such as `docker inspect` printing a
-/// container's environment on 2026-09-01. A name with an empty value (a grep
-/// pattern like `'^REGISTRY_TOKEN='`) is left alone.
-fn mask_secret_assignments(l: &str) -> String {
-    const MARKERS: [&str; 6] = ["TOKEN", "SECRET", "PASSWORD", "PASSWD", "KEY", "CREDENTIAL"];
-    let mut out = String::with_capacity(l.len());
+/// fix-39, second layer, widened by fix-56 (expert panel,
+/// secret-mask-too-narrow, 2026-09-27): the one masker every transcript line
+/// passes through, ported from the house filter
+/// `dev-procedure/hooks/mask-secrets.sed`.
+///
+/// `Cmd::quiet` keeps known secret reads out entirely; this catches the paths
+/// nobody marked, such as `docker inspect` printing a container's environment
+/// on 2026-09-01. The fix-39 version knew one shape, upper-case `NAME=value`
+/// unquoted; measured against it, `KYU_TOKEN="abc"`, `export API_KEY='abc'`,
+/// `password=abc`, YAML `KEY: v`, JSON, `postgres://u:p@`,
+/// `Authorization: Bearer` and `?api_key=` all passed in plain text. Now:
+///
+/// - a name holding TOKEN, SECRET, KEY, PASS, BEARER or CREDENTIAL (any case)
+///   followed by `=` or `:` loses its value, quoted or not, in env, shell,
+///   TOML, YAML, JSON and query-string shapes;
+/// - `scheme://user:password@host` loses the password;
+/// - `Bearer <token>` loses the token.
+///
+/// Left alone on purpose: an empty value (a grep pattern like
+/// `'^REGISTRY_TOKEN='`), a value that is a shell reference (`$VAR`,
+/// `$(cat f)`: it names where the secret is, and a replayed command needs it),
+/// and names ending in `_FILE`, `_PATH` or `_DIR`, which hold a path.
+pub fn mask_secrets(l: &str) -> String {
+    mask_bearer(&mask_url_passwords(&mask_named_values(l)))
+}
+
+const REDACTED: &str = "<redacted>";
+
+fn is_name_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'-'
+}
+
+fn names_a_secret(name: &str) -> bool {
+    const MARKERS: [&str; 6] = ["token", "secret", "key", "pass", "bearer", "credential"];
+    const PATHS: [&str; 6] = ["_file", "-file", "_path", "-path", "_dir", "-dir"];
+    let lower = name.to_ascii_lowercase();
+    MARKERS.iter().any(|m| lower.contains(m)) && !PATHS.iter().any(|p| lower.ends_with(p))
+}
+
+/// A value that is a shell reference or already masked is not a secret.
+fn keeps_its_value(v: &str) -> bool {
+    v.is_empty() || v.starts_with('$') || v.starts_with(REDACTED)
+}
+
+fn mask_named_values(l: &str) -> String {
     let bytes = l.as_bytes();
+    let mut out = String::with_capacity(l.len());
     let mut i = 0;
     while i < l.len() {
-        // A NAME is [A-Z0-9_]+ starting at a word boundary.
-        let at_boundary = i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
-        if at_boundary && (bytes[i].is_ascii_uppercase() || bytes[i] == b'_') {
-            let mut j = i;
-            while j < l.len()
-                && (bytes[j].is_ascii_uppercase() || bytes[j].is_ascii_digit() || bytes[j] == b'_')
-            {
-                j += 1;
-            }
-            if j < l.len() && bytes[j] == b'=' {
-                let name = &l[i..j];
-                let mut k = j + 1;
-                while k < l.len()
-                    && !bytes[k].is_ascii_whitespace()
-                    && bytes[k] != b'\''
-                    && bytes[k] != b'"'
-                {
-                    k += 1;
-                }
-                if k > j + 1 && MARKERS.iter().any(|m| name.contains(m)) {
-                    out.push_str(name);
-                    out.push_str("=<redacted>");
-                    i = k;
-                    continue;
-                }
-            }
-            out.push_str(&l[i..j]);
+        let at_boundary = i == 0 || !is_name_byte(bytes[i - 1]);
+        if !(at_boundary && is_name_byte(bytes[i])) {
+            let ch = l[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+            continue;
+        }
+        let mut j = i;
+        while j < l.len() && is_name_byte(bytes[j]) {
+            j += 1;
+        }
+        let name = &l[i..j];
+        if !names_a_secret(name) {
+            out.push_str(name);
             i = j;
             continue;
         }
-        let ch = l[i..].chars().next().unwrap();
-        out.push(ch);
-        i += ch.len_utf8();
+        // A JSON key or quoted YAML key: step over its closing quote.
+        let mut k = j;
+        if i > 0
+            && (bytes[i - 1] == b'"' || bytes[i - 1] == b'\'')
+            && k < l.len()
+            && bytes[k] == bytes[i - 1]
+        {
+            k += 1;
+        }
+        while k < l.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+            k += 1;
+        }
+        let is_sep = k < l.len()
+            && (bytes[k] == b'=' || bytes[k] == b':')
+            && !(k + 1 < l.len() && bytes[k + 1] == bytes[k]);
+        if !is_sep {
+            out.push_str(name);
+            i = j;
+            continue;
+        }
+        let mut v = k + 1;
+        while v < l.len() && (bytes[v] == b' ' || bytes[v] == b'\t') {
+            v += 1;
+        }
+        if v < l.len() && (bytes[v] == b'"' || bytes[v] == b'\'') {
+            let q = bytes[v];
+            let mut e = v + 1;
+            while e < l.len() && bytes[e] != q {
+                if bytes[e] == b'\\' && q == b'"' {
+                    e += 1;
+                }
+                e += 1;
+            }
+            // No closing quote: this quote closes an enclosing string (a grep
+            // pattern ending in `NAME='`), so there is no value here.
+            if e >= l.len() || keeps_its_value(&l[v + 1..e]) {
+                out.push_str(name);
+                i = j;
+                continue;
+            }
+            out.push_str(&l[i..=v]);
+            out.push_str(REDACTED);
+            i = e;
+            continue;
+        }
+        let mut e = v;
+        while e < l.len() && !bytes[e].is_ascii_whitespace() && !b"\"'&;".contains(&bytes[e]) {
+            e += 1;
+        }
+        if keeps_its_value(&l[v..e]) {
+            out.push_str(name);
+            i = j;
+            continue;
+        }
+        out.push_str(&l[i..v]);
+        out.push_str(REDACTED);
+        i = e;
     }
+    out
+}
+
+fn mask_url_passwords(l: &str) -> String {
+    let mut out = String::with_capacity(l.len());
+    let mut rest = l;
+    while let Some(at) = rest.find("://") {
+        let (head, tail) = rest.split_at(at + 3);
+        out.push_str(head);
+        let authority_end = tail
+            .find(|c: char| {
+                c == '/' || c == '?' || c == '#' || c == '"' || c == '\'' || c.is_whitespace()
+            })
+            .unwrap_or(tail.len());
+        let authority = &tail[..authority_end];
+        match (authority.rfind('@'), authority.find(':')) {
+            (Some(amp), Some(colon))
+                if colon < amp && !keeps_its_value(&authority[colon + 1..amp]) =>
+            {
+                out.push_str(&authority[..=colon]);
+                out.push_str(REDACTED);
+                out.push_str(&authority[amp..]);
+            }
+            _ => out.push_str(authority),
+        }
+        rest = &tail[authority_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn mask_bearer(l: &str) -> String {
+    let lower = l.to_ascii_lowercase();
+    let bytes = l.as_bytes();
+    let mut out = String::with_capacity(l.len());
+    let mut i = 0;
+    while let Some(off) = lower[i..].find("bearer") {
+        let b = i + off;
+        let after = b + "bearer".len();
+        let boundary = b == 0 || !bytes[b - 1].is_ascii_alphanumeric();
+        let mut t = after;
+        while t < l.len() && bytes[t] == b' ' {
+            t += 1;
+        }
+        let mut e = t;
+        while e < l.len()
+            && !bytes[e].is_ascii_whitespace()
+            && bytes[e] != b'"'
+            && bytes[e] != b'\''
+        {
+            e += 1;
+        }
+        if boundary && t > after && !keeps_its_value(&l[t..e]) {
+            out.push_str(&l[i..t]);
+            out.push_str(REDACTED);
+            i = e;
+        } else {
+            out.push_str(&l[i..after]);
+            i = after;
+        }
+    }
+    out.push_str(&l[i..]);
     out
 }
 
 /// A line as the transcript shows it: whole when short, else its start and
 /// the size of what was left out.
 pub fn trace_line(l: &str) -> String {
-    let masked = mask_secret_assignments(l);
+    let masked = mask_secrets(l);
     let l = masked.as_str();
     if l.len() <= TRACE_LINE_MAX {
         return l.to_string();
@@ -213,7 +354,9 @@ impl<'a> TracingExecutor<'a> {
 #[async_trait]
 impl Executor for TracingExecutor<'_> {
     async fn run(&self, cmd: &Cmd) -> Result<CmdOutput, CoreError> {
-        self.line(format!("[run ] {}", cmd.shell_line()));
+        // fix-56: the command line is masked like its output; a secret passed
+        // as an argument reached the transcript, journal and bundle whole.
+        self.line(format!("[run ] {}", mask_secrets(&cmd.shell_line())));
         let out = self.inner.run(cmd).await?;
         if cmd.quiet {
             self.line(format!(
@@ -262,11 +405,30 @@ pub async fn pct_sh_secret(
     timeout_s: u64,
 ) -> Result<CmdOutput, CoreError> {
     let vm = vmid.to_string();
-    exec.run(&Cmd::new("pct", &["exec", &vm, "--", "sh", "-c", script], timeout_s).quiet())
-        .await
+    let limit = timeout_s.to_string();
+    exec.run(
+        &Cmd::new(
+            "pct",
+            &[
+                "exec", &vm, "--", "timeout", "-k", "10", &limit, "sh", "-c", script,
+            ],
+            timeout_s,
+        )
+        .quiet(),
+    )
+    .await
 }
 
 /// Run a shell script inside an LXC via `pct exec`.
+///
+/// fix-53 (expert panel, timeout-leaves-container-work-running, 2026-09-27):
+/// the script runs under the container's own `timeout` with the same limit.
+/// The host's timeout only ends the wait for `pct`; without this a timed-out
+/// `docker compose pull` kept running inside the container next to whatever
+/// the step did next. GNU `timeout` signals its whole process group, so the
+/// script's children go too, and `-k 10` follows a TERM that is ignored with
+/// a KILL. Measured 2026-09-27: every running container has GNU coreutils
+/// `timeout` (9.1 or 9.7).
 pub async fn pct_sh(
     exec: &dyn Executor,
     vmid: u16,
@@ -274,9 +436,12 @@ pub async fn pct_sh(
     timeout_s: u64,
 ) -> Result<CmdOutput, CoreError> {
     let vm = vmid.to_string();
+    let limit = timeout_s.to_string();
     exec.run(&Cmd::new(
         "pct",
-        &["exec", &vm, "--", "sh", "-c", script],
+        &[
+            "exec", &vm, "--", "timeout", "-k", "10", &limit, "sh", "-c", script,
+        ],
         timeout_s,
     ))
     .await
@@ -310,6 +475,8 @@ pub struct MockExecutor {
     container_created: Mutex<HashMap<String, String>>,
     /// Which app containers `docker compose up -d` has started.
     container_running: Mutex<std::collections::BTreeSet<String>>,
+    /// Paths whose read fails for a reason other than absence (EACCES, EIO).
+    read_errors: Mutex<HashMap<String, String>>,
 }
 
 impl MockExecutor {
@@ -373,6 +540,15 @@ impl MockExecutor {
 
     pub fn file_mode(&self, path: &str) -> Option<u32> {
         self.files.lock().unwrap().get(path).map(|(_, m)| *m)
+    }
+
+    /// Make every read of `path` fail with `why`, as a real read does on
+    /// EACCES or EIO: the file is there, it just cannot be read.
+    pub fn fail_read(&self, path: &str, why: &str) {
+        self.read_errors
+            .lock()
+            .unwrap()
+            .insert(path.to_string(), why.to_string());
     }
 
     pub fn seed_file(&self, path: &str, content: &str) {
@@ -556,12 +732,15 @@ impl Executor for MockExecutor {
     }
 
     async fn read_file(&self, path: &str) -> Result<String, CoreError> {
+        if let Some(why) = self.read_errors.lock().unwrap().get(path) {
+            return Err(CoreError::State(format!("{}: {}", path, why)));
+        }
         self.files
             .lock()
             .unwrap()
             .get(path)
             .map(|(c, _)| c.clone())
-            .ok_or_else(|| CoreError::State(format!("no such file: {}", path)))
+            .ok_or_else(|| CoreError::NotFound(format!("no such file: {}", path)))
     }
 
     async fn sleep_ms(&self, _ms: u64) {}

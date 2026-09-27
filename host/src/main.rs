@@ -7,7 +7,7 @@
 use std::io::Write;
 use std::net::SocketAddr;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -724,6 +724,199 @@ fn persist_settings(
 
 #[cfg(test)]
 mod tests {
+    /// fix-51 (expert panel, state-writes-race, 2026-09-27): two writers of
+    /// one path shared the temp name `<path>.tmp`. One removed the other's
+    /// half-written temp file, or `create_new` failed with EEXIST, and the
+    /// error was thrown away by `let _ = store.save(..)`. Concurrent writes of
+    /// one path must all succeed and leave one whole version behind.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole() {
+        use homelab_core::executor::Executor;
+        let dir = std::env::temp_dir().join(format!("homelab-fix51-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json").to_string_lossy().into_owned();
+        for round in 0..20 {
+            let writes = (0..8).map(|i| {
+                let path = path.clone();
+                tokio::spawn(async move {
+                    let body = format!("{}-{};", round, i).repeat(20_000);
+                    super::RealExecutor.write_file(&path, &body, 0o644).await
+                })
+            });
+            for w in writes.collect::<Vec<_>>() {
+                w.await
+                    .unwrap()
+                    .expect("every concurrent write of one path succeeds");
+            }
+            let got = std::fs::read_to_string(&path).unwrap();
+            let piece = &got[..=got.find(';').expect("content present")];
+            assert_eq!(got, piece.repeat(20_000), "one writer's content, whole");
+        }
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "state.json")
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(leftovers.is_empty(), "no temp files left: {:?}", leftovers);
+    }
+
+    /// fix-52 (expert panel, background-tasks-unsupervised, 2026-09-27): the
+    /// scheduler was spawned and its handle dropped, so one panic in it ended
+    /// the nightly backups for good while the daemon kept serving and the
+    /// watchdog kept being fed. A dead scheduler must end the process with a
+    /// failure, so systemd restarts it with a live one.
+    #[tokio::test]
+    async fn fix_52_a_dead_scheduler_ends_the_daemon_with_a_failure() {
+        let scheduler = tokio::spawn(async { panic!("scheduler bug") });
+        let code = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::supervise(
+                std::future::pending::<std::io::Result<()>>(),
+                scheduler,
+                std::future::pending::<()>(),
+                Arc::new(Mutex::new(())),
+                Duration::from_secs(1),
+            ),
+        )
+        .await
+        .expect("supervision ends when the scheduler dies");
+        assert_ne!(code, 0, "and it ends as a failure");
+    }
+
+    /// fix-52 and adoption norm N1: SIGTERM lets the running operation finish
+    /// (up to a bound) and then exits 0, instead of killing a step mid-way.
+    #[tokio::test]
+    async fn fix_52_sigterm_waits_for_the_running_operation_then_exits_zero() {
+        let op_lock = Arc::new(Mutex::new(()));
+        let held = op_lock.clone().lock_owned().await;
+        let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let f2 = finished.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            f2.store(true, std::sync::atomic::Ordering::SeqCst);
+            drop(held);
+        });
+        let scheduler = tokio::spawn(std::future::pending::<()>());
+        let code = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::supervise(
+                std::future::pending::<std::io::Result<()>>(),
+                scheduler,
+                std::future::ready(()),
+                op_lock.clone(),
+                Duration::from_secs(3),
+            ),
+        )
+        .await
+        .expect("supervision ends on SIGTERM");
+        assert_eq!(code, 0);
+        assert!(
+            finished.load(std::sync::atomic::Ordering::SeqCst),
+            "it waited for the operation holding the lock"
+        );
+        // Having waited, it keeps the lock: nothing queued after the signal
+        // starts before the process exits.
+        assert!(op_lock.try_lock().is_err(), "the lock stays held");
+        // A hung operation does not hold the exit forever.
+        let op_lock = Arc::new(Mutex::new(()));
+        let _stuck = op_lock.clone().lock_owned().await;
+        let scheduler = tokio::spawn(std::future::pending::<()>());
+        let code = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::supervise(
+                std::future::pending::<std::io::Result<()>>(),
+                scheduler,
+                std::future::ready(()),
+                op_lock,
+                Duration::from_millis(100),
+            ),
+        )
+        .await
+        .expect("the drain wait is bounded");
+        assert_eq!(code, 0);
+    }
+
+    /// fix-53 (expert panel, timeout-leaves-container-work-running,
+    /// 2026-09-27): a timeout killed only the direct child (`pct`), not what
+    /// it had started (`lxc-attach` and the script), so a "timed out" step
+    /// went on changing the container. Everything the command started must
+    /// be gone once the timeout is reported.
+    #[tokio::test]
+    async fn fix_53_a_timeout_kills_everything_the_command_started() {
+        use homelab_core::executor::Executor;
+        let pidfile =
+            std::env::temp_dir().join(format!("homelab-fix53-{}.pid", std::process::id()));
+        let _ = std::fs::remove_file(&pidfile);
+        let script = format!("sleep 30 & echo $! > '{}'; wait", pidfile.display());
+        let got = super::RealExecutor
+            .run(&Cmd::new("sh", &["-c", &script], 1))
+            .await;
+        assert!(
+            matches!(got, Err(CoreError::Timeout { .. })),
+            "the wait ends as a timeout: {:?}",
+            got
+        );
+        let pid = std::fs::read_to_string(&pidfile)
+            .expect("the script recorded its child")
+            .trim()
+            .to_string();
+        let _ = std::fs::remove_file(&pidfile);
+        // An exit is not instant; a zombie awaiting its reaper counts as gone.
+        let mut alive = true;
+        for _ in 0..20 {
+            let stat = std::fs::read_to_string(format!("/proc/{}/stat", pid)).unwrap_or_default();
+            alive = !stat.is_empty() && !stat.contains(") Z ");
+            if !alive {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if alive {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid])
+                .status();
+        }
+        assert!(
+            !alive,
+            "the command's own child {} outlived the timeout",
+            pid
+        );
+    }
+
+    /// fix-55 (expert panel, unparseable-frame-logged-whole, 2026-09-27): a
+    /// frame the host could not parse was logged whole. A deploy frame carries
+    /// every `.env` value of its stack (`DeploySpec.env` is the secrets
+    /// channel) and a staging frame tens of MB of base64, so one version skew
+    /// put a stack's secrets, or a whole binary, into one pve journal line.
+    #[test]
+    fn fix_55_an_unparseable_frame_is_logged_without_its_body() {
+        let secret = "hunter2-db-password";
+        let frame = format!(
+            r#"{{"id":7,"cmd":"deploy_stack","manifest":{{"vmid":"not-a-number"}},"env":{{"app":{{"DB_PASSWORD":"{}"}}}},"blob":"{}"}}"#,
+            secret,
+            "A".repeat(100_000)
+        );
+        let e = serde_json::from_str::<RpcRequest>(&frame).unwrap_err();
+        let line = super::unparseable_frame_line(&e, &frame);
+        assert!(!line.contains(secret), "{}", line);
+        assert!(line.len() < 500, "{} bytes", line.len());
+        assert!(line.contains("deploy_stack"), "names the method: {}", line);
+        assert!(
+            line.contains(&frame.len().to_string()),
+            "and the size: {}",
+            line
+        );
+        // serde's own message quotes the offending value; that value may be a
+        // secret too, so only its position is kept.
+        let e = serde_json::from_str::<RpcRequest>(r#"{"id":"s3cr3t-token","cmd":"ping"}"#)
+            .unwrap_err();
+        let line = super::unparseable_frame_line(&e, r#"{"id":"s3cr3t-token","cmd":"ping"}"#);
+        assert!(!line.contains("s3cr3t-token"), "{}", line);
+    }
+
     /// covers: F208
     ///
     /// G1 of the Phase-7 gate. Saving a setting from the TUI rewrites the
@@ -1666,18 +1859,42 @@ impl Executor for RealExecutor {
         // pipeline; here we only trace at the log level for non-pipeline calls.
         let rendered = cmd.rendered();
         tracing::trace!("run {}", rendered);
-        let fut = Command::new(&cmd.program)
+        // fix-53 (expert panel, timeout-leaves-container-work-running,
+        // 2026-09-27): the command leads a process group of its own, and a
+        // timeout kills that whole group. `kill_on_drop` alone reached only
+        // the direct child (`pct`), not the `lxc-attach` and script it had
+        // started, so a "timed out" step went on changing the container.
+        let child = Command::new(&cmd.program)
             .args(&cmd.args)
             .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .kill_on_drop(true)
-            .output();
-        let out = tokio::time::timeout(Duration::from_secs(cmd.timeout_s), fut)
-            .await
-            .map_err(|_| CoreError::Timeout {
-                rendered: rendered.clone(),
-                seconds: cmd.timeout_s,
-            })?
+            .process_group(0)
+            .spawn()
             .map_err(|e| CoreError::Other(format!("spawn {}: {}", rendered, e)))?;
+        let group = child.id();
+        let out = match tokio::time::timeout(
+            Duration::from_secs(cmd.timeout_s),
+            child.wait_with_output(),
+        )
+        .await
+        {
+            Ok(out) => out.map_err(|e| CoreError::Other(format!("wait {}: {}", rendered, e)))?,
+            Err(_) => {
+                if let Some(pgid) = group.and_then(|p| i32::try_from(p).ok()) {
+                    // SAFETY: killpg only sends a signal; the group is the one
+                    // this call created for the child it spawned.
+                    unsafe {
+                        libc::killpg(pgid, libc::SIGKILL);
+                    }
+                }
+                return Err(CoreError::Timeout {
+                    rendered: rendered.clone(),
+                    seconds: cmd.timeout_s,
+                });
+            }
+        };
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let stderr = String::from_utf8_lossy(&out.stderr).to_string();
         Ok(CmdOutput {
@@ -1697,7 +1914,18 @@ impl Executor for RealExecutor {
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| CoreError::State(e.to_string()))?;
             }
-            let tmp = format!("{}.tmp", path);
+            // fix-51 (expert panel, state-writes-race, 2026-09-27): a temp
+            // name of its own per write. The fixed `<path>.tmp` let two
+            // writers of one path (three nightly backups recording their
+            // notification outcome, or writing the notify header file) remove
+            // each other's temp file or fail on EEXIST.
+            static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let tmp = format!(
+                "{}.{}.{}.tmp",
+                path,
+                std::process::id(),
+                SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            );
             {
                 // Created with its final mode: a secret written into a file
                 // that is world-readable until the chmod below is readable in
@@ -1716,9 +1944,19 @@ impl Executor for RealExecutor {
                     .map_err(|e| CoreError::State(e.to_string()))?;
                 f.sync_all().map_err(|e| CoreError::State(e.to_string()))?;
             }
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))
-                .map_err(|e| CoreError::State(e.to_string()))?;
-            std::fs::rename(&tmp, &path).map_err(|e| CoreError::State(e.to_string()))?;
+            let placed = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))
+                .and_then(|()| std::fs::rename(&tmp, &path));
+            if let Err(e) = placed {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(CoreError::State(e.to_string()));
+            }
+            // fix-51: the rename is only durable once the directory entry
+            // is; without this a power cut can bring the old file back.
+            if let Some(parent) = p.parent() {
+                if let Ok(d) = std::fs::File::open(parent) {
+                    let _ = d.sync_all();
+                }
+            }
             Ok(())
         })
         .await
@@ -1726,9 +1964,15 @@ impl Executor for RealExecutor {
     }
 
     async fn read_file(&self, path: &str) -> Result<String, CoreError> {
-        tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| CoreError::State(format!("{}: {}", path, e)))
+        // fix-50: absence and unreadability are different answers; the state
+        // store may only treat the first as a fresh install.
+        tokio::fs::read_to_string(path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                CoreError::NotFound(format!("{}: {}", path, e))
+            } else {
+                CoreError::State(format!("{}: {}", path, e))
+            }
+        })
     }
 
     async fn sleep_ms(&self, ms: u64) {
@@ -1898,6 +2142,84 @@ fn sd_notify(msg: &str) {
     }
 }
 
+/// Run the daemon until something ends it, and say with which exit code.
+///
+/// fix-52 (expert panel, background-tasks-unsupervised, 2026-09-27): main
+/// used to await the server alone. The scheduler's handle was dropped, so a
+/// panic in it ended every nightly backup for good while the daemon went on
+/// serving and feeding the watchdog; and nothing handled SIGTERM, so
+/// `systemctl stop` or a self-update restart killed a step mid-way.
+///
+/// - The scheduler ending in any way is a failure (exit 1): systemd's
+///   `Restart=always` brings the daemon back with a live scheduler.
+/// - SIGTERM waits for the operation holding `op_lock`, at most `drain`,
+///   then exits 0 (adoption norm N1). The lock is fair, so no operation
+///   queued after the signal starts.
+async fn supervise<S>(
+    serve: S,
+    scheduler: tokio::task::JoinHandle<()>,
+    shutdown: impl std::future::Future<Output = ()>,
+    op_lock: Arc<Mutex<()>>,
+    drain: Duration,
+) -> i32
+where
+    S: std::future::Future<Output = std::io::Result<()>>,
+{
+    tokio::select! {
+        served = serve => {
+            match served {
+                Ok(()) => error!("server stopped without an error — exiting so systemd restarts it"),
+                Err(e) => error!("server stopped :: {}", e),
+            }
+            1
+        }
+        ended = scheduler => {
+            let how = match ended {
+                Err(e) if e.is_panic() => "panicked",
+                Err(_) => "was cancelled",
+                Ok(()) => "returned",
+            };
+            error!(
+                "scheduler task {} — exiting so systemd restarts the daemon with a live scheduler",
+                how
+            );
+            1
+        }
+        () = shutdown => {
+            info!(
+                "SIGTERM: waiting up to {}s for the running operation to finish",
+                drain.as_secs()
+            );
+            match tokio::time::timeout(drain, op_lock.lock_owned()).await {
+                Ok(guard) => {
+                    // Held until the process exits: nothing starts after this.
+                    std::mem::forget(guard);
+                    info!("SIGTERM: no operation running — exiting");
+                }
+                Err(_) => tracing::warn!(
+                    "SIGTERM: an operation is still running after {}s — exiting anyway; the next start reports it as interrupted",
+                    drain.as_secs()
+                ),
+            }
+            0
+        }
+    }
+}
+
+/// fix-52: resolves on SIGTERM. If the handler cannot be installed the
+/// daemon keeps running as it did before, and says so.
+async fn terminate_signal() {
+    match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+        Ok(mut sig) => {
+            sig.recv().await;
+        }
+        Err(e) => {
+            tracing::warn!("no SIGTERM handler ({}) — a stop kills the running step", e);
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // H5: the self-update gate runs `staged --selfcheck` before installing.
@@ -1982,9 +2304,10 @@ async fn main() {
     // E4: nightly scheduler — backups for every managed stack + auto-policy
     // updates, driven from state.json manifests (no client needed). Reads the
     // live settings each tick, so G8 edits apply without a restart.
-    {
+    // fix-52: the handle is kept; `supervise` ends the process if it ends.
+    let scheduler = {
         let sched_state = state.clone();
-        tokio::spawn(async move { scheduler_loop(sched_state).await });
+        let handle = tokio::spawn(async move { scheduler_loop(sched_state).await });
         match config.initial_settings.backup_hour {
             Some(hour) => info!(
                 "scheduler armed: daily backup + auto-updates at {:02}:00",
@@ -1992,7 +2315,9 @@ async fn main() {
             ),
             None => info!("scheduler idle (backup_hour not set)"),
         }
-    }
+        handle
+    };
+    let op_lock = state.op_lock.clone();
 
     let app = Router::new()
         .route("/api/health", get(|| async { "ok" }))
@@ -2024,6 +2349,15 @@ async fn main() {
         }
     });
 
+    // fix-52: bind first, so READY=1 means the port is open. It was sent
+    // before the socket existed, and a bind failure then looked like a
+    // daemon that had started.
+    let listener = tokio::net::TcpListener::bind(config.listen)
+        .await
+        .and_then(|l| l.into_std())
+        .expect("bind listen address");
+    let server = axum_server::from_tcp_rustls(listener, tls_config).expect("serve");
+
     // B7: tell systemd we're ready, then feed its watchdog. If this loop
     // ever stops (deadlock/hang), systemd kills and restarts the daemon.
     sd_notify("READY=1");
@@ -2034,10 +2368,15 @@ async fn main() {
         }
     });
 
-    axum_server::bind_rustls(config.listen, tls_config)
-        .serve(app.into_make_service())
-        .await
-        .expect("serve");
+    let code = supervise(
+        server.serve(app.into_make_service()),
+        scheduler,
+        terminate_signal(),
+        op_lock,
+        Duration::from_secs(60),
+    )
+    .await;
+    std::process::exit(code);
 }
 
 /// H16: parse capacity numbers (C6) from `free -m`, `nproc` and
@@ -2394,7 +2733,10 @@ async fn scheduler_loop(state: AppState) {
         tokio::time::sleep(Duration::from_secs(20 * 60)).await;
         spawn_mirror_push(&state); // D5 retry queue: try again every tick
         let (hour, tiers) = {
-            let s = state.settings.read().unwrap();
+            let s = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner);
             match s.backup_hour {
                 Some(h) => (h, s.retention.clone()),
                 None => continue, // scheduler disabled
@@ -2551,31 +2893,20 @@ async fn scheduler_loop(state: AppState) {
                     update_ok &= r.ok;
                 }
                 if backup.records_a_timestamp() {
-                    if let Ok(mut s) = store.load().await {
+                    record_state(&store, "last_backup", |s| {
                         if let Some(rec) = s.stacks.get_mut(&name) {
                             rec.last_backup = now;
                         }
-                        let _ = store.save(s).await;
-                    }
+                    })
+                    .await;
                 }
                 // A deferred backup is deliberately absent from this
                 // condition: it is not a failed night, and parking the stack
                 // for it would punish the house for using its own services.
                 if backup.parks_the_stack(update_ok) {
-                    let mut parked = false;
-                    if let Ok(mut s) = store.load().await {
-                        if let Some(rec) = s.stacks.get_mut(&name) {
-                            if rec.enabled {
-                                rec.enabled = false;
-                                parked = true;
-                                tracing::warn!(
-                                    "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
-                                    name, name
-                                );
-                            }
-                        }
-                        let _ = store.save(s).await;
-                    }
+                    let parked = record_state(&store, "auto-disable", |s| park(s, &name))
+                        .await
+                        .unwrap_or(false);
                     if parked {
                         notify_auto_disabled(
                             &state,
@@ -2600,12 +2931,12 @@ async fn scheduler_loop(state: AppState) {
                 .unwrap_or(NightBackup::Failed);
             if backup.records_a_timestamp() {
                 // Record last_backup so tomorrow's check is accurate.
-                if let Ok(mut s) = store.load().await {
+                record_state(&store, "last_backup", |s| {
                     if let Some(rec) = s.stacks.get_mut(&name) {
                         rec.last_backup = now;
                     }
-                    let _ = store.save(s).await;
-                }
+                })
+                .await;
             }
             let m2 = manifest.clone();
             let update_report = run_mutating_op(&state, &exec, 0, "scheduled-update", |ctx| {
@@ -2619,20 +2950,9 @@ async fn scheduler_loop(state: AppState) {
             // onboot and the running containers are untouched, so a transient
             // failure can never keep a stack from surviving a host reboot.
             if backup.parks_the_stack(update_report.ok) {
-                let mut parked = false;
-                if let Ok(mut s) = store.load().await {
-                    if let Some(rec) = s.stacks.get_mut(&name) {
-                        if rec.enabled {
-                            rec.enabled = false;
-                            parked = true;
-                            tracing::warn!(
-                                "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
-                                name, name
-                            );
-                        }
-                    }
-                    let _ = store.save(s).await;
-                }
+                let parked = record_state(&store, "auto-disable", |s| park(s, &name))
+                    .await
+                    .unwrap_or(false);
                 if parked {
                     notify_auto_disabled(
                         &state,
@@ -2661,10 +2981,7 @@ async fn scheduler_loop(state: AppState) {
             })
             .await;
             if report.ok {
-                if let Ok(mut s) = store.load().await {
-                    s.last_host_meta = now;
-                    let _ = store.save(s).await;
-                }
+                record_state(&store, "last_host_meta", |s| s.last_host_meta = now).await;
             } else {
                 tracing::error!(
                     "scheduler: host-meta backup FAILED — the vault/state/TLS snapshot is the recovery path for a lost host disk; investigate now"
@@ -2690,7 +3007,7 @@ async fn scheduler_loop(state: AppState) {
                 };
                 let target = format!("{}/restore-drill", state.config.state_dir);
                 let outcome = run_restore_drill(&exec, &cfg, &repo, &target).await;
-                if let Ok(mut sn) = store.load().await {
+                record_state(&store, "restore drill", |sn| {
                     sn.restore_drill_index = next;
                     sn.last_restore_drill_repo = repo.clone();
                     match &outcome {
@@ -2710,8 +3027,8 @@ async fn scheduler_loop(state: AppState) {
                             tracing::error!("restore drill: {} proved nothing :: {}", repo, why);
                         }
                     }
-                    let _ = store.save(sn).await;
-                }
+                })
+                .await;
             }
         }
 
@@ -2750,10 +3067,7 @@ async fn scheduler_loop(state: AppState) {
             })
             .await;
             if report.ok {
-                if let Ok(mut s) = store.load().await {
-                    s.last_zfs = now;
-                    let _ = store.save(s).await;
-                }
+                record_state(&store, "last_zfs", |s| s.last_zfs = now).await;
             } else {
                 tracing::error!("scheduler: ZFS replication FAILED — investigate; the old cron script used to fail silently, this one does not");
             }
@@ -2871,6 +3185,38 @@ async fn ws_upgrade(
         .into_response()
 }
 
+/// The journal line for a request frame this end could not parse.
+///
+/// fix-55 (expert panel, unparseable-frame-logged-whole, 2026-09-27): never
+/// the body. A deploy frame carries every `.env` value of its stack and a
+/// staging frame tens of MB of base64; both went into one journal line when
+/// a version skew made a frame unreadable. serde's own message is left out
+/// too, because it quotes the offending value ("invalid type: string
+/// \"...\""), which can be a secret. The method, the size and where parsing
+/// stopped are enough to tell which client sent what.
+fn unparseable_frame_line(e: &serde_json::Error, text: &str) -> String {
+    let method = text
+        .find("\"cmd\"")
+        .map(|at| {
+            text[at + 5..]
+                .trim_start_matches(|c: char| c.is_whitespace() || c == ':' || c == '"')
+                .chars()
+                .take_while(|c| c.is_ascii_lowercase() || *c == '_')
+                .take(40)
+                .collect::<String>()
+        })
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| "?".into());
+    format!(
+        "unparseable request dropped :: cmd={} · {} bytes · {:?} error at line {} column {}",
+        method,
+        text.len(),
+        e.classify(),
+        e.line(),
+        e.column()
+    )
+}
+
 async fn ws_session(socket: WebSocket, state: AppState) {
     serve_ws(socket, state, |st, req| async move {
         handle_rpc(&st, req).await
@@ -2943,7 +3289,7 @@ where
                 // hang rather than a bug: the request was dropped and the
                 // client waited for a reply that was never coming. A frame
                 // this end cannot understand is a fault on this end.
-                tracing::error!("unparseable request dropped :: {} :: {}", e, text);
+                tracing::error!("{}", unparseable_frame_line(&e, &text));
                 continue;
             }
         };
@@ -3014,7 +3360,7 @@ async fn notify_auto_disabled(state: &AppState, exec: &RealExecutor, stack: &str
     if !state
         .damper
         .lock()
-        .unwrap()
+        .unwrap_or_else(PoisonError::into_inner)
         .should_send(&op, false, Some(why), now)
     {
         return;
@@ -3044,7 +3390,7 @@ async fn notify(
     if !state
         .damper
         .lock()
-        .unwrap()
+        .unwrap_or_else(PoisonError::into_inner)
         .should_send(&report.op, report.ok, error.as_deref(), now)
     {
         return;
@@ -3070,7 +3416,12 @@ fn exec_allowed(config: &Config, vmid: u16) -> Result<(), homelab_core::error::C
 /// records the outcome in state so an unreachable notification path becomes a
 /// finding instead of a silence.
 async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
-    let primary = state.settings.read().unwrap().notify_webhook.clone();
+    let primary = state
+        .settings
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .notify_webhook
+        .clone();
     let fallback = state.config.notify_fallback_webhook.clone();
     let urls = homelab_core::notify::route(primary.as_deref(), fallback.as_deref());
     if urls.is_empty() {
@@ -3131,6 +3482,42 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
     record_notify_outcome(state, exec, delivered, &last).await;
 }
 
+/// fix-51 (expert panel, state-writes-race, 2026-09-27): every short
+/// read-modify-write of state.json outside an operation goes through the
+/// store's lock, and a failure is logged instead of dropped. These used to be
+/// `load` then `let _ = store.save(..)`: concurrent callers saved over each
+/// other and nobody heard about a save that failed.
+async fn record_state<R>(
+    store: &homelab_core::state::StateStore<'_>,
+    what: &str,
+    change: impl FnOnce(&mut homelab_core::state::HostState) -> R,
+) -> Option<R> {
+    match store.update(change).await {
+        Ok(r) => Some(r),
+        Err(e) => {
+            tracing::error!("state: could not record {} :: {}", what, e);
+            None
+        }
+    }
+}
+
+/// H8: flip a stack's enabled flag off after a failed nightly run. True when
+/// this call parked it (it was enabled before).
+fn park(s: &mut homelab_core::state::HostState, name: &str) -> bool {
+    let Some(rec) = s.stacks.get_mut(name) else {
+        return false;
+    };
+    if !rec.enabled {
+        return false;
+    }
+    rec.enabled = false;
+    tracing::warn!(
+        "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
+        name, name
+    );
+    true
+}
+
 /// Keep the last word on whether notifications are arriving, so a broken
 /// notification path is visible somewhere other than in a notification.
 ///
@@ -3139,21 +3526,20 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
 /// so cannot reach him by the path that is broken.
 async fn record_notify_outcome(state: &AppState, exec: &RealExecutor, delivered: bool, why: &str) {
     let store = homelab_core::state::StateStore::new(exec, &state.config.state_dir);
-    let Ok(mut st) = store.load().await else {
-        return;
-    };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    if delivered {
-        st.last_notify_ok = now;
-        st.last_notify_error = None;
-    } else {
-        st.last_notify_failed = now;
-        st.last_notify_error = Some(why.to_string());
-    }
-    let _ = store.save(st).await;
+    record_state(&store, "notification outcome", |st| {
+        if delivered {
+            st.last_notify_ok = now;
+            st.last_notify_error = None;
+        } else {
+            st.last_notify_failed = now;
+            st.last_notify_error = Some(why.to_string());
+        }
+    })
+    .await;
 }
 
 /// Run any mutating operation under the op-lock (AR12) with uniform incident
@@ -3428,15 +3814,16 @@ async fn gather_live_facts(
 /// reported about kyu minutes after I had backed it up myself.
 async fn record_backup_time(state: &AppState, stack: &str) {
     let store = homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
-    if let Ok(mut s) = store.load().await {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    record_state(&store, "last_backup", |s| {
         if let Some(rec) = s.stacks.get_mut(stack) {
-            rec.last_backup = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let _ = store.save(s).await;
+            rec.last_backup = now;
         }
-    }
+    })
+    .await;
 }
 
 fn render_findings(findings: &[homelab_core::ops::fleetcheck::Finding]) -> String {
@@ -3519,12 +3906,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
             let dir = staged_binaries_dir(&state.config.state_dir, &stack);
             let path = format!("{}/{}.b64", dir, unit);
-            let written = std::fs::create_dir_all(&dir)
-                .and_then(|_| std::fs::write(&path, binary_b64.as_bytes()))
-                .and_then(|_| {
-                    use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                });
+            // fix-51: through the executor's atomic write (own temp name,
+            // 0600 from creation, off the async worker) rather than a plain
+            // `std::fs::write` of tens of MB that a deploy reading the file at
+            // the same moment could see half-written.
+            let written = exec.write_file(&path, &binary_b64, 0o600).await;
             match written {
                 Ok(()) => RpcResponse {
                     id: req.id,
@@ -3586,7 +3972,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         }
         Rpc::BackupStack(manifest) => {
             let cfg = homelab_core::ops::backup::BackupCfg {
-                tiers: state.settings.read().unwrap().retention.clone(),
+                tiers: state
+                    .settings
+                    .read()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .retention
+                    .clone(),
                 ..state.config.backup.clone()
             };
             let stack = manifest.stack_name.clone();
@@ -3643,7 +4034,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             .await
         }
         Rpc::BackupHostMeta => {
-            let tiers = state.settings.read().unwrap().retention.clone();
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
             let cfg = homelab_core::ops::backup::BackupCfg {
                 tiers,
                 ..state.config.backup.clone()
@@ -3657,13 +4053,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             if resp.ok {
                 let store =
                     homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
-                if let Ok(mut s) = store.load().await {
-                    s.last_host_meta = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let _ = store.save(s).await;
-                }
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                record_state(&store, "last_host_meta", |s| s.last_host_meta = now).await;
             }
             resp
         }
@@ -3694,7 +4088,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         Rpc::BackupNative { stack } => {
             match native_from_state(&state.config.state_dir, &stack).await {
                 Ok((services, _)) => {
-                    let tiers = state.settings.read().unwrap().retention.clone();
+                    let tiers = state
+                        .settings
+                        .read()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .retention
+                        .clone();
                     let cfg = homelab_core::ops::backup::BackupCfg {
                         tiers,
                         ..state.config.backup.clone()
@@ -4095,7 +4494,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
         }
         Rpc::ZfsReplicate => {
-            let tiers = state.settings.read().unwrap().retention.clone();
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
             let jobs = state.config.zfs_jobs.clone();
             let resp = run_mutating_op(state, &exec, req.id, "zfs-replicate", |ctx| {
                 Box::pin(async move { homelab_core::ops::zfs::replicate(ctx, &jobs, &tiers).await })
@@ -4104,13 +4508,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             if resp.ok {
                 let store =
                     homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
-                if let Ok(mut s) = store.load().await {
-                    s.last_zfs = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let _ = store.save(s).await;
-                }
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                record_state(&store, "last_zfs", |s| s.last_zfs = now).await;
             }
             resp
         }
@@ -4124,7 +4526,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     deferred: None,
                 };
             }
-            let tiers = state.settings.read().unwrap().retention.clone();
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
             let mut lines = Vec::new();
             let mut ok = true;
             for dev in devices {
@@ -4174,14 +4581,16 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             note,
         } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
-            let mut st = store.load().await.unwrap_or_default();
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let found = homelab_core::ops::manualchecks::answer(&mut st, &id, ok, &note, now);
+            let found = record_state(&store, "manual check answer", |st| {
+                homelab_core::ops::manualchecks::answer(st, &id, ok, &note, now)
+            })
+            .await
+            .unwrap_or(false);
             let message = if found {
-                let _ = store.save(st).await;
                 format!("{} recorded as {}", id, if ok { "ok" } else { "NOT ok" })
             } else {
                 format!(
@@ -4360,7 +4769,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
         }
         Rpc::GetConfig => {
-            let view = state.settings.read().unwrap().clone();
+            let view = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
             let _ = state.log_tx.send(ServerMsg::Config(Box::new(view)));
             RpcResponse {
                 id: req.id,
@@ -4391,7 +4804,10 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
             match persist_settings(&state.config, &view) {
                 Ok(()) => {
-                    *state.settings.write().unwrap() = *view;
+                    *state
+                        .settings
+                        .write()
+                        .unwrap_or_else(PoisonError::into_inner) = *view;
                     info!("settings updated via G8");
                     RpcResponse {
                         id: req.id,

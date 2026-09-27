@@ -462,9 +462,42 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     120,
                 ))
                 .await;
-            let usable = matches!(&has_snapshot, Ok(out)
-                if out.success() && out.stdout.trim() != "[]" && !out.stdout.trim().is_empty());
-            if !usable {
+            // fix-54 (expert panel, auto-restore-error-as-fresh, 2026-09-27):
+            // only two answers mean "nothing to restore": an empty snapshot
+            // list, and restic's own "repository does not exist" (exit 10
+            // since restic 0.17; pve runs 0.18). Every other failure (Drive
+            // unreachable, an expired rclone token, a wrong password, the
+            // 120 s timeout) used to read as "fresh" at Info level, so a
+            // rebuild could start an app on an empty directory and that
+            // night's backup would make the empty state `latest`. Such a
+            // path is now a loud warning; the deploy still goes on, because
+            // backup-target trouble never blocks a deploy (E3 spec).
+            let listed = match &has_snapshot {
+                Ok(out) if out.success() => Ok(out.stdout.trim().to_string()),
+                Ok(out) if out.code == 10 => Ok(String::new()),
+                Ok(out) => Err(format!(
+                    "rc={} :: {}",
+                    out.code,
+                    crate::executor::trace_line(out.stderr.trim())
+                )),
+                Err(e) => Err(e.to_string()),
+            };
+            let listed = match listed {
+                Ok(listed) => listed,
+                Err(why) => {
+                    failed_any = true;
+                    ctx.sink.emit(PipelineEvent::Line {
+                        level: Level::Warn,
+                        source: "HOST".into(),
+                        msg: format!(
+                            "[e3] {} is empty and its backup could not be checked ({}) — deploy continues with that dir EMPTY; if it held data, restore it by hand before the next nightly backup",
+                            mount.host_path, why
+                        ),
+                    });
+                    continue;
+                }
+            };
+            if listed.is_empty() || listed == "[]" {
                 log_info(format!(
                     "[e3] {} is empty and has no snapshot — fresh",
                     mount.host_path

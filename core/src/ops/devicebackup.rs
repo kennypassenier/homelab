@@ -23,15 +23,6 @@ use crate::ops::OpCtx;
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
-
 /// One device that can hand over its own configuration.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct DeviceBackup {

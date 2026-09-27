@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["core", "proto", "host", "client", "tui-preview"]
+members = ["core", "proto", "host", "client"]
+# rust-code-hygiene (expert panel, 2026-09-27): the TUI mock-up has no tests
+# and its own dependency tree (rand, chrono); it stays in the repository,
+# outside the workspace, and builds on its own from its directory.
+exclude = ["tui-preview"]
 
 [workspace.package]
 version = "3.60.0"
@@ -19,3 +23,13 @@ async-trait = "0.1"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sha2 = "0.10"
+base64 = "0.22"
+rcgen = "0.13"
+tokio-tungstenite = "0.29"
+
+# One `unsafe` block exists (fix-53: `libc::killpg` in the host executor),
+# allowed where it stands; anything else is refused. `forbid` would not let
+# that one block opt out.
+[workspace.lints.rust]
+unsafe_code = "deny"

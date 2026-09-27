@@ -14,15 +14,6 @@ use crate::sink::Level;
 use super::util::shq;
 use super::OpCtx;
 
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
-
 /// One captured container image: `sha256:<id>` plus the `repo:tag` it ran as.
 #[derive(Debug, Clone)]
 struct CapturedImage {

@@ -16,15 +16,6 @@ use super::{util_pct_sh, OpCtx};
 /// 26 h leaves room for a late run without accepting yesterday's file.
 pub const MAX_OWN_COPY_AGE_S: u64 = 26 * 3600;
 
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
-
 /// Adopt an existing container as a managed native-service stack. Never
 /// starts, stops or restarts anything — a running production service is
 /// exactly what must stay untouched while the homelab takes ownership.

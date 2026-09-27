@@ -14,15 +14,6 @@ use crate::sink::Level;
 
 use super::OpCtx;
 
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
-
 pub struct TemplateCfg {
     /// The vmid the builder may create AND destroy. Nothing else, ever.
     pub temp_vmid: u16,

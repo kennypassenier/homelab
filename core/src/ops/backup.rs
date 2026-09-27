@@ -12,15 +12,6 @@ use crate::sink::{Level, PipelineEvent};
 
 use super::OpCtx;
 
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
-
 /// Where restic keeps its index cache. Without it every single operation
 /// re-downloads the repository index from Google Drive first.
 ///

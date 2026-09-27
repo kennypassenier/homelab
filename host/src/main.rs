@@ -804,16 +804,30 @@ mod tests {
         assert!(!line.contains("s3cr3t-token"), "{}", line);
     }
 
+    /// Load a config from `raw` through a file of its own. Tests run as
+    /// parallel threads of one process, so neither a shared path nor
+    /// `HOMELAB_CONFIG` may be used (rust-code-hygiene, 2026-09-27: one test
+    /// set that variable and wrote a fixed /tmp path while others ran).
+    fn config_from_text(raw: &str) -> Config {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "homelab-host-test-{}-{}.toml",
+            std::process::id(),
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::write(&path, raw).unwrap();
+        let cfg = load_config_from(path.display().to_string());
+        let _ = std::fs::remove_file(&path);
+        cfg
+    }
+
     /// F8: host.toml may only ADD to the no-touch list. Assigning used to be
     /// possible, which meant one line in a hand-edited file could drop VM 100
     /// and VM 101 out of protection without a word.
     #[test]
     fn the_config_can_widen_the_no_touch_list_but_never_shrink_it() {
         let raw = "token = \"0123456789abcdef0123\"\nno_touch = [200, 201]\n";
-        std::fs::write("/tmp/homelab-f8-test.toml", raw).unwrap();
-        std::env::set_var("HOMELAB_CONFIG", "/tmp/homelab-f8-test.toml");
-        let cfg = load_config();
-        std::env::remove_var("HOMELAB_CONFIG");
+        let cfg = config_from_text(raw);
 
         for compiled in homelab_core::safety::DEFAULT_NO_TOUCH {
             assert!(
@@ -831,10 +845,7 @@ mod tests {
     #[test]
     fn fix_36_remote_exec_refuses_a_vmid_the_config_added_to_the_no_touch_list() {
         let raw = "token = \"0123456789abcdef0123\"\nexec_enabled = true\nno_touch = [200]\n";
-        // Loaded by path, not through HOMELAB_CONFIG: tests run in parallel
-        // and another test sets that variable.
-        std::fs::write("/tmp/homelab-fix36-test.toml", raw).unwrap();
-        let cfg = load_config_from("/tmp/homelab-fix36-test.toml".into());
+        let cfg = config_from_text(raw);
         assert!(
             exec_allowed(&cfg, 200).is_err(),
             "vmid 200 is on the configured no-touch list; exec must refuse it"
@@ -986,13 +997,7 @@ pull_timeout_secs = 180
 registry = "lscr.io"
 port = 5003
 "#;
-        let path = std::env::temp_dir().join(format!(
-            "homelab-config-roundtrip-{}.toml",
-            std::process::id()
-        ));
-        std::fs::write(&path, raw).unwrap();
-        let config = load_config_from(path.display().to_string());
-        let _ = std::fs::remove_file(&path);
+        let config = config_from_text(raw);
 
         let mut settings = config.initial_settings.clone();
         settings.backup_hour = Some(5);
@@ -1052,11 +1057,7 @@ port = 5003
         H: Fn(AppState, RpcRequest) -> Fut + Clone + Send + Sync + 'static,
         Fut: std::future::Future<Output = RpcResponse> + Send + 'static,
     {
-        // Loaded by path, not through HOMELAB_CONFIG, for the reason fix-36's
-        // test gives: tests run in parallel and another one sets it.
-        let path = format!("/tmp/homelab-loopback-test-{}.toml", std::process::id());
-        std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
-        let config = load_config_from(path);
+        let config = config_from_text("token = \"0123456789abcdef0123\"\n");
         let (log_tx, _) = broadcast::channel(64);
         let state = AppState {
             config: config.clone(),
@@ -1593,7 +1594,9 @@ impl Executor for RealExecutor {
             Err(_) => {
                 if let Some(pgid) = group.and_then(|p| i32::try_from(p).ok()) {
                     // SAFETY: killpg only sends a signal; the group is the one
-                    // this call created for the child it spawned.
+                    // this call created for the child it spawned. The one
+                    // exception to the workspace's `unsafe_code = "deny"`.
+                    #[allow(unsafe_code)]
                     unsafe {
                         libc::killpg(pgid, libc::SIGKILL);
                     }
@@ -2377,10 +2380,8 @@ fn bearer_ok(header: Option<&str>, token: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// E4: check every 20 minutes; when the local hour matches `hour` and a
-/// stack's last backup is >20h old, run backup (E1) then auto-updates (D9)
-/// for that stack. Uses the same op machinery as RPCs (op-lock, incidents,
-/// notifications), so a client-triggered deploy never overlaps.
+use homelab_core::ops::backup::NightBackup;
+
 /// Y1: the nightly backups, several at a time.
 ///
 /// Kenny asked why so much of a run is spent waiting, and measuring answered
@@ -2402,8 +2403,6 @@ fn bearer_ok(header: Option<&str>, token: &str) -> bool {
 /// containers to take a clean snapshot, so the number is also "how much of
 /// the house may be briefly still at 04:00" — which is Kenny's call, not the
 /// author's (he chose three).
-use homelab_core::ops::backup::NightBackup;
-
 async fn run_backup_batch(
     state: &AppState,
     exec: &RealExecutor,
@@ -2489,6 +2488,12 @@ enum BackupWhat {
     Native(Vec<homelab_core::native::NativeServiceManifest>),
 }
 
+/// E4: check every 20 minutes; when the local hour matches `hour` and a
+/// stack's last backup is >20h old, run backup (E1) then auto-updates (D9)
+/// for that stack. Uses the same op machinery as RPCs (op-lock, incidents,
+/// notifications), so a client-triggered deploy never overlaps.
+/// (rust-code-hygiene, 2026-09-27: this sat on a `use` line above
+/// `run_backup_batch`, where it documented nothing.)
 async fn scheduler_loop(state: AppState) {
     let exec = RealExecutor;
     loop {

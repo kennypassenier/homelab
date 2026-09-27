@@ -12,15 +12,6 @@ use crate::sink::Level;
 
 use super::OpCtx;
 
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
-
 pub async fn set_enabled(ctx: &OpCtx<'_>, stack_name: &str, enabled: bool) -> OperationReport {
     let op = format!(
         "{}-{}",

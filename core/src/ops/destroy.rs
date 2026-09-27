@@ -20,15 +20,6 @@ fn runner_warn(ctx: &OpCtx<'_>, msg: String) {
     });
 }
 
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
-
 /// Destroy a managed container by stack name + vmid. `confirmed` must be the
 /// caller's proof the user typed the stack name (the TUI enforces this); we
 /// re-check it here so the core is safe on its own.

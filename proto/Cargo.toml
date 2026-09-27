@@ -9,3 +9,6 @@ description = "Shared message types for the CLIENT <-> HOST protocol"
 homelab-core = { path = "../core" }
 serde.workspace = true
 serde_json.workspace = true
+
+[lints]
+workspace = true

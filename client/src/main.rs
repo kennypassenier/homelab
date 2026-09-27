@@ -84,8 +84,23 @@ fn load_config_env() {
     }
 }
 
-#[tokio::main]
-async fn main() {
+/// The env file is read before the tokio runtime starts: `set_var` while
+/// worker threads may read the environment is a data race (and `unsafe` from
+/// edition 2024 on, which is what kept the workspace on 2021).
+/// rust-code-hygiene, expert panel 2026-09-27.
+fn main() {
+    // `explicit_host` is what was typed before the command, read before the
+    // env file can add to it (feat-client-1, see `run`).
+    let explicit_host = std::env::var("HOMELAB_HOST").ok();
+    load_config_env();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("start the tokio runtime")
+        .block_on(run(explicit_host));
+}
+
+async fn run(explicit_host: Option<String>) {
     let args: Vec<String> = std::env::args().collect();
     let mut cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
@@ -121,8 +136,7 @@ async fn main() {
     // fleet and lives in the repository, `config/client.toml`; a value typed
     // before the command still wins, the machine's env file comes after the
     // repository, and the compiled-in default is the last resort.
-    let explicit_host = std::env::var("HOMELAB_HOST").ok();
-    load_config_env();
+    // (The env file was loaded in `main`, before the runtime started.)
     let repo_cfg = homelab_client::repo_config::load(
         &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
     )

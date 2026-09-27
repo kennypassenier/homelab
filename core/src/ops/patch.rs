@@ -10,15 +10,6 @@ use crate::sink::Level;
 
 use super::OpCtx;
 
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
-
 const PATCH_SCRIPT: &str = "export DEBIAN_FRONTEND=noninteractive; \
      apt-get update -qq && \
      apt-get dist-upgrade -y -qq -o Dpkg::Options::=--force-confold && \

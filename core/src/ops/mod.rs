@@ -1,5 +1,19 @@
 //! Operations: step lists executed through the shared runner (AR3).
 
+/// Run a step, and end the operation with its error when it fails (A3).
+///
+/// Defined here, before the modules, so every operation sees this one
+/// (rust-code-hygiene, 2026-09-27: there were eleven identical copies).
+/// deploy.rs shadows it with its own, which also marks the stack incomplete.
+macro_rules! step {
+    ($runner:expr, $name:expr, $body:expr) => {
+        match $runner.step($name, || async { $body }).await {
+            Ok(o) => o,
+            Err(e) => return $runner.finish_err($name, &e),
+        }
+    };
+}
+
 pub mod backup;
 pub mod busy;
 pub mod dashboard;

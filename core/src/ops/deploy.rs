@@ -2653,6 +2653,41 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             }
             changed = true;
         }
+        // Expert panel 2026-09-27 (stale-secret-residue-on-pve): flat vault
+        // copies from before fix-37 stayed on pve with live tokens nothing
+        // restores. A flat copy is kept only while it is the one a unit would
+        // still be restored from: a single unit reads that name and its
+        // per-unit copy does not exist yet. Anything else is removed, by name.
+        let dir = format!("{}/secrets/{}", ctx.state_dir, m.stack_name);
+        let listing = exec
+            .run(&Cmd::new(
+                "find",
+                &[dir.as_str(), "-maxdepth", "1", "-type", "f"],
+                30,
+            ))
+            .await;
+        if let Ok(out) = listing {
+            for flat in out.stdout.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                let name = flat.rsplit('/').next().unwrap_or(flat);
+                let still_needed = match seen.get(name) {
+                    Some(paths) if paths.len() == 1 => {
+                        let only = paths.iter().next().cloned().unwrap_or_default();
+                        let per_unit = format!("{}/{}", dir, vault_key(&only));
+                        !matches!(exec.read_file(&per_unit).await, Ok(c) if !c.trim().is_empty())
+                    }
+                    _ => false,
+                };
+                if still_needed {
+                    continue;
+                }
+                run_ok(exec, &Cmd::new("rm", &["-f", flat], 30)).await?;
+                log_warn(format!(
+                    "[native] removed stale flat vault copy {} — no unit restores from it",
+                    flat
+                ));
+                changed = true;
+            }
+        }
         Ok(if changed {
             StepOutcome::Changed
         } else {

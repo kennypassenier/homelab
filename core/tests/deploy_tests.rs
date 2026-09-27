@@ -3081,6 +3081,65 @@ mod native_from_zero {
             .is_empty());
     }
 
+    /// Expert panel 2026-09-27 (stale-secret-residue-on-pve): flat vault
+    /// copies older deploys wrote stayed on pve with live tokens nothing
+    /// restores. Measured the same day in `/var/lib/homelab/secrets/kyu/`:
+    /// `kyu.env` and `token.env` byte-identical to their per-unit copies, and
+    /// `config.toml` (2026-09-04) read by no unit. A flat copy is kept only
+    /// while it is the one a unit would still be restored from.
+    #[tokio::test]
+    async fn a_flat_vault_copy_no_unit_would_restore_from_is_removed() {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        for unit in ["runner", "board"] {
+            exec.respond_always(&format!("id -u {unit}"), CmdOutput::ok("990"));
+            exec.respond_always(
+                &format!("test -s '/appdata/drill/{unit}-config/token.env'"),
+                CmdOutput::ok("yes"),
+            );
+            exec.respond_always(
+                &format!("test -x '/usr/local/bin/{unit}'"),
+                CmdOutput::ok("yes"),
+            );
+            exec.respond_always(
+                &format!("systemctl is-active {unit}"),
+                CmdOutput::ok("active"),
+            );
+            exec.respond_always(
+                &format!("cat '/appdata/drill/{unit}-config/token.env'"),
+                CmdOutput::ok(&format!("TOKEN={unit}-secret\n")),
+            );
+        }
+        exec.respond_always(
+            "find /var/lib/homelab/secrets/drill -maxdepth 1 -type f",
+            CmdOutput::ok(
+                "/var/lib/homelab/secrets/drill/token.env\n/var/lib/homelab/secrets/drill/config.toml\n",
+            ),
+        );
+        let sink = VecSink::new();
+        let journal = NullJournal;
+        let report = deploy(&ctx(&exec, &sink, &journal), &two_token_units_spec()).await;
+        assert!(report.ok, "{:?}", report.error);
+        let rm = exec.calls_containing("rm -f");
+        assert!(
+            rm.iter()
+                .any(|c| c.contains("/var/lib/homelab/secrets/drill/token.env")),
+            "shadowed by both per-unit copies: {rm:?}"
+        );
+        assert!(
+            rm.iter()
+                .any(|c| c.contains("/var/lib/homelab/secrets/drill/config.toml")),
+            "read by no unit: {rm:?}"
+        );
+        assert!(
+            sink.lines()
+                .iter()
+                .any(|l| l.contains("stale flat vault copy")),
+            "{:?}",
+            sink.lines()
+        );
+    }
+
     /// fix-37: a single unit's file keeps being restored from the flat copy an
     /// older deploy wrote, so the change of vault layout loses nothing.
     ///

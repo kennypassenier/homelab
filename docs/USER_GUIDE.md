@@ -1214,9 +1214,11 @@ homelab update stacks/syncthing syncthing  # one app
 
 or `SHIFT+U` in the TUI. Per app (`core/src/ops/update.rs:121-270`):
 
-1. **policy**: the nightly run only touches apps whose container carries the
-   label `com.homelab.update.policy=auto`; an update you start yourself
-   touches every app you named.
+1. **policy**: the nightly run only touches services whose container carries
+   the label `com.homelab.update.policy=auto`, read per service (fix-117): in
+   an app whose services disagree, only the `auto` ones are pulled and
+   recreated (`up -d --no-deps <service>`), the others keep their label. An
+   update you start yourself touches every app you named.
 2. **capture** the running images (B6).
 3. **busy check**: only Jellyfin is asked whether anybody is watching, and an
    answer it cannot read counts as busy, so the app is skipped

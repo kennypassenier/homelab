@@ -7,6 +7,7 @@ pub mod deploy;
 pub mod destroy;
 pub mod devicebackup;
 pub mod discovery;
+pub mod edge;
 pub mod enable;
 pub mod facts;
 pub mod fleetcheck;

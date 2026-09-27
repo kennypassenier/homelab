@@ -2121,6 +2121,14 @@ the stack's recorded manifest and its intent-history copy under
 Secrets are not compared (they would need latch); `homelab apply --plan`
 compares them too. The nightly check has no repository, so it raises neither.
 
+After the host's answer, `homelab check` compares the Cloudflare edge with
+`captured/gateway/` using the read-only token at
+`~/.config/cloudflare/kp-soft.token` (fix-143): `edge: Cloudflare agrees with
+captured/gateway/`, or `edge: <n> finding(s)` in the same format (`broken`
+for an Access app that now lets everyone in). Without the token it prints
+`edge: not compared — <why>` and fails nothing. See
+`docs/deployment/CLOUDFLARE.md`.
+
 The host runs the same check after every nightly run and notifies only when a
 finding is not `noted` (`host/src/main.rs:2646-2690`).
 

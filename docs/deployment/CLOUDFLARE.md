@@ -61,7 +61,7 @@ fabian.hernalsteen@gmail.com
 Identity providers: Google (`mendax1@gmail.com`) and one-time PIN. A healthy
 answer from outside is therefore a **302 to the Cloudflare login page**, not a
 200 — which is exactly what the two external Uptime Kuma monitors accept, and
-why they accept it.
+since fix-143 the only thing they accept.
 
 The 730-hour session (a month) is why Kenny is rarely asked to log in again.
 
@@ -78,8 +78,10 @@ true, and it has one exception with a name.
 ↳ *SuperSync = the sync service on CT 111 (`stacks/productivity`), the one
 Super Productivity talks to.*
 
-### `Kobo services` — `ha.kp-soft.dev`, session 24h
+### `Kobo services` — `ha.kp-soft.dev` and `trmnl.kp-soft.dev`, session 24h
 
+Covers two names: `ha.kp-soft.dev` and `trmnl.kp-soft.dev` (the second was
+in the capture of 2026-09-20 and missing here until 2026-09-27, fix-143).
 Two policies:
 
 1. `Toegang kpsoft` — **allow**, the same three email addresses.
@@ -115,5 +117,30 @@ curl -H "Authorization: Bearer $CF_TOKEN" \
   https://api.cloudflare.com/client/v4/accounts/$ACC/access/apps/$APP/policies
 ```
 
-The token Kenny supplied for this capture is not stored anywhere in this
-repository, and re-reading needs a new one.
+The token is not stored anywhere in this repository. Since 2026-09-20 a
+read-only token lives on the workstation at `~/.config/cloudflare/kp-soft.token`.
+
+## Noticing when the answer changes (fix-143)
+
+The capture is `captured/gateway/cloudflare-tunnel.json`,
+`cloudflare-access.json` and, since 2026-09-27, `cloudflare-dns.json` (the two
+CNAMEs above; the tunnel and DNS files also carry the account and zone ids
+the API is asked with). `homelab check` reads the same four endpoints with the
+token above, projects the answers onto the capture's shape (addresses
+redacted, tunnel health and ids left out) and prints `edge: Cloudflare agrees
+with captured/gateway/` or a finding per difference: `drift` for a changed
+tunnel, app, policy or record, `broken` for an Access app that now lets
+everyone in where the capture did not. Without the token it says `edge: not
+compared` and fails nothing. The token goes to curl on stdin, never in argv
+(`client/src/edge.rs`, `core/src/ops/edge.rs`). First run 2026-09-27: no
+finding.
+
+It runs where the token is, on the workstation, not in the nightly round:
+that would need a Cloudflare token on the hypervisor, which is Kenny's call.
+
+The two external Uptime Kuma monitors accept only the 302 to the login page
+and follow no redirect, so a deleted or bypassed wildcard app turns them red;
+a third asks `https://sp.kp-soft.dev/api/sync/status` without a token and
+must get 401 (measured 2026-09-27; `/` and `/health` answer 200 by design).
+After a change here that was meant, capture it again: the check compares
+against the files, not against memory.

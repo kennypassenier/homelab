@@ -1004,6 +1004,83 @@ fn every_declared_upstream_is_one_the_nightly_round_can_ask() {
     }
 }
 
+/// fix-143 (expert panel 2026-09-27, edge-changes-unnoticed): the external
+/// monitors accepted `200-299` as well as the 302 to Cloudflare's login, and
+/// followed redirects, so with the wildcard Access app deleted or flipped to
+/// bypass `fin` and `docs` would answer 200 and stay green while the house
+/// was public. They now accept only the 302 and follow nothing; and a canary
+/// asks `sp.kp-soft.dev` (open by design) for its sync status without a
+/// token, which must stay 401 (measured 2026-09-27: 401; `/` and `/health`
+/// answer 200 by design).
+#[test]
+fn fix_143_the_external_monitors_accept_only_the_access_redirect() {
+    let dir = stacks_dir().join("uptime").join("kuma-seeder");
+    let script = r#"
+import json, seed
+out = []
+for name, url, accepted in seed.APPLICATION_MONITORS:
+    if url.startswith("https://"):
+        o = seed.monitor_options(accepted)
+        out.append([url, o["accepted_statuscodes"], o["maxredirects"]])
+print(json.dumps(sorted(out)))
+"#;
+    let out = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .env("PYTHONPATH", &dir)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .output()
+        .expect("python3");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        r#"[["https://docs.kp-soft.dev/", ["302"], 0], ["https://fin.kp-soft.dev/", ["302"], 0], ["https://sp.kp-soft.dev/api/sync/status", ["401"], 0]]"#
+    );
+}
+
+/// fix-143: the seeder only added a monitor that was missing and corrected
+/// its address, so the two external monitors already in Uptime Kuma would
+/// have kept accepting 200 whatever the file said. It now corrects the
+/// accepted codes and the redirect limit of a declared monitor too.
+#[test]
+fn fix_143_the_seeder_corrects_accepted_codes_on_existing_monitors() {
+    let dir = stacks_dir().join("uptime").join("kuma-seeder");
+    let script = r#"
+import json, seed
+monitors = [
+    {"id": 1, "name": "extern · fin.kp-soft.dev", "url": "https://fin.kp-soft.dev/",
+     "accepted_statuscodes": ["200-299", "302"], "maxredirects": 10},
+    {"id": 2, "name": "extern · docs.kp-soft.dev", "url": "https://docs.kp-soft.dev/",
+     "accepted_statuscodes": ["302"], "maxredirects": 0},
+    {"id": 3, "name": "media · jellyfin", "url": "http://10.10.10.6:8096/health",
+     "accepted_statuscodes": ["200-299"], "maxredirects": 10},
+    {"id": 4, "name": "host · gateway", "hostname": "10.10.10.4"},
+    {"id": 5, "name": "not declared", "url": "http://x/", "accepted_statuscodes": ["418"]},
+]
+print(json.dumps([(m["id"], c) for m, c in seed.plan_options(monitors)]))
+"#;
+    let out = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .env("PYTHONPATH", &dir)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .output()
+        .expect("python3");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        r#"[[1, {"accepted_statuscodes": ["302"], "maxredirects": 0}]]"#
+    );
+}
+
 /// The deploy of 2026-09-27 19:42 recreated Uptime Kuma and its seeder
 /// together; the seeder's first round found Kuma not yet listening
 /// (`UptimeKumaException: unable to connect`) and then slept its full hour,

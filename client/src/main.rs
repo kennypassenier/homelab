@@ -333,7 +333,7 @@ async fn main() {
                     C_RESET
                 );
             }
-            rpc(
+            let fleet_ok = rpc_with(
                 &host,
                 &token,
                 Command::FleetCheck {
@@ -342,6 +342,38 @@ async fn main() {
                 },
             )
             .await;
+            // fix-143 (expert panel 2026-09-27, edge-changes-unnoticed): the
+            // Cloudflare edge against captured/gateway/, from here because
+            // the read-only token and the capture both live on this side.
+            let captured = Path::new(&base).join("../captured/gateway");
+            let edge_ok = match homelab_client::edge::check_edge(&captured) {
+                homelab_client::edge::EdgeOutcome::NotCompared(why) => {
+                    println!("{}edge: not compared — {}{}", C_DIM, why, C_RESET);
+                    true
+                }
+                homelab_client::edge::EdgeOutcome::Compared(findings) if findings.is_empty() => {
+                    println!("edge: Cloudflare agrees with captured/gateway/");
+                    true
+                }
+                homelab_client::edge::EdgeOutcome::Compared(findings) => {
+                    println!("edge: {} finding(s)", findings.len());
+                    for f in &findings {
+                        println!(
+                            "  [{}] {} — {}\n      remedy: {}",
+                            match f.severity {
+                                homelab_core::ops::fleetcheck::Severity::Broken => "broken",
+                                homelab_core::ops::fleetcheck::Severity::Drift => "drift",
+                                homelab_core::ops::fleetcheck::Severity::Noted => "noted",
+                            },
+                            f.subject,
+                            f.what,
+                            f.remedy
+                        );
+                    }
+                    homelab_core::ops::fleetcheck::check_passes(&findings)
+                }
+            };
+            std::process::exit(if fleet_ok && edge_ok { 0 } else { 1 });
         }
         // fix-68 (four-answers-to-is-anything-wrong, 2026-09-27): the morning
         // question in one verb. `check`, `doctor`, `incidents` and `checks`

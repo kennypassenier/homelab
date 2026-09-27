@@ -1,0 +1,19 @@
+{
+  "captured_at": "2026-09-27",
+  "source": "Cloudflare API, read-only token (fix-143)",
+  "zone_id": "f53290db3a400e6b3de07eda03c76267",
+  "records": [
+    {
+      "type": "CNAME",
+      "name": "*.kp-soft.dev",
+      "content": "b027d052-9f97-43e5-9272-eeb336d3266e.cfargotunnel.com",
+      "proxied": true
+    },
+    {
+      "type": "CNAME",
+      "name": "kp-soft.dev",
+      "content": "b027d052-9f97-43e5-9272-eeb336d3266e.cfargotunnel.com",
+      "proxied": true
+    }
+  ]
+}

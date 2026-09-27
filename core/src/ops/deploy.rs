@@ -265,6 +265,17 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // ── D10: never trust the client — validate host-side too. ────────────
     step!(runner, exec, ctx, m, "validate", {
         manifest::validate(spec)?;
+        // fix-88: only the host knows which container is the gateway, so
+        // the port-80 rule (traefik-lan-host-header-bypass) is checked here,
+        // still before anything changes.
+        if let Some(fw) = m.firewall.as_ref().filter(|f| f.enabled) {
+            if m.vmid == ctx.safety.gateway_vmid {
+                let p = crate::firewall::gateway_problems(fw);
+                if !p.is_empty() {
+                    return Err(CoreError::Validation(p.join("; ")));
+                }
+            }
+        }
         Ok(StepOutcome::Unchanged)
     });
 
@@ -576,12 +587,84 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         }
     });
 
+    // ── fix-88: the container's own firewall (flat-vlan-no-east-west-control,
+    // traefik-lan-host-header-bypass, 2026-09-27). Before the container is
+    // created, so a new one starts behind its rules; written only when the
+    // rendering differs from what pve holds, and the transcript names the
+    // lines that came and went. `enabled: false` is a declaration kept for
+    // the stack-by-stack rollout and touches nothing.
+    let fw_enabled = m.firewall.as_ref().is_some_and(|f| f.enabled);
+    if let Some(fwspec) = m.firewall.as_ref() {
+        step!(runner, exec, ctx, m, "firewall", {
+            if !fwspec.enabled {
+                log_info(format!(
+                    "[firewall] declared, not enabled — {} is left as it is",
+                    crate::firewall::fw_path(m.vmid)
+                ));
+                return Ok(StepOutcome::Unchanged);
+            }
+            let path = crate::firewall::fw_path(m.vmid);
+            let body = crate::firewall::render(&m.stack_name, fwspec);
+            let old = exec.read_file(&path).await.ok();
+            let mut changed = false;
+            if old.as_deref() == Some(body.as_str()) {
+                log_info(format!("[firewall] {} unchanged", path));
+            } else {
+                // 0640: pmxcfs refuses any other mode outside priv/.
+                exec.write_file(&path, &body, 0o640).await?;
+                let (added, removed) =
+                    crate::firewall::line_changes(old.as_deref().unwrap_or(""), &body);
+                log_info(format!(
+                    "[firewall] {} written: +{} -{}{}",
+                    path,
+                    added.len(),
+                    removed.len(),
+                    if old.is_none() { " (new file)" } else { "" }
+                ));
+                for l in &added {
+                    log_info(format!("[firewall]   + {}", l));
+                }
+                for l in &removed {
+                    log_info(format!("[firewall]   - {}", l));
+                }
+                changed = true;
+            }
+            // Without `firewall=1` on the NIC Proxmox applies none of it.
+            // CT 116's flag was set by hand; the create path below sets it
+            // for a new container.
+            if exists {
+                let cfg = run_ok(exec, &Cmd::new("pct", &["config", &vm], 30)).await?;
+                let net0 = cfg
+                    .stdout
+                    .lines()
+                    .find_map(|l| l.strip_prefix("net0:"))
+                    .map(str::trim);
+                if let Some(new) = net0.and_then(crate::firewall::net0_with_firewall) {
+                    run_ok(exec, &Cmd::new("pct", &["set", &vm, "--net0", &new], 60)).await?;
+                    log_info(format!(
+                        "[firewall] net0 of {} now carries firewall=1 — the rules apply from here",
+                        m.vmid
+                    ));
+                    changed = true;
+                }
+            }
+            Ok(if changed {
+                StepOutcome::Changed
+            } else {
+                StepOutcome::Unchanged
+            })
+        });
+    }
+
     // ── C1: create or reuse the container; C3 boot policy at create. ─────
     step!(runner, exec, ctx, m, "provision container", {
         if !exists {
             let mut net = format!(
-                "name=eth0,bridge={},firewall=0,ip={},gw={}",
-                m.network.bridge, m.network.ip, m.network.gateway
+                "name=eth0,bridge={},firewall={},ip={},gw={}",
+                m.network.bridge,
+                if fw_enabled { 1 } else { 0 },
+                m.network.ip,
+                m.network.gateway
             );
             if let Some(tag) = m.network.vlan {
                 net.push_str(&format!(",tag={}", tag));

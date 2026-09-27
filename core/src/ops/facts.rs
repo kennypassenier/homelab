@@ -427,6 +427,26 @@ pub async fn gather_live_facts(
         }
     }
 
+    // fix-88: each recorded stack's firewall file, read whole off pmxcfs so
+    // the check compares bytes with the declaration's rendering. A file that
+    // cannot be read counts as absent: the declaration says it should exist,
+    // and the finding then says so.
+    if let Some(snapshot) = snapshot.as_ref() {
+        for (name, st) in &snapshot.stacks {
+            if inp.no_touch.contains(&st.vmid) {
+                continue;
+            }
+            facts.firewalls.push(crate::ops::fleetcheck::FirewallFact {
+                stack: name.clone(),
+                vmid: st.vmid,
+                content: exec
+                    .read_file(&crate::firewall::fw_path(st.vmid))
+                    .await
+                    .ok(),
+            });
+        }
+    }
+
     if let Ok(out) = exec.run(&Cmd::new("pct", &["list"], 30)).await {
         facts.containers = parse_pct_list(&out.stdout);
     }

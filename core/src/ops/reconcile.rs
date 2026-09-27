@@ -25,6 +25,9 @@ pub struct LiveConfig {
     pub order: Option<u16>,
     pub memory_mb: Option<u32>,
     pub cores: Option<u16>,
+    /// fix-88: whether net0 carries `firewall=1`, without which Proxmox
+    /// applies none of the container's firewall rules. None = no net0 line.
+    pub nic_firewall: Option<bool>,
 }
 
 /// Parse the subset of `pct config <vmid>` this cares about.
@@ -49,6 +52,7 @@ pub fn parse(conf: &str) -> LiveConfig {
         }),
         memory_mb: val("memory").and_then(|v| v.parse().ok()),
         cores: val("cores").and_then(|v| v.parse().ok()),
+        nic_firewall: val("net0").map(|v| v.split(',').any(|p| p.trim() == "firewall=1")),
     }
 }
 

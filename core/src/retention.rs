@@ -41,10 +41,19 @@ const DAY: u64 = 86_400;
 /// Given `(id, unix_time)` snapshots and the tier policy, return the ids to
 /// FORGET. The newest snapshot is always kept, whatever the policy says.
 ///
-/// Bucketing: each tier's age window is divided into `every_days` buckets
-/// (aligned to `now`); the newest snapshot in each bucket is kept. Snapshots
-/// older than the last bounded tier fall into the unbounded tier if present,
-/// otherwise they are forgotten.
+/// Bucketing: a snapshot belongs to the tier whose age window holds it, and
+/// within that tier to the bucket `time / every_days` counted from the Unix
+/// epoch; the newest snapshot in each bucket is kept. Snapshots older than
+/// the last bounded tier fall into the unbounded tier if present, otherwise
+/// they are forgotten.
+///
+/// The buckets are anchored to absolute time, not to `now` (fix-42). Aligned
+/// to `now`, every bucket boundary moved one day each night, so the snapshot
+/// that had just aged out of the daily tier was always the newest in the
+/// first 14-day bucket and pushed the older one out: applied night after
+/// night the policy kept about eight days, whatever the tiers said. With
+/// fixed buckets, a bucket's survivor stops changing once the whole bucket
+/// has aged into the tier.
 pub fn forget_list(snapshots: &[(String, u64)], tiers: &[RetentionTier], now: u64) -> Vec<String> {
     if snapshots.is_empty() {
         return Vec::new();
@@ -85,7 +94,7 @@ pub fn forget_list(snapshots: &[(String, u64)], tiers: &[RetentionTier], now: u6
             if !in_window {
                 continue;
             }
-            let bucket = (age_days - start) / every;
+            let bucket = *t / (every * DAY);
             match keep.get_mut(&(wi, bucket)) {
                 Some(existing) => {
                     // Keep the newest in the bucket; the other is forgotten.

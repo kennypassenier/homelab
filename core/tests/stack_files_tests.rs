@@ -635,6 +635,7 @@ fn the_metrics_stack_caps_its_disk_and_alerts_on_missing_data() {
         "SystemdUnitFailed",
         "AlertDeliveryFailing",
         "HypervisorRootFillingUp",
+        "ContainerMemoryLow",
     ] {
         assert!(rules.contains(&format!("alert: {alert}")), "{alert}");
     }

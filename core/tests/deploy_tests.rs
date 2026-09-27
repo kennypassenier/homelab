@@ -3650,3 +3650,34 @@ fn docker_keeps_containers_running_across_its_own_restart() {
 fn unattended_upgrades_also_take_alloy_from_grafanas_repository() {
     assert!(homelab_core::ops::guards::UNATTENDED_UPGRADES.contains("site=apt.grafana.com"));
 }
+
+/// Correction corr-kuma-memory (Kenny: Klopt, 2026-09-27). The deploy round
+/// of 18:22 left CT 107 thrashing in 512 MB (memory pressure avg60 64.75)
+/// and Uptime Kuma unreachable for about eight minutes. A deploy now refuses
+/// to start on a container with less than 15% of its memory available,
+/// before anything is (re)started, and names the remedy.
+#[tokio::test]
+async fn a_deploy_refuses_a_container_short_of_memory() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always(
+        "cat /proc/meminfo",
+        CmdOutput::ok("MemTotal:  524288 kB\nMemFree: 1024 kB\nMemAvailable:   52428 kB\n"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &spec(107, "uptime")).await;
+    assert!(!report.ok);
+    let why = report.error.unwrap().why;
+    assert!(why.contains("10% of its memory available"), "{why}");
+    assert!(why.contains("homelab resize"), "{why}");
+    assert!(exec.calls_containing("compose up").is_empty());
+}
+
+#[test]
+fn memory_headroom_is_read_from_meminfo() {
+    use homelab_core::ops::deploy::memory_available_fraction;
+    let f = memory_available_fraction("MemTotal: 1000 kB\nMemAvailable: 250 kB\n").unwrap();
+    assert!((f - 0.25).abs() < 1e-9);
+    assert!(memory_available_fraction("").is_none());
+}

@@ -192,3 +192,15 @@ groups:
           summary: "{{ $labels.service }} answers 5xx ({{ $value | printf \"%.2f\" }}/s)"
           description: "Traefik sees sustained server errors from {{ $labels.service }}."
 
+      # Correction corr-kuma-memory (2026-09-27): CT 107 thrashed in 512 MB
+      # during a deploy round and Uptime Kuma stopped answering. A deploy now
+      # refuses under 15% available; this says so before anyone deploys.
+      - alert: ContainerMemoryLow
+        expr: node_memory_MemAvailable_bytes{role="lxc"} / node_memory_MemTotal_bytes{role="lxc"} < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.host }} has {{ $value | humanizePercentage }} of its memory available"
+          description: "Raise memory_mb in its stack file and run homelab resize; a deploy refuses below 15%."
+

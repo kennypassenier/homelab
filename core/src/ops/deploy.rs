@@ -208,6 +208,24 @@ pub async fn orphan_files_keeping(
 /// http-switchboard both read `token.env`, so they shared ONE vault copy and
 /// the vault kept whichever was copied last; a rebuild would have given both
 /// the same token.
+/// Below this share of available memory a deploy does not start
+/// (corr-kuma-memory, 2026-09-27).
+pub const MIN_MEMORY_AVAILABLE: f64 = 0.15;
+
+/// `MemAvailable / MemTotal` from a container's /proc/meminfo (lxcfs shows
+/// the container's own limit). None when either line is missing.
+pub fn memory_available_fraction(meminfo: &str) -> Option<f64> {
+    let field = |name: &str| {
+        meminfo.lines().find_map(|l| {
+            let rest = l.strip_prefix(name)?.trim_start_matches(':').trim();
+            rest.split_whitespace().next()?.parse::<f64>().ok()
+        })
+    };
+    let total = field("MemTotal")?;
+    let avail = field("MemAvailable")?;
+    (total > 0.0).then(|| avail / total)
+}
+
 pub fn vault_key(path: &str) -> String {
     let mut parts = path.rsplit('/');
     let name = parts.next().unwrap_or(path);
@@ -390,6 +408,34 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         }
         // M1: the directories this stack borrows rather than owns.
         crate::ops::hardware::check_data_mounts(exec, &m.stack_name, &m.data_mounts).await?;
+        // Correction corr-kuma-memory (Kenny, 2026-09-27): a deploy that
+        // (re)starts services in a container already short of memory tips it
+        // into thrashing; on 2026-09-27 CT 107 stopped answering for eight
+        // minutes that way. An existing container with under 15% available
+        // is refused before anything moves. A container that does not exist
+        // yet answers nothing here and is not held back.
+        let meminfo = exec
+            .run(&Cmd::new(
+                "pct",
+                &["exec", &m.vmid.to_string(), "--", "cat", "/proc/meminfo"],
+                20,
+            ))
+            .await;
+        if let Ok(out) = meminfo {
+            if let Some(avail) = memory_available_fraction(&out.stdout) {
+                if avail < MIN_MEMORY_AVAILABLE {
+                    return Err(CoreError::SafetyAbort(format!(
+                        "{} has {:.0}% of its memory available, under the {:.0}% a deploy \
+                         needs :: raise memory_mb in the stack file and run `homelab resize \
+                         stacks/{}` first, then deploy",
+                        m.hostname,
+                        avail * 100.0,
+                        MIN_MEMORY_AVAILABLE * 100.0,
+                        m.stack_name
+                    )));
+                }
+            }
+        }
         Ok(StepOutcome::Unchanged)
     });
     if let Some(g) = &gpu {

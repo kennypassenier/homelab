@@ -164,6 +164,13 @@ pub struct HostState {
     /// until that repository passes instead of until any other one does.
     #[serde(default)]
     pub restore_drills: BTreeMap<String, DrillRecord>,
+    /// fix-65: the alarming set the nightly fleet check last sent
+    /// (`fleetcheck::report_fingerprint`), and when. Empty when the last
+    /// night had nothing alarming, so a problem that returns is sent again.
+    #[serde(default)]
+    pub last_fleet_report_fp: String,
+    #[serde(default)]
+    pub last_fleet_report_at: u64,
     /// fix-59 (failed-update-parks-backups, 2026-09-27): stacks whose
     /// automatic updates a failed nightly update parked, with the unix time
     /// it happened. Only updates: a parked stack keeps its nightly backup.
@@ -252,6 +259,15 @@ pub struct ManualCheckRecord {
     /// Whatever the person wanted to add. Empty is normal.
     #[serde(default)]
     pub note: String,
+    /// fix-65: the stack's `applied_hash` when this was answered. Only a
+    /// deploy that changed the stack's files reopens the question; `None`
+    /// is an answer from before the field, judged by the old rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_hash: Option<String>,
+    /// fix-65: a deliberate "not ok" that is accepted until this unix time,
+    /// with the reason in `note`. Noted until then, Broken after.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_until: Option<u64>,
 }
 
 pub struct StateStore<'a> {

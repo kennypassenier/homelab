@@ -229,8 +229,9 @@ Workstation, repository root. Read-only: stop at any step.
    remote, mirror lag, interrupted operations (`core/src/doctor.rs:45-188`).
 3. `homelab incidents`. One directory per failed operation.
 4. `homelab checks`. The questions only a person can answer; record one
-   with `homelab checks answer <id> ok|nok [note]`
-   (`client/src/main.rs:388-421`).
+   with `homelab checks answer <id> ok|nok [note]`, or accept a deliberate
+   `nok` for a while with `homelab checks answer <id> accept <days> <reason>`
+   (fix-65; `client/src/main.rs`).
 5. Host, only when one of the above points there:
 
    ```sh

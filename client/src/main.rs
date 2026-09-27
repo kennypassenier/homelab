@@ -394,14 +394,34 @@ async fn main() {
                 let verdict = args
                     .get(4)
                     .unwrap_or_else(|| die("usage: homelab checks answer <id> ok|nok [note]"));
-                let yes = ["ok", "yes", "ja"];
-                let no = ["nok", "no", "nee"];
-                let ok = if yes.contains(&verdict.as_str()) {
-                    true
-                } else if no.contains(&verdict.as_str()) {
-                    false
+                // fix-65: `accept <days> <reason>` records a deliberate nok
+                // that is noted, not broken, until that many days from now.
+                let (ok, note, accept_days) = if verdict == "accept" {
+                    let usage = "usage: homelab checks answer <id> accept <days> <reason>";
+                    let days: u32 = args
+                        .get(5)
+                        .and_then(|d| d.parse().ok())
+                        .filter(|d| *d > 0)
+                        .unwrap_or_else(|| die(usage));
+                    let reason = args.get(6..).map(|r| r.join(" ")).unwrap_or_default();
+                    if reason.trim().is_empty() {
+                        die(usage);
+                    }
+                    (false, reason, Some(days))
                 } else {
-                    die(&format!("answer must be ok or nok, not {}", verdict))
+                    let yes = ["ok", "yes", "ja"];
+                    let no = ["nok", "no", "nee"];
+                    let ok = if yes.contains(&verdict.as_str()) {
+                        true
+                    } else if no.contains(&verdict.as_str()) {
+                        false
+                    } else {
+                        die(&format!(
+                            "answer must be ok, nok or accept, not {}",
+                            verdict
+                        ))
+                    };
+                    (ok, args[5..].join(" "), None)
                 };
                 rpc(
                     &host,
@@ -409,7 +429,8 @@ async fn main() {
                     Command::AnswerManualCheck {
                         check_id: id.clone(),
                         ok,
-                        note: args[5..].join(" "),
+                        note,
+                        accept_days,
                     },
                 )
                 .await;

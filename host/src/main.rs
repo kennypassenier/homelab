@@ -2679,6 +2679,28 @@ async fn scheduler_loop(state: AppState) {
                 // Z3, now a tested function in core rather than a filter
                 // buried in this loop (G15).
                 let problems = homelab_core::ops::fleetcheck::alarming(&findings);
+                // fix-65: the same alarming set is sent once, then weekly
+                // while it stands; a new or changed set goes out that night.
+                let fingerprint = homelab_core::ops::fleetcheck::report_fingerprint(&findings);
+                let send = !problems.is_empty()
+                    && homelab_core::ops::fleetcheck::nightly_report_due(
+                        &fingerprint,
+                        &snapshot.last_fleet_report_fp,
+                        snapshot.last_fleet_report_at,
+                        now,
+                    );
+                if send || (problems.is_empty() && !snapshot.last_fleet_report_fp.is_empty()) {
+                    // Remember what went out; forget it once nothing is
+                    // alarming, so a problem that comes back is sent again.
+                    let mut sn = snapshot.clone();
+                    if send {
+                        sn.last_fleet_report_fp = fingerprint.clone();
+                        sn.last_fleet_report_at = now;
+                    } else {
+                        sn.last_fleet_report_fp.clear();
+                    }
+                    let _ = store.save(sn).await;
+                }
                 if problems.is_empty() {
                     info!(
                         "fleet check: repo and reality agree{}",
@@ -2687,6 +2709,14 @@ async fn scheduler_loop(state: AppState) {
                         } else {
                             format!("\n{}", render_findings(&findings))
                         }
+                    );
+                } else if !send {
+                    tracing::warn!(
+                        "fleet check: {} finding(s), the same alarming set as reported on {} — \
+                         not sent again until it changes or a week has passed\n{}",
+                        findings.len(),
+                        homelab_core::state::ymd(snapshot.last_fleet_report_at),
+                        render_findings(&findings)
                     );
                 } else {
                     tracing::warn!(
@@ -3989,6 +4019,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             check_id: id,
             ok,
             note,
+            accept_days,
         } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let mut st = store.load().await.unwrap_or_default();
@@ -3996,10 +4027,22 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let found = homelab_core::ops::manualchecks::answer(&mut st, &id, ok, &note, now);
+            // fix-65: a deliberate nok, accepted until a date.
+            let until = accept_days.map(|d| now + u64::from(d) * 86_400);
+            let found = match until {
+                Some(u) => homelab_core::ops::manualchecks::accept(&mut st, &id, u, &note, now),
+                None => homelab_core::ops::manualchecks::answer(&mut st, &id, ok, &note, now),
+            };
             let message = if found {
                 let _ = store.save(st).await;
-                format!("{} recorded as {}", id, if ok { "ok" } else { "NOT ok" })
+                match until {
+                    Some(u) => format!(
+                        "{} recorded as NOT ok, accepted until {}",
+                        id,
+                        homelab_core::state::ymd(u)
+                    ),
+                    None => format!("{} recorded as {}", id, if ok { "ok" } else { "NOT ok" }),
+                }
             } else {
                 format!(
                     "no manual check has id {} — run `homelab checks` for the list",

@@ -258,6 +258,10 @@ pub enum Command {
         check_id: String,
         ok: bool,
         note: String,
+        /// fix-65: a deliberate "not ok" accepted for this many days, with
+        /// the reason in `note`. None = an ordinary answer.
+        #[serde(default)]
+        accept_days: Option<u32>,
     },
 }
 
@@ -498,6 +502,7 @@ mod wire_tests {
                 check_id: "c4bca102".into(),
                 ok: true,
                 note: String::new(),
+                accept_days: None,
             },
             Command::ListManualChecks,
             Command::SetStackEnabled {

@@ -1500,7 +1500,11 @@ plans the night (`host/src/main.rs:2257-2333,2000-2035`):
    that repository passes.
 5. Device configuration backups and ZFS jobs (E8), when configured.
 6. A fleet check of what the host can see, with a notification only when a
-   finding is alarming (`host/src/main.rs:2628-2694`).
+   finding is alarming, and since fix-65 only when the alarming set (which
+   subjects, at which severity) differs from the one last sent, or a week has
+   passed since; otherwise the host logs that it held the report back
+   (`report_fingerprint`, `nightly_report_due` in
+   `core/src/ops/fleetcheck.rs`).
 
 With no nightly hour set, nothing runs (`host/src/main.rs:2264-2267`). A stack
 whose nightly update fails has its automatic updates parked (H8, fix-59); its
@@ -2085,7 +2089,16 @@ stack is destroyed or forgotten (`core/src/ops/destroy.rs:298`).
 homelab checks                              # list them
 homelab checks answer <id> ok               # record an answer
 homelab checks answer <id> nok the subtitles drift after an hour
+homelab checks answer <id> accept 90 by design, D56   # a deliberate nok
 ```
+
+Since fix-65 (2026-09-27): an answer is reopened only by a deploy that changed
+the stack's files (its `applied_hash` is kept with the answer), not by every
+deploy, and the open-checks finding says when that is why. An answer given
+before fix-65 is still judged by the old rule until it is answered again.
+`accept <days> <reason>` records a deliberate `nok` that is `noted`, not
+broken, until that many days from now, and broken again after; the listing
+shows it as `accepted to <date>`.
 
 The listing is grouped per stack, one line per question with its id and
 status (`unanswered`, `ok, <n>d ago` or `NOT OK`), and ends with the count of

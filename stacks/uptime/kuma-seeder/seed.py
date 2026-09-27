@@ -87,6 +87,12 @@ APPLICATION_MONITORS = [
     ("paperwork · stirling", "http://10.10.10.14:8080/login", OK),
     ("paperwork · paperless", "http://10.10.10.14:8000/accounts/login/", OK),
     ("home · homepage", "http://10.10.10.15:3000/", OK),
+    # Declared 2026-09-27 (expert panel, kuma-coverage-and-seeder-drift):
+    # sp.kp-soft.dev bypasses Access, and every docker pull in the fleet goes
+    # through the cache, yet neither had a monitor. Both probed from CT 107
+    # before they were written down: 200 each.
+    ("productivity · supersync", "http://10.10.10.11:1900/health", OK),
+    ("registry · docker.io cache", "http://10.10.10.17:5000/v2/", OK),
     ("kp-soft · site", "http://10.10.10.16:8080/up", OK),
     # Through cloudflared and Traefik. Every *.kp-soft.dev name sits behind
     # Cloudflare Access, so a healthy answer is the 302 to its login page.

@@ -689,3 +689,13 @@ fn the_gewenst_metrics_and_gateway_changes_are_in_the_stack_files() {
         assert!(rules.contains(&format!("alert: {alert}")), "{alert}");
     }
 }
+
+/// Expert panel 2026-09-27 (kuma-coverage-and-seeder-drift): the public
+/// SuperSync endpoint and the registry cache every pull goes through had no
+/// Uptime Kuma monitor.
+#[test]
+fn supersync_and_the_registry_cache_are_monitored() {
+    let seed = std::fs::read_to_string(stacks_dir().join("uptime/kuma-seeder/seed.py")).unwrap();
+    assert!(seed.contains("\"http://10.10.10.11:1900/health\""));
+    assert!(seed.contains("\"http://10.10.10.17:5000/v2/\""));
+}

@@ -86,3 +86,69 @@ apps: []
 # which it did not before: losing the container would have lost the only
 # copy of the file that makes the service exist.
 natives: [almanac]
+
+# fix-89: this container's Proxmox firewall (fix-88), declared but NOT in force:
+# Kenny's rollout goes one stack at a time, by setting `enabled: true` here and
+# deploying. Every rule comes from a flow measured on 2026-09-27; the test
+# core/tests/firewall_declarations_tests.rs holds the rules against that list.
+# The management network stays closed except DNS to 10.10.5.1 (the guard the
+# renderer appends) and what an ACCEPT below names.
+firewall:
+  enabled: false
+  comment: |-
+    CT 112 (almanac), almanac (native).
+    Declared from the flows measured 2026-09-27 (fix-89): tcpdump on pve's veths,
+    conntrack and ss in the container, the Prometheus targets, the Uptime Kuma
+    monitors, the Traefik routes and the stacks' own configuration.
+  rules:
+    - comment: "pve's rescue address: never from a container"
+      dir: out
+      action: DROP
+      dest: 10.10.10.250
+    - comment: "the neighbours it uses"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.4
+      proto: tcp
+      dport: "3100"
+      note: Loki push (Alloy)
+    - comment: "every other neighbour in VLAN 10 stays out of reach"
+      dir: out
+      action: DROP
+      dest: 10.10.10.0/24
+    - comment: "who may reach the container"
+      dir: in
+      action: ACCEPT
+      source: 10.10.10.13
+      proto: tcp
+      dport: "8080,9100"
+      note: Prometheus (almanac metrics, node exporter)
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.4
+      proto: tcp
+      dport: "8080"
+      note: Traefik route almanac
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.16
+      proto: tcp
+      dport: "8080"
+      note: JobTracker events (JOBTRACKER_ALMANAC_URL)
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: icmp
+      note: Uptime Kuma ping
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: tcp
+      dport: "8080"
+      note: Uptime Kuma HTTP monitor
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.10
+      proto: tcp
+      dport: "22,8080"
+      note: Kenny's desktop (ssh and the web ports the homepage tiles link to)

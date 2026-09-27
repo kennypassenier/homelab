@@ -119,17 +119,97 @@ pub fn render(stack: &str, fw: &FirewallSpec) -> String {
             "management network: DNS to the router, nothing else (flat-vlan-no-east-west-control,\n\
              traefik-lan-host-header-bypass, 2026-09-27)",
         );
-        s.push_str(&format!(
-            "OUT ACCEPT -dest {} -p udp -dport 53\n",
-            ROUTER_DNS
-        ));
-        s.push_str(&format!(
-            "OUT ACCEPT -dest {} -p tcp -dport 53\n",
-            ROUTER_DNS
-        ));
-        s.push_str(&format!("OUT DROP -dest {}\n", MANAGEMENT_NET));
+        for r in guard_rules() {
+            s.push_str(&rule_line(&r));
+            s.push('\n');
+        }
     }
     s
+}
+
+/// The management guard as rules: DNS to the router over udp and tcp, then
+/// nothing else on the management network.
+fn guard_rules() -> Vec<FirewallRule> {
+    let rule = |action, proto, dport: Option<&str>, dest: &str| FirewallRule {
+        dir: FwDir::Out,
+        action,
+        source: None,
+        dest: Some(dest.to_string()),
+        proto,
+        dport: dport.map(str::to_string),
+        comment: None,
+        note: None,
+    };
+    vec![
+        rule(FwAction::Accept, Some(FwProto::Udp), Some("53"), ROUTER_DNS),
+        rule(FwAction::Accept, Some(FwProto::Tcp), Some("53"), ROUTER_DNS),
+        rule(FwAction::Drop, None, None, MANAGEMENT_NET),
+    ]
+}
+
+/// Whether `ip` falls under `spec` (an address or a CIDR network).
+fn addr_matches(spec: &str, ip: Ipv4Addr) -> bool {
+    let (net, bits) = match spec.split_once('/') {
+        Some((n, b)) => (n, b.parse::<u32>().unwrap_or(32)),
+        None => (spec, 32),
+    };
+    let Ok(net) = net.parse::<Ipv4Addr>() else {
+        return false;
+    };
+    let mask: u32 = if bits == 0 {
+        0
+    } else {
+        u32::MAX << (32 - bits.min(32))
+    };
+    u32::from(net) & mask == u32::from(ip) & mask
+}
+
+/// fix-89: would this declaration let one flow through, reading its rules
+/// the way Proxmox does — first match in order, the management guard after
+/// the declared rules, the policy when nothing matches.
+///
+/// It is how the declarations are held against the flows measured on
+/// 2026-09-27: a rule set that would break a real connection fails a test
+/// before it is ever enabled. `own` is the container's address, `peer` the
+/// other end; `port` is the destination port (None for icmp).
+pub fn permits(
+    fw: &FirewallSpec,
+    own: Ipv4Addr,
+    dir: FwDir,
+    peer: Ipv4Addr,
+    proto: FwProto,
+    port: Option<u16>,
+) -> bool {
+    let mut rules: Vec<FirewallRule> = fw.rules.clone();
+    if fw.management_open.is_none() {
+        rules.extend(guard_rules());
+    }
+    let (src, dst) = match dir {
+        FwDir::In => (peer, own),
+        FwDir::Out => (own, peer),
+    };
+    for r in rules.iter().filter(|r| r.dir == dir) {
+        if r.source.as_deref().is_some_and(|s| !addr_matches(s, src))
+            || r.dest.as_deref().is_some_and(|d| !addr_matches(d, dst))
+            || r.proto.is_some_and(|p| p != proto)
+        {
+            continue;
+        }
+        if let Some(ports) = &r.dport {
+            let Some(port) = port else { continue };
+            let hit = port_ranges(ports)
+                .map(|rs| rs.iter().any(|(a, b)| (*a..=*b).contains(&u32::from(port))))
+                .unwrap_or(false);
+            if !hit {
+                continue;
+            }
+        }
+        return r.action == FwAction::Accept;
+    }
+    match dir {
+        FwDir::In => fw.policy_in == FwAction::Accept,
+        FwDir::Out => fw.policy_out == FwAction::Accept,
+    }
 }
 
 /// `10.10.10.4` or `10.10.10.0/24`. A network written with host bits set is

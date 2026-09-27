@@ -140,3 +140,87 @@ apps: []
 # which it did not before: losing the container would have lost the only
 # copy of the file that makes the service exist.
 natives: [kyu, kyu-runner, http-switchboard]
+
+# fix-89: this container's Proxmox firewall (fix-88), declared but NOT in force:
+# Kenny's rollout goes one stack at a time, by setting `enabled: true` here and
+# deploying. Every rule comes from a flow measured on 2026-09-27; the test
+# core/tests/firewall_declarations_tests.rs holds the rules against that list.
+# The management network stays closed except DNS to 10.10.5.1 (the guard the
+# renderer appends) and what an ACCEPT below names.
+firewall:
+  enabled: false
+  comment: |-
+    CT 109 (kyu), kyu, kyu-runner and http-switchboard (native).
+    Declared from the flows measured 2026-09-27 (fix-89): tcpdump on pve's veths,
+    conntrack and ss in the container, the Prometheus targets, the Uptime Kuma
+    monitors, the Traefik routes and the stacks' own configuration.
+  rules:
+    - comment: "pve's rescue address: never from a container"
+      dir: out
+      action: DROP
+      dest: 10.10.10.250
+    - comment: "the neighbours it uses"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.4
+      proto: tcp
+      dport: "3100"
+      note: Loki push (Alloy)
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.2
+      proto: tcp
+      dport: "8123"
+      note: kyu-runner and http-switchboard to Home Assistant webhooks
+    - comment: "every other neighbour in VLAN 10 stays out of reach"
+      dir: out
+      action: DROP
+      dest: 10.10.10.0/24
+    - comment: "who may reach the container"
+      dir: in
+      action: ACCEPT
+      source: 10.10.10.13
+      proto: tcp
+      dport: "8080,9100"
+      note: Prometheus (kyu metrics, node exporter) and the Alertmanager webhook
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.4
+      proto: tcp
+      dport: "8080"
+      note: Traefik route kyu
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.6
+      proto: tcp
+      dport: "8080"
+      note: Sonarr and Radarr webhooks
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.2
+      proto: tcp
+      dport: "8080"
+      note: Home Assistant rest_command.mailbox_publish
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.250
+      proto: tcp
+      dport: "8080"
+      note: the homelab daemon's notifications from pve
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: icmp
+      note: Uptime Kuma ping
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: tcp
+      dport: "8080,8082,8083"
+      note: Uptime Kuma HTTP monitors
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.10
+      proto: tcp
+      dport: "22,8080"
+      note: Kenny's desktop (ssh and the web ports the homepage tiles link to)

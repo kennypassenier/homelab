@@ -432,7 +432,7 @@ stateDiagram-v2
     end note
     note right of RolledBack
         The OnFailure= unit restores .prev.
-        It lives on the host only, not in this repository.
+        It ships inside the binary (core/assets/host-units).
     end note
 ```
 <sub>Source: `core/src/ops/selfupdate.rs`, `host/src/main.rs` (`Rpc::SelfUpdateHost`, marker cleared after 5 s).</sub>

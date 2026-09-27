@@ -436,6 +436,26 @@ pub fn scan_local_stacks(base: &Path) -> Vec<(String, PathBuf)> {
 /// The host's state directory. Derived from the restic password file, which
 /// `BackupCfg::default()` places in `<state_dir>/secrets/`, so the document
 /// and the backup code cannot name two different directories.
+/// The daemon's units as the binary carries them (`homelab_core::hostunits`),
+/// so a pve rebuilt from this runbook gets the watchdog and the rollback,
+/// not a minimal unit without either (expert panel, daemon-units-outside-repo).
+fn runbook_host_units() -> String {
+    let mut out = String::from(
+        "**The units.** The daemon runs under these files; the binary carries them and \
+         every self-update puts them in place, and `homelab doctor` names any that differ. \
+         On a rebuilt host, write them before the first start, then \
+         `systemctl daemon-reload && systemctl enable --now homelab-host`.\n\n",
+    );
+    for u in homelab_core::hostunits::UNITS {
+        let lang = if u.path.ends_with(".sh") { "sh" } else { "ini" };
+        out.push_str(&format!(
+            "`{}` (mode {:o}):\n\n```{}\n{}```\n\n",
+            u.path, u.mode, lang, u.content
+        ));
+    }
+    out
+}
+
 fn runbook_state_dir(bcfg: &homelab_core::ops::backup::BackupCfg) -> String {
     Path::new(&bcfg.password_file)
         .parent()
@@ -977,23 +997,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          ```\n\n\
          To build it instead, `make host-binary` in the repository builds it against \
          Debian 12 in docker and leaves it at `target-debian/release/homelab-host`.\n\n\
-         **The unit file** `/etc/systemd/system/{svc}.service` is not in this repository and \
-         not in any backup this code makes. If it is gone, this is what the program needs: \
-         root (it runs `pct`, `zfs` and `restic`), and nothing on its command line, because \
-         it reads `{toml}` by default.\n\n```ini\n\
-         [Unit]\n\
-         Description=homelab host daemon\n\
-         Wants=network-online.target\n\
-         After=network-online.target\n\n\
-         [Service]\n\
-         ExecStart={cur}\n\
-         Restart=on-failure\n\n\
-         [Install]\n\
-         WantedBy=multi-user.target\n\
-         ```\n\n\
-         The self-update rollback hook (an `OnFailure=` unit that puts `{prev}` back while \
-         `{marker}` exists) is not in the repository either; without it a failed self-update \
-         is undone by hand as above.\n\n\
+         {units}\
          **The certificate pin.** The daemon's certificate is `{state}/tls-cert.pem` with \
          `{state}/tls-key.pem`; when either is missing at start it makes a new pair \
          (host/src/tls.rs). Clients refuse a certificate whose SHA-256 fingerprint differs \
@@ -1011,6 +1015,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          environment). A new token means updating `HOMELAB_TOKEN` in \
          `~/.config/homelab/env` on every client machine.\n\n",
         svc = su.service,
+        units = runbook_host_units(),
         port = port,
         toml = host_toml,
         cur = su.current,

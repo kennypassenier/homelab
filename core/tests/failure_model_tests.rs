@@ -191,6 +191,7 @@ fn f6_doctor_healthy_system_is_ok() {
         offsite_token_valid: true,
         mirror_behind: Some(0),
         interrupted_ops: vec![],
+        host_units_drift: None,
     };
     let checks = doctor::diagnose(&p);
     assert_eq!(doctor::overall(&checks), Health::Ok);
@@ -211,6 +212,7 @@ fn f6_doctor_flags_each_problem_with_remedy() {
         offsite_token_valid: false,                   // fail
         mirror_behind: Some(2),                       // warn
         interrupted_ops: vec!["deploy-media".into()], // warn
+        host_units_drift: None,
     };
     let checks = doctor::diagnose(&p);
     assert_eq!(doctor::overall(&checks), Health::Fail);
@@ -242,6 +244,7 @@ fn gap_27_the_dead_drive_token_remedy_does_not_promise_local_backups() {
         offsite_token_valid: false,
         mirror_behind: Some(0),
         interrupted_ops: vec![],
+        host_units_drift: None,
     };
     let checks = doctor::diagnose(&p);
     let remedy = checks

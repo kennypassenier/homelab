@@ -86,6 +86,27 @@ pub async fn self_update(ctx: &OpCtx<'_>, cfg: &SelfUpdateCfg) -> OperationRepor
         Ok(StepOutcome::Changed)
     });
 
+    // The units that supervise the daemon ship with it (expert panel,
+    // daemon-units-outside-repo): the watchdog and the rollback below only
+    // exist if these files do. Written before the marker is armed, so the
+    // restart already runs under them.
+    step!(runner, "install host units", {
+        let mut changed = false;
+        for u in crate::hostunits::UNITS {
+            let live = exec.read_file(u.path).await.ok();
+            if live.as_deref() != Some(u.content) {
+                exec.write_file(u.path, u.content, u.mode).await?;
+                changed = true;
+            }
+        }
+        if changed {
+            run_ok(exec, &Cmd::new("systemctl", &["daemon-reload"], 30)).await?;
+            Ok(StepOutcome::Changed)
+        } else {
+            Ok(StepOutcome::Unchanged)
+        }
+    });
+
     // Armed BEFORE the restart: if the new binary never comes up, the
     // OnFailure unit sees this marker and restores `prev`.
     step!(runner, "arm rollback marker", {

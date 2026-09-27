@@ -48,10 +48,11 @@ push staging files (`core/src/ops/util.rs:48`), the restic cache
 (`core/src/ops/backup.rs:128`). On a host with a non-default `state_dir`,
 look for those under `/var/lib/homelab` anyway.
 
-The daemon's systemd unit, its `OnFailure=` rollback script and any
-`WatchdogSec` setting live on the Proxmox host, not in this repository
-(`core/src/ops/selfupdate.rs:4-7`). This guide can only describe what the
-daemon does; it cannot vouch for what that unit file says.
+The daemon's systemd unit, its `OnFailure=` rollback unit and script ship
+inside the binary (`core/assets/host-units/`, `core/src/hostunits.rs`).
+Every self-update puts them in place before the restart, and
+`homelab doctor` has a `host units` line that names any file on the
+Proxmox host that differs from the binary's copy.
 
 ## 1. The evidence map
 

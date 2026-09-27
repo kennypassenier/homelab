@@ -797,6 +797,79 @@ async fn h5_selfupdate_happy_path_arms_marker_before_restart() {
     assert!(exec.calls_containing("--on-active=2").len() == 1);
 }
 
+/// Expert panel 2026-09-27 (daemon-units-outside-repo): the unit that starts
+/// the daemon, its watchdog and the rollback that saves a bad self-update
+/// existed only on pve. A rebuild from the DR runbook recreated a minimal
+/// unit without `Type=notify`, `WatchdogSec` or `OnFailure=`, and nothing
+/// would have said so. The units now ship inside the binary, and every
+/// self-update puts them in place before the restart.
+#[tokio::test]
+async fn daemon_units_ship_with_the_binary_and_a_self_update_installs_them() {
+    use homelab_core::hostunits::UNITS;
+    let exec = MockExecutor::new();
+    exec.respond_always("--selfcheck", CmdOutput::ok("3.59.6\n"));
+    // A pve rebuilt from the old runbook: the minimal unit.
+    exec.seed_file(
+        "/etc/systemd/system/homelab-host.service",
+        "[Service]\nExecStart=/usr/local/bin/homelab-host\nRestart=on-failure\n",
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = self_update(&ctx(&exec, &sink, &j), &SelfUpdateCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    for u in UNITS {
+        assert_eq!(
+            exec.file(u.path).as_deref(),
+            Some(u.content),
+            "{} is put in place",
+            u.path
+        );
+    }
+    let calls = exec.calls();
+    let pos = |n: &str| calls.iter().position(|c| c.contains(n)).unwrap();
+    assert!(
+        pos("daemon-reload") < pos("systemd-run"),
+        "systemd must read the units before the restart"
+    );
+    let unit = UNITS
+        .iter()
+        .find(|u| u.path.ends_with("homelab-host.service"))
+        .unwrap();
+    for key in [
+        "Type=notify",
+        "WatchdogSec=",
+        "OnFailure=homelab-host-rollback.service",
+    ] {
+        assert!(unit.content.contains(key), "{key}");
+    }
+    let script = UNITS
+        .iter()
+        .find(|u| u.path.ends_with("homelab-rollback.sh"))
+        .unwrap();
+    assert!(
+        script.content.contains(&SelfUpdateCfg::default().marker),
+        "the rollback reads the marker the self-update arms"
+    );
+}
+
+/// Doctor names a unit on pve that differs from the one the binary carries.
+#[test]
+fn doctor_reports_host_units_that_drifted() {
+    use homelab_core::doctor::{diagnose, Health, Probes};
+    let p = Probes {
+        host_units_drift: Some(vec!["/etc/systemd/system/homelab-host.service".into()]),
+        state_parses: true,
+        ..Default::default()
+    };
+    let c = diagnose(&p);
+    let u = c
+        .iter()
+        .find(|c| c.name == "host units")
+        .expect("a host units line");
+    assert_eq!(u.health, Health::Warn);
+    assert!(u.detail.contains("homelab-host.service"));
+}
+
 // ── H6: fleet patching ──────────────────────────────────────────────────────
 
 use homelab_core::ops::patch::patch_fleet;

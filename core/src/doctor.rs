@@ -30,6 +30,9 @@ pub struct Probes {
     pub offsite_token_valid: bool,
     pub mirror_behind: Option<u32>,
     pub interrupted_ops: Vec<String>,
+    /// Host units on pve that differ from what the binary carries
+    /// (`crate::hostunits`); `None` when not asked.
+    pub host_units_drift: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +181,27 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
             },
             remedy: (behind > 0)
                 .then(|| "mirror push is retrying in the background (non-blocking)".into()),
+        });
+    }
+
+    if let Some(drift) = p.host_units_drift.as_ref() {
+        checks.push(Check {
+            name: "host units".into(),
+            health: if drift.is_empty() {
+                Health::Ok
+            } else {
+                Health::Warn
+            },
+            detail: if drift.is_empty() {
+                "the daemon's units match the ones this binary carries".into()
+            } else {
+                format!("differ from this binary's copy: {}", drift.join(", "))
+            },
+            remedy: (!drift.is_empty()).then(|| {
+                "the next self-update puts them back (`homelab release-update`); \
+                 until then the watchdog or the rollback may be missing"
+                    .into()
+            }),
         });
     }
 

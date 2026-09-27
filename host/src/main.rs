@@ -4452,7 +4452,14 @@ async fn gather_probes(
                 .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
                 .map(|used| 100u64.saturating_sub(used))
         });
+    // The daemon's own units, held against the copies this binary carries.
+    let mut units = Vec::new();
+    for u in homelab_core::hostunits::UNITS {
+        units.push((u.path, exec.read_file(u.path).await.ok()));
+    }
+    let host_units_drift = Some(homelab_core::hostunits::drift(&units));
     Probes {
+        host_units_drift,
         host_disk_free_pct: disk,
         state_parses,
         managed_stacks,

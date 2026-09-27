@@ -74,23 +74,75 @@ systemctl restart homelab-host
 
 To build it instead, `make host-binary` in the repository builds it against Debian 12 in docker and leaves it at `target-debian/release/homelab-host`.
 
-**The unit file** `/etc/systemd/system/homelab-host.service` is not in this repository and not in any backup this code makes. If it is gone, this is what the program needs: root (it runs `pct`, `zfs` and `restic`), and nothing on its command line, because it reads `/etc/homelab/host.toml` by default.
+**The units.** The daemon runs under these files; the binary carries them and every self-update puts them in place, and `homelab doctor` names any that differ. On a rebuilt host, write them before the first start, then `systemctl daemon-reload && systemctl enable --now homelab-host`.
+
+`/etc/systemd/system/homelab-host.service` (mode 644):
 
 ```ini
 [Unit]
-Description=homelab host daemon
+Description=Homelab HOST daemon (v2)
+After=network-online.target pve-cluster.service
 Wants=network-online.target
-After=network-online.target
+OnFailure=homelab-host-rollback.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
+Type=notify
+WatchdogSec=30
+Environment=HOMELAB_CONFIG=/etc/homelab/host.toml
 ExecStart=/usr/local/bin/homelab-host
-Restart=on-failure
+Restart=always
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-The self-update rollback hook (an `OnFailure=` unit that puts `/usr/local/bin/homelab-host.prev` back while `/var/lib/homelab/selfupdate.pending` exists) is not in the repository either; without it a failed self-update is undone by hand as above.
+`/etc/systemd/system/homelab-host-rollback.service` (mode 644):
+
+```ini
+[Unit]
+Description=Homelab HOST self-update rollback (H5)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/homelab-rollback.sh
+```
+
+`/usr/local/lib/homelab-rollback.sh` (mode 755):
+
+```sh
+#!/bin/sh
+# Runs when homelab-host enters the failed state (systemd OnFailure).
+# Two jobs, both outside the daemon (it is dead at this point):
+#  1. If a self-update marker is present: the new binary never came up
+#     healthy - restore the previous binary and restart (H5 rollback).
+#  2. Notify Home Assistant either way (F3) - the daemon cannot report
+#     its own death.
+
+WEBHOOK=$(grep "^notify_webhook" /etc/homelab/host.toml 2>/dev/null | cut -d\" -f2)
+
+notify() {
+  # $1 = op, $2 = error text
+  [ -n "$WEBHOOK" ] || return 0
+  curl -m 5 -s -o /dev/null -X POST -H "Content-Type: application/json" \
+    -d "{\"source\":\"homelab-host\",\"op\":\"$1\",\"label\":\"systemd\",\"ok\":false,\"error\":\"$2\"}" \
+    "$WEBHOOK" || true
+}
+
+if [ -f /var/lib/homelab/selfupdate.pending ]; then
+  logger -t homelab-rollback "self-update failed - restoring previous binary"
+  cp -a /usr/local/bin/homelab-host.prev /usr/local/bin/homelab-host
+  rm -f /var/lib/homelab/selfupdate.pending
+  notify "self-update-rollback" "new binary never came up healthy - previous binary restored and restarted"
+  systemctl reset-failed homelab-host
+  systemctl restart homelab-host
+else
+  logger -t homelab-rollback "daemon entered failed state (no self-update pending)"
+  notify "daemon-failed" "homelab-host crashed repeatedly and systemd gave up - manual intervention needed (journalctl -u homelab-host)"
+fi
+```
 
 **The certificate pin.** The daemon's certificate is `/var/lib/homelab/tls-cert.pem` with `/var/lib/homelab/tls-key.pem`; when either is missing at start it makes a new pair (host/src/tls.rs). Clients refuse a certificate whose SHA-256 fingerprint differs from the `pin` in `config/client.toml`, and from the copy each machine keeps in `~/.config/homelab/pin`. Compare:
 

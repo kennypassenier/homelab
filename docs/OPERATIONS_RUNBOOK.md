@@ -749,7 +749,7 @@ sequenceDiagram
         alt serves for 5 s
             H->>H: remove the marker, log self-update accepted
         else dies with the marker in place
-            S->>S: OnFailure unit restores .prev, a unit not in this repository
+            S->>S: OnFailure unit restores .prev (core/assets/host-units)
         end
     end
     O->>W: homelab ping
@@ -759,7 +759,9 @@ sequenceDiagram
 
 **Rollback.** `core/src/ops/selfupdate.rs:1-7` describes an `OnFailure=`
 unit on the host that restores `.prev` while the marker is still there.
-That unit file is not in this repository. Check it exists:
+The unit and its script ship inside the binary (`core/assets/host-units/`)
+and every self-update puts them in place; `homelab doctor` reports a
+`host units` line when they differ. Check it is wired:
 
 ```sh
 systemctl show homelab-host -p OnFailure

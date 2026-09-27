@@ -1,0 +1,6 @@
+[Unit]
+Description=Homelab HOST self-update rollback (H5)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/homelab-rollback.sh

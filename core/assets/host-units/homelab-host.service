@@ -1,0 +1,18 @@
+[Unit]
+Description=Homelab HOST daemon (v2)
+After=network-online.target pve-cluster.service
+Wants=network-online.target
+OnFailure=homelab-host-rollback.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=notify
+WatchdogSec=30
+Environment=HOMELAB_CONFIG=/etc/homelab/host.toml
+ExecStart=/usr/local/bin/homelab-host
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

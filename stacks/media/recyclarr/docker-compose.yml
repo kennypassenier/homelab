@@ -14,8 +14,10 @@ services:
     # image — the earlier version of this file asked for a tag that has never
     # been published, so it could not have started. 8.7.2 is the newest
     # release (2026-09-03) and its one fix is the permission error this
-    # container would otherwise hit on its own config volume.
-    image: ghcr.io/recyclarr/recyclarr:8.7.2
+    # container would otherwise hit on its own config volume. fix-82
+    # (manual-images-latest-unpinned, 2026-09-27) adds the digest CT 106 ran
+    # that day.
+    image: ghcr.io/recyclarr/recyclarr:8.7.2@sha256:6e69e009e1cd7493ff6093e8e187b5d3788c75b4a2c0c5127b6a1beda1c19728
     container_name: recyclarr
     environment:
       - TZ=Europe/Brussels

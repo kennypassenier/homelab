@@ -3,7 +3,9 @@
 # one window where nothing is reachable is the wrong trade.
 services:
   grafana:
-    image: grafana/grafana:latest
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
+    # digest CT 104 ran that day; moving it is an edit of this line.
+    image: grafana/grafana:13.2.1@sha256:f772d434e8fab0049deb2b1b30abd43342bcfca1537614aa8d36080232cf4283
     container_name: grafana
     networks:
       - gateway_net

@@ -2,7 +2,9 @@
 # and Traefik's bouncer plugin asks it about every request.
 services:
   crowdsec:
-    image: crowdsecurity/crowdsec:latest
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
+    # digest CT 104 ran that day; moving it is an edit of this line.
+    image: crowdsecurity/crowdsec:v1.8.1@sha256:0f2523fa61ef507f15d953045cface490cc880670c62f2755ced17524107f71a
     container_name: crowdsec
     networks:
       - gateway_net

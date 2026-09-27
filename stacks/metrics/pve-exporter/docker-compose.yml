@@ -3,7 +3,9 @@
 # with PVEAuditor role suffices — never the root password).
 services:
   pve-exporter:
-    image: prompve/prometheus-pve-exporter:latest
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
+    # digest CT 113 ran that day; moving it is an edit of this line.
+    image: prompve/prometheus-pve-exporter:3.10.0@sha256:4867684c0a937716f11f770a32d32958bded507cf570fc334f774392afcb2f37
     container_name: pve-exporter
     restart: unless-stopped
     env_file:

@@ -1,6 +1,8 @@
 services:
   prometheus:
-    image: prom/prometheus:latest
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
+    # digest CT 113 ran that day; moving it is an edit of this line.
+    image: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
     container_name: prometheus
     restart: unless-stopped
     command:

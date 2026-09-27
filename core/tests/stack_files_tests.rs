@@ -648,3 +648,181 @@ fn the_metrics_stack_caps_its_disk_and_alerts_on_missing_data() {
         "AlertDeliveryFailing reads Alertmanager's own counters"
     );
 }
+
+/// Services whose running image is a branch build that no release tag names,
+/// so the digest is the only honest pin. A tag would describe a different
+/// image; `:latest` would not describe anything. Each entry says why, and the
+/// test fails when an entry is no longer needed, so the list cannot rot.
+const UNTAGGED_BUILDS: &[(&str, &str)] = &[
+    (
+        "gluetun",
+        "a master build of 2026-09-01 whose version label reads literally \"latest\" \
+         (Kenny, 2026-09-19)",
+    ),
+    (
+        "supersync",
+        "a master build (revision 633a27b) whose master-<sha> tag upstream no longer \
+         carries (measured 2026-09-27)",
+    ),
+];
+
+/// Every service in one compose text as (service name, image, policy label).
+/// Merge keys are applied first: the registry stack defines its image once
+/// under an anchor.
+fn compose_services(text: &str) -> Vec<(String, String, Option<String>)> {
+    let mut doc: serde_yaml::Value = serde_yaml::from_str(text).expect("compose parses");
+    doc.apply_merge().expect("merge keys apply");
+    let mut out = Vec::new();
+    let Some(services) = doc.get("services").and_then(|s| s.as_mapping()) else {
+        return out;
+    };
+    for (name, svc) in services {
+        let name = name.as_str().unwrap_or_default().to_string();
+        let image = svc
+            .get("image")
+            .and_then(|i| i.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let policy = match svc.get("labels") {
+            Some(serde_yaml::Value::Sequence(l)) => l.iter().find_map(|v| {
+                v.as_str()?
+                    .strip_prefix("com.homelab.update.policy=")
+                    .map(str::to_string)
+            }),
+            Some(serde_yaml::Value::Mapping(m)) => m
+                .get("com.homelab.update.policy")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            _ => None,
+        };
+        out.push((name, image, policy));
+    }
+    out
+}
+
+/// Why an image reference is not an exact pin, or None when it is one.
+fn pin_problem(service: &str, image: &str) -> Option<String> {
+    let Some((name, digest)) = image.split_once("@sha256:") else {
+        return Some("carries no @sha256 digest".into());
+    };
+    if digest.len() != 64 || !digest.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Some(format!("digest '{}' is not 64 hex characters", digest));
+    }
+    // A tag is whatever follows a ':' in the last path segment, so a
+    // registry port (10.10.10.17:5000/...) is not mistaken for one.
+    let last = name.rsplit('/').next().unwrap_or(name);
+    let tag = last.split_once(':').map(|(_, t)| t);
+    let untagged = UNTAGGED_BUILDS.iter().any(|(s, _)| *s == service);
+    match tag {
+        None if untagged => None,
+        None => Some("carries a digest but no version tag".into()),
+        Some(_) if untagged => Some(format!(
+            "has a version tag now; remove {} from UNTAGGED_BUILDS",
+            service
+        )),
+        Some(t) => {
+            // Exact means at least major.minor: `17-alpine`, `3` and
+            // `latest` all move under the same name.
+            let exact = t.contains('.')
+                && t.split(|c: char| !c.is_ascii_digit())
+                    .filter(|p| !p.is_empty())
+                    .count()
+                    >= 2;
+            (!exact).then(|| format!("tag '{}' is not an exact version", t))
+        }
+    }
+}
+
+/// Expert panel 2026-09-27 (manual-images-latest-unpinned), Kenny's answer
+/// "vastzetten-plus-melding": a `manual` service is never updated by the
+/// nightly run, so its file is the only record of what it runs. With
+/// `:latest` a rebuild pulled whatever was newest that day (Traefik v3 to v4
+/// on the gateway at the worst moment), and a registry cache serving a tag
+/// could hand over anything. Every manual image, cAdvisor's too, now names
+/// the version it runs and the digest that proves it.
+///
+/// covers: fix-82
+#[test]
+fn every_manual_image_is_pinned_to_an_exact_version_and_its_digest() {
+    let root = stacks_dir().parent().unwrap().to_path_buf();
+    let mut files: Vec<(String, String)> = vec![(
+        "guards::CADVISOR_COMPOSE".into(),
+        homelab_core::ops::guards::CADVISOR_COMPOSE.to_string(),
+    )];
+    let mut stacks: Vec<_> = std::fs::read_dir(stacks_dir())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    stacks.sort();
+    for stack in stacks {
+        let Ok(apps) = std::fs::read_dir(&stack) else {
+            continue;
+        };
+        for app in apps.flatten() {
+            let f = app.path().join("docker-compose.yml");
+            if f.is_file() {
+                files.push((
+                    f.strip_prefix(&root).unwrap().display().to_string(),
+                    std::fs::read_to_string(&f).unwrap(),
+                ));
+            }
+        }
+    }
+    let mut manual = 0;
+    let mut problems = Vec::new();
+    let mut seen_untagged = Vec::new();
+    for (file, text) in &files {
+        for (svc, image, policy) in compose_services(text) {
+            if policy.as_deref() != Some("manual") {
+                continue;
+            }
+            manual += 1;
+            if UNTAGGED_BUILDS.iter().any(|(s, _)| *s == svc) {
+                seen_untagged.push(svc.clone());
+            }
+            if let Some(p) = pin_problem(&svc, &image) {
+                problems.push(format!("{} :: {} ({}) {}", file, svc, image, p));
+            }
+        }
+    }
+    assert!(
+        manual >= 20,
+        "found only {} manual services — this test is looking in the wrong place",
+        manual
+    );
+    for (s, why) in UNTAGGED_BUILDS {
+        assert!(
+            seen_untagged.iter().any(|x| x == s),
+            "UNTAGGED_BUILDS names {} ({}), which is no manual service any more",
+            s,
+            why
+        );
+    }
+    assert!(
+        problems.is_empty(),
+        "manual images that are not pinned to an exact version and digest:\n{}",
+        problems.join("\n")
+    );
+}
+
+/// The golden template pre-pulls the same cAdvisor image the guard starts,
+/// or a fresh container would fetch a second one at its first deploy.
+///
+/// covers: fix-82
+#[test]
+fn the_template_pre_pulls_the_cadvisor_image_the_guard_pins() {
+    use homelab_core::ops::guards::{CADVISOR_COMPOSE, CADVISOR_IMAGE};
+    assert!(CADVISOR_COMPOSE.contains(&format!("image: {}\n", CADVISOR_IMAGE)));
+    let template = std::fs::read_to_string(
+        stacks_dir()
+            .parent()
+            .unwrap()
+            .join("core/src/ops/template.rs"),
+    )
+    .unwrap();
+    assert!(
+        !template.contains("cadvisor/cadvisor:latest"),
+        "the template still pre-pulls cAdvisor by :latest"
+    );
+}

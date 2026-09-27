@@ -274,6 +274,7 @@ fn wizard_renders_preset_step() {
         step: WizStep::Preset,
         preset_idx: 0,
         name: String::new(),
+        name_suggested: false,
         ram: 512,
         cores: 2,
         disk: 8,
@@ -300,6 +301,7 @@ fn wizard_resources_step_shows_all_fields() {
         step: WizStep::Resources,
         preset_idx: 0,
         name: "test".into(),
+        name_suggested: false,
         ram: 2048,
         cores: 4,
         disk: 16,
@@ -2532,4 +2534,211 @@ fn the_help_text_and_the_usage_message_agree_about_install_native() {
         help.trim(),
         usage.trim()
     );
+}
+
+// ── Test-plan part A findings (headless run, 2026-09-26) ───────────────────
+// Each finding in docs/TEST_RUN_PART_A.md gets the test that would have
+// caught it. The run drove `homelab tui --offline` through a pseudo-terminal
+// and read the screens back as text, which is how these were seen at all.
+
+fn wizard_at(step: homelab_client::tui::model::WizStep, name: &str) -> Model {
+    use homelab_client::tui::model::{ResField, Wizard};
+    let mut m = ready_model();
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    m.presets = homelab_client::scaffold::scan_presets(&presets_dir);
+    m.wizard = Some(Wizard {
+        step,
+        preset_idx: 0,
+        name: name.into(),
+        name_suggested: false,
+        ram: 1024,
+        cores: 2,
+        disk: 8,
+        swap: 512,
+        swap_touched: false,
+        vmid: 108,
+        res_field: ResField::Ram,
+        storage_paths: vec!["/appdata/retrotest/actual-config".into()],
+        storage_idx: 0,
+        storage_no_data: vec![false],
+        disk_typing: false,
+    });
+    m
+}
+
+fn bottom_row(out: &str) -> String {
+    let cells: Vec<char> = out.chars().collect();
+    cells[cells.len() - 120..].iter().collect()
+}
+
+/// Finding 2: the ticker said "press U" while SHIFT+U updates the selected
+/// stack and the host update is lowercase u; the footer printed `[R]` for a
+/// lowercase r while SHIFT+R is restore. A letter shown is the key pressed:
+/// lowercase for plain keys, SHIFT+ for capitals, as the help screen does.
+#[test]
+fn a_key_named_on_screen_is_the_key_that_does_it() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut m = ready_model();
+    m.host_version = "2.6.0".into();
+    homelab_client::tui::model::update(&mut m, Msg::ReleaseTag(Some("v9.9.9".into())));
+    let out = render(&m);
+    assert!(out.contains("available — press u"), "ticker: {}", out);
+    assert!(!out.contains("press U"));
+    assert!(!out.contains("beschikbaar"), "English interface");
+    // The key the ticker names does what the ticker says.
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)),
+    );
+    assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
+
+    let m = ready_model();
+    let foot = bottom_row(&render(&m));
+    for hint in ["[n] new stack", "[p] plan", "[r] refresh"] {
+        assert!(
+            foot.contains(hint),
+            "dashboard footer lacks {:?}: {}",
+            hint,
+            foot
+        );
+    }
+    for wrong in ["[N]", "[P]", "[R]"] {
+        assert!(
+            !foot.contains(wrong),
+            "dashboard footer shows {}: {}",
+            wrong,
+            foot
+        );
+    }
+    let mut m = ready_model();
+    m.tab = Tab::Logs;
+    let foot = bottom_row(&render(&m));
+    assert!(foot.contains("[SHIFT+G] tail"), "logs footer: {}", foot);
+}
+
+/// Finding 1: the right-aligned status was drawn over the key hints, leaving
+/// `[Q]link established` on every screen with a status message.
+#[test]
+fn the_status_message_never_overwrites_a_key_hint() {
+    let mut m = ready_model();
+    m.status_line = "link established".into();
+    let foot = bottom_row(&render(&m));
+    let (left, _) = foot
+        .split_once("link established")
+        .unwrap_or_else(|| panic!("status missing: {}", foot));
+    let left = left.trim_end();
+    assert!(
+        !left.ends_with(']') && !left.ends_with('['),
+        "a hint was cut: {:?}",
+        left
+    );
+    // Every hint that is shown is shown whole: each "[" has its "]" and a
+    // description after it.
+    for part in left.split('[').skip(1) {
+        let (_, desc) = part
+            .split_once(']')
+            .unwrap_or_else(|| panic!("half a hint: {:?}", left));
+        assert!(
+            !desc.trim().is_empty(),
+            "hint without a description: {:?}",
+            left
+        );
+    }
+}
+
+/// Finding 3: a nine-letter stack name ran into the message,
+/// `syncthingsyncthing :: folder …`.
+#[test]
+fn a_long_log_source_keeps_its_space() {
+    use homelab_client::tui::model::LogRow;
+    use homelab_proto::LogLevel;
+    let mut m = ready_model();
+    m.tab = Tab::Logs;
+    m.logs.push_back(LogRow {
+        level: LogLevel::Debug,
+        source: "syncthing".into(),
+        msg: "folder in sync".into(),
+    });
+    let out = render(&m);
+    assert!(out.contains("syncthing folder in sync"), "{}", out);
+}
+
+/// Finding 5: the review step printed `resources1024 MiB`, and the storage
+/// step's own hint line was overdrawn by the generic one (`selectback`).
+#[test]
+fn the_wizard_review_and_storage_steps_render_cleanly() {
+    use homelab_client::tui::model::WizStep;
+    let out = render(&wizard_at(WizStep::Review, "retrotest"));
+    assert!(out.contains("resources 1024 MiB"), "{}", out);
+    let out = render(&wizard_at(WizStep::Storage, "retrotest"));
+    assert!(out.contains("SPACE toggle"), "{}", out);
+    assert!(!out.contains("selectback"), "{}", out);
+    assert!(
+        !out.contains("[UP/DOWN] select"),
+        "generic hint over the storage hint"
+    );
+}
+
+/// Finding 6: the name step starts with the preset's name, and typing
+/// appended to it (`actual` + `retrotest` = `actualretrotest`). The
+/// suggestion stands until the first letter, which replaces it.
+#[test]
+fn typing_a_name_replaces_the_suggested_one() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use homelab_client::tui::model::WizStep;
+    let mut m = wizard_at(WizStep::Preset, "");
+    let key = |c| Msg::Key(KeyEvent::new(c, KeyModifiers::NONE));
+    homelab_client::tui::model::update(&mut m, key(KeyCode::Enter));
+    let suggested = m.wizard.as_ref().unwrap().name.clone();
+    assert!(!suggested.is_empty(), "the preset's name is suggested");
+    for c in "retro".chars() {
+        homelab_client::tui::model::update(&mut m, key(KeyCode::Char(c)));
+    }
+    assert_eq!(m.wizard.as_ref().unwrap().name, "retro");
+    // ENTER without typing keeps the suggestion.
+    let mut m = wizard_at(WizStep::Preset, "");
+    homelab_client::tui::model::update(&mut m, key(KeyCode::Enter));
+    homelab_client::tui::model::update(&mut m, key(KeyCode::Enter));
+    let w = m.wizard.as_ref().unwrap();
+    assert_eq!(w.name, suggested);
+    assert!(matches!(w.step, WizStep::Resources));
+}
+
+/// Finding 7: at 120 columns the CAPACITY panel cut its own figures off,
+/// `free 19064 M` and `ceilings 1.2× (LX`.
+#[test]
+fn the_capacity_panel_shows_its_figures_whole() {
+    let out = render(&ready_model());
+    assert!(out.contains("free 19064 MB"), "{}", out);
+    assert!(out.contains("1.2×"), "{}", out);
+    assert!(out.contains("12 cores"), "{}", out);
+}
+
+/// Finding 8: a bad value in lxc-compose.yml was reported at line 2 (the
+/// flattened struct loses positions) and with no remedy. Standing rule 11:
+/// every error carries its remedy.
+#[test]
+fn a_bad_manifest_value_is_reported_at_its_own_line_with_a_remedy() {
+    let tmp = std::env::temp_dir().join(format!("homelab-parse-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let stack = tmp.join("retrotest");
+    std::fs::create_dir_all(&stack).unwrap();
+    let manifest = "stack_name: retrotest\nvmid: 150\nhostname: 150-app-retrotest\n\
+                    network:\n  ip: 10.10.10.50/24\n  gateway: 10.10.10.1\n  bridge: vmbr0\n  vlan: 10\n\
+                    resources:\n  cores: 2\n  memory_mb: lots\n  swap_mb: 512\n  disk_gb: 8\n  storage: local-lvm\n\
+                    lxc:\n  template: \"clone:998\"\n  unprivileged: true\n\
+                    apps: []\n";
+    let bad_line = manifest.lines().position(|l| l.contains("lots")).unwrap() + 1;
+    std::fs::write(stack.join("lxc-compose.yml"), manifest).unwrap();
+    let err = homelab_client::spec::build_manifest(&stack)
+        .expect_err("a string for memory_mb must not parse");
+    let _ = std::fs::remove_dir_all(&tmp);
+    assert!(err.contains("memory_mb"), "names the field: {}", err);
+    assert!(
+        err.contains(&format!("line {}", bad_line)),
+        "names line {}: {}",
+        bad_line,
+        err
+    );
+    assert!(err.contains("::"), "carries a remedy: {}", err);
 }

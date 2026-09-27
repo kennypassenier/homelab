@@ -41,6 +41,30 @@ fn default_gw() -> u16 {
     104
 }
 
+/// Parse `lxc-compose.yml`, reporting a bad value where it actually is.
+///
+/// `StackFile` flattens the manifest, and a flattened struct is buffered
+/// before it is read, so serde_yaml loses every position: a string where
+/// `memory_mb` wants a number was reported "at line 2 column 1", whatever
+/// line it sat on, and with nothing to do about it (test-plan part A,
+/// 2026-09-26, finding 8). When the whole file fails, the manifest alone is
+/// parsed again — that pass is not flattened, so its error carries the
+/// field and the real line — and the message ends in a remedy, per standing
+/// rule 11.
+fn parse_stack_file(raw: &str, path: &Path) -> Result<StackFile, String> {
+    serde_yaml::from_str::<StackFile>(raw).map_err(|whole| {
+        let detail = match serde_yaml::from_str::<StackManifest>(raw) {
+            Err(e) => e.to_string(),
+            Ok(_) => whole.to_string(),
+        };
+        format!(
+            "manifest parse: {} :: fix that value in {} and run `homelab plan` again",
+            detail,
+            path.display()
+        )
+    })
+}
+
 /// Just the intent — no files, no secrets, no latch.
 ///
 /// The backup and destroy verbs need the manifest and nothing else: they run
@@ -55,8 +79,7 @@ pub fn build_manifest(dir: &Path) -> Result<homelab_core::manifest::StackManifes
     let manifest_path = dir.join("lxc-compose.yml");
     let raw = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("cannot read {}: {}", manifest_path.display(), e))?;
-    let stack_file: StackFile =
-        serde_yaml::from_str(&raw).map_err(|e| format!("manifest parse: {}", e))?;
+    let stack_file = parse_stack_file(&raw, &manifest_path)?;
     Ok(stack_file.manifest)
 }
 
@@ -64,8 +87,7 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
     let manifest_path = dir.join("lxc-compose.yml");
     let raw = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("cannot read {}: {}", manifest_path.display(), e))?;
-    let stack_file: StackFile =
-        serde_yaml::from_str(&raw).map_err(|e| format!("manifest parse: {}", e))?;
+    let stack_file = parse_stack_file(&raw, &manifest_path)?;
 
     let mut files: Vec<FileBlob> = Vec::new();
     let mut env: BTreeMap<String, String> = BTreeMap::new();

@@ -473,13 +473,13 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
             let defaults = crate::scaffold::StackDefaults::default();
             let kv = |k: &str, v: String| -> Line<'static> {
                 Line::from(vec![
-                    Span::styled(format!("  {:<9}", k), THEME.muted_style()),
+                    Span::styled(format!("  {:<9} ", k), THEME.muted_style()),
                     Span::styled(v, Style::new().fg(THEME.text)),
                 ])
             };
             let lines = vec![
                 Line::from(vec![
-                    Span::styled("  name     ", THEME.muted_style()),
+                    Span::styled("  name      ", THEME.muted_style()),
                     Span::styled(
                         wiz.name.clone(),
                         Style::new().fg(THEME.cyan).add_modifier(Modifier::BOLD),
@@ -519,17 +519,21 @@ fn draw_wizard(f: &mut Frame, model: &Model, wiz: &crate::tui::model::Wizard) {
             f.render_widget(Paragraph::new(lines), rows[1]);
         }
     }
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("[ENTER]", THEME.hint()),
-            Span::styled(" next  ", THEME.muted_style()),
-            Span::styled("[ESC]", THEME.hint()),
-            Span::styled(" back/cancel  ", THEME.muted_style()),
-            Span::styled("[UP/DOWN]", THEME.hint()),
-            Span::styled(" select", THEME.muted_style()),
-        ])),
-        rows[2],
-    );
+    // The storage step draws its own hint line; the generic one drawn on
+    // top of it left `[UP/DOWN] selectback` behind (finding 5).
+    if !matches!(wiz.step, WizStep::Storage) {
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("[ENTER]", THEME.hint()),
+                Span::styled(" next  ", THEME.muted_style()),
+                Span::styled("[ESC]", THEME.hint()),
+                Span::styled(" back/cancel  ", THEME.muted_style()),
+                Span::styled("[UP/DOWN]", THEME.hint()),
+                Span::styled(" select", THEME.muted_style()),
+            ])),
+            rows[2],
+        );
+    }
 }
 
 fn draw_tab_bar(f: &mut Frame, model: &Model, area: Rect) {
@@ -596,7 +600,7 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
     }
     if let Some(tag) = model.host_update_available() {
         attn.push(format!(
-            "⬆ HOST UPDATE {} beschikbaar — press U (checksum-verified, auto-rollback armed)",
+            "⬆ HOST UPDATE {} available — press u (checksum-verified, auto-rollback armed)",
             tag
         ));
     }
@@ -664,31 +668,35 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
 }
 
 fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
-    // AZERTY: modifier names spelled out, digit-row hints shown as "1-4".
+    // AZERTY: modifier names spelled out, digit-row hints shown as "1-6".
+    // A letter is shown exactly as it is pressed: lowercase for a plain key,
+    // SHIFT+ for a capital. `[R] refresh` once sat beside SHIFT+R = restore,
+    // and the ticker's "press U" beside SHIFT+U = update the selected stack
+    // (test-plan part A, 2026-09-26, finding 2).
     let keys: &[(&str, &str)] = match model.tab {
         Tab::Dashboard | Tab::Stacks => &[
             ("1-6/TAB", "tabs"),
-            ("N", "new stack"),
-            ("P", "plan"),
+            ("n", "new stack"),
+            ("p", "plan"),
             ("SHIFT+D", "deploy"),
-            ("R", "refresh"),
+            ("r", "refresh"),
             ("CTRL+K", "palette"),
-            ("H", "help"),
-            ("Q", "quit"),
+            ("h", "help"),
+            ("q", "quit"),
         ],
         Tab::Logs => &[
             ("LEFT/RIGHT", "source"),
             ("UP/DOWN", "scroll"),
             ("SPACE", "follow"),
-            ("G", "tail"),
+            ("SHIFT+G", "tail"),
             ("CTRL+K", "palette"),
-            ("Q", "quit"),
+            ("q", "quit"),
         ],
         Tab::Doctor => &[
-            ("R/ENTER", "re-run"),
+            ("r/ENTER", "re-run"),
             ("1-6/TAB", "tabs"),
             ("CTRL+K", "palette"),
-            ("Q", "quit"),
+            ("q", "quit"),
         ],
         Tab::Shell => &[
             ("type+ENTER", "run"),
@@ -700,29 +708,45 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
         Tab::Settings => &[
             ("UP/DOWN", "field"),
             ("LEFT/RIGHT", "value"),
-            ("A", "add tier"),
-            ("D", "del tier"),
+            ("a", "add tier"),
+            ("d", "del tier"),
             ("ENTER", "edit webhook"),
             ("SHIFT+S", "save"),
-            ("R", "reload"),
-            ("Q", "quit"),
+            ("r", "reload"),
+            ("q", "quit"),
         ],
     };
+    // The status sits on the right and the hints take what is left, whole
+    // hints only. Both used to be drawn across the full width, so a status
+    // landed on top of the last hints: `[Q]link established` (finding 1).
+    let status = format!("{} ", model.status_line);
+    let status_w = if model.status_line.is_empty() {
+        0
+    } else {
+        status.chars().count() as u16
+    };
+    let room = area.width.saturating_sub(status_w + 1) as usize;
     let mut spans: Vec<Span> = Vec::new();
+    let mut used = 0usize;
     for (k, d) in keys {
-        spans.push(Span::styled(format!("[{}]", k), THEME.hint()));
-        spans.push(Span::styled(format!(" {}  ", d), THEME.muted_style()));
+        let key = format!("[{}]", k);
+        let desc = format!(" {}  ", d);
+        let w = key.chars().count() + desc.chars().count();
+        if used + w > room {
+            break;
+        }
+        used += w;
+        spans.push(Span::styled(key, THEME.hint()));
+        spans.push(Span::styled(desc, THEME.muted_style()));
     }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    let cols = Layout::horizontal([Constraint::Min(0), Constraint::Length(status_w)]).split(area);
+    let (hints, right) = (cols[0], cols[1]);
+    f.render_widget(Paragraph::new(Line::from(spans)), hints);
     f.render_widget(
         Paragraph::new(
-            Line::from(Span::styled(
-                format!("{} ", model.status_line),
-                Style::new().fg(THEME.blue),
-            ))
-            .right_aligned(),
+            Line::from(Span::styled(status, Style::new().fg(THEME.blue))).right_aligned(),
         ),
-        area,
+        right,
     );
 }
 
@@ -765,8 +789,8 @@ fn draw_help(f: &mut Frame) {
         ("u", "update the host binary when one is offered"),
         ("CTRL+K", "command palette"),
         ("F2", "cycle effect intensity"),
-        ("H", "this help"),
-        ("Q", "quit"),
+        ("h", "this help"),
+        ("q", "quit"),
     ];
     let lines: Vec<Line> = rows
         .iter()

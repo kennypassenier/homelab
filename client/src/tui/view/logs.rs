@@ -124,7 +124,7 @@ pub fn draw(f: &mut Frame, model: &Model, area: Rect) {
                     level_style,
                 ),
                 Span::styled(
-                    format!("{:<9}", l.source),
+                    format!("{:<9} ", l.source),
                     Style::new().fg(src_color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(l.msg.clone(), Style::new().fg(THEME.text)),

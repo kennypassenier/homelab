@@ -1387,6 +1387,12 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
     if let Some((_, dir)) = model.local_stacks.iter().find(|(n, _)| *n == stack.name) {
         let spec = crate::spec::build_spec(dir)?;
         homelab_core::manifest::validate(&spec).map_err(|e| format!("validation failed: {}", e))?;
+        // fix-92: the same route check `homelab plan` and `deploy` run.
+        let base = dir.parent().unwrap_or(std::path::Path::new("."));
+        let problems = crate::spec::fleet_route_problems(base)?;
+        if !problems.is_empty() {
+            return Err(format!("route check failed: {}", problems.join("; ")));
+        }
         return Ok((spec, false));
     }
     // Synthetic spec from the fleet view — enough to preview/demo.

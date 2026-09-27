@@ -145,7 +145,10 @@ gateway_route:
 # so the first deploy changes nothing.
 #
 # `external` names every backend in the file that is not a stack's own
-# container, exactly as the file writes it.
+# container, exactly as the file writes it. `homelab plan`, `deploy` and
+# `apply` refuse a backend that is neither a stack's address nor declared
+# here (fix-92), so a route to the management network cannot appear without
+# a line in this file saying so.
 extra_routes:
   - filename: manual-homeassistant.yml
     external: ["http://10.10.10.2:8123"]

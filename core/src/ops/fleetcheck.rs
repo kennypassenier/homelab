@@ -84,6 +84,45 @@ pub struct LiveFacts {
     /// fix-26: storage directories whose owner on disk is not the declared
     /// `host_owner_uid`. Only mismatches are kept.
     pub owners: Vec<OwnerFact>,
+    /// fix-92: every file name in the gateway's routes directory, whatever
+    /// its extension. Empty when none, and when it could not be read.
+    pub route_files: Vec<String>,
+}
+
+/// fix-92 (routes-outside-repo-unvalidated, 2026-09-27): a file in the
+/// gateway's routes directory that no stack's deploy recorded.
+///
+/// Which hostnames the house publishes is decided by that directory, so a
+/// file there that no stack declares is a hostname the repository cannot
+/// account for — the four hand-written files fix-91 brought in were exactly
+/// that. Judged against what deploys recorded (`route_file`,
+/// `extra_route_files`) rather than against the stack files, because the
+/// nightly round runs on the host, which has no working copy of them. Every
+/// name counts, not only `*.yml`: a `.bak` Traefik ignores today is still a
+/// file somebody put there and nobody owns. Drift, not Broken: nothing fails
+/// because of it. Homelab never removes such a file itself (fix-41).
+pub fn evaluate_route_owners(state: &HostState, on_disk: &[String]) -> Vec<Finding> {
+    let owned: std::collections::BTreeSet<&str> = state
+        .stacks
+        .values()
+        .flat_map(|s| s.route_file.iter().chain(s.extra_route_files.iter()))
+        .map(String::as_str)
+        .collect();
+    on_disk
+        .iter()
+        .filter(|f| !owned.contains(f.as_str()))
+        .map(|f| Finding {
+            severity: Severity::Drift,
+            subject: format!("gateway route file {}", f),
+            what: "is in the gateway's routes directory but no stack declares it — the \
+                   repository cannot say what it publishes"
+                .into(),
+            remedy: "declare it in the stack it belongs to (gateway_route, or extra_routes to \
+                     keep its name) and deploy that stack, or delete it by hand on the gateway; \
+                     homelab never removes a route file no deploy wrote"
+                .into(),
+        })
+        .collect()
 }
 
 /// fix-26: one storage directory owned by someone other than its stack file
@@ -723,6 +762,7 @@ pub fn evaluate(
     out.extend(evaluate_pools(&live.pools, growth_limits));
     out.extend(evaluate_big_logs(&live.big_logs));
     out.extend(evaluate_owners(&live.owners));
+    out.extend(evaluate_route_owners(state, &live.route_files));
     out.extend(evaluate_coverage(&live.coverage));
     out.extend(evaluate_boot(state, &live.boot));
     out.extend(evaluate_watched_backups(&live.watched_backups));

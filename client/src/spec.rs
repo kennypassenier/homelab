@@ -123,6 +123,52 @@ fn declared_routes(dir: &Path, stack_file: &StackFile) -> Result<Vec<DeclaredRou
     Ok(out)
 }
 
+/// fix-92: every stack in `base` with its address (prefix length dropped),
+/// and every route file the stacks declare. Secret-free and offline, like
+/// [`route_files`], so `plan` can hold the whole fleet without latch.
+#[allow(clippy::type_complexity)]
+pub fn fleet_routes(
+    base: &Path,
+) -> Result<(Vec<(String, String)>, Vec<homelab_core::routes::RouteDecl>), String> {
+    let mut stacks = Vec::new();
+    let mut routes = Vec::new();
+    for (name, dir) in scan_local_stacks(base) {
+        let manifest = build_manifest(&dir).map_err(|e| format!("{}: {}", name, e))?;
+        let ip = manifest
+            .network
+            .ip
+            .split('/')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        stacks.push((manifest.stack_name, ip));
+        routes.extend(route_files(&dir).map_err(|e| format!("{}: {}", name, e))?);
+    }
+    Ok((stacks, routes))
+}
+
+/// fix-92 (routes-outside-repo-unvalidated, 2026-09-27): what is wrong with
+/// the routes of the stacks in `base`, taken together — see
+/// [`homelab_core::routes::fleet_route_problems`]. Empty when nothing is.
+pub fn fleet_route_problems(base: &Path) -> Result<Vec<String>, String> {
+    let (stacks, routes) = fleet_routes(base)?;
+    let mut problems = Vec::new();
+    let mut facts = Vec::new();
+    for r in &routes {
+        // A file the check cannot read is one whose hostnames it never
+        // compared, so it is a problem rather than a skip.
+        match crate::routes::facts(r) {
+            Ok(f) => facts.push(f),
+            Err(e) => problems.push(format!(
+                "route file {} (stack {}) is not valid YAML: {} — fix the file",
+                r.filename, r.stack, e
+            )),
+        }
+    }
+    problems.extend(homelab_core::routes::fleet_route_problems(&stacks, &facts));
+    Ok(problems)
+}
+
 /// fix-91: every route file a stack directory declares, without secrets,
 /// latch or network — what the gateway would be given, and what the fleet
 /// route check (fix-92) reads.

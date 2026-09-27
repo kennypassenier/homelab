@@ -168,7 +168,8 @@ async fn g6_routes_are_read_from_the_gateway_and_knocked_on() {
     assert!(
         exec.calls_containing("pct exec 104 --")
             .iter()
-            .all(|c| c.contains("bash -c") || c.contains("for f in")),
+            // fix-92 adds the one listing of the directory's names.
+            .all(|c| c.contains("bash -c") || c.contains("for f in") || c.contains("ls -1A")),
         "the knock uses bash, not dash: {:?}",
         exec.calls_containing("/dev/tcp")
     );

@@ -5,6 +5,7 @@ pub mod apply;
 pub mod link;
 pub mod release;
 pub mod repo_config;
+pub mod routes;
 pub mod scaffold;
 pub mod spec;
 pub mod testplan;

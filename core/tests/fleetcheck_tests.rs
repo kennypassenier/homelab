@@ -98,6 +98,7 @@ fn y4_a_healthy_fleet_is_silent() {
         pools: vec![],
         big_logs: vec![],
         owners: vec![],
+        route_files: vec![],
         watched_backups: vec![],
         containers: vec![(113, "113-app-metrics".into())],
         routes: vec![RouteFact {

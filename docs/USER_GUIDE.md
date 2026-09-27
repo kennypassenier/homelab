@@ -1859,6 +1859,23 @@ one the stack stops declaring; destroy and forget remove the recorded ones.
 A file on the gateway that no deploy recorded is never removed
 (`client/tests/route_files_tests.rs`, `core/tests/route_files_tests.rs`).
 
+`homelab plan`, `homelab deploy`, `homelab apply` and a deploy from the TUI
+first hold every route in the stacks directory against every other (fix-92)
+and stop with `route check failed:` and one line per problem when:
+
+- two route files claim the same hostname (F115's shape);
+- two stacks declare the same route file name;
+- a backend is neither a stack's address nor listed under `external:`;
+- an `external:` entry names a backend its file does not route to;
+- a route file is not valid YAML.
+
+The whole directory is checked, not only the stack named, because a
+duplicate hostname is a fact about two stacks. The nightly check and
+`homelab check` report, as drift, every file in the gateway's routes
+directory that no stack's deploy recorded, whatever its extension; homelab
+never deletes such a file itself (`core/tests/route_check_tests.rs`,
+`client/tests/route_check_tests.rs`).
+
 #### H2 · OPNsense Kea DHCP reservations
 
 **Status:** Removed. Built and then removed (FEATURES.md amendment of

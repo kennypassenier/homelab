@@ -199,8 +199,10 @@ A certificate that does not match the pin ends the connection with
 ## Commands
 
 `homelab --help` (or `-h` anywhere on the line, or no arguments) prints the
-full list and does nothing else. That holds for every verb: the check runs
-before any argument is read (`wants_help` in `client/src/version.rs`).
+grouped list and does nothing else; `homelab <verb> --help` prints that
+verb with one example. That holds for every verb: the check runs before any
+argument is read (`wants_help` in `client/src/version.rs`, the text in
+`client/src/cli_help.rs`). A mistyped verb exits 2 and names the nearest one.
 
 Every verb exits 1 on failure. A verb that talks to the daemon exits 0 only
 when the daemon reports success.

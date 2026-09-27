@@ -2430,12 +2430,9 @@ fn every_cli_verb_appears_in_the_usage_text() {
         verbs
     );
 
-    // The usage block, which starts at the version line.
-    let start = src
-        .find("— usage:")
-        .expect("the usage block moved; this test parses it");
-    let usage = &src[start..];
-    let usage = &usage[..usage.find("env: HOMELAB_HOST").unwrap_or(usage.len())];
+    // The usage text, one table since fix-108.
+    let usage = homelab_client::cli_help::usage();
+    let usage = usage.as_str();
 
     // `enable`/`disable` are documented as one line; accept either spelling.
     let missing: Vec<&String> = verbs
@@ -2565,10 +2562,8 @@ fn the_help_text_and_the_usage_message_agree_about_install_native() {
         .lines()
         .find(|l| l.contains("usage: homelab install-native"))
         .expect("the usage message must exist");
-    let help = src
-        .lines()
-        .find(|l| l.contains("homelab install-native stacks/") && !l.contains("usage:"))
-        .expect("the help line must exist");
+    // fix-108: the help is one table in cli_help.
+    let help = homelab_client::cli_help::verb_help("install-native").expect("the help must exist");
     let shape = "stacks/<name>[/<unit>] [<tag> | --file <path>]";
     assert!(usage.contains(shape), "usage drifted: {}", usage.trim());
     assert!(

@@ -179,9 +179,13 @@ Every host operation streams its log lines and ends with one line:
 says `<label> deferred — <reason>` and leaves no incident
 (`host/src/main.rs:3054-3065`).
 
-Arguments are positional. `--help` or `-h` anywhere on the line prints the
-usage instead of running anything (`client/src/main.rs:109-111`,
-`client/src/version.rs:98-100`).
+Arguments are positional. `--help` or `-h` anywhere on the line prints help
+instead of running anything (`client/src/version.rs:98-100`): after a verb,
+that verb's line with one example (`homelab deploy --help`); otherwise the
+whole list, grouped as Daily, Change a stack, Native services, Host and
+fleet, Local, and Rare and destructive (`client/src/cli_help.rs`). A verb
+the client does not know is refused with exit code 2 and the nearest verb:
+`unknown command 'stauts'; did you mean 'status'?` (fix-108).
 
 ---
 

@@ -125,7 +125,7 @@ fn load_config_env() {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let mut cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
+    let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
     // F309: `--help` anywhere means SHOW the help, never do the thing.
     //
@@ -142,7 +142,28 @@ async fn main() {
     // here covers every verb at once rather than the one that happened to
     // bite.
     if homelab_client::version::wants_help(&args) {
-        cmd = "help";
+        // fix-108 (help-flat-ids-typo-exit0, 2026-09-27): `homelab <verb>
+        // --help` is that verb's help with an example, not the whole list.
+        match args
+            .get(1)
+            .and_then(|v| homelab_client::cli_help::verb_help(v))
+        {
+            Some(help) => print!("{}", help),
+            None => print!("{}", homelab_client::cli_help::usage()),
+        }
+        std::process::exit(0);
+    }
+    // fix-108: a mistyped verb printed the help and exited 0, so a typo in a
+    // script looked like success. It says what was probably meant and exits 2.
+    if !homelab_client::cli_help::is_verb(cmd) {
+        let hint = homelab_client::cli_help::suggest(cmd)
+            .map(|v| format!("; did you mean '{}'?", v))
+            .unwrap_or_default();
+        eprintln!(
+            "{}error:{} unknown command '{}'{} — `homelab help` lists them",
+            C_RED, C_RESET, cmd, hint
+        );
+        std::process::exit(2);
     }
 
     // Kenny, 2026-09-02: `homelab check` has to work from any directory
@@ -1316,76 +1337,9 @@ async fn main() {
             )
             .await;
         }
-        _ => {
-            println!("homelab v{} — usage:", env!("CARGO_PKG_VERSION"));
-            println!("  homelab today [stacks/]             what needs you: doctor, check, incidents, manual checks in one list");
-            println!("  homelab ping|status|doctor|incidents");
-            println!("  homelab plan stacks/<name>          validate and show the spec (no host; runs latch/gh for secrets and native releases)");
-            println!("  homelab deploy stacks/<name>");
-            println!("  homelab backup stacks/<name>        restic snapshot (E1)");
-            println!("  homelab restore stacks/<name> [snap]  restore from snapshot (E2)");
-            println!("  homelab update stacks/<name> [app]  pull+up with rollback (D9/B6)");
-            println!(
-                "  homelab patch                       apt dist-upgrade all managed stacks (H6)"
-            );
-            println!("  homelab destroy stacks/<name>       gated destroy (C2; from the host's record when the dir is gone)");
-            println!("  homelab apply [stacks/] [--dry-run] [--yes] [--no-backup]  show the plan, ask once, deploy what changed, destroy what left the files after its name is typed (ask-8)");
-            println!("  homelab wipe <stack>[/<app>]        delete what a retired stack or app kept: backups, /appdata, vault (ask-9)");
-            println!("  homelab prune-orphans stacks/<name>  remove files the repo dropped (H2b; the deploy does this itself now)");
-            println!(
-                "  homelab enable|disable <stack>      (un)park for the nightly scheduler (H8)"
-            );
-            println!("  homelab backup-host-meta            snapshot vault/state/TLS/repo (H10)");
-            println!("  homelab check [stacks/]             hold the repo against reality (Y4)");
-            println!("  homelab guards <vmid>               apply the runaway guards (B2/G1)");
-            println!("  homelab forget <stack>              drop a stale record and its registrations (no container touched)");
-            println!("  homelab adopt stacks/<name>         adopt a native-service CT (C7)");
-            println!(
-                "  homelab backup-native|update-native <stack>  drive an adopted service (C7)"
-            );
-            println!("  homelab zfs-replicate               ZFS snapshots + replication (E8)");
-            println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
-            println!("  homelab dashboard <stack> <app>...  render a stack dashboard (T2, local)");
-            println!("  homelab presets                     list the preset catalog (local)");
-            println!("  homelab new <name> --preset <p> --vmid <n>   scaffold a stack (T65)");
-            println!(
-                "  homelab exec <vmid> <cmd...>        remote exec (A6, requires exec_enabled)"
-            );
-            println!("  homelab self-update <binary>        replace HOST binary w/ rollback (H5)");
-            println!("  homelab self-install [tag]          replace THIS client with a release's, checksum-verified");
-            // G20 of the Phase-7 gate: eight verbs existed and appeared in no
-            // help text at all, `install-native` and `release-update` among
-            // them — the one that installs your own services and the one that
-            // updates the host. A command nobody can discover is a command
-            // that does not exist.
-            println!(
-                "  homelab release-update              fetch the newest release and ship it (H7)"
-            );
-            println!(
-                "  homelab install-native stacks/<name>[/<unit>] [<tag> | --file <path>]  install a native service from a release or a file (O1, B7)"
-            );
-            println!(
-                "  homelab template-build [vmid] [ver] [--privileged] [--base <vztmpl>]  golden template (M3)"
-            );
-            println!("  homelab templates                   list the golden templates");
-            println!("  homelab resize stacks/<name>        apply changed resources (H4)");
-            println!("  homelab config                      show the host's settings (G8)");
-            println!("  homelab release-update-native <stack> install the latest release of each service (B1)");
-            println!("  homelab backup-devices              fetch each device's own config now");
-            println!(
-                "  homelab testplan                    regenerate docs/deployment/TEST_PLAN.md"
-            );
-            println!(
-                "  homelab checks                      the questions only a person can answer (G17)"
-            );
-            println!("  homelab checks answer <id> ok|nok [note]   record one of those answers");
-            println!(
-                "  homelab export|import <file>        write or read a stack-definition bundle"
-            );
-            println!("  homelab tui                         the terminal interface (G1)");
-            println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");
-            println!("cert pin: ~/.config/homelab/pin (auto on first connect)");
-        }
+        // fix-108: `help` (or no arguments). An unknown verb never reaches
+        // here: it is refused before the token is read.
+        _ => print!("{}", homelab_client::cli_help::usage()),
     }
 }
 

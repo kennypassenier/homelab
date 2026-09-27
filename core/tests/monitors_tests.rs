@@ -171,6 +171,75 @@ mod native_dashboard {
         }
     }
 
+    /// fix-70: the native "Service uptime" panel drew `time() -
+    /// node_boot_time_seconds`, which inside an LXC is the hypervisor
+    /// kernel's boot time. Measured 2026-09-27: 58.5 days on kyu and on
+    /// almanac alike, on the day both services were redeployed; a unit that
+    /// kept dying would have shown the same confident number
+    /// (native-uptime-panel-wrong). What answers "is it alive" is each unit's
+    /// own state, and the uptime the service reports itself.
+    ///
+    /// covers: fix-70
+    #[test]
+    fn fix_70_a_native_stack_shows_its_units_not_the_hypervisor_s_boot_time() {
+        let units = [
+            "kyu".to_string(),
+            "kyu-runner".to_string(),
+            "http-switchboard".to_string(),
+        ];
+        let d = dashboard_json_for("kyu", &units, true);
+        assert!(
+            !d.contains("node_boot_time_seconds"),
+            "the hypervisor's boot time is not any service's uptime: {}",
+            d
+        );
+        assert!(d.contains("node_systemd_unit_state"), "{}", d);
+        for u in &units {
+            assert!(
+                d.contains(&format!("|{}|", u))
+                    || d.contains(&format!("({}|", u))
+                    || d.contains(&format!("|{})", u)),
+                "unit {} is not in the unit-state panel: {}",
+                u,
+                d
+            );
+        }
+        assert!(
+            d.contains(r#"job=\"kyu\""#) && d.contains("_uptime_seconds"),
+            "the service's own uptime, which resets on a restart: {}",
+            d
+        );
+        let v: serde_json::Value = serde_json::from_str(&d).unwrap();
+        let ids: Vec<u64> = v["panels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_u64().unwrap())
+            .collect();
+        assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 7, 8], "panel ids stay unique");
+        // A docker stack's dashboard is untouched: a deploy that changes
+        // nothing must write nothing.
+        let docker: serde_json::Value =
+            serde_json::from_str(&dashboard_json("media", &["jellyfin".to_string()])).unwrap();
+        let errors = &docker["panels"][4];
+        assert_eq!(errors["title"], "Errors in range");
+        assert_eq!(errors["id"], 5);
+        assert_eq!(errors["gridPos"]["y"], 16);
+        let exprs: Vec<String> = v["panels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|p| p["targets"][0]["expr"].as_str().map(String::from))
+            .collect();
+        assert!(
+            exprs.iter().any(|e| e.contains(
+                r#"node_systemd_unit_state{stack="kyu",state="active",name=~"(kyu|kyu-runner|http-switchboard)[.]service"}"#
+            )),
+            "{:?}",
+            exprs
+        );
+    }
+
     #[test]
     fn both_shapes_are_valid_json() {
         for native in [false, true] {

@@ -886,6 +886,37 @@ mod tests {
         );
     }
 
+    /// fix-55 (expert panel, unparseable-frame-logged-whole, 2026-09-27): a
+    /// frame the host could not parse was logged whole. A deploy frame carries
+    /// every `.env` value of its stack (`DeploySpec.env` is the secrets
+    /// channel) and a staging frame tens of MB of base64, so one version skew
+    /// put a stack's secrets, or a whole binary, into one pve journal line.
+    #[test]
+    fn fix_55_an_unparseable_frame_is_logged_without_its_body() {
+        let secret = "hunter2-db-password";
+        let frame = format!(
+            r#"{{"id":7,"cmd":"deploy_stack","manifest":{{"vmid":"not-a-number"}},"env":{{"app":{{"DB_PASSWORD":"{}"}}}},"blob":"{}"}}"#,
+            secret,
+            "A".repeat(100_000)
+        );
+        let e = serde_json::from_str::<RpcRequest>(&frame).unwrap_err();
+        let line = super::unparseable_frame_line(&e, &frame);
+        assert!(!line.contains(secret), "{}", line);
+        assert!(line.len() < 500, "{} bytes", line.len());
+        assert!(line.contains("deploy_stack"), "names the method: {}", line);
+        assert!(
+            line.contains(&frame.len().to_string()),
+            "and the size: {}",
+            line
+        );
+        // serde's own message quotes the offending value; that value may be a
+        // secret too, so only its position is kept.
+        let e = serde_json::from_str::<RpcRequest>(r#"{"id":"s3cr3t-token","cmd":"ping"}"#)
+            .unwrap_err();
+        let line = super::unparseable_frame_line(&e, r#"{"id":"s3cr3t-token","cmd":"ping"}"#);
+        assert!(!line.contains("s3cr3t-token"), "{}", line);
+    }
+
     /// covers: F208
     ///
     /// G1 of the Phase-7 gate. Saving a setting from the TUI rewrites the
@@ -3037,6 +3068,38 @@ async fn ws_upgrade(
         .into_response()
 }
 
+/// The journal line for a request frame this end could not parse.
+///
+/// fix-55 (expert panel, unparseable-frame-logged-whole, 2026-09-27): never
+/// the body. A deploy frame carries every `.env` value of its stack and a
+/// staging frame tens of MB of base64; both went into one journal line when
+/// a version skew made a frame unreadable. serde's own message is left out
+/// too, because it quotes the offending value ("invalid type: string
+/// \"...\""), which can be a secret. The method, the size and where parsing
+/// stopped are enough to tell which client sent what.
+fn unparseable_frame_line(e: &serde_json::Error, text: &str) -> String {
+    let method = text
+        .find("\"cmd\"")
+        .map(|at| {
+            text[at + 5..]
+                .trim_start_matches(|c: char| c.is_whitespace() || c == ':' || c == '"')
+                .chars()
+                .take_while(|c| c.is_ascii_lowercase() || *c == '_')
+                .take(40)
+                .collect::<String>()
+        })
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| "?".into());
+    format!(
+        "unparseable request dropped :: cmd={} · {} bytes · {:?} error at line {} column {}",
+        method,
+        text.len(),
+        e.classify(),
+        e.line(),
+        e.column()
+    )
+}
+
 async fn ws_session(socket: WebSocket, state: AppState) {
     let (mut tx, mut rx) = socket.split();
     let hello = ServerMsg::Hello {
@@ -3071,7 +3134,7 @@ async fn ws_session(socket: WebSocket, state: AppState) {
                 // hang rather than a bug: the request was dropped and the
                 // client waited for a reply that was never coming. A frame
                 // this end cannot understand is a fault on this end.
-                tracing::error!("unparseable request dropped :: {} :: {}", e, text);
+                tracing::error!("{}", unparseable_frame_line(&e, &text));
                 continue;
             }
         };

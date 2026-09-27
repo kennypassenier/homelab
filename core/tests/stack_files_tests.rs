@@ -590,3 +590,26 @@ print(json.dumps([len(d3), r3 is not None]))
         "nine of ten gone at once is refused as a truncated list"
     );
 }
+
+/// Expert panel 2026-09-27 (crowdsec-blind-to-internet). Measured on CT 104
+/// the same day: every request for a kp-soft.dev name in the last two access
+/// logs had `ClientHost` 172.18.0.1 (462 of 464), the docker bridge the
+/// tunnel's requests arrive through. CrowdSec whitelists 172.16.0.0/12, so it
+/// could never ban anyone on the internet. Traefik and the bouncer now take
+/// the visitor's address from the header the tunnel sets, but only from
+/// docker's own range, which only containers on CT 104 can send from.
+#[test]
+fn traefik_and_the_bouncer_read_the_visitor_address_from_the_tunnel() {
+    let compose =
+        std::fs::read_to_string(stacks_dir().join("gateway/traefik/docker-compose.yml")).unwrap();
+    assert!(
+        compose.contains("--entrypoints.web.forwardedHeaders.trustedIPs=172.16.0.0/12"),
+        "Traefik must trust X-Forwarded-For from the tunnel only"
+    );
+    assert!(compose.contains("plugin.bouncer.forwardedheaderstrustedips=172.16.0.0/12"));
+    assert!(compose.contains("plugin.bouncer.forwardedheaderscustomname=CF-Connecting-IP"));
+    assert!(
+        !compose.contains("forwardedHeaders.insecure"),
+        "trusting every sender would let anyone on the LAN pick their own address"
+    );
+}

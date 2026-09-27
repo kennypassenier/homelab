@@ -11,6 +11,12 @@ services:
       - "--api.dashboard=true"
       - "--api.insecure=false"
       - "--entrypoints.web.address=:80"
+      # The tunnel's requests reach :80 through docker's bridge, so every
+      # visitor arrived as 172.18.0.1 (measured 2026-09-27: 462 of 464
+      # kp-soft.dev requests) and CrowdSec, which whitelists 172.16.0.0/12,
+      # could ban nobody. X-Forwarded-For is trusted from docker's own range
+      # only: nothing outside CT 104 can send from it.
+      - "--entrypoints.web.forwardedHeaders.trustedIPs=172.16.0.0/12"
       # Docker provider, for the containers on this machine.
       - "--providers.docker=true"
       - "--providers.docker.network=gateway_net"
@@ -31,7 +37,7 @@ services:
       - "--log.level=INFO"
       # Traefik's OWN log goes to stdout, so it lands in docker's log like
       # every other container here: capped by the runaway guards, shipped to
-      # Loki by promtail, and readable with `docker logs`. It used to go to a
+      # Loki by Alloy, and readable with `docker logs`. It used to go to a
       # file, which meant nothing shipped it, nothing capped it, and the
       # reason for a fleet-wide 403 on 2026-09-01 could only be found by
       # knowing which file to open.
@@ -64,6 +70,11 @@ services:
       - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.enabled=true"
       - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.crowdseclapikey=${TRAEFIK_CROWDSEC_BOUNCER_API_KEY}"
       - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.crowdseclapihost=crowdsec:8080"
+      # The bouncer decides on the visitor's own address: the header
+      # Cloudflare sets, believed only from docker's range (see the
+      # entrypoint flag above).
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.forwardedheaderstrustedips=172.16.0.0/12"
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.bouncer.forwardedheaderscustomname=CF-Connecting-IP"
       - "com.homelab.backup.pause=true"
       # Y1/Z1: UPDATE_POLICY.md puts this in the MANUAL class - a silent
       # failure here is expensive, and the gateway is the one container

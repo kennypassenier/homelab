@@ -526,9 +526,10 @@ homelab release-update       # afterwards: roll the published release out to the
 ```
 
 `make release` refuses a dirty tree, an existing tag, and a HEAD whose CI
-failed. `DRY=1` stops after those three checks, before the gate runs. The tag starts `.github/workflows/release.yml`, which runs the gates
-again and publishes `homelab-host`, `homelab` and `SHA256SUMS` built in
-`rust:1-bookworm`. CI (`.github/workflows/ci.yml`) runs fmt, clippy and the
+failed. `DRY=1` stops after those three checks, before the gate runs. The tag starts `.github/workflows/release.yml`, which refuses a tag that is
+not the `Cargo.toml` version or not on `main`, runs the gates again with a
+read-only token, and then, from a separate job, publishes `homelab-host`,
+`homelab` and `SHA256SUMS` built in `rust:1-bookworm`. CI (`.github/workflows/ci.yml`) runs fmt, clippy and the
 tests with `--locked` on every push. The toolchain is pinned in
 `rust-toolchain.toml`.
 

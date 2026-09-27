@@ -1,37 +1,92 @@
 # Release engineering (AR10): a version tag builds Debian-12-compatible
 # binaries, attaches them (plus sha256 checksums) to a GitHub Release, and
 # H5 self-update consumes them from there. No binaries in git, ever.
+#
+# Two jobs since 2026-09-27 (expert panel, host-release-unsigned). The job
+# that compiles runs every dependency's build.rs and proc-macros; it used to
+# hold a `contents: write` token while doing so, with the token persisted in
+# .git/config, so one compromised crate could publish a release that
+# `homelab release-update` installs as root on the hypervisor. Now `build`
+# holds a read-only token and hands its output over as an artifact; only
+# `publish`, which compiles nothing and checks nothing out, can write.
+# Actions are pinned by commit SHA (tag in the comment): a moved tag cannot
+# swap the code that holds the write token. Dependabot's github-actions
+# ecosystem keeps the pins current.
 name: release
 
 on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+# Nothing by default: a job that does not ask gets no rights.
+permissions: {}
 
 jobs:
   build:
     runs-on: ubuntu-latest
     container: rust:1-bookworm
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The whole history, so the ancestry check below has main to
+          # compare against.
+          fetch-depth: 0
+      - name: Refuse a tag that is not this version or not on main
+        # Any `v*` tag on any commit used to publish a "latest" release; the
+        # Makefile's own history records fake tags reaching GitHub (F252).
+        # `make release` tags the commit it pushes to main, so both hold for
+        # every real release.
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $version in Cargo.toml"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main"
+            exit 1
+          fi
       - name: Test gate (AR9 — releases are never exempt)
+        # --locked everywhere: the release must be built from what Cargo.lock
+        # pins, which is what CI tested (F235).
         run: |
           rustup component add rustfmt clippy
           cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
       - name: Build release binaries
-        run: cargo build --release -p homelab-host -p homelab-client
+        run: cargo build --release --locked -p homelab-host -p homelab-client
       - name: Package
         run: |
           mkdir -p dist
           cp target/release/homelab-host dist/homelab-host
           cp target/release/homelab dist/homelab
           cd dist && sha256sum homelab-host homelab > SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-binaries
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-binaries
+          path: dist
+      - name: Checksums match the build's
+        run: cd dist && sha256sum -c SHA256SUMS
       - name: Publish release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             dist/homelab-host

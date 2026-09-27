@@ -720,8 +720,11 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
    `/usr/local/bin/homelab-host.prev`, the new one installed, a rollback
    marker armed and a restart scheduled 2 s later
    (`core/src/ops/selfupdate.rs:39-131`). The new daemon removes the marker
-   after 5 s of serving and logs `"self-update accepted"`
-   (`host/src/main.rs:1882-1891`).
+   once it has answered its first authenticated request and logs
+   `"self-update accepted"` (fix-121). `homelab release-update` waits up to
+   150 s for the shipped version to answer, pings it (that is the request
+   that accepts it) and exits non-zero when the old version came back (a
+   rollback) or nothing answered.
 5. **Verify.** `homelab ping` prints the host version and `"link up"`
    (`client/src/main.rs:1183-1194`).
 6. **New client** on every workstation, from the verified release asset:
@@ -763,7 +766,8 @@ sequenceDiagram
         H->>S: systemd-run, restart in 2 s
         H-->>W: report
         S->>H: restart homelab-host
-        alt serves for 5 s
+        W->>H: waits for the new version, then ping
+        alt answers the ping
             H->>H: remove the marker, log self-update accepted
         else dies with the marker in place
             S->>S: OnFailure unit restores .prev (core/assets/host-units)

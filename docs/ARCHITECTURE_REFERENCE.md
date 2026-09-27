@@ -410,7 +410,10 @@ latch call in the workspace is the client's `latch cat`
   `arm rollback marker` (`/var/lib/homelab/selfupdate.pending`),
   `schedule restart` via `systemd-run` two seconds later
   (`core/src/ops/selfupdate.rs:39-121`). The new daemon deletes the marker
-  after five seconds of running (`host/src/main.rs:1851-1859`).
+  once it has answered its first authenticated request, from a daemon that
+  started after the marker was armed (`accept_pending_update`, fix-121);
+  `homelab release-update` waits up to 150 s for that and exits non-zero on
+  a rollback or no answer.
 - **Rollback.** Putting `.prev` back while the marker exists is the job of a
   systemd `OnFailure=` unit (`selfupdate.rs:4-7`). That unit and
   `homelab-host.service` are in neither this repository nor the host-meta
@@ -430,7 +433,7 @@ stateDiagram-v2
     Installed --> Armed: write selfupdate.pending
     Armed --> RestartScheduled: systemd-run, restart in 2 s
     RestartScheduled --> NewServing: systemctl restart
-    NewServing --> Accepted: 5 s of serving, marker deleted
+    NewServing --> Accepted: first authenticated request answered, marker deleted
     NewServing --> RolledBack: unit fails while the marker exists
     Failed --> [*]
     Accepted --> [*]
@@ -444,7 +447,7 @@ stateDiagram-v2
         It ships inside the binary (core/assets/host-units).
     end note
 ```
-<sub>Source: `core/src/ops/selfupdate.rs`, `host/src/main.rs` (`Rpc::SelfUpdateHost`, marker cleared after 5 s).</sub>
+<sub>Source: `core/src/ops/selfupdate.rs`, `host/src/main.rs` (`Rpc::SelfUpdateHost`, marker cleared by the first answered request, fix-121).</sub>
 - **Watchdog (B7).** `READY=1`, then `WATCHDOG=1` every 10 seconds
   (`host/src/main.rs:1862-1868`); nothing is sent when `NOTIFY_SOCKET` is
   unset (`:1734-1747`). Whether systemd enforces it depends on the unit on

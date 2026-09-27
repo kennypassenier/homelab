@@ -1009,8 +1009,9 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          than 16 characters. A key it does not know is a `WARNING` line, not a refusal.\n\n\
          **A self-update that never came up.** A self-update copies the running program to \
          `{prev}`, installs the new one, and writes `{marker}`; the new program deletes the \
-         marker once it has served for a few seconds. A marker that is still there means the \
-         update was never accepted. Put the previous program back:\n\n```sh\n\
+         marker once it has answered its first authenticated request. A marker that is still \
+         there means no client has had an answer from the new program yet; when `homelab ping` \
+         cannot get one either, put the previous program back:\n\n```sh\n\
          ls -l {cur} {prev} {marker}\n\
          {prev} --selfcheck                 # prints its version when it can run\n\
          install -m 755 {prev} {cur}\n\

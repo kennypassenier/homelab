@@ -1492,7 +1492,15 @@ port = 5003
         // test gives: tests run in parallel and another one sets it.
         let path = format!("/tmp/homelab-loopback-test-{}.toml", std::process::id());
         std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
-        let state = test_state(load_config_from(path));
+        serve_state_on_loopback(test_state(load_config_from(path)), handler).await
+    }
+
+    /// [`serve_on_loopback`] around a state the test built itself.
+    async fn serve_state_on_loopback<H, Fut>(state: AppState, handler: H) -> SocketAddr
+    where
+        H: Fn(AppState, RpcRequest) -> Fut + Clone + Send + Sync + 'static,
+        Fut: std::future::Future<Output = RpcResponse> + Send + 'static,
+    {
         let app = Router::new()
             .route(
                 "/ws",
@@ -1584,6 +1592,106 @@ port = 5003
             "the operator allowed over the same connection, but the operation heard: {}",
             verdict
         );
+    }
+
+    /// A state whose `state_dir` is a fresh directory of its own, holding a
+    /// self-update marker armed at `armed_at`.
+    fn state_with_marker(tag: &str, armed_at: u64) -> (AppState, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("homelab-{}-{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml = dir.join("host.toml");
+        std::fs::write(
+            &toml,
+            format!(
+                "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        let marker = dir.join("selfupdate.pending");
+        std::fs::write(
+            &marker,
+            format!("{{\"to_version\":\"9.9.9\",\"armed_at\":{}}}\n", armed_at),
+        )
+        .unwrap();
+        (
+            test_state(load_config_from(toml.to_string_lossy().into_owned())),
+            marker,
+        )
+    }
+
+    /// One Ping over a real session, answered.
+    async fn ping_over(addr: SocketAddr) {
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+            .await
+            .expect("connect to the loopback session");
+        let (mut tx, mut rx) = ws.split();
+        let req = RpcRequest {
+            id: 1,
+            command: Rpc::Ping,
+        };
+        tx.send(WsMsg::Text(serde_json::to_string(&req).unwrap().into()))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(Ok(WsMsg::Text(t))) = rx.next().await {
+                if let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t) {
+                    assert!(r.ok);
+                    return;
+                }
+            }
+            panic!("the connection closed before the ping was answered");
+        })
+        .await
+        .expect("the ping was answered");
+        // The acceptance runs after the answer is queued; give it its turn.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    /// fix-121 (expert panel, self-update-acceptance-weak, 2026-09-27): a new
+    /// daemon was accepted after five seconds alive, before anything had
+    /// talked to it, so a binary that ran but could not serve a client was
+    /// kept. It is accepted now by the first authenticated request it
+    /// answers.
+    #[tokio::test]
+    async fn fix_121_a_self_update_is_accepted_by_an_answered_request() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let (state, marker) = state_with_marker("fix121-new", now - 100);
+        let addr =
+            serve_state_on_loopback(state, |st, req| async move { handle_rpc(&st, req).await })
+                .await;
+        assert!(marker.exists(), "precondition: the update is pending");
+        ping_over(addr).await;
+        let accepted = !marker.exists();
+        let _ = std::fs::remove_dir_all(marker.parent().unwrap());
+        assert!(
+            accepted,
+            "an answered request from the new daemon accepts the update"
+        );
+    }
+
+    /// fix-121: the daemon that ARMED the marker answers the self-update
+    /// request itself; that answer must not accept the binary that replaces
+    /// it.
+    #[tokio::test]
+    async fn fix_121_the_old_daemon_never_accepts_its_successor() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let (state, marker) = state_with_marker("fix121-old", now + 100);
+        let addr =
+            serve_state_on_loopback(state, |st, req| async move { handle_rpc(&st, req).await })
+                .await;
+        ping_over(addr).await;
+        let kept = marker.exists();
+        let _ = std::fs::remove_dir_all(marker.parent().unwrap());
+        assert!(kept, "armed after this daemon started: not its own");
     }
 
     #[test]
@@ -2208,11 +2316,19 @@ struct AppState {
     /// fix-120: connections refused for their token since this daemon
     /// started, for `homelab doctor`.
     auth_failures: Arc<AuthFailures>,
+    /// fix-121: when this daemon started. A self-update marker armed before
+    /// this moment names this binary as the new one; one armed later was
+    /// armed by this daemon for its successor.
+    started_at: u64,
 }
 
 impl AppState {
     fn new(config: Config, log_tx: broadcast::Sender<ServerMsg>) -> Self {
         AppState {
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
             settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
             config,
             log_tx,
@@ -2258,6 +2374,38 @@ impl AuthFailures {
             last_peer: last.as_ref().map(|(p, _)| p.clone()),
             last_at: last.map(|(_, t)| t).unwrap_or(0),
         }
+    }
+}
+
+/// fix-121 (expert panel, self-update-acceptance-weak, 2026-09-27): accept a
+/// pending self-update once this daemon has answered an authenticated
+/// request. It used to be accepted after five seconds alive, before the TLS
+/// line had carried anything, so a binary that ran but could not serve a
+/// client was kept and the client could not ship the next fix.
+///
+/// Until a request is answered the marker stays armed, so a daemon that dies
+/// or crash-loops meanwhile is rolled back by the OnFailure unit as before.
+/// Only a marker armed before this daemon started is its own: the daemon that
+/// armed it answers the self-update request itself, and that answer must not
+/// accept its successor.
+fn accept_pending_update(state_dir: &str, started_at: u64) {
+    let marker = format!("{}/selfupdate.pending", state_dir);
+    let Ok(raw) = std::fs::read_to_string(&marker) else {
+        return;
+    };
+    let armed_at = serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|v| v.get("armed_at").and_then(|a| a.as_u64()))
+        .unwrap_or(0);
+    if armed_at >= started_at {
+        return;
+    }
+    match std::fs::remove_file(&marker) {
+        Ok(()) => info!(
+            "self-update accepted — v{} answered an authenticated request",
+            VERSION
+        ),
+        Err(e) => tracing::warn!("self-update: could not clear {} :: {}", marker, e),
     }
 }
 
@@ -2521,16 +2669,17 @@ async fn main() {
             .await
             .expect("load tls");
 
-    // H5: accept the self-update only after surviving 5s of real serving —
-    // a binary that binds and then dies must leave the marker for OnFailure.
-    let marker = format!("{}/selfupdate.pending", config.state_dir);
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        if std::path::Path::new(&marker).exists() {
-            let _ = std::fs::remove_file(&marker);
-            info!("self-update accepted — now running v{}", VERSION);
-        }
-    });
+    // H5 / fix-121: a pending self-update is accepted by the first
+    // authenticated request this daemon answers (`accept_pending_update`),
+    // no longer by five seconds alive. Until then the marker stays armed, so
+    // a binary that binds and then dies is still rolled back by OnFailure.
+    if std::path::Path::new(&format!("{}/selfupdate.pending", config.state_dir)).exists() {
+        info!(
+            "self-update pending — v{} is accepted by the first authenticated request it \
+             answers; until then a crash-loop rolls it back",
+            VERSION
+        );
+    }
 
     // fix-52: bind first, so READY=1 means the port is open. It was sent
     // before the socket existed, and a bind failure then looked like a
@@ -3545,6 +3694,8 @@ where
             while let Some(req) = work_rx.recv().await {
                 let resp = handler(state.clone(), req).await;
                 let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+                // fix-121: an answered request is what accepts an update.
+                accept_pending_update(&state.config.state_dir, state.started_at);
             }
         })
     };
@@ -3564,8 +3715,9 @@ where
         if runs_beside_the_queue(&req.command) {
             let (out_tx, state, handler) = (out_tx.clone(), state.clone(), handler.clone());
             tokio::spawn(async move {
-                let resp = handler(state, req).await;
+                let resp = handler(state.clone(), req).await;
                 let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+                accept_pending_update(&state.config.state_dir, state.started_at);
             });
         } else if work_tx.send(req).is_err() {
             break;

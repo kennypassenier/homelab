@@ -187,6 +187,47 @@ pub fn latest_tag_of(repo: &str) -> Option<String> {
     (!tag.is_empty()).then_some(tag)
 }
 
+/// fix-121: what one look at the host after a self-update means.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AfterUpdate {
+    /// Not decided yet: unreachable while it restarts, or the old daemon
+    /// still finishing its operation before it goes.
+    Wait,
+    /// The shipped version (or, when that is unknown, a restarted daemon)
+    /// answered; a round trip with it accepts the update on the host.
+    Answered,
+    /// The daemon came back as this other version: the rollback ran.
+    RolledBack(String),
+}
+
+/// fix-121: `expected` is the version shipped (None when unknown),
+/// `seen_down` whether the host has been unreachable since the update was
+/// sent, `answered` the version that answered this look (None: unreachable).
+pub fn after_update(
+    expected: Option<&str>,
+    seen_down: bool,
+    answered: Option<&str>,
+) -> AfterUpdate {
+    let Some(version) = answered else {
+        return AfterUpdate::Wait;
+    };
+    match expected {
+        Some(want) if version == want => AfterUpdate::Answered,
+        // The old daemon drains its running operation (up to a minute,
+        // fix-52) before it goes; only after the gap is it the rollback.
+        Some(_) if seen_down => AfterUpdate::RolledBack(version.to_string()),
+        Some(_) => AfterUpdate::Wait,
+        None if seen_down => AfterUpdate::Answered,
+        None => AfterUpdate::Wait,
+    }
+}
+
+/// fix-121: the version a release tag installs, as the host reports it.
+pub fn expected_host_version(tag: &str) -> Option<String> {
+    let v = tag.trim().trim_start_matches('v');
+    (!v.is_empty()).then(|| v.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,6 +267,47 @@ mod tests {
         );
         assert!(install_source(&a(&["--file"])).is_err());
         assert!(install_source(&a(&["--bogus"])).is_err());
+    }
+
+    /// fix-121 (expert panel, self-update-acceptance-weak, 2026-09-27):
+    /// `release-update` returned as soon as the restart was scheduled, and a
+    /// rollback was only visible in a notification. It now watches the host
+    /// come back and exits non-zero unless the version it shipped answers.
+    #[test]
+    fn fix_121_the_wait_after_an_update_tells_accepted_from_rolled_back() {
+        use super::{after_update, AfterUpdate};
+        // Unreachable: restarting, keep waiting.
+        assert_eq!(after_update(Some("3.60.0"), false, None), AfterUpdate::Wait);
+        // The new version answers: accepted, whether or not the gap was seen.
+        assert_eq!(
+            after_update(Some("3.60.0"), false, Some("3.60.0")),
+            AfterUpdate::Answered
+        );
+        assert_eq!(
+            after_update(Some("3.60.0"), true, Some("3.60.0")),
+            AfterUpdate::Answered
+        );
+        // The old version before the gap: still draining its operation.
+        assert_eq!(
+            after_update(Some("3.60.0"), false, Some("3.59.6")),
+            AfterUpdate::Wait
+        );
+        // The old version after the gap: the rollback put it back.
+        assert_eq!(
+            after_update(Some("3.60.0"), true, Some("3.59.6")),
+            AfterUpdate::RolledBack("3.59.6".into())
+        );
+        // A binary of unknown version: whatever answers after the gap.
+        assert_eq!(after_update(None, false, Some("3.59.6")), AfterUpdate::Wait);
+        assert_eq!(
+            after_update(None, true, Some("3.60.0")),
+            AfterUpdate::Answered
+        );
+        // The tag's leading v is not part of the version the host reports.
+        assert_eq!(
+            super::expected_host_version("v3.60.0"),
+            Some("3.60.0".to_string())
+        );
     }
 
     #[test]

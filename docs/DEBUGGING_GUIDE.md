@@ -431,7 +431,7 @@ reaches curl through a mode-600 header file,
 | `interrupted operation '<op>' at step '<step>'` | warn | see section 4 | `host/src/main.rs:1805-1809` |
 | `scheduler armed: daily backup + auto-updates at <hh>:00` | info | nightly round configured | `host/src/main.rs:1844-1847` |
 | `scheduler idle (backup_hour not set)` | info | no nightly round at all | `host/src/main.rs:1848` |
-| `self-update accepted` | info | a new binary survived 5 s of serving and cleared the rollback marker | `host/src/main.rs:1871-1880` |
+| `self-update accepted` | info | a new binary answered its first authenticated request and cleared the rollback marker (fix-121) | `host/src/main.rs:1871-1880` |
 | `<label> failed: <what>` | error | a mutating operation failed; a bundle was written | `host/src/main.rs:3064` |
 | `<label> stood aside: <why>` | info | deferred, no bundle | `host/src/main.rs:3048` |
 | `unparseable request dropped :: <e> :: <text>` | error | the host could not parse a client frame; the client waits forever for a reply | `host/src/main.rs:2755-2765` |
@@ -707,8 +707,10 @@ round, the answer is immediately unattended
 The last one is a warning, not a fatal error: the daemon starts, without the
 setting.
 
-After a self-update, the new binary must serve for 5 s before it deletes the
-rollback marker (`host/src/main.rs:1871-1880`). If it does not, the marker
+After a self-update, the new binary deletes the rollback marker when it has
+answered its first authenticated request (fix-121; `homelab release-update`
+sends that request, and so does any client that connects). Until then the
+marker
 stays for the unit's `OnFailure=` handler, which lives outside this
 repository (section 0).
 

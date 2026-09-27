@@ -381,6 +381,20 @@ def seed_once(api, host_monitors, have_generated_list):
         print(f"[seed] WARN: could not write the status file: {exc}", flush=True)
 
 
+def next_sleep(consecutive_errors, interval):
+    """Seconds until the next round.
+
+    A round that failed is retried after 30 seconds, up to ten times in a
+    row, before the normal interval applies again. On 2026-09-27 a deploy
+    recreated Kuma and this seeder together; the first round found Kuma not
+    listening yet and then slept a whole hour, so nothing was seeded and the
+    deploy's service check failed.
+    """
+    if 1 <= consecutive_errors <= 10:
+        return 30
+    return interval
+
+
 def main():
     url = env("KUMA_URL")
     user = env("KUMA_USER")
@@ -388,6 +402,7 @@ def main():
     monitors_file = env("HOST_MONITORS_FILE", "/config/host-monitors.json")
     interval = int(env("SEED_INTERVAL_SECONDS", "3600"))
 
+    errors = 0
     while True:
         try:
             api = UptimeKumaApi(url)
@@ -395,6 +410,7 @@ def main():
                 api.login(user, password)
                 monitors, had_list = load_host_monitors(monitors_file)
                 seed_once(api, monitors, had_list)
+                errors = 0
             finally:
                 api.disconnect()
         except Exception as e:  # noqa: BLE001 — a loop that dies stops watching
@@ -403,7 +419,8 @@ def main():
             # would leave every future stack unwatched, and the container
             # would be counted as "not running" by the deploy verification.
             print(f"[seed] ERROR: {type(e).__name__}: {e}", flush=True)
-        time.sleep(interval)
+            errors += 1
+        time.sleep(next_sleep(errors, interval))
 
 
 if __name__ == "__main__":

@@ -1003,3 +1003,29 @@ fn every_declared_upstream_is_one_the_nightly_round_can_ask() {
         );
     }
 }
+
+/// The deploy of 2026-09-27 19:42 recreated Uptime Kuma and its seeder
+/// together; the seeder's first round found Kuma not yet listening
+/// (`UptimeKumaException: unable to connect`) and then slept its full hour,
+/// so the deploy's service check failed and nothing was seeded. A failed
+/// round is retried after 30 seconds, ten times, before the hour applies.
+#[test]
+fn the_seeder_retries_soon_after_a_failed_round() {
+    let dir = stacks_dir().join("uptime").join("kuma-seeder");
+    let out = std::process::Command::new("python3")
+        .arg("-c")
+        .arg("import seed; print([seed.next_sleep(n, 3600) for n in (0, 1, 5, 10, 11)])")
+        .env("PYTHONPATH", &dir)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .output()
+        .expect("python3");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "[3600, 30, 30, 30, 3600]"
+    );
+}

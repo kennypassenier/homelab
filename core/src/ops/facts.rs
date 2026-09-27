@@ -232,7 +232,23 @@ pub async fn gather_live_facts(
     inp: &FactsInputs,
     stack_files: &[(String, u16)],
 ) -> (LiveFacts, Notes) {
+    gather_live_facts_with(exec, inp, stack_files, &|_| {}).await
+}
+
+/// [`gather_live_facts`], saying what it is doing as it goes.
+///
+/// fix-104 (long-silences, 2026-09-27): `homelab check` took 41 s with
+/// nothing on the screen after "link up". `progress` is handed one line per
+/// phase and one per container probed; the host sends them to whoever is
+/// watching.
+pub async fn gather_live_facts_with(
+    exec: &dyn Executor,
+    inp: &FactsInputs,
+    stack_files: &[(String, u16)],
+    progress: &(dyn Fn(&str) + Send + Sync),
+) -> (LiveFacts, Notes) {
     let mut notes: Notes = Vec::new();
+    progress("reading backups, the monitor seeder and the recorded stacks…");
 
     // O1: what the router (and anything else outside this suite) uploaded
     // last night. Read through the rclone remote that already exists for the
@@ -458,6 +474,7 @@ pub async fn gather_live_facts(
     if let Ok(out) = exec.run(&Cmd::new("pct", &["list"], 30)).await {
         facts.containers = parse_pct_list(&out.stdout);
     }
+    progress("probing every gateway route…");
 
     // fix-92: every name in the routes directory, whatever its extension, so
     // the check can name a file no stack declares. `*.yml` below would miss
@@ -554,7 +571,12 @@ pub async fn gather_live_facts(
         .filter(|(v, _)| !inp.no_touch.contains(v))
         .map(|(v, h)| (*v, h.clone()))
         .collect();
-    for (vmid, hostname) in &managed {
+    progress(&format!(
+        "probing {} container(s): disk, memory, logs, guards…",
+        managed.len()
+    ));
+    for (i, (vmid, hostname)) in managed.iter().enumerate() {
+        progress(&format!("  {}/{} {}", i + 1, managed.len(), hostname));
         let vs = vmid.to_string();
         let Ok(out) = exec
             .run(&Cmd::new(
@@ -571,6 +593,7 @@ pub async fn gather_live_facts(
         }
     }
 
+    progress("reading each container's configuration…");
     // W3: the configured shape of every managed container, from `pct config`
     // rather than from inside it — `pct exec` cannot ask a stopped guest
     // anything, and the stopped guest is exactly the one to find.
@@ -592,6 +615,7 @@ pub async fn gather_live_facts(
     // Is each stack's safety net actually attached? Both questions are
     // skipped when their address is not configured: an unasked question must
     // never become a finding.
+    progress("asking Prometheus, Loki and Grafana about each stack…");
     let prom = inp.prometheus_url.clone();
     let loki = inp.loki_url.clone();
     let window = &inp.logs_window;

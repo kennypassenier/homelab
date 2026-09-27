@@ -6,7 +6,7 @@ use ratatui::widgets::{Block, BorderType, Cell, List, ListItem, Paragraph, Row, 
 
 use super::panel_title;
 use crate::tui::fx;
-use crate::tui::model::Model;
+use crate::tui::model::{DriftState, Model};
 use crate::tui::theme::THEME;
 
 pub fn draw(f: &mut Frame, model: &Model, area: Rect) {
@@ -57,7 +57,7 @@ fn draw_list(f: &mut Frame, model: &Model, area: Rect) {
                 Span::styled(name, Style::new().fg(color).add_modifier(Modifier::BOLD)),
             ];
             if s.drift {
-                spans.push(Span::styled(" [UPD]", THEME.warn()));
+                spans.push(Span::styled(" [CHANGED]", THEME.warn()));
             }
             if !s.enabled {
                 spans.push(Span::styled(" [OFF]", THEME.muted_style()));
@@ -108,10 +108,23 @@ fn draw_detail(f: &mut Frame, model: &Model, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("drift ", THEME.muted_style()),
-            if s.drift {
-                Span::styled("[UPD] intent differs from applied", THEME.warn())
-            } else {
-                Span::styled("none — intent == runtime", THEME.ok())
+            // fix-107 (tui-indicators-claim-too-much, 2026-09-27): only what
+            // was compared is green.
+            match model.drift_state(s) {
+                DriftState::Changed => Span::styled(
+                    "[CHANGED] the files differ from what the host applied",
+                    THEME.warn(),
+                ),
+                DriftState::Same => {
+                    Span::styled("none — the files match what the host applied", THEME.ok())
+                }
+                DriftState::NoLocalFiles => {
+                    Span::styled("unknown (no local files)", THEME.muted_style())
+                }
+                DriftState::NeverApplied => {
+                    Span::styled("unknown (nothing applied recorded)", THEME.muted_style())
+                }
+                DriftState::NotCompared => Span::styled("not compared yet", THEME.muted_style()),
             },
             Span::styled("   nightly ", THEME.muted_style()),
             if s.enabled {
@@ -120,10 +133,8 @@ fn draw_detail(f: &mut Frame, model: &Model, area: Rect) {
                 Span::styled("○ parked [e] to re-enable", THEME.warn())
             },
         ]),
-        Line::from(vec![
-            Span::styled("safety ", THEME.muted_style()),
-            Span::styled("whitelist ✓  hostname-guard ✓  fail-closed ✓", THEME.ok()),
-        ]),
+        // fix-107: the `safety whitelist ✓ hostname-guard ✓ fail-closed ✓`
+        // line was a constant that measured nothing; it is gone.
     ];
     f.render_widget(Paragraph::new(lines), inner);
 

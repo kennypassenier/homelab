@@ -127,6 +127,9 @@ fn start_with_repo_pin(addr: &str, repo_pin: Option<&str>) -> Channels {
         host: addr.to_string(),
         token: "0123456789abcdef0123".into(),
         repo_pin: repo_pin.map(str::to_string),
+        // The loopback host presents a certificate made for the test; the
+        // fleet's built-in pin is not this one (fix-149 tests it on its own).
+        built_in_pin: None,
     })
     .start()
 }
@@ -245,8 +248,8 @@ async fn fix_67_the_tui_holds_the_host_to_the_repository_pin() {
         mut evt_rx,
     } = start_with_repo_pin(&host.addr, Some(other));
     let events = drain(&mut evt_rx, Duration::from_millis(1500)).await;
-    // The machine adopted the foreign pin, as it should; the next test must
-    // not inherit it.
+    // Since fix-149 a refused host leaves no pin behind; removed anyway so the
+    // next test can never inherit one.
     let _ = std::fs::remove_file(pin_file());
     assert!(
         !events
@@ -304,4 +307,92 @@ async fn fix_67_the_tui_reads_a_message_larger_than_sixteen_mib() {
         "a 20 MiB message from the host did not arrive: {:?}",
         seen
     );
+}
+
+/// covers: fix-105
+///
+/// older-client-no-warning (expert panel, 2026-09-27): the version gate
+/// refused only a client NEWER than the host. A stale client may drop a
+/// field the host now reads as "no longer declared, remove" (ask-8), the
+/// mirror image of the 2026-08-31 data_mounts incident. The TUI refuses a
+/// mutating command to a newer host and names `homelab self-install`.
+#[tokio::test]
+async fn fix_105_the_tui_refuses_a_mutating_command_to_a_newer_host() {
+    let mut host = fake_host("999.0.0").await;
+    let Channels { cmd_tx, mut evt_rx } = start(&host.addr);
+    let _ = drain(&mut evt_rx, Duration::from_millis(500)).await;
+
+    cmd_tx.send(Command::PatchFleet).await.unwrap();
+    let reached = tokio::time::timeout(Duration::from_millis(1000), host.received.recv()).await;
+    assert!(
+        reached.is_err(),
+        "a mutating command from an older client reached the host: {:?}",
+        reached
+    );
+    let events = drain(&mut evt_rx, Duration::from_millis(500)).await;
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            BackendEvent::Server(ServerMsg::RpcDone(r)) if !r.ok && r.message.contains("self-install")
+        )),
+        "the refusal must reach the screen and name the remedy: {:?}",
+        events
+    );
+}
+
+/// covers: fix-149
+///
+/// first-connect-pin (Kenny, 2026-09-27: "Pin in de client"): a machine
+/// with no pin trusted the first certificate it saw and sent the bearer
+/// token to it. With a pin built into the client, a certificate that is not
+/// that one is refused on the very first connection, and nothing is saved.
+#[tokio::test]
+async fn fix_149_a_first_connection_refuses_any_certificate_but_the_built_in_one() {
+    let mut host = fake_host(env!("CARGO_PKG_VERSION")).await;
+    let _ = std::fs::remove_file(pin_file());
+    let other = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99";
+    let Channels {
+        cmd_tx: _cmd,
+        mut evt_rx,
+    } = Box::new(RemoteBackend {
+        host: host.addr.clone(),
+        token: "0123456789abcdef0123".into(),
+        repo_pin: None,
+        built_in_pin: Some(other.into()),
+    })
+    .start();
+    let events = drain(&mut evt_rx, Duration::from_millis(1500)).await;
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, BackendEvent::Connected { .. })),
+        "a first connection trusted a certificate the client was not built for: {:?}",
+        events
+    );
+    let got = tokio::time::timeout(Duration::from_millis(300), host.received.recv()).await;
+    assert!(
+        !matches!(got, Ok(Some(_))),
+        "a frame reached a host whose certificate was refused: {:?}",
+        got
+    );
+    assert!(
+        !pin_file().exists(),
+        "the refused certificate must not be pinned"
+    );
+}
+
+/// covers: fix-105
+///
+/// The command line holds the same rule; a read-only command still goes
+/// through, so the mismatch can be looked at, with a warning.
+#[test]
+fn fix_105_an_older_client_may_read_but_not_change() {
+    use homelab_client::link::{older_client_warning, refuse_older_client};
+    let why = refuse_older_client(&Command::PatchFleet, "999.0.0").expect("refused");
+    assert!(why.contains("self-install"), "{}", why);
+    assert!(refuse_older_client(&Command::Status, "999.0.0").is_none());
+    assert!(refuse_older_client(&Command::PatchFleet, env!("CARGO_PKG_VERSION")).is_none());
+    assert!(refuse_older_client(&Command::PatchFleet, "0.1.0").is_none());
+    assert!(older_client_warning("999.0.0").is_some());
+    assert!(older_client_warning(env!("CARGO_PKG_VERSION")).is_none());
 }

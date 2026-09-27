@@ -38,6 +38,12 @@ struct StackFile {
     /// env content either way.
     #[serde(default)]
     latch_secrets: Vec<String>,
+    /// fix-100 (apply-no-confirm-creates-drill, 2026-09-27): a stack that
+    /// exists to be created and destroyed in one sitting, like the rollback
+    /// drill. `homelab apply` and the DR runbook leave it out; it is deployed
+    /// only by name. Client-side only, so it never reaches the intent hash.
+    #[serde(default)]
+    ephemeral: bool,
 }
 
 /// `deny_unknown_fields` for the same reason as on `StackFile`: a misspelt
@@ -594,6 +600,29 @@ pub fn scan_local_stacks(base: &Path) -> Vec<(String, PathBuf)> {
     out.sort();
     out
 }
+
+/// fix-100: does this stack directory say `ephemeral: true`? A file that
+/// does not parse is not ephemeral: the verbs that read it report the parse
+/// error themselves.
+pub fn is_ephemeral(dir: &Path) -> bool {
+    let path = dir.join("lxc-compose.yml");
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| parse_stack_file(&raw, &path).ok())
+        .is_some_and(|f| f.ephemeral)
+}
+
+/// fix-100 (apply-no-confirm-creates-drill, 2026-09-27): the stacks the
+/// repository declares as part of the fleet, which `apply` holds the host to
+/// and the DR runbook rebuilds. Every directory with an `lxc-compose.yml`
+/// used to count, so the throwaway drill stack (vmid 119) would have been
+/// created by the next `homelab apply` and rebuilt after a disaster.
+pub fn declared_stacks(base: &Path) -> Vec<(String, PathBuf)> {
+    scan_local_stacks(base)
+        .into_iter()
+        .filter(|(_, dir)| !is_ephemeral(dir))
+        .collect()
+}
 // ── E7: the disaster-recovery runbook ───────────────────────────────────────
 //
 // Rewritten at the Phase 8 gate (Kenny, "Herschrijven", 2026-09-27): every
@@ -935,7 +964,9 @@ fn runbook_stack_section(
 /// Returns the number of stacks included.
 pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, String> {
     use homelab_core::ops::backup::{BackupCfg, RESTIC_CACHE_DIR};
-    let stacks = scan_local_stacks(stacks_dir);
+    // fix-100: a stack made to be destroyed in the same sitting is not
+    // something a rebuild should bring back.
+    let stacks = declared_stacks(stacks_dir);
     let bcfg = BackupCfg::default();
     let su = homelab_core::ops::selfupdate::SelfUpdateCfg::default();
     let state = runbook_state_dir(&bcfg);
@@ -1170,17 +1201,22 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          {units}\
          **The certificate pin.** The daemon's certificate is `{state}/tls-cert.pem` with \
          `{state}/tls-key.pem`; when either is missing at start it makes a new pair \
-         (host/src/tls.rs). Clients refuse a certificate whose SHA-256 fingerprint differs \
-         from the `pin` in `config/client.toml`, and from the copy each machine keeps in \
-         `~/.config/homelab/pin`. Compare:\n\n```sh\n\
+         (host/src/tls.rs). The client trusts one certificate: the fingerprint built into \
+         the client, taken from `pin` in `config/client.toml` when it was compiled. It refuses \
+         any other, on a first connection too, and it also refuses when that `pin` or the \
+         copy a machine keeps in `~/.config/homelab/pin` disagrees with it. Compare:\n\n```sh\n\
          journalctl -u {svc} | grep 'TLS fingerprint' | tail -1\n\
          openssl x509 -in {state}/tls-cert.pem -noout -fingerprint -sha256\n\
          ```\n\n\
          with `pin` in `config/client.toml` on a workstation. If they differ because the pair \
-         was regenerated, either restore both files from `host-meta-config` (Layer 3) and \
-         restart, or accept the new certificate: write the new fingerprint into `pin` in \
-         `config/client.toml`, and delete `~/.config/homelab/pin` on every client machine \
-         (a machine pin that disagrees with the repository pin is refused, not replaced).\n\n\
+         was regenerated, every installed client refuses the daemon until one of two things \
+         happens. Either restore both files from `host-meta-config` (Layer 3) and restart: \
+         the clients work again unchanged. Or accept the new certificate: write the new \
+         fingerprint into `pin` in `config/client.toml`, commit it, and put a client built \
+         from that tree on every machine (`make install`, or cut a release and run \
+         `homelab self-install` on each, which needs `gh` and not the daemon), then delete \
+         `~/.config/homelab/pin` on each. A client never falls back to trusting the \
+         certificate it sees.\n\n\
          **The token** is `token` in `{toml}` (or `HOMELAB_TOKEN` in the daemon's \
          environment). A new token means updating `HOMELAB_TOKEN` in \
          `~/.config/homelab/env` on every client machine.\n\n",

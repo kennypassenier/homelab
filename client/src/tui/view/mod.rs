@@ -15,7 +15,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph, Tabs};
 
 use crate::tui::fx::{self, FlickerPhase, FxLevel};
-use crate::tui::model::{palette_matches, Conn, Model, Screen, Tab, PALETTE};
+use crate::tui::model::{palette_matches, Conn, Model, Screen, Tab};
 use crate::tui::theme::THEME;
 
 pub fn draw(f: &mut Frame, model: &Model) {
@@ -82,7 +82,7 @@ pub fn draw(f: &mut Frame, model: &Model) {
         focus::draw(f, model, fc);
     }
     if let Some(plan) = &model.plan {
-        draw_plan(f, model, plan);
+        draw_plan(f, plan);
     }
     if let Some(wiz) = &model.wizard {
         draw_wizard(f, model, wiz);
@@ -90,8 +90,11 @@ pub fn draw(f: &mut Frame, model: &Model) {
     if let Some(c) = &model.confirm {
         draw_confirm(f, c);
     }
+    if let Some(q) = &model.yes_no {
+        draw_yes_no(f, q);
+    }
     if model.help_open {
-        draw_help(f);
+        draw_help(f, model.tab);
     }
     if model.palette_open {
         draw_palette(f, model);
@@ -144,7 +147,44 @@ fn draw_confirm(f: &mut Frame, c: &crate::tui::model::Confirm) {
     );
 }
 
-fn draw_plan(f: &mut Frame, model: &Model, plan: &crate::tui::model::Plan) {
+/// fix-102: a one-key question. It states what `y` sets in motion; every
+/// other key cancels, so a stray keystroke does nothing.
+fn draw_yes_no(f: &mut Frame, q: &crate::tui::model::YesNo) {
+    let area = f.area();
+    let w = 76u16.min(area.width.saturating_sub(4));
+    let h = 8u16.min(area.height.saturating_sub(2));
+    let rect = Rect {
+        x: (area.width.saturating_sub(w)) / 2,
+        y: area.height / 3,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .border_type(BorderType::Double)
+        .border_style(Style::new().fg(THEME.yellow))
+        .title(Line::from(Span::styled(
+            format!(" >> {} << ", q.title),
+            Style::new().fg(THEME.yellow).add_modifier(Modifier::BOLD),
+        )))
+        .style(Style::new().bg(THEME.elevated).fg(THEME.text));
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let lines = vec![
+        Line::from(Span::styled(q.prompt.clone(), Style::new().fg(THEME.text))),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  y yes · any other key: no, nothing is done",
+            THEME.muted_style(),
+        )),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }),
+        inner,
+    );
+}
+
+fn draw_plan(f: &mut Frame, plan: &crate::tui::model::Plan) {
     let area = f.area();
     let w = 72u16.min(area.width - 4);
     let h = (plan.lines.len() as u16 + 5).min(area.height - 4);
@@ -155,13 +195,8 @@ fn draw_plan(f: &mut Frame, model: &Model, plan: &crate::tui::model::Plan) {
         height: h,
     };
     f.render_widget(Clear, rect);
-    let title = fx::glitch(
-        &format!("CHANGE_PLAN :: {}", plan.stack),
-        0xB1A5,
-        model.tick,
-        model.fx,
-    )
-    .unwrap_or_else(|| format!("CHANGE_PLAN :: {}", plan.stack));
+    // fix-106: titles are read, so they never scramble.
+    let title = format!("CHANGE_PLAN :: {}", plan.stack);
     let block = Block::bordered()
         .border_type(BorderType::Double)
         .border_style(THEME.border_modal())
@@ -542,17 +577,16 @@ fn draw_tab_bar(f: &mut Frame, model: &Model, area: Rect) {
         .map(|t| {
             let label = t.title();
             if *t == model.tab {
-                let text = fx::glitch(label, 0xAB ^ t.index() as u64, model.tick, model.fx)
-                    .unwrap_or_else(|| label.to_string());
-                Line::from(Span::styled(format!(" {} ", text), THEME.title_active()))
+                Line::from(Span::styled(format!(" {} ", label), THEME.title_active()))
             } else {
                 Line::from(Span::styled(format!(" {} ", label), THEME.title_inactive()))
             }
         })
         .collect();
 
-    let title = fx::glitch("HOMELAB :: CONTROL_DECK", 0xC0DE, model.tick, model.fx)
-        .unwrap_or_else(|| "HOMELAB :: CONTROL_DECK".into());
+    // fix-106 (tui-not-calm, 2026-09-27): tab labels and titles used to
+    // scramble into glyphs at random; text that carries meaning stands still.
+    let title = "HOMELAB :: CONTROL_DECK".to_string();
 
     let (dot, conn_txt, conn_style) = match model.conn {
         Conn::Up => ("● ", "HOST_LINK", THEME.ok()),
@@ -560,6 +594,20 @@ fn draw_tab_bar(f: &mut Frame, model: &Model, area: Rect) {
         Conn::Down => ("○ ", "LINK_DOWN", THEME.err()),
     };
 
+    // fix-105 (older-client-no-warning, 2026-09-27): which client talks to
+    // which host, in yellow when this client is the older one (it may then
+    // read, not change).
+    let client = env!("CARGO_PKG_VERSION");
+    let host = if model.host_version.is_empty() {
+        "?".to_string()
+    } else {
+        model.host_version.clone()
+    };
+    let versions_style = if crate::version::older(client, &model.host_version) {
+        Style::new().fg(THEME.yellow)
+    } else {
+        THEME.muted_style()
+    };
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(THEME.border_active())
@@ -570,6 +618,10 @@ fn draw_tab_bar(f: &mut Frame, model: &Model, area: Rect) {
         ]))
         .title(
             Line::from(vec![
+                Span::styled(
+                    format!("client v{} · host v{} ", client, host),
+                    versions_style,
+                ),
                 Span::styled(dot, conn_style),
                 Span::styled(conn_txt, conn_style),
                 Span::styled(
@@ -612,7 +664,9 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
             .map(|s| s.name.as_str())
             .collect();
         if !drifted.is_empty() {
-            attn.push(format!("⚠ UPD pending: {}", drifted.join(",")));
+            // fix-107: CHANGED, not UPD, which read as SHIFT+U (update
+            // the images) — this is files that differ from what was applied.
+            attn.push(format!("⚠ CHANGED, not deployed: {}", drifted.join(",")));
         }
         for s in fleet.stacks.iter().filter(|s| !s.env_sealed) {
             attn.push(format!("⚠ NOENV {} (deploy fails closed)", s.name));
@@ -678,7 +732,10 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
         c.extend(calm);
         (c, THEME.faint)
     };
-    let text = fx::ticker_text(&segs, area.width, model.tick);
+    // fix-106 (tui-not-calm, 2026-09-27): the alerts used to scroll past as
+    // a marquee, so reading one meant waiting for it. They stand still; what
+    // does not fit is counted, and the TODAY panel lists everything.
+    let text = static_line(&segs, area.width as usize);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             text,
@@ -688,55 +745,36 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
     );
 }
 
+/// fix-106: as many whole segments as fit in `width`, then how many more.
+fn static_line(segs: &[String], width: usize) -> String {
+    let mut out = String::new();
+    for (i, seg) in segs.iter().enumerate() {
+        let sep = if out.is_empty() { "" } else { "  ::  " };
+        let rest = segs.len() - i - 1;
+        let more = if rest > 0 {
+            format!("  ::  +{} more", rest)
+        } else {
+            String::new()
+        };
+        let need = out.chars().count() + sep.chars().count() + seg.chars().count();
+        if need + more.chars().count() > width && !out.is_empty() {
+            out.push_str(&format!("  ::  +{} more", segs.len() - i));
+            return out.chars().take(width).collect();
+        }
+        out.push_str(sep);
+        out.push_str(seg);
+    }
+    out.chars().take(width).collect()
+}
+
 fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
     // AZERTY: modifier names spelled out, digit-row hints shown as "1-6".
     // A letter is shown exactly as it is pressed: lowercase for a plain key,
     // SHIFT+ for a capital. `[R] refresh` once sat beside SHIFT+R = restore,
     // and the ticker's "press U" beside SHIFT+U = update the selected stack
     // (test-plan part A, 2026-09-26, finding 2).
-    let keys: &[(&str, &str)] = match model.tab {
-        Tab::Dashboard | Tab::Stacks => &[
-            ("1-6/TAB", "tabs"),
-            ("n", "new stack"),
-            ("p", "plan"),
-            ("SHIFT+D", "deploy"),
-            ("r", "refresh"),
-            ("CTRL+K", "palette"),
-            ("h", "help"),
-            ("q", "quit"),
-        ],
-        Tab::Logs => &[
-            ("LEFT/RIGHT", "source"),
-            ("UP/DOWN", "scroll"),
-            ("SPACE", "follow"),
-            ("SHIFT+G", "tail"),
-            ("CTRL+K", "palette"),
-            ("q", "quit"),
-        ],
-        Tab::Doctor => &[
-            ("r/ENTER", "re-run"),
-            ("1-6/TAB", "tabs"),
-            ("CTRL+K", "palette"),
-            ("q", "quit"),
-        ],
-        Tab::Shell => &[
-            ("type+ENTER", "run"),
-            ("LEFT/RIGHT", "target (empty input)"),
-            ("UP", "recall"),
-            ("TAB", "tabs"),
-            ("CTRL+K", "palette"),
-        ],
-        Tab::Settings => &[
-            ("UP/DOWN", "field"),
-            ("LEFT/RIGHT", "value"),
-            ("a", "add tier"),
-            ("d", "del tier"),
-            ("ENTER", "edit webhook"),
-            ("SHIFT+S", "save"),
-            ("r", "reload"),
-            ("q", "quit"),
-        ],
-    };
+    // fix-107: from the one key table the key map and the palette use.
+    let keys = crate::tui::keys::footer(model.tab);
     // The status sits on the right and the hints take what is left, whole
     // hints only. Both used to be drawn across the full width, so a status
     // landed on top of the last hints: `[Q]link established` (finding 1).
@@ -771,10 +809,13 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
     );
 }
 
-fn draw_help(f: &mut Frame) {
+/// fix-107 (tui-indicators-claim-too-much, 2026-09-27): the key map of the
+/// tab in front of the operator, from the one key table. It used to be a
+/// list of its own that said `1-4` for six tabs and left keys out.
+fn draw_help(f: &mut Frame, tab: Tab) {
     let area = f.area();
-    let w = 60u16.min(area.width - 4);
-    let h = 24u16.min(area.height - 4);
+    let w = 76u16.min(area.width - 4);
+    let h = area.height.saturating_sub(2);
     let rect = Rect {
         x: (area.width - w) / 2,
         y: area.height / 8,
@@ -792,35 +833,19 @@ fn draw_help(f: &mut Frame) {
         .style(Style::new().bg(THEME.elevated).fg(THEME.text));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
-    let rows: &[(&str, &str)] = &[
-        ("1-4 or & é \" '", "switch tab (AZERTY-safe)"),
-        ("TAB / SHIFT+TAB", "cycle tabs"),
-        ("UP / DOWN", "move selection / scroll"),
-        ("LEFT / RIGHT", "log source (Logs tab)"),
-        ("SPACE", "follow logs"),
-        ("n / p / SHIFT+D", "new stack · plan · deploy"),
-        ("SHIFT+B", "back up the selected stack"),
-        ("SHIFT+U", "update the selected stack"),
-        ("SHIFT+R", "restore it (asks for the name first)"),
-        ("g", "apply the runaway guards"),
-        ("c", "fleet check — repo against reality"),
-        ("i", "incident bundles"),
-        ("r", "refresh fleet state"),
-        ("e", "park/unpark stack for nightly runs"),
-        ("u", "update the host binary when one is offered"),
-        ("CTRL+K", "command palette"),
-        ("F2", "cycle effect intensity"),
-        ("h", "this help"),
-        ("q", "quit"),
-    ];
-    let lines: Vec<Line> = rows
+    let lines: Vec<Line> = crate::tui::keys::KEYMAP
         .iter()
-        .map(|(k, v)| {
+        .filter(|b| b.shown_on(tab) && !b.key.is_empty())
+        .map(|b| {
             Line::from(vec![
-                Span::styled(format!("  {:<16}", k), THEME.hint()),
-                Span::styled(v.to_string(), Style::new().fg(THEME.text)),
+                Span::styled(format!("  {:<12}", b.key), THEME.hint()),
+                Span::styled(b.what, Style::new().fg(THEME.text)),
             ])
         })
+        .chain(std::iter::once(Line::from(Span::styled(
+            "  CTRL+K lists every action by name; other tabs have their own keys",
+            THEME.muted_style(),
+        ))))
         .collect();
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -873,6 +898,13 @@ fn draw_palette(f: &mut Frame, model: &Model) {
         rows[1],
     );
     let matches = palette_matches(&model.palette_input);
+    let actions = crate::tui::keys::palette();
+    // fix-107: "selected stack" says which one.
+    let selected = model
+        .fleet
+        .as_ref()
+        .and_then(|f| f.stacks.get(model.selected_stack))
+        .map(|s| s.name.clone());
     let items: Vec<ListItem> = matches
         .iter()
         .enumerate()
@@ -888,7 +920,13 @@ fn draw_palette(f: &mut Frame, model: &Model) {
             };
             ListItem::new(Line::from(vec![
                 Span::styled(if sel { "▶ " } else { "  " }, style),
-                Span::styled(PALETTE[ai].label, style),
+                Span::styled(
+                    match &selected {
+                        Some(name) => actions[ai].label.replace("selected stack", name),
+                        None => actions[ai].label.clone(),
+                    },
+                    style,
+                ),
             ]))
         })
         .collect();
@@ -897,7 +935,9 @@ fn draw_palette(f: &mut Frame, model: &Model) {
 
 /// Shared panel title helper.
 pub fn panel_title(text: &str, id: u64, model: &Model) -> Line<'static> {
-    let t = fx::glitch(text, id, model.tick, model.fx).unwrap_or_else(|| text.to_string());
+    // fix-106: never scrambled; `id` and the effect level no longer matter.
+    let _ = (id, model.fx);
+    let t = text.to_string();
     Line::from(vec![
         Span::styled(" [ ", Style::new().fg(THEME.faint)),
         Span::styled(t, THEME.title_active()),

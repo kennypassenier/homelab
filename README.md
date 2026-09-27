@@ -115,7 +115,7 @@ be the one the daemon was given (see [The host daemon](#the-host-daemon)).
 Without it, every verb that talks to the host stops before connecting:
 
 ```
-error: HOMELAB_TOKEN is not set
+error: HOMELAB_TOKEN is not set — put HOMELAB_TOKEN=<token> in ~/.config/homelab/env (or export it); it is the token in the daemon's host.toml
 ```
 
 ### 3. Check the link
@@ -181,8 +181,13 @@ A `config/client.toml` that exists but does not parse is an error, never a
 silent fall-through to the next source. Its only keys are `host` and `pin`.
 
 **Certificate pin.** The daemon's certificate is self-signed; trust comes from
-its SHA-256 fingerprint, stored per machine in `~/.config/homelab/pin`
-(`client/src/lib.rs`):
+its SHA-256 fingerprint. Since fix-149 the client is built with the fleet's
+pin, read from `config/client.toml` at compile time (`client/build.rs`), and
+trusts that certificate only, on a machine's first connection too: nothing
+is trusted on first use and no token goes to a certificate it was not built
+for. A machine pin (`~/.config/homelab/pin`) or a repository `pin` that
+disagrees with the built-in one is refused with the remedy. A client built
+from a tree without a pin behaves as the table below:
 
 | Machine pin | `pin` in `config/client.toml` | Result |
 |---|---|---|
@@ -199,17 +204,19 @@ A certificate that does not match the pin ends the connection with
 ## Commands
 
 `homelab --help` (or `-h` anywhere on the line, or no arguments) prints the
-full list and does nothing else. That holds for every verb: the check runs
-before any argument is read (`wants_help` in `client/src/version.rs`).
+grouped list and does nothing else; `homelab <verb> --help` prints that
+verb with one example. That holds for every verb: the check runs before any
+argument is read (`wants_help` in `client/src/version.rs`, the text in
+`client/src/cli_help.rs`). A mistyped verb exits 2 and names the nearest one.
 
 Every verb exits 1 on failure. A verb that talks to the daemon exits 0 only
 when the daemon reports success.
 
 ### Verbs that need no token
 
-`help`, `plan`, `runbook`, `dashboard`, `presets`, `export`, `import`, and
-`tui --offline`. Everything else, including the local-only `new` and
-`testplan`, stops with `HOMELAB_TOKEN is not set` when there is no token
+`help`, `plan`, `runbook`, `dashboard`, `presets`, `export`, `import`, `new`,
+`testplan`, `self-install` and `tui --offline`. Everything else stops with
+`HOMELAB_TOKEN is not set` and where to put it when there is no token
 (`needs_token` in `client/src/main.rs`).
 
 "No token" does not always mean "no network". `plan` and `export` build the
@@ -232,7 +239,7 @@ and for a stack with `natives` they fetch each service's release through `gh`
 |---|---|
 | `homelab new <name> --preset <p> --vmid <n>` | scaffold `stacks/<name>` from a preset; optional `--ram`, `--cores`, `--disk`, `--swap`, repeatable `--no-data <path>` |
 | `homelab deploy stacks/<name>` | validate, then create or reconcile the container, and remove what the stack's files no longer declare (files, units, native services, mounts, an old route); data stays |
-| `homelab apply [stacks/] [--no-backup]` | deploy every stack whose files differ from what the host last applied; a stack still on the host whose directory is gone is destroyed only after you type its name |
+| `homelab apply [stacks/] [--dry-run] [--yes] [--no-backup]` | show the per-file plan, ask once, then deploy every stack whose files differ from what the host last applied; a stack still on the host whose directory is gone is destroyed only after you type its name; an `ephemeral: true` stack is left out |
 | `homelab backup stacks/<name>` | restic snapshot of the stack |
 | `homelab restore stacks/<name> [snapshot]` | restore, `latest` by default |
 | `homelab update stacks/<name> [app]` | pull and recreate one app or all, with rollback |

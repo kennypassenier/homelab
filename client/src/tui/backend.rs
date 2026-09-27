@@ -36,6 +36,10 @@ pub struct RemoteBackend {
     pub token: String,
     /// The fingerprint `config/client.toml` names, when there is one.
     pub repo_pin: Option<String>,
+    /// fix-149: the fingerprint this client was built with
+    /// (`repo_config::built_in_pin`); `None` only in tests with a
+    /// certificate of their own.
+    pub built_in_pin: Option<String>,
 }
 
 impl Backend for RemoteBackend {
@@ -47,8 +51,13 @@ impl Backend for RemoteBackend {
             // fix-67 (tui-connection-skips-guards, 2026-09-27): the same
             // connect as the command line — the repository's pin, the fix-30
             // frame ceiling — instead of a copy that had drifted from it.
-            let link = match crate::link::connect(&self.host, &self.token, self.repo_pin.as_deref())
-                .await
+            let link = match crate::link::connect(
+                &self.host,
+                &self.token,
+                self.repo_pin.as_deref(),
+                self.built_in_pin.as_deref(),
+            )
+            .await
             {
                 Ok(l) => l,
                 Err(e) => {
@@ -109,7 +118,11 @@ impl Backend for RemoteBackend {
                         req_id += 1;
                         // The refusal comes back the way a failed operation
                         // does, so it lands where the operator is looking.
-                        if let Some(why) = crate::link::refuse_older_host(&cmd, &host_version) {
+                        // fix-105: and the other way round, a client older
+                        // than the host.
+                        if let Some(why) = crate::link::refuse_older_host(&cmd, &host_version)
+                            .or_else(|| crate::link::refuse_older_client(&cmd, &host_version))
+                        {
                             let refused = ServerMsg::RpcDone(homelab_proto::RpcResponse {
                                 id: req_id,
                                 ok: false,

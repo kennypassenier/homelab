@@ -1483,12 +1483,11 @@ fn h19_every_palette_action_reaches_a_real_handler() {
     // removing — and it drifted on the first change: six new actions were
     // wired into the dispatcher and the copy here still held eleven. So the
     // dispatcher source is read instead of mirrored.
-    use homelab_client::tui::model::PALETTE;
     let src = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/model.rs"),
     )
     .unwrap();
-    for action in PALETTE {
+    for action in homelab_client::tui::keys::palette() {
         assert!(
             src.contains(&format!("\"{}\" =>", action.id)),
             "palette action '{}' ({}) has no dispatcher arm",
@@ -1515,10 +1514,14 @@ fn b6_update_badge_and_u_key_flow() {
     homelab_client::tui::model::update(&mut m, Msg::ReleaseTag(Some("v9.9.9".into())));
     let out = render(&m);
     assert!(out.contains("HOST UPDATE v9.9.9"), "badge must appear");
-    // U opens the focus window and requests staging.
+    // u asks first (fix-102); y opens the focus window and requests staging.
     homelab_client::tui::model::update(
         &mut m,
         Msg::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)),
+    );
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
     );
     assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
     assert!(m.focus.is_some());
@@ -2332,8 +2335,8 @@ fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
         op: "deploy-gateway".into(),
         step: "service checks".into(),
         what: "routes went 29 → 28".into(),
-        if_allowed: "de uitrol gaat door en legt het nieuwe aantal vast".into(),
-        if_stopped: "de uitrol faalt en bundelt een incident".into(),
+        if_allowed: "the deploy goes on and records the new count".into(),
+        if_stopped: "the deploy fails and bundles an incident".into(),
     });
 
     // It is drawn where the operator is already reading — over the feed, not
@@ -2341,17 +2344,18 @@ fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
     let out = render(&m);
     assert!(out.contains("service checks"), "the step must be named");
     assert!(out.contains("routes went 29"), "and what happened");
+    // fix-107: in the language of the rest of the interface.
     assert!(
-        out.contains("toelaten") && out.contains("stoppen"),
+        out.contains("[a] allow") && out.contains("[s] stop"),
         "both keys visible: {}",
         out
     );
     assert!(
-        out.contains("de uitrol gaat door"),
+        out.contains("the deploy goes on"),
         "each key says what it DOES, not just its label (D82)"
     );
     assert!(
-        out.contains("onbeheerd"),
+        out.contains("unattended"),
         "and that not answering is its own outcome"
     );
 
@@ -2434,12 +2438,9 @@ fn every_cli_verb_appears_in_the_usage_text() {
         verbs
     );
 
-    // The usage block, which starts at the version line.
-    let start = src
-        .find("— usage:")
-        .expect("the usage block moved; this test parses it");
-    let usage = &src[start..];
-    let usage = &usage[..usage.find("env: HOMELAB_HOST").unwrap_or(usage.len())];
+    // The usage text, one table since fix-108.
+    let usage = homelab_client::cli_help::usage();
+    let usage = usage.as_str();
 
     // `enable`/`disable` are documented as one line; accept either spelling.
     let missing: Vec<&String> = verbs
@@ -2569,10 +2570,8 @@ fn the_help_text_and_the_usage_message_agree_about_install_native() {
         .lines()
         .find(|l| l.contains("usage: homelab install-native"))
         .expect("the usage message must exist");
-    let help = src
-        .lines()
-        .find(|l| l.contains("homelab install-native stacks/") && !l.contains("usage:"))
-        .expect("the help line must exist");
+    // fix-108: the help is one table in cli_help.
+    let help = homelab_client::cli_help::verb_help("install-native").expect("the help must exist");
     let shape = "stacks/<name>[/<unit>] [<tag> | --file <path>]";
     assert!(usage.contains(shape), "usage drifted: {}", usage.trim());
     assert!(
@@ -2632,10 +2631,15 @@ fn a_key_named_on_screen_is_the_key_that_does_it() {
     assert!(out.contains("available — press u"), "ticker: {}", out);
     assert!(!out.contains("press U"));
     assert!(!out.contains("beschikbaar"), "English interface");
-    // The key the ticker names does what the ticker says.
+    // The key the ticker names does what the ticker says, after its y/N
+    // question (fix-102).
     homelab_client::tui::model::update(
         &mut m,
         Msg::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)),
+    );
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
     );
     assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
 
@@ -2976,4 +2980,298 @@ fn fix_68_the_day_s_list_fills_the_today_panel_and_leaves_an_open_operation_alon
     m.today = Some(Today::default());
     let out = render(&m);
     assert!(out.contains("NOTHING NEEDS YOU"), "{}", out);
+}
+
+/// older-client-no-warning (expert panel, 2026-09-27): the TUI advertised
+/// only host updates; which client talks to which host was nowhere on the
+/// screen. The header names both.
+/// covers: fix-105
+#[test]
+fn fix_105_the_header_names_the_client_and_the_host_version() {
+    let mut m = ready_model();
+    m.host_version = "3.59.6".into();
+    let out = render(&m);
+    assert!(
+        out.contains(&format!("client v{}", env!("CARGO_PKG_VERSION"))),
+        "{}",
+        out
+    );
+    assert!(out.contains("host v3.59.6"), "{}", out);
+}
+
+/// tui-not-calm (expert panel, 2026-09-27): every launch started at full
+/// effects and F2's choice was forgotten. The TUI starts with effects off and
+/// reads back the level F2 last chose.
+/// covers: fix-106
+#[test]
+fn fix_106_the_tui_starts_calm_and_remembers_f2() {
+    use homelab_client::tui::fx::{load_fx, save_fx, FxLevel};
+    assert!(Model::new().fx == FxLevel::Off, "effects on at launch");
+    let dir = std::env::temp_dir().join(format!("homelab-fx-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("tui-fx");
+    assert!(load_fx(&path).is_none(), "nothing saved yet");
+    save_fx(&path, FxLevel::Subtle);
+    assert!(load_fx(&path) == Some(FxLevel::Subtle));
+    std::fs::write(&path, "loud\n").unwrap();
+    assert!(load_fx(&path).is_none(), "an unknown word is no choice");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Panel titles, tab labels and the header scrambled into glyphs at random,
+/// and the alert line scrolled, so an alarm had to be waited for. With every
+/// effect on, text that carries meaning stands still.
+/// covers: fix-106
+#[test]
+fn fix_106_meaningful_text_never_moves() {
+    let mut m = ready_model();
+    m.fx = homelab_client::tui::fx::FxLevel::Full;
+    let first_ticker = {
+        let out = render(&m);
+        let cells: Vec<char> = out.chars().collect();
+        cells[cells.len() - 240..cells.len() - 120]
+            .iter()
+            .collect::<String>()
+    };
+    for tick in (0..900).step_by(3) {
+        m.tick = tick;
+        m.flicker = 0;
+        let out = render(&m);
+        assert!(
+            out.contains("HOMELAB :: CONTROL_DECK"),
+            "tick {}: {}",
+            tick,
+            out
+        );
+        assert!(out.contains(" DASHBOARD "), "tick {}", tick);
+        assert!(out.contains("HOST_MESH"), "tick {}", tick);
+        let cells: Vec<char> = out.chars().collect();
+        let ticker: String = cells[cells.len() - 240..cells.len() - 120].iter().collect();
+        assert_eq!(
+            ticker, first_ticker,
+            "the alert line moved at tick {}",
+            tick
+        );
+    }
+}
+
+/// tui-indicators-claim-too-much (expert panel, 2026-09-27): every stack's
+/// detail showed `safety whitelist ✓ hostname-guard ✓ fail-closed ✓` as a
+/// constant, and `drift none — intent == runtime` in green for stacks whose
+/// drift nobody computed. Only what was measured is shown.
+/// covers: fix-107
+#[test]
+fn fix_107_the_stack_detail_shows_only_what_was_measured() {
+    let mut m = ready_model();
+    press(&mut m, crossterm::event::KeyCode::Char('2'));
+    let out = render(&m);
+    assert!(!out.contains("whitelist ✓"), "a constant posing as a check");
+    assert!(!out.contains("intent == runtime"), "{}", out);
+    assert!(out.contains("unknown (no local files)"), "{}", out);
+
+    let fleet = m.fleet.as_mut().unwrap();
+    fleet.stacks[0].applied_hash = "h1".into();
+    m.local_stacks = vec![("syncthing".into(), "/nonexistent/syncthing".into())];
+    assert!(render(&m).contains("not compared yet"));
+    m.local_hashes.insert("syncthing".into(), "h1".into());
+    assert!(render(&m).contains("files match what the host applied"));
+    m.local_hashes.insert("syncthing".into(), "h2".into());
+    m.fleet.as_mut().unwrap().stacks[0].drift = true;
+    let out = render(&m);
+    assert!(out.contains("[CHANGED]"), "{}", out);
+    assert!(
+        !out.contains("[UPD]"),
+        "UPD read as SHIFT+U, update the images"
+    );
+}
+
+/// The key map said `1-4` for six tabs and left keys out; the palette,
+/// meant so that nothing needs a keybind first, had no deploy, plan, park,
+/// new stack, and its "selected stack" entries did not say
+/// which. The key map, the footer and the palette now come from one table.
+/// covers: fix-107
+#[test]
+fn fix_107_key_map_footer_and_palette_come_from_one_table() {
+    use homelab_client::tui::keys::{footer, palette, KEYMAP};
+    let mut m = ready_model();
+    press(&mut m, crossterm::event::KeyCode::Char('h'));
+    let help = render(&m);
+    assert!(help.contains("1-6"), "{}", help);
+    assert!(!help.contains("1-4"), "{}", help);
+    for b in KEYMAP.iter().filter(|b| b.shown_on(Tab::Dashboard)) {
+        assert!(help.contains(b.key), "help lacks {}: {}", b.key, help);
+    }
+    for tab in Tab::ALL {
+        for (key, _) in footer(tab) {
+            assert!(
+                KEYMAP.iter().any(|b| b.key == key && b.shown_on(tab)),
+                "footer key {} is not in the key map",
+                key
+            );
+        }
+    }
+    let labels: Vec<String> = palette().iter().map(|a| a.label.clone()).collect();
+    // Manual checks stay off the TUI by form I2 (see CLI_ONLY).
+    for wanted in ["deploy", "plan", "park", "new stack", "host update"] {
+        assert!(
+            labels.iter().any(|l| l.contains(wanted)),
+            "palette lacks {}: {:?}",
+            wanted,
+            labels
+        );
+    }
+    let mut m = ready_model();
+    m.palette_open = true;
+    m.palette_input = "deploy".into();
+    let out = render(&m);
+    assert!(out.contains("deploy: syncthing"), "{}", out);
+    assert!(
+        out.contains("SHIFT+D"),
+        "the palette names the key: {}",
+        out
+    );
+}
+
+/// The host-question window was Dutch in an English interface, and so was
+/// the deploy's own question.
+/// covers: fix-107
+#[test]
+fn fix_107_one_language_per_surface() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    for file in ["client/src/tui/view/focus.rs", "core/src/ops/deploy.rs"] {
+        let src = std::fs::read_to_string(root.join(file)).unwrap();
+        for dutch in ["toelaten", "stoppen", "onbeheerd", "de uitrol"] {
+            let code: String = src
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(!code.contains(dutch), "{} still says {:?}", file, dutch);
+        }
+    }
+}
+
+fn press(m: &mut Model, code: crossterm::event::KeyCode) {
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    homelab_client::tui::model::update(m, Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+}
+
+/// tui-single-keys-no-confirm (expert panel, 2026-09-27): `e` parked a stack
+/// at once, next to `r`: no nightly backup and no start after a power cut,
+/// shown only as a small `[OFF]` badge. It now says that and waits for `y`;
+/// any other key keeps the stack as it is.
+/// covers: fix-102
+#[test]
+fn fix_102_parking_a_stack_says_what_it_costs_and_waits_for_y() {
+    use crossterm::event::KeyCode;
+    use homelab_proto::Command;
+    let mut m = ready_model();
+    press(&mut m, KeyCode::Char('e'));
+    assert!(
+        !m.outbox
+            .iter()
+            .any(|c| matches!(c, Command::SetStackEnabled { .. })),
+        "e parked the stack without asking"
+    );
+    let out = render(&m);
+    assert!(out.contains("No nightly backup"), "{}", out);
+    assert!(out.contains("power cut"), "{}", out);
+    press(&mut m, KeyCode::Char('n'));
+    assert!(m.outbox.is_empty(), "n must keep the stack as it is");
+    assert!(
+        m.status_line.contains("nothing was done"),
+        "{}",
+        m.status_line
+    );
+
+    press(&mut m, KeyCode::Char('e'));
+    press(&mut m, KeyCode::Char('y'));
+    assert!(m.outbox.iter().any(|c| matches!(
+        c,
+        Command::SetStackEnabled { stack, enabled: false } if stack == "syncthing"
+    )));
+}
+
+/// `u` started a host self-update at once, one Shift away from SHIFT+U
+/// (update the selected stack).
+/// covers: fix-102
+#[test]
+fn fix_102_the_host_update_key_asks_first() {
+    use crossterm::event::KeyCode;
+    let mut m = ready_model();
+    m.host_version = "2.6.0".into();
+    homelab_client::tui::model::update(&mut m, Msg::ReleaseTag(Some("v9.9.9".into())));
+    press(&mut m, KeyCode::Char('u'));
+    assert!(m.release_update_requested.is_none(), "u updated the host");
+    assert!(render(&m).contains("restarts itself"));
+    press(&mut m, KeyCode::Esc);
+    assert!(m.release_update_requested.is_none());
+    press(&mut m, KeyCode::Char('u'));
+    press(&mut m, KeyCode::Char('y'));
+    assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
+}
+
+/// Settings `d` deleted a retention tier with no question.
+/// covers: fix-102
+#[test]
+fn fix_102_deleting_a_retention_tier_asks_first() {
+    use crossterm::event::KeyCode;
+    use homelab_proto::{HostConfigView, ServerMsg};
+    let mut m = ready_model();
+    press(&mut m, KeyCode::Char('5'));
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Backend(homelab_client::tui::backend::BackendEvent::Server(
+            ServerMsg::Config(Box::new(HostConfigView {
+                backup_hour: Some(4),
+                notify_webhook: None,
+                retention: homelab_core::retention::default_tiers(),
+            })),
+        )),
+    );
+    let tiers = m.settings.as_ref().unwrap().retention.len();
+    press(&mut m, KeyCode::Down);
+    press(&mut m, KeyCode::Char('d'));
+    assert_eq!(m.settings.as_ref().unwrap().retention.len(), tiers);
+    press(&mut m, KeyCode::Char('n'));
+    assert_eq!(m.settings.as_ref().unwrap().retention.len(), tiers);
+    press(&mut m, KeyCode::Char('d'));
+    press(&mut m, KeyCode::Char('y'));
+    assert_eq!(m.settings.as_ref().unwrap().retention.len(), tiers - 1);
+}
+
+/// `q` quit with unsaved settings, and while an operation sent to the
+/// background still ran (it could then not answer a host question).
+/// covers: fix-102
+#[test]
+fn fix_102_quit_asks_when_something_would_be_lost() {
+    use crossterm::event::KeyCode;
+    let mut m = ready_model();
+    m.settings_dirty = true;
+    press(&mut m, KeyCode::Char('q'));
+    assert!(!m.should_quit, "q dropped unsaved settings");
+    assert!(render(&m).contains("not saved"));
+    press(&mut m, KeyCode::Char('y'));
+    assert!(m.should_quit);
+
+    let mut m = ready_model();
+    m.focus = Some(homelab_client::tui::model::Focus {
+        title: "DEPLOY syncthing".into(),
+        feed: Vec::new(),
+        scroll: 0,
+        done: false,
+        ok: false,
+        result: String::new(),
+    });
+    press(&mut m, KeyCode::Esc);
+    press(&mut m, KeyCode::Char('q'));
+    assert!(!m.should_quit, "q left a running operation behind");
+    press(&mut m, KeyCode::Char('n'));
+    assert!(!m.should_quit);
+
+    let mut m = ready_model();
+    press(&mut m, KeyCode::Char('q'));
+    assert!(m.should_quit, "nothing to lose: q quits at once");
 }

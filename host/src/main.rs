@@ -1419,7 +1419,7 @@ port = 5003
             "lsd gdrive:homelab-backups",
             CmdOutput::failed(3, "token expired"),
         );
-        let probes = gather_probes(&exec, "/var/lib/homelab", None, now).await;
+        let probes = gather_probes(&exec, "/var/lib/homelab", None, now, &|_| {}).await;
         assert_eq!(probes.managed_stacks.len(), 1);
         assert_eq!(probes.managed_stacks[0].backup_age_h, Some(80));
         assert!(probes.managed_stacks[0].container_present);
@@ -1449,6 +1449,7 @@ port = 5003
             config: config.clone(),
             log_tx,
             op_lock: Arc::new(Mutex::new(())),
+            busy: Arc::new(std::sync::Mutex::new(None)),
             pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
@@ -2160,6 +2161,9 @@ struct AppState {
     config: Config,
     log_tx: broadcast::Sender<ServerMsg>,
     op_lock: Arc<Mutex<()>>, // AR12: mutations strictly serial
+    /// fix-104 (long-silences, 2026-09-27): what holds `op_lock`, so a
+    /// command that has to wait is told what for, at once.
+    busy: Arc<std::sync::Mutex<Option<homelab_core::oplock::Holder>>>,
     /// G8: live mutable settings (scheduler hour, webhook, retention).
     settings: Arc<std::sync::RwLock<homelab_proto::HostConfigView>>,
     /// H13: failure-repeat damping for F3 notifications.
@@ -2356,6 +2360,7 @@ async fn main() {
         config: config.clone(),
         log_tx,
         op_lock: Arc::new(Mutex::new(())),
+        busy: Arc::new(std::sync::Mutex::new(None)),
         pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
@@ -2810,7 +2815,8 @@ async fn run_backup_batch(
         jobs.len(),
         limit
     );
-    let _guard = state.op_lock.lock().await;
+    let _guard = lock_ops(state).await;
+    let _busy = BusyMark::set(state, "the nightly backup", jobs.len());
     // M-T75: measured, not predicted — the line the morning reads.
     let phase_started = std::time::Instant::now();
     let stacks_in_phase = jobs.len();
@@ -2851,6 +2857,7 @@ async fn run_backup_batch(
             if let NightBackup::Deferred(why) = &outcome {
                 info!("scheduler: backup for {} stood aside — {}", name, why);
             }
+            BusyMark::step(state);
             (name, outcome)
         })
         .buffer_unordered(limit)
@@ -3332,11 +3339,7 @@ async fn scheduler_loop(state: AppState) {
                         render_findings(&findings)
                     );
                 } else {
-                    tracing::warn!(
-                        "fleet check: {} finding(s)\n{}",
-                        findings.len(),
-                        render_findings(&findings)
-                    );
+                    tracing::warn!("{}", render_findings(&findings));
                     // The finding text is already in the log above; the
                     // webhook exists so it leaves the machine.
                     // F86: through op_payload like every other event, so the
@@ -3793,8 +3796,81 @@ where
         Box<dyn std::future::Future<Output = homelab_core::runner::OperationReport> + Send + 'a>,
     >,
 {
-    let _guard = state.op_lock.lock().await;
+    let _guard = lock_ops(state).await;
+    let _busy = BusyMark::set(state, label, 0);
     run_op_locked(state, exec, req_id, label, op).await
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// fix-104 (long-silences, 2026-09-27): take the operation lock, and when it
+/// is taken, tell whoever is watching what this command waits for before
+/// waiting. A command typed during the nightly batch used to hang with no
+/// word for as long as the batch ran.
+async fn lock_ops(state: &AppState) -> tokio::sync::MutexGuard<'_, ()> {
+    if let Ok(g) = state.op_lock.try_lock() {
+        return g;
+    }
+    let holder = state.busy.lock().ok().and_then(|b| b.clone());
+    let msg = homelab_core::oplock::waiting_message(holder.as_ref(), unix_now());
+    info!("{}", msg);
+    let _ = state.log_tx.send(ServerMsg::Log {
+        level: homelab_proto::LogLevel::Warn,
+        source: "HOST".into(),
+        msg,
+    });
+    state.op_lock.lock().await
+}
+
+/// fix-104: one progress line of a long read (check, doctor, today) to
+/// whoever is watching. Nobody connected, nothing sent.
+fn progress_line(state: &AppState, line: &str) {
+    let _ = state.log_tx.send(ServerMsg::Log {
+        level: homelab_proto::LogLevel::Info,
+        source: "CHECK".into(),
+        msg: line.to_string(),
+    });
+}
+
+/// fix-104: records what holds the operation lock for as long as it lives.
+struct BusyMark<'a> {
+    state: &'a AppState,
+}
+
+impl<'a> BusyMark<'a> {
+    fn set(state: &'a AppState, what: &str, total: usize) -> Self {
+        if let Ok(mut b) = state.busy.lock() {
+            *b = Some(homelab_core::oplock::Holder {
+                what: what.to_string(),
+                started_unix: unix_now(),
+                done: 0,
+                total,
+            });
+        }
+        BusyMark { state }
+    }
+
+    /// One more item of a batch is finished.
+    fn step(state: &AppState) {
+        if let Ok(mut b) = state.busy.lock() {
+            if let Some(h) = b.as_mut() {
+                h.done += 1;
+            }
+        }
+    }
+}
+
+impl Drop for BusyMark<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut b) = self.state.busy.lock() {
+            *b = None;
+        }
+    }
 }
 
 /// The body of a mutating operation WITHOUT taking the global lock.
@@ -3964,6 +4040,7 @@ async fn gather_today(
         &state.config.state_dir,
         state.config.mirror_remote.as_deref(),
         now,
+        &|line: &str| progress_line(state, line),
     )
     .await;
     let checks = homelab_core::doctor::diagnose(&probes);
@@ -4037,7 +4114,11 @@ async fn gather_live_facts(
             .map(|d| d.as_secs())
             .unwrap_or(0),
     };
-    let (facts, notes) = homelab_core::ops::facts::gather_live_facts(exec, &inp, stack_files).await;
+    // fix-104: each phase goes to whoever is watching; the check took 41 s
+    // with nothing on the screen after "link up".
+    let progress = |line: &str| progress_line(state, line);
+    let (facts, notes) =
+        homelab_core::ops::facts::gather_live_facts_with(exec, &inp, stack_files, &progress).await;
     for n in notes {
         info!("{}", n);
     }
@@ -4062,26 +4143,10 @@ async fn record_backup_time(state: &AppState, stack: &str) {
     .await;
 }
 
+/// fix-103: one rendering for `homelab check`, the TUI and the nightly log —
+/// a summary first, then the findings grouped by severity.
 fn render_findings(findings: &[homelab_core::ops::fleetcheck::Finding]) -> String {
-    use homelab_core::ops::fleetcheck::Severity;
-    if findings.is_empty() {
-        return "fleet check: repo and reality agree".into();
-    }
-    let mut s = format!("fleet check: {} finding(s)\n", findings.len());
-    for f in findings {
-        s.push_str(&format!(
-            "  [{}] {} — {}\n      remedy: {}\n",
-            match f.severity {
-                Severity::Broken => "broken",
-                Severity::Drift => "drift",
-                Severity::Noted => "noted",
-            },
-            f.subject,
-            f.what,
-            f.remedy
-        ));
-    }
-    s
+    homelab_core::ops::fleetcheck::render(findings)
 }
 
 /// T85: where a stack's binaries wait between `StageNativeBinary` and the
@@ -5159,6 +5224,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 &state.config.state_dir,
                 state.config.mirror_remote.as_deref(),
                 now,
+                &|line: &str| progress_line(state, line),
             )
             .await;
             let checks = homelab_core::doctor::diagnose(&probes);
@@ -5299,13 +5365,17 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
 /// stack from state.json, offsite reachability via a quick rclone listing,
 /// mirror lag via unpushed-commit count. Generic over the executor so the
 /// healthy/broken matrix is testable with MockExecutor.
+/// `progress` gets one line per phase (fix-104, long-silences, 2026-09-27:
+/// `homelab doctor` took 24 s with nothing on the screen after "link up").
 async fn gather_probes(
     exec: &dyn Executor,
     state_dir: &str,
     mirror_remote: Option<&str>,
     now_unix: u64,
+    progress: &(dyn Fn(&str) + Send + Sync),
 ) -> homelab_core::doctor::Probes {
     use homelab_core::doctor::{Probes, StackProbe};
+    progress("doctor: every managed container, its backup age and its sealed secrets…");
     let state_raw = exec.read_file(&format!("{}/state.json", state_dir)).await;
     let state_parses = state_raw
         .as_ref()
@@ -5340,6 +5410,7 @@ async fn gather_probes(
     }
 
     // Offsite: is the gdrive remote configured, and does a cheap listing work?
+    progress("doctor: the offsite remote (one listing on Google Drive)…");
     let remotes = exec
         .run(&Cmd::new("rclone", &["listremotes"], 20))
         .await
@@ -5365,6 +5436,7 @@ async fn gather_probes(
             .unwrap_or(false);
 
     // Mirror lag: commits not yet on the mirror remote.
+    progress("doctor: mirror, disk and the daemon's own units…");
     let repo = format!("{}/repo", state_dir);
     let mirror_behind = match mirror_remote {
         None => None,

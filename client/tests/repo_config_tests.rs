@@ -172,3 +172,123 @@ fn the_committed_client_file_names_the_in_vlan_door_and_a_real_fingerprint() {
         pin
     );
 }
+
+/// first-connect-pin (Kenny, 2026-09-27: "Pin in de client"): a machine
+/// with no pin of its own trusted the first certificate it saw and sent the
+/// bearer token to it. The fleet's pin is compiled into the client, and it
+/// is the only certificate trusted, first connection included.
+/// covers: fix-149
+#[test]
+fn fix_149_the_built_in_pin_is_the_only_certificate_trusted() {
+    use homelab_client::repo_config::reconcile_pin_built_in;
+    let a = "AA:AA";
+    let b = "BB:BB";
+    // First connection on a fresh machine: no trust on first use.
+    let d = reconcile_pin_built_in(Some(a), None, None).unwrap();
+    assert_eq!(d.pin.as_deref(), Some(a));
+    assert!(d.adopted_from_repo, "the machine saves it");
+    // The same pin everywhere: nothing to say.
+    let d = reconcile_pin_built_in(Some(a), Some(a.into()), Some(a)).unwrap();
+    assert_eq!(d.pin.as_deref(), Some(a));
+    assert!(!d.adopted_from_repo);
+    // A machine pin or a repository pin that disagrees is refused, with the
+    // remedy named.
+    let e = reconcile_pin_built_in(Some(a), Some(b.into()), None).unwrap_err();
+    assert!(e.contains(".config/homelab/pin"), "{}", e);
+    let e = reconcile_pin_built_in(Some(a), None, Some(b)).unwrap_err();
+    assert!(
+        e.contains("config/client.toml") && e.contains("self-install"),
+        "{}",
+        e
+    );
+    // A client built without a pin behaves as before.
+    assert_eq!(
+        reconcile_pin_built_in(None, None, Some(b)).unwrap(),
+        reconcile_pin(None, Some(b)).unwrap()
+    );
+}
+
+/// The released client carries the committed pin, and the DR runbook says
+/// what a regenerated certificate then asks for.
+/// covers: fix-149
+#[test]
+fn fix_149_the_client_is_built_with_the_committed_pin() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let (_, cfg) = load(root)
+        .unwrap()
+        .expect("config/client.toml is committed");
+    let committed = cfg.pin.expect("the pin is committed");
+    assert_eq!(
+        homelab_client::repo_config::built_in_pin().map(str::to_string),
+        Some(committed.trim_start_matches("SHA256:").to_string())
+    );
+    let out = std::env::temp_dir().join(format!("homelab-dr-f149-{}.md", std::process::id()));
+    homelab_client::spec::generate_runbook(&root.join("stacks"), out.to_str().unwrap()).unwrap();
+    let doc = std::fs::read_to_string(&out).unwrap();
+    let _ = std::fs::remove_file(&out);
+    assert!(
+        doc.contains("built into the client"),
+        "the runbook predates fix-149"
+    );
+    assert!(
+        doc.contains("homelab self-install"),
+        "the runbook names no way to rebuild"
+    );
+}
+
+/// cli-path-vs-name-and-cwd (expert panel, 2026-09-27): half the verbs took
+/// `stacks/<name>`, the other half `<name>`, and the wrong form answered
+/// "cannot read almanac/lxc-compose.yml" with no hint. Every spelling now
+/// names the same stack.
+/// covers: fix-101
+#[test]
+fn fix_101_every_spelling_of_a_stack_names_the_same_stack() {
+    use homelab_client::repo_config::stack_name;
+    for arg in [
+        "almanac",
+        "almanac/",
+        "stacks/almanac",
+        "stacks/almanac/",
+        "./stacks/almanac",
+        "/home/k/Projects/homelab/stacks/almanac",
+    ] {
+        assert_eq!(stack_name(arg), "almanac", "{}", arg);
+    }
+    // A unit inside a stack, and an app of a retired stack, keep their part.
+    assert_eq!(stack_name("stacks/kyu/kyu-runner"), "kyu/kyu-runner");
+    assert_eq!(stack_name("media/radarr"), "media/radarr");
+}
+
+/// The verbs read `./stacks`, so outside the repository `check` checked half
+/// the fleet and `deploy` found nothing. The repository is found once: up
+/// from the working directory, or where `HOMELAB_REPO` points.
+/// covers: fix-101
+#[test]
+fn fix_101_a_stack_resolves_from_its_name_from_any_directory() {
+    use homelab_client::repo_config::{repo_root, stack_dir, stacks_dir};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let elsewhere = scratch("elsewhere");
+
+    assert_eq!(
+        repo_root(&root.join("stacks/almanac"), None).as_deref(),
+        Some(root)
+    );
+    assert_eq!(
+        repo_root(&elsewhere, Some(root.to_str().unwrap())).as_deref(),
+        Some(root)
+    );
+    assert_eq!(repo_root(&elsewhere, None), None);
+    assert_eq!(
+        repo_root(&elsewhere, Some(elsewhere.to_str().unwrap())),
+        None
+    );
+
+    let almanac = root.join("stacks/almanac");
+    for arg in ["almanac", "stacks/almanac/", "almanac/"] {
+        assert_eq!(stack_dir(arg, &elsewhere, Some(root)), almanac, "{}", arg);
+    }
+    // Standing in the repository, the path as typed still works.
+    assert_eq!(stack_dir("stacks/almanac", root, Some(root)), almanac);
+    assert_eq!(stacks_dir(Some(root)), root.join("stacks"));
+    assert_eq!(stacks_dir(None), PathBuf::from("stacks"));
+}

@@ -18,18 +18,60 @@ use homelab_proto::{Command, LogLevel, RpcRequest, ServerMsg};
 
 use homelab_client::{spec, tui};
 
-const C_RESET: &str = "\x1b[0m";
-const C_CYAN: &str = "\x1b[36m";
-const C_GREEN: &str = "\x1b[32m";
-const C_YELLOW: &str = "\x1b[33m";
-const C_RED: &str = "\x1b[31m";
-const C_DIM: &str = "\x1b[2m";
+// fix-109 (colour-codes-when-piped, 2026-09-27): each prints itself only when
+// `main` found a terminal and no NO_COLOR; they were bare escape codes that
+// landed in every pipe and log.
+use homelab_client::output::Paint;
+const C_RESET: Paint = Paint("\x1b[0m");
+const C_CYAN: Paint = Paint("\x1b[36m");
+const C_GREEN: Paint = Paint("\x1b[32m");
+const C_YELLOW: Paint = Paint("\x1b[33m");
+const C_RED: Paint = Paint("\x1b[31m");
+const C_DIM: Paint = Paint("\x1b[2m");
 
 /// Where the address in use came from, and the repository's pin — set once
 /// in `main`, read by `rpc`, which is called from every verb.
 static HOST_SOURCE: std::sync::OnceLock<homelab_client::repo_config::HostSource> =
     std::sync::OnceLock::new();
 static REPO_PIN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+/// fix-101 (cli-path-vs-name-and-cwd, 2026-09-27): the repository, found once
+/// in `main`, so every verb reads the same stacks from any directory.
+static REPO_ROOT: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+
+fn repo_root() -> Option<&'static Path> {
+    REPO_ROOT.get().and_then(|r| r.as_deref())
+}
+
+fn cwd() -> std::path::PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// fix-101: the stack directory an argument names, `almanac` or
+/// `stacks/almanac` alike.
+fn stack_dir(arg: &str) -> std::path::PathBuf {
+    let dir = homelab_client::repo_config::stack_dir(arg, &cwd(), repo_root());
+    if repo_root().is_none() && !dir.exists() {
+        eprintln!(
+            "{}note: no repository found from here — run this inside it, or set \
+             HOMELAB_REPO=<path> in ~/.config/homelab/env{}",
+            C_YELLOW, C_RESET
+        );
+    }
+    dir
+}
+
+/// fix-101: the stacks directory, the repository's wherever the command runs.
+fn stacks_base() -> std::path::PathBuf {
+    homelab_client::repo_config::stacks_dir(repo_root())
+}
+
+/// fix-101: a path inside the repository, or relative to where the command
+/// runs when no repository was found.
+fn in_repo(rel: &str) -> std::path::PathBuf {
+    repo_root()
+        .map(|r| r.join(rel))
+        .unwrap_or_else(|| std::path::PathBuf::from(rel))
+}
 
 fn die(msg: &str) -> ! {
     eprintln!("{}error:{} {}", C_RED, C_RESET, msg);
@@ -100,8 +142,13 @@ fn load_config_env() {
 
 #[tokio::main]
 async fn main() {
+    use std::io::IsTerminal as _;
+    homelab_client::output::set_colour(homelab_client::output::should_colour(
+        std::io::stdout().is_terminal(),
+        std::env::var("NO_COLOR").ok().as_deref(),
+    ));
     let args: Vec<String> = std::env::args().collect();
-    let mut cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
+    let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
     // F309: `--help` anywhere means SHOW the help, never do the thing.
     //
@@ -118,7 +165,28 @@ async fn main() {
     // here covers every verb at once rather than the one that happened to
     // bite.
     if homelab_client::version::wants_help(&args) {
-        cmd = "help";
+        // fix-108 (help-flat-ids-typo-exit0, 2026-09-27): `homelab <verb>
+        // --help` is that verb's help with an example, not the whole list.
+        match args
+            .get(1)
+            .and_then(|v| homelab_client::cli_help::verb_help(v))
+        {
+            Some(help) => print!("{}", help),
+            None => print!("{}", homelab_client::cli_help::usage()),
+        }
+        std::process::exit(0);
+    }
+    // fix-108: a mistyped verb printed the help and exited 0, so a typo in a
+    // script looked like success. It says what was probably meant and exits 2.
+    if !homelab_client::cli_help::is_verb(cmd) {
+        let hint = homelab_client::cli_help::suggest(cmd)
+            .map(|v| format!("; did you mean '{}'?", v))
+            .unwrap_or_default();
+        eprintln!(
+            "{}error:{} unknown command '{}'{} — `homelab help` lists them",
+            C_RED, C_RESET, cmd, hint
+        );
+        std::process::exit(2);
     }
 
     // Kenny, 2026-09-02: `homelab check` has to work from any directory
@@ -137,10 +205,13 @@ async fn main() {
     // repository, and the compiled-in default is the last resort.
     let explicit_host = std::env::var("HOMELAB_HOST").ok();
     load_config_env();
-    let repo_cfg = homelab_client::repo_config::load(
-        &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-    )
-    .unwrap_or_else(|e| die(&e));
+    let root = homelab_client::repo_config::repo_root(
+        &cwd(),
+        std::env::var("HOMELAB_REPO").ok().as_deref(),
+    );
+    let repo_cfg = homelab_client::repo_config::load(root.as_deref().unwrap_or(&cwd()))
+        .unwrap_or_else(|e| die(&e));
+    let _ = REPO_ROOT.set(root);
     let (host, host_source) = homelab_client::repo_config::resolve_host(
         explicit_host,
         repo_cfg.as_ref().map(|(p, c)| (p.as_path(), c)),
@@ -154,10 +225,24 @@ async fn main() {
     // and `plan` (local validation only, D10).
     let needs_token = !matches!(
         cmd,
-        "help" | "plan" | "runbook" | "dashboard" | "presets" | "export" | "import"
+        "help"
+            | "plan"
+            | "runbook"
+            | "dashboard"
+            | "presets"
+            | "export"
+            | "import"
+            | "self-install"
+            // fix-110: local, they never reach the host.
+            | "new"
+            | "testplan"
     ) && !(cmd == "tui" && offline);
     if token.is_empty() && needs_token {
-        die("HOMELAB_TOKEN is not set");
+        // fix-110: the refusal names where the token goes.
+        die(
+            "HOMELAB_TOKEN is not set — put HOMELAB_TOKEN=<token> in ~/.config/homelab/env \
+             (or export it); it is the token in the daemon's host.toml",
+        );
     }
 
     match cmd {
@@ -170,9 +255,10 @@ async fn main() {
                     host: host.clone(),
                     token: token.clone(),
                     repo_pin: REPO_PIN.get().cloned().flatten(),
+                    built_in_pin: homelab_client::repo_config::built_in_pin().map(str::to_string),
                 })
             };
-            if let Err(e) = tui::run(backend).await {
+            if let Err(e) = tui::run(backend, repo_root().map(Path::to_path_buf)).await {
                 die(&format!("tui: {}", e));
             }
         }
@@ -184,10 +270,11 @@ async fn main() {
         // C7: adopt a hand-built native-service container, and drive an
         // adopted one. The stack file is stacks/<name>/service.yml.
         "adopt" => {
-            let dir = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab adopt stacks/<name>"));
-            let path = Path::new(dir).join("service.yml");
+            let dir = stack_dir(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab adopt stacks/<name>")),
+            );
+            let path = dir.join("service.yml");
             let raw = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| die(&format!("cannot read {}: {}", path.display(), e)));
             let m: homelab_proto::NativeServiceManifest = serde_yaml::from_str(&raw)
@@ -205,10 +292,10 @@ async fn main() {
         // already created. The other half of C7 — until now the orchestrator
         // could take over a hand-built container and could not build one.
         "install-native" => {
-            let dir = args.get(2).unwrap_or_else(|| {
+            let dir = stack_dir(args.get(2).unwrap_or_else(|| {
                 die("usage: homelab install-native stacks/<name>[/<unit>] [<tag> | --file <path>]")
-            });
-            let path = Path::new(dir).join("service.yml");
+            }));
+            let path = dir.join("service.yml");
             let raw = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| die(&format!("cannot read {}: {}", path.display(), e)));
             let m: homelab_proto::NativeServiceManifest = serde_yaml::from_str(&raw)
@@ -235,10 +322,7 @@ async fn main() {
             // The unit file lives beside the service file, or in the unit's
             // own directory when several services share one stack.
             let unit_name = format!("{}.service", m.unit);
-            let candidates = [
-                Path::new(dir).join(&unit_name),
-                Path::new(dir).join(&m.unit).join(&unit_name),
-            ];
+            let candidates = [dir.join(&unit_name), dir.join(&m.unit).join(&unit_name)];
             let unit_file = candidates
                 .iter()
                 .find_map(|p| std::fs::read_to_string(p).ok())
@@ -247,7 +331,8 @@ async fn main() {
                         "no {} found beside {} — the file that makes the service exist is not \
                          in the repository, so a rebuilt container would have the binary and \
                          nothing to run it",
-                        unit_name, dir
+                        unit_name,
+                        dir.display()
                     ))
                 });
             let asset = m.asset_name().to_string();
@@ -313,14 +398,17 @@ async fn main() {
             rpc(&host, &token, Command::ApplyGuards { vmid }).await;
         }
         "forget" => {
-            let stack = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab forget <stack>"))
-                .clone();
+            let stack = homelab_client::repo_config::stack_name(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab forget <stack>")),
+            );
             rpc(&host, &token, Command::ForgetStack { stack }).await;
         }
         "check" => {
-            let base = args.get(2).cloned().unwrap_or_else(|| "stacks".into());
+            let base = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| stacks_base().display().to_string());
             let stack_files = crate::spec::stack_files_with_vmids(&base);
             // Kenny ran this from inside `stacks/` on 2026-09-02 and it said
             // "0 stack file(s)" in passing, then reported the host's half as
@@ -334,7 +422,8 @@ async fn main() {
                 );
                 println!(
                     "  the half that compares your stack files against the fleet is SKIPPED. \
-                     Run this from the repository root, or pass the path: homelab check \
+                     Run this inside the repository, set HOMELAB_REPO in \
+                     ~/.config/homelab/env, or pass the path: homelab check \
                      ~/Projects/homelab/stacks"
                 );
             } else {
@@ -353,12 +442,16 @@ async fn main() {
         // each gave part of the answer, and the operator merged them in his
         // head; this asks the host for all of it and prints one verdict.
         "today" => {
-            let base = args.get(2).cloned().unwrap_or_else(|| "stacks".into());
+            let base = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| stacks_base().display().to_string());
             let stack_files = crate::spec::stack_files_with_vmids(&base);
             if stack_files.is_empty() {
                 println!(
                     "{}▶ today :: no stack files under '{}' — the check reads only what the \
-                     HOST can see; run this from the repository root, or pass the path{}",
+                     HOST can see; run this inside the repository, set HOMELAB_REPO in \
+                     ~/.config/homelab/env, or pass the path{}",
                     C_YELLOW, base, C_RESET
                 );
             } else {
@@ -385,44 +478,26 @@ async fn main() {
             std::process::exit(if today.needs_you() { 1 } else { 0 });
         }
         "backup-native" => {
-            let stack = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab backup-native <stack>"));
-            rpc(
-                &host,
-                &token,
-                Command::BackupNative {
-                    stack: stack.clone(),
-                },
-            )
-            .await;
+            let stack = homelab_client::repo_config::stack_name(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab backup-native <stack>")),
+            );
+            rpc(&host, &token, Command::BackupNative { stack }).await;
         }
         "update-native" => {
-            let stack = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab update-native <stack>"));
-            rpc(
-                &host,
-                &token,
-                Command::UpdateNative {
-                    stack: stack.clone(),
-                },
-            )
-            .await;
+            let stack = homelab_client::repo_config::stack_name(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab update-native <stack>")),
+            );
+            rpc(&host, &token, Command::UpdateNative { stack }).await;
         }
         // B1: the orchestrator's own release update of a native stack, now.
         "release-update-native" => {
-            let stack = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab release-update-native <stack>"));
-            rpc(
-                &host,
-                &token,
-                Command::ReleaseUpdateNative {
-                    stack: stack.clone(),
-                },
-            )
-            .await;
+            let stack = homelab_client::repo_config::stack_name(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab release-update-native <stack>")),
+            );
+            rpc(&host, &token, Command::ReleaseUpdateNative { stack }).await;
         }
         // Route A: ask every configured device for its own configuration now,
         // instead of waiting for 04:00 to find out whether it works.
@@ -490,14 +565,15 @@ async fn main() {
         },
         // H8 (light): park / unpark a stack for the nightly scheduler.
         "enable" | "disable" => {
-            let stack = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab enable|disable <stack-name>"));
+            let stack = homelab_client::repo_config::stack_name(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab enable|disable <stack-name>")),
+            );
             rpc(
                 &host,
                 &token,
                 Command::SetStackEnabled {
-                    stack: stack.clone(),
+                    stack,
                     enabled: cmd == "enable",
                 },
             )
@@ -505,10 +581,11 @@ async fn main() {
         }
         "export" => {
             // D11: single-file bundle, never secrets.
-            let dir = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab export stacks/<name> [out.yml]"));
-            let name = Path::new(dir)
+            let dir = stack_dir(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab export stacks/<name> [out.yml]")),
+            );
+            let name = dir
                 .file_name()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "stack".into());
@@ -516,7 +593,7 @@ async fn main() {
                 .get(3)
                 .cloned()
                 .unwrap_or_else(|| format!("{}-bundle.yml", name));
-            match spec::export_bundle(Path::new(dir), &out) {
+            match spec::export_bundle(&dir, &out) {
                 Ok(n) => println!(
                     "{}✓ exported{} — {} ({} file(s), no secrets)",
                     C_GREEN, C_RESET, out, n
@@ -532,7 +609,7 @@ async fn main() {
                 .get(4)
                 .and_then(|v| v.parse().ok())
                 .unwrap_or_else(|| die(usage));
-            match spec::import_bundle(Path::new(bundle), Path::new("stacks"), name, vmid) {
+            match spec::import_bundle(Path::new(bundle), &stacks_base(), name, vmid) {
                 Ok(dest) => {
                     // Validate what we just wrote with the same validator as deploy.
                     match spec::build_spec(&dest).and_then(|s| {
@@ -550,9 +627,10 @@ async fn main() {
         }
         "resize" => {
             // C4: apply the manifest's resources to the live container.
-            let dir = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab resize stacks/<name>"));
+            let dir = &stack_dir(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab resize stacks/<name>")),
+            );
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             println!(
                 "{}▶ resize {} :: {} MiB / {} cores / {}G{}",
@@ -573,18 +651,20 @@ async fn main() {
         "templates" => rpc(&host, &token, Command::ListTemplates).await,
         "template-build" => {
             // B8: bake the golden template. Temp vmid defaults to 999.
-            let temp_vmid: u16 = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(999);
-            let version: u32 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
             // O2: `--privileged` builds the second template. CT 105 and 106
             // are privileged and a clone cannot change that, so they need one.
-            let unprivileged = !args.iter().any(|a| a == "--privileged");
             // `--base <vztmpl>` picks the OS. Absent keeps the host's default,
             // so this stays the command it has always been for a caller that
             // does not care which Debian it is baking.
-            let base_template = args
-                .iter()
-                .position(|a| a == "--base")
-                .and_then(|i| args.get(i + 1).cloned());
+            // fix-110 (small-sharp-edges, 2026-09-27): an argument that does
+            // not parse is refused; it used to become vmid 999 or version 1.
+            let homelab_client::version::TemplateArgs {
+                temp_vmid,
+                version,
+                unprivileged,
+                base_template,
+            } = homelab_client::version::template_build_args(&args[2..])
+                .unwrap_or_else(|e| die(&e));
             let shown = base_template
                 .as_deref()
                 .map(homelab_core::ops::template::os_slug)
@@ -651,7 +731,8 @@ async fn main() {
                         .unwrap_or_else(|_| die(&format!("{} takes a number, got '{}'", what, v)))
                 })
             };
-            let presets_dir = Path::new("presets");
+            let presets_path = in_repo("presets");
+            let presets_dir = presets_path.as_path();
             let presets = homelab_client::scaffold::scan_presets(presets_dir);
             let preset_name = flag("--preset")
                 .unwrap_or_else(|| die("--preset is required; `homelab presets` lists them"));
@@ -690,11 +771,7 @@ async fn main() {
                 preset: Some(preset),
                 no_data_paths: &no_data,
             };
-            match homelab_client::scaffold::scaffold_stack(
-                Path::new("stacks"),
-                presets_dir,
-                &params,
-            ) {
+            match homelab_client::scaffold::scaffold_stack(&stacks_base(), presets_dir, &params) {
                 Ok(s) => {
                     println!(
                         "{}✓ scaffolded {}{} — {} file(s)",
@@ -716,7 +793,7 @@ async fn main() {
         }
         "presets" => {
             // G2: list the data-driven preset catalog (local, no network).
-            for pr in homelab_client::scaffold::scan_presets(Path::new("presets")) {
+            for pr in homelab_client::scaffold::scan_presets(&in_repo("presets")) {
                 let src = if pr.dir.is_some() {
                     ""
                 } else {
@@ -741,9 +818,10 @@ async fn main() {
         "incidents" => rpc(&host, &token, Command::Incidents).await,
         "plan" => {
             // D6/D10: validate locally and show what would be sent — no network.
-            let dir = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab plan stacks/<name>"));
+            let dir = &stack_dir(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab plan stacks/<name>")),
+            );
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             check_fleet_routes(Path::new(dir).parent().unwrap_or(Path::new(".")));
             match homelab_core::manifest::validate(&spec) {
@@ -760,9 +838,10 @@ async fn main() {
             }
         }
         "deploy" => {
-            let dir = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab deploy stacks/<name>"));
+            let dir = &stack_dir(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab deploy stacks/<name>")),
+            );
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             // D10: fail fast client-side before opening a connection.
             if let Err(e) = homelab_core::manifest::validate(&spec) {
@@ -781,8 +860,12 @@ async fn main() {
                 .get(2)
                 .filter(|a| !a.starts_with("--"))
                 .cloned()
-                .unwrap_or_else(|| "stacks".into());
+                .unwrap_or_else(|| stacks_base().display().to_string());
             let skip_backup = args.iter().any(|a| a == "--no-backup");
+            // fix-100 (apply-no-confirm-creates-drill, 2026-09-27): the plan
+            // used to be printed and deployed in the same breath.
+            let dry_run = args.iter().any(|a| a == "--dry-run");
+            let assume_yes = args.iter().any(|a| a == "--yes");
             let base_path = Path::new(&base);
             if !base_path.is_dir() {
                 die(&format!(
@@ -808,7 +891,13 @@ async fn main() {
             let mut local: Vec<(String, String)> = Vec::new();
             let mut specs: std::collections::BTreeMap<String, homelab_proto::DeploySpec> =
                 std::collections::BTreeMap::new();
-            for (name, dir) in spec::scan_local_stacks(base_path) {
+            let declared = spec::declared_stacks(base_path);
+            let ephemeral: Vec<String> = spec::scan_local_stacks(base_path)
+                .into_iter()
+                .map(|(n, _)| n)
+                .filter(|n| !declared.iter().any(|(d, _)| d == n))
+                .collect();
+            for (name, dir) in declared {
                 let sp = spec::build_spec(&dir)
                     .unwrap_or_else(|e| die(&format!("{}: {} — nothing applied", name, e)));
                 if let Err(e) = homelab_core::manifest::validate(&sp) {
@@ -840,14 +929,78 @@ async fn main() {
             for n in &plan.unchanged {
                 println!("{}  = {}{}", C_DIM, n, C_RESET);
             }
+            for n in &ephemeral {
+                println!(
+                    "{}  · {} — ephemeral: deployed by name only, never by apply{}",
+                    C_DIM, n, C_RESET
+                );
+            }
             for n in &plan.deploy {
                 println!("  ↑ {}", n);
+                // fix-100: what the deploy changes, file by file, removals
+                // included — the host's applied files against the local ones.
+                let Some(sp) = specs.get(n) else { continue };
+                if !host_pairs.iter().any(|(h, _)| h == n) {
+                    println!(
+                        "{}      new: creates CT {}{}",
+                        C_DIM, sp.manifest.vmid, C_RESET
+                    );
+                    continue;
+                }
+                let applied: Vec<homelab_proto::FileBlob> =
+                    rpc_reply(&host, &token, Command::GetApplied { stack: n.clone() })
+                        .await
+                        .filter(|r| r.ok)
+                        .and_then(|r| serde_json::from_str(&r.message).ok())
+                        .unwrap_or_else(|| {
+                            die(&format!(
+                                "could not read what the host applied for {} — nothing applied",
+                                n
+                            ))
+                        });
+                let changes = homelab_client::apply::file_changes(&sp.files, &applied);
+                if changes.is_empty() {
+                    println!(
+                        "{}      files unchanged (secrets or settings differ){}",
+                        C_DIM, C_RESET
+                    );
+                }
+                for c in changes {
+                    println!("      {}", c);
+                }
             }
             for n in &plan.destroy {
                 println!(
                     "{}  ✗ {} — in host state, no {}/{}/{}",
                     C_YELLOW, n, base, n, C_RESET
                 );
+            }
+            let answer = if dry_run || assume_yes || plan.deploy.is_empty() {
+                None
+            } else {
+                use std::io::Write as _;
+                eprint!("Deploy these {} stack(s)? [y/N] ", plan.deploy.len());
+                std::io::stderr().flush().ok();
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .map(|_| line)
+            };
+            match homelab_client::apply::decide(
+                dry_run,
+                assume_yes || plan.deploy.is_empty(),
+                answer.as_deref(),
+            ) {
+                homelab_client::apply::Decision::Preview => {
+                    println!("dry run — nothing deployed, nothing destroyed");
+                    std::process::exit(0);
+                }
+                homelab_client::apply::Decision::Decline => {
+                    die("not confirmed — nothing deployed, nothing destroyed")
+                }
+                homelab_client::apply::Decision::Deploy => {}
             }
             for name in &plan.deploy {
                 let Some(sp) = specs.remove(name) else {
@@ -904,7 +1057,7 @@ async fn main() {
             let name = args
                 .get(2)
                 .filter(|a| !a.starts_with("--"))
-                .cloned()
+                .map(|a| homelab_client::repo_config::stack_name(a))
                 .unwrap_or_else(|| die("usage: homelab wipe <stack> | <stack>/<app>"));
             let listed = rpc_with(
                 &host,
@@ -936,9 +1089,10 @@ async fn main() {
             .await;
         }
         "backup" => {
-            let dir = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab backup stacks/<name>"));
+            let dir = &stack_dir(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab backup stacks/<name>")),
+            );
             // F291: the manifest alone. A backup runs on the host against
             // /appdata paths and needs no file and no secret from here.
             let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
@@ -953,9 +1107,9 @@ async fn main() {
                 .skip(2)
                 .filter(|a| !a.starts_with("--"))
                 .collect();
-            let dir = positional.first().unwrap_or_else(|| {
+            let dir = &stack_dir(positional.first().copied().unwrap_or_else(|| {
                 die("usage: homelab restore stacks/<name> [snapshot] [--yes] [--no-safety-copy]")
-            });
+            }));
             let snapshot = positional
                 .get(1)
                 .map(|s| s.to_string())
@@ -1000,9 +1154,10 @@ async fn main() {
             .await;
         }
         "update" => {
-            let dir = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab update stacks/<name> [app]"));
+            let dir = &stack_dir(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab update stacks/<name> [app]")),
+            );
             let app = args.get(3).cloned();
             // F294: an update pulls an image and recreates a container on the
             // host; the files and secrets it used to build here were thrown
@@ -1055,6 +1210,34 @@ async fn main() {
                 Err(e) => die(&e),
             }
         }
+        // fix-105 (older-client-no-warning, 2026-09-27): the client updates
+        // itself the way `release-update` updates the host — the release's
+        // own binary, checksum-verified, then put where this one runs from.
+        // It was a five-line gh/sha256sum/install routine per workstation.
+        "self-install" => {
+            let tag = match args.get(2).cloned() {
+                Some(t) => t,
+                None => homelab_client::release::latest_release_tag()
+                    .unwrap_or_else(|| die("no release found (gh authenticated? release exists?)")),
+            };
+            let target = std::env::current_exe().unwrap_or_else(|e| {
+                die(&format!("cannot tell where this client runs from: {}", e))
+            });
+            println!(
+                "{}▶ self-install :: client {} from GitHub into {}{}",
+                C_CYAN,
+                tag,
+                target.display(),
+                C_RESET
+            );
+            let bytes = homelab_client::release::stage_client(&tag).unwrap_or_else(|e| die(&e));
+            println!("{}✓ checksum verified{}", C_GREEN, C_RESET);
+            homelab_client::release::install_binary(&bytes, &target).unwrap_or_else(|e| die(&e));
+            println!(
+                "{}✓ client {} installed{} — the next command runs it",
+                C_GREEN, tag, C_RESET
+            );
+        }
         "self-update" => {
             // H5: ship a new HOST binary over the line; the host selfchecks,
             // installs with an armed rollback, and restarts itself.
@@ -1103,13 +1286,14 @@ async fn main() {
         // Phase 7's output document, derived from the tests rather than kept
         // beside them — the same reasoning as `runbook`.
         "testplan" => {
-            let out = args
-                .get(2)
-                .cloned()
-                .unwrap_or_else(|| "docs/deployment/TEST_PLAN.md".into());
+            let out = args.get(2).cloned().unwrap_or_else(|| {
+                in_repo("docs/deployment/TEST_PLAN.md")
+                    .display()
+                    .to_string()
+            });
             match homelab_client::testplan::generate_test_plan(
-                &[Path::new("core/tests"), Path::new("client/tests")],
-                Path::new("docs/deployment/REALIZATION_PLAN.md"),
+                &[&in_repo("core/tests"), &in_repo("client/tests")],
+                &in_repo("docs/deployment/REALIZATION_PLAN.md"),
                 Path::new(&out),
             ) {
                 Ok(n) => println!(
@@ -1125,8 +1309,8 @@ async fn main() {
             let out = args
                 .get(2)
                 .cloned()
-                .unwrap_or_else(|| "docs/DR_RUNBOOK.md".into());
-            match spec::generate_runbook(Path::new("stacks"), &out) {
+                .unwrap_or_else(|| in_repo("docs/DR_RUNBOOK.md").display().to_string());
+            match spec::generate_runbook(&stacks_base(), &out) {
                 Ok(n) => println!(
                     "{}✓ runbook written{} — {} ({} stack(s))",
                     C_GREEN, C_RESET, out, n
@@ -1139,9 +1323,10 @@ async fn main() {
             // no longer has; since ask-8 (2026-09-27) the deploy removes them
             // itself, so this is mostly a no-op kept for a container that has
             // not been deployed since. Same typed confirmation as before.
-            let dir = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab prune-orphans stacks/<name>"));
+            let dir = &stack_dir(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab prune-orphans stacks/<name>")),
+            );
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             let stack = spec.manifest.stack_name.clone();
             eprint!(
@@ -1169,9 +1354,10 @@ async fn main() {
             .await;
         }
         "destroy" => {
-            let dir = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab destroy stacks/<name>"));
+            let dir = &stack_dir(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab destroy stacks/<name>")),
+            );
             let skip_backup = args.iter().any(|a| a == "--no-backup");
             // ask-8: a stack whose directory is gone is destroyed from the
             // manifest the host recorded when it last applied it.
@@ -1183,7 +1369,10 @@ async fn main() {
                 eprintln!(
                     "{}! no {}/lxc-compose.yml — destroying '{}' from the manifest the host \
                      recorded{}",
-                    C_YELLOW, dir, stack, C_RESET
+                    C_YELLOW,
+                    dir.display(),
+                    stack,
+                    C_RESET
                 );
                 let confirm = read_typed(&format!(
                     "Type the stack name '{}' to confirm destroy: ",
@@ -1238,75 +1427,9 @@ async fn main() {
             )
             .await;
         }
-        _ => {
-            println!("homelab v{} — usage:", env!("CARGO_PKG_VERSION"));
-            println!("  homelab today [stacks/]             what needs you: doctor, check, incidents, manual checks in one list");
-            println!("  homelab ping|status|doctor|incidents");
-            println!("  homelab plan stacks/<name>          validate and show the spec (no host; runs latch/gh for secrets and native releases)");
-            println!("  homelab deploy stacks/<name>");
-            println!("  homelab backup stacks/<name>        restic snapshot (E1)");
-            println!("  homelab restore stacks/<name> [snap] [--yes] [--no-safety-copy]  restore from snapshot (E2); asks for the name, keeps a copy of the current data");
-            println!("  homelab update stacks/<name> [app]  pull+up with rollback (D9/B6)");
-            println!(
-                "  homelab patch                       apt dist-upgrade all managed stacks (H6)"
-            );
-            println!("  homelab destroy stacks/<name>       gated destroy (C2; from the host's record when the dir is gone)");
-            println!("  homelab apply [stacks/] [--no-backup]  deploy what changed, destroy what left the files after its name is typed (ask-8)");
-            println!("  homelab wipe <stack>[/<app>]        delete what a retired stack or app kept: backups, /appdata, vault (ask-9)");
-            println!("  homelab prune-orphans stacks/<name>  remove files the repo dropped (H2b; the deploy does this itself now)");
-            println!(
-                "  homelab enable|disable <stack>      (un)park for the nightly scheduler (H8)"
-            );
-            println!("  homelab backup-host-meta            snapshot vault/state/TLS/repo (H10)");
-            println!("  homelab check [stacks/]             hold the repo against reality (Y4)");
-            println!("  homelab guards <vmid>               apply the runaway guards (B2/G1)");
-            println!("  homelab forget <stack>              drop a stale record and its registrations (no container touched)");
-            println!("  homelab adopt stacks/<name>         adopt a native-service CT (C7)");
-            println!(
-                "  homelab backup-native|update-native <stack>  drive an adopted service (C7)"
-            );
-            println!("  homelab zfs-replicate               ZFS snapshots + replication (E8)");
-            println!("  homelab runbook [out.md]            generate DR runbook (E7, local)");
-            println!("  homelab dashboard <stack> <app>...  render a stack dashboard (T2, local)");
-            println!("  homelab presets                     list the preset catalog (local)");
-            println!("  homelab new <name> --preset <p> --vmid <n>   scaffold a stack (T65)");
-            println!(
-                "  homelab exec <vmid> <cmd...>        remote exec (A6, requires exec_enabled)"
-            );
-            println!("  homelab self-update <binary>        replace HOST binary w/ rollback (H5)");
-            // G20 of the Phase-7 gate: eight verbs existed and appeared in no
-            // help text at all, `install-native` and `release-update` among
-            // them — the one that installs your own services and the one that
-            // updates the host. A command nobody can discover is a command
-            // that does not exist.
-            println!(
-                "  homelab release-update              fetch the newest release and ship it (H7)"
-            );
-            println!(
-                "  homelab install-native stacks/<name>[/<unit>] [<tag> | --file <path>]  install a native service from a release or a file (O1, B7)"
-            );
-            println!(
-                "  homelab template-build [vmid] [ver] [--privileged] [--base <vztmpl>]  golden template (M3)"
-            );
-            println!("  homelab templates                   list the golden templates");
-            println!("  homelab resize stacks/<name>        apply changed resources (H4)");
-            println!("  homelab config                      show the host's settings (G8)");
-            println!("  homelab release-update-native <stack> install the latest release of each service (B1)");
-            println!("  homelab backup-devices              fetch each device's own config now");
-            println!(
-                "  homelab testplan                    regenerate docs/deployment/TEST_PLAN.md"
-            );
-            println!(
-                "  homelab checks                      the questions only a person can answer (G17)"
-            );
-            println!("  homelab checks answer <id> ok|nok [note]   record one of those answers");
-            println!(
-                "  homelab export|import <file>        write or read a stack-definition bundle"
-            );
-            println!("  homelab tui                         the terminal interface (G1)");
-            println!("env: HOMELAB_HOST (default 10.10.5.250:8443), HOMELAB_TOKEN");
-            println!("cert pin: ~/.config/homelab/pin (auto on first connect)");
-        }
+        // fix-108: `help` (or no arguments). An unknown verb never reaches
+        // here: it is refused before the token is read.
+        _ => print!("{}", homelab_client::cli_help::usage()),
     }
 }
 
@@ -1379,11 +1502,20 @@ async fn rpc_exchange(
     let mut done: Option<bool> = None;
     // fix-67: the pin, the frame ceiling and the version gate live in one
     // place, shared with the TUI, whose own copy had drifted from this one.
-    let link =
-        homelab_client::link::connect(host, token, REPO_PIN.get().and_then(|p| p.as_deref()))
-            .await
-            .unwrap_or_else(|e| die(&e));
+    let link = homelab_client::link::connect(
+        host,
+        token,
+        REPO_PIN.get().and_then(|p| p.as_deref()),
+        homelab_client::repo_config::built_in_pin(),
+    )
+    .await
+    .unwrap_or_else(|e| die(&e));
     match &link.pinned {
+        // fix-149: nothing trusted on first use; say where the pin came from.
+        Some(homelab_client::link::Pinned::BuiltIn(fp)) => eprintln!(
+            "{}● pinned host certificate SHA256:{}, the one this client was built with{}",
+            C_YELLOW, fp, C_RESET
+        ),
         Some(homelab_client::link::Pinned::FromRepo(fp)) => eprintln!(
             "{}● pinned host certificate SHA256:{} from {}{}",
             C_YELLOW,
@@ -1448,6 +1580,16 @@ async fn rpc_exchange(
                 if let Some(why) = homelab_client::link::refuse_older_host(&req.command, &version) {
                     die(&why);
                 }
+                // fix-105 (older-client-no-warning, 2026-09-27): the other
+                // direction — a stale client may not change anything, and
+                // says so when it only reads.
+                if let Some(why) = homelab_client::link::refuse_older_client(&req.command, &version)
+                {
+                    die(&why);
+                }
+                if let Some(warn) = homelab_client::link::older_client_warning(&version) {
+                    eprintln!("{}! {}{}", C_YELLOW, warn, C_RESET);
+                }
                 if !sent {
                     tx.send(Message::Text(serde_json::to_string(&req).unwrap().into()))
                         .await
@@ -1507,6 +1649,12 @@ async fn rpc_exchange(
                 if !echo_reply {
                     return (resp.ok, fleet_seen, Some(resp));
                 }
+                // fix-103: a fleet check is printed group by group, each in
+                // its own colour, instead of one red block.
+                if resp.message.starts_with("fleet check:") {
+                    print_check(&resp.message, resp.ok);
+                    return (resp.ok, fleet_seen, Some(resp));
+                }
                 if !resp.ok {
                     println!("{}✗ {}{}", C_RED, resp.message, C_RESET);
                     return (false, fleet_seen, Some(resp));
@@ -1528,6 +1676,26 @@ async fn rpc_exchange(
         C_RED, C_RESET
     );
     (false, fleet_seen, None)
+}
+
+/// fix-103 (check-output-buries-problem, 2026-09-27): the fleet check with
+/// the summary first and each severity group in its own colour.
+fn print_check(msg: &str, ok: bool) {
+    use homelab_client::output::{check_tones, Tone};
+    for (i, (tone, line)) in check_tones(msg).into_iter().enumerate() {
+        let color = match tone {
+            Tone::Broken => C_RED,
+            Tone::Drift => C_YELLOW,
+            Tone::Noted => C_DIM,
+            Tone::Plain => C_GREEN,
+        };
+        let mark = match (i, ok) {
+            (0, true) => "✓ ",
+            (0, false) => "✗ ",
+            _ => "",
+        };
+        println!("{}{}{}{}", color, mark, line, C_RESET);
+    }
 }
 
 /// Read one line the operator typed after `prompt` (typed-name gates).

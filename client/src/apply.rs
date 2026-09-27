@@ -52,3 +52,59 @@ pub fn plan(
     out.destroy.dedup();
     out
 }
+
+/// What `apply` does once the plan is on the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision {
+    /// `--dry-run`: the plan is the whole answer.
+    Preview,
+    Deploy,
+    /// Anything but a yes, including no answer at all.
+    Decline,
+}
+
+/// fix-100 (apply-no-confirm-creates-drill, 2026-09-27): `apply` deployed
+/// every changed stack the moment it had printed the plan, and since ask-8 a
+/// deploy also removes what the files no longer carry. It now asks once.
+/// `answer` is the line typed at the prompt, `None` when nothing could be
+/// read; only a typed yes deploys.
+pub fn decide(dry_run: bool, yes: bool, answer: Option<&str>) -> Decision {
+    if dry_run {
+        return Decision::Preview;
+    }
+    if yes {
+        return Decision::Deploy;
+    }
+    match answer.map(|a| a.trim().to_ascii_lowercase()) {
+        Some(a) if a == "y" || a == "yes" => Decision::Deploy,
+        _ => Decision::Decline,
+    }
+}
+
+/// fix-100: the per-file change a deploy makes, from the files the host last
+/// applied: `+ path` new, `~ path` changed, `- path` removed by the deploy.
+/// Sorted by path; empty when the files are the same.
+pub fn file_changes(
+    local: &[homelab_proto::FileBlob],
+    applied: &[homelab_proto::FileBlob],
+) -> Vec<String> {
+    let mut out: Vec<(String, char)> = Vec::new();
+    for f in local {
+        match applied.iter().find(|a| a.path == f.path) {
+            None => out.push((f.path.clone(), '+')),
+            Some(a) if a.content != f.content || a.mode != f.mode => {
+                out.push((f.path.clone(), '~'))
+            }
+            Some(_) => {}
+        }
+    }
+    for a in applied {
+        if !local.iter().any(|f| f.path == a.path) {
+            out.push((a.path.clone(), '-'));
+        }
+    }
+    out.sort();
+    out.into_iter()
+        .map(|(p, sign)| format!("{} {}", sign, p))
+        .collect()
+}

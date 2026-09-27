@@ -21,6 +21,9 @@ pub type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 /// about in its own way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pinned {
+    /// fix-149: the machine had no pin and took the one this client was
+    /// built with.
+    BuiltIn(String),
     /// The machine had no pin and took the repository's.
     FromRepo(String),
     /// Nothing named a fingerprint, so the first one seen was trusted.
@@ -34,9 +37,18 @@ pub struct Link {
     pub pinned: Option<Pinned>,
 }
 
-/// Open the line: the machine's pin reconciled with the repository's, the
-/// certificate held to it, and the same message ceiling the host accepts.
-pub async fn connect(host: &str, token: &str, repo_pin: Option<&str>) -> Result<Link, String> {
+/// Open the line: the machine's pin reconciled with the repository's and
+/// the one this client was built with, the certificate held to it, and the
+/// same message ceiling the host accepts.
+///
+/// `built_in`: the pin compiled into the client (`repo_config::built_in_pin`),
+/// passed in so a test can present a certificate of its own.
+pub async fn connect(
+    host: &str,
+    token: &str,
+    repo_pin: Option<&str>,
+    built_in: Option<&str>,
+) -> Result<Link, String> {
     let url = format!("wss://{}/api/ws", host);
     let mut request = url
         .clone()
@@ -52,14 +64,19 @@ pub async fn connect(host: &str, token: &str, repo_pin: Option<&str>) -> Result<
     // A4: pin the host certificate (TOFU on first connect) — unless the
     // repository names the fingerprint (feat-client-1), in which case a
     // fresh machine pins that instead of trusting whatever answers first.
-    let decision = crate::repo_config::reconcile_pin(crate::load_pin(), repo_pin)?;
+    // fix-149 (first-connect-pin, Kenny 2026-09-27: "Pin in de client"): with
+    // a pin built into the client, that is the only certificate trusted, a
+    // first connection included — the handshake fails before the request
+    // that carries the bearer token is ever sent.
+    let decision =
+        crate::repo_config::reconcile_pin_built_in(built_in, crate::load_pin(), repo_pin)?;
+    // Saved only once the handshake has held the host to it (below): saving
+    // it first left a pin behind for a host that was never reached.
+    let adopted = decision
+        .adopted_from_repo
+        .then(|| decision.pin.clone())
+        .flatten();
     let mut pinned = None;
-    if decision.adopted_from_repo {
-        if let Some(fp) = decision.pin.as_deref() {
-            crate::save_pin(fp);
-            pinned = Some(Pinned::FromRepo(fp.to_string()));
-        }
-    }
     let first_connect = decision.pin.is_none();
     let verifier = crate::tls::PinnedVerifier::new(decision.pin);
     let tls_config = rustls::ClientConfig::builder()
@@ -85,6 +102,14 @@ pub async fn connect(host: &str, token: &str, repo_pin: Option<&str>) -> Result<
     .map_err(|e| format!("connect {}: {}", url, e))?;
 
     let fingerprint = verifier.observed();
+    if let Some(fp) = adopted {
+        crate::save_pin(&fp);
+        pinned = Some(if built_in.is_some() {
+            Pinned::BuiltIn(fp)
+        } else {
+            Pinned::FromRepo(fp)
+        });
+    }
     if first_connect {
         if let Some(fp) = &fingerprint {
             crate::save_pin(fp);
@@ -95,6 +120,39 @@ pub async fn connect(host: &str, token: &str, repo_pin: Option<&str>) -> Result<
         ws,
         fingerprint,
         pinned,
+    })
+}
+
+/// fix-105 (older-client-no-warning, 2026-09-27): why `command` may not go
+/// from this client to a host at `host_version`, if it may not.
+///
+/// The mirror image of [`refuse_older_host`]. The gate refused only a client
+/// newer than the host; a stale client talking to a newer one parses the
+/// stack files with an older reader, and since ask-8 a field it drops is a
+/// field the host reads as "no longer declared, remove". Read-only commands
+/// still go through, so the mismatch can be looked at.
+pub fn refuse_older_client(command: &Command, host_version: &str) -> Option<String> {
+    let client = env!("CARGO_PKG_VERSION");
+    (crate::version::mutates(command) && crate::version::older(client, host_version)).then(|| {
+        format!(
+            "this client is v{} and the host is v{} :: an older client drops what it does \
+             not know, and the host reads a dropped field as \"no longer declared, remove\" \
+             — run 'homelab self-install' first",
+            client, host_version
+        )
+    })
+}
+
+/// fix-105: the warning a read-only command prints when this client is
+/// older than the host.
+pub fn older_client_warning(host_version: &str) -> Option<String> {
+    let client = env!("CARGO_PKG_VERSION");
+    crate::version::older(client, host_version).then(|| {
+        format!(
+            "this client is v{} and the host is v{} — 'homelab self-install' updates it; \
+             commands that change anything are refused until then",
+            client, host_version
+        )
     })
 }
 

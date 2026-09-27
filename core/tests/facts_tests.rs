@@ -24,6 +24,32 @@ fn inputs() -> FactsInputs {
     }
 }
 
+/// long-silences (expert panel, 2026-09-27): `homelab check` took 41 s with
+/// nothing on the screen after "link up". The gatherer reports each phase,
+/// and each container it probes, as it goes.
+/// covers: fix-104
+#[tokio::test]
+async fn fix_104_the_fact_gatherer_reports_each_phase_as_it_goes() {
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "pct list",
+        CmdOutput::ok(
+            "VMID Status Lock Name\n109 running 109-app-kyu\n112 running 112-app-almanac\n",
+        ),
+    );
+    let lines = std::sync::Mutex::new(Vec::<String>::new());
+    let progress = |l: &str| lines.lock().unwrap().push(l.to_string());
+    let _ = gather_live_facts_with(&exec, &inputs(), &[], &progress).await;
+    let lines = lines.into_inner().unwrap();
+    assert!(
+        lines.iter().any(|l| l.contains("probing 2 container(s)")),
+        "{:?}",
+        lines
+    );
+    assert!(lines.iter().any(|l| l.contains("1/2")), "{:?}", lines);
+    assert!(lines.iter().any(|l| l.contains("2/2")), "{:?}", lines);
+}
+
 #[test]
 fn g6_pct_list_becomes_vmid_and_hostname_pairs() {
     let got = parse_pct_list(

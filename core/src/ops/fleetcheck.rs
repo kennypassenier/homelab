@@ -707,6 +707,53 @@ pub fn check_passes(findings: &[Finding]) -> bool {
     alarming(findings).is_empty()
 }
 
+/// The check as text, for `homelab check`, the TUI and the nightly log.
+///
+/// fix-103 (check-output-buries-problem, 2026-09-27): live, the header read
+/// `9 finding(s)`, two of them `noted` with nothing to do, and the only
+/// `broken` item was seventh because the list was sorted by subject. A
+/// summary line comes first, then each severity as its own group, the one
+/// that needs action on top. The `[broken]`/`[drift]`/`[noted]` tags stay on
+/// every item, so a client can colour it and a grep still finds it.
+pub fn render(findings: &[Finding]) -> String {
+    if findings.is_empty() {
+        return "fleet check: repo and reality agree".into();
+    }
+    let groups = [
+        (Severity::Broken, "broken", "not doing its job now"),
+        (
+            Severity::Drift,
+            "drift",
+            "works, bites on the next deploy or outage",
+        ),
+        (Severity::Noted, "noted", "nothing to do"),
+    ];
+    let count = |s: Severity| findings.iter().filter(|f| f.severity == s).count();
+    let summary: Vec<String> = groups
+        .iter()
+        .filter(|(s, _, _)| count(*s) > 0)
+        .map(|(s, tag, _)| match s {
+            Severity::Noted => format!("{} {} (nothing to do)", count(*s), tag),
+            _ => format!("{} {}", count(*s), tag),
+        })
+        .collect();
+    let mut out = format!("fleet check: {}\n", summary.join(" · "));
+    for (severity, tag, meaning) in groups {
+        let items: Vec<&Finding> = findings.iter().filter(|f| f.severity == severity).collect();
+        if items.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("{} — {}:\n", tag, meaning));
+        for f in items {
+            out.push_str(&format!(
+                "  [{}] {} — {}\n      remedy: {}\n",
+                tag, f.subject, f.what, f.remedy
+            ));
+        }
+    }
+    out
+}
+
 /// The whole comparison, as one pure function.
 pub fn evaluate(
     state: &HostState,
@@ -1255,8 +1302,8 @@ pub fn evaluate_seed(fact: &SeedFact, max_age_s: u64) -> Vec<Finding> {
             severity: Severity::Drift,
             subject: "uptime seeder".into(),
             what: "ran without a generated monitor list, so it judged nothing stale".into(),
-            remedy: "absent data is not an empty fleet (F175) — check that the deploy is \
-                     writing the host-monitors file"
+            remedy: "check that the deploy writes the host-monitors file, then let the seeder \
+                     run again"
                 .into(),
         });
     } else if !fact.stale.is_empty() {
@@ -1268,10 +1315,9 @@ pub fn evaluate_seed(fact: &SeedFact, max_age_s: u64) -> Vec<Finding> {
                 fact.stale.len(),
                 fact.stale.join(", ")
             ),
-            remedy: "the seeder removes the monitors it owns once their entry leaves the files \
-                     (2026-09-27); these it left, because the desired list looked truncated \
-                     (see `refused` in last-seed.json) — check the generated list, or remove \
-                     them in Uptime Kuma"
+            remedy: "the seeder left them because the generated list looked truncated \
+                     (`refused` in last-seed.json): check that list, or remove them in \
+                     Uptime Kuma"
                 .into(),
         });
     }
@@ -1321,7 +1367,7 @@ pub fn evaluate_coverage(facts: &[CoverageFact]) -> Vec<Finding> {
                 severity: Severity::Drift,
                 subject: c.stack.clone(),
                 what: "no Prometheus target answers for this stack — it is not being measured".into(),
-                remedy: "check /appdata/metrics/prometheus-config/targets/<stack>.json exists and that Prometheus reads that directory; a deploy writes the file, and for weeks nothing read it".into(),
+                remedy: "check /appdata/metrics/prometheus-config/targets/<stack>.json exists and that Prometheus reads that directory".into(),
             });
         }
         if c.dashboard_provisioned == Some(false) {
@@ -1329,7 +1375,7 @@ pub fn evaluate_coverage(facts: &[CoverageFact]) -> Vec<Finding> {
                 severity: Severity::Drift,
                 subject: c.stack.clone(),
                 what: "Grafana does not have this stack's generated dashboard — the deploy wrote it somewhere Grafana never reads".into(),
-                remedy: "check that `grafana_dashboards_dir` in host.toml is a directory the Grafana container actually mounts; the deploy's own report cannot tell you, because writing the file is all it checks (F149)".into(),
+                remedy: "check that `grafana_dashboards_dir` in host.toml is a directory the Grafana container mounts".into(),
             });
         }
         if c.logs_recent == Some(false) {

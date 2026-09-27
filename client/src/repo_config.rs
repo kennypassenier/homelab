@@ -72,6 +72,55 @@ pub fn find_repo_file(start: &Path) -> Option<PathBuf> {
     None
 }
 
+/// fix-101 (cli-path-vs-name-and-cwd, 2026-09-27): the repository root,
+/// found once. Up from `start` for `config/client.toml`, the way the address
+/// is found; else `env_repo` (`HOMELAB_REPO`, which `~/.config/homelab/env`
+/// may set) when it holds that file. The verbs read `./stacks`, so run from
+/// `/tmp` `check` compared half the fleet and `deploy` found nothing.
+pub fn repo_root(start: &Path, env_repo: Option<&str>) -> Option<PathBuf> {
+    let root_of = |file: PathBuf| file.parent()?.parent().map(Path::to_path_buf);
+    if let Some(root) = find_repo_file(start).and_then(root_of) {
+        return Some(root);
+    }
+    let dir = PathBuf::from(env_repo?.trim());
+    dir.join(REPO_FILE).is_file().then_some(dir)
+}
+
+/// fix-101: the stacks directory the verbs read: the repository's when one
+/// was found, else `stacks` where the command runs, as before.
+pub fn stacks_dir(root: Option<&Path>) -> PathBuf {
+    root.map(|r| r.join("stacks"))
+        .unwrap_or_else(|| PathBuf::from("stacks"))
+}
+
+/// fix-101: the stack an argument names, however it is spelled: `almanac`,
+/// `almanac/`, `stacks/almanac`, or a full path into a stacks directory all
+/// say `almanac`. A part below the stack (`kyu/kyu-runner`, `media/radarr`)
+/// is kept. The verbs that take a name answered `stack 'stacks/almanac' is
+/// not in host state` to the path form.
+pub fn stack_name(arg: &str) -> String {
+    let s = arg.trim().trim_end_matches('/');
+    let s = s.strip_prefix("./").unwrap_or(s);
+    let s = match s.rfind("stacks/") {
+        Some(i) if i == 0 || s[..i].ends_with('/') => &s[i + "stacks/".len()..],
+        _ => s,
+    };
+    s.to_string()
+}
+
+/// fix-101: the stack directory an argument names. The path as typed when it
+/// is a stack directory from `cwd` (with an `lxc-compose.yml` or a
+/// `service.yml`); otherwise the stack of that name in the repository's
+/// stacks directory. The verbs that take a path answered `homelab deploy
+/// almanac` with "cannot read almanac/lxc-compose.yml".
+pub fn stack_dir(arg: &str, cwd: &Path, root: Option<&Path>) -> PathBuf {
+    let typed = cwd.join(arg.trim());
+    if typed.join("lxc-compose.yml").is_file() || typed.join("service.yml").is_file() {
+        return typed.components().collect();
+    }
+    stacks_dir(root).join(stack_name(arg))
+}
+
 /// Read the repository file if there is one. A file that exists but cannot
 /// be parsed is an error, never an absence: standing rule 45 — an input the
 /// program could not parse is refused rather than quietly replaced by a
@@ -135,6 +184,62 @@ fn normalise(fp: &str) -> String {
         .trim_start_matches("SHA256:")
         .trim_start_matches("sha256:")
         .to_ascii_uppercase()
+}
+
+/// fix-149 (first-connect-pin, Kenny 2026-09-27: "Pin in de client"): the
+/// fleet's certificate fingerprint as `config/client.toml` said when this
+/// client was compiled (`client/build.rs`), without its `SHA256:` prefix.
+/// `None` for a client built from a tree without a pin.
+pub fn built_in_pin() -> Option<&'static str> {
+    let pin = env!("HOMELAB_BUILT_IN_PIN").trim();
+    let pin = pin.strip_prefix("SHA256:").unwrap_or(pin);
+    (!pin.is_empty()).then_some(pin)
+}
+
+/// fix-149: [`reconcile_pin`] with the pin the client was built with on top.
+///
+/// A machine with no pin of its own used to trust the first certificate it
+/// saw and send it the bearer token. With a built-in pin that is the only
+/// certificate trusted, first connection included; a machine pin or a
+/// repository pin that disagrees with it is refused, never followed, because
+/// either one differing is exactly what a changed certificate or a stale
+/// checkout looks like, and a person has to look. A client built without a
+/// pin behaves as before.
+pub fn reconcile_pin_built_in(
+    built_in: Option<&str>,
+    machine: Option<String>,
+    repo: Option<&str>,
+) -> Result<PinDecision, String> {
+    let Some(built) = built_in.map(normalise).filter(|b| !b.is_empty()) else {
+        return reconcile_pin(machine, repo);
+    };
+    if let Some(r) = repo.map(normalise).filter(|r| !r.is_empty()) {
+        if r != built {
+            return Err(format!(
+                "{} names the host certificate {} but this client was built for {} :: \
+                 either the certificate changed and this client predates it — rebuild it \
+                 from the repository (`make install`) or install the release built from it \
+                 (`homelab self-install`) — or the repository is not the one this client \
+                 came from",
+                REPO_FILE, r, built
+            ));
+        }
+    }
+    let machine = machine.map(|m| normalise(&m)).filter(|m| !m.is_empty());
+    if let Some(m) = &machine {
+        if *m != built {
+            return Err(format!(
+                "the host certificate pinned on this machine (~/.config/homelab/pin: {}) is not \
+                 the one this client was built for ({}) :: delete ~/.config/homelab/pin; the \
+                 client pins its own",
+                m, built
+            ));
+        }
+    }
+    Ok(PinDecision {
+        pin: Some(built),
+        adopted_from_repo: machine.is_none(),
+    })
 }
 
 /// A repository pin fills an empty machine and never overrules a different

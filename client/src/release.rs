@@ -61,6 +61,37 @@ pub fn stage_release(tag: &str) -> Result<String, String> {
     stage_asset_checked(REPO, tag, "homelab-host", false)
 }
 
+/// fix-105 (older-client-no-warning, 2026-09-27): the release's own client,
+/// `homelab`, verified against the release's SHA256SUMS like the host binary
+/// (checksum only, the same stated gap as H7). The raw bytes.
+pub fn stage_client(tag: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    let b64 = stage_asset_checked(REPO, tag, "homelab", false)?;
+    base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| e.to_string())
+}
+
+/// fix-105: put `bytes` where `target` is, executable, in one rename. Written
+/// beside the target first so the rename never crosses a filesystem; a
+/// running client keeps the file it started from, and the next start is the
+/// new one. Updating the client was a five-line gh/sha256sum/install routine
+/// per workstation (op-9 step 6).
+pub fn install_binary(bytes: &[u8], target: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let name = target
+        .file_name()
+        .ok_or_else(|| format!("{} names no file", target.display()))?;
+    let tmp = target.with_file_name(format!(".{}.new", name.to_string_lossy()));
+    let fail = |e: std::io::Error| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("cannot replace {}: {}", target.display(), e)
+    };
+    std::fs::write(&tmp, bytes).map_err(fail)?;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(fail)?;
+    std::fs::rename(&tmp, target).map_err(fail)
+}
+
 /// T11: the same staging for ANY release asset in any repository Kenny's
 /// `gh` can read — the four native services each ship their own binary.
 ///

@@ -98,3 +98,62 @@ pub fn too_large(len: usize) -> Option<String> {
 pub fn wants_help(args: &[String]) -> bool {
     args.iter().skip(1).any(|a| a == "--help" || a == "-h")
 }
+
+/// What `homelab template-build` was asked to build.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateArgs {
+    pub temp_vmid: u16,
+    pub version: u32,
+    pub unprivileged: bool,
+    pub base_template: Option<String>,
+}
+
+/// fix-110 (small-sharp-edges, 2026-09-27): read `template-build`'s
+/// arguments, `[vmid] [version] [--privileged] [--base <vztmpl>]`, and refuse
+/// any it cannot read. They were parsed with `unwrap_or(999)` and
+/// `unwrap_or(1)`, so a typo built a template on the default vmid: the F309
+/// pattern above, closed then for `--help` only. Absent stays the default;
+/// unreadable is an error.
+pub fn template_build_args(rest: &[String]) -> Result<TemplateArgs, String> {
+    let usage = "usage: homelab template-build [vmid] [version] [--privileged] [--base <vztmpl>]";
+    let mut out = TemplateArgs {
+        temp_vmid: 999,
+        version: 1,
+        unprivileged: true,
+        base_template: None,
+    };
+    let mut positional: Vec<&str> = Vec::new();
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--privileged" => out.unprivileged = false,
+            "--base" => {
+                let base = it
+                    .next()
+                    .ok_or_else(|| format!("--base needs a template file name :: {}", usage))?;
+                out.base_template = Some(base.clone());
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!("unknown option '{}' :: {}", flag, usage))
+            }
+            value => positional.push(value),
+        }
+    }
+    if positional.len() > 2 {
+        return Err(format!(
+            "'{}' is one argument too many :: {}",
+            positional[2], usage
+        ));
+    }
+    if let Some(v) = positional.first() {
+        out.temp_vmid = v
+            .parse()
+            .map_err(|_| format!("'{}' is not a vmid :: {}", v, usage))?;
+    }
+    if let Some(v) = positional.get(1) {
+        out.version = v
+            .parse()
+            .map_err(|_| format!("'{}' is not a version number :: {}", v, usage))?;
+    }
+    Ok(out)
+}

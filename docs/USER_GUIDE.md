@@ -36,7 +36,7 @@ things, and each has its own home:
 |---|---|---|
 | Host address | `HOMELAB_HOST` typed before the command; else `host` in `config/client.toml`, searched upward from the current directory the way git finds its root; else `HOMELAB_HOST` from `~/.config/homelab/env` or `./.env`; else the built-in `10.10.5.250:8443` | `client/src/main.rs:127-137`, `client/src/repo_config.rs:25,63,103` |
 | Token | `HOMELAB_TOKEN` in the environment; else `~/.config/homelab/env`; else `./.env` | `client/src/main.rs:49-88,140` |
-| Certificate pin | `~/.config/homelab/pin`; if that is empty, the `pin` in `config/client.toml` is adopted and saved; if both are empty, the first certificate seen is trusted and saved | `client/src/lib.rs:16-18`, `client/src/repo_config.rs:143`, `client/src/main.rs:1101-1155` |
+| Certificate pin | the pin built into the client from `config/client.toml` at compile time (fix-149), the only certificate trusted; a machine pin or repository pin that disagrees is refused. A client built without one: `~/.config/homelab/pin`; if that is empty, the `pin` in `config/client.toml` is adopted and saved; if both are empty, the first certificate seen is trusted and saved | `client/src/lib.rs:16-18`, `client/src/repo_config.rs:143`, `client/src/main.rs:1101-1155` |
 
 Only keys that start with `HOMELAB_` are read from the two env files, and a
 key already in the environment is never overwritten (`client/src/main.rs:76-81`).
@@ -92,7 +92,10 @@ that differs from the pin, the connection is refused with
 say what to delete; do that only after checking the fingerprint the host
 logs at start (`host/src/main.rs:1876`).
 
-The certificate pin is decided per connection like this:
+The certificate pin is decided per connection like this, for a client built
+without a pin; the released client carries the fleet's pin (fix-149), trusts
+that certificate only, first connection included, and refuses a machine or
+repository pin that disagrees with it:
 
 ```mermaid
 flowchart TD
@@ -119,15 +122,20 @@ Drawn from `client/src/repo_config.rs` (`reconcile_pin`), `client/src/main.rs` a
 ### 0.2 Which verbs need a token, and which read the working directory
 
 Every verb needs `HOMELAB_TOKEN` except `help`, `plan`, `runbook`,
-`dashboard`, `presets`, `export`, `import` and `tui --offline`
-(`client/src/main.rs:144-150`). Note that `new` and `testplan` never contact
-the host but are not on that list, so they also stop with
-`HOMELAB_TOKEN is not set` when no token is configured.
+`dashboard`, `presets`, `export`, `import`, `new`, `testplan`, `self-install`
+and `tui --offline` (`client/src/main.rs:144-150`; `new` and `testplan` since
+fix-110). Without it the refusal names the file: `HOMELAB_TOKEN is not set —
+put HOMELAB_TOKEN=<token> in ~/.config/homelab/env (or export it)`.
+`template-build` refuses an argument it cannot read instead of falling back
+to vmid 999 or version 1.
 
-These verbs read or write paths **relative to the current directory**, so run
-them from the repository root:
+These verbs read or write paths in **the repository**: the directory above
+the working directory that holds `config/client.toml`, or, from anywhere
+else, the directory `HOMELAB_REPO` names (put `HOMELAB_REPO=~/Projects/homelab`
+in `~/.config/homelab/env` once). With neither, they fall back to the current
+directory (fix-101):
 
-| Verb | Reads / writes relative to the current directory | Source |
+| Verb | Reads / writes in the repository | Source |
 |---|---|---|
 | `homelab presets` | reads `presets/` | `client/src/main.rs:650` |
 | `homelab new` | reads `presets/`, writes `stacks/<name>/` | `client/src/main.rs:585,624-628` |
@@ -139,8 +147,11 @@ them from the repository root:
 | `homelab export` | writes `<name>-bundle.yml` here unless an output path is given | `client/src/main.rs:446-449` |
 | `homelab tui` | reads `stacks/` and `presets/` at start | `client/src/tui/mod.rs:47-48` |
 
-The verbs that take a stack path (`deploy`, `plan`, `backup`, ...) read the
-path you give them, so they work from anywhere as long as the path is right.
+A stack can be named the same way for every verb: `almanac`, `almanac/`,
+`stacks/almanac` and a full path all name the same stack. The verbs that read
+a stack directory (`deploy`, `plan`, `backup`, ...) take the path as typed
+when it is a stack directory from here, and otherwise the stack of that name
+in the repository.
 
 ### 0.3 The version gate
 
@@ -150,9 +161,22 @@ host update (`client/src/version.rs:15-30`, `client/src/main.rs:1203-1213`).
 Read-only verbs such as `homelab check` and `homelab config` are refused too.
 The message ends with `run 'homelab release-update' first`. The reason is in
 the message: a host that predates a field ignores it, and the operation
-quietly does less than asked. The TUI has no such gate.
+quietly does less than asked. The TUI holds the same gate since fix-67.
+
+The other direction holds too (fix-105): when this client is older than the
+host, the same set of commands is refused with
+`... — run 'homelab self-install' first`, and the ones let through print
+`this client is v<x> and the host is v<y> — 'homelab self-install' updates it`
+first. `homelab self-install [tag]` downloads the release's `homelab`
+(newest when no tag is given), checks it against the release's
+`SHA256SUMS` and puts it where the running client lives; it needs `gh`, not
+the token. The TUI header shows `client v<x> · host v<y>`, yellow when the
+client is the older one.
 
 ### 0.4 Reading an answer
+
+Output is coloured only when it goes to a terminal and `NO_COLOR` is unset
+or empty; piped into a file, `grep` or a log it is plain text (fix-109).
 
 Every host operation streams its log lines and ends with one line:
 `✓ <message>` and exit code 0, or `✗ <message>` and exit code 1
@@ -163,9 +187,13 @@ Every host operation streams its log lines and ends with one line:
 says `<label> deferred — <reason>` and leaves no incident
 (`host/src/main.rs:3054-3065`).
 
-Arguments are positional. `--help` or `-h` anywhere on the line prints the
-usage instead of running anything (`client/src/main.rs:109-111`,
-`client/src/version.rs:98-100`).
+Arguments are positional. `--help` or `-h` anywhere on the line prints help
+instead of running anything (`client/src/version.rs:98-100`): after a verb,
+that verb's line with one example (`homelab deploy --help`); otherwise the
+whole list, grouped as Daily, Change a stack, Native services, Host and
+fleet, Local, and Rare and destructive (`client/src/cli_help.rs`). A verb
+the client does not know is refused with exit code 2 and the nearest verb:
+`unknown command 'stauts'; did you mean 'status'?` (fix-108).
 
 ---
 
@@ -201,9 +229,9 @@ Source: `client/src/tui/model.rs:36-45,751-761`.
 |---|---|---|
 | `TAB` / `SHIFT+TAB` | next / previous tab | `client/src/tui/model.rs:726-733` |
 | `CTRL+K` or `CTRL+P` | command palette (G3) | `client/src/tui/model.rs:716-720` |
-| `F2` | cycle effects `FX:OFF` → `FX:SUBTLE` → `FX:FULL` | `client/src/tui/model.rs:721-724`, `client/src/tui/fx.rs:26-39` |
+| `F2` | cycle effects `FX:OFF` → `FX:SUBTLE` → `FX:FULL`; the choice is kept for the next launch (fix-106) | `client/src/tui/model.rs:721-724`, `client/src/tui/fx.rs:26-39` |
 | `h` | key map; `ESC`, `h` or `ENTER` closes it | `client/src/tui/model.rs:652-657,725` |
-| `q` | quit | `client/src/tui/model.rs:714` |
+| `q` | quit; asks `y` first when settings are unsaved or an operation sent to the background still runs (fix-102) | `client/src/tui/model.rs:714` |
 
 On the SHELL tab, typing owns the keyboard: only `TAB`, `SHIFT+TAB`, `F2`,
 `CTRL+K` and `CTRL+P` pass through (`client/src/tui/model.rs:699-710`).
@@ -250,8 +278,8 @@ All of these act on the stack under the cursor.
 | `SHIFT+I` | install its native services from their releases (C7) | `client/src/tui/model.rs:824` |
 | `c` | fleet check over `stacks/` | `client/src/tui/model.rs:825` |
 | `i` | list incident bundles | `client/src/tui/model.rs:826-836` |
-| `e` | park or unpark for the nightly run (H8) | `client/src/tui/model.rs:837-850` |
-| `u` | update the host binary, only when a newer release is offered (H7) | `client/src/tui/model.rs:780-792` |
+| `e` | park or unpark for the nightly run (H8), after a `y` to a question that says what parking costs (fix-102) | `client/src/tui/model.rs:837-850` |
+| `u` | update the host binary, only when a newer release is offered (H7), after a `y` (fix-102) | `client/src/tui/model.rs:780-792` |
 | `n` | new-stack wizard (G2) | `client/src/tui/model.rs:852-872` |
 
 `SHIFT+A` and `SHIFT+I` work but are not listed in the `h` key map
@@ -295,7 +323,7 @@ before starting the TUI anywhere else:
 | DOCTOR | `r` or `ENTER` | run the doctor again | `client/src/tui/model.rs:906-910` |
 | SETTINGS | `UP`/`DOWN` | pick a row | `client/src/tui/model.rs:946-947` |
 | SETTINGS | `LEFT`/`RIGHT` | change the value | `client/src/tui/model.rs:948-978` |
-| SETTINGS | `a` / `d` | add / delete a retention tier | `client/src/tui/model.rs:979-1002` |
+| SETTINGS | `a` / `d` | add / delete a retention tier (`d` asks `y` first, fix-102) | `client/src/tui/model.rs:979-1002` |
 | SETTINGS | `ENTER` on the webhook row | edit it; `ENTER` keeps, `ESC` cancels | `client/src/tui/model.rs:1003-1005,1076-1097` |
 | SETTINGS | `SHIFT+S` | send the settings to the host | `client/src/tui/model.rs:1006-1010` |
 | SETTINGS | `r` | reload from the host | `client/src/tui/model.rs:1011` |
@@ -311,7 +339,7 @@ before starting the TUI anywhere else:
 - **A question from the host**: when a deploy's service checks see a value go
   down, the host pauses and asks. Only `a` (allow) and `s` (stop) do anything
   until it is answered (`client/src/tui/model.rs:620-633`). The window
-  shows `[a] toelaten` and `[s] stoppen` (`client/src/tui/view/focus.rs:138-142`).
+  shows `[a] allow` and `[s] stop` (`client/src/tui/view/focus.rs:138-142`).
   Unanswered, it times out after `ask_timeout_s` seconds, 120 by default, and
   counts as a stop (`host/src/main.rs:146-152,669-671`,
   `core/src/ops/deploy.rs:2617-2659`). On the command line the question is
@@ -625,11 +653,17 @@ you answer with `homelab checks answer` (see section 3).
 
 The host stores a hash of what it last applied per stack
 (`core/src/ops/deploy.rs:2402`). The TUI hashes the local `stacks/<name>/`
-the same way (`core/src/manifest.rs:951`) and marks a stack `[UPD]` when the
-two differ (`client/src/tui/model.rs:490-509`,
-`client/src/tui/view/stacks.rs:59-61`); the ticker lists them as
-`⚠ UPD pending: <stacks>` (`client/src/tui/view/mod.rs:615`). Redeploy to
-converge. Only stacks found under the TUI's `stacks/` are compared.
+the same way (`core/src/manifest.rs:951`) and marks a stack `[CHANGED]` when
+the two differ (`client/src/tui/model.rs:490-509`,
+`client/src/tui/view/stacks.rs:59-61`); the alert line lists them as
+`⚠ CHANGED, not deployed: <stacks>` (`client/src/tui/view/mod.rs:615`).
+Redeploy to converge. Only stacks found in the repository's `stacks/` are
+compared; the detail pane says `unknown (no local files)`, `unknown (nothing
+applied recorded)` or `not compared yet` instead of a green `none` for any
+other (fix-107). The key map (`h`), the footer and the palette (`CTRL+K`)
+come from one table, `client/src/tui/keys.rs`; `h` shows the keys of the tab
+in front of you, and the palette names each action's key and the stack it
+would act on.
 
 #### B5 · Transaction journal
 
@@ -1770,11 +1804,14 @@ The command exits 1 only when a check is `Fail`.
 
 #### G1 · The control deck
 
-**Status:** Built. Section 1 covers the keys. A splash screen opens on any
-key or by itself after a moment (`client/src/tui/model.rs:403-405,612-615`).
-Effects cycle with `F2`; with effects off there is no reveal animation
-(`client/src/tui/model.rs:344-349`). Screens are covered by snapshot tests in
-`client/tests/tui_snapshot_tests.rs`.
+**Status:** Built. Section 1 covers the keys. The TUI starts with effects
+off, or at the level `F2` last chose, which it keeps in
+`~/.config/homelab/tui-fx` (fix-106). With effects on, a splash screen opens
+on any key or by itself after a moment; with them off there is none. Text
+that carries meaning never moves at any level: titles and tab labels do not
+scramble, names and doctor lines do not "decrypt" in, and the alert line
+under the panels stands still, ending in `+<n> more` when it does not fit.
+Screens are covered by snapshot tests in `client/tests/tui_snapshot_tests.rs`.
 
 #### G2 · New-stack wizard
 
@@ -2169,13 +2206,24 @@ The client sends the vmid every stack file claims; the host adds what it can
 see and compares (`client/src/main.rs:310-338`, `host/src/main.rs:3773-3806`).
 From outside the repository with no path, it says the stack-file half is
 `SKIPPED` and checks only the host's half (`client/src/main.rs:317-327`). The
-answer (`render_findings`, `host/src/main.rs:3190-3210`):
+answer (`render`, `core/src/ops/fleetcheck.rs`, fix-103) leads with a count
+per severity and then groups the findings, broken first, each group printed
+in its own colour (red, yellow, dim):
 
 ```text
-fleet check: <n> finding(s)
-  [<broken|drift|noted>] <subject> — <what>
+fleet check: <b> broken · <d> drift · <n> noted (nothing to do)
+broken — not doing its job now:
+  [broken] <subject> — <what>
+      remedy: <remedy>
+drift — works, bites on the next deploy or outage:
+  [drift] <subject> — <what>
+      remedy: <remedy>
+noted — nothing to do:
+  [noted] <subject> — <what>
       remedy: <remedy>
 ```
+
+A group with nothing in it is left out, of the summary too.
 
 or `fleet check: repo and reality agree`. The command exits 0 when no finding
 is `broken` or `drift`; `noted` findings are printed and do not fail it
@@ -2271,6 +2319,15 @@ anything when one fails: `<stack>: validation failed: <e> — nothing applied`
 ```
 
 `<dir>` is the stacks directory apply read, `stacks` by default.
+
+Under each `↑` line the plan lists what that deploy changes, file by file,
+against the files the host last applied: `+` new, `~` changed, `-` removed by
+the deploy; a stack the host has never applied reads `new: creates CT <vmid>`.
+A stack file with `ephemeral: true` (the rollback drill) is listed as `·` and
+never deployed by apply; `homelab deploy stacks/drill` still deploys it. Then
+apply asks `Deploy these <n> stack(s)? [y/N]`; anything but `y` ends with
+`not confirmed — nothing deployed, nothing destroyed` and exit 1. `--yes`
+answers yes for a script; `--dry-run` prints the plan and stops (fix-100).
 
 A stack is unchanged when the host's `applied_hash` equals the intent hash of
 the local files (manifest, files and env, so a secret changed in latch counts

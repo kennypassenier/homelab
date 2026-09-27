@@ -6,6 +6,7 @@
 
 pub mod backend;
 pub mod fx;
+pub mod keys;
 pub mod model;
 pub mod theme;
 pub mod view;
@@ -25,7 +26,12 @@ use ratatui::Terminal;
 use backend::Backend;
 use model::{update, Model, Msg};
 
-pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
+/// `repo`: the repository root the command line found (fix-101), so the TUI
+/// reads the same stacks and presets from any directory.
+pub async fn run(
+    backend: Box<dyn Backend>,
+    repo: Option<std::path::PathBuf>,
+) -> std::io::Result<()> {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
@@ -43,9 +49,21 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
     let cmd_tx = channels.cmd_tx;
 
     let mut model = Model::new();
-    // Discover locally-deployable stacks (a ./stacks dir next to the cwd).
-    model.local_stacks = crate::spec::scan_local_stacks(std::path::Path::new("stacks"));
-    model.presets = crate::scaffold::scan_presets(std::path::Path::new("presets"));
+    // fix-101 (cli-path-vs-name-and-cwd, 2026-09-27): the repository's stacks
+    // and presets, not whatever `./stacks` the TUI was started next to.
+    if let Some(root) = repo {
+        model.stacks_dir = root.join("stacks");
+        model.presets_dir = root.join("presets");
+    }
+    // fix-106 (tui-not-calm, 2026-09-27): start at the effect level F2 last
+    // chose; nothing saved means off.
+    let fx_file = fx::fx_path();
+    if let Some(level) = fx::load_fx(&fx_file) {
+        model.fx = level;
+    }
+    let mut saved_fx = model.fx;
+    model.local_stacks = crate::spec::scan_local_stacks(&model.stacks_dir);
+    model.presets = crate::scaffold::scan_presets(&model.presets_dir);
 
     // H7: release check off-thread; the loop below folds the answer in.
     let (side_tx, mut side_rx) = tokio::sync::mpsc::channel::<Msg>(8);
@@ -62,6 +80,11 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
 
     while !model.should_quit {
         terminal.draw(|f| view::draw(f, &model))?;
+        // fix-106: F2 (or the palette) changed the level: keep it.
+        if model.fx != saved_fx {
+            fx::save_fx(&fx_file, model.fx);
+            saved_fx = model.fx;
+        }
 
         tokio::select! {
             maybe = events.next() => {

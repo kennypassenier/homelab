@@ -154,14 +154,14 @@ else
 fi
 ```
 
-**The certificate pin.** The daemon's certificate is `/var/lib/homelab/tls-cert.pem` with `/var/lib/homelab/tls-key.pem`; when either is missing at start it makes a new pair (host/src/tls.rs). Clients refuse a certificate whose SHA-256 fingerprint differs from the `pin` in `config/client.toml`, and from the copy each machine keeps in `~/.config/homelab/pin`. Compare:
+**The certificate pin.** The daemon's certificate is `/var/lib/homelab/tls-cert.pem` with `/var/lib/homelab/tls-key.pem`; when either is missing at start it makes a new pair (host/src/tls.rs). The client trusts one certificate: the fingerprint built into the client, taken from `pin` in `config/client.toml` when it was compiled. It refuses any other, on a first connection too, and it also refuses when that `pin` or the copy a machine keeps in `~/.config/homelab/pin` disagrees with it. Compare:
 
 ```sh
 journalctl -u homelab-host | grep 'TLS fingerprint' | tail -1
 openssl x509 -in /var/lib/homelab/tls-cert.pem -noout -fingerprint -sha256
 ```
 
-with `pin` in `config/client.toml` on a workstation. If they differ because the pair was regenerated, either restore both files from `host-meta-config` (Layer 3) and restart, or accept the new certificate: write the new fingerprint into `pin` in `config/client.toml`, and delete `~/.config/homelab/pin` on every client machine (a machine pin that disagrees with the repository pin is refused, not replaced).
+with `pin` in `config/client.toml` on a workstation. If they differ because the pair was regenerated, every installed client refuses the daemon until one of two things happens. Either restore both files from `host-meta-config` (Layer 3) and restart: the clients work again unchanged. Or accept the new certificate: write the new fingerprint into `pin` in `config/client.toml`, commit it, and put a client built from that tree on every machine (`make install`, or cut a release and run `homelab self-install` on each, which needs `gh` and not the daemon), then delete `~/.config/homelab/pin` on each. A client never falls back to trusting the certificate it sees.
 
 **The token** is `token` in `/etc/homelab/host.toml` (or `HOMELAB_TOKEN` in the daemon's environment). A new token means updating `HOMELAB_TOKEN` in `~/.config/homelab/env` on every client machine.
 
@@ -330,17 +330,6 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 - Host directory mounted in, never created or backed up by this suite: `/HDD18TB/subvol-103-disk-0` at `/mnt/data/18TB` (CT 103's dataset; holds downloads/ and the 18 TB library).
 - Host directory mounted in, never created or backed up by this suite: `/HDD12TB/subvol-103-disk-0` at `/mnt/data/12TB` (CT 103's dataset; unused by this stack today, carried for parity).
 
-### drill (vmid 119)
-
-- Container: hostname `119-app-drill`, ip `10.10.10.19/24` on `vmbr0` VLAN 10, 1 core(s), 256 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order unset.
-- Runs no docker: native systemd services only.
-- Unit `drillsvc`:
-  - program `/opt/drillsvc/bin/drillsvc`, no release_repo, so no recorded source for the binary; update policy manual.
-  - unit file `stacks/drill/drillsvc/drillsvc.service` in the repository; the container's copy is `/etc/systemd/system/drillsvc.service`.
-  - data: none, declared stateless, so no repository.
-  - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/drill/drillsvc`. Adoption only records a service that is already active; it never starts one.
-- Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
-
 ### gateway (vmid 104)
 
 - Container: hostname `104-app-gateway`, ip `10.10.10.4/24` on `vmbr0` VLAN 10, 4 core(s), 5120 MiB RAM, 0 MiB swap, 30 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 5.
@@ -479,4 +468,4 @@ These directories hold a `service.yml` and no `lxc-compose.yml`: the service was
 4. Put back the `homelab-host` program and its unit file, start it, and check the certificate fingerprint against the pin (Layer 1).
 5. Restore the guests this suite never touches (vmid 100, 101, 102, 103) from Proxmox's own backups: `qmrestore` for a VM, `pct restore` for a container.
 6. Rebuild the templates the stacks clone: `clone:997` (privileged), `clone:998` (unprivileged). `homelab template-build <vmid> <version>` builds an unprivileged one at that vmid, and `homelab template-build <vmid> <version> --privileged` a privileged one.
-7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), uptime (107), syncthing (108), kyu (109), almanac (112), metrics (113), productivity (111), paperwork (114), kp-soft (116), home (115), downloader (105), media (106), drill (119). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.
+7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), uptime (107), syncthing (108), kyu (109), almanac (112), metrics (113), productivity (111), paperwork (114), kp-soft (116), home (115), downloader (105), media (106). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.

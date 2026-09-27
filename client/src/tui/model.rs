@@ -145,6 +145,39 @@ pub struct Confirm {
     pub prompt: String,
 }
 
+/// fix-107: see [`Model::drift_state`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriftState {
+    /// The local files differ from what the host applied.
+    Changed,
+    /// Compared, and the same.
+    Same,
+    /// No stack directory here to compare with.
+    NoLocalFiles,
+    /// The host recorded no applied hash.
+    NeverApplied,
+    /// The local hash has not come back yet.
+    NotCompared,
+}
+
+/// fix-102 (tui-single-keys-no-confirm, 2026-09-27): a single key whose
+/// consequence lasts — park a stack, update the host, drop a retention tier,
+/// quit with something unsaved or running — states that consequence and
+/// waits for `y`. Any other key keeps things as they are.
+pub struct YesNo {
+    pub title: String,
+    pub prompt: String,
+    pub action: YesNoAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum YesNoAction {
+    Park { stack: String, enabled: bool },
+    HostUpdate(String),
+    DeleteTier(usize),
+    Quit,
+}
+
 /// D6 change-plan preview: what a deploy would do, shown before it runs.
 /// ENTER executes, ESC cancels.
 pub struct Plan {
@@ -243,6 +276,11 @@ pub struct Model {
     pub transfers: Vec<Transfer>,
     /// Open typed confirmation, if any (restore).
     pub confirm: Option<Confirm>,
+    /// fix-102: an open y/N question, if any.
+    pub yes_no: Option<YesNo>,
+    /// fix-102: an operation window was sent to the background with ESC and
+    /// its reply has not come yet, so quitting would leave it unwatched.
+    pub background_op: bool,
     pub palette_open: bool,
     pub palette_input: String,
     pub palette_sel: usize,
@@ -250,6 +288,10 @@ pub struct Model {
     pub doctor_text: Vec<String>,
     /// Deployable stack dirs found locally (name, path).
     pub local_stacks: Vec<(String, std::path::PathBuf)>,
+    /// fix-101: where the stacks and presets live — the repository's when
+    /// the command line found one, else `stacks` and `presets` here.
+    pub stacks_dir: std::path::PathBuf,
+    pub presets_dir: std::path::PathBuf,
     pub focus: Option<Focus>,
     pub plan: Option<Plan>,
     /// D6: spec awaiting the host's applied files for a real diff plan.
@@ -314,7 +356,9 @@ impl Model {
         Self {
             screen: Screen::Splash,
             tab: Tab::Dashboard,
-            fx: FxLevel::Full,
+            // fix-106 (tui-not-calm, 2026-09-27): calm unless F2 said
+            // otherwise; `tui::run` restores the level F2 last saved.
+            fx: FxLevel::Off,
             tick: 0,
             reveal_start: 0,
             flicker: 0,
@@ -335,6 +379,8 @@ impl Model {
             help_open: false,
             doctor_text: Vec::new(),
             local_stacks: Vec::new(),
+            stacks_dir: std::path::PathBuf::from("stacks"),
+            presets_dir: std::path::PathBuf::from("presets"),
             focus: None,
             plan: None,
             plan_pending: None,
@@ -343,6 +389,8 @@ impl Model {
             release_update_requested: None,
             native_install_requested: Vec::new(),
             confirm: None,
+            yes_no: None,
+            background_op: false,
             wizard: None,
             presets: crate::scaffold::synthetic_presets(),
             shell_target: 0,
@@ -363,11 +411,11 @@ impl Model {
         }
     }
 
+    /// fix-106 (tui-not-calm, 2026-09-27): always whole. Hostnames and
+    /// doctor lines used to "decrypt" in on every tab switch; text that
+    /// carries meaning is never animated.
     pub fn reveal_progress(&self) -> f32 {
-        if self.fx == FxLevel::Off {
-            return 1.0; // no reveal animation when effects are off
-        }
-        ((self.tick.saturating_sub(self.reveal_start)) as f32 / 9.0).min(1.0)
+        1.0
     }
 
     /// H7: a host update is available when the newest release outruns the
@@ -376,6 +424,24 @@ impl Model {
         let latest = self.latest_release.as_deref()?;
         (!self.host_version.is_empty() && crate::release::version_newer(latest, &self.host_version))
             .then_some(latest)
+    }
+
+    /// fix-107 (tui-indicators-claim-too-much, 2026-09-27): what is known
+    /// about a stack's drift. `drift none — intent == runtime` was shown in
+    /// green for stacks nobody compared, because the flag stays false when
+    /// there is nothing to compare.
+    pub fn drift_state(&self, s: &homelab_proto::StackView) -> DriftState {
+        if !self.local_stacks.iter().any(|(n, _)| *n == s.name) {
+            DriftState::NoLocalFiles
+        } else if s.applied_hash.is_empty() {
+            DriftState::NeverApplied
+        } else if !self.local_hashes.contains_key(&s.name) {
+            DriftState::NotCompared
+        } else if s.drift {
+            DriftState::Changed
+        } else {
+            DriftState::Same
+        }
     }
 
     pub fn stack_count(&self) -> usize {
@@ -405,7 +471,7 @@ impl Model {
         }
         self.today_pending = true;
         self.outbox.push(Command::Today {
-            stack_files: crate::spec::stack_files_with_vmids("stacks"),
+            stack_files: crate::spec::stack_files_with_vmids(&self.stacks_dir.to_string_lossy()),
         });
     }
 
@@ -457,7 +523,8 @@ pub fn update(model: &mut Model, msg: Msg) {
                 t.age = t.age.saturating_add(1);
             }
             model.transfers.retain(|t| t.age < 30);
-            if model.screen == Screen::Splash && model.tick > 120 {
+            // fix-106: with effects off there is no four-second splash.
+            if model.screen == Screen::Splash && (model.fx == FxLevel::Off || model.tick > 120) {
                 enter_main(model);
             }
         }
@@ -654,6 +721,9 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                         return;
                     }
                 }
+                // fix-102: a reply with no window open ends the operation
+                // that was sent to the background (replies come in order).
+                model.background_op = false;
                 if model.tab == Tab::Doctor {
                     model.doctor_text = resp.message.lines().map(|s| s.to_string()).collect();
                 }
@@ -708,6 +778,15 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         }
         return;
     }
+    // fix-102: a y/N question swallows every key; only `y` acts.
+    if let Some(q) = model.yes_no.take() {
+        if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+            run_yes(model, q.action);
+        } else {
+            model.status_line = "cancelled — nothing was done".into();
+        }
+        return;
+    }
     if let Some(focus) = model.focus.as_mut() {
         match key.code {
             KeyCode::Up => focus.scroll = focus.scroll.saturating_add(1),
@@ -719,6 +798,7 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 } else {
                     model.status_line = "deploy keeps running — feed in LOG_STREAM".into();
                     model.focus = None;
+                    model.background_op = true;
                 }
             }
             KeyCode::Enter if focus.done => model.focus = None,
@@ -788,7 +868,7 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
 
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match (key.code, ctrl) {
-        (KeyCode::Char('q'), _) => model.should_quit = true,
+        (KeyCode::Char('q'), _) => ask_quit(model),
         // AZERTY: Ctrl+K for palette; also accept Ctrl+P.
         (KeyCode::Char('k'), true) | (KeyCode::Char('p'), true) => {
             model.palette_open = true;
@@ -857,19 +937,7 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 model.outbox.push(Command::GetState);
                 model.request_today();
             }
-            KeyCode::Char('u') => {
-                if let Some(tag) = model.host_update_available().map(String::from) {
-                    model.focus = Some(Focus {
-                        title: format!("UPDATE HOST → {}", tag),
-                        feed: Vec::new(),
-                        scroll: 0,
-                        done: false,
-                        ok: false,
-                        result: String::new(),
-                    });
-                    model.release_update_requested = Some(tag);
-                }
-            }
+            KeyCode::Char('u') => ask_host_update(model),
             KeyCode::Char('D') => start_deploy(model),
             // The six operations Kenny reaches for in ordinary use (form T1).
             // They existed only on the command line, which meant opening a
@@ -922,42 +990,9 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 });
                 model.outbox.push(Command::Incidents);
             }
-            KeyCode::Char('e') => {
-                // H8 (light): toggle the selected stack's enabled flag. The
-                // GetState refresh rides behind the op — the host handles
-                // RPCs in order, so it sees the new flag.
-                if let Some(fleet) = &model.fleet {
-                    if let Some(s) = fleet.stacks.get(model.selected_stack) {
-                        model.outbox.push(Command::SetStackEnabled {
-                            stack: s.name.clone(),
-                            enabled: !s.enabled,
-                        });
-                        model.outbox.push(Command::GetState);
-                    }
-                }
-            }
+            KeyCode::Char('e') => ask_park(model),
             KeyCode::Char('p') => open_plan(model),
-            KeyCode::Char('n') => {
-                let vmid = next_free_vmid(model);
-                let first_ram = model.presets.first().map(|p| p.meta.ram_mb).unwrap_or(1024);
-                model.wizard = Some(Wizard {
-                    step: WizStep::Preset,
-                    preset_idx: 0,
-                    name: String::new(),
-                    name_suggested: false,
-                    ram: first_ram,
-                    cores: 2,
-                    disk: 8,
-                    swap: crate::scaffold::StackDefaults::default().swap_for(first_ram),
-                    swap_touched: false,
-                    vmid,
-                    res_field: ResField::Ram,
-                    disk_typing: false,
-                    storage_paths: Vec::new(),
-                    storage_idx: 0,
-                    storage_no_data: Vec::new(),
-                });
-            }
+            KeyCode::Char('n') => open_wizard(model),
             _ => {}
         },
         Tab::Logs => match key.code {
@@ -1081,11 +1116,26 @@ fn settings_key(model: &mut Model, key: crossterm::event::KeyEvent) {
             model.settings_dirty = true;
         }
         KeyCode::Char('d') => {
+            // fix-102: a tier gone from the plan lets the next prune drop
+            // the snapshots only it kept, once saved; so it asks first.
             if row >= 1 && row < webhook_row && cfg.retention.len() > 1 {
                 let tier_idx = (row - 1) / 2;
-                cfg.retention.remove(tier_idx);
-                model.settings_row = model.settings_row.min(settings_rows(cfg) - 1);
-                model.settings_dirty = true;
+                let t = &cfg.retention[tier_idx];
+                let span = t
+                    .span_days
+                    .map(|d| format!("for {} days", d))
+                    .unwrap_or_else(|| "forever".into());
+                model.yes_no = Some(YesNo {
+                    title: format!("DELETE RETENTION TIER {}", tier_idx + 1),
+                    prompt: format!(
+                        "Delete tier {} (a snapshot every {} days, kept {})? Once saved, the \
+                         next prune may drop the snapshots only this tier kept.",
+                        tier_idx + 1,
+                        t.every_days,
+                        span
+                    ),
+                    action: YesNoAction::DeleteTier(tier_idx),
+                });
             }
         }
         KeyCode::Enter if row == webhook_row => {
@@ -1184,96 +1234,10 @@ fn settings_webhook_edit_key(model: &mut Model, key: crossterm::event::KeyEvent)
     }
 }
 
-pub struct PaletteAction {
-    pub label: &'static str,
-    pub id: &'static str,
-}
-
-pub const PALETTE: &[PaletteAction] = &[
-    PaletteAction {
-        label: "go: dashboard",
-        id: "tab.dashboard",
-    },
-    PaletteAction {
-        label: "go: stacks",
-        id: "tab.stacks",
-    },
-    PaletteAction {
-        label: "go: log stream",
-        id: "tab.logs",
-    },
-    PaletteAction {
-        label: "go: doctor",
-        id: "tab.doctor",
-    },
-    PaletteAction {
-        label: "go: settings",
-        id: "tab.settings",
-    },
-    PaletteAction {
-        label: "go: shell",
-        id: "tab.shell",
-    },
-    PaletteAction {
-        label: "refresh state",
-        id: "refresh",
-    },
-    PaletteAction {
-        label: "run doctor",
-        id: "doctor",
-    },
-    // The six from form T1, reachable by name as well as by key — the point
-    // of the palette is that nothing in this interface requires knowing a
-    // keybind first.
-    PaletteAction {
-        label: "backup: selected stack",
-        id: "op.backup",
-    },
-    PaletteAction {
-        label: "update: selected stack",
-        id: "op.update",
-    },
-    PaletteAction {
-        label: "restore: selected stack (asks first)",
-        id: "op.restore",
-    },
-    PaletteAction {
-        label: "guards: apply to selected stack",
-        id: "op.guards",
-    },
-    PaletteAction {
-        label: "adopt: native services of selected stack",
-        id: "op.adopt",
-    },
-    PaletteAction {
-        label: "install-native: binaries of selected stack",
-        id: "op.install-native",
-    },
-    PaletteAction {
-        label: "fleet check: repo against reality",
-        id: "op.check",
-    },
-    PaletteAction {
-        label: "incidents: list captured bundles",
-        id: "op.incidents",
-    },
-    PaletteAction {
-        label: "cycle effects (F2)",
-        id: "fx",
-    },
-    PaletteAction {
-        label: "help",
-        id: "help",
-    },
-    PaletteAction {
-        label: "quit",
-        id: "quit",
-    },
-];
-
+// fix-107: the palette is drawn from the one key table, `tui::keys`.
 pub fn palette_matches(input: &str) -> Vec<usize> {
     let q = input.to_lowercase();
-    PALETTE
+    crate::tui::keys::palette()
         .iter()
         .enumerate()
         .filter(|(_, a)| q.is_empty() || a.label.to_lowercase().contains(&q))
@@ -1308,7 +1272,7 @@ fn palette_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         KeyCode::Enter => {
             let matches = palette_matches(&model.palette_input);
             if let Some(&ai) = matches.get(model.palette_sel) {
-                let id = PALETTE[ai].id;
+                let id = crate::tui::keys::palette()[ai].id;
                 model.palette_open = false;
                 run_action(model, id);
             }
@@ -1339,6 +1303,12 @@ fn run_action(model: &mut Model, id: &str) {
         "op.adopt" => start_native_adopt(model),
         "op.install-native" => start_native_install(model),
         "op.check" => start_fleet_check(model),
+        // fix-107: the palette offers every stack action a key does.
+        "op.new" => open_wizard(model),
+        "op.plan" => open_plan(model),
+        "op.deploy" => start_deploy(model),
+        "op.park" => ask_park(model),
+        "op.host-update" => ask_host_update(model),
         "op.restore" => {
             if let Some(name) = selected_stack_name(model) {
                 model.confirm = Some(Confirm {
@@ -1366,7 +1336,7 @@ fn run_action(model: &mut Model, id: &str) {
         }
         "fx" => model.fx = model.fx.cycle(),
         "help" => model.help_open = true,
-        "quit" => model.should_quit = true,
+        "quit" => ask_quit(model),
         _ => {}
     }
 }
@@ -1488,6 +1458,144 @@ fn confirm_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         }
         _ => {}
     }
+}
+
+/// H7: offer the host update, when a newer release is known (key `u`, and
+/// the palette since fix-107).
+fn ask_host_update(model: &mut Model) {
+    if let Some(tag) = model.host_update_available().map(String::from) {
+        // fix-102: one Shift away from SHIFT+U (update the
+        // selected stack), so it asks first.
+        model.yes_no = Some(YesNo {
+            title: format!("UPDATE HOST → {}", tag),
+            prompt: format!(
+                "Update the host daemon from v{} to {}? It replaces its own \
+                 binary and restarts itself; a failed selfcheck rolls back.",
+                model.host_version, tag
+            ),
+            action: YesNoAction::HostUpdate(tag),
+        });
+    }
+}
+
+/// H8 (light): park or unpark the selected stack (key `e`, and the palette
+/// since fix-107).
+fn ask_park(model: &mut Model) {
+    // H8 (light): toggle the selected stack's enabled flag.
+    // fix-102: it sits next to `r` and parking lasts, so the
+    // cost is stated and `y` is needed.
+    if let Some(fleet) = &model.fleet {
+        if let Some(s) = fleet.stacks.get(model.selected_stack) {
+            let (title, prompt) = if s.enabled {
+                (
+                    format!("PARK {}", s.name),
+                    format!(
+                        "Park {}? No nightly backup and no nightly update, and \
+                         onboot is cleared: after a power cut it stays down. \
+                         Running containers are not touched.",
+                        s.name
+                    ),
+                )
+            } else {
+                (
+                    format!("UNPARK {}", s.name),
+                    format!(
+                        "Unpark {}? Nightly backups and updates resume, and it \
+                         starts again after a power cut.",
+                        s.name
+                    ),
+                )
+            };
+            model.yes_no = Some(YesNo {
+                title,
+                prompt,
+                action: YesNoAction::Park {
+                    stack: s.name.clone(),
+                    enabled: !s.enabled,
+                },
+            });
+        }
+    }
+}
+
+/// G2: open the new-stack wizard (key `n`, and the palette since fix-107).
+fn open_wizard(model: &mut Model) {
+    let vmid = next_free_vmid(model);
+    let first_ram = model.presets.first().map(|p| p.meta.ram_mb).unwrap_or(1024);
+    model.wizard = Some(Wizard {
+        step: WizStep::Preset,
+        preset_idx: 0,
+        name: String::new(),
+        name_suggested: false,
+        ram: first_ram,
+        cores: 2,
+        disk: 8,
+        swap: crate::scaffold::StackDefaults::default().swap_for(first_ram),
+        swap_touched: false,
+        vmid,
+        res_field: ResField::Ram,
+        disk_typing: false,
+        storage_paths: Vec::new(),
+        storage_idx: 0,
+        storage_no_data: Vec::new(),
+    });
+}
+
+/// fix-102: what a `y` to an open question does.
+fn run_yes(model: &mut Model, action: YesNoAction) {
+    match action {
+        YesNoAction::Park { stack, enabled } => {
+            // The GetState refresh rides behind the op — the host handles
+            // RPCs in order, so it sees the new flag.
+            model
+                .outbox
+                .push(Command::SetStackEnabled { stack, enabled });
+            model.outbox.push(Command::GetState);
+        }
+        YesNoAction::HostUpdate(tag) => {
+            model.focus = Some(Focus {
+                title: format!("UPDATE HOST → {}", tag),
+                feed: Vec::new(),
+                scroll: 0,
+                done: false,
+                ok: false,
+                result: String::new(),
+            });
+            model.release_update_requested = Some(tag);
+        }
+        YesNoAction::DeleteTier(idx) => {
+            if let Some(cfg) = model.settings.as_mut() {
+                if idx < cfg.retention.len() && cfg.retention.len() > 1 {
+                    cfg.retention.remove(idx);
+                    model.settings_row = model.settings_row.min(settings_rows(cfg) - 1);
+                    model.settings_dirty = true;
+                }
+            }
+        }
+        YesNoAction::Quit => model.should_quit = true,
+    }
+}
+
+/// fix-102: `q` quits at once unless that would lose something: settings not
+/// yet saved, or an operation sent to the background whose questions and
+/// result nobody would then see.
+fn ask_quit(model: &mut Model) {
+    let mut lost: Vec<&str> = Vec::new();
+    if model.background_op || model.staging_pending > 0 {
+        lost.push("an operation is still running and nobody would see its result");
+    }
+    if model.settings_dirty {
+        lost.push("settings changes are not saved (SHIFT+S saves them)");
+    }
+    if lost.is_empty() {
+        model.should_quit = true;
+        return;
+    }
+    model.yes_no = Some(YesNo {
+        title: "QUIT".into(),
+        prompt: format!("Quit anyway? {}.", lost.join("; ")),
+        action: YesNoAction::Quit,
+    });
 }
 
 /// The name of the stack the cursor is on, or None with a status line said.
@@ -1694,7 +1802,8 @@ fn start_stack_op(model: &mut Model, op: StackOp) {
 /// Y4 from the TUI: the same fleet check `homelab check` runs, over the stack
 /// directories this client can see.
 fn start_fleet_check(model: &mut Model) {
-    let stack_files: Vec<(String, u16)> = crate::spec::stack_files_with_vmids("stacks");
+    let stack_files: Vec<(String, u16)> =
+        crate::spec::stack_files_with_vmids(&model.stacks_dir.to_string_lossy());
     if stack_files.is_empty() {
         model.status_line = "no stack files found under stacks/".into();
         return;
@@ -1887,6 +1996,7 @@ pub fn next_free_vmid(model: &Model) -> u16 {
 fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
     use crossterm::event::KeyCode;
     let presets = model.presets.clone();
+    let (stacks_dir, presets_dir) = (model.stacks_dir.clone(), model.presets_dir.clone());
     let n_presets = presets.len().max(1);
     let Some(w) = model.wizard.as_mut() else {
         return;
@@ -2014,7 +2124,7 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 // the manifest afterwards, so nothing is written before the
                 // question is answered.
                 w.storage_paths = crate::scaffold::preview_appdata_paths(
-                    std::path::Path::new("presets"),
+                    &presets_dir,
                     presets.get(w.preset_idx),
                     &w.name,
                     w.vmid,
@@ -2059,8 +2169,8 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                     .map(|(p, _)| p.clone())
                     .collect();
                 match crate::scaffold::scaffold_stack(
-                    std::path::Path::new("stacks"),
-                    std::path::Path::new("presets"),
+                    &stacks_dir,
+                    &presets_dir,
                     &crate::scaffold::StackParams {
                         name: &name,
                         vmid,

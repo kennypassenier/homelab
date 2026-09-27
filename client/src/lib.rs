@@ -2,7 +2,9 @@
 //! `homelab` binary and the test suite.
 
 pub mod apply;
+pub mod cli_help;
 pub mod link;
+pub mod output;
 pub mod release;
 pub mod repo_config;
 pub mod routes;

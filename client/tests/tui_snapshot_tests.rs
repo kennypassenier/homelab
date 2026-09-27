@@ -2742,3 +2742,54 @@ fn a_bad_manifest_value_is_reported_at_its_own_line_with_a_remedy() {
     );
     assert!(err.contains("::"), "carries a remedy: {}", err);
 }
+
+/// gap-21: the placeholder shown before the first state named `[R]` for
+/// refresh, and on STACKS `SHIFT+R` is restore. It names the refresh key.
+///
+/// covers: gap-21
+#[test]
+fn gap_21_the_waiting_placeholder_names_the_refresh_key() {
+    let mut m = ready_model();
+    m.fleet = None;
+    m.tab = homelab_client::tui::model::Tab::Stacks;
+    let screen = render(&m);
+    assert!(
+        screen.contains("awaiting state… [r]"),
+        "the placeholder must be on screen and name r: {screen}"
+    );
+}
+
+/// gap-19: without a local `stacks/<name>/` the TUI builds a synthetic
+/// manifest from the fleet view, and that manifest declares no storage. A
+/// backup sent with it snapshots nothing, while the host still records the
+/// backup time; a restore with it restores nothing. Backup and restore now
+/// refuse a synthetic spec and say why, instead of reporting success.
+///
+/// covers: gap-19
+#[test]
+fn gap_19_backup_and_restore_refuse_a_stack_without_its_local_stack_file() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use homelab_client::tui::model::{update, Msg};
+
+    for key in ['B', 'R'] {
+        let mut m = ready_model();
+        m.tab = homelab_client::tui::model::Tab::Stacks;
+        m.local_stacks = Vec::new();
+        m.selected_stack = 0;
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::SHIFT)),
+        );
+        assert!(
+            m.outbox.is_empty(),
+            "SHIFT+{key} without a stack file must send nothing: {:?}",
+            m.outbox
+        );
+        assert!(m.confirm.is_none(), "and asks nothing for SHIFT+{key}");
+        assert!(
+            m.status_line.contains("stacks/"),
+            "and must say the stack file is missing: {:?}",
+            m.status_line
+        );
+    }
+}

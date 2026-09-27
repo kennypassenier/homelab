@@ -199,7 +199,7 @@ restic dump --path /<unit>-data.tar latest /<unit>-data.tar | pct exec <vmid> --
 pct exec <vmid> -- systemctl start <unit>
 ```
 
-Do not use `homelab restore` for a native stack. It runs the compose route above: it stops no unit (it stops compose apps, and there are none) and runs `restic restore latest --target /`, which writes the archive itself to `/<unit>-data.tar` on the host and unpacks nothing. For the same reason a rebuild's automatic restore finds no snapshot for a native unit's directory and leaves it empty: its data always comes back by the commands above.
+`homelab restore` refuses a native stack (gap-28): the compose route's `restic restore latest --target /` would write the archive itself to `/<unit>-data.tar` on the host and unpack nothing. For the same reason a rebuild's automatic restore finds no snapshot for a native unit's directory and leaves it empty: its data always comes back by the commands above.
 
 **A restore brings back what was retired after the snapshot** (gap-16). almanac retires a source by renaming its profile to `*.toml.retired` in `/appdata/almanac/almanac-config/profiles/`, at runtime and without a deploy. A snapshot taken before that rename still holds the live `*.toml`, so restoring it makes almanac load the retired source again. After restoring almanac, compare `ls /appdata/almanac/almanac-config/profiles/` with the list of retired sources before starting the service.
 

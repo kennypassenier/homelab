@@ -3465,3 +3465,42 @@ async fn f274_a_host_without_the_collector_still_gets_its_snapshot() {
     assert!(!snap.contains("smart-"), "{}", snap);
     assert!(snap.contains("/var/lib/homelab/state.json"), "{}", snap);
 }
+
+/// gap-28: a native unit's backup is one tar stream (`/<unit>-data.tar`),
+/// not a copy of its directories. `restic restore --target /` of that
+/// repository drops the tar file at `/` on the Proxmox host and unpacks
+/// nothing, while the report says the restore succeeded. The restore refuses
+/// a native stack before touching anything and names the procedure that
+/// works.
+///
+/// covers: gap-28
+#[tokio::test]
+async fn gap_28_restore_refuses_a_native_unit_instead_of_dropping_its_tar_on_the_host() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 109, "kyu");
+    exec.respond_always(
+        "snapshots",
+        CmdOutput::ok("ID  Time  Host\nabc123  today  pve\n"),
+    );
+    let mut m = manifest(109, "kyu");
+    m.apps = Vec::new();
+    m.native_only = true;
+    m.natives = vec!["kyu".into()];
+    m.storage[0].host_path = "/appdata/kyu/kyu-config".into();
+    m.storage[0].mount_point = "/appdata/kyu/kyu-config".into();
+    m.storage[0].app = Some("kyu".into());
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = restore(&ctx(&exec, &sink, &j), &m, &BackupCfg::default(), "latest").await;
+    assert!(!report.ok, "a native restore must not report success");
+    assert!(
+        exec.calls_containing("restic restore").is_empty()
+            && exec.calls_containing("--target /").is_empty(),
+        "nothing may be restored onto the host: {:?}",
+        exec.calls()
+    );
+    let err = report.error.expect("an error");
+    let text = format!("{} {} {}", err.what, err.why, err.remedy);
+    assert!(text.contains("native"), "{text}");
+    assert!(text.contains("OPERATIONS_RUNBOOK"), "{text}");
+}

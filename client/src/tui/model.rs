@@ -802,7 +802,15 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 // Restore overwrites live data, so it is the one of the six
                 // that asks first. The same shape as destroy: type the stack
                 // name.
-                if let Some(name) = selected_stack_name(model) {
+                // gap-19: asking for the name of a restore that cannot
+                // restore anything would be a question with no good answer.
+                if let Ok((spec, true)) = resolve_spec(model) {
+                    model.status_line = format!(
+                        "Restore needs stacks/{}/ — without the stack file there is no \
+                         storage to restore; start the TUI from the repository root",
+                        spec.manifest.stack_name
+                    );
+                } else if let Some(name) = selected_stack_name(model) {
                     model.confirm = Some(Confirm {
                         op: StackOp::Restore,
                         stack: name.clone(),
@@ -1510,6 +1518,23 @@ fn answer_ask(model: &mut Model, allow: bool) {
 
 fn start_stack_op(model: &mut Model, op: StackOp) {
     let spec = match resolve_spec(model) {
+        // gap-19: the synthetic spec declares no storage. A backup sent with
+        // it snapshotted nothing while the host recorded the backup time, and
+        // a restore restored nothing; both need the real stack file.
+        Ok((spec, true)) if matches!(op, StackOp::Backup | StackOp::Restore) => {
+            model.status_line = format!(
+                "{} needs stacks/{}/ — without the stack file there is no storage to {}; \
+                 start the TUI from the repository root",
+                op.title(),
+                spec.manifest.stack_name,
+                if op == StackOp::Backup {
+                    "back up"
+                } else {
+                    "restore"
+                }
+            );
+            return;
+        }
         Ok((spec, _)) => spec,
         Err(e) => {
             model.status_line = e;
@@ -1546,8 +1571,9 @@ fn start_stack_op(model: &mut Model, op: StackOp) {
             Some(c) => model.outbox.push(c),
             None => {
                 model.focus = None;
-                model.status_line =
-                    "restore is not wired for native stacks — use `homelab restore` (T71)".into();
+                model.status_line = "restore is not wired for native stacks — restore by hand as \
+                     docs/OPERATIONS_RUNBOOK.md op-11 describes (gap-28)"
+                    .into();
             }
         }
         return;

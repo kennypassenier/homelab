@@ -823,6 +823,28 @@ pub async fn restore(
         Ok(StepOutcome::Unchanged)
     });
 
+    // gap-28: a native unit's backup is one tar stream, `/<unit>-data.tar`
+    // (native.rs), not a copy of its directories. `restic restore --target /`
+    // of that repository drops the tar file at `/` on the Proxmox host,
+    // unpacks nothing, and used to report success. Refused before anything
+    // is touched, naming the procedure that does work.
+    step!(runner, "native units", {
+        let natives: Vec<String> = owner_groups(m)
+            .into_iter()
+            .map(|(owner, _)| owner)
+            .filter(|o| m.natives.contains(o))
+            .collect();
+        if !natives.is_empty() {
+            return Err(CoreError::SafetyAbort(format!(
+                "{} is a native unit: its backup is one tar stream, and a restic restore would \
+                 drop that tar file on the host and unpack nothing :: restore it by hand with \
+                 `restic dump` into the container, as docs/OPERATIONS_RUNBOOK.md op-11 describes",
+                natives.join(", ")
+            )));
+        }
+        Ok(StepOutcome::Unchanged)
+    });
+
     // D25: a stack's data lives in one repository per owning app, so a
     // restore walks all of them. Order is the manifest's.
     let groups = owner_groups(m);

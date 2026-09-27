@@ -2447,7 +2447,7 @@ async fn scheduler_loop(state: AppState) {
                             &state,
                             &exec,
                             &name,
-                            "nightly run failed — stack parked (H8): no backup, no update, no onboot until re-enabled",
+                            homelab_core::ops::enable::AUTO_PARK_NOTICE,
                         )
                         .await;
                     }
@@ -2504,7 +2504,7 @@ async fn scheduler_loop(state: AppState) {
                         &state,
                         &exec,
                         &name,
-                        "nightly run failed — stack parked (H8): no backup, no update, no onboot until re-enabled",
+                        homelab_core::ops::enable::AUTO_PARK_NOTICE,
                     )
                     .await;
                 }
@@ -2798,7 +2798,8 @@ fn spawn_mirror_push(state: &AppState) {
 }
 
 /// A stack has just been parked by H8, which is the moment it stops being
-/// protected — no nightly backup, no update, no onboot.
+/// protected: no nightly backup and no update (onboot is left alone by the
+/// automatic park, gap-22).
 ///
 /// It used to be a `tracing::warn!` and nothing else. On 2026-08-31 the
 /// metrics stack parked itself after the run that stopped Alertmanager, and

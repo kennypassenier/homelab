@@ -25,7 +25,7 @@ pub fn draw(f: &mut Frame, model: &Model, area: Rect) {
                     THEME.muted_style(),
                 )),
                 Line::from(Span::styled(
-                    "press R or ENTER to re-run",
+                    "press r or ENTER to re-run",
                     Style::new().fg(THEME.faint),
                 )),
             ]),

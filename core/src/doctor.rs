@@ -152,7 +152,11 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
                 "token invalid/expired".into()
             },
             remedy: (!p.offsite_token_valid).then(|| {
-                "refresh the rclone Google Drive token (E5); local backups still run".into()
+                // gap-27: it added "local backups still run", but every
+                // repository lives behind rclone on Google Drive: with the
+                // token dead, no backup runs at all until it is refreshed.
+                "refresh the rclone Google Drive token (E5); until then no backup can be written"
+                    .into()
             }),
         });
     }

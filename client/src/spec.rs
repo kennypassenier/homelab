@@ -1136,10 +1136,9 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          restic dump --path /<unit>-data.tar latest /<unit>-data.tar | pct exec <vmid> -- tar -xf - -C /\n\
          pct exec <vmid> -- systemctl start <unit>\n\
          ```\n\n\
-         Do not use `homelab restore` for a native stack. It runs the compose route above: \
-         it stops no unit (it stops compose apps, and there are none) and runs `restic \
-         restore latest --target /`, which writes the archive itself to `/<unit>-data.tar` on \
-         the host and unpacks nothing. For the same reason a rebuild's automatic restore \
+         `homelab restore` refuses a native stack (gap-28): the compose route's `restic \
+         restore latest --target /` would write the archive itself to `/<unit>-data.tar` on \
+         the host and unpack nothing. For the same reason a rebuild's automatic restore \
          finds no snapshot for a native unit's directory and leaves it empty: its data \
          always comes back by the commands above.\n\n\
          **A restore brings back what was retired after the snapshot** (gap-16). almanac \

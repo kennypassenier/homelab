@@ -511,7 +511,8 @@ pub async fn install_native(
 /// /appdata was never an option); the snapshot therefore streams
 /// `pct exec tar` straight into `restic --stdin` — one host-side pipeline,
 /// nothing written in between. Repo naming and tiered retention are the
-/// same as every compose stack: `<base>/<stack>-config`.
+/// same as every compose stack: `<base>/<unit>-config` (D25: named after the
+/// service, not the stack).
 pub async fn backup_native(
     ctx: &OpCtx<'_>,
     m: &NativeServiceManifest,

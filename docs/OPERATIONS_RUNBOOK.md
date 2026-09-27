@@ -316,8 +316,11 @@ The argument is the stack **name**, not a path
 **Automatic park.** A failed night sets the flag in state only; `onboot`
 and the running containers are left alone (`host/src/main.rs:2483-2486`).
 The notification is named `stack-disabled-<stack>`
-(`host/src/main.rs:2812-2828`). Its text says `"no onboot until
-re-enabled"`, which is not what the automatic park does; see op-19.
+(`host/src/main.rs:2812-2828`). Its text is `AUTO_PARK_NOTICE`
+(`core/src/ops/enable.rs`): no nightly backup and no update until
+re-enabled, onboot and the running containers left as they were. Before
+v3.58.4 it said "no onboot until re-enabled", which the automatic park never
+did (gap-22).
 
 After an automatic park:
 
@@ -585,11 +588,11 @@ backup uses (`core/src/ops/backup.rs:32`, `:88-105`, `:124-134`).
 The procedure is DR_RUNBOOK.md Layer 4, "A native stack"
 (`client/src/spec.rs:1127-1142`). In short, and why:
 
-- Do not use `homelab restore` for a native stack. The nightly snapshot of a
-  native service is one tar stream stored as `/<unit>-data.tar`
-  (`core/src/ops/native.rs:611-615`); `homelab restore` runs
-  `restic restore <snapshot> --target /` (`core/src/ops/backup.rs:903-915`),
-  which writes that tar file to the host's `/` and unpacks nothing. Where
+- `homelab restore` refuses a native stack (gap-28, since v3.58.4). The
+  nightly snapshot of a native service is one tar stream stored as
+  `/<unit>-data.tar` (`core/src/ops/native.rs:611-615`); the compose route's
+  `restic restore <snapshot> --target /` would write that tar file to the
+  host's `/` and unpack nothing, which is what it did before the refusal. Where
   restic stores a stdin snapshot was checked with restic 0.19.1 on the
   workstation: `restic ls --json` reports the path `/almanac-data.tar`; the host's
   restic version may differ.
@@ -1165,8 +1168,8 @@ Found while writing this runbook. Each line says what to believe.
 
 | Where | Says | Code does |
 |---|---|---|
-| Automatic park notification (`host/src/main.rs:2450`, `:2507`) | `"no onboot until re-enabled"` | leaves `onboot` untouched (`host/src/main.rs:2483-2486`); only `homelab disable` clears it |
-| `Makefile:8`, `:23` | press `U` in the TUI for the host update | host update is `u`; `U` updates the selected stack (`client/src/tui/model.rs:780-800`) |
-| Doctor remedy for Drive (`core/src/doctor.rs:155`) | `"local backups still run"` | with the default `restic_base` every backup goes to `rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:127`); no local copy is made |
-| `stacks/almanac/lxc-compose.yml:16-17` | `homelab restore stacks/almanac` puts the data back | see op-11 |
-| Doc comment `core/src/ops/native.rs:513-514` | repository `<stack>-config` | repository `<unit>-config` (`core/src/ops/native.rs:536`, `:613`, `:623`) |
+| Automatic park notification | fixed in v3.58.4 (gap-22) | the text now says onboot is left alone |
+| `Makefile:8`, `:23` | fixed in v3.58.4 (gap-21) | both say `u` now |
+| Doctor remedy for Drive | fixed in v3.58.4 (gap-27) | says no backup can be written until the token is refreshed |
+| `stacks/almanac/lxc-compose.yml` | fixed in v3.58.4 (gap-28) | points at op-11; `homelab restore` refuses a native stack |
+| Doc comment in `core/src/ops/native.rs` | fixed in v3.58.4 | says `<unit>-config` |

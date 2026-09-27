@@ -93,3 +93,12 @@ pub async fn set_enabled(ctx: &OpCtx<'_>, stack_name: &str, enabled: bool) -> Op
     );
     runner.finish_ok()
 }
+
+/// What Kenny is told when a failed nightly run parks a stack.
+///
+/// gap-22: it said "no onboot until re-enabled", but the automatic park is
+/// state-only on purpose: onboot and the running containers stay as they
+/// were, so a transient failure can never keep a stack down after a host
+/// reboot. Only `homelab disable` clears onboot.
+pub const AUTO_PARK_NOTICE: &str = "nightly run failed — stack parked (H8): no nightly backup \
+     and no update until re-enabled; onboot and the running containers are left as they were";

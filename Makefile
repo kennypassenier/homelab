@@ -5,7 +5,7 @@
 # gate, stamps the workspace version, commits, tags and pushes. GitHub CI
 # (.github/workflows/release.yml) then re-runs the gate and publishes the
 # binaries + SHA256SUMS as a GitHub Release. Rolling out to the host stays a
-# separate, deliberate step: `homelab release-update` (B6) or press U in the
+# separate, deliberate step: `homelab release-update` (B6) or press u in the
 # TUI when the update badge appears.
 # ============================================================================
 
@@ -20,7 +20,7 @@ help:
 	@echo "make release VERSION=x.y.z"
 	@echo "                      gate, stamp workspace version, commit, tag vx.y.z, push."
 	@echo "                      CI publishes the GitHub Release; roll out afterwards"
-	@echo "                      with 'homelab release-update' (or U in the TUI)."
+	@echo "                      with 'homelab release-update' (or u in the TUI)."
 
 # One-time per clone: core.hooksPath is local config, never committed, so a
 # fresh clone has no enforcement until this runs.

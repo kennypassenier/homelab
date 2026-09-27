@@ -191,29 +191,26 @@ All of these act on the stack under the cursor.
 
 On a native-only stack, `SHIFT+B` runs the native backup and `SHIFT+U` the
 supervised self-update; `SHIFT+R` is refused with
-`restore is not wired for native stacks — use` followed by the command to use
-(`client/src/tui/model.rs:1533-1553`).
+`restore is not wired for native stacks — restore by hand as docs/OPERATIONS_RUNBOOK.md op-11 describes`
+(`client/src/tui/model.rs`). `homelab restore` refuses a native stack too
+(gap-28): its backup is one tar stream, which a restic restore would drop on
+the host unpacked.
 
-Two placeholder texts still name the wrong key: the STACKS panel shows
-`awaiting state… [R] refresh` before the first state arrives
-(`client/src/tui/view/stacks.rs:30`), and the DOCTOR panel shows
-`press R or ENTER to re-run` before its first answer
-(`client/src/tui/view/doctor.rs:28`). Refresh is `r`. On STACKS, `SHIFT+R` opens
+The placeholders before the first state (`awaiting state… [r] refresh` on STACKS, `press r or ENTER to re-run` on DOCTOR) name lowercase `r` since v3.58.4 (gap-21; they said `R`, which is restore on STACKS). Refresh is `r`. On STACKS, `SHIFT+R` opens
 the restore prompt; it restores nothing unless you then type the stack name.
 
 ### 1.3 Warning: the TUI and a missing `stacks/` directory
 
 For every per-stack action the TUI looks for `stacks/<name>/` in the
-directory it was started from. When it finds none, it does not refuse: it
-builds a **synthetic manifest** from the fleet view, with default resources
-and **no storage entries** (`client/src/tui/model.rs:1283-1360`). Read what
-that means before starting the TUI anywhere else:
+directory it was started from. When it finds none, it builds a **synthetic
+manifest** from the fleet view, with default resources and **no storage
+entries** (`client/src/tui/model.rs`, `resolve_spec`). Read what that means
+before starting the TUI anywhere else:
 
-- `SHIFT+B` backs up nothing (a manifest without storage has no repository to
-  write, `core/src/ops/backup.rs:269-294,571-573`) and still succeeds, and the
-  host then records a backup time for the stack (`host/src/main.rs:3346-3348`).
-- `SHIFT+R` stops and restarts every app of the stack and restores nothing
-  (`core/src/ops/backup.rs:883-932`).
+- `SHIFT+B` and `SHIFT+R` refuse (gap-19): the status line says the stack
+  needs `stacks/<name>/`, and nothing is sent. Before v3.58.4 a backup with
+  the synthetic manifest wrote nothing while the host recorded a backup time,
+  and a restore stopped and restarted every app and restored nothing.
 - Drift badges are only computed for stacks found locally
   (`client/src/tui/model.rs:490-509`).
 
@@ -1877,7 +1874,7 @@ shows it.
 | 8 | G6 reports only file-push bytes | `core/src/ops/deploy.rs:1091` |
 | 9 | H6 has no reboot indicator and no TUI action | `core/src/ops/patch.rs`, `client/src/tui/model.rs:1104-1184` |
 | 10 | C6 has no overcommit warning in the wizard | `client/src/tui/model.rs:1806-1900` |
-| 11 | Without a local `stacks/` directory, TUI backup records a backup of nothing and TUI restore restarts the apps and restores nothing (section 1.3) | `client/src/tui/model.rs:1283-1360`, `host/src/main.rs:3346-3348` |
+| 11 | Fixed in v3.58.4 (gap-19): without a local `stacks/` directory, TUI backup and restore now refuse instead of acting on a manifest with no storage (section 1.3) | `client/src/tui/model.rs`, `start_stack_op` |
 | 12 | After the wizard, the status line says `SHIFT+D`, which deploys the stack under the cursor, not the new one | `client/src/tui/model.rs:1945-1949,1287-1295` |
 | 13 | Two placeholder texts name `R` where refresh is `r` | `client/src/tui/view/stacks.rs:30`, `client/src/tui/view/doctor.rs:28` |
 | 14 | `homelab new` and `homelab testplan` need a token although they never connect | `client/src/main.rs:144-150` |

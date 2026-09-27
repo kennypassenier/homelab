@@ -13,8 +13,9 @@
 #
 # Rebuilding it, in order:
 #   1. this manifest recreates the container;
-#   2. `homelab restore stacks/almanac` puts the service's data back from its
-#      own restic repository;
+#   2. the service's data comes back from its own restic repository by
+#      hand, as docs/OPERATIONS_RUNBOOK.md op-11 describes (`homelab restore`
+#      refuses a native stack: its backup is one tar stream, gap-28);
 #   3. the binary is installed the way C7 installs it.
 
 stack_name: almanac

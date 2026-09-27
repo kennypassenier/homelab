@@ -228,6 +228,31 @@ fn f6_doctor_flags_each_problem_with_remedy() {
         .any(|c| c.name.contains("interrupted") && c.health == Health::Warn));
 }
 
+/// gap-27: with the Drive token dead the doctor said "local backups still
+/// run". Every repository lives behind rclone on Google Drive, so none runs.
+///
+/// covers: gap-27
+#[test]
+fn gap_27_the_dead_drive_token_remedy_does_not_promise_local_backups() {
+    let p = Probes {
+        host_disk_free_pct: Some(57),
+        state_parses: true,
+        managed_stacks: vec![],
+        offsite_configured: true,
+        offsite_token_valid: false,
+        mirror_behind: Some(0),
+        interrupted_ops: vec![],
+    };
+    let checks = doctor::diagnose(&p);
+    let remedy = checks
+        .iter()
+        .find(|c| c.name.contains("offsite"))
+        .and_then(|c| c.remedy.clone())
+        .expect("a remedy");
+    assert!(!remedy.contains("local backups still run"), "{remedy}");
+    assert!(remedy.contains("no backup"), "{remedy}");
+}
+
 // ── RecordingSink tees to inner sink AND records ────────────────────────────
 
 #[tokio::test]

@@ -27,7 +27,7 @@ fn draw_list(f: &mut Frame, model: &Model, area: Rect) {
     let Some(fleet) = &model.fleet else {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                format!("{} awaiting state… [R] refresh", fx::spinner(model.tick)),
+                format!("{} awaiting state… [r] refresh", fx::spinner(model.tick)),
                 THEME.muted_style(),
             ))),
             inner,

@@ -186,6 +186,62 @@ fn normalise(fp: &str) -> String {
         .to_ascii_uppercase()
 }
 
+/// fix-149 (first-connect-pin, Kenny 2026-09-27: "Pin in de client"): the
+/// fleet's certificate fingerprint as `config/client.toml` said when this
+/// client was compiled (`client/build.rs`), without its `SHA256:` prefix.
+/// `None` for a client built from a tree without a pin.
+pub fn built_in_pin() -> Option<&'static str> {
+    let pin = env!("HOMELAB_BUILT_IN_PIN").trim();
+    let pin = pin.strip_prefix("SHA256:").unwrap_or(pin);
+    (!pin.is_empty()).then_some(pin)
+}
+
+/// fix-149: [`reconcile_pin`] with the pin the client was built with on top.
+///
+/// A machine with no pin of its own used to trust the first certificate it
+/// saw and send it the bearer token. With a built-in pin that is the only
+/// certificate trusted, first connection included; a machine pin or a
+/// repository pin that disagrees with it is refused, never followed, because
+/// either one differing is exactly what a changed certificate or a stale
+/// checkout looks like, and a person has to look. A client built without a
+/// pin behaves as before.
+pub fn reconcile_pin_built_in(
+    built_in: Option<&str>,
+    machine: Option<String>,
+    repo: Option<&str>,
+) -> Result<PinDecision, String> {
+    let Some(built) = built_in.map(normalise).filter(|b| !b.is_empty()) else {
+        return reconcile_pin(machine, repo);
+    };
+    if let Some(r) = repo.map(normalise).filter(|r| !r.is_empty()) {
+        if r != built {
+            return Err(format!(
+                "{} names the host certificate {} but this client was built for {} :: \
+                 either the certificate changed and this client predates it — rebuild it \
+                 from the repository (`make install`) or install the release built from it \
+                 (`homelab self-install`) — or the repository is not the one this client \
+                 came from",
+                REPO_FILE, r, built
+            ));
+        }
+    }
+    let machine = machine.map(|m| normalise(&m)).filter(|m| !m.is_empty());
+    if let Some(m) = &machine {
+        if *m != built {
+            return Err(format!(
+                "the host certificate pinned on this machine (~/.config/homelab/pin: {}) is not \
+                 the one this client was built for ({}) :: delete ~/.config/homelab/pin; the \
+                 client pins its own",
+                m, built
+            ));
+        }
+    }
+    Ok(PinDecision {
+        pin: Some(built),
+        adopted_from_repo: machine.is_none(),
+    })
+}
+
 /// A repository pin fills an empty machine and never overrules a different
 /// one: a machine that pinned something else is what a changed certificate
 /// looks like, and the two answers have to be put in front of a person.

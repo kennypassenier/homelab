@@ -1277,23 +1277,24 @@ the restic password (lost-1):
    Both lines show the same colon-separated SHA-256 of the certificate
    (`host/src/tls.rs:56-68`).
 2. Workstation, repository root: set `pin` in `config/client.toml` to that
-   value, commit on `main`, push.
-3. Every workstation, in this order: `git pull` in the repository, then
-   `rm ~/.config/homelab/pin`, then `homelab ping` from the repository. It
-   prints `"pinned host certificate SHA256:<fp> from <file>"`, the file
-   being `config/client.toml` (`client/src/main.rs:1101-1117`,
-   `client/src/repo_config.rs:29`). Deleting the pin before pulling adopts
-   the old pin from the old file, and the next command then refuses with
-   `"the host certificate pinned on this machine"`
-   (`client/src/repo_config.rs:140-167`): delete it again after the pull.
+   value, commit on `main`, push. From this moment every installed client
+   refuses the daemon: the pin is built into the client (fix-149), and a
+   client never falls back to trusting the certificate it sees.
+3. Every workstation, in this order: `git pull` in the repository, a client
+   built from it (`make install`, or cut a release and run
+   `homelab self-install`, which needs `gh` and not the daemon), then
+   `rm ~/.config/homelab/pin`, then `homelab ping`. It prints
+   `"pinned host certificate SHA256:<fp>, the one this client was built with"`.
+   A machine pin left from before is refused with `"delete
+   ~/.config/homelab/pin"`.
 4. Workstation: `homelab backup-host-meta`, so the offsite copy holds the
    new pair.
 
 **Only a workstation's pin file is gone.** Nothing to do: the next command
-run inside the repository takes the pin from `config/client.toml`
-(`client/src/repo_config.rs:158-161`). Outside the repository it trusts
-the first certificate it sees and says `"verify this matches the
-fingerprint the host printed at boot"` (`client/src/main.rs:1143-1155`).
+pins the certificate the client was built with, wherever it runs (fix-149).
+Only a client built from a tree without a pin still trusts the first
+certificate it sees and says `"verify this matches the fingerprint the host
+printed at boot"`.
 
 ### lost-3 · The API token is gone
 

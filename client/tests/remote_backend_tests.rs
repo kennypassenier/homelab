@@ -127,6 +127,9 @@ fn start_with_repo_pin(addr: &str, repo_pin: Option<&str>) -> Channels {
         host: addr.to_string(),
         token: "0123456789abcdef0123".into(),
         repo_pin: repo_pin.map(str::to_string),
+        // The loopback host presents a certificate made for the test; the
+        // fleet's built-in pin is not this one (fix-149 tests it on its own).
+        built_in_pin: None,
     })
     .start()
 }
@@ -245,8 +248,8 @@ async fn fix_67_the_tui_holds_the_host_to_the_repository_pin() {
         mut evt_rx,
     } = start_with_repo_pin(&host.addr, Some(other));
     let events = drain(&mut evt_rx, Duration::from_millis(1500)).await;
-    // The machine adopted the foreign pin, as it should; the next test must
-    // not inherit it.
+    // Since fix-149 a refused host leaves no pin behind; removed anyway so the
+    // next test can never inherit one.
     let _ = std::fs::remove_file(pin_file());
     assert!(
         !events
@@ -334,6 +337,47 @@ async fn fix_105_the_tui_refuses_a_mutating_command_to_a_newer_host() {
         )),
         "the refusal must reach the screen and name the remedy: {:?}",
         events
+    );
+}
+
+/// covers: fix-149
+///
+/// first-connect-pin (Kenny, 2026-09-27: "Pin in de client"): a machine
+/// with no pin trusted the first certificate it saw and sent the bearer
+/// token to it. With a pin built into the client, a certificate that is not
+/// that one is refused on the very first connection, and nothing is saved.
+#[tokio::test]
+async fn fix_149_a_first_connection_refuses_any_certificate_but_the_built_in_one() {
+    let mut host = fake_host(env!("CARGO_PKG_VERSION")).await;
+    let _ = std::fs::remove_file(pin_file());
+    let other = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99";
+    let Channels {
+        cmd_tx: _cmd,
+        mut evt_rx,
+    } = Box::new(RemoteBackend {
+        host: host.addr.clone(),
+        token: "0123456789abcdef0123".into(),
+        repo_pin: None,
+        built_in_pin: Some(other.into()),
+    })
+    .start();
+    let events = drain(&mut evt_rx, Duration::from_millis(1500)).await;
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, BackendEvent::Connected { .. })),
+        "a first connection trusted a certificate the client was not built for: {:?}",
+        events
+    );
+    let got = tokio::time::timeout(Duration::from_millis(300), host.received.recv()).await;
+    assert!(
+        !matches!(got, Ok(Some(_))),
+        "a frame reached a host whose certificate was refused: {:?}",
+        got
+    );
+    assert!(
+        !pin_file().exists(),
+        "the refused certificate must not be pinned"
     );
 }
 

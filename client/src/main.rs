@@ -241,6 +241,7 @@ async fn main() {
                     host: host.clone(),
                     token: token.clone(),
                     repo_pin: REPO_PIN.get().cloned().flatten(),
+                    built_in_pin: homelab_client::repo_config::built_in_pin().map(str::to_string),
                 })
             };
             if let Err(e) = tui::run(backend, repo_root().map(Path::to_path_buf)).await {
@@ -1430,11 +1431,20 @@ async fn rpc_exchange(
     let mut done: Option<bool> = None;
     // fix-67: the pin, the frame ceiling and the version gate live in one
     // place, shared with the TUI, whose own copy had drifted from this one.
-    let link =
-        homelab_client::link::connect(host, token, REPO_PIN.get().and_then(|p| p.as_deref()))
-            .await
-            .unwrap_or_else(|e| die(&e));
+    let link = homelab_client::link::connect(
+        host,
+        token,
+        REPO_PIN.get().and_then(|p| p.as_deref()),
+        homelab_client::repo_config::built_in_pin(),
+    )
+    .await
+    .unwrap_or_else(|e| die(&e));
     match &link.pinned {
+        // fix-149: nothing trusted on first use; say where the pin came from.
+        Some(homelab_client::link::Pinned::BuiltIn(fp)) => eprintln!(
+            "{}● pinned host certificate SHA256:{}, the one this client was built with{}",
+            C_YELLOW, fp, C_RESET
+        ),
         Some(homelab_client::link::Pinned::FromRepo(fp)) => eprintln!(
             "{}● pinned host certificate SHA256:{} from {}{}",
             C_YELLOW,

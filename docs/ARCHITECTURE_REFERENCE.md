@@ -272,10 +272,14 @@ in one place (`client/src/scaffold.rs:473-500`). Default swap is
 
 **The line.** The daemon generates a self-signed certificate once into
 `<state_dir>/tls-cert.pem` and `tls-key.pem` and prints its fingerprint at
-every boot (`host/src/tls.rs:16-54`, `host/src/main.rs:1837-1843`). The CLI
-pins: `~/.config/homelab/pin` wins, the `pin` in the repository's
-`config/client.toml` fills an empty machine, a disagreement stops with an
-error, and with neither the first certificate seen is trusted and saved
+every boot (`host/src/tls.rs:16-54`, `host/src/main.rs:1837-1843`). The
+client is built with the fleet's pin (fix-149, `client/build.rs` reads
+`config/client.toml`) and trusts that certificate only, first connection
+included; a machine or repository pin that disagrees stops with an error.
+A client built without one pins as before: `~/.config/homelab/pin` wins, the
+`pin` in the repository's `config/client.toml` fills an empty machine, a
+disagreement stops with an error, and with neither the first certificate
+seen is trusted and saved
 (`client/src/repo_config.rs:139-167`, `client/src/main.rs:1100-1120`). The
 TUI uses the machine pin only (`client/src/tui/backend.rs:66`). Every
 websocket upgrade needs `Authorization: Bearer <token>`

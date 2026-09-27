@@ -173,6 +173,69 @@ fn the_committed_client_file_names_the_in_vlan_door_and_a_real_fingerprint() {
     );
 }
 
+/// first-connect-pin (Kenny, 2026-09-27: "Pin in de client"): a machine
+/// with no pin of its own trusted the first certificate it saw and sent the
+/// bearer token to it. The fleet's pin is compiled into the client, and it
+/// is the only certificate trusted, first connection included.
+/// covers: fix-149
+#[test]
+fn fix_149_the_built_in_pin_is_the_only_certificate_trusted() {
+    use homelab_client::repo_config::reconcile_pin_built_in;
+    let a = "AA:AA";
+    let b = "BB:BB";
+    // First connection on a fresh machine: no trust on first use.
+    let d = reconcile_pin_built_in(Some(a), None, None).unwrap();
+    assert_eq!(d.pin.as_deref(), Some(a));
+    assert!(d.adopted_from_repo, "the machine saves it");
+    // The same pin everywhere: nothing to say.
+    let d = reconcile_pin_built_in(Some(a), Some(a.into()), Some(a)).unwrap();
+    assert_eq!(d.pin.as_deref(), Some(a));
+    assert!(!d.adopted_from_repo);
+    // A machine pin or a repository pin that disagrees is refused, with the
+    // remedy named.
+    let e = reconcile_pin_built_in(Some(a), Some(b.into()), None).unwrap_err();
+    assert!(e.contains(".config/homelab/pin"), "{}", e);
+    let e = reconcile_pin_built_in(Some(a), None, Some(b)).unwrap_err();
+    assert!(
+        e.contains("config/client.toml") && e.contains("self-install"),
+        "{}",
+        e
+    );
+    // A client built without a pin behaves as before.
+    assert_eq!(
+        reconcile_pin_built_in(None, None, Some(b)).unwrap(),
+        reconcile_pin(None, Some(b)).unwrap()
+    );
+}
+
+/// The released client carries the committed pin, and the DR runbook says
+/// what a regenerated certificate then asks for.
+/// covers: fix-149
+#[test]
+fn fix_149_the_client_is_built_with_the_committed_pin() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let (_, cfg) = load(root)
+        .unwrap()
+        .expect("config/client.toml is committed");
+    let committed = cfg.pin.expect("the pin is committed");
+    assert_eq!(
+        homelab_client::repo_config::built_in_pin().map(str::to_string),
+        Some(committed.trim_start_matches("SHA256:").to_string())
+    );
+    let out = std::env::temp_dir().join(format!("homelab-dr-f149-{}.md", std::process::id()));
+    homelab_client::spec::generate_runbook(&root.join("stacks"), out.to_str().unwrap()).unwrap();
+    let doc = std::fs::read_to_string(&out).unwrap();
+    let _ = std::fs::remove_file(&out);
+    assert!(
+        doc.contains("built into the client"),
+        "the runbook predates fix-149"
+    );
+    assert!(
+        doc.contains("homelab self-install"),
+        "the runbook names no way to rebuild"
+    );
+}
+
 /// cli-path-vs-name-and-cwd (expert panel, 2026-09-27): half the verbs took
 /// `stacks/<name>`, the other half `<name>`, and the wrong form answered
 /// "cannot read almanac/lxc-compose.yml" with no hint. Every spelling now

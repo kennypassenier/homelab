@@ -36,7 +36,7 @@ things, and each has its own home:
 |---|---|---|
 | Host address | `HOMELAB_HOST` typed before the command; else `host` in `config/client.toml`, searched upward from the current directory the way git finds its root; else `HOMELAB_HOST` from `~/.config/homelab/env` or `./.env`; else the built-in `10.10.5.250:8443` | `client/src/main.rs:127-137`, `client/src/repo_config.rs:25,63,103` |
 | Token | `HOMELAB_TOKEN` in the environment; else `~/.config/homelab/env`; else `./.env` | `client/src/main.rs:49-88,140` |
-| Certificate pin | `~/.config/homelab/pin`; if that is empty, the `pin` in `config/client.toml` is adopted and saved; if both are empty, the first certificate seen is trusted and saved | `client/src/lib.rs:16-18`, `client/src/repo_config.rs:143`, `client/src/main.rs:1101-1155` |
+| Certificate pin | the pin built into the client from `config/client.toml` at compile time (fix-149), the only certificate trusted; a machine pin or repository pin that disagrees is refused. A client built without one: `~/.config/homelab/pin`; if that is empty, the `pin` in `config/client.toml` is adopted and saved; if both are empty, the first certificate seen is trusted and saved | `client/src/lib.rs:16-18`, `client/src/repo_config.rs:143`, `client/src/main.rs:1101-1155` |
 
 Only keys that start with `HOMELAB_` are read from the two env files, and a
 key already in the environment is never overwritten (`client/src/main.rs:76-81`).
@@ -92,7 +92,10 @@ that differs from the pin, the connection is refused with
 say what to delete; do that only after checking the fingerprint the host
 logs at start (`host/src/main.rs:1876`).
 
-The certificate pin is decided per connection like this:
+The certificate pin is decided per connection like this, for a client built
+without a pin; the released client carries the fleet's pin (fix-149), trusts
+that certificate only, first connection included, and refuses a machine or
+repository pin that disagrees with it:
 
 ```mermaid
 flowchart TD

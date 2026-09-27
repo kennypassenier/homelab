@@ -1063,17 +1063,22 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          {units}\
          **The certificate pin.** The daemon's certificate is `{state}/tls-cert.pem` with \
          `{state}/tls-key.pem`; when either is missing at start it makes a new pair \
-         (host/src/tls.rs). Clients refuse a certificate whose SHA-256 fingerprint differs \
-         from the `pin` in `config/client.toml`, and from the copy each machine keeps in \
-         `~/.config/homelab/pin`. Compare:\n\n```sh\n\
+         (host/src/tls.rs). The client trusts one certificate: the fingerprint built into \
+         the client, taken from `pin` in `config/client.toml` when it was compiled. It refuses \
+         any other, on a first connection too, and it also refuses when that `pin` or the \
+         copy a machine keeps in `~/.config/homelab/pin` disagrees with it. Compare:\n\n```sh\n\
          journalctl -u {svc} | grep 'TLS fingerprint' | tail -1\n\
          openssl x509 -in {state}/tls-cert.pem -noout -fingerprint -sha256\n\
          ```\n\n\
          with `pin` in `config/client.toml` on a workstation. If they differ because the pair \
-         was regenerated, either restore both files from `host-meta-config` (Layer 3) and \
-         restart, or accept the new certificate: write the new fingerprint into `pin` in \
-         `config/client.toml`, and delete `~/.config/homelab/pin` on every client machine \
-         (a machine pin that disagrees with the repository pin is refused, not replaced).\n\n\
+         was regenerated, every installed client refuses the daemon until one of two things \
+         happens. Either restore both files from `host-meta-config` (Layer 3) and restart: \
+         the clients work again unchanged. Or accept the new certificate: write the new \
+         fingerprint into `pin` in `config/client.toml`, commit it, and put a client built \
+         from that tree on every machine (`make install`, or cut a release and run \
+         `homelab self-install` on each, which needs `gh` and not the daemon), then delete \
+         `~/.config/homelab/pin` on each. A client never falls back to trusting the \
+         certificate it sees.\n\n\
          **The token** is `token` in `{toml}` (or `HOMELAB_TOKEN` in the daemon's \
          environment). A new token means updating `HOMELAB_TOKEN` in \
          `~/.config/homelab/env` on every client machine.\n\n",

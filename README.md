@@ -181,8 +181,13 @@ A `config/client.toml` that exists but does not parse is an error, never a
 silent fall-through to the next source. Its only keys are `host` and `pin`.
 
 **Certificate pin.** The daemon's certificate is self-signed; trust comes from
-its SHA-256 fingerprint, stored per machine in `~/.config/homelab/pin`
-(`client/src/lib.rs`):
+its SHA-256 fingerprint. Since fix-149 the client is built with the fleet's
+pin, read from `config/client.toml` at compile time (`client/build.rs`), and
+trusts that certificate only, on a machine's first connection too: nothing
+is trusted on first use and no token goes to a certificate it was not built
+for. A machine pin (`~/.config/homelab/pin`) or a repository `pin` that
+disagrees with the built-in one is refused with the remedy. A client built
+from a tree without a pin behaves as the table below:
 
 | Machine pin | `pin` in `config/client.toml` | Result |
 |---|---|---|

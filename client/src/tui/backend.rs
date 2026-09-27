@@ -36,6 +36,10 @@ pub struct RemoteBackend {
     pub token: String,
     /// The fingerprint `config/client.toml` names, when there is one.
     pub repo_pin: Option<String>,
+    /// fix-149: the fingerprint this client was built with
+    /// (`repo_config::built_in_pin`); `None` only in tests with a
+    /// certificate of their own.
+    pub built_in_pin: Option<String>,
 }
 
 impl Backend for RemoteBackend {
@@ -47,8 +51,13 @@ impl Backend for RemoteBackend {
             // fix-67 (tui-connection-skips-guards, 2026-09-27): the same
             // connect as the command line — the repository's pin, the fix-30
             // frame ceiling — instead of a copy that had drifted from it.
-            let link = match crate::link::connect(&self.host, &self.token, self.repo_pin.as_deref())
-                .await
+            let link = match crate::link::connect(
+                &self.host,
+                &self.token,
+                self.repo_pin.as_deref(),
+                self.built_in_pin.as_deref(),
+            )
+            .await
             {
                 Ok(l) => l,
                 Err(e) => {

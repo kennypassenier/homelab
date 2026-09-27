@@ -29,6 +29,12 @@ appears in the orchestrator's own `FEATURES.md` under D9 and was never built —
 
 ## What an automatic update actually does
 
+Only on a night whose backup of the stack actually ran (fix-60, 2026-09-27):
+a backup that failed or stood aside because an app was in use skips every
+automatic update of that stack, native services included, and the host logs
+`automatic updates of <stack> skipped tonight`. Before, the updates ran
+regardless and could migrate a database with no copy from that night.
+
 Per app, in this order (O9):
 
 1. `docker compose pull` — while the service is still running, so the downtime

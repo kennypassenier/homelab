@@ -193,6 +193,30 @@ fn a_real_failure_still_parks_and_a_good_night_still_records() {
     // `fix_59_a_failed_night_never_stops_the_stacks_backups` holds that.
 }
 
+/// fix-60 (updates-run-after-failed-backup, 2026-09-27): the scheduler ran
+/// every automatic update after the backup batch whatever the backup did.
+/// Somebody watching a film at 02:00 made the media backup stand aside, and
+/// sonarr, radarr, prowlarr, bazarr and seerr were still updated and migrated
+/// their databases with no backup from that night to go back to.
+#[test]
+fn fix_60_no_automatic_update_without_tonights_backup() {
+    assert!(NightBackup::Done.allows_update());
+    assert!(
+        !NightBackup::Deferred("kenny is watching Arrival".into()).allows_update(),
+        "a backup that stood aside leaves nothing of tonight to go back to"
+    );
+    assert!(
+        !NightBackup::Failed.allows_update(),
+        "a failed backup leaves nothing of tonight to go back to"
+    );
+    let line = NightBackup::Deferred("jellyfin is playing".into()).update_skip_line("media");
+    assert!(
+        line.contains("media") && line.contains("jellyfin is playing"),
+        "{}",
+        line
+    );
+}
+
 /// T5: services sharing one container share a fate.
 #[test]
 fn the_worst_service_decides_the_stacks_night() {

@@ -63,6 +63,34 @@ impl NightBackup {
         }
     }
 
+    /// May tonight's automatic updates of this stack run? Only after a backup
+    /// that happened.
+    ///
+    /// fix-60 (updates-run-after-failed-backup, 2026-09-27): the scheduler
+    /// updated every stack after the backup batch whatever the backup did.
+    /// A backup that stood aside because somebody was watching a film, or one
+    /// that failed, left the *arr apps to migrate their databases with no
+    /// copy from that night to go back to. The update waits for a night with
+    /// a backup; a stack that keeps standing aside is escalated by the
+    /// backup-age check, not updated blind.
+    pub fn allows_update(&self) -> bool {
+        matches!(self, NightBackup::Done)
+    }
+
+    /// The log line for a stack whose updates this backup outcome held back.
+    pub fn update_skip_line(&self, stack: &str) -> String {
+        let why = match self {
+            NightBackup::Done => "it ran".to_string(),
+            NightBackup::Deferred(why) => format!("it stood aside ({})", why),
+            NightBackup::Failed => "it failed".to_string(),
+        };
+        format!(
+            "scheduler: automatic updates of {} skipped tonight — no backup of tonight to go \
+             back to: {}",
+            stack, why
+        )
+    }
+
     /// May a `last_backup` timestamp be written? Only for work that happened.
     pub fn records_a_timestamp(&self) -> bool {
         matches!(self, NightBackup::Done)

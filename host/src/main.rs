@@ -2418,6 +2418,9 @@ async fn scheduler_loop(state: AppState) {
                             name, name
                         );
                         &[]
+                    } else if !backup.allows_update() {
+                        info!("{}", backup.update_skip_line(&name));
+                        &[]
                     } else {
                         &st.natives
                     };
@@ -2482,6 +2485,10 @@ async fn scheduler_loop(state: AppState) {
                      `homelab enable {}` resumes them",
                     name, name
                 );
+                continue;
+            }
+            if !backup.allows_update() {
+                info!("{}", backup.update_skip_line(&name));
                 continue;
             }
             let m2 = manifest.clone();

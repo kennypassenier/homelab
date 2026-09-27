@@ -444,6 +444,8 @@ reaches curl through a mode-600 header file,
 | `fleet check: repo and reality agree` | info | the nightly check found nothing alarming | `host/src/main.rs:2648-2655` |
 | `fleet check: <n> finding(s)` | warn | the nightly check found something; it also went out as a notification | `host/src/main.rs:2657-2679` |
 | `notification route <scheme>://<host:port>/<path withheld> failed: <why>` | warn | one webhook route did not answer 2xx; the path (a Home Assistant webhook id) is withheld since fix-123, the full URL is `notify_webhook` or `notify_fallback_webhook` in `host.toml` | `host/src/main.rs`, `notify_raw` |
+| `a client lagged: <n> message(s) to it dropped` | warn | a connected client read slower than the host wrote; it was told so and sent every open question again (fix-127) | `host/src/main.rs`, `serve_ws` |
+| `401 on <path> from <address>: missing or wrong bearer token (<n> refused since this daemon started)` | warn | a connection without the right token; `homelab doctor` counts them under `refused connections` (fix-120) | `host/src/main.rs`, `log_refused` |
 | `notification took the fallback route: the primary said <why>` | warn | primary failed, fallback delivered | `host/src/main.rs:2909-2914` |
 | `mirror push failed (will retry): <e>` | warn | the intent repo did not reach its mirror; retried every tick | `host/src/main.rs:2781-2785`, `2250` |
 | `A6 exec vmid=<n> cmd=<cmd>` | info | a `homelab exec` ran | `host/src/main.rs:3969` |

@@ -1503,9 +1503,18 @@ port = 5003
     {
         // Loaded by path, not through HOMELAB_CONFIG, for the reason fix-36's
         // test gives: tests run in parallel and another one sets it.
-        let path = format!("/tmp/homelab-loopback-test-{}.toml", std::process::id());
+        // One file per call: tests run in parallel, and a shared path let one
+        // test read the file while another was rewriting it.
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let path = format!(
+            "/tmp/homelab-loopback-test-{}-{}.toml",
+            std::process::id(),
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
-        serve_state_on_loopback(test_state(load_config_from(path)), handler).await
+        let config = load_config_from(path.clone());
+        let _ = std::fs::remove_file(&path);
+        serve_state_on_loopback(test_state(config), handler).await
     }
 
     /// [`serve_on_loopback`] around a state the test built itself.
@@ -1604,6 +1613,116 @@ port = 5003
             verdict, "Allow",
             "the operator allowed over the same connection, but the operation heard: {}",
             verdict
+        );
+    }
+
+    /// fix-127 (expert panel, websocket-edge-cases, 2026-09-27): the session
+    /// read `while let Some(Ok(Message::Text(..)))`, so the first Ping,
+    /// Pong or Binary frame ended it. A keepalive ping from a client or a
+    /// proxy closed the line without a word.
+    #[tokio::test]
+    async fn fix_127_a_ping_or_binary_frame_does_not_end_the_session() {
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let addr = serve_on_loopback(|st, req| async move { handle_rpc(&st, req).await }).await;
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+            .await
+            .expect("connect to the loopback session");
+        let (mut tx, mut rx) = ws.split();
+        tx.send(WsMsg::Ping(vec![1, 2, 3].into())).await.unwrap();
+        tx.send(WsMsg::Binary(vec![0xff; 8].into())).await.unwrap();
+        let req = RpcRequest {
+            id: 7,
+            command: Rpc::Ping,
+        };
+        tx.send(WsMsg::Text(serde_json::to_string(&req).unwrap().into()))
+            .await
+            .unwrap();
+        let answered = tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(Ok(frame)) = rx.next().await {
+                if let WsMsg::Text(t) = frame {
+                    if let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t) {
+                        return r.id == 7 && r.ok;
+                    }
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+        assert!(
+            answered,
+            "the request after a ping and a binary frame is answered"
+        );
+    }
+
+    /// Asks a question, and while it waits floods the broadcast channel far
+    /// past its capacity, so a slow reader lags past the question.
+    async fn flooding_asker(st: AppState, req: RpcRequest) -> RpcResponse {
+        if matches!(req.command, Rpc::Answer { .. }) {
+            return handle_rpc(&st, req).await;
+        }
+        // Spawned before the question is sent, so on this single-threaded
+        // test runtime it runs as soon as the asker waits: after the Ask is
+        // in the channel, before the session's forwarder has taken it out.
+        let flood = st.log_tx.clone();
+        tokio::spawn(async move {
+            for i in 0..500 {
+                let _ = flood.send(ServerMsg::Log {
+                    level: homelab_proto::LogLevel::Debug,
+                    source: "HOST".into(),
+                    msg: format!("noise {}", i),
+                });
+            }
+        });
+        asking_handler(st, req).await
+    }
+
+    /// fix-127: a client that reads slower than the host writes lags the
+    /// broadcast channel, and the forwarder skipped what it missed without
+    /// a word, questions included, so the operation waited for an answer to
+    /// a question the operator never saw and ended Unattended. Now the
+    /// client is told how much it missed and every open question is sent
+    /// again.
+    #[tokio::test]
+    async fn fix_127_a_lagging_client_still_gets_the_open_question() {
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let addr = serve_on_loopback(flooding_asker).await;
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+            .await
+            .expect("connect to the loopback session");
+        let (mut tx, mut rx) = ws.split();
+        let frame = |req: RpcRequest| WsMsg::Text(serde_json::to_string(&req).unwrap().into());
+        tx.send(frame(RpcRequest {
+            id: 1,
+            command: Rpc::Ping,
+        }))
+        .await
+        .unwrap();
+        let mut told_of_the_gap = false;
+        let verdict = tokio::time::timeout(Duration::from_secs(20), async {
+            while let Some(Ok(WsMsg::Text(t))) = rx.next().await {
+                match serde_json::from_str::<ServerMsg>(&t).unwrap() {
+                    ServerMsg::Ask { id, .. } => {
+                        tx.send(frame(RpcRequest {
+                            id: 2,
+                            command: Rpc::Answer { id, allow: true },
+                        }))
+                        .await
+                        .unwrap();
+                    }
+                    ServerMsg::Log { msg, .. } if msg.contains("dropped") => told_of_the_gap = true,
+                    ServerMsg::RpcDone(r) if r.id == 1 => return r.message,
+                    _ => {}
+                }
+            }
+            "the connection closed".to_string()
+        })
+        .await
+        .expect("the operation never finished");
+        assert_eq!(verdict, "Allow", "the question reached the operator");
+        assert!(
+            told_of_the_gap,
+            "and the client was told it missed messages"
         );
     }
 
@@ -2596,8 +2715,7 @@ struct AppState {
     damper: Arc<std::sync::Mutex<homelab_core::notify::NotifyDamper>>,
     /// T69: questions a step is waiting on, by id. The client's answer
     /// arrives as an ordinary RPC and is delivered through one of these.
-    pending_asks:
-        Arc<std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::oneshot::Sender<bool>>>>,
+    pending_asks: Arc<std::sync::Mutex<std::collections::HashMap<u64, PendingAsk>>>,
     /// Monotonic id for those questions. Not a clock: two questions in the
     /// same second must still be distinguishable.
     next_ask_id: Arc<std::sync::atomic::AtomicU64>,
@@ -2629,6 +2747,14 @@ impl AppState {
             auth_failures: Arc::new(AuthFailures::default()),
         }
     }
+}
+
+/// T69: a question waiting for its answer.
+struct PendingAsk {
+    reply: tokio::sync::oneshot::Sender<bool>,
+    /// fix-127: the question as sent, so a client that lagged past it gets
+    /// it again.
+    ask: ServerMsg,
 }
 
 /// fix-120 (expert panel, api-token-is-root, 2026-09-27): the 401 branch
@@ -2775,17 +2901,24 @@ impl homelab_core::ask::Asker for LiveAsker<'_> {
             .next_ask_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        if let Ok(mut g) = self.state.pending_asks.lock() {
-            g.insert(id, tx);
-        }
-        let _ = self.state.log_tx.send(ServerMsg::Ask {
+        let ask = ServerMsg::Ask {
             id,
             op: q.op.clone(),
             step: q.step.clone(),
             what: q.what.clone(),
             if_allowed: q.if_allowed.clone(),
             if_stopped: q.if_stopped.clone(),
-        });
+        };
+        if let Ok(mut g) = self.state.pending_asks.lock() {
+            g.insert(
+                id,
+                PendingAsk {
+                    reply: tx,
+                    ask: ask.clone(),
+                },
+            );
+        }
+        let _ = self.state.log_tx.send(ask);
         let answer = match tokio::time::timeout(Duration::from_secs(self.timeout_s), rx).await {
             Ok(Ok(true)) => Answer::Allow,
             Ok(Ok(false)) => Answer::Stop,
@@ -4068,11 +4201,33 @@ where
 
     let mut log_rx = state.log_tx.subscribe();
     let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<ServerMsg>(256);
+    let asks = state.pending_asks.clone();
     let forward = tokio::spawn(async move {
         loop {
             tokio::select! {
-                Ok(msg) = log_rx.recv() => {
-                    if tx.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() { break; }
+                received = log_rx.recv() => {
+                    let msgs = match received {
+                        Ok(msg) => vec![msg],
+                        // fix-127 (websocket-edge-cases, 2026-09-27): a client
+                        // slower than the host lags the channel. The skipped
+                        // messages were dropped in silence, questions
+                        // included, so an operation waited on an answer to a
+                        // question nobody saw. Say how much was missed, and
+                        // send every open question again.
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!("a client lagged: {} message(s) to it dropped", n);
+                            lag_catch_up(n, &asks)
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    };
+                    let mut gone = false;
+                    for msg in msgs {
+                        if tx.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() {
+                            gone = true;
+                            break;
+                        }
+                    }
+                    if gone { break; }
                 }
                 Some(msg) = out_rx.recv() => {
                     if tx.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() { break; }
@@ -4109,7 +4264,27 @@ where
         })
     };
 
-    while let Some(Ok(Message::Text(text))) = rx.next().await {
+    while let Some(frame) = rx.next().await {
+        // fix-127 (websocket-edge-cases, 2026-09-27): only Close and a read
+        // error end the session. The loop matched Text alone, so the first
+        // Ping (a client or proxy keepalive), Pong or Binary frame ended it
+        // without a word. Pings are answered by the WebSocket layer itself.
+        let text = match frame {
+            Ok(Message::Text(text)) => text,
+            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => continue,
+            Ok(Message::Binary(b)) => {
+                tracing::warn!(
+                    "a binary frame of {} bytes was ignored — requests are JSON text",
+                    b.len()
+                );
+                continue;
+            }
+            Ok(Message::Close(_)) => break,
+            Err(e) => {
+                info!("session ended on a read error :: {}", e);
+                break;
+            }
+        };
         let req = match serde_json::from_str::<RpcRequest>(&text) {
             Ok(r) => r,
             Err(e) => {
@@ -4140,6 +4315,29 @@ where
     drop(work_tx);
     let _ = worker.await;
     forward.abort();
+}
+
+/// fix-127: what a client that lagged past `n` messages is sent instead: a
+/// warning that says so, then every question still waiting for an answer,
+/// oldest first.
+fn lag_catch_up(
+    n: u64,
+    asks: &std::sync::Mutex<std::collections::HashMap<u64, PendingAsk>>,
+) -> Vec<ServerMsg> {
+    let mut out = vec![ServerMsg::Log {
+        level: homelab_proto::LogLevel::Warn,
+        source: "HOST".into(),
+        msg: format!(
+            "{} message(s) to this client were dropped because it read too slowly; \
+             open questions are sent again",
+            n
+        ),
+    }];
+    let guard = asks.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut open: Vec<(&u64, &PendingAsk)> = guard.iter().collect();
+    open.sort_by_key(|(id, _)| **id);
+    out.extend(open.into_iter().map(|(_, p)| p.ask.clone()));
+    out
 }
 
 /// fix-66: requests that must not wait behind the one in flight. An answer
@@ -5450,7 +5648,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .lock()
                 .ok()
                 .and_then(|mut g| g.remove(&id))
-                .map(|tx| tx.send(allow).is_ok())
+                .map(|p| p.reply.send(allow).is_ok())
                 .unwrap_or(false);
             RpcResponse {
                 id: req.id,

@@ -61,7 +61,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **Released and live at v3.57.0** (2026-09-26 23:22 local, fix-26/27); v3.56.0 the same evening (fix-24 log rotation); v3.55.0 on 2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **544 tests in 36 suites** (counted 2026-09-26), CI green — and green now
+- **Released and live at v3.57.0** (2026-09-26 23:22 local, fix-26/27); v3.56.0 the same evening (fix-24 log rotation); v3.55.0 on 2026-09-20 01:47 local; 3.53.0 and 3.52.0 on 2026-09-19, 3.51.0 on 2026-09-11); **552 tests in 36 suites** (counted 2026-09-27 at v3.57.1), CI green — and green now
   means something: CI ran without `--locked` until that day, so it built
   whatever crates.io served rather than what the lockfile pins (F235).
   The deployment project is what moves now — see `docs/deployment/REGISTER.md`.

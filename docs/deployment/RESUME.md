@@ -1,4 +1,4 @@
-# Resume point — last verified 2026-09-26
+# Resume point — last verified 2026-09-27
 
 Written so a new session can pick this up without reading a chat log. Kenny's
 standing instruction that day: *"ga door tot je niet meer kan, houdt er
@@ -12,10 +12,11 @@ only says what is IN FLIGHT.
 
 - Phase 7 hardening: **22 of 23 gaps closed**, 1 deferred by Kenny (G6).
   Per-gap table in `REALIZATION_PLAN.md`.
-- Host runs **v3.57.0** (live 2026-09-26 23:22 local); repo version matches.
-  **544 tests in 36 suites**, counted with `cargo test --workspace` on
-  2026-09-26 at `dfeddad`. (This line said v3.51.0 and 480 tests until then,
-  six releases behind.)
+- Host runs **v3.57.0** (live 2026-09-26 23:22 local). The repo is at
+  **v3.57.1** (2026-09-27): client fixes only, host code unchanged.
+  **552 tests in 36 suites**, counted with `cargo test --workspace` on
+  2026-09-27 at `4430016`. (This line said v3.51.0 and 480 tests until
+  2026-09-26, six releases behind.)
 - `homelab` is installed at `~/.cargo/bin/homelab` (`make install`) and reads
   `~/.config/homelab/env`, so it works from any directory with no sourcing.
 - **What is in flight is in the Next action row of `CLAUDE.md`**, kept current

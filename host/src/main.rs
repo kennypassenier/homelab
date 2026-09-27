@@ -1785,9 +1785,24 @@ fn sd_notify(msg: &str) {
 async fn main() {
     // H5: the self-update gate runs `staged --selfcheck` before installing.
     // Prove we can execute at all and report our version, then exit.
-    if std::env::args().any(|a| a == "--selfcheck") {
-        println!("{}", VERSION);
-        std::process::exit(0);
+    // `--version` does the same for a person. Any other argument stops the
+    // daemon before it opens a port: on 2026-09-27 `homelab-host --version`
+    // run by hand on pve started a second daemon that held 8443 while systemd
+    // restarted the real one (corr-rogue-daemon).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        None => {}
+        Some("--selfcheck") | Some("--version") if args.len() == 1 => {
+            println!("{}", VERSION);
+            std::process::exit(0);
+        }
+        Some(_) => {
+            eprintln!(
+                "homelab-host: unknown argument(s) {:?}; it takes none (only --version or --selfcheck) and is started by systemd",
+                args
+            );
+            std::process::exit(2);
+        }
     }
 
     tracing_subscriber::fmt()

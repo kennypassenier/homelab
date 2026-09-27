@@ -9,7 +9,7 @@ them, because a file a person keeps in step with reality drifts out of it
 what it checks comes from the test names, which in this codebase are
 sentences. A test that is deleted disappears from here in the same commit.
 
-**529 tests across 27 suites.**
+**530 tests across 28 suites.**
 
 ## Accepted limitations
 
@@ -584,6 +584,14 @@ G10 · the thirteen stack files that actually run this house, validated.
 - `every_stack_without_an_application_monitor_is_one_we_named` — A stack with no monitor at all is not automatically wrong — the mechanical half already pings every container.
 - `only_the_gateway_declares_the_opnsense_syslog_receiver` — gap-11 · the OPNsense syslog receiver is declared by the gateway stack and by nothing else.
 - `a_receiver_the_shipper_could_not_open_is_refused_at_plan_time` — The validator refuses a receiver the shipper could not actually open — Alloy runs as its own user, so a port below 1024 binds nothing and Alloy merely logs it while the deploy reports success.
+
+### `core/tests/trace_line_tests.rs`
+
+fix-30: a huge command-output line never reaches the transcript whole.
+
+Covers: fix-30
+
+- `fix_30_a_forty_megabyte_line_is_cut_to_its_start_and_its_size` — `base64 -w0` of kyu is one 40 MB line.
 
 ### `core/tests/unit_prereqs_tests.rs`
 

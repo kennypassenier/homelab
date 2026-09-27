@@ -81,6 +81,33 @@ pub struct TracingExecutor<'a> {
     sink: &'a dyn crate::sink::Sink,
 }
 
+/// fix-30: the longest command-output line the transcript carries.
+///
+/// `base64 -w0` answers with the whole binary on ONE line: 40 MB for kyu.
+/// Echoed whole, that line became a single 40 MB message on the link, the
+/// client's websocket (16 MiB frame limit) dropped the connection, and
+/// `release-update-native` reported "connection closed before RPC completed"
+/// for installs the host finished successfully (2026-09-27, almanac and
+/// kyu). No reader needs more than the start of a line to know what it was.
+pub const TRACE_LINE_MAX: usize = 300;
+
+/// A line as the transcript shows it: whole when short, else its start and
+/// the size of what was left out.
+pub fn trace_line(l: &str) -> String {
+    if l.len() <= TRACE_LINE_MAX {
+        return l.to_string();
+    }
+    let mut cut = TRACE_LINE_MAX;
+    while !l.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!(
+        "{}… ({} bytes, truncated in the transcript)",
+        &l[..cut],
+        l.len()
+    )
+}
+
 impl<'a> TracingExecutor<'a> {
     pub fn new(inner: &'a dyn Executor, sink: &'a dyn crate::sink::Sink) -> Self {
         Self { inner, sink }
@@ -101,7 +128,7 @@ impl Executor for TracingExecutor<'_> {
         let out = self.inner.run(cmd).await?;
         for l in out.stdout.lines().chain(out.stderr.lines()).take(20) {
             if !l.trim().is_empty() {
-                self.line(format!("  {}", l));
+                self.line(format!("  {}", trace_line(l)));
             }
         }
         Ok(out)

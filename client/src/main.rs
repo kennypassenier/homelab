@@ -1124,10 +1124,21 @@ async fn rpc_with(host: &str, token: &str, command: Command) -> bool {
         .with_no_client_auth();
     let connector = Connector::Rustls(Arc::new(tls_config));
 
-    let (ws, _) =
-        tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
-            .await
-            .unwrap_or_else(|e| die(&format!("connect {}: {}", url, e)));
+    let (ws, _) = tokio_tungstenite::connect_async_tls_with_config(
+        request,
+        // fix-30: the same ceiling the host accepts. tungstenite's
+        // default frame limit is 16 MiB, so any larger event from the
+        // host closed the link mid-operation.
+        Some(
+            tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+                .max_message_size(Some(homelab_client::version::MAX_WS_FRAME))
+                .max_frame_size(Some(homelab_client::version::MAX_WS_FRAME)),
+        ),
+        false,
+        Some(connector),
+    )
+    .await
+    .unwrap_or_else(|e| die(&format!("connect {}: {}", url, e)));
 
     if first_connect {
         if let Some(fp) = verifier.observed() {

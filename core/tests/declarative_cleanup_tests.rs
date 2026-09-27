@@ -587,7 +587,7 @@ async fn destroy_from_state_keeps_every_safety_gate() {
     assert!(!r.ok && r.error.unwrap().why.contains("no manifest"));
     // Unknown stack.
     assert!(!destroy_recorded(&c, "ghost", "ghost", true).await.ok);
-    assert!(exec.calls_containing("pct destroy").is_empty());
+    assert!(exec.ran("pct", &["destroy"]) == 0);
     assert_eq!(load_state(&exec).await.stacks.len(), 3);
 }
 

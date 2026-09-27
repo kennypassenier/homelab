@@ -129,7 +129,7 @@ async fn c2_destroy_refuses_no_touch_vmid() {
         .await;
         assert!(!report.ok, "vmid {} must be refused", vmid);
         assert!(report.error.unwrap().why.contains("no-touch"));
-        assert!(exec.calls_containing("pct destroy").is_empty());
+        assert!(exec.ran("pct", &["destroy"]) == 0);
     }
 }
 
@@ -145,7 +145,7 @@ async fn c2_destroy_refuses_hostname_mismatch() {
     let report = destroy(&ctx(&exec, &sink, &j), &manifest(108, "test"), "test", true).await;
     assert!(!report.ok);
     assert!(report.error.unwrap().why.contains("refusing to destroy"));
-    assert!(exec.calls_containing("pct destroy").is_empty());
+    assert!(exec.ran("pct", &["destroy"]) == 0);
 }
 
 #[tokio::test]
@@ -1401,7 +1401,7 @@ async fn b8_template_build_refuses_no_touch_and_existing_vmids() {
     let report = build_template(&ctx(&exec, &sink, &j), &cfg).await;
     assert!(!report.ok);
     assert!(report.error.unwrap().why.contains("no-touch"));
-    assert!(exec.calls_containing("pct create").is_empty());
+    assert!(exec.ran("pct", &["create"]) == 0);
     // Existing vmid refused (would destroy someone's container).
     let exec = MockExecutor::new();
     exec.respond_always("pct config 999", CmdOutput::ok("hostname: something\n"));
@@ -1444,7 +1444,7 @@ async fn b8_clone_template_provisions_via_pct_clone() {
     assert!(report.ok, "{:?}", report.error);
     assert_eq!(exec.calls_containing("pct clone 999 108").len(), 1);
     assert!(
-        exec.calls_containing("pct create").is_empty(),
+        exec.ran("pct", &["create"]) == 0,
         "no full create on clone path"
     );
     assert_eq!(exec.calls_containing("pct resize 108 rootfs 8G").len(), 1);
@@ -2475,7 +2475,7 @@ async fn o5_clone_refuses_a_privilege_level_the_template_cannot_give() {
     );
     assert!(!err.remedy.is_empty(), "an error must carry a remedy");
     assert!(
-        exec.calls_containing("pct clone").is_empty(),
+        exec.ran("pct", &["clone"]) == 0,
         "nothing should have been cloned"
     );
 }
@@ -3235,10 +3235,7 @@ async fn a_failed_backup_stops_the_destroy() {
         "the escape must be named: {}",
         why
     );
-    assert!(
-        exec.calls_containing("pct destroy").is_empty(),
-        "nothing may be removed"
-    );
+    assert!(exec.ran("pct", &["destroy"]) == 0, "nothing may be removed");
 
     // The escape works, and it is the operator's decision rather than a retry.
     let exec2 = MockExecutor::new();
@@ -4230,7 +4227,7 @@ async fn gap_33_requested_guards_check_the_hostname_and_skip_docker_on_a_native_
             .await
             .is_err()
     );
-    assert!(exec.calls_containing("pct push").is_empty());
+    assert!(exec.ran("pct", &["push"]) == 0);
 
     // A hostname that is not the stack's is refused.
     let exec = MockExecutor::new();
@@ -4240,7 +4237,7 @@ async fn gap_33_requested_guards_check_the_hostname_and_skip_docker_on_a_native_
             .await
             .is_err()
     );
-    assert!(exec.calls_containing("pct push").is_empty());
+    assert!(exec.ran("pct", &["push"]) == 0);
 
     // A native stack gets no docker guards.
     let exec = MockExecutor::new();

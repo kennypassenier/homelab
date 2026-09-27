@@ -818,6 +818,7 @@ name = "homelab-core"
 version = "3.60.0"
 dependencies = [
  "async-trait",
+ "homelab-core",
  "minisign-verify",
  "serde",
  "serde_json",

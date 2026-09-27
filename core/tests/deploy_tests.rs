@@ -161,7 +161,7 @@ async fn a_clone_refuses_a_privilege_level_the_template_cannot_give() {
         err
     );
     assert!(
-        exec.calls_containing("pct clone").is_empty(),
+        exec.ran("pct", &["clone"]) == 0,
         "and nothing may have been cloned"
     );
 }
@@ -751,8 +751,8 @@ async fn m1_a_missing_borrowed_directory_stops_the_deploy() {
         "say what would happen: {}",
         why
     );
-    assert!(exec.calls_containing("pct create").is_empty());
-    assert!(exec.calls_containing("pct clone").is_empty());
+    assert!(exec.ran("pct", &["create"]) == 0);
+    assert!(exec.ran("pct", &["clone"]) == 0);
 }
 
 /// The two lists stay distinct, in both directions. Blurring them is how the
@@ -1101,8 +1101,8 @@ async fn w1_a_gpu_stack_is_refused_when_the_host_has_no_card() {
         why
     );
     // And it refuses before it builds anything.
-    assert!(exec.calls_containing("pct create").is_empty());
-    assert!(exec.calls_containing("pct clone").is_empty());
+    assert!(exec.ran("pct", &["create"]) == 0);
+    assert!(exec.ran("pct", &["clone"]) == 0);
     assert!(exec.calls_containing("mkdir -p /appdata").is_empty());
 }
 

@@ -25,4 +25,6 @@ base64 = "0.22"
 libc = "0.2"
 
 [dev-dependencies]
+# The host's tests drive core with the MockExecutor (test-support feature).
+homelab-core = { path = "../core", features = ["test-support"] }
 tokio-tungstenite = "0.26"

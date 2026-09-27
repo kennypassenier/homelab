@@ -17,7 +17,14 @@ minisign-verify = "0.2"
 # concurrent tasks cannot save over each other. A lock, not I/O.
 tokio = { version = "1", features = ["sync"] }
 
+[features]
+# mock-executor-weak-assertions (expert panel, 2026-09-27): the scripted
+# MockExecutor is compiled only for tests, never into the host binary.
+test-support = []
+
 [dev-dependencies]
+# The crate's own integration tests use the mock.
+homelab-core = { path = ".", features = ["test-support"] }
 serde_yaml.workspace = true
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt"] }

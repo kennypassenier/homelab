@@ -61,8 +61,17 @@ fn shell_word(a: &str) -> String {
     if plain {
         a.to_string()
     } else {
-        format!("'{}'", a.replace('\'', "'\\''"))
+        shq(a)
     }
+}
+
+/// Single-quote a string for `sh -c`, escaping any quote it contains.
+///
+/// The one quoting helper (shell-strings-quoting, expert panel 2026-09-27):
+/// there were three copies, and every value that enters a script goes
+/// through this one rather than between bare `'{}'` quotes.
+pub fn shq(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 #[derive(Debug, Clone, Default)]

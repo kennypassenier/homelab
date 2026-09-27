@@ -61,7 +61,10 @@ pub async fn push_content_staged(
     let remote = pct_sh(
         exec,
         vmid,
-        &format!("sha256sum '{}' 2>/dev/null | cut -d' ' -f1 || true", dest),
+        &format!(
+            "sha256sum {} 2>/dev/null | cut -d' ' -f1 || true",
+            shq(dest)
+        ),
         30,
     )
     .await?
@@ -159,10 +162,6 @@ pub async fn write_file_owned_like_dir(
     Ok(())
 }
 
-/// Single-quote a string for `sh -c`, escaping any quote it contains.
-///
-/// One definition on purpose: `native.rs` grew its own copy, and two
-/// quoting helpers are two places to get quoting subtly different.
-pub(crate) fn shq(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
+/// The one quoting helper lives with the executor; re-exported here because
+/// the operations already import it from `util`.
+pub(crate) use crate::executor::shq;

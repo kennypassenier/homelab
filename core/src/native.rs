@@ -162,8 +162,14 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
         .chain(m.env_file.iter())
         .chain(m.data_dirs.iter())
     {
-        if !p.starts_with('/') || p.contains("..") {
-            problems.push(format!("path '{}' must be absolute and free of '..'", p));
+        // shell-strings-quoting (2026-09-27): the same alphabet as a compose
+        // stack's paths, not only "absolute and no `..`".
+        if !crate::manifest::is_plain_abs_path(p) {
+            problems.push(format!(
+                "path '{}' must be absolute and made of letters, digits, '.', '_', '-' and \
+                 single '/' separators, with no '..' segment",
+                p
+            ));
         }
     }
     if m.data_dirs.is_empty() && !m.stateless {

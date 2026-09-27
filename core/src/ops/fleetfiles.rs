@@ -8,7 +8,7 @@
 //! them too, from the same code.
 
 use crate::error::CoreError;
-use crate::executor::{pct_sh, Cmd, Executor};
+use crate::executor::{pct_sh, shq, Cmd, Executor};
 use crate::runner::StepOutcome;
 use crate::sink::{Level, PipelineEvent};
 
@@ -38,7 +38,7 @@ pub async fn write_homepage_services(
     let listing = pct_sh(
         exec,
         ctx.safety.gateway_vmid,
-        &format!("ls -1 '{}'/*.yml 2>/dev/null || true", dir),
+        &format!("ls -1 {}/*.yml 2>/dev/null || true", shq(dir)),
         60,
     )
     .await?;
@@ -62,7 +62,7 @@ pub async fn write_homepage_services(
         let body = pct_sh(
             exec,
             ctx.safety.gateway_vmid,
-            &format!("cat '{}'", path),
+            &format!("cat {}", shq(path)),
             60,
         )
         .await?;

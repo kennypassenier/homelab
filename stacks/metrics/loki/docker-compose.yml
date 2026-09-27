@@ -1,0 +1,34 @@
+# Loki receives from every container's Alloy. Its data under
+# loki-config/data is a log DATABASE, not configuration — Kenny chose to
+# carry it across the gateway's rebuild (form G2), because a rebuild is
+# exactly the event you later want to be able to look back at. On the metrics
+# stack since 2026-09-27 (fix-90, gateway-shared-no-limits).
+services:
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: loki
+    networks:
+      - metrics_net
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - /appdata/metrics/loki-config/data:/loki
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+    restart: unless-stopped
+    labels:
+      # Pinned to 3.0.0 on purpose: promtail on nine stacks is pinned to the
+      # same version and the two have to agree. This is one of the eleven
+      # services where the `auto` policy could never do anything (form H5).
+      # Y1/Z1: UPDATE_POLICY.md puts this in the MANUAL class - a silent
+      # failure here is expensive. The label read auto until 2026-09-02
+      # (F192), so the ratified decision and the fleet disagreed for as long
+      # as both existed.
+      - "com.homelab.update.policy=manual"
+
+# The stack's one network, created by the deploy: Grafana reaches Loki on it
+# by container name.
+networks:
+  metrics_net:
+    external: true
+    name: metrics_net

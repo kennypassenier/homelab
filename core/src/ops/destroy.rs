@@ -236,18 +236,20 @@ async fn unregister(
                 return Ok(StepOutcome::Unchanged);
             };
             let path = crate::ops::dashboard::dashboard_file(dir, stack_name);
-            // On the GATEWAY, not on the Proxmox host. The directory is a
-            // path inside CT 104 — the deploy writes it with `pct push` — and
-            // a bare `rm -f` here ran on the host, where it does not exist,
-            // and exited 0. The step reported "changed" and removed nothing
-            // for as long as it existed (F162). `rm -f` on a missing path
-            // SUCCEEDS, so the step could not have discovered this on its own.
+            // In GRAFANA'S container, not on the Proxmox host. The directory
+            // is a path inside that container — the deploy writes it with
+            // `pct push` — and a bare `rm -f` here ran on the host, where it
+            // does not exist, and exited 0. The step reported "changed" and
+            // removed nothing for as long as it existed (F162). `rm -f` on a
+            // missing path SUCCEEDS, so the step could not have discovered
+            // this on its own. That container was the gateway until fix-90
+            // (2026-09-27) moved Grafana to the metrics stack.
             let _ = exec
                 .run(&Cmd::new(
                     "pct",
                     &[
                         "exec",
-                        &ctx.safety.gateway_vmid.to_string(),
+                        &ctx.safety.grafana_vmid.to_string(),
                         "--",
                         "rm",
                         "-f",

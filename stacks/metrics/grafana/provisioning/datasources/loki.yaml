@@ -16,7 +16,9 @@ datasources:
     uid: loki
     type: loki
     access: proxy
-    url: http://10.10.10.4:3100
+    # By container name on metrics_net since both moved to the metrics
+    # stack (fix-90, 2026-09-27); it was the gateway's address before.
+    url: http://loki:3100
     isDefault: true
     editable: false
     jsonData:

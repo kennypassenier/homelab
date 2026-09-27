@@ -55,7 +55,8 @@ which is a second road to the same containers that this document never
 mentioned — and one without the health check and rollback the nightly run
 has. Measured on 2026-09-18: a gateway deploy would have replaced all five
 `manual` apps there (traefik, crowdsec, grafana, cloudflared, goaccess) to
-lift one Alloy line.
+lift one Alloy line. (Grafana has run on the metrics stack since fix-90,
+2026-09-27.)
 
 The rule now: **a deploy pulls an image only when the container does not
 have it, and never replaces one that is there.** `auto` apps are refreshed

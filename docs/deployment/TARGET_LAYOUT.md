@@ -21,7 +21,7 @@ made the reordering unnecessary.
 | 106 | `media` | jellyfin, sonarr, radarr, bazarr, prowlarr, seerr, flaresolverr, recyclarr | recyclarr added |
 | 107 | `uptime` | uptime-kuma | **amended 2026-09-01 (D68)** — new stack; leaves 104 so it no longer watches its own host |
 | 108 | `syncthing` | syncthing | **amended 2026-09-01 (D68)** — stays where it is |
-| 113 | `metrics` | prometheus, alertmanager, pve-exporter, grafana, loki | **amended 2026-09-01 (D68)** — stays where it is; still absorbs grafana and loki from 104 |
+| 113 | `metrics` | prometheus, alertmanager, pve-exporter, grafana, loki | **amended 2026-09-01 (D68)** — stays where it is; absorbs grafana and loki from 104 (stack files 2026-09-27, fix-90) |
 | 109 | `messaging` | kyu, kyu-runner, http-switchboard | two services added |
 | **110** | *(reserved, unusable)* | — | 10.10.10.10 is Kenny's workstation |
 | 111 | `productivity` | supersync, postgres | vikunja dropped |
@@ -324,4 +324,6 @@ is met by any container that is not 104.
 
 Grafana and Loki still move off 104 to the metrics stack, separately and after
 the gateway rebuild (H2) — carrying two databases through the one operation
-during which nothing in the house is reachable is the wrong trade.
+during which nothing in the house is reachable is the wrong trade. The stack
+files made that move on 2026-09-27 (fix-90, Kenny's triage answer to the
+expert panel's gateway-shared-no-limits); the live migration is its own step.

@@ -12,6 +12,7 @@ fn inputs() -> FactsInputs {
         kuma_monitors_file: None,
         state_dir: "/var/lib/homelab".into(),
         gateway_vmid: 104,
+        grafana_vmid: 104,
         gateway_routes_dir: "/appdata/gateway/traefik-config/routes".into(),
         no_touch: vec![100, 101],
         prometheus_url: None,
@@ -446,10 +447,46 @@ async fn coverage_asks_loki_for_every_stack_without_a_promtail_app() {
         CmdOutput::ok(r#"{"data":{"result":[{"value":[1,"42"]}]}}"#),
     );
     let mut inp = inputs();
-    inp.loki_url = Some("http://10.10.10.4:3100".into());
+    inp.loki_url = Some("http://10.10.10.13:3100".into());
     let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
     let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
     assert_eq!(media.logs_recent, Some(false), "{:?}", exec.calls());
     let kyu = facts.coverage.iter().find(|c| c.stack == "kyu").unwrap();
     assert_eq!(kyu.logs_recent, Some(true), "{:?}", exec.calls());
+}
+
+/// fix-90 (2026-09-27, gateway-shared-no-limits): Grafana runs on the
+/// metrics container now, so the question which generated dashboards it
+/// serves is asked there, not on the gateway.
+/// covers: fix-90
+#[tokio::test]
+async fn fix_90_the_dashboard_question_is_asked_where_grafana_runs() {
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "media": {"vmid": 106, "hostname": "106-app-media", "apps": ["jellyfin"], "applied_at": 1, "manifest": null}
+            }
+        })
+        .to_string(),
+    );
+    exec.respond_always(
+        "api/search?tag=generated",
+        CmdOutput::ok(r#"[{"uid":"homelab-media"}]"#),
+    );
+    let mut inp = inputs();
+    inp.prometheus_url = Some("http://10.10.10.13:9090".into());
+    inp.grafana_dashboards_dir =
+        Some("/opt/metrics/grafana/provisioning/dashboards-generated".into());
+    inp.grafana_vmid = 113;
+    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
+    let asked = exec.calls_containing("api/search?tag=generated");
+    assert!(
+        asked.iter().any(|c| c.starts_with("pct exec 113 -- ")),
+        "{asked:?}"
+    );
+    let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
+    assert_eq!(media.dashboard_provisioned, Some(true));
 }

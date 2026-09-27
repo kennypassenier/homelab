@@ -44,7 +44,7 @@ compactor:
 limits_config:
   retention_period: 744h  # 31 days
 
-# Changing this file restarts Loki on the next gateway deploy; the deploy then
+# Changing this file restarts Loki on the next metrics deploy; the deploy then
 # re-reads Loki's readiness for up to 60 s before calling it a change
 # (fix-27, measured 2026-09-27 with this very edit).
 # No alerting from Loki (T64 grafana-contact, Kenny 2026-09-26). Alerts go

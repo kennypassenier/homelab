@@ -3300,7 +3300,7 @@ async fn a_gateway_deploy_renders_the_receiver_and_restores_single_file_mode() {
         format: "rfc5424".into(),
     }];
     let mut c = ctx(&exec, &sink, &journal);
-    c.loki_url = Some("http://10.10.10.4:3100".into());
+    c.loki_url = Some("http://10.10.10.13:3100".into());
     let report = deploy(&c, &sp).await;
     assert!(report.ok, "{:?}", report);
 
@@ -3612,7 +3612,7 @@ async fn a_deploy_grants_alloy_read_access_and_says_so_when_it_still_cannot_read
     let journal = NullJournal;
     let sp = spec(106, "media");
     let mut c = ctx(&exec, &sink, &journal);
-    c.loki_url = Some("http://10.10.10.4:3100".into());
+    c.loki_url = Some("http://10.10.10.13:3100".into());
     let report = deploy(&c, &sp).await;
     assert!(report.ok, "{:?}", report);
     let calls = exec.calls();

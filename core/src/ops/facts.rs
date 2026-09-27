@@ -41,6 +41,9 @@ pub struct FactsInputs {
     pub kuma_monitors_file: Option<String>,
     pub state_dir: String,
     pub gateway_vmid: u16,
+    /// Where Grafana runs, and so where the dashboard question is asked
+    /// (fix-90: the metrics container since 2026-09-27, the gateway before).
+    pub grafana_vmid: u16,
     pub gateway_routes_dir: String,
     pub no_touch: Vec<u16>,
     pub prometheus_url: Option<String>,
@@ -180,11 +183,11 @@ pub fn parse_growth(vmid: u16, hostname: &str, stdout: &str) -> Option<GrowthFac
 /// caused the fault this question exists to catch (F149).
 ///
 /// `None` means the question could not be asked at all — never an empty
-/// answer, so a gateway that is down does not turn every stack into a
+/// answer, so a Grafana that is down does not turn every stack into a
 /// finding.
 pub async fn grafana_generated_uids(
     exec: &dyn Executor,
-    gateway_vmid: u16,
+    grafana_vmid: u16,
     dashboards_dir: &str,
 ) -> Option<Vec<String>> {
     let app_dir = std::path::Path::new(dashboards_dir).parent()?.to_str()?;
@@ -200,7 +203,7 @@ pub async fn grafana_generated_uids(
     let out = exec
         .run(&Cmd::new(
             "pct",
-            &["exec", &gateway_vmid.to_string(), "--", "sh", "-c", &script],
+            &["exec", &grafana_vmid.to_string(), "--", "sh", "-c", &script],
             60,
         ))
         .await
@@ -538,7 +541,7 @@ pub async fn gather_live_facts(
     let loki = inp.loki_url.clone();
     let window = &inp.logs_window;
     let provisioned: Option<Vec<String>> = match inp.grafana_dashboards_dir.as_deref() {
-        Some(dir) => grafana_generated_uids(exec, inp.gateway_vmid, dir).await,
+        Some(dir) => grafana_generated_uids(exec, inp.grafana_vmid, dir).await,
         None => None,
     };
     if prom.is_some() || loki.is_some() {

@@ -9,10 +9,13 @@
 # watchman on the roof he guards goes down with it, which is exactly what
 # happened on 2026-08-31.
 #
-# Grafana and Loki still run here. The target layout moves them to the metrics
-# stack, deliberately AFTER this rebuild (Kenny, form H2): carrying two
-# databases through the one operation during which nothing is reachable is the
-# wrong trade, and moving them later costs a dashboard, not the house.
+# Grafana and Loki ran here until 2026-09-27 and moved to the metrics stack
+# (fix-90; Kenny's triage answer to gateway-shared-no-limits): a Loki query
+# storm competed with Traefik in one cgroup, and when this container went
+# down the logs and dashboards that would explain it went down with it. The
+# move waited until after this container's rebuild on purpose (form H2).
+# OPNsense's syslog receiver stays here, below: the firewall sends to this
+# address, and the receiver is Alloy, not Loki.
 stack_name: gateway
 vmid: 104
 hostname: 104-app-gateway
@@ -83,25 +86,6 @@ storage:
     mount_point: /appdata/gateway/crowdsec-config
     host_owner_uid: 100000
     app: crowdsec
-  - host_path: /appdata/gateway/grafana-config
-    mount_point: /appdata/gateway/grafana-config
-    host_owner_uid: 101000
-    app: grafana
-  # 110001, not 100000: Loki's image runs as uid 10001, and 10001 inside an
-  # unprivileged container is 110001 on the host. Declared 100000 first —
-  # container root — which passes validation (the +100000 mapping is right)
-  # and hands Loki's database to a user it is not. It crash-looped with
-  # `permission denied` and the front door stayed down while that was read out
-  # of a Go stack trace. A chown by hand did not fix it either: the next
-  # deploy applied this number again.
-  - host_path: /appdata/gateway/loki-config
-    mount_point: /appdata/gateway/loki-config
-    host_owner_uid: 110001
-    # Not backed up (Kenny, triage 2026-09-27): log chunks are not restored,
-    # and copying them stopped Loki every night, losing the lines sent while
-    # it was down. Its configuration is in the repository.
-    no_backup: "Loki log chunks and index; not restored, configuration is in the repository"
-    app: loki
   - host_path: /appdata/gateway/goaccess-config
     mount_point: /appdata/gateway/goaccess-config
     host_owner_uid: 100000
@@ -129,9 +113,9 @@ data_mounts:
         container: traefik
         signal: USR1
 
-apps: [traefik, cloudflared, crowdsec, grafana, loki, goaccess]
+apps: [traefik, cloudflared, crowdsec, goaccess]
 
-latch_secrets: [traefik, cloudflared, grafana]
+latch_secrets: [traefik, cloudflared]
 
 gateway_route:
   filename: 104-app-gateway.yml

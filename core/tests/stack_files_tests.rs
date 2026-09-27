@@ -719,7 +719,7 @@ fn service_checks_read_what_they_claim_to_count() {
         prom.contains("max_over_time(up"),
         "up at any moment of the last two minutes"
     );
-    let grafana = read("gateway/grafana/checks.yml");
+    let grafana = read("metrics/grafana/checks.yml");
     let dash = &grafana[grafana.find("name: \"dashboards\"").unwrap()..];
     let dash = &dash[..dash.find("layer:").unwrap()];
     assert!(dash.contains("expect: must_be_present"), "{dash}");
@@ -731,7 +731,7 @@ fn service_checks_read_what_they_claim_to_count() {
 #[test]
 fn grafana_refuses_browser_edits_it_would_lose() {
     let p = std::fs::read_to_string(
-        stacks_dir().join("gateway/grafana/provisioning/dashboards/dashboards.yaml"),
+        stacks_dir().join("metrics/grafana/provisioning/dashboards/dashboards.yaml"),
     )
     .unwrap();
     assert!(p.contains("allowUiUpdates: false"), "{p}");
@@ -756,7 +756,7 @@ fn the_monitoring_data_is_not_backed_up_and_the_services_are_not_paused() {
             "metrics/lxc-compose.yml",
             "/appdata/metrics/prometheus-config",
         ),
-        ("gateway/lxc-compose.yml", "/appdata/gateway/loki-config"),
+        ("metrics/lxc-compose.yml", "/appdata/metrics/loki-config"),
     ] {
         let s = read(stack);
         let at = s.find(&format!("host_path: {dir}")).unwrap();
@@ -766,8 +766,110 @@ fn the_monitoring_data_is_not_backed_up_and_the_services_are_not_paused() {
     for compose in [
         "metrics/prometheus/docker-compose.yml",
         "metrics/alertmanager/docker-compose.yml",
-        "gateway/loki/docker-compose.yml",
+        "metrics/loki/docker-compose.yml",
     ] {
         assert!(!read(compose).contains("backup.pause=true"), "{compose}");
+    }
+}
+
+/// Kenny's triage answer 2026-09-27 (gateway-shared-no-limits: "Loki en
+/// Grafana naar CT 113 verhuizen"). A Loki query storm competed with Traefik
+/// in one cgroup, and when the gateway went down the logs and dashboards that
+/// would explain the outage went down with it. Both now run on the metrics
+/// stack, beside the Prometheus they already read, and every address that
+/// named them on CT 104 follows.
+///
+/// covers: fix-90
+#[test]
+fn fix_90_loki_and_grafana_run_on_the_metrics_stack() {
+    let read = |p: &str| std::fs::read_to_string(stacks_dir().join(p)).unwrap();
+    let stacks = compose_stacks();
+    let get = |n: &str| stacks.iter().find(|(s, _)| s == n).unwrap().1.clone();
+    let (metrics, gateway) = (get("metrics"), get("gateway"));
+    for app in ["loki", "grafana"] {
+        assert!(metrics.apps.iter().any(|a| a == app), "metrics runs {app}");
+        assert!(
+            !gateway.apps.iter().any(|a| a == app),
+            "gateway keeps {app}"
+        );
+        assert!(!stacks_dir().join("gateway").join(app).exists(), "{app}");
+        assert!(stacks_dir().join("metrics").join(app).is_dir(), "{app}");
+    }
+    let mount = |dir: &str| {
+        metrics
+            .storage
+            .iter()
+            .find(|s| s.host_path == dir)
+            .unwrap_or_else(|| panic!("metrics declares {dir}"))
+            .clone()
+    };
+    // The same ownership and backup decisions as on the gateway: Loki's
+    // chunks are not backed up (fix-81), Grafana's database is.
+    let loki = mount("/appdata/metrics/loki-config");
+    assert_eq!(
+        (loki.app.as_deref(), loki.host_owner_uid),
+        (Some("loki"), Some(110001))
+    );
+    assert!(loki.no_backup.is_some(), "fix-81: Loki's chunks stay out");
+    let grafana = mount("/appdata/metrics/grafana-config");
+    assert_eq!(
+        (grafana.app.as_deref(), grafana.host_owner_uid),
+        (Some("grafana"), Some(101000))
+    );
+    assert!(grafana.no_backup.is_none() && !grafana.no_data);
+    assert!(!gateway
+        .storage
+        .iter()
+        .any(|s| s.host_path.contains("loki") || s.host_path.contains("grafana")));
+    // Measured 2026-09-27 on CT 104 and CT 113 (14-day peaks from cadvisor):
+    // metrics 415 MB, loki 342 MB, grafana 527 MB. 2560 MB keeps about half
+    // free at those peaks; 1024 would have been full.
+    assert!(
+        metrics.resources.memory_mb >= 2560,
+        "{}",
+        metrics.resources.memory_mb
+    );
+    assert!(read("metrics/lxc-compose.yml").contains("latch_secrets: [pve-exporter, grafana]"));
+    assert!(read("gateway/lxc-compose.yml").contains("latch_secrets: [traefik, cloudflared]"));
+    // The route follows the backend; a name must never be routed twice.
+    let routes = read("metrics/traefik-routes.yml");
+    assert!(routes.contains("Host(`grafana.kp-soft.dev`)"), "{routes}");
+    assert!(routes.contains("http://10.10.10.13:3000"), "{routes}");
+    assert!(!read("gateway/traefik-routes.yml").contains("grafana"));
+    // Inside the stack Grafana reaches both datasources by container name.
+    let ds = "metrics/grafana/provisioning/datasources";
+    assert!(read(&format!("{ds}/loki.yaml")).contains("url: http://loki:3100"));
+    assert!(read(&format!("{ds}/prometheus.yaml")).contains("url: http://prometheus:9090"));
+    let compose = read("metrics/grafana/docker-compose.yml");
+    assert!(compose.contains("/appdata/metrics/grafana-config:/var/lib/grafana"));
+    assert!(compose.contains("metrics_net") && !compose.contains("gateway_net"));
+    assert!(read("metrics/grafana/checks.yml").contains("/opt/metrics/grafana/.env"));
+    let loki_compose = read("metrics/loki/docker-compose.yml");
+    assert!(loki_compose.contains("/appdata/metrics/loki-config/data:/loki"));
+    assert!(loki_compose.contains("metrics_net") && !loki_compose.contains("gateway_net"));
+    let seed = read("uptime/kuma-seeder/seed.py");
+    assert!(seed.contains("(\"metrics · grafana\", \"http://10.10.10.13:3000/api/health\", OK)"));
+    assert!(seed.contains("(\"metrics · loki\", \"http://10.10.10.13:3100/ready\", OK)"));
+    assert!(read("home/homepage/services-overlay.yml").contains("url: http://10.10.10.13:3000"));
+    // Nothing in any stack still names the old addresses.
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&stacks_dir(), &mut files);
+    for f in files {
+        let Ok(text) = std::fs::read_to_string(&f) else {
+            continue;
+        };
+        for old in ["10.10.10.4:3100", "10.10.10.4:3000"] {
+            assert!(!text.contains(old), "{} still names {old}", f.display());
+        }
     }
 }

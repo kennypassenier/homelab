@@ -54,7 +54,8 @@ Migration order, least consequential first, ending where Loki itself runs:
 almanac (CT 112) — both shipped nothing at all before. Compose stacks
 migrated and verified in Loki: **registry, syncthing, home, uptime, kp-soft,
 productivity, metrics, paperwork, downloader, media, gateway** — **all eleven done**, no promtail left in the fleet (F256)
-— gateway last on purpose, Loki itself runs there.
+— gateway last on purpose, Loki itself ran there (it moved to the metrics
+stack with fix-90, 2026-09-27).
 
 Per stack the work is: drop `promtail` from `apps:` in `lxc-compose.yml`,
 `git rm -r stacks/<name>/promtail`, `homelab deploy stacks/<name>`, then query
@@ -68,7 +69,7 @@ already gone.
 runs and delivers nothing is the fault this project keeps finding):
 
 ```sh
-curl -s -G "http://10.10.10.4:3100/loki/api/v1/query_range" \
+curl -s -G "http://10.10.10.13:3100/loki/api/v1/query_range" \
   --data-urlencode 'query={stack="<naam>"}' \
   --data-urlencode "start=$(( $(date +%s) - 600 ))000000000" \
   --data-urlencode "end=$(date +%s)000000000" --data-urlencode 'limit=1'

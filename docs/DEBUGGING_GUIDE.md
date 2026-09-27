@@ -450,8 +450,9 @@ reaches curl through a mode-600 header file,
 
 ### Logs in Loki
 
-Every managed container ships its logs to Loki on CT 104
-(`http://10.10.10.4:3100`) through Grafana Alloy, from a config the deploy
+Every managed container ships its logs to Loki on CT 113
+(`http://10.10.10.13:3100`; on CT 104 until fix-90 moved it on 2026-09-27)
+through Grafana Alloy, from a config the deploy
 renders (`core/src/ops/logshipper.rs`). Grafana's Explore view reads the same
 data. Three jobs arrive, with these labels:
 

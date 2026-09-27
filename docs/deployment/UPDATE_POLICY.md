@@ -29,10 +29,26 @@ appears in the orchestrator's own `FEATURES.md` under D9 and was never built —
 
 ## What an automatic update actually does
 
+Only on a night whose backup of the stack actually ran (fix-60, 2026-09-27):
+a backup that failed or stood aside because an app was in use skips every
+automatic update of that stack, native services included, and the host logs
+`automatic updates of <stack> skipped tonight`. Before, the updates ran
+regardless and could migrate a database with no copy from that night.
+
 Per app, in this order (O9):
 
 1. `docker compose pull` — while the service is still running, so the downtime
    is the swap and not the download.
+   **Pre-update copy (fix-61, 2026-09-27):** when the pull brought a
+   different image, the app's data directories are copied to
+   `/var/lib/homelab/pre-update/<stack>/<app>-<unix time>/` with its
+   containers paused (`docker compose pause`) for a consistent copy. The
+   update is skipped, and the running version left alone, when there is no
+   room for the copy (twice the data plus 1 GiB free) or the copy fails. A
+   verified update deletes this copy; a rolled-back one keeps it and names it
+   in its error, because the rollback restores the image and not data the
+   new image may have migrated. Nothing restores that data automatically:
+   putting it back is an operator's act.
 2. If the container is labelled `com.homelab.update.stop-first=true`,
    `docker stop -t 60`. Sixty seconds because a database checkpoint is not
    always quick, and `up -d` would otherwise kill it and make the next start a
@@ -96,7 +112,12 @@ installed binary's checksum, and only a differing asset is downloaded,
 verified on the host and installed through the same staged, glibc-checked,
 rollback-armed path as `install-native`. `homelab release-update-native
 <stack>` runs it on demand. kyu and kyu-runner are `auto`; http-switchboard
-and almanac are `manual`, each with its reason in its file.
+is `manual`, each with its reason in its file. **Amended 2026-09-27
+(fix-58):** `manual` used to stop only the release update while the nightly
+round still ran every unit's own `update_cmd`, so http-switchboard updated
+itself every night. `manual` now means the nightly round does nothing, and
+almanac, whose own verb IS its update, is `self`: the `update_cmd` runs,
+no release is installed over it.
 
 ## Kenny's own Rust services
 

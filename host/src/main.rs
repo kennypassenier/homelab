@@ -2546,7 +2546,31 @@ async fn run_restore_drill(
                 .await
                 .map(|o| o.stdout.trim().parse::<u64>().unwrap_or(0))
                 .unwrap_or(0);
-            verdict(count, largest)
+            // fix-62: a native unit's backup is one tar; a torn one has
+            // content and passed the size rule, so each must also list.
+            let unreadable: Vec<String> = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &[
+                        "-c",
+                        &format!(
+                            "find {} -type f -name '*.tar' | while read -r f; do \
+                             tar -tf \"$f\" >/dev/null 2>&1 || echo \"$f\"; done",
+                            target
+                        ),
+                    ],
+                    600,
+                ))
+                .await
+                .map(|o| {
+                    o.stdout
+                        .lines()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            homelab_core::ops::restoredrill::with_archives(verdict(count, largest), &unreadable)
         }
     };
     // Always: a drill that leaves a full restore behind fills the disk the
@@ -2774,7 +2798,7 @@ async fn scheduler_loop(state: AppState) {
             .map(|(n, st)| (n.clone(), st.enabled, st.last_backup))
             .collect();
         // G14: taken before the loop below consumes `snapshot.stacks`.
-        let drill_repos: Vec<String> = homelab_core::ops::restoredrill::drill_repos(
+        let drill_repos: Vec<String> = homelab_core::ops::restoredrill::all_drill_repos(
             &snapshot
                 .stacks
                 .iter()
@@ -2792,7 +2816,16 @@ async fn scheduler_loop(state: AppState) {
                     )
                 })
                 .collect::<Vec<_>>(),
+            &state
+                .config
+                .device_backups
+                .iter()
+                .map(|d| d.name.clone())
+                .collect::<Vec<_>>(),
         );
+        // fix-62: whose turn it is, read before the loop below consumes the
+        // snapshot's stacks.
+        let drill_pick = homelab_core::ops::restoredrill::pick(&snapshot, &drill_repos);
         let plan = nightly_plan(
             hour,
             local_hour,
@@ -2838,6 +2871,7 @@ async fn scheduler_loop(state: AppState) {
         let backup_done =
             run_backup_batch(&state, &exec, backup_jobs, state.config.backup_concurrency).await;
 
+        let updates_parked = snapshot.updates_parked.clone();
         for (name, st) in snapshot.stacks {
             if !plan.contains(&NightlyTask::Stack(name.clone())) {
                 if !st.enabled {
@@ -2866,13 +2900,25 @@ async fn scheduler_loop(state: AppState) {
                     .unwrap_or(NightBackup::Failed);
                 let mut update_ok = true;
                 let applied = Some(st.applied_at);
+                // fix-59: a stack whose updates a failed night parked is
+                // still backed up above, and not updated here.
+                let natives: &[homelab_core::native::NativeServiceManifest] =
+                    if updates_parked.contains_key(&name) {
+                        info!(
+                            "scheduler: automatic updates of {} are parked — skipped; \
+                             `homelab enable {}` resumes them",
+                            name, name
+                        );
+                        &[]
+                    } else if !backup.allows_update() {
+                        info!("{}", backup.update_skip_line(&name));
+                        &[]
+                    } else {
+                        &st.natives
+                    };
                 // B1: the orchestrator's own release update, for the
                 // services whose policy hands it to the orchestrator.
-                for native in st
-                    .natives
-                    .iter()
-                    .filter(|n| n.update_policy == homelab_core::native::UpdatePolicy::Auto)
-                {
+                for native in natives.iter().filter(|n| n.nightly_updates().release) {
                     let native = native.clone();
                     let r = run_mutating_op(&state, &exec, 0, "scheduled-release-update", |ctx| {
                         Box::pin(async move {
@@ -2882,7 +2928,7 @@ async fn scheduler_loop(state: AppState) {
                     .await;
                     update_ok &= r.ok;
                 }
-                for native in st.natives.clone() {
+                for native in natives.iter().filter(|n| n.nightly_updates().own_cmd) {
                     let n2 = native.clone();
                     let r = run_mutating_op(&state, &exec, 0, "scheduled-update-native", |ctx| {
                         Box::pin(async move {
@@ -2900,23 +2946,9 @@ async fn scheduler_loop(state: AppState) {
                     })
                     .await;
                 }
-                // A deferred backup is deliberately absent from this
-                // condition: it is not a failed night, and parking the stack
-                // for it would punish the house for using its own services.
-                if backup.parks_the_stack(update_ok) {
-                    let parked = record_state(&store, "auto-disable", |s| park(s, &name))
-                        .await
-                        .unwrap_or(false);
-                    if parked {
-                        notify_auto_disabled(
-                            &state,
-                            &exec,
-                            &name,
-                            homelab_core::ops::enable::AUTO_PARK_NOTICE,
-                        )
-                        .await;
-                    }
-                }
+                // fix-59: only a failed update parks, and only the updates; a
+                // failed or deferred backup is simply tried again tomorrow.
+                park_after_night(&state, &exec, &store, &name, update_ok, now).await;
                 continue;
             }
             let Some(manifest) = st.manifest else {
@@ -2938,6 +2970,19 @@ async fn scheduler_loop(state: AppState) {
                 })
                 .await;
             }
+            // fix-59: parked updates are skipped; the backup above still ran.
+            if updates_parked.contains_key(&name) {
+                info!(
+                    "scheduler: automatic updates of {} are parked — skipped; \
+                     `homelab enable {}` resumes them",
+                    name, name
+                );
+                continue;
+            }
+            if !backup.allows_update() {
+                info!("{}", backup.update_skip_line(&name));
+                continue;
+            }
             let m2 = manifest.clone();
             let update_report = run_mutating_op(&state, &exec, 0, "scheduled-update", |ctx| {
                 Box::pin(
@@ -2945,24 +2990,11 @@ async fn scheduler_loop(state: AppState) {
                 )
             })
             .await;
-            // H8: a failed nightly run flips the flag off — one loud message,
-            // then silence instead of a fresh failure every night. State-only:
-            // onboot and the running containers are untouched, so a transient
-            // failure can never keep a stack from surviving a host reboot.
-            if backup.parks_the_stack(update_report.ok) {
-                let parked = record_state(&store, "auto-disable", |s| park(s, &name))
-                    .await
-                    .unwrap_or(false);
-                if parked {
-                    notify_auto_disabled(
-                        &state,
-                        &exec,
-                        &name,
-                        homelab_core::ops::enable::AUTO_PARK_NOTICE,
-                    )
-                    .await;
-                }
-            }
+            // H8: a failed nightly update parks the stack's updates — one
+            // loud message, then silence instead of a fresh failure every
+            // night. State-only: onboot and the running containers are
+            // untouched, and since fix-59 the nightly backup goes on.
+            park_after_night(&state, &exec, &store, &name, update_report.ok, now).await;
         }
 
         // H10: the host's own crown jewels — the secrets vault (holding the
@@ -2997,36 +3029,27 @@ async fn scheduler_loop(state: AppState) {
         // comparing two md5 sums that both belonged to a zero-byte file, and
         // a drill that can be satisfied by empty files rehearses nothing.
         if plan.contains(&NightlyTask::RestoreDrill) {
-            if let Some((repo, next)) = homelab_core::ops::restoredrill::next_repo(
-                &drill_repos,
-                snapshot.restore_drill_index,
-            ) {
+            if let Some(repo) = drill_pick.clone() {
                 let cfg = homelab_core::ops::backup::BackupCfg {
                     tiers: tiers.clone(),
                     ..state.config.backup.clone()
                 };
                 let target = format!("{}/restore-drill", state.config.state_dir);
                 let outcome = run_restore_drill(&exec, &cfg, &repo, &target).await;
-                record_state(&store, "restore drill", |sn| {
-                    sn.restore_drill_index = next;
-                    sn.last_restore_drill_repo = repo.clone();
-                    match &outcome {
-                        homelab_core::ops::restoredrill::Outcome::Passed {
-                            files,
-                            largest_bytes,
-                        } => {
-                            sn.last_restore_drill = now;
-                            sn.last_restore_drill_error = None;
-                            info!(
-                                "restore drill: {} came back with {} file(s), largest {} bytes",
-                                repo, files, largest_bytes
-                            );
-                        }
-                        homelab_core::ops::restoredrill::Outcome::Failed(why) => {
-                            sn.last_restore_drill_error = Some(why.clone());
-                            tracing::error!("restore drill: {} proved nothing :: {}", repo, why);
-                        }
+                match &outcome {
+                    homelab_core::ops::restoredrill::Outcome::Passed {
+                        files,
+                        largest_bytes,
+                    } => info!(
+                        "restore drill: {} came back with {} file(s), largest {} bytes",
+                        repo, files, largest_bytes
+                    ),
+                    homelab_core::ops::restoredrill::Outcome::Failed(why) => {
+                        tracing::error!("restore drill: {} proved nothing :: {}", repo, why)
                     }
+                }
+                record_state(&store, "restore drill", |sn| {
+                    homelab_core::ops::restoredrill::record(sn, &drill_repos, &repo, &outcome, now)
                 })
                 .await;
             }
@@ -3103,6 +3126,30 @@ async fn scheduler_loop(state: AppState) {
                 // Z3, now a tested function in core rather than a filter
                 // buried in this loop (G15).
                 let problems = homelab_core::ops::fleetcheck::alarming(&findings);
+                // fix-65: the same alarming set is sent once, then weekly
+                // while it stands; a new or changed set goes out that night.
+                let fingerprint = homelab_core::ops::fleetcheck::report_fingerprint(&findings);
+                let send = !problems.is_empty()
+                    && homelab_core::ops::fleetcheck::nightly_report_due(
+                        &fingerprint,
+                        &snapshot.last_fleet_report_fp,
+                        snapshot.last_fleet_report_at,
+                        now,
+                    );
+                if send || (problems.is_empty() && !snapshot.last_fleet_report_fp.is_empty()) {
+                    // Remember what went out; forget it once nothing is
+                    // alarming, so a problem that comes back is sent again.
+                    let fp = fingerprint.clone();
+                    record_state(&store, "fleet report fingerprint", |sn| {
+                        if send {
+                            sn.last_fleet_report_fp = fp;
+                            sn.last_fleet_report_at = now;
+                        } else {
+                            sn.last_fleet_report_fp.clear();
+                        }
+                    })
+                    .await;
+                }
                 if problems.is_empty() {
                     info!(
                         "fleet check: repo and reality agree{}",
@@ -3111,6 +3158,14 @@ async fn scheduler_loop(state: AppState) {
                         } else {
                             format!("\n{}", render_findings(&findings))
                         }
+                    );
+                } else if !send {
+                    tracing::warn!(
+                        "fleet check: {} finding(s), the same alarming set as reported on {} — \
+                         not sent again until it changes or a week has passed\n{}",
+                        findings.len(),
+                        homelab_core::state::ymd(snapshot.last_fleet_report_at),
+                        render_findings(&findings)
                     );
                 } else {
                     tracing::warn!(
@@ -3338,9 +3393,41 @@ fn spawn_mirror_push(state: &AppState) {
     });
 }
 
+/// H8: record what one stack's night parked, and say so once. The decision
+/// is `ops::enable::after_night`; this is the load, save and notice around it.
+async fn park_after_night(
+    state: &AppState,
+    exec: &RealExecutor,
+    store: &homelab_core::state::StateStore<'_>,
+    name: &str,
+    update_ok: bool,
+    now: u64,
+) {
+    let parked = record_state(store, "auto-park", |s| {
+        homelab_core::ops::enable::after_night(s, name, update_ok, now)
+    })
+    .await
+    .unwrap_or(false);
+    if parked {
+        tracing::warn!(
+            "scheduler: nightly update for {} FAILED — automatic updates parked, backups continue (H8, fix-59); investigate, then resume with `homelab enable {}`",
+            name, name
+        );
+    }
+    if parked {
+        notify_auto_disabled(
+            state,
+            exec,
+            name,
+            homelab_core::ops::enable::AUTO_PARK_NOTICE,
+        )
+        .await;
+    }
+}
+
 /// A stack has just been parked by H8, which is the moment it stops being
-/// protected: no nightly backup and no update (onboot is left alone by the
-/// automatic park, gap-22).
+/// protected: since fix-59 no automatic update (its nightly backup goes on;
+/// onboot is left alone by the automatic park, gap-22).
 ///
 /// It used to be a `tracing::warn!` and nothing else. On 2026-08-31 the
 /// metrics stack parked itself after the run that stopped Alertmanager, and
@@ -3499,23 +3586,6 @@ async fn record_state<R>(
             None
         }
     }
-}
-
-/// H8: flip a stack's enabled flag off after a failed nightly run. True when
-/// this call parked it (it was enabled before).
-fn park(s: &mut homelab_core::state::HostState, name: &str) -> bool {
-    let Some(rec) = s.stacks.get_mut(name) else {
-        return false;
-    };
-    if !rec.enabled {
-        return false;
-    }
-    rec.enabled = false;
-    tracing::warn!(
-        "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
-        name, name
-    );
-    true
 }
 
 /// Keep the last word on whether notifications are arriving, so a broken
@@ -3992,14 +4062,38 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
             resp
         }
-        Rpc::RestoreStack { manifest, snapshot } => {
+        Rpc::RestoreStack {
+            manifest,
+            snapshot,
+            confirm,
+            skip_safety_copy,
+        } => {
+            // fix-64: no typed name, no restore — whoever sent the request.
+            if let Err(e) = homelab_core::ops::backup::restore_confirmed(
+                &manifest.stack_name,
+                confirm.as_deref(),
+            ) {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e.to_string(),
+                    deferred: None,
+                };
+            }
             // The configured target and timeout, not the compiled defaults:
             // this is the path where a hardcoded 1800 s used to kill a large
             // restore over Google Drive at thirty minutes (F38).
             let cfg = state.config.backup.clone();
             run_mutating_op(state, &exec, req.id, "restore", |ctx| {
                 Box::pin(async move {
-                    homelab_core::ops::backup::restore(ctx, &manifest, &cfg, &snapshot).await
+                    homelab_core::ops::backup::restore_with(
+                        ctx,
+                        &manifest,
+                        &cfg,
+                        &snapshot,
+                        !skip_safety_copy,
+                    )
+                    .await
                 })
             })
             .await
@@ -4579,19 +4673,30 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             check_id: id,
             ok,
             note,
+            accept_days,
         } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let found = record_state(&store, "manual check answer", |st| {
-                homelab_core::ops::manualchecks::answer(st, &id, ok, &note, now)
+            // fix-65: a deliberate nok, accepted until a date.
+            let until = accept_days.map(|d| now + u64::from(d) * 86_400);
+            let found = record_state(&store, "manual check answer", |st| match until {
+                Some(u) => homelab_core::ops::manualchecks::accept(st, &id, u, &note, now),
+                None => homelab_core::ops::manualchecks::answer(st, &id, ok, &note, now),
             })
             .await
             .unwrap_or(false);
             let message = if found {
-                format!("{} recorded as {}", id, if ok { "ok" } else { "NOT ok" })
+                match until {
+                    Some(u) => format!(
+                        "{} recorded as NOT ok, accepted until {}",
+                        id,
+                        homelab_core::state::ymd(u)
+                    ),
+                    None => format!("{} recorded as {}", id, if ok { "ok" } else { "NOT ok" }),
+                }
             } else {
                 format!(
                     "no manual check has id {} — run `homelab checks` for the list",

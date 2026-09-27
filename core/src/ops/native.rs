@@ -620,6 +620,56 @@ pub async fn backup_native(
         );
     }
 
+    // fix-63 (native-rebuild-starts-empty, 2026-09-27): after a rebuild the
+    // unit starts with empty data directories until somebody restores them
+    // by hand, and a tar of an empty directory is never zero bytes, so
+    // nothing refused to archive it. One night later the empty state was the
+    // latest snapshot and retention began pruning the real history. Empty
+    // directories are archived only into a repository without history — a
+    // new service — and refused over one that has some.
+    step!(runner, "empty data over history", {
+        if own_copy.is_some() || m.data_dirs.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let dirs = m
+            .data_dirs
+            .iter()
+            .map(|d| shq(d))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let probe = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("find {} -type f 2>/dev/null | head -1", dirs),
+            120,
+        )
+        .await?;
+        if !probe.stdout.trim().is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let listing = crate::executor::run_ok(
+            exec,
+            &crate::ops::backup::restic_cmd(cfg, &m.unit, &["snapshots", "--json"], 300),
+        )
+        .await?;
+        let history = crate::ops::backup::parse_snapshots_json(&listing.stdout);
+        let Some(newest) = history.iter().map(|(_, t)| *t).max() else {
+            return Ok(StepOutcome::Unchanged);
+        };
+        Err(CoreError::SafetyAbort(format!(
+            "{} holds no files on {} while {}-config has {} snapshot(s), the newest from {} :: \
+             archiving it would make an empty state the latest snapshot and start pruning the \
+             real history. This is what a rebuilt container looks like before its data is \
+             put back: restore it first (docs/OPERATIONS_RUNBOOK.md op-11), and the next \
+             backup runs",
+            m.data_dirs.join(", "),
+            m.hostname,
+            m.unit,
+            history.len(),
+            crate::state::ymd(newest)
+        )))
+    });
+
     step!(runner, "snapshot", {
         let dirs = match &own_copy {
             Some(f) => shq(f),

@@ -930,7 +930,7 @@ a container runs several (`stacks/kyu/kyu-runner/service.yml`)
 | `update_cmd` | its own self-update command; absent means never updated by the host | `core/src/native.rs:48` |
 | `release_repo`, `release_asset` | `owner/name` on GitHub and the asset (default: the unit name) | `core/src/native.rs:64-68,88-90` |
 | `backup_from_newest` | archive the newest file matching this glob instead of `data_dirs` | `core/src/native.rs:79` |
-| `update_policy` | `auto` or `manual` (default) | `core/src/native.rs:83` |
+| `update_policy` | `auto`, `self` or `manual` (default) | `core/src/native.rs` |
 
 The verbs:
 
@@ -976,8 +976,9 @@ Tests: `core/tests/native_tests.rs:1473,1508`.
 **Update policy** (deployment decision B1, `docs/deployment/UPDATE_POLICY.md`
 and `docs/deployment/REGISTER.md`, row B1): a service with `update_policy: auto`
 gets the latest signed release installed by the nightly run before its
-supervised self-update; `manual` services are never release-updated at night
-(`host/src/main.rs:2393-2408`). `update_policy: auto` without a
+supervised self-update; `self` services get only their own `update_cmd`; `manual`
+services are left alone at night, neither release-updated nor self-updated
+(fix-58, `NativeServiceManifest::nightly_updates`). `update_policy: auto` without a
 `release_repo` fails validation (`core/src/native.rs:163-167`). The host reads
 the policy from its own copy, so after changing it run
 `homelab adopt stacks/<name>` to refresh that copy
@@ -1389,7 +1390,16 @@ kept, and the reason must be at least 10 characters
 ```bash
 homelab restore stacks/syncthing              # latest snapshot
 homelab restore stacks/syncthing <snapshot-id>
+homelab restore stacks/syncthing --yes        # scripts: the name counts as typed
 ```
+
+Since fix-64 (2026-09-27) the command asks you to type the stack name, as the
+TUI always did, and the host refuses a restore request without it. Before it
+writes anything, with the stack down, the host copies the current data to
+`/var/lib/homelab/pre-restore/<stack>-<unix time>/` and prints where; nothing
+removes that copy. When there is no room for it (twice the data plus 1 GiB
+free) the restore stops before anything is stopped; `--no-safety-copy`
+restores without the copy, deliberately.
 
 The client prints `▶ restore <stack> from '<snapshot>'`
 (`client/src/main.rs:758-778`). The host runs `safety gates`, then
@@ -1471,23 +1481,34 @@ plans the night (`host/src/main.rs:2257-2333,2000-2035`):
    (`backup_concurrency`, `host/src/main.rs:164-165,675-677`), all under the
    one operation lock, so they never overlap a deploy
    (`host/src/main.rs:2172-2188`).
-2. Then, one stack at a time: image updates for `auto` apps (D9); for native
-   stacks the release update of `auto` services and the supervised
-   self-update of every service (C7).
+2. Then, one stack at a time and only when that stack's backup ran tonight
+   (fix-60): image updates for `auto` apps (D9); for native stacks the
+   release update of `auto` services and the supervised self-update of
+   `auto` and `self` services (C7, fix-58).
 3. The host's own backup (`host-meta-config` repository: vault, state,
    TLS files, intent repository, `/etc/homelab/host.toml`,
    `core/src/ops/backup.rs:967-1010`).
-4. A restore drill of one repository in turn, when the last passed drill is
-   older than `restore_drill_interval_s` (default 90 days,
-   `core/src/ops/restoredrill.rs:24`): it restores into a scratch directory,
-   judges the result by its file count and largest file, and deletes it
-   (`host/src/main.rs:2040-2083,2541-2582`).
+4. A restore drill of one repository, when the last passed drill is older
+   than `restore_drill_interval_s` (default 20 hours, so every night; it was
+   90 days until fix-62): the repository drilled longest ago goes first, over
+   the stack and native repositories, `host-meta` and each device
+   configuration. It restores into a scratch directory, judges the result by
+   its file count and largest file and by whether every `.tar` in it lists,
+   records the outcome per repository, and deletes the scratch copy
+   (`core/src/ops/restoredrill.rs`, `run_restore_drill` in
+   `host/src/main.rs`). A repository whose drill failed stays a finding until
+   that repository passes.
 5. Device configuration backups and ZFS jobs (E8), when configured.
 6. A fleet check of what the host can see, with a notification only when a
-   finding is alarming (`host/src/main.rs:2628-2694`).
+   finding is alarming, and since fix-65 only when the alarming set (which
+   subjects, at which severity) differs from the one last sent, or a week has
+   passed since; otherwise the host logs that it held the report back
+   (`report_fingerprint`, `nightly_report_due` in
+   `core/src/ops/fleetcheck.rs`).
 
 With no nightly hour set, nothing runs (`host/src/main.rs:2264-2267`). A stack
-whose night fails (backup failed or an update failed) is parked (H8). A
+whose nightly update fails has its automatic updates parked (H8, fix-59); its
+backups go on, and a failed backup parks nothing. A
 deferred backup is neither a failure nor a backup
 (`core/src/ops/backup.rs:34-86`).
 
@@ -1950,11 +1971,15 @@ its detail (`client/src/tui/view/stacks.rs:62-64,117-121`), and the nightly
 run skips it and logs `scheduler: stack <name> is disabled — skipped`
 (`host/src/main.rs:2365-2371`).
 
-A failed nightly run parks the stack by itself: only the flag, `onboot` is
-left alone. The host logs
-`nightly run for <name> FAILED — stack auto-disabled (H8); investigate, then re-enable with`
+A failed nightly update parks the stack's automatic updates by itself
+(fix-59): the nightly backup goes on, `onboot` and the running containers are
+left alone. A failed backup parks nothing; it is tried again the next night.
+The host logs
+`nightly update for <name> FAILED — automatic updates parked, backups continue (H8, fix-59); investigate, then resume with`
 followed by the enable command, and sends a notification
-(`host/src/main.rs:2483-2511`). A redeploy keeps the flag as it was
+(`park_after_night` in `host/src/main.rs`). `homelab check` lists the stack
+as `automatic updates parked since <date>` until `homelab enable <name>`
+resumes them. A redeploy keeps the flag as it was
 (`core/src/ops/deploy.rs:2362-2378`), but a deploy does start a stopped
 container (`core/src/ops/deploy.rs:812-816`).
 
@@ -2064,7 +2089,16 @@ stack is destroyed or forgotten (`core/src/ops/destroy.rs:298`).
 homelab checks                              # list them
 homelab checks answer <id> ok               # record an answer
 homelab checks answer <id> nok the subtitles drift after an hour
+homelab checks answer <id> accept 90 by design, D56   # a deliberate nok
 ```
+
+Since fix-65 (2026-09-27): an answer is reopened only by a deploy that changed
+the stack's files (its `applied_hash` is kept with the answer), not by every
+deploy, and the open-checks finding says when that is why. An answer given
+before fix-65 is still judged by the old rule until it is answered again.
+`accept <days> <reason>` records a deliberate `nok` that is `noted`, not
+broken, until that many days from now, and broken again after; the listing
+shows it as `accepted to <date>`.
 
 The listing is grouped per stack, one line per question with its id and
 status (`unanswered`, `ok, <n>d ago` or `NOT OK`), and ends with the count of

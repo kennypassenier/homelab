@@ -1384,6 +1384,69 @@ fn b1_auto_policy_needs_a_release_repo() {
     .is_ok());
 }
 
+/// fix-58 (native-update-ignores-manual-policy, 2026-09-27): `manual` means
+/// the nightly round leaves the service alone. The scheduler ran the unit's
+/// own `update_cmd` for every native whatever its policy, so
+/// http-switchboard, manual because it sits on the alert path, updated itself
+/// every night, past the orchestrator's signature check.
+#[test]
+fn fix_58_a_manual_native_with_an_update_cmd_gets_no_nightly_update() {
+    use homelab_core::native::UpdatePolicy;
+    let manual = NativeServiceManifest {
+        update_cmd: Some("http-switchboard update".into()),
+        update_policy: UpdatePolicy::Manual,
+        ..kyu_manifest()
+    };
+    let n = manual.nightly_updates();
+    assert!(!n.release, "manual: no release update");
+    assert!(
+        !n.own_cmd,
+        "manual: the unit's own update verb must not run either"
+    );
+    // `self` (almanac): its own verb and nothing else; `auto` keeps both, as
+    // before.
+    let own = NativeServiceManifest {
+        update_policy: UpdatePolicy::OwnVerb,
+        ..manual.clone()
+    }
+    .nightly_updates();
+    assert!(own.own_cmd && !own.release);
+    let auto = NativeServiceManifest {
+        update_policy: UpdatePolicy::Auto,
+        ..manual.clone()
+    }
+    .nightly_updates();
+    assert!(auto.own_cmd && auto.release);
+    // `self` without a verb to run is a stack file mistake.
+    let why = validate_native(&NativeServiceManifest {
+        update_policy: UpdatePolicy::OwnVerb,
+        update_cmd: None,
+        ..manual
+    })
+    .unwrap_err()
+    .join("; ");
+    assert!(
+        why.contains("update_policy: self without an update_cmd"),
+        "{}",
+        why
+    );
+    // The stack files say what the scheduler now reads.
+    let read = |p: &str| -> NativeServiceManifest {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../stacks")
+            .join(p);
+        serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    };
+    assert_eq!(
+        read("almanac/service.yml").update_policy,
+        UpdatePolicy::OwnVerb
+    );
+    assert_eq!(
+        read("kyu/http-switchboard/service.yml").update_policy,
+        UpdatePolicy::Manual
+    );
+}
+
 fn release_mocks(exec: &MockExecutor, installed: &str) {
     adopt_mocks(exec);
     exec.respond_always("releases/latest", CmdOutput::ok(RELEASE_JSON));
@@ -1570,4 +1633,68 @@ fn fix_29_the_real_kyu_release_signature_verifies() {
     assert!(
         homelab_core::release_sig::verify_sums(&SIGNED_SUMS.replace('a', "b"), SIGNED_SIG).is_err()
     );
+}
+
+/// fix-63 (native-rebuild-starts-empty, 2026-09-27): after a rebuild a native
+/// unit runs with empty data directories until somebody restores by hand,
+/// and the nightly backup had no emptiness guard — a tar of an empty
+/// directory is never zero bytes — so one night made the empty state the
+/// latest snapshot, and retention then pruned the real history.
+#[tokio::test]
+async fn fix_63_empty_data_dirs_are_not_backed_up_over_a_repository_with_history() {
+    use homelab_core::ops::backup::BackupCfg;
+    use homelab_core::ops::native::backup_native;
+    let history = r#"[{"short_id":"abcd1234","time":"2026-09-26T04:00:00Z"}]"#;
+
+    // Empty in the container, history in the repository: refused.
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok(history));
+    exec.respond_always("-type f", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup_native(
+        &ctx(&exec, &sink, &j),
+        &kyu_manifest(),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(
+        !report.ok,
+        "an empty state must not become the latest snapshot"
+    );
+    let why = format!("{:?}", report.error);
+    assert!(why.contains("op-11"), "it names the way back: {}", why);
+    assert!(
+        exec.calls_containing("restic backup").is_empty(),
+        "{:?}",
+        exec.calls()
+    );
+
+    // Data present: backed up as before.
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok(history));
+    exec.respond_always("-type f", CmdOutput::ok("/var/lib/kyu/kyu.db\n"));
+    let report = backup_native(
+        &ctx(&exec, &sink, &j),
+        &kyu_manifest(),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(exec.calls_containing("restic backup --stdin").len(), 1);
+
+    // Empty and no history: a new service, backed up as before.
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    exec.respond_always("-type f", CmdOutput::ok(""));
+    let report = backup_native(
+        &ctx(&exec, &sink, &j),
+        &kyu_manifest(),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
 }

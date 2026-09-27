@@ -160,6 +160,8 @@ fn an_answer_older_than_the_deploy_that_followed_it_is_asked_again() {
     // Answered at 500, deploy applied at 1000: the deploy may have broken the
     // very thing the question is about.
     answer(&mut st, &id, true, "", 500);
+    // fix-65: that holds for a deploy that changed the stack's files.
+    st.stacks.get_mut("media").unwrap().applied_hash = "changed".into();
 
     let f = evaluate_manual(&st, 1_100, DEFAULT_ANSWER_MAX_AGE_S);
     assert_eq!(f.len(), 1, "{:?}", f);
@@ -289,4 +291,88 @@ fn a_no_keeps_its_own_line_even_among_many_open_ones() {
         broken[0].what
     );
     assert_eq!(broken[0].subject, "media/jellyfin", "and it names the app");
+}
+
+// ── fix-65: the nightly report was red every night by design ───────────────
+
+/// fix-65 (nightly-report-always-red, 2026-09-27): an answer was reopened by
+/// any deploy after it, and `applied_at` moves on every deploy, so answers
+/// given in the morning were open again by the evening. Only a deploy that
+/// changed the stack's files may reopen one, and the finding says so.
+#[test]
+fn fix_65_a_redeploy_that_changed_nothing_does_not_reopen_an_answer() {
+    let mut st = state_with_stack(100);
+    st.stacks.get_mut("media").unwrap().applied_hash = "h1".into();
+    register(&mut st, "media", &[q("jellyfin", "sound in sync")], 100);
+    let id = id_for("media", "jellyfin", "sound in sync");
+    answer(&mut st, &id, true, "", 500);
+
+    // Redeployed at 1000 with the same files: the answer stands.
+    st.stacks.get_mut("media").unwrap().applied_at = 1_000;
+    assert!(
+        evaluate_manual(&st, 1_100, DEFAULT_ANSWER_MAX_AGE_S).is_empty(),
+        "{:?}",
+        evaluate_manual(&st, 1_100, DEFAULT_ANSWER_MAX_AGE_S)
+    );
+
+    // Redeployed with changed files: asked again, and told why.
+    st.stacks.get_mut("media").unwrap().applied_hash = "h2".into();
+    let f = evaluate_manual(&st, 1_100, DEFAULT_ANSWER_MAX_AGE_S);
+    assert_eq!(f.len(), 1, "{:?}", f);
+    assert_eq!(f[0].severity, Severity::Drift);
+    assert!(f[0].what.contains("files changed"), "{}", f[0].what);
+}
+
+/// fix-65: kp-soft.dev's deliberate `nok` (D56) was Broken every night with
+/// no way to say "known, and accepted". An accepted answer is Noted until
+/// its date, then Broken again.
+#[test]
+fn fix_65_a_deliberate_nok_can_be_accepted_until_a_date() {
+    use homelab_core::ops::manualchecks::accept;
+    let mut st = state_with_stack(100);
+    register(
+        &mut st,
+        "media",
+        &[q("jellyfin", "reachable from outside")],
+        100,
+    );
+    let id = id_for("media", "jellyfin", "reachable from outside");
+    assert!(accept(&mut st, &id, 30 * DAY, "by design, D56", 500));
+
+    let f = evaluate_manual(&st, 10 * DAY, DEFAULT_ANSWER_MAX_AGE_S);
+    assert_eq!(f.len(), 1, "{:?}", f);
+    assert_eq!(f[0].severity, Severity::Noted, "{:?}", f[0]);
+    assert!(f[0].what.contains("accepted until"), "{}", f[0].what);
+    assert!(f[0].what.contains("by design, D56"), "{}", f[0].what);
+
+    let f = evaluate_manual(&st, 31 * DAY, DEFAULT_ANSWER_MAX_AGE_S);
+    assert_eq!(f.len(), 1, "{:?}", f);
+    assert_eq!(f[0].severity, Severity::Broken, "the acceptance ran out");
+}
+
+/// fix-65: the same red report went out every night, so a real new problem
+/// arrived in an envelope Kenny had learned to ignore. It goes out when the
+/// alarming set changes, and once a week while it stands.
+#[test]
+fn fix_65_the_nightly_report_goes_out_when_the_set_changes_or_weekly() {
+    use homelab_core::ops::fleetcheck::nightly_report_due;
+    let now = 1_800_000_000u64;
+    assert!(nightly_report_due("Broken|media", "", 0, now), "first time");
+    assert!(
+        !nightly_report_due("Broken|media", "Broken|media", now - DAY, now),
+        "the same set as last night stays quiet"
+    );
+    assert!(
+        nightly_report_due(
+            "Broken|media\nDrift|paperwork",
+            "Broken|media",
+            now - DAY,
+            now
+        ),
+        "something new is sent"
+    );
+    assert!(
+        nightly_report_due("Broken|media", "Broken|media", now - 7 * DAY, now),
+        "and a standing problem is repeated weekly"
+    );
 }

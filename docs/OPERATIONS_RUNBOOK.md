@@ -153,11 +153,14 @@ at least 20 hours old (`host/src/main.rs:1952-1954`, `:2008-2013`).
    `core/src/ops/backup.rs:66-69`). See op-5.
 4. **Host-meta**, the host's own backup, when due
    (`host/src/main.rs:2518-2539`). See op-12.
-5. **Restore drill**: at most one repository per night, only when the last
-   passed drill is older than `restore_drill_interval_s` (default 90
-   days), round robin over the stack and native repositories
-   (`host/src/main.rs:2548-2582`, `core/src/ops/restoredrill.rs:24-30`,
-   `:55-88`).
+5. **Restore drill**: one repository per night (`restore_drill_interval_s`
+   defaults to 20 hours since fix-62; it was 90 days), the one drilled
+   longest ago first, over the stack and native repositories, `host-meta`
+   and the device configurations. Every `.tar` that comes back must list
+   with `tar -tf`. Each repository keeps its own record
+   (`HostState.restore_drills`), so a failure stands until that repository
+   passes (`core/src/ops/restoredrill.rs`, `run_restore_drill` in
+   `host/src/main.rs`).
 6. **Device configurations** from `device_backups` in `host.toml`, one GET
    per device into restic (`host/src/main.rs:2588-2609`).
 7. **ZFS** snapshots and replication, when `zfs_jobs` is set
@@ -234,8 +237,9 @@ names `homelab release-update`. The steps below are the parts it merges.
    remote, mirror lag, interrupted operations (`core/src/doctor.rs:45-188`).
 3. `homelab incidents`. One directory per failed operation.
 4. `homelab checks`. The questions only a person can answer; record one
-   with `homelab checks answer <id> ok|nok [note]`
-   (`client/src/main.rs:388-421`).
+   with `homelab checks answer <id> ok|nok [note]`, or accept a deliberate
+   `nok` for a while with `homelab checks answer <id> accept <days> <reason>`
+   (fix-65; `client/src/main.rs`).
 5. Host, only when one of the above points there:
 
    ```sh
@@ -358,7 +362,7 @@ stateDiagram-v2
     state "Retired, container gone, data, vault and repositories kept" as Removed
     state "Enabled, in the nightly rotation" as Enabled
     state "Parked by hand, onboot 0" as ParkedByHand
-    state "Auto-parked, onboot unchanged" as AutoParked
+    state "Updates auto-parked, backups continue" as AutoParked
     state "On the host, recorded in state" as OnHost
 
     [*] --> Scaffolded: homelab new
@@ -367,7 +371,7 @@ stateDiagram-v2
     state OnHost {
         [*] --> Enabled
         Enabled --> ParkedByHand: homelab disable
-        Enabled --> AutoParked: failed night
+        Enabled --> AutoParked: failed nightly update
         AutoParked --> ParkedByHand: homelab disable
         ParkedByHand --> Enabled: homelab enable
         AutoParked --> Enabled: fix, prove, homelab enable
@@ -391,12 +395,17 @@ stateDiagram-v2
 - Parked stacks show `[OFF]` in the TUI
   (`client/src/tui/view/dashboard.rs:208`, `client/src/tui/view/stacks.rs:63`).
 
-**Automatic park.** A failed night sets the flag in state only; `onboot`
-and the running containers are left alone (`host/src/main.rs:2483-2486`).
+**Automatic park.** Since fix-59 (2026-09-27) a failed nightly update parks
+the stack's automatic updates only (`HostState.updates_parked`,
+`core/src/ops/enable.rs` `after_night`); the stack stays enabled and keeps its
+nightly backup, and `onboot` and the running containers are left alone. A
+failed backup parks nothing. Before fix-59 the park set `enabled = false`,
+which stopped the backups too.
 The notification is named `stack-disabled-<stack>`
 (`host/src/main.rs:2812-2828`). Its text is `AUTO_PARK_NOTICE`
-(`core/src/ops/enable.rs`): no nightly backup and no update until
-re-enabled, onboot and the running containers left as they were. Before
+(`core/src/ops/enable.rs`): the nightly backup still runs, updates wait
+until `homelab enable`, onboot and the running containers left as they were.
+Before
 v3.58.4 it said "no onboot until re-enabled", which the automatic park never
 did (gap-22).
 
@@ -409,8 +418,8 @@ After an automatic park:
    `homelab backup-native <name>` (native).
 4. `homelab enable <name>`.
 
-A backup that stood aside because an app was in use never parks a stack
-(`core/src/ops/backup.rs:66-69`).
+A backup, failed or stood aside, never parks a stack (fix-59,
+`core/src/ops/enable.rs` `after_night`).
 
 ---
 
@@ -604,7 +613,7 @@ named is left running (`core/src/ops/deploy.rs:285-297`, test
 | Route | What runs | Which services |
 |---|---|---|
 | Nightly release install | Host asks the GitHub API for the latest release, requires `SHA256SUMS.minisig` signed with key 1C88AB06D43C0B16, compares the checksum with the installed binary, installs under an armed rollback (`core/src/ops/native.rs:919-1131`, `core/src/release_sig.rs:10-40`) | only `update_policy: auto` (`host/src/main.rs:2395-2399`) |
-| Nightly self-update | the service's own `update_cmd`; binary preserved, restart only when it changed, 20 s to come up then a settle window that also watches `NRestarts`, rollback from outside (`core/src/ops/native.rs:701-720`, `:1174-1333`) | every service with an `update_cmd`, whatever `update_policy` says (`host/src/main.rs:2409-2418`) |
+| Nightly self-update | the service's own `update_cmd`; binary preserved, restart only when it changed, 20 s to come up then a settle window that also watches `NRestarts`, rollback from outside (`core/src/ops/native.rs:701-720`, `:1174-1333`) | services with an `update_cmd` and `update_policy: auto` or `self`; never `manual` (fix-58, `NativeServiceManifest::nightly_updates`) |
 | `homelab release-update-native <stack>` | the release install, now | every service on the stack, policy not consulted (`host/src/main.rs:3521-3555`) |
 | `homelab install-native stacks/<stack>/<unit> [<tag>]` | one service, latest or a named tag, downloaded and verified on the workstation with `gh` (`client/src/release.rs:75-173`) | the one named |
 | `homelab update-native <stack>` | every `update_cmd`, now | every service on the stack |
@@ -795,10 +804,15 @@ docker, `Makefile:45-49`), then
 only; no secrets and no latch key needed (`client/src/main.rs:749-757`,
 `client/src/spec.rs:68-84`).
 
-**Restore to latest.** `homelab restore stacks/<name>`, or TUI `R`, which
-asks for the stack name first (`client/src/tui/model.rs:801-817`). The
-host checks every owning app's repository holds a snapshot, stops every app
-(`docker compose down`, **point of no return**), runs
+**Restore to latest.** `homelab restore stacks/<name>`, or TUI `R`; both ask
+for the stack name first, `--yes` answers it for scripts, and the host
+refuses a request without it (fix-64, `restore_confirmed` in
+`core/src/ops/backup.rs`). The host checks every owning app's repository
+holds a snapshot and that there is room for a copy of the current data,
+stops every app (`docker compose down`), copies the current data to
+`/var/lib/homelab/pre-restore/<stack>-<unix time>/` (kept; delete it by hand
+once the restore is proven; `--no-safety-copy` skips it), then
+(**point of no return**) runs
 `restic restore latest --target /` per repository, starts every app again
 even when the restore failed, and verifies they run
 (`core/src/ops/backup.rs:803-962`).
@@ -842,6 +856,12 @@ The procedure is DR_RUNBOOK.md Layer 4, "A native stack"
   (`appdata/almanac/almanac-config/...`): GNU tar strips it from the
   absolute paths the backup passes (`core/src/ops/native.rs:611-613`).
   Unpack it inside the container so owners stay the container's own.
+- Since fix-63 (2026-09-27) the nightly backup refuses a native service whose
+  data directories hold no files while its repository has snapshots, and the
+  refusal names this procedure. That is what a rebuilt container looks like
+  before this procedure has run; before the guard, one night was enough to
+  make the empty state the latest snapshot. The deploy still starts the unit
+  on empty directories, so the service runs empty until this is done.
 
 Worked example, host, almanac on CT 112:
 
@@ -897,10 +917,9 @@ the list above names them (`core/src/ops/backup.rs:1056-1065`).
 age: `last_host_meta` is written by the scheduler and by
 `homelab backup-host-meta`, and read only by the nightly plan
 (`core/src/state.rs:113-117`, `host/src/main.rs:2014-2023`, `:2531`,
-`:3408`). The nightly
-restore drill never picks it: the drill list is built from stacks and
-native services only (`core/src/ops/restoredrill.rs:55-77`,
-`host/src/main.rs:2301-2319`). A failure logs
+`:3408`). Since fix-62 the nightly restore drill takes `host-meta` in its
+turn like any other repository (`all_drill_repos` in
+`core/src/ops/restoredrill.rs`). A failure logs
 `"scheduler: host-meta backup FAILED"` and sends the operation's
 notification (`host/src/main.rs:2534-2538`, `:3038`).
 

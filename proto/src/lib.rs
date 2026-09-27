@@ -61,6 +61,14 @@ pub enum Command {
     RestoreStack {
         manifest: Box<StackManifest>,
         snapshot: String,
+        /// fix-64: the stack name as the operator typed it. The host refuses
+        /// a restore without it; absent from clients before fix-64.
+        #[serde(default)]
+        confirm: Option<String>,
+        /// fix-64: `--no-safety-copy`, the deliberate way past the copy of
+        /// the current data a restore takes first.
+        #[serde(default)]
+        skip_safety_copy: bool,
     },
     /// D9/B6: managed update with rollback. `app: None` = whole stack.
     UpdateStack {
@@ -262,6 +270,10 @@ pub enum Command {
         check_id: String,
         ok: bool,
         note: String,
+        /// fix-65: a deliberate "not ok" accepted for this many days, with
+        /// the reason in `note`. None = an ordinary answer.
+        #[serde(default)]
+        accept_days: Option<u32>,
     },
 }
 
@@ -502,6 +514,7 @@ mod wire_tests {
                 check_id: "c4bca102".into(),
                 ok: true,
                 note: String::new(),
+                accept_days: None,
             },
             Command::ListManualChecks,
             Command::SetStackEnabled {

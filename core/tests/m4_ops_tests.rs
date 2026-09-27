@@ -86,6 +86,10 @@ fn mock_hostname(exec: &MockExecutor, vmid: u16, stack: &str) {
     // HAS been deployed. A test about the other case says so itself with
     // `respond_first`.
     exec.respond_always("test -d", CmdOutput::ok("yes\n"));
+    // fix-64: and a host with room for a restore's safety copy: 1 kB of
+    // data, 50 GB free. A test about a full disk says so with
+    // `respond_first`.
+    exec.respond_always("du -sbc", CmdOutput::ok("1000\n50000000000\n"));
 }
 
 // ── C2: gated destroy ───────────────────────────────────────────────────────
@@ -656,6 +660,101 @@ async fn e2_restore_fails_when_app_not_running_after() {
         .contains("not running after restore"));
 }
 
+// ── fix-64: a restore asks first and keeps what it overwrites ──────────────
+
+/// fix-64 (restore-no-confirm-no-safety-snapshot, 2026-09-27): the TUI asked
+/// for the stack's name before a restore, the command line went straight to
+/// the host, and the host accepted either. A restore overwrites live data, so
+/// the host now refuses one whose request does not carry the typed name.
+#[test]
+fn fix_64_the_host_refuses_a_restore_without_the_typed_stack_name() {
+    use homelab_core::ops::backup::restore_confirmed;
+    assert!(restore_confirmed("paperwork", None).is_err());
+    assert!(restore_confirmed("paperwork", Some("paperwrk")).is_err());
+    assert!(restore_confirmed("paperwork", Some("paperwork")).is_ok());
+}
+
+const PRE_RESTORE_COPY: &str = "/var/lib/homelab/pre-restore/test-1760000000";
+
+/// fix-64: when the corruption happened before last night's backup, `latest`
+/// is the corruption, and the restore overwrote the only other copy of the
+/// data. The current data is now copied aside, with the stack down, before
+/// anything is written over it, and the copy is kept.
+#[tokio::test]
+async fn fix_64_a_restore_copies_the_current_data_aside_before_it_writes() {
+    use homelab_core::ops::backup::restore_with;
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("snapshots", CmdOutput::ok("ID  Time\nabc123  today\n"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = restore_with(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+        "latest",
+        true,
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let calls = exec.calls();
+    let pos = |n: &str| {
+        calls
+            .iter()
+            .position(|c| c.contains(n))
+            .unwrap_or_else(|| panic!("no call containing {:?} in {:#?}", n, calls))
+    };
+    assert!(
+        pos("compose down") < pos("cp -a"),
+        "copied with the stack down"
+    );
+    assert!(
+        pos("cp -a") < pos("restic restore"),
+        "copied before it is written over"
+    );
+    assert!(
+        calls[pos("cp -a")].contains("/appdata/test/test-config")
+            && calls[pos("cp -a")].contains(PRE_RESTORE_COPY),
+        "{}",
+        calls[pos("cp -a")]
+    );
+    assert!(
+        exec.calls_containing(&format!("rm -rf '{}'", PRE_RESTORE_COPY))
+            .is_empty(),
+        "the copy is kept"
+    );
+    assert!(
+        sink.lines().iter().any(|l| l.contains(PRE_RESTORE_COPY)),
+        "the transcript says where it is"
+    );
+}
+
+/// fix-64: no room for the copy refuses the restore before anything stops.
+#[tokio::test]
+async fn fix_64_no_room_for_the_safety_copy_refuses_before_anything_stops() {
+    use homelab_core::ops::backup::restore_with;
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("snapshots", CmdOutput::ok("ID  Time\nabc123  today\n"));
+    exec.respond_first("du -sbc", CmdOutput::ok("40000000000\n50000000000\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = restore_with(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+        "latest",
+        true,
+    )
+    .await;
+    assert!(!report.ok);
+    let why = report.error.unwrap().why;
+    assert!(why.contains("--no-safety-copy"), "{}", why);
+    assert!(exec.calls_containing("compose down").is_empty());
+    assert!(exec.calls_containing("restic restore").is_empty());
+}
+
 // ── D9/B6: managed updates with rollback ────────────────────────────────────
 
 use homelab_core::ops::update::update;
@@ -733,6 +832,108 @@ async fn b6_failed_update_rolls_back_to_captured_image() {
     let tag_calls = exec.calls_containing("docker tag sha256:oldimg myimg:latest");
     assert_eq!(tag_calls.len(), 1);
     assert!(tag_calls[0].contains("--force-recreate"));
+}
+
+/// The mocks an automatic update needs to reach its data copy: policy `auto`,
+/// nobody watching, running image `sha256:old`, and `pulled` as what the
+/// compose file resolves to after the pull.
+fn auto_update_mocks(exec: &MockExecutor, pulled: &str) {
+    mock_hostname(exec, 108, "test");
+    exec.respond_first("busy-check", CmdOutput::ok("<no value>\n"));
+    exec.respond_first("com.homelab.update.policy", CmdOutput::ok("auto\n"));
+    exec.respond_always(
+        "docker inspect --format",
+        CmdOutput::ok("sha256:old myimg:latest\n"),
+    );
+    exec.respond_always("config --images", CmdOutput::ok(&format!("{}\n", pulled)));
+    // 1 kB of data, 50 GB free.
+    exec.respond_always("du -sbc", CmdOutput::ok("1000\n50000000000\n"));
+}
+
+const PRE_UPDATE_COPY: &str = "/var/lib/homelab/pre-update/test/app-1760000000";
+
+/// fix-61 (no-pre-update-snapshot, 2026-09-27): the rollback put the old
+/// image back but not the data, and a migrating upgrade that failed its
+/// verify left the old binary running against the migrated database with no
+/// copy of what was there before. An automatic update that brings a new image
+/// now copies the app's data first, with its containers paused, and drops the
+/// copy only once the new version is verified.
+#[tokio::test]
+async fn fix_61_an_auto_update_copies_the_apps_data_before_the_new_image_starts() {
+    let exec = MockExecutor::new();
+    auto_update_mocks(&exec, "sha256:new");
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, true).await;
+    assert!(report.ok, "{:?}", report.error);
+    let calls = exec.calls();
+    let pos = |n: &str| {
+        calls
+            .iter()
+            .position(|c| c.contains(n))
+            .unwrap_or_else(|| panic!("no call containing {:?} in {:#?}", n, calls))
+    };
+    assert!(pos("compose pull") < pos("compose pause"));
+    assert!(pos("compose pause") < pos("cp -a"));
+    assert!(pos("cp -a") < pos("compose unpause"));
+    assert!(pos("compose unpause") < pos("compose up -d"));
+    assert!(
+        calls[pos("cp -a")].contains("/appdata/test/test-config")
+            && calls[pos("cp -a")].contains(PRE_UPDATE_COPY),
+        "{}",
+        calls[pos("cp -a")]
+    );
+    // Verified: this operation's own copy is dropped, and only that one.
+    let dropped = exec.calls_containing(&format!("rm -rf '{}'", PRE_UPDATE_COPY));
+    assert_eq!(dropped.len(), 1, "{:#?}", calls);
+    assert!(pos("ps --status running") < pos(&format!("rm -rf '{}'", PRE_UPDATE_COPY)));
+}
+
+/// fix-61: a rolled-back update keeps the copy and names it.
+#[tokio::test]
+async fn fix_61_a_rolled_back_update_keeps_the_pre_update_copy_and_names_it() {
+    let exec = MockExecutor::new();
+    auto_update_mocks(&exec, "sha256:new");
+    exec.enqueue("ps --status running --services", CmdOutput::ok(""));
+    exec.enqueue("ps --status running --services", CmdOutput::ok("app\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, true).await;
+    assert!(!report.ok);
+    let why = report.error.unwrap().why;
+    assert!(why.contains("ROLLED BACK"), "{}", why);
+    assert!(why.contains(PRE_UPDATE_COPY), "{}", why);
+    assert!(
+        exec.calls_containing(&format!("rm -rf '{}'", PRE_UPDATE_COPY))
+            .is_empty(),
+        "the copy is the way back to the data as it was; it must be kept"
+    );
+}
+
+/// fix-61: nothing new pulled, nothing copied; and no room means no update.
+#[tokio::test]
+async fn fix_61_no_copy_without_a_new_image_and_no_update_without_room_for_one() {
+    let exec = MockExecutor::new();
+    auto_update_mocks(&exec, "sha256:old");
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, true).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(exec.calls_containing("cp -a").is_empty());
+
+    let exec = MockExecutor::new();
+    auto_update_mocks(&exec, "sha256:new");
+    // 40 GB of data, 50 GB free: the copy would leave the host nearly full.
+    exec.respond_first("du -sbc", CmdOutput::ok("40000000000\n50000000000\n"));
+    let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, true).await;
+    assert!(report.ok, "a skipped app is not a failed night");
+    assert!(exec.calls_containing("cp -a").is_empty());
+    assert!(
+        exec.calls_containing("compose up -d").is_empty(),
+        "no copy, no update"
+    );
 }
 
 #[tokio::test]
@@ -2268,6 +2469,8 @@ async fn f38_restore_honours_the_configured_timeout() {
     // repository holds no snapshots, so this test has to get past that to
     // reach the thing it is actually about — the timeout.
     exec.respond_always("snapshots", CmdOutput::ok("ID  Time\nabc123  today\n"));
+    // fix-64: and past the room check for the safety copy.
+    exec.respond_always("du -sbc", CmdOutput::ok("1000\n50000000000\n"));
     let sink = VecSink::new();
     let j = NullJournal;
     let cfg = BackupCfg {

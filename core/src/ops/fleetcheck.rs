@@ -509,6 +509,37 @@ pub fn alarming(findings: &[Finding]) -> Vec<Finding> {
         .collect()
 }
 
+/// fix-65 (nightly-report-always-red, 2026-09-27): which things are alarming,
+/// as one comparable string. Severity and subject only: the wording carries
+/// ages and counts that move every night, and a fingerprint that moves every
+/// night would send the same report every night — the failure this exists
+/// to end.
+pub fn report_fingerprint(findings: &[Finding]) -> String {
+    let mut keys: Vec<String> = alarming(findings)
+        .iter()
+        .map(|f| format!("{:?}|{}", f.severity, f.subject))
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys.join("\n")
+}
+
+/// fix-65: does tonight's alarming set go out as a notification? The same
+/// red report every night taught its reader to ignore it, and a real new
+/// problem then arrived in that envelope. It goes out when the set changed
+/// since the last one sent, and once a week while it stands.
+pub fn nightly_report_due(
+    fingerprint: &str,
+    last_fingerprint: &str,
+    last_sent: u64,
+    now: u64,
+) -> bool {
+    fingerprint != last_fingerprint || now.saturating_sub(last_sent) >= NIGHTLY_REPORT_REPEAT_S
+}
+
+/// fix-65: how often a standing alarming set is sent again.
+pub const NIGHTLY_REPORT_REPEAT_S: u64 = 7 * 24 * 3600;
+
 /// Whether `homelab check` passes: nothing alarming (gap-32). `noted`
 /// findings need nothing done and are printed only so they stay visible, so
 /// they no longer turn the answer into a failure (exit 1).
@@ -601,6 +632,25 @@ pub fn evaluate(
                 what: "disabled — the nightly run skips it entirely".into(),
                 remedy: format!(
                     "a failed nightly run auto-disables a stack (H8); fix the cause, then `homelab enable {}`",
+                    name
+                ),
+            });
+        }
+
+        // fix-59: a failed nightly update parks the updates only. The backup
+        // still runs, so nothing else would ever say the updates stopped.
+        if let Some(since) = state.updates_parked.get(name) {
+            out.push(Finding {
+                severity: Severity::Broken,
+                subject: name.clone(),
+                what: format!(
+                    "automatic updates parked since {} after a failed nightly update; the \
+                     nightly backup still runs",
+                    crate::state::ymd(*since)
+                ),
+                remedy: format!(
+                    "read that night's update transcript, fix or pin the image, then \
+                     `homelab enable {}` resumes the updates",
                     name
                 ),
             });

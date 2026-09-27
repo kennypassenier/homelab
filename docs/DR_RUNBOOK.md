@@ -249,7 +249,7 @@ export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
 export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
 ```
 
-**A compose stack.** When the daemon is up, `homelab restore stacks/<stack> [snapshot]` does the following, and by hand it is the same (`restore` in core/src/ops/backup.rs):
+**A compose stack.** When the daemon is up, `homelab restore stacks/<stack> [snapshot]` does the following, and by hand it is the same (`restore` in core/src/ops/backup.rs). It asks for the stack name first (`--yes` for scripts) and, with the stack down, copies the current data to `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it (fix-64; `--no-safety-copy` skips that copy):
 
 ```sh
 pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose down'   # every app
@@ -301,7 +301,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 - Container: hostname `112-app-almanac`, ip `10.10.10.12/24` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 50.
 - Runs no docker: native systemd services only.
 - Unit `almanac`:
-  - program `/opt/almanac/bin/almanac`, from the GitHub release `kennypassenier/almanac` (asset `almanac`); update policy manual.
+  - program `/opt/almanac/bin/almanac`, from the GitHub release `kennypassenier/almanac` (asset `almanac`); update policy self.
   - unit file `stacks/almanac/almanac/almanac.service` in the repository; the container's copy is `/etc/systemd/system/almanac.service`.
   - data: repository `rclone:gdrive:homelab-backups/almanac-config`, archive `/almanac-data.tar` holding a tar of `/appdata/almanac/almanac-config`.
   - vault copy of almanac (`/appdata/almanac/almanac-config/latch.env`): `/var/lib/homelab/secrets/almanac/almanac-config/latch.env`.

@@ -1666,9 +1666,13 @@ fn start_stack_op(model: &mut Model, op: StackOp) {
         // "latest" is the same default the command line uses: a restore
         // that asks which snapshot before it can run is a restore nobody
         // performs under pressure.
+        // fix-64: a restore only starts after `confirm_key` saw the stack's
+        // name typed, so that name is the confirmation the host asks for.
         StackOp::Restore => Command::RestoreStack {
+            confirm: Some(m.stack_name.clone()),
             manifest: Box::new(m),
             snapshot: "latest".into(),
+            skip_safety_copy: false,
         },
         StackOp::Update => Command::UpdateStack {
             manifest: Box::new(m),

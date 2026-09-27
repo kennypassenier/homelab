@@ -176,11 +176,8 @@ fn a_deferred_night_neither_parks_the_stack_nor_records_a_backup() {
         deferred,
         NightBackup::Deferred("kenny is watching Arrival".into())
     );
-    assert!(
-        !deferred.parks_the_stack(true),
-        "H8 must not park a stack for being in use — that punishes the house \
-         for using its own services"
-    );
+    // fix-59: a backup outcome never parks anything; only a failed update
+    // parks, and only the updates (`ops::enable::after_night`).
     assert!(
         !deferred.records_a_timestamp(),
         "nothing was backed up, so nothing may claim a fresh backup — the \
@@ -190,13 +187,34 @@ fn a_deferred_night_neither_parks_the_stack_nor_records_a_backup() {
 
 #[test]
 fn a_real_failure_still_parks_and_a_good_night_still_records() {
-    assert!(NightBackup::of(false, None).parks_the_stack(true));
     assert!(!NightBackup::of(false, None).records_a_timestamp());
     assert!(NightBackup::of(true, None).records_a_timestamp());
-    assert!(!NightBackup::of(true, None).parks_the_stack(true));
-    // A failed update parks the stack whatever the backup did.
-    assert!(NightBackup::of(true, None).parks_the_stack(false));
-    assert!(NightBackup::of(false, Some("in use")).parks_the_stack(false));
+    // fix-59: what parks is a failed update, and it parks the updates only;
+    // `fix_59_a_failed_night_never_stops_the_stacks_backups` holds that.
+}
+
+/// fix-60 (updates-run-after-failed-backup, 2026-09-27): the scheduler ran
+/// every automatic update after the backup batch whatever the backup did.
+/// Somebody watching a film at 02:00 made the media backup stand aside, and
+/// sonarr, radarr, prowlarr, bazarr and seerr were still updated and migrated
+/// their databases with no backup from that night to go back to.
+#[test]
+fn fix_60_no_automatic_update_without_tonights_backup() {
+    assert!(NightBackup::Done.allows_update());
+    assert!(
+        !NightBackup::Deferred("kenny is watching Arrival".into()).allows_update(),
+        "a backup that stood aside leaves nothing of tonight to go back to"
+    );
+    assert!(
+        !NightBackup::Failed.allows_update(),
+        "a failed backup leaves nothing of tonight to go back to"
+    );
+    let line = NightBackup::Deferred("jellyfin is playing".into()).update_skip_line("media");
+    assert!(
+        line.contains("media") && line.contains("jellyfin is playing"),
+        "{}",
+        line
+    );
 }
 
 /// T5: services sharing one container share a fate.

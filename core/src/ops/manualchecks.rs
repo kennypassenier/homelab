@@ -64,6 +64,8 @@ pub fn register(state: &mut HostState, stack: &str, questions: &[(String, String
                 answered_at: None,
                 ok: None,
                 note: String::new(),
+                answered_hash: None,
+                accepted_until: None,
             });
     }
     // Gone from the stack file = gone as a question. Keeping it would grow a
@@ -76,16 +78,41 @@ pub fn register(state: &mut HostState, stack: &str, questions: &[(String, String
 
 /// Record a person's answer. Returns false when the id is unknown, so the
 /// caller can say so instead of silently doing nothing.
+///
+/// fix-65: the stack's `applied_hash` is kept with the answer, so only a
+/// deploy that changed the stack's files asks the question again.
 pub fn answer(state: &mut HostState, id: &str, ok: bool, note: &str, now: u64) -> bool {
+    let Some(stack) = state.manual_checks.get(id).map(|r| r.stack.clone()) else {
+        return false;
+    };
+    let hash = state.stacks.get(&stack).map(|s| s.applied_hash.clone());
     match state.manual_checks.get_mut(id) {
         Some(r) => {
             r.answered_at = Some(now);
             r.ok = Some(ok);
             r.note = note.to_string();
+            r.answered_hash = hash;
+            r.accepted_until = None;
             true
         }
         None => false,
     }
+}
+
+/// fix-65 (nightly-report-always-red, 2026-09-27): record a deliberate "not
+/// ok" that is accepted until `until`, with the reason. kp-soft.dev's `nok`
+/// (D56) is by design and was Broken every night, which kept the nightly
+/// report red and taught its reader to ignore it. An accepted answer is
+/// Noted until its date and Broken again after, so the acceptance cannot
+/// quietly become permanent.
+pub fn accept(state: &mut HostState, id: &str, until: u64, reason: &str, now: u64) -> bool {
+    if !answer(state, id, false, reason, now) {
+        return false;
+    }
+    if let Some(r) = state.manual_checks.get_mut(id) {
+        r.accepted_until = Some(until);
+    }
+    true
 }
 
 /// How long an answer stays good before the question is asked again.
@@ -116,14 +143,34 @@ pub fn evaluate_manual(state: &HostState, now: u64, answer_max_age_s: u64) -> Ve
     // stack -> (unanswered//stale-by-deploy, stale-by-age)
     let mut pending: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut aging: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // fix-65: how many of a stack's open checks were answered before and
+    // reopened because its files changed, so the finding can say why.
+    let mut reopened: BTreeMap<String, usize> = BTreeMap::new();
 
     for r in state.manual_checks.values() {
-        let deployed_at = state
-            .stacks
-            .get(&r.stack)
-            .map(|s| s.applied_at)
-            .unwrap_or(0);
+        let stack = state.stacks.get(&r.stack);
+        let deployed_at = stack.map(|s| s.applied_at).unwrap_or(0);
+        // fix-65: an answer is about the files it was given against. Any
+        // deploy used to reopen it, and `applied_at` moves on every deploy,
+        // so answers given in the morning were open again by the evening.
+        let files_changed = |at: u64| match &r.answered_hash {
+            Some(h) => stack.map(|s| &s.applied_hash != h).unwrap_or(false),
+            None => at < deployed_at,
+        };
         match (r.ok, r.answered_at) {
+            (Some(false), _) if r.accepted_until.is_some_and(|u| now < u) => out.push(Finding {
+                severity: Severity::Noted,
+                subject: format!("{}/{}", r.stack, r.app),
+                what: format!(
+                    "\"{}\" is not ok, accepted until {}: {}",
+                    r.text,
+                    crate::state::ymd(r.accepted_until.unwrap_or(0)),
+                    r.note
+                ),
+                remedy: "nothing until that date; then it is a finding again unless it is \
+                         answered anew"
+                    .into(),
+            }),
             (Some(false), _) => out.push(Finding {
                 severity: Severity::Broken,
                 subject: format!("{}/{}", r.stack, r.app),
@@ -144,10 +191,15 @@ pub fn evaluate_manual(state: &HostState, now: u64, answer_max_age_s: u64) -> Ve
                 .entry(r.stack.clone())
                 .or_default()
                 .push(r.text.clone()),
-            (_, Some(at)) if at < deployed_at => pending
-                .entry(r.stack.clone())
-                .or_default()
-                .push(r.text.clone()),
+            (_, Some(at)) if files_changed(at) => {
+                if r.answered_hash.is_some() {
+                    *reopened.entry(r.stack.clone()).or_default() += 1;
+                }
+                pending
+                    .entry(r.stack.clone())
+                    .or_default()
+                    .push(r.text.clone())
+            }
             (_, Some(at)) if now.saturating_sub(at) > answer_max_age_s => aging
                 .entry(r.stack.clone())
                 .or_default()
@@ -160,11 +212,19 @@ pub fn evaluate_manual(state: &HostState, now: u64, answer_max_age_s: u64) -> Ve
         texts.sort();
         out.push(Finding {
             severity: Severity::Drift,
-            subject: stack,
+            subject: stack.clone(),
             what: format!(
-                "{} check(s) only a person can answer are open, e.g. {}",
+                "{} check(s) only a person can answer are open, e.g. {}{}",
                 texts.len(),
-                examples(&texts)
+                examples(&texts),
+                match reopened.get(&stack) {
+                    Some(n) => format!(
+                        " ({} of them answered before, reopened because the stack's files \
+                         changed since)",
+                        n
+                    ),
+                    None => String::new(),
+                }
             ),
             remedy: "`homelab checks` lists them with their ids; \
                      `homelab checks answer <id> ok|nok` records one. Printing the question \
@@ -232,6 +292,11 @@ pub fn render_listing(rows: &[(String, ManualCheckRecord)], now: u64) -> String 
         }
         let status = match (r.ok, r.answered_at) {
             (Some(true), Some(at)) => format!("ok, {}d ago", now.saturating_sub(at) / 86400),
+            // fix-65
+            (Some(false), _) if r.accepted_until.is_some_and(|u| now < u) => format!(
+                "accepted to {}",
+                crate::state::ymd(r.accepted_until.unwrap_or(0))
+            ),
             (Some(false), _) => "NOT OK".into(),
             _ => "unanswered".into(),
         };
@@ -243,7 +308,8 @@ pub fn render_listing(rows: &[(String, ManualCheckRecord)], now: u64) -> String 
         s.push_str(&format!("  {}  [{:>11}]  {}\n", id, status, r.text));
     }
     s.push_str(&format!(
-        "\n{} answered ok, {} open. Answer one with:\n  homelab checks answer <id> ok|nok [note]\n",
+        "\n{} answered ok, {} open. Answer one with:\n  homelab checks answer <id> ok|nok [note]\n  \
+         homelab checks answer <id> accept <days> <reason>   (a deliberate nok, noted until then)\n",
         done, open
     ));
     s

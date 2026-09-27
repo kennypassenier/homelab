@@ -428,14 +428,34 @@ async fn main() {
                 let verdict = args
                     .get(4)
                     .unwrap_or_else(|| die("usage: homelab checks answer <id> ok|nok [note]"));
-                let yes = ["ok", "yes", "ja"];
-                let no = ["nok", "no", "nee"];
-                let ok = if yes.contains(&verdict.as_str()) {
-                    true
-                } else if no.contains(&verdict.as_str()) {
-                    false
+                // fix-65: `accept <days> <reason>` records a deliberate nok
+                // that is noted, not broken, until that many days from now.
+                let (ok, note, accept_days) = if verdict == "accept" {
+                    let usage = "usage: homelab checks answer <id> accept <days> <reason>";
+                    let days: u32 = args
+                        .get(5)
+                        .and_then(|d| d.parse().ok())
+                        .filter(|d| *d > 0)
+                        .unwrap_or_else(|| die(usage));
+                    let reason = args.get(6..).map(|r| r.join(" ")).unwrap_or_default();
+                    if reason.trim().is_empty() {
+                        die(usage);
+                    }
+                    (false, reason, Some(days))
                 } else {
-                    die(&format!("answer must be ok or nok, not {}", verdict))
+                    let yes = ["ok", "yes", "ja"];
+                    let no = ["nok", "no", "nee"];
+                    let ok = if yes.contains(&verdict.as_str()) {
+                        true
+                    } else if no.contains(&verdict.as_str()) {
+                        false
+                    } else {
+                        die(&format!(
+                            "answer must be ok, nok or accept, not {}",
+                            verdict
+                        ))
+                    };
+                    (ok, args[5..].join(" "), None)
                 };
                 rpc(
                     &host,
@@ -443,7 +463,8 @@ async fn main() {
                     Command::AnswerManualCheck {
                         check_id: id.clone(),
                         ok,
-                        note: args[5..].join(" "),
+                        note,
+                        accept_days,
                     },
                 )
                 .await;
@@ -907,22 +928,56 @@ async fn main() {
             rpc(&host, &token, Command::BackupStack(Box::new(manifest))).await;
         }
         "restore" => {
-            let dir = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab restore stacks/<name> [snapshot]"));
-            let snapshot = args.get(3).cloned().unwrap_or_else(|| "latest".into());
+            // fix-64: flags may stand anywhere; the rest is dir then snapshot.
+            let yes = args.iter().any(|a| a == "--yes");
+            let skip_safety_copy = args.iter().any(|a| a == "--no-safety-copy");
+            let positional: Vec<&String> = args
+                .iter()
+                .skip(2)
+                .filter(|a| !a.starts_with("--"))
+                .collect();
+            let dir = positional.first().unwrap_or_else(|| {
+                die("usage: homelab restore stacks/<name> [snapshot] [--yes] [--no-safety-copy]")
+            });
+            let snapshot = positional
+                .get(1)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "latest".into());
             // F294: the manifest alone, for the same reason as F291 above.
             let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            let stack = manifest.stack_name.clone();
             println!(
                 "{}▶ restore {} from '{}'{}",
-                C_YELLOW, manifest.stack_name, snapshot, C_RESET
+                C_YELLOW, stack, snapshot, C_RESET
             );
+            // fix-64: a restore overwrites live data, so the command line asks
+            // for the name the way the TUI always did; `--yes` answers it
+            // for scripts. The host refuses a request without it.
+            let confirm = if yes {
+                stack.clone()
+            } else {
+                let typed = read_typed(&format!(
+                    "This overwrites the live data of '{}'{}. Type the stack name to confirm: ",
+                    stack,
+                    if skip_safety_copy {
+                        ", WITHOUT a copy of it (--no-safety-copy)"
+                    } else {
+                        " (a copy of it is kept on the host first)"
+                    }
+                ));
+                if typed != stack {
+                    die("name mismatch — nothing was restored");
+                }
+                typed
+            };
             rpc(
                 &host,
                 &token,
                 Command::RestoreStack {
                     manifest: Box::new(manifest),
                     snapshot,
+                    confirm: Some(confirm),
+                    skip_safety_copy,
                 },
             )
             .await;
@@ -1173,7 +1228,7 @@ async fn main() {
             println!("  homelab plan stacks/<name>          validate and show the spec (no host; runs latch/gh for secrets and native releases)");
             println!("  homelab deploy stacks/<name>");
             println!("  homelab backup stacks/<name>        restic snapshot (E1)");
-            println!("  homelab restore stacks/<name> [snap]  restore from snapshot (E2)");
+            println!("  homelab restore stacks/<name> [snap] [--yes] [--no-safety-copy]  restore from snapshot (E2); asks for the name, keeps a copy of the current data");
             println!("  homelab update stacks/<name> [app]  pull+up with rollback (D9/B6)");
             println!(
                 "  homelab patch                       apt dist-upgrade all managed stacks (H6)"

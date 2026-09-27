@@ -70,4 +70,7 @@ update_cmd: cd /appdata/almanac/almanac-config && set -a && . /appdata/almanac/a
 release_repo: kennypassenier/almanac
 # B1: almanac updates itself and keeps its previous binary; the orchestrator
 # observes its revert and never installs over it.
-update_policy: manual
+# fix-58 (2026-09-27): `self`, not `manual`. The nightly round runs the
+# update_cmd above and nothing else; `manual` now stops that verb too, which
+# is what http-switchboard's `manual` always meant.
+update_policy: self

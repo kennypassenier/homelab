@@ -161,6 +161,25 @@ pub struct HostState {
     /// instead of proving the same one twelve times.
     #[serde(default)]
     pub restore_drill_index: usize,
+    /// fix-62: the drill's record per repository, so a failure is remembered
+    /// until that repository passes instead of until any other one does.
+    #[serde(default)]
+    pub restore_drills: BTreeMap<String, DrillRecord>,
+    /// fix-65: the alarming set the nightly fleet check last sent
+    /// (`fleetcheck::report_fingerprint`), and when. Empty when the last
+    /// night had nothing alarming, so a problem that returns is sent again.
+    #[serde(default)]
+    pub last_fleet_report_fp: String,
+    #[serde(default)]
+    pub last_fleet_report_at: u64,
+    /// fix-59 (failed-update-parks-backups, 2026-09-27): stacks whose
+    /// automatic updates a failed nightly update parked, with the unix time
+    /// it happened. Only updates: a parked stack keeps its nightly backup.
+    /// The old park set `enabled = false`, which stopped the backups too, so
+    /// one bad upstream image meant no backup until somebody typed `homelab
+    /// enable`. `homelab enable <stack>` clears the entry.
+    #[serde(default)]
+    pub updates_parked: BTreeMap<String, u64>,
     /// ask-8 / ask-9: what a stack, app or native unit left behind when it
     /// left the files, keyed by `<stack>` for a whole stack and
     /// `<stack>/<name>` for an app or unit that left a stack still running.
@@ -172,6 +191,20 @@ pub struct HostState {
     /// becomes something nobody knows is there.
     #[serde(default)]
     pub retired: BTreeMap<String, RetiredRecord>,
+}
+
+/// fix-62: what the restore drill knows about one repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DrillRecord {
+    /// Unix time of the last drill of this repository, passed or not.
+    #[serde(default)]
+    pub last_attempt: u64,
+    /// Unix time of the last drill of this repository that proved a restore.
+    #[serde(default)]
+    pub last_pass: u64,
+    /// Why the last drill of this repository proved nothing. None = it did.
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 /// What kind of thing left the files.
@@ -227,6 +260,15 @@ pub struct ManualCheckRecord {
     /// Whatever the person wanted to add. Empty is normal.
     #[serde(default)]
     pub note: String,
+    /// fix-65: the stack's `applied_hash` when this was answered. Only a
+    /// deploy that changed the stack's files reopens the question; `None`
+    /// is an answer from before the field, judged by the old rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_hash: Option<String>,
+    /// fix-65: a deliberate "not ok" that is accepted until this unix time,
+    /// with the reason in `note`. Noted until then, Broken after.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_until: Option<u64>,
 }
 
 /// fix-51 (expert panel, state-writes-race, 2026-09-27): the lock that

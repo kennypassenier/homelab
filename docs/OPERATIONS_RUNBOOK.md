@@ -78,7 +78,10 @@ source; `<...>` marks a value the program fills in.
 **One operation at a time.** Every mutating operation takes the host's one
 lock (`host/src/main.rs:2980`); the nightly backup phase holds it for its
 whole batch (`host/src/main.rs:2188`). A command typed during the backup
-hour waits for the batch.
+hour waits for the batch, and says so at once:
+`waiting for the nightly backup (started 23 min ago, stack 5 of 14); this command runs as soon as it is done`
+(fix-104). `check`, `doctor` and `today` print a `CHECK` line per phase while
+they read, one per container they probe.
 
 **Client newer than host.** A mutating command against an older host is
 refused and the message ends in `"run 'homelab release-update' first"`

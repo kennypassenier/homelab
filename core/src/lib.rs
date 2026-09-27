@@ -16,6 +16,7 @@ pub mod incidents;
 pub mod manifest;
 pub mod native;
 pub mod notify;
+pub mod oplock;
 pub mod ops;
 pub mod release_sig;
 pub mod retention;

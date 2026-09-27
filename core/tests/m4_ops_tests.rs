@@ -1642,6 +1642,106 @@ async fn e3_nonempty_dirs_skip_restore_and_restic_failure_never_blocks() {
         .any(|l| l.contains("AUTO-RESTORE FAILED")));
 }
 
+/// fix-54 (expert panel, auto-restore-error-as-fresh, 2026-09-27): any
+/// failure of `restic snapshots` read as "no snapshot, fresh" at Info level.
+/// An unreachable Drive, an expired rclone token or a timeout during a
+/// rebuild then let an app initialise empty, and that night's backup became
+/// `latest`. Only restic's own "repository does not exist" (exit 10) or an
+/// empty snapshot list is fresh; anything else is a loud warning that the
+/// directory's history could not be checked. The deploy still goes on:
+/// backup-target trouble never blocks a deploy (the E3 spec).
+#[tokio::test]
+async fn fix_54_a_snapshot_check_that_fails_is_not_read_as_fresh() {
+    use homelab_core::ops::deploy::deploy;
+    let level_of = |sink: &VecSink, needle: &str| {
+        sink.events().into_iter().find_map(|e| match e {
+            homelab_core::sink::PipelineEvent::Line { level, msg, .. } if msg.contains(needle) => {
+                Some(level)
+            }
+            _ => None,
+        })
+    };
+    // Drive unreachable: not fresh, and said loudly.
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always(
+        "snapshots --last --json",
+        CmdOutput::failed(1, "Fatal: unable to open repository: rclone: couldn't list"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok, "still never blocks: {:?}", report.error);
+    assert!(
+        !sink.lines().iter().any(|l| l.contains("— fresh")),
+        "a failed check is not a fresh start: {:?}",
+        sink.lines()
+    );
+    assert_eq!(
+        level_of(&sink, "could not be checked"),
+        Some(homelab_core::sink::Level::Warn),
+        "{:?}",
+        sink.lines()
+    );
+    // A timeout of the check is the same.
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    struct TimesOut<'a>(&'a MockExecutor);
+    #[async_trait::async_trait]
+    impl homelab_core::executor::Executor for TimesOut<'_> {
+        async fn run(
+            &self,
+            cmd: &homelab_core::executor::Cmd,
+        ) -> Result<CmdOutput, homelab_core::error::CoreError> {
+            if cmd.rendered().contains("snapshots --last") {
+                return Err(homelab_core::error::CoreError::Timeout {
+                    rendered: cmd.rendered(),
+                    seconds: 120,
+                });
+            }
+            self.0.run(cmd).await
+        }
+        async fn write_file(
+            &self,
+            p: &str,
+            c: &str,
+            m: u32,
+        ) -> Result<(), homelab_core::error::CoreError> {
+            self.0.write_file(p, c, m).await
+        }
+        async fn read_file(&self, p: &str) -> Result<String, homelab_core::error::CoreError> {
+            self.0.read_file(p).await
+        }
+        async fn sleep_ms(&self, _ms: u64) {}
+    }
+    let slow = TimesOut(&exec);
+    let sink = VecSink::new();
+    let mut c = ctx(&exec, &sink, &j);
+    c.exec = &slow;
+    let report = deploy(&c, &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(!sink.lines().iter().any(|l| l.contains("— fresh")));
+    assert!(sink
+        .lines()
+        .iter()
+        .any(|l| l.contains("could not be checked")));
+    // restic's own "repository does not exist" is a fresh start.
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always(
+        "snapshots --last --json",
+        CmdOutput::failed(10, "Fatal: repository does not exist"),
+    );
+    let sink = VecSink::new();
+    let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(sink.lines().iter().any(|l| l.contains("— fresh")));
+    assert!(!sink
+        .lines()
+        .iter()
+        .any(|l| l.contains("could not be checked")));
+}
+
 /// T40: `data_dirs` may only be empty when the service says so. kyu-runner is
 /// deliberately stateless — its own unit file says "no state directory, no
 /// disk to protect" and it runs under DynamicUser — so refusing it outright

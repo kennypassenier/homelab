@@ -115,41 +115,30 @@ fn pem_to_der(pem: &str) -> std::io::Result<Vec<u8>> {
         .lines()
         .filter(|l| !l.starts_with("-----"))
         .collect::<String>();
-    base64_decode(&body).ok_or_else(|| std::io::Error::other("invalid cert PEM"))
-}
-
-/// Minimal standard-base64 decoder (avoids pulling a crate for one use).
-fn base64_decode(s: &str) -> Option<Vec<u8>> {
-    fn val(c: u8) -> Option<u8> {
-        match c {
-            b'A'..=b'Z' => Some(c - b'A'),
-            b'a'..=b'z' => Some(c - b'a' + 26),
-            b'0'..=b'9' => Some(c - b'0' + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        }
-    }
-    let mut out = Vec::new();
-    let mut buf = 0u32;
-    let mut bits = 0u32;
-    for &c in s.as_bytes() {
-        if c == b'=' {
-            break;
-        }
-        let v = val(c)? as u32;
-        buf = (buf << 6) | v;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buf >> bits) as u8);
-        }
-    }
-    Some(out)
+    // rust-code-hygiene (2026-09-27): the `base64` crate the host already
+    // depends on, not a hand-written decoder kept "to avoid a crate".
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(body.trim())
+        .map_err(|e| std::io::Error::other(format!("invalid cert PEM: {e}")))
 }
 
 #[cfg(test)]
 mod tests {
+    /// The PEM a host writes decodes to exactly the DER its fingerprint is
+    /// taken over (rust-code-hygiene, 2026-09-27: guards the move from a
+    /// hand-written decoder to the `base64` crate).
+    #[test]
+    fn a_generated_certificate_decodes_to_its_own_der() {
+        let key = rcgen::KeyPair::generate().unwrap();
+        let cert = rcgen::CertificateParams::new(vec!["localhost".to_string()])
+            .unwrap()
+            .self_signed(&key)
+            .unwrap();
+        assert_eq!(super::pem_to_der(&cert.pem()).unwrap(), cert.der().to_vec());
+        assert!(super::pem_to_der("-----BEGIN X-----\n#!\n-----END X-----\n").is_err());
+    }
+
     use super::*;
 
     fn fresh_dir(tag: &str) -> String {

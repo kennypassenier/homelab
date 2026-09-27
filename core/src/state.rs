@@ -36,11 +36,6 @@ pub struct StackState {
     /// run state — manual `pct stop` and this flag are independent worlds.
     #[serde(default = "enabled_default")]
     pub enabled: bool,
-    /// C7: legacy single-service field. Kept only so state written before
-    /// T5 still loads; `HostState::load` moves it into `natives` and clears
-    /// it. Nothing should read this — read `natives`.
-    #[serde(default)]
-    pub native: Option<crate::native::NativeServiceManifest>,
     /// fix-41: the gateway route file a deploy of this stack wrote. Only this
     /// file is ever retired; a route written by hand on the gateway (almanac,
     /// kyu, Home Assistant) is not the stack's to remove.
@@ -95,16 +90,37 @@ pub fn ymd(unix: u64) -> String {
     format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
-impl StackState {
-    /// Fold the pre-T5 single-service field into the list. Idempotent.
-    fn migrate_natives(&mut self) {
-        if let Some(one) = self.native.take() {
-            if !self.natives.iter().any(|n| n.unit == one.unit) {
-                self.natives.push(one);
-            }
+/// Fold a stack's pre-T5 single-service `native` field into `natives`, in
+/// the raw document, before it becomes a `StackState`.
+///
+/// legacy-native-field (expert panel, 2026-09-27): the field used to stay on
+/// `StackState` beside `natives`, written as `null` on every save and carried
+/// through the deploy, so one fact had two fields that could disagree after
+/// a partial write. It is migrated here, once per read, and no longer exists
+/// in the type, so it is never written. No schema bump: a binary of schema 1
+/// reads the result unchanged, and a bump would make it refuse the file after
+/// a self-update rollback.
+fn migrate_legacy_native(stack: &mut serde_json::Value) {
+    let Some(obj) = stack.as_object_mut() else {
+        return;
+    };
+    let Some(one) = obj.remove("native") else {
+        return;
+    };
+    if one.is_null() {
+        return;
+    }
+    let list = obj
+        .entry("natives")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    if let Some(list) = list.as_array_mut() {
+        if !list.iter().any(|n| n.get("unit") == one.get("unit")) {
+            list.push(one);
         }
     }
+}
 
+impl StackState {
     /// True for a stack the orchestrator supervises as systemd units.
     pub fn is_native(&self) -> bool {
         !self.natives.is_empty()
@@ -419,14 +435,15 @@ impl<'a> StateStore<'a> {
                 )))
             }
         };
-        match serde_json::from_str::<HostState>(&raw) {
-            Ok(mut state) if state.schema_version <= STATE_SCHEMA_VERSION => {
-                // T5: state written before native services became a list.
-                for st in state.stacks.values_mut() {
-                    st.migrate_natives();
-                }
-                Ok(state)
+        // T5: state written before native services became a list.
+        let parsed = serde_json::from_str::<serde_json::Value>(&raw).and_then(|mut doc| {
+            if let Some(stacks) = doc.get_mut("stacks").and_then(|s| s.as_object_mut()) {
+                stacks.values_mut().for_each(migrate_legacy_native);
             }
+            serde_json::from_value::<HostState>(doc)
+        });
+        match parsed {
+            Ok(state) if state.schema_version <= STATE_SCHEMA_VERSION => Ok(state),
             Ok(state) => Err(CoreError::State(format!(
                 "state.json schema v{} is newer than this binary understands (v{}) — refusing to touch it; update the host binary. File: {}",
                 state.schema_version, STATE_SCHEMA_VERSION, self.path

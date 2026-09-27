@@ -11,15 +11,6 @@ use crate::sink::Level;
 
 use super::OpCtx;
 
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
-
 fn conf_u32(conf: &str, key: &str) -> Option<u32> {
     conf.lines()
         .find(|l| l.starts_with(&format!("{}:", key)))

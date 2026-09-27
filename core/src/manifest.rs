@@ -609,6 +609,24 @@ pub struct DeploySpec {
 /// app names reach `sh -c` strings inside containers, so they are constrained
 /// to the same [a-z0-9-] alphabet as stack names, and this validator now runs
 /// for backup/restore/update/resize too, not just deploy.
+/// An absolute path in the alphabet every host-side path in the fleet uses:
+/// no quote, comma, space or `..`, and no empty segment. See the
+/// shell-strings-quoting note in `collect_manifest_problems`.
+pub fn is_plain_abs_path(p: &str) -> bool {
+    let Some(rest) = p.strip_prefix('/') else {
+        return false;
+    };
+    !rest.is_empty()
+        && rest.split('/').all(|seg| {
+            !seg.is_empty()
+                && seg != "."
+                && seg != ".."
+                && seg
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+        })
+}
+
 pub fn validate_manifest(m: &StackManifest) -> Result<(), CoreError> {
     let mut problems: Vec<String> = Vec::new();
     collect_manifest_problems(m, &mut problems);
@@ -750,6 +768,30 @@ fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
             problems.push(format!(
                 "app name '{}' must be non-empty lowercase [a-z0-9-] (it is used in shell paths)",
                 app
+            ));
+        }
+    }
+    // shell-strings-quoting (expert panel, 2026-09-27): these paths reach root
+    // shell commands on the Proxmox host and the `pct set -mpN host,mp=ct`
+    // option string. Held to a plain alphabet here, once, so no call site has
+    // to escape them; the prefix checks in `validate` let `/appdata/x'` and
+    // `/appdata/../etc` through.
+    let paths = m
+        .storage
+        .iter()
+        .flat_map(|s| [&s.host_path, &s.mount_point])
+        .chain(
+            m.data_mounts
+                .iter()
+                .flat_map(|d| [&d.host_path, &d.mount_point]),
+        );
+    for p in paths {
+        if !is_plain_abs_path(p) {
+            problems.push(format!(
+                "path '{}' must be absolute and made of letters, digits, '.', '_', '-' and \
+                 single '/' separators, with no '..' segment :: it is used unquoted in \
+                 mount options and in root shell commands on the host",
+                p
             ));
         }
     }

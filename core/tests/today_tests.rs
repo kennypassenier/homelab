@@ -19,7 +19,6 @@ fn stack(applied_at: u64, last_backup: u64) -> StackState {
         applied_hash: String::new(),
         manifest: None,
         enabled: true,
-        native: None,
         natives: Vec::new(),
         incomplete_step: None,
         route_file: None,

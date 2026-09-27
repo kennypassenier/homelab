@@ -192,7 +192,6 @@ retention:
             last_backup: NOW,
             applied_hash: String::new(),
             manifest: Some(manifest),
-            native: None,
             natives: vec![almanac(false)],
             enabled: true,
             incomplete_step: None,

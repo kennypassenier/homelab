@@ -164,7 +164,7 @@ async fn a_clone_refuses_a_privilege_level_the_template_cannot_give() {
         err
     );
     assert!(
-        exec.calls_containing("pct clone").is_empty(),
+        exec.ran("pct", &["clone"]) == 0,
         "and nothing may have been cloned"
     );
 }
@@ -754,8 +754,8 @@ async fn m1_a_missing_borrowed_directory_stops_the_deploy() {
         "say what would happen: {}",
         why
     );
-    assert!(exec.calls_containing("pct create").is_empty());
-    assert!(exec.calls_containing("pct clone").is_empty());
+    assert!(exec.ran("pct", &["create"]) == 0);
+    assert!(exec.ran("pct", &["clone"]) == 0);
 }
 
 /// The two lists stay distinct, in both directions. Blurring them is how the
@@ -1104,8 +1104,8 @@ async fn w1_a_gpu_stack_is_refused_when_the_host_has_no_card() {
         why
     );
     // And it refuses before it builds anything.
-    assert!(exec.calls_containing("pct create").is_empty());
-    assert!(exec.calls_containing("pct clone").is_empty());
+    assert!(exec.ran("pct", &["create"]) == 0);
+    assert!(exec.ran("pct", &["clone"]) == 0);
     assert!(exec.calls_containing("mkdir -p /appdata").is_empty());
 }
 
@@ -3918,4 +3918,185 @@ fn memory_headroom_is_read_from_meminfo() {
     let f = memory_available_fraction("MemTotal: 1000 kB\nMemAvailable: 250 kB\n").unwrap();
     assert!((f - 0.25).abs() < 1e-9);
     assert!(memory_available_fraction("").is_none());
+}
+
+// ── fix-132: shell-strings-quoting (expert panel, 2026-09-27) ───────────────
+
+/// An existing, healthy `110-app-syncthing`, as the fix-40 tests script it.
+fn script_existing_syncthing(exec: &MockExecutor) {
+    exec.respond_always("qm status", CmdOutput::failed(2, ""));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 110-app-syncthing\ncores: 1\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+}
+
+/// A path lands between single quotes in a root shell on the Proxmox host
+/// (`ls -A '<host_path>'`), and in `pct set -mpN <host>,mp=<ct>`. A typo such
+/// as `/appdata/x'` or `/appdata/../etc` used to validate, because the only
+/// checks were `starts_with("/appdata/")` and `starts_with('/')`.
+#[test]
+fn a_path_with_a_quote_a_dotdot_or_an_empty_segment_is_refused() {
+    use homelab_core::manifest::{validate, DataMount};
+    for bad in [
+        "/appdata/syncthing/syncthing-config'",
+        "/appdata/../etc/syncthing-config",
+        "/appdata//syncthing-config",
+        "/appdata/syncthing/syncthing-config,mp=/x",
+    ] {
+        let mut s = spec(110, "syncthing");
+        s.manifest.storage[0].host_path = bad.into();
+        let err = validate(&s).expect_err(bad);
+        assert!(
+            format!("{err}").contains("letters, digits"),
+            "{bad}: the error must name the rule: {err}"
+        );
+    }
+    for bad in ["/HDD18TB/media'; true #", "/HDD18TB/../etc", "/mnt/a b"] {
+        let mut s = spec(110, "syncthing");
+        s.manifest.data_mounts = vec![DataMount {
+            host_path: bad.into(),
+            mount_point: "/mnt/media".into(),
+            note: None,
+            rotate: None,
+        }];
+        let err = validate(&s).expect_err(bad);
+        assert!(format!("{err}").contains("letters, digits"), "{bad}: {err}");
+    }
+    // The positive twin: the shapes the fleet really uses still validate.
+    let mut ok = spec(110, "syncthing");
+    ok.manifest.data_mounts = vec![DataMount {
+        host_path: "/HDD18TB/subvol-103-disk-0".into(),
+        mount_point: "/mnt/data/18TB".into(),
+        note: None,
+        rotate: None,
+    }];
+    validate(&ok).expect("a plain path is valid");
+}
+
+/// The quoting helper is the only way a value enters a script: a quote inside
+/// the value is escaped instead of ending the quoted word.
+#[tokio::test]
+async fn a_value_with_a_quote_is_escaped_in_the_script() {
+    let exec = MockExecutor::new();
+    homelab_core::ops::util::push_content(&exec, 110, "/opt/a'b/.env", "X=1\n", "0600")
+        .await
+        .unwrap();
+    let probe = exec.calls_containing("sha256sum");
+    assert_eq!(probe.len(), 1, "{:?}", exec.calls());
+    assert!(
+        probe[0].contains(r"sha256sum '/opt/a'\''b/.env'"),
+        "{}",
+        probe[0]
+    );
+}
+
+/// Standing rule 12: no usable answer is not "no". A probe that could not ask
+/// whether a container is older than its files used to count as "not older",
+/// so the restart fix-40 exists for was skipped exactly when nothing could be
+/// known. Restarting is the safe side.
+#[tokio::test]
+async fn a_failed_staleness_probe_restarts_rather_than_assuming_fresh() {
+    let exec = MockExecutor::new();
+    script_existing_syncthing(&exec);
+    let spec = spec(110, "syncthing");
+    exec.respond_always(
+        "sha256sum '/opt/syncthing/syncthing/docker-compose.yml'",
+        CmdOutput::ok(&sha_hex(&spec.files[0].content)),
+    );
+    exec.respond_always("-newermt", CmdOutput::failed(255, "lxc-attach: failed"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        exec.calls_containing("docker compose restart").len(),
+        1,
+        "{:?}",
+        exec.calls_containing("docker compose")
+    );
+}
+
+/// fix-40 skipped the restart when compose's output contained "reated", which
+/// also matches a warning that a volume "was not created by Docker Compose".
+/// Only compose's own `Created`/`Recreated` status word counts now.
+#[tokio::test]
+async fn a_compose_warning_mentioning_created_does_not_skip_the_restart() {
+    let exec = MockExecutor::new();
+    script_existing_syncthing(&exec);
+    exec.respond_always(
+        "docker compose up -d",
+        CmdOutput {
+            stdout: String::new(),
+            stderr: "volume \"data\" already exists but was not created by Docker Compose. \
+                     Use `external: true` to use an existing volume\n \
+                     Container syncthing  Running\n"
+                .into(),
+            code: 0,
+        },
+    );
+    let mut spec = spec(110, "syncthing");
+    spec.files.push(FileBlob {
+        path: "syncthing/seed.py".into(),
+        content: "print('new')\n".into(),
+        mode: None,
+    });
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        exec.calls_containing("docker compose restart").len(),
+        1,
+        "nothing was recreated, so the changed file needs a restart: {:?}",
+        exec.calls_containing("docker compose")
+    );
+}
+
+/// The garbage collector threw the exit code of its removal away and logged
+/// "removed" anyway. A removal that failed now fails the step, so the old
+/// app stays on record and the next deploy tries again.
+#[tokio::test]
+async fn a_failed_removal_of_a_dropped_app_is_not_reported_as_removed() {
+    let exec = MockExecutor::new();
+    script_existing_syncthing(&exec);
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{"syncthing":{"vmid":110,"hostname":"110-app-syncthing","apps":["syncthing","oldapp"],"applied_at":1}}}"#,
+    );
+    exec.respond_always(
+        "rm -rf '/opt/syncthing/oldapp'",
+        CmdOutput::failed(1, "rm: cannot remove: Device or resource busy"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec(110, "syncthing")).await;
+    assert!(!report.ok, "the removal failed, the deploy may not pass");
+    assert!(
+        report
+            .error
+            .as_ref()
+            .unwrap()
+            .what
+            .contains("garbage collect"),
+        "{:?}",
+        report.error
+    );
+    assert!(
+        !sink.lines().iter().any(|l| l.contains("oldapp' removed")),
+        "{:?}",
+        sink.lines()
+    );
+    // The positive twin: the removal was attempted.
+    assert_eq!(
+        exec.calls_containing("rm -rf '/opt/syncthing/oldapp'")
+            .len(),
+        1
+    );
 }

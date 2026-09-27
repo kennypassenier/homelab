@@ -4,7 +4,7 @@
 //! runner (AR3); every side effect through the Executor (AR2).
 
 use crate::error::CoreError;
-use crate::executor::{pct_sh, run_ok, Cmd};
+use crate::executor::{pct_sh, run_ok, shq, Cmd};
 use crate::manifest::{self, DeploySpec};
 use crate::ops::{guards, util::push_content, OpCtx};
 use crate::runner::{OperationReport, Runner, StepOutcome};
@@ -97,7 +97,6 @@ async fn mark_incomplete(
                     applied_hash: String::new(),
                     manifest: Some(m.clone()),
                     enabled: true,
-                    native: None,
                     route_file: None,
                     extra_route_files: Vec::new(),
                     natives: Vec::new(),
@@ -117,6 +116,21 @@ async fn mark_incomplete(
         ),
     });
 }
+/// Did `docker compose up -d` create or recreate a container? Compose ends
+/// such a status line with the word `Created` or `Recreated`.
+///
+/// shell-strings-quoting (expert panel, 2026-09-27): this was
+/// `contains("reated")`, which a warning that a volume "was not created by
+/// Docker Compose" also matches, and the restart a changed file needs was
+/// then skipped.
+pub fn compose_reports_created(out: &str) -> bool {
+    out.lines().any(|l| {
+        let mut words = l.split_whitespace();
+        words.next() == Some("Container")
+            && matches!(words.last(), Some("Created") | Some("Recreated"))
+    })
+}
+
 /// F129 · per app: where its compose lives in the container, what it said
 /// before the cache rewrite, and the mode to write it back with.
 type CacheOriginals =
@@ -561,7 +575,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     "sh",
                     &[
                         "-c",
-                        &format!("ls -A '{}' 2>/dev/null | head -1", mount.host_path),
+                        &format!("ls -A {} 2>/dev/null | head -1", shq(&mount.host_path)),
                     ],
                     30,
                 ))
@@ -1718,7 +1732,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             }
             let paths = want
                 .iter()
-                .map(|(p, _)| format!("'{}'", p))
+                .map(|(p, _)| shq(p))
                 .collect::<Vec<_>>()
                 .join(" ");
             let out = pct_sh(exec, m.vmid, &format!("sha256sum {} 2>&1", paths), 120)
@@ -1761,11 +1775,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         if let Some(reg) = &m.registry_login {
             let envf = format!("/opt/{}/{}/.env", m.stack_name, reg.app);
             let script = format!(
-                "u=$(grep -m1 '^REGISTRY_USER=' '{f}' | cut -d= -f2-); \
-                 t=$(grep -m1 '^REGISTRY_TOKEN=' '{f}' | cut -d= -f2-); \
-                 [ -n \"$u\" ] && [ -n \"$t\" ] || {{ echo 'no REGISTRY_USER/REGISTRY_TOKEN in {f}' >&2; exit 1; }}; \
+                "u=$(grep -m1 '^REGISTRY_USER=' {f} | cut -d= -f2-); \
+                 t=$(grep -m1 '^REGISTRY_TOKEN=' {f} | cut -d= -f2-); \
+                 [ -n \"$u\" ] && [ -n \"$t\" ] || {{ echo no REGISTRY_USER/REGISTRY_TOKEN in {f} >&2; exit 1; }}; \
                  printf %s \"$t\" | docker login {r} -u \"$u\" --password-stdin",
-                f = envf,
+                f = shq(&envf),
+                // Validated as a bare host name (`registry_login.registry`).
                 r = reg.registry
             );
             let out = pct_sh(exec, m.vmid, &script, 60).await?;
@@ -1789,7 +1804,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         )
         .await?;
         for app in &m.apps {
-            let dir = format!("/opt/{}/{}", m.stack_name, app);
+            let dir = shq(&format!("/opt/{}/{}", m.stack_name, app));
             // F129 · the fallback half of C1. An app whose compose was
             // pointed at the cache gets a bounded first attempt; anything
             // else keeps the full step budget, because then there is nowhere
@@ -1800,7 +1815,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 (Some(_), Some(c)) => c.pull_timeout_secs,
                 _ => 900,
             };
-            let cmd = format!("cd '{}' && docker compose pull -q", dir);
+            let cmd = format!("cd {} && docker compose pull -q", dir);
             // gap-12 (Kenny, 2026-09-19: "alleen wat ontbreekt"): a deploy
             // fetches only what the container does not have. Pulling every
             // app on every deploy lifted five `manual`-policy apps on the
@@ -1816,7 +1831,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 exec,
                 m.vmid,
                 &format!(
-                    "cd '{}' && for i in $(docker compose config --images 2>/dev/null); do \
+                    "cd {} && for i in $(docker compose config --images 2>/dev/null); do \
                      docker image inspect \"$i\" >/dev/null 2>&1 && echo \"present $i\" \
                      || echo \"missing $i\"; done",
                     dir
@@ -1900,7 +1915,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             let up = pct_sh(
                 exec,
                 m.vmid,
-                &format!("cd '{}' && docker compose up -d --remove-orphans", dir),
+                &format!("cd {} && docker compose up -d --remove-orphans", dir),
                 300,
             )
             .await?;
@@ -1918,7 +1933,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             // recreated (a comment-only change recreates nothing). Only
             // compose's own "Recreated"/"Created" line skips the restart.
             let compose_recreated = recreated.lock().map(|g| g.contains(app)).unwrap_or(false)
-                && format!("{}{}", up.stdout, up.stderr).contains("reated");
+                && compose_reports_created(&format!("{}\n{}", up.stdout, up.stderr));
             // fix-40, the invariant: a container that started before a
             // file in its app directory last changed runs an older copy of
             // that file, whether or not this deploy pushed it (a restart that
@@ -1926,11 +1941,11 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             let older_than_files = if compose_recreated {
                 false
             } else {
-                pct_sh(
+                match pct_sh(
                     exec,
                     m.vmid,
                     &format!(
-                        "cd '{}' && for c in $(docker compose ps -q); do \
+                        "cd {} && for c in $(docker compose ps -q); do \
                          s=$(docker inspect -f '{{{{.State.StartedAt}}}}' \"$c\"); \
                          find . -maxdepth 3 -type f -newermt \"$s\" -print -quit | grep -q . \
                          && echo stale; done; true",
@@ -1939,8 +1954,36 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     60,
                 )
                 .await
-                .map(|o| o.stdout.contains("stale"))
-                .unwrap_or(false)
+                {
+                    Ok(o) if o.success() => o.stdout.contains("stale"),
+                    // shell-strings-quoting (2026-09-27), standing rule 12: a
+                    // probe that could not answer is not "not older". A
+                    // restart is the safe side of not knowing.
+                    Ok(o) => {
+                        ctx.sink.emit(PipelineEvent::Line {
+                            level: Level::Warn,
+                            source: "HOST".into(),
+                            msg: format!(
+                                "[config] {} :: whether it runs older files could not be \
+                                 read (rc={}) — restarting it to be sure",
+                                app, o.code
+                            ),
+                        });
+                        true
+                    }
+                    Err(e) => {
+                        ctx.sink.emit(PipelineEvent::Line {
+                            level: Level::Warn,
+                            source: "HOST".into(),
+                            msg: format!(
+                                "[config] {} :: whether it runs older files could not be \
+                                 read ({}) — restarting it to be sure",
+                                app, e
+                            ),
+                        });
+                        true
+                    }
+                }
             };
             let restart_this = (needs_restart
                 .lock()
@@ -1952,7 +1995,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 let r = pct_sh(
                     exec,
                     m.vmid,
-                    &format!("cd '{}' && docker compose restart", dir),
+                    &format!("cd {} && docker compose restart", dir),
                     300,
                 )
                 .await?;
@@ -2130,12 +2173,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     step!(runner, exec, ctx, m, "verify health", {
         exec.sleep_ms(5000).await;
         for app in &m.apps {
-            let dir = format!("/opt/{}/{}", m.stack_name, app);
+            let dir = shq(&format!("/opt/{}/{}", m.stack_name, app));
             let out = pct_sh(
                 exec,
                 m.vmid,
                 &format!(
-                    "cd '{}' && docker compose ps --status running --services",
+                    "cd {} && docker compose ps --status running --services",
                     dir
                 ),
                 60,
@@ -2146,7 +2189,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     exec,
                     m.vmid,
                     &format!(
-                        "cd '{}' && docker compose ps -a && docker compose logs --tail 20",
+                        "cd {} && docker compose ps -a && docker compose logs --tail 20",
                         dir
                     ),
                     60,
@@ -2438,17 +2481,26 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             return Ok(StepOutcome::Unchanged);
         }
         for app in &removed {
-            let _ = pct_sh(
+            // shell-strings-quoting (2026-09-27): the exit code was thrown
+            // away and "removed" logged regardless. It is `rm`'s (the last
+            // command); a failure fails the step, which leaves the app on
+            // record so the next deploy tries again.
+            let out = pct_sh(
                 exec,
                 m.vmid,
                 &format!(
-                    "cd '/opt/{stack}/{app}' && docker compose down --remove-orphans; rm -rf '/opt/{stack}/{app}'",
-                    stack = m.stack_name,
-                    app = app
+                    "cd {d} && docker compose down --remove-orphans; rm -rf {d}",
+                    d = shq(&format!("/opt/{}/{}", m.stack_name, app))
                 ),
                 300,
             )
             .await?;
+            if !out.success() {
+                return Err(CoreError::Command {
+                    rendered: format!("remove /opt/{}/{}", m.stack_name, app),
+                    detail: format!("rc={} :: {}", out.code, out.stderr.trim()),
+                });
+            }
             log_info(format!("[gc] app '{}' removed (config dirs kept)", app));
         }
         Ok(StepOutcome::Changed)
@@ -3026,23 +3078,17 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         //
         // ask-8: except a unit the stack FILE dropped from `natives:` — the
         // step "retire dropped" stopped it, and it leaves the record here.
-        let (prior_native, prior_natives) = state
+        let prior_natives: Vec<crate::native::NativeServiceManifest> = state
             .stacks
             .get(&m.stack_name)
             .map(|s| {
-                let native = s
-                    .native
-                    .clone()
-                    .filter(|n| !dropped_natives.contains(&n.unit));
-                let natives: Vec<crate::native::NativeServiceManifest> = s
-                    .natives
+                s.natives
                     .iter()
                     .filter(|n| !dropped_natives.contains(&n.unit))
                     .cloned()
-                    .collect();
-                (native, natives)
+                    .collect()
             })
-            .unwrap_or((None, Vec::new()));
+            .unwrap_or_default();
         // ask-8 / ask-9: an app or unit that left the files leaves its
         // backups, /appdata and vault copies behind, KEPT until `homelab
         // wipe`; recorded here with the date it left. A stack or app that is
@@ -3095,7 +3141,6 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 applied_hash: manifest::intent_hash(spec),
                 manifest: Some(m.clone()),
                 enabled,
-                native: prior_native,
                 natives: prior_natives,
                 incomplete_step: None,
                 // fix-41: the route this deploy wrote, the only one a later

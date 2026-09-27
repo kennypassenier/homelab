@@ -5,21 +5,12 @@
 //! first-class, gated operation.
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, Cmd, Executor, TracingExecutor};
+use crate::executor::{run_ok, shq, Cmd, Executor, TracingExecutor};
 use crate::manifest::StackManifest;
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::{Level, PipelineEvent};
 
 use super::OpCtx;
-
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
 
 /// Where restic keeps its index cache. Without it every single operation
 /// re-downloads the repository index from Google Drive first.
@@ -539,8 +530,8 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
                     &[
                         "-c",
                         &format!(
-                            "find '{}' -mindepth 1 -maxdepth 1 2>/dev/null | head -5 | wc -l",
-                            mount.host_path
+                            "find {} -mindepth 1 -maxdepth 1 2>/dev/null | head -5 | wc -l",
+                            shq(&mount.host_path)
                         ),
                     ],
                     60,
@@ -580,7 +571,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
                     "sh",
                     &[
                         "-c",
-                        &format!("test -d '{}' && echo yes || echo no", mount.host_path),
+                        &format!("test -d {} && echo yes || echo no", shq(&mount.host_path)),
                     ],
                     30,
                 ))
@@ -1648,7 +1639,7 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
             let out = exec
                 .run(&Cmd::new(
                     "sh",
-                    &["-c", &format!("test -e '{}' && echo yes || true", p)],
+                    &["-c", &format!("test -e {} && echo yes || true", shq(p))],
                     30,
                 ))
                 .await?;

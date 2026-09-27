@@ -102,7 +102,7 @@ fn fleet_with(last_host_meta: u64) -> HostState {
             last_backup: NOW,
             applied_hash: String::new(),
             manifest: None,
-            native: None,
+
             natives: vec![],
             enabled: true,
             incomplete_step: None,

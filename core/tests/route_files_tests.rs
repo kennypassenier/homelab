@@ -143,7 +143,6 @@ fn record(m: &StackManifest) -> StackState {
         applied_hash: String::new(),
         manifest: Some(m.clone()),
         enabled: true,
-        native: None,
         natives: Vec::new(),
         incomplete_step: None,
         route_file: None,

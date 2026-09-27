@@ -222,7 +222,7 @@ async fn a_rootfs_file_outside_the_allowed_places_stops_the_deploy_before_any_pu
     let why = format!("{:?}", report.error);
     assert!(why.contains("rootfs/etc/passwd"), "{}", why);
     assert!(
-        exec.calls_containing("pct push").is_empty(),
+        exec.ran("pct", &["push"]) == 0,
         "nothing may be pushed once validation refused: {:?}",
         exec.calls()
     );

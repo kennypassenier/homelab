@@ -4,7 +4,8 @@
 //! (D10), safety gates (A1-A3), the operation pipeline (AR3), state handling
 //! (AR4) and the operations themselves. All side effects go through the
 //! [`executor::Executor`] trait (AR2), so every path in this crate is fully
-//! testable with [`executor::MockExecutor`] — no Proxmox required.
+//! testable with `executor::MockExecutor` (feature `test-support`) — no
+//! Proxmox required.
 
 pub mod ask;
 pub mod checks;
@@ -15,6 +16,8 @@ pub mod firewall;
 pub mod hostunits;
 pub mod incidents;
 pub mod manifest;
+#[cfg(any(test, feature = "test-support"))]
+pub mod mock;
 pub mod native;
 pub mod notify;
 pub mod oplock;

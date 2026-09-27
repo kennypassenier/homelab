@@ -633,7 +633,7 @@ fn state_with(stack: &str, vmid: u16, spec: Option<FirewallSpec>) -> HostState {
             applied_hash: String::new(),
             manifest: Some(m),
             enabled: true,
-            native: None,
+
             natives: Vec::new(),
             incomplete_step: None,
             route_file: None,

@@ -207,7 +207,6 @@ fn recorded(route_file: Option<&str>, extras: &[&str]) -> StackState {
         applied_hash: String::new(),
         manifest: None,
         enabled: true,
-        native: None,
         natives: Vec::new(),
         incomplete_step: None,
         route_file: route_file.map(str::to_string),

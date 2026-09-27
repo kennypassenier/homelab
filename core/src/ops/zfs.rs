@@ -16,20 +16,11 @@
 //!     webhook/incident chain instead of an email nobody reads.
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, Cmd, Executor, TracingExecutor};
+use crate::executor::{run_ok, shq, Cmd, Executor, TracingExecutor};
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 
 use super::OpCtx;
-
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
 
 /// One replication job: snapshot `source` recursively, then send the
 /// difference to `target`.
@@ -557,17 +548,17 @@ pub async fn replicate(
                         // and refuses otherwise.
                         format!(
                             "zfs send -I {} {} | zfs receive -F -x mountpoint {}",
-                            shell_quote(&format!("{}@{}", d.source, base)),
-                            shell_quote(&new),
-                            shell_quote(&d.target)
+                            shq(&format!("{}@{}", d.source, base)),
+                            shq(&new),
+                            shq(&d.target)
                         ),
                         6 * 3600,
                     ),
                     DatasetStep::Seed => (
                         format!(
                             "zfs send {} | zfs receive -x mountpoint {}",
-                            shell_quote(&new),
-                            shell_quote(&d.target)
+                            shq(&new),
+                            shq(&d.target)
                         ),
                         12 * 3600,
                     ),
@@ -577,8 +568,8 @@ pub async fn replicate(
                     DatasetStep::SeedEmpty => (
                         format!(
                             "zfs send {} | zfs receive -F -x mountpoint {}",
-                            shell_quote(&new),
-                            shell_quote(&d.target)
+                            shq(&new),
+                            shq(&d.target)
                         ),
                         12 * 3600,
                     ),
@@ -660,8 +651,4 @@ async fn destroy_each(exec: &dyn Executor, victims: &[String]) -> Result<StepOut
     } else {
         StepOutcome::Changed
     })
-}
-
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
 }

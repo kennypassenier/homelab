@@ -13,15 +13,6 @@ use crate::sink::Level;
 
 use super::OpCtx;
 
-macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
-        match $runner.step($name, || async { $body }).await {
-            Ok(o) => o,
-            Err(e) => return $runner.finish_err($name, &e),
-        }
-    };
-}
-
 pub struct SelfUpdateCfg {
     /// Where the uploaded candidate binary was staged (mode 0755).
     pub staged: String,

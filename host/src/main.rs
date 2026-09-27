@@ -55,7 +55,16 @@ fn default_watched_max_age_hours() -> u64 {
     26
 }
 
-#[derive(Debug, serde::Deserialize, Default)]
+/// host.toml as written: the one serde representation of the file.
+///
+/// config-four-representations (expert panel, 2026-09-27): the same struct is
+/// read, checked for keys it does not read (`unknown_keys`), and written
+/// back by a settings save (`render_settings_toml`). There used to be a
+/// second, hand-kept struct for the write and hand-kept key lists for the
+/// check, held in step by tests that scraped this source file. Every field
+/// is optional so that what is written back is only what the file said;
+/// defaults are applied when `Config` is resolved.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Default)]
 struct FileConfig {
     token: Option<String>,
     listen: Option<String>,
@@ -164,8 +173,7 @@ struct FileConfig {
     /// question and decide, short enough that a forgotten window does not
     /// hold the global op lock all night — the lock is held for the whole
     /// operation, so a question nobody answers blocks every other one.
-    #[serde(default = "default_ask_timeout_s")]
-    ask_timeout_s: u64,
+    ask_timeout_s: Option<u64>,
     /// Y1: how many stack backups the nightly round runs at once. Measured
     /// 2026-09-02: a full round took ~38 minutes for thirteen stacks, of
     /// which only ~6 minutes was writing data — the rest was small questions
@@ -177,8 +185,7 @@ struct FileConfig {
     /// also "how much of the house may be briefly still at 04:00". Kenny
     /// chose three (form Y4): about a third of the wait, and never more than
     /// three services quiet at once.
-    #[serde(default = "default_backup_concurrency")]
-    backup_concurrency: usize,
+    backup_concurrency: Option<usize>,
     /// fix-96 (single-offsite-copy-no-integrity-check, 2026-09-27): the ZFS
     /// dataset that holds the second repository set, e.g. `HDD4TB/restic`.
     /// Absent = no second copy (the nightly `restic check` of the Google
@@ -282,6 +289,9 @@ struct Config {
     integrity_data_read_interval_s: u64,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
+    /// host.toml as it was read; a settings save writes this back with only
+    /// the settings changed.
+    file: FileConfig,
 }
 
 /// ── F186: keys the daemon would otherwise ignore in silence. ──────────
@@ -297,108 +307,49 @@ struct Config {
 /// time and did not prevent the second.
 ///
 /// Serde ignores unknown fields by default, which is what makes it silent.
-/// These lists are hand-maintained because Rust has no reflection, and the
-/// failure direction is deliberately the safe one: a field added to
-/// `FileConfig` but forgotten here produces a loud false "unknown key",
-/// never a silently swallowed real one.
-const KNOWN_TOP: &[&str] = &[
-    "token",
-    "listen",
-    "state_dir",
-    "backup_hour",
-    "notify_webhook",
-    "notify_auth_bearer",
-    "restore_drill_interval_s",
-    "notify_fallback_webhook",
-    "notify_fallback_auth_bearer",
-    "prometheus_url",
-    "loki_url",
-    "loki_vmid",
-    "logs_window",
-    "retention",
-    "exec_enabled",
-    "mirror_remote",
-    "no_touch",
-    "privileged_vmids",
-    "data_mount_roots",
-    "gateway_vmid",
-    "gateway_routes_dir",
-    "grafana_vmid",
-    "zfs_jobs",
-    "registry_cache",
-    "restic_base",
-    "restic_password_file",
-    "restic_snapshot_timeout_s",
-    "restic_restore_timeout_s",
-    "metrics_targets_dir",
-    "grafana_dashboards_dir",
-    "homepage_services_file",
-    "kuma_monitors_file",
-    "ask_timeout_s",
-    "backup_concurrency",
-    "watched_backups",
-    "device_backups",
-    "second_copy_dataset",
-    "integrity_data_read_interval_s",
-];
-const KNOWN_REGISTRY_CACHE: &[&str] = &["host", "upstreams", "pull_timeout_secs"];
-const KNOWN_UPSTREAM: &[&str] = &["registry", "port"];
-const KNOWN_ZFS_JOB: &[&str] = &["source", "target"];
-const KNOWN_WATCHED_BACKUP: &[&str] = &["name", "rclone_path", "max_age_hours"];
-const KNOWN_DEVICE_BACKUP: &[&str] = &["name", "url", "cred_file", "filename", "pin", "ca_file"];
-const KNOWN_RETENTION: &[&str] = &["every_days", "keep", "span_days"];
-
-/// Every key in `raw` that no field of `FileConfig` will ever read, as
-/// dotted paths. An empty result means the file says exactly what it looks
-/// like it says.
+/// The keys it reads are found by reading the file into `FileConfig` and
+/// writing that back: whatever the round trip lost, no field reads
+/// (config-four-representations, 2026-09-27; this replaced hand-kept key
+/// lists that had drifted, see the retention `keep` test). Returned as
+/// dotted paths, e.g. `registry_cache.upstreams[0].opnsense_url`. A file
+/// that does not deserialize returns nothing here; loading it fails loudly.
 fn unknown_keys(raw: &toml::Table) -> Vec<String> {
-    fn table(out: &mut Vec<String>, t: &toml::Table, known: &[&str], path: &str) {
-        for k in t.keys() {
-            if !known.contains(&k.as_str()) {
-                out.push(if path.is_empty() {
-                    k.clone()
-                } else {
-                    format!("{}.{}", path, k)
-                });
+    fn walk(out: &mut Vec<String>, raw: &toml::Value, read: Option<&toml::Value>, path: &str) {
+        match (raw, read) {
+            (toml::Value::Table(r), Some(toml::Value::Table(k))) => {
+                for (key, v) in r {
+                    let p = if path.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{}.{}", path, key)
+                    };
+                    match k.get(key) {
+                        Some(kv) => walk(out, v, Some(kv), &p),
+                        None => out.push(p),
+                    }
+                }
             }
+            (toml::Value::Array(r), Some(toml::Value::Array(k))) => {
+                for (i, v) in r.iter().enumerate() {
+                    walk(out, v, k.get(i), &format!("{}[{}]", path, i));
+                }
+            }
+            _ => {}
         }
     }
-    fn array_of(out: &mut Vec<String>, v: Option<&toml::Value>, known: &[&str], path: &str) {
-        let Some(arr) = v.and_then(|v| v.as_array()) else {
-            return;
-        };
-        for (i, item) in arr.iter().enumerate() {
-            if let Some(t) = item.as_table() {
-                table(out, t, known, &format!("{}[{}]", path, i));
-            }
-        }
-    }
-
+    let Ok(file) = raw.clone().try_into::<FileConfig>() else {
+        return Vec::new();
+    };
+    let Ok(read) = toml::Table::try_from(&file) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
-    table(&mut out, raw, KNOWN_TOP, "");
-    array_of(&mut out, raw.get("zfs_jobs"), KNOWN_ZFS_JOB, "zfs_jobs");
-    array_of(&mut out, raw.get("retention"), KNOWN_RETENTION, "retention");
-    array_of(
+    walk(
         &mut out,
-        raw.get("watched_backups"),
-        KNOWN_WATCHED_BACKUP,
-        "watched_backups",
+        &toml::Value::Table(raw.clone()),
+        Some(&toml::Value::Table(read)),
+        "",
     );
-    array_of(
-        &mut out,
-        raw.get("device_backups"),
-        KNOWN_DEVICE_BACKUP,
-        "device_backups",
-    );
-    if let Some(rc) = raw.get("registry_cache").and_then(|v| v.as_table()) {
-        table(&mut out, rc, KNOWN_REGISTRY_CACHE, "registry_cache");
-        array_of(
-            &mut out,
-            rc.get("upstreams"),
-            KNOWN_UPSTREAM,
-            "registry_cache.upstreams",
-        );
-    }
     out.sort();
     out
 }
@@ -441,6 +392,7 @@ fn load_config_from(path: String) -> Config {
             }
         }
     };
+    let as_read = file.clone();
 
     let token = std::env::var("HOMELAB_TOKEN")
         .ok()
@@ -540,8 +492,10 @@ fn load_config_from(path: String) -> Config {
         grafana_dashboards_dir: file.grafana_dashboards_dir,
         homepage_services_file: file.homepage_services_file,
         kuma_monitors_file: file.kuma_monitors_file,
-        backup_concurrency: file.backup_concurrency,
-        ask_timeout_s: file.ask_timeout_s,
+        backup_concurrency: file
+            .backup_concurrency
+            .unwrap_or_else(default_backup_concurrency),
+        ask_timeout_s: file.ask_timeout_s.unwrap_or_else(default_ask_timeout_s),
         second_copy_dataset: file.second_copy_dataset.clone(),
         integrity_data_read_interval_s: file
             .integrity_data_read_interval_s
@@ -553,6 +507,7 @@ fn load_config_from(path: String) -> Config {
                 .retention
                 .unwrap_or_else(homelab_core::retention::default_tiers),
         },
+        file: as_read,
     };
     // F259: a watcher whose path no writer targets watches nothing — it
     // reports "holds no files at all" forever while looking like a working
@@ -584,176 +539,25 @@ fn load_config_from(path: String) -> Config {
     cfg
 }
 
-/// G8: persist the mutable settings back to host.toml, atomically, keeping
-/// the immutable fields (token/listen/state_dir) intact.
-/// Render host.toml from the immutable config + mutable settings. Split out
-/// of persist_settings so the parse→render→parse round-trip is testable
-/// (gap: an early version silently dropped the OPNsense fields on every
-/// settings save).
+/// G8: render host.toml for a settings save: the file as it was read, with
+/// only the settings the TUI may change replaced.
+///
+/// config-four-representations (expert panel, 2026-09-27): this serialises
+/// `FileConfig` itself. It used to fill a separate hand-kept struct from the
+/// resolved `Config`, so every new field had to be added twice, and a field
+/// forgotten there was wiped from host.toml by the next save (F208). It also
+/// wrote resolved values the file never said: the compiled no-touch list
+/// merged in, the default drill interval, a token from the environment.
+/// Comments in host.toml are not kept, as before.
 fn render_settings_toml(
     config: &Config,
     settings: &homelab_proto::HostConfigView,
 ) -> Result<String, String> {
-    #[derive(serde::Serialize)]
-    struct Out<'a> {
-        token: &'a str,
-        listen: String,
-        state_dir: &'a str,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        backup_hour: Option<u8>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        notify_webhook: Option<&'a String>,
-        retention: &'a [homelab_proto::RetentionTier],
-        #[serde(skip_serializing_if = "std::ops::Not::not")]
-        exec_enabled: bool,
-        // Written back for the same reason the OPNsense fields are: a
-        // settings save that dropped this would silently stop every
-        // notification, and the first thing you would not hear about is that.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        notify_auth_bearer: Option<&'a String>,
-        // G16: the second notification route and its credential. Same
-        // reasoning as the line above, one step further: losing the fallback
-        // silently would leave exactly the window Y2 carved out — kyu being
-        // restarted by the very operation whose failure you need to hear.
-        // G14: Kenny's interval for the restore drill. A save that dropped
-        // it would quietly reset the rehearsal to the default — not
-        // dangerous, and exactly the kind of silent revert F208 was about.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        restore_drill_interval_s: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        notify_fallback_webhook: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        notify_fallback_auth_bearer: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        prometheus_url: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        loki_url: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        loki_vmid: Option<u16>,
-        logs_window: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        mirror_remote: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        no_touch: Option<&'a Vec<u16>>,
-        // fix-120: a settings save that dropped these would quietly put the
-        // fleet defaults back in place of what Kenny wrote.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        privileged_vmids: Option<&'a Vec<u16>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        data_mount_roots: Option<&'a Vec<String>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        gateway_vmid: Option<u16>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        gateway_routes_dir: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        grafana_vmid: Option<u16>,
-        #[serde(skip_serializing_if = "<[_]>::is_empty")]
-        zfs_jobs: &'a [homelab_core::ops::zfs::ZfsJob],
-        // F208: these three were absent, so every settings save silently
-        // wiped them — the pull-through cache the media deploy leans on, the
-        // router-backup watch, and the device backups. A struct that renders
-        // the whole file must know the whole file.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        registry_cache: Option<&'a homelab_core::ops::registry_cache::CacheCfg>,
-        #[serde(skip_serializing_if = "<[_]>::is_empty")]
-        watched_backups: &'a [WatchedBackup],
-        #[serde(skip_serializing_if = "<[_]>::is_empty")]
-        device_backups: &'a [homelab_core::ops::devicebackup::DeviceBackup],
-        // Written back only when they differ from the compiled defaults, but
-        // written back they must be: a settings save that drops them would
-        // silently move the backup target, which is the same class of bug the
-        // opnsense fields once had.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        restic_base: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        restic_password_file: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        restic_snapshot_timeout_s: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        restic_restore_timeout_s: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        metrics_targets_dir: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        grafana_dashboards_dir: Option<&'a String>,
-        homepage_services_file: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        kuma_monitors_file: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        backup_concurrency: Option<usize>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        ask_timeout_s: Option<u64>,
-        // fix-96: a save that dropped this would end the second copy in
-        // silence, since the fleet check says nothing about an unconfigured one.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        second_copy_dataset: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        integrity_data_read_interval_s: Option<u64>,
-    }
-    let bdef = homelab_core::ops::backup::BackupCfg::default();
-    let out = Out {
-        token: &config.token,
-        listen: config.listen.to_string(),
-        state_dir: &config.state_dir,
-        backup_hour: settings.backup_hour,
-        notify_webhook: settings.notify_webhook.as_ref(),
-        retention: &settings.retention,
-        exec_enabled: config.exec_enabled,
-        notify_auth_bearer: config.notify_auth_bearer.as_ref(),
-        restore_drill_interval_s: Some(config.restore_drill_interval_s),
-        notify_fallback_webhook: config.notify_fallback_webhook.as_ref(),
-        notify_fallback_auth_bearer: config.notify_fallback_auth_bearer.as_ref(),
-        prometheus_url: config.prometheus_url.as_ref(),
-        loki_url: config.loki_url.as_ref(),
-        loki_vmid: config.loki_vmid,
-        logs_window: (config.logs_window != default_logs_window()).then_some(&config.logs_window),
-        mirror_remote: config.mirror_remote.as_ref(),
-        no_touch: (config.safety.no_touch != SafetyConfig::default().no_touch)
-            .then_some(&config.safety.no_touch),
-        privileged_vmids: config
-            .safety
-            .privileged_vmids
-            .as_ref()
-            .filter(|v| v.as_slice() != homelab_core::safety::FLEET_PRIVILEGED_VMIDS),
-        data_mount_roots: config.safety.data_mount_roots.as_ref().filter(|v| {
-            !v.iter()
-                .map(String::as_str)
-                .eq(homelab_core::safety::FLEET_DATA_MOUNT_ROOTS.iter().copied())
-        }),
-        gateway_vmid: (config.safety.gateway_vmid != SafetyConfig::default().gateway_vmid)
-            .then_some(config.safety.gateway_vmid),
-        gateway_routes_dir: (config.safety.gateway_routes_dir
-            != SafetyConfig::default().gateway_routes_dir)
-            .then_some(&config.safety.gateway_routes_dir),
-        // Written only when it differs from the default, which is the
-        // gateway itself (fix-90).
-        grafana_vmid: (config.safety.grafana_vmid != config.safety.gateway_vmid)
-            .then_some(config.safety.grafana_vmid),
-        zfs_jobs: &config.zfs_jobs,
-        registry_cache: config.registry_cache.as_ref(),
-        watched_backups: &config.watched_backups,
-        device_backups: &config.device_backups,
-        restic_base: (config.backup.restic_base != bdef.restic_base)
-            .then_some(&config.backup.restic_base),
-        restic_password_file: (config.backup.password_file != bdef.password_file)
-            .then_some(&config.backup.password_file),
-        restic_snapshot_timeout_s: (config.backup.snapshot_timeout_s != bdef.snapshot_timeout_s)
-            .then_some(config.backup.snapshot_timeout_s),
-        restic_restore_timeout_s: (config.backup.restore_timeout_s != bdef.restore_timeout_s)
-            .then_some(config.backup.restore_timeout_s),
-        metrics_targets_dir: config.metrics_targets_dir.as_ref(),
-        grafana_dashboards_dir: config.grafana_dashboards_dir.as_ref(),
-        homepage_services_file: config.homepage_services_file.as_ref(),
-        kuma_monitors_file: config.kuma_monitors_file.as_ref(),
-        backup_concurrency: (config.backup_concurrency != default_backup_concurrency())
-            .then_some(config.backup_concurrency),
-        ask_timeout_s: (config.ask_timeout_s != default_ask_timeout_s())
-            .then_some(config.ask_timeout_s),
-        second_copy_dataset: config.second_copy_dataset.as_ref(),
-        integrity_data_read_interval_s: (config.integrity_data_read_interval_s
-            != homelab_core::ops::secondcopy::DEFAULT_DATA_READ_INTERVAL_S)
-            .then_some(config.integrity_data_read_interval_s),
-    };
-    toml::to_string_pretty(&out).map_err(|e| e.to_string())
+    let mut file = config.file.clone();
+    file.backup_hour = settings.backup_hour;
+    file.notify_webhook = settings.notify_webhook.clone();
+    file.retention = Some(settings.retention.clone());
+    toml::to_string_pretty(&file).map_err(|e| e.to_string())
 }
 
 /// Y1: how many backups actually run at once, given what the config says.
@@ -1063,116 +867,21 @@ mod tests {
         assert!(!line.contains("s3cr3t-token"), "{}", line);
     }
 
-    /// covers: F208
-    ///
-    /// G1 of the Phase-7 gate. Saving a setting from the TUI rewrites the
-    /// whole of host.toml from the `Out` struct, so a field `Out` does not
-    /// know is a field that DISAPPEARS on save. Three were missing when this
-    /// was measured: the pull-through cache the media deploy leans on, the
-    /// router-backup watch, and the device backups.
-    ///
-    /// The old guard test could not catch it — it set those fields to empty
-    /// in its own fixture and never asserted them afterwards, so it passed
-    /// on exactly this bug. This one reads both structs out of the source,
-    /// which is the same trick `known_top_lists_every_field_of_file_config`
-    /// uses, and cannot drift.
-    #[test]
-    fn the_settings_writer_knows_every_field_the_config_has() {
-        let src = include_str!("main.rs");
-        fn fields(src: &str, marker: &str, end: &str) -> Vec<String> {
-            let start = src
-                .find(marker)
-                .unwrap_or_else(|| panic!("{} not found", marker));
-            let body = &src[start..];
-            let body = &body[..body.find(end).expect("unterminated struct")];
-            let mut out = Vec::new();
-            for line in body.lines().skip(1) {
-                let t = line.trim();
-                if t.starts_with("//") || t.starts_with("#[") || t.is_empty() {
-                    continue;
-                }
-                if let Some(name) = t.split(':').next() {
-                    let name = name.trim();
-                    if !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')
-                    {
-                        out.push(name.to_string());
-                    }
-                }
-            }
-            out
-        }
-
-        let file_cfg = fields(src, "struct FileConfig {", "\n}");
-        let written = fields(src, "    struct Out<'a> {", "\n    }");
-        assert!(
-            file_cfg.len() > 20 && written.len() > 20,
-            "the parser broke, not the code: {} vs {}",
-            file_cfg.len(),
-            written.len()
-        );
-
-        let dropped: Vec<&String> = file_cfg.iter().filter(|f| !written.contains(f)).collect();
-        assert!(
-            dropped.is_empty(),
-            "these settings would be WIPED from host.toml the next time Kenny \
-             saves anything from the TUI: {:?}",
-            dropped
-        );
-    }
-
-    /// V5 (Kenny, 2026-09-02): the two key lists were hand-maintained
-    /// because Rust cannot enumerate its own struct fields, and he asked for
-    /// that cost to go away rather than be accepted. It can: the source is
-    /// available at compile time, so the list can be checked against the
-    /// struct itself.
-    ///
-    /// A field added to `FileConfig` and forgotten in `KNOWN_TOP` used to
-    /// produce a loud false "unknown key" at startup — safe, but only
-    /// noticed by whoever read the log. Now it is a failing test, at build
-    /// time, naming the field.
-    #[test]
-    fn known_top_lists_every_field_of_file_config() {
-        let src = include_str!("main.rs");
-        let start = src
-            .find("struct FileConfig {")
-            .expect("FileConfig struct not found — this test parses it");
-        let body = &src[start..];
-        let end = body.find("\n}").expect("unterminated FileConfig struct");
-        let body = &body[..end];
-
-        let mut fields: Vec<&str> = Vec::new();
-        for line in body.lines().skip(1) {
-            let t = line.trim();
-            if t.starts_with("//") || t.starts_with("#[") || t.is_empty() {
-                continue;
-            }
-            if let Some(name) = t.split(':').next() {
-                let name = name.trim();
-                if !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
-                    fields.push(name);
-                }
-            }
-        }
-        assert!(
-            fields.len() > 20,
-            "parsed only {} fields — the parser broke, not the list",
-            fields.len()
-        );
-
-        let missing: Vec<&&str> = fields.iter().filter(|f| !KNOWN_TOP.contains(f)).collect();
-        assert!(
-            missing.is_empty(),
-            "FileConfig has field(s) absent from KNOWN_TOP, so host.toml would \
-             report them as unknown settings: {:?}",
-            missing
-        );
-
-        let stale: Vec<&&str> = KNOWN_TOP.iter().filter(|k| !fields.contains(k)).collect();
-        assert!(
-            stale.is_empty(),
-            "KNOWN_TOP names key(s) FileConfig no longer has: {:?}",
-            stale
-        );
+    /// Load a config from `raw` through a file of its own. Tests run as
+    /// parallel threads of one process, so neither a shared path nor
+    /// `HOMELAB_CONFIG` may be used (rust-code-hygiene, 2026-09-27: one test
+    /// set that variable and wrote a fixed /tmp path while others ran).
+    fn config_from_text(raw: &str) -> Config {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "homelab-host-test-{}-{}.toml",
+            std::process::id(),
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::write(&path, raw).unwrap();
+        let cfg = load_config_from(path.display().to_string());
+        let _ = std::fs::remove_file(&path);
+        cfg
     }
 
     /// F8: host.toml may only ADD to the no-touch list. Assigning used to be
@@ -1181,10 +890,7 @@ mod tests {
     #[test]
     fn the_config_can_widen_the_no_touch_list_but_never_shrink_it() {
         let raw = "token = \"0123456789abcdef0123\"\nno_touch = [200, 201]\n";
-        std::fs::write("/tmp/homelab-f8-test.toml", raw).unwrap();
-        std::env::set_var("HOMELAB_CONFIG", "/tmp/homelab-f8-test.toml");
-        let cfg = load_config();
-        std::env::remove_var("HOMELAB_CONFIG");
+        let cfg = config_from_text(raw);
 
         for compiled in homelab_core::safety::DEFAULT_NO_TOUCH {
             assert!(
@@ -1202,10 +908,7 @@ mod tests {
     #[test]
     fn fix_36_remote_exec_refuses_a_vmid_the_config_added_to_the_no_touch_list() {
         let raw = "token = \"0123456789abcdef0123\"\nexec_enabled = true\nno_touch = [200]\n";
-        // Loaded by path, not through HOMELAB_CONFIG: tests run in parallel
-        // and another test sets that variable.
-        std::fs::write("/tmp/homelab-fix36-test.toml", raw).unwrap();
-        let cfg = load_config_from("/tmp/homelab-fix36-test.toml".into());
+        let cfg = config_from_text(raw);
         assert!(
             exec_allowed(&cfg, 200).is_err(),
             "vmid 200 is on the configured no-touch list; exec must refuse it"
@@ -1383,204 +1086,86 @@ port = 5003
         assert_eq!(unknown_keys(&t), vec!["kuma_monitor_file".to_string()]);
     }
 
+    /// config-four-representations (expert panel, 2026-09-27): the known
+    /// keys were hand-kept lists beside the struct, and they had already
+    /// drifted: `KNOWN_RETENTION` named `keep`, which `RetentionTier` has
+    /// never read, so a `keep = 3` was ignored without a word. The keys are
+    /// now whatever the one struct reads.
+    #[test]
+    fn a_key_the_struct_does_not_read_is_reported_even_where_a_list_named_it() {
+        let raw = "[[retention]]\nevery_days = 1\nspan_days = 7\nkeep = 3\n";
+        let t: toml::Table = toml::from_str(raw).unwrap();
+        assert_eq!(unknown_keys(&t), vec!["retention[0].keep".to_string()]);
+    }
+
+    /// config-four-representations (expert panel, 2026-09-27): a settings
+    /// save writes back the file it read, changing only what the settings
+    /// tab changed. It used to render a fourth, hand-kept struct from the
+    /// resolved config, which wrote the merged no-touch list, the compiled
+    /// drill interval and the env token into a file that never said them.
+    /// Nested tables write their defaults out (`max_age_hours`,
+    /// `pull_timeout_secs`), so the fixture states them.
+    ///
+    /// covers: F208
+    #[test]
+    fn a_settings_save_writes_back_the_file_it_read() {
+        let raw = r#"
+token = "0123456789abcdef0123"
+listen = "0.0.0.0:8443"
+backup_hour = 4
+notify_webhook = "http://ha/webhook/x"
+notify_auth_bearer = "a-token-that-must-survive-a-save"
+notify_fallback_webhook = "http://10.10.5.101:8123/api/webhook/homelab"
+exec_enabled = true
+no_touch = [200]
+gateway_vmid = 112
+restic_base = "rclone:hdd:homelab-backups"
+restic_restore_timeout_s = 9999
+logs_window = "6h"
+ask_timeout_s = 300
+metrics_targets_dir = "/appdata/metrics/prometheus-config/targets"
+
+[[retention]]
+every_days = 1
+span_days = 7
+
+[[zfs_jobs]]
+source = "HDD2TB"
+target = "HDD18TB/replica/HDD2TB"
+
+[[watched_backups]]
+name = "opnsense-config"
+rclone_path = "gdrive:homelab-backups/OPNSense-backups"
+max_age_hours = 26
+
+[[device_backups]]
+name = "opnsense"
+url = "https://10.10.10.1/api/core/backup/download/this"
+cred_file = "/var/lib/homelab/secrets/opnsense-backup.conf"
+filename = "config.xml"
+pin = "sha256//abc"
+
+[registry_cache]
+host = "10.10.10.17"
+pull_timeout_secs = 180
+
+[[registry_cache.upstreams]]
+registry = "lscr.io"
+port = 5003
+"#;
+        let config = config_from_text(raw);
+
+        let mut settings = config.initial_settings.clone();
+        settings.backup_hour = Some(5);
+        let rendered = render_settings_toml(&config, &settings).expect("render");
+
+        let mut want: toml::Table = toml::from_str(raw).unwrap();
+        want.insert("backup_hour".into(), toml::Value::Integer(5));
+        let got: toml::Table = toml::from_str(&rendered).unwrap();
+        assert_eq!(got, want, "rendered:\n{rendered}");
+    }
+
     use super::*;
-
-    /// Round-trip: everything load_config understands must survive a
-    /// settings save. Guards the bug where a field the settings tab does not
-    /// know about is silently dropped on save — first found with the OPNsense
-    /// pair, which died on the next restart without any warning. Those two
-    /// are gone (form V4, 2026-09-02); the guard is not, because the class of
-    /// bug belongs to the save path rather than to those fields.
-    #[test]
-    fn settings_render_keeps_every_config_field() {
-        let config = Config {
-            restore_drill_interval_s: 90 * 24 * 3600,
-            notify_fallback_webhook: Some("http://10.10.5.101:8123/api/webhook/homelab".into()),
-            notify_fallback_auth_bearer: None,
-            // F208: with real values, so the round-trip proves they SURVIVE
-            // rather than only that the struct knows their names.
-            watched_backups: vec![WatchedBackup {
-                name: "opnsense-config".into(),
-                rclone_path: "gdrive:homelab-backups/OPNSense-backups".into(),
-                max_age_hours: 26,
-            }],
-            device_backups: vec![homelab_core::ops::devicebackup::DeviceBackup {
-                name: "opnsense".into(),
-                url: "https://10.10.10.1/api/core/backup/download/this".into(),
-                cred_file: "/var/lib/homelab/secrets/opnsense-backup.conf".into(),
-                filename: "config.xml".into(),
-                pin: Some("sha256//abc".into()),
-                ca_file: None,
-            }],
-            token: "0123456789abcdef0123".into(),
-            listen: "0.0.0.0:8443".parse().unwrap(),
-            state_dir: "/var/lib/homelab".into(),
-            config_path: "/etc/homelab/host.toml".into(),
-            exec_enabled: true,
-            notify_auth_bearer: Some("a-token-that-must-survive-a-save".into()),
-            prometheus_url: Some("http://10.10.10.13:9090".into()),
-            loki_url: Some("http://10.10.10.13:3100".into()),
-            loki_vmid: Some(113),
-            logs_window: "6h".into(),
-            mirror_remote: Some("git@github.com:k/m.git".into()),
-            safety: SafetyConfig {
-                no_touch: vec![100, 101],
-                gateway_vmid: 112,
-                gateway_routes_dir: "/appdata/platform/traefik-config/routes".into(),
-                grafana_vmid: 113,
-                privileged_vmids: Some(vec![105, 106, 107]),
-                data_mount_roots: Some(vec!["/HDD18TB/media".into()]),
-            },
-            registry_cache: Some(homelab_core::ops::registry_cache::CacheCfg {
-                host: "10.10.10.17".into(),
-                upstreams: vec![],
-                pull_timeout_secs: 180,
-            }),
-            zfs_jobs: vec![homelab_core::ops::zfs::ZfsJob {
-                source: "HDD2TB".into(),
-                target: "HDD18TB/REPLICA_2TB".into(),
-            }],
-            backup: homelab_core::ops::backup::BackupCfg {
-                restic_base: "rclone:hdd:homelab-backups".into(),
-                restore_timeout_s: 9_999,
-                ..Default::default()
-            },
-            metrics_targets_dir: Some("/appdata/metrics/prometheus-config/targets".into()),
-            grafana_dashboards_dir: Some("/opt/grafana/provisioning/dashboards".into()),
-            homepage_services_file: Some("/appdata/home/homepage-config/services.yaml".into()),
-            kuma_monitors_file: Some(
-                "/appdata/uptime/kuma-seeder-config/host-monitors.json".into(),
-            ),
-            backup_concurrency: 3,
-            ask_timeout_s: 120,
-            // fix-96: a settings save must not drop the second copy.
-            second_copy_dataset: Some("HDD4TB/restic".into()),
-            integrity_data_read_interval_s:
-                homelab_core::ops::secondcopy::DEFAULT_DATA_READ_INTERVAL_S,
-            initial_settings: homelab_proto::HostConfigView {
-                backup_hour: Some(4),
-                notify_webhook: Some("http://ha/webhook/x".into()),
-                retention: homelab_core::retention::default_tiers(),
-            },
-        };
-        let rendered = render_settings_toml(&config, &config.initial_settings).expect("render");
-        let parsed: FileConfig = toml::from_str(&rendered).expect("parse back");
-        assert_eq!(parsed.token.as_deref(), Some("0123456789abcdef0123"));
-        // The notification bearer must survive a settings save. Dropping it
-        // would stop every notification the host sends, and the first thing
-        // you would not hear about is that.
-        assert_eq!(
-            parsed.notify_auth_bearer.as_deref(),
-            Some("a-token-that-must-survive-a-save")
-        );
-        // G16: and so must the second route, or a save re-opens the exact
-        // window Y2 carved out — kyu down while the orchestrator is the one
-        // restarting it.
-        assert_eq!(
-            parsed.notify_fallback_webhook.as_deref(),
-            Some("http://10.10.5.101:8123/api/webhook/homelab")
-        );
-        assert_eq!(parsed.backup_hour, Some(4));
-        // E8: settings saves must not drop the zfs jobs (same class of bug
-        // as the opnsense fields once had).
-        assert_eq!(
-            parsed.zfs_jobs.as_deref(),
-            Some(
-                &[homelab_core::ops::zfs::ZfsJob {
-                    source: "HDD2TB".into(),
-                    target: "HDD18TB/REPLICA_2TB".into(),
-                }][..]
-            )
-        );
-        assert_eq!(
-            parsed.notify_webhook.as_deref(),
-            Some("http://ha/webhook/x")
-        );
-        assert_eq!(parsed.exec_enabled, Some(true));
-        // F39: a settings save must not silently move the backup target back
-        // to the compiled default.
-        assert_eq!(
-            parsed.restic_base.as_deref(),
-            Some("rclone:hdd:homelab-backups")
-        );
-        assert_eq!(parsed.restic_restore_timeout_s, Some(9_999));
-        // Values left at the default stay out of the file rather than being
-        // frozen into it.
-        assert_eq!(parsed.restic_password_file, None);
-        assert_eq!(parsed.restic_snapshot_timeout_s, None);
-        assert_eq!(
-            parsed.mirror_remote.as_deref(),
-            Some("git@github.com:k/m.git")
-        );
-        assert_eq!(
-            parsed.prometheus_url.as_deref(),
-            Some("http://10.10.10.13:9090")
-        );
-        assert_eq!(
-            parsed.notify_auth_bearer.as_deref(),
-            Some("a-token-that-must-survive-a-save")
-        );
-        // F208: the three that a settings save used to wipe.
-        assert!(
-            parsed.registry_cache.is_some(),
-            "the pull-through cache must survive a settings save"
-        );
-        assert_eq!(
-            parsed.watched_backups.as_ref().map(|w| w.len()),
-            Some(1),
-            "the router-backup watch must survive a settings save"
-        );
-        assert_eq!(
-            parsed.device_backups.as_ref().map(|d| d.len()),
-            Some(1),
-            "the device backups must survive a settings save"
-        );
-        assert_eq!(parsed.retention.as_ref().map(|r| r.len()), Some(3));
-        assert_eq!(parsed.no_touch, Some(vec![100, 101]));
-        // fix-120: the host policy survives a settings save.
-        assert_eq!(parsed.privileged_vmids, Some(vec![105, 106, 107]));
-        assert_eq!(
-            parsed.data_mount_roots,
-            Some(vec!["/HDD18TB/media".to_string()])
-        );
-        // fix-96: dropping this would silently end the second copy, and the
-        // fleet check says nothing about a copy that is not configured.
-        assert_eq!(parsed.second_copy_dataset.as_deref(), Some("HDD4TB/restic"));
-        assert_eq!(parsed.integrity_data_read_interval_s, None);
-        assert_eq!(parsed.gateway_vmid, Some(112));
-        assert_eq!(
-            parsed.gateway_routes_dir.as_deref(),
-            Some("/appdata/platform/traefik-config/routes")
-        );
-        // fix-90: where Grafana runs, once it left the gateway.
-        assert_eq!(parsed.grafana_vmid, Some(113));
-        // fix-93: where the log question is asked, now that the LAN port
-        // takes pushes only.
-        assert_eq!(parsed.loki_vmid, Some(113));
-    }
-
-    /// fix-90 (2026-09-27, gateway-shared-no-limits): Grafana moved to the
-    /// metrics container. `grafana_vmid` says where; unset, it is the
-    /// gateway, which is where Grafana ran until then.
-    /// covers: fix-90
-    #[test]
-    fn fix_90_grafana_vmid_is_read_and_defaults_to_the_gateway() {
-        std::fs::write(
-            "/tmp/homelab-fix90-test.toml",
-            "token = \"0123456789abcdef0123\"\ngrafana_vmid = 113\n",
-        )
-        .unwrap();
-        let cfg = load_config_from("/tmp/homelab-fix90-test.toml".into());
-        assert_eq!(cfg.safety.grafana_vmid, 113);
-        std::fs::write(
-            "/tmp/homelab-fix90-test.toml",
-            "token = \"0123456789abcdef0123\"\ngateway_vmid = 112\n",
-        )
-        .unwrap();
-        let cfg = load_config_from("/tmp/homelab-fix90-test.toml".into());
-        assert_eq!(cfg.safety.grafana_vmid, 112);
-        let _ = std::fs::remove_file("/tmp/homelab-fix90-test.toml");
-    }
 
     /// H8: the probe layer feeds real data — stale backups and a dead
     /// offsite remote must surface, healthy state must not.
@@ -1806,19 +1391,7 @@ port = 5003
         H: Fn(AppState, RpcRequest) -> Fut + Clone + Send + Sync + 'static,
         Fut: std::future::Future<Output = RpcResponse> + Send + 'static,
     {
-        // Loaded by path, not through HOMELAB_CONFIG, for the reason fix-36's
-        // test gives: tests run in parallel and another one sets it.
-        // One file per call: tests run in parallel, and a shared path let one
-        // test read the file while another was rewriting it.
-        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let path = format!(
-            "/tmp/homelab-loopback-test-{}-{}.toml",
-            std::process::id(),
-            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        );
-        std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
-        let config = load_config_from(path.clone());
-        let _ = std::fs::remove_file(&path);
+        let config = config_from_text("token = \"0123456789abcdef0123\"\n");
         serve_state_on_loopback(test_state(config), handler).await
     }
 
@@ -2867,7 +2440,6 @@ port = 5003
                 applied_hash: String::new(),
                 manifest: Some(mk(1024)),
                 enabled: true,
-                native: None,
                 natives: Vec::new(),
                 incomplete_step: None,
                 route_file: None,
@@ -2885,7 +2457,6 @@ port = 5003
                 applied_hash: String::new(),
                 manifest: Some(mk(4096)),
                 enabled: true,
-                native: None,
                 natives: Vec::new(),
                 incomplete_step: None,
                 route_file: None,
@@ -2938,7 +2509,9 @@ impl Executor for RealExecutor {
             Err(_) => {
                 if let Some(pgid) = group.and_then(|p| i32::try_from(p).ok()) {
                     // SAFETY: killpg only sends a signal; the group is the one
-                    // this call created for the child it spawned.
+                    // this call created for the child it spawned. The one
+                    // exception to the workspace's `unsafe_code = "deny"`.
+                    #[allow(unsafe_code)]
                     unsafe {
                         libc::killpg(pgid, libc::SIGKILL);
                     }
@@ -4062,31 +3635,6 @@ fn log_refused(state: &AppState, peer: SocketAddr, path: &str) {
     );
 }
 
-/// E4: check every 20 minutes; when the local hour matches `hour` and a
-/// stack's last backup is >20h old, run backup (E1) then auto-updates (D9)
-/// for that stack. Uses the same op machinery as RPCs (op-lock, incidents,
-/// notifications), so a client-triggered deploy never overlaps.
-/// Y1: the nightly backups, several at a time.
-///
-/// Kenny asked why so much of a run is spent waiting, and measuring answered
-/// it: on 2026-09-02 a full round took about 38 minutes for thirteen stacks,
-/// of which only ~6 minutes was actually writing data. The other half hour
-/// was 36 small questions to Google Drive — does this repository exist, which
-/// snapshots are there, forget the old ones — each one waiting on a
-/// round-trip, not on bandwidth. That kind of waiting overlaps almost
-/// perfectly, which is why this helps far more than a bandwidth argument
-/// would suggest.
-///
-/// The global lock is taken ONCE for the whole round rather than dropped:
-/// backups still cannot interleave with a deploy or a destroy, exactly as
-/// before. What changed is only that they can interleave with EACH OTHER.
-/// That is the conservative half of the win, and it is the half that is
-/// obviously safe.
-///
-/// `limit` bounds how many run at once. Not a constant: a backup pauses its
-/// containers to take a clean snapshot, so the number is also "how much of
-/// the house may be briefly still at 04:00" — which is Kenny's call, not the
-/// author's (he chose three).
 use homelab_core::ops::backup::NightBackup;
 
 async fn run_backup_batch(

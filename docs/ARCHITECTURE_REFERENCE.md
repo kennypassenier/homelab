@@ -55,15 +55,15 @@ flowchart LR
 ```
 <sub>Source: `client/src/main.rs`, `client/src/spec.rs`, `client/src/release.rs`, `host/src/main.rs`, `core/src/ops/backup.rs`, `core/src/ops/native.rs`.</sub>
 
-- Five workspace members (`Cargo.toml:3`); the release builds only
+- Four workspace members (`Cargo.toml:3`); the release builds only
   `homelab-host` and `homelab` (`.github/workflows/release.yml:26`).
-  `tui-preview` is a mockup on simulated data (`tui-preview/Cargo.toml:5`).
+  `tui-preview`, a mockup on simulated data, sits outside the workspace (`exclude`, fix-135).
 - Containers are reached only through `pct exec` (`core/src/executor.rs:161-174`)
   and `pct push` of a staged file (`core/src/ops/util.rs:99-107`).
 - Frames are bare JSON: the host opens with `ServerMsg::Hello`
   (`host/src/main.rs:2707-2716`), the client answers with an `RpcRequest`
-  (`client/src/main.rs:1160`). The `Envelope {v, topic, id, payload}` in
-  `proto/src/lib.rs:370-377` is defined and used by neither binary.
+  (`client/src/main.rs`). There is no envelope; AR5 was amended to this on
+  2026-09-27 (`docs/ARCHITECTURE_DECISIONS.md`).
 - Version skew: the client refuses a mutating command to a host older than
   itself and tells you to run `homelab release-update` first
   (`client/src/main.rs:1203-1212`).
@@ -483,20 +483,20 @@ Verification: `SHA256SUMS.minisig` over `SHA256SUMS` with the compiled
 | AR2 | Executor trait | `core/src/executor.rs:58-73` |
 | AR3 | step pipelines, one runner | `core/src/runner.rs` |
 | AR4 | typed JSON, schema version, atomic writes | `core/src/state.rs`, `host/src/main.rs:1549-1570` |
-| AR5 | envelope `{v, topic, id, payload}` | type defined, not used on the wire (section 1) |
+| AR5 | bare JSON frames (amended 2026-09-27; the envelope was removed) | `proto/src/lib.rs`, section 1 |
 | AR6 | Elm-style TUI over `Backend` | `client/src/tui/backend.rs:33,40,173`; `update` at `client/src/tui/model.rs:389` |
 | AR7 | `OperatorError` what, why, remedy | `core/src/error.rs:41-45` |
-| AR8 | templates via minijinja | no crate depends on minijinja |
+| AR8 | no template engine (amended 2026-09-27) | string substitution in `client/src/scaffold.rs` |
 | AR9 | hard CI gates | `ci.yml:29-42`: fmt, clippy `-D warnings`, tests |
 | AR10 | tagged releases with sha256 | `release.yml:1-40`, no signature |
 | AR11 | TOML config, YAML manifests | `host/src/main.rs:369-396`; `client/src/spec.rs:54-56` |
 | AR12 | serial mutations | `host/src/main.rs:1667,2944` |
 | AR13 | journal names interrupted ops | `core/src/incidents.rs:117-137` |
 | AR14 | incident bundle per failure | `core/src/incidents.rs:56-110` |
-| AR15 | journald plus a JSONL ring | stderr to the journal, no colour codes; every line of an operation inside `rpc{id,stack}` or `stack{stack}` and `op{op}` spans, step starts and finishes logged (fix-122, `journal_subscriber`, `run_op_locked`); no ring, no runtime debug toggle |
-| AR16 | frame capture, `commands.sh` replay | replay yes (`core/src/incidents.rs:39-52`); no frame-capture toggle found |
+| AR15 | journald only (amended 2026-09-27) | stderr to the journal, no colour codes; every line of an operation inside `rpc{id,stack}` or `stack{stack}` and `op{op}` spans, step starts and finishes logged (fix-122, `journal_subscriber`, `run_op_locked`); no ring, no runtime debug toggle |
+| AR16 | `commands.sh` replay, no frame capture (amended 2026-09-27) | `core/src/incidents.rs` |
 | AR17 | dependency policy | a process rule |
-| AR18 | MSRV 1.88 with its own CI job | `Cargo.toml:7` says 1.88; builds use 1.97 (`rust-toolchain.toml:13`); `ci.yml` has one job, `check` (`:17`), while its comment says branch protection requires an `msrv` context (`:6-9`) |
+| AR18 | MSRV 1.88, checked in `make release` (amended 2026-09-27) | `Cargo.toml` `rust-version`; `Makefile` release target; no CI job (finding `ci-hygiene-gaps`) |
 | AR19 | MIT OR Apache-2.0 | `Cargo.toml:8`, both license files |
 
 Looks wrong, is deliberate:
@@ -522,7 +522,7 @@ Looks wrong, is deliberate:
 | a registration outside the container (a file on another machine, a list entry) | the deploy step that adds it, its removal in `unregister` (`core/src/ops/destroy.rs:207`), a removal in the deploy when the stack file can drop it, a row in `docs/deployment/REGISTRATION_SURFACE.md`, a test in `core/tests/declarative_cleanup_tests.rs` |
 | data a removal must keep | a path in the `RetiredRecord` (`core/src/state.rs:183-204`), filled in `core/src/ops/retired.rs`, so `wipe` can find it |
 | a catalog app | `presets/<name>/` only |
-| a host setting | `FileConfig` and `KNOWN_TOP` in `host/src/main.rs` (`:274`), or the daemon warns it is unknown |
+| a host setting | a field of `FileConfig` in `host/src/main.rs` and its resolved value in `Config`; `unknown_keys` and the settings save follow the struct |
 | a safety rule | `core/src/safety.rs` and a test that proves the refusal |
 
 ## Numbers

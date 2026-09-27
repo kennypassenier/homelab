@@ -33,7 +33,6 @@ fn one_stack() -> homelab_core::state::HostState {
             applied_hash: String::new(),
             manifest: None,
             enabled: true,
-            native: None,
             natives: Vec::new(),
             incomplete_step: None,
             route_file: None,

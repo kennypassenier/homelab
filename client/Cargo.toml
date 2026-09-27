@@ -17,14 +17,19 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 futures-util.workspace = true
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
-tokio-rustls = "0.26"
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 rustls = "0.23"
-sha2 = "0.10"
+sha2.workspace = true
 toml.workspace = true
 ratatui = "0.30"
 crossterm = { version = "0.29", features = ["event-stream"] }
-base64 = "0.22"
+base64.workspace = true
 
 [dev-dependencies]
-rcgen = "0.13"
+rcgen.workspace = true
+# Only the TLS pin tests use it (rust-code-hygiene, 2026-09-27: it was a
+# normal dependency, built into every release binary).
+tokio-rustls = "0.26"
+
+[lints]
+workspace = true

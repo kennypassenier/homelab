@@ -21,7 +21,6 @@ fn state_with_stack(applied_at: u64) -> HostState {
             applied_hash: String::new(),
             manifest: None,
             enabled: true,
-            native: None,
             natives: Vec::new(),
             incomplete_step: None,
             route_file: None,

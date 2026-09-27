@@ -19,7 +19,7 @@
 //!   fact, because a zero read out of a failed measurement is a false
 //!   finding wearing plausible numbers.
 
-use crate::executor::{Cmd, Executor};
+use crate::executor::{shq, Cmd, Executor};
 use crate::ops::fleetcheck::{
     BootFact, CoverageFact, GrowthFact, LiveFacts, RouteFact, SeedFact, WatchedBackupFact,
 };
@@ -261,9 +261,9 @@ pub async fn gather_live_facts_with(
                 &[
                     "-c",
                     &format!(
-                        "rclone lsjson --files-only '{}' 2>&1 | \
+                        "rclone lsjson --files-only {} 2>&1 | \
                          sed -n 's/.*\"ModTime\":\"\\([^\"]*\\)\".*/\\1/p' | sort | tail -1",
-                        w.rclone_path
+                        shq(&w.rclone_path)
                     ),
                 ],
                 180,
@@ -378,8 +378,8 @@ pub async fn gather_live_facts_with(
                 .iter()
                 .map(|p| {
                     format!(
-                        "printf '%s ' '{}'; df -Pk '{}' 2>/dev/null | tail -n +2 | head -1; echo",
-                        p, p
+                        "printf '%s ' {q}; df -Pk {q} 2>/dev/null | tail -n +2 | head -1; echo",
+                        q = shq(p)
                     )
                 })
                 .collect::<Vec<_>>()
@@ -397,7 +397,7 @@ pub async fn gather_live_facts_with(
                 .collect();
             let find = format!(
                 "find {} -maxdepth 2 -xdev -type f -name '*.log' -size +{}k -printf '%s %p\\n' 2>/dev/null; true",
-                paths.iter().map(|p| format!("'{}'", p)).collect::<Vec<_>>().join(" "),
+                paths.iter().map(|p| shq(p)).collect::<Vec<_>>().join(" "),
                 crate::ops::fleetcheck::BIG_LOG_BYTES / 1024
             );
             if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &find], 120)).await {
@@ -442,7 +442,7 @@ pub async fn gather_live_facts_with(
         if !declared.is_empty() {
             let script = declared
                 .iter()
-                .map(|(p, _, _)| format!("stat -c '%u %n' '{}' 2>/dev/null", p))
+                .map(|(p, _, _)| format!("stat -c '%u %n' {} 2>/dev/null", shq(p)))
                 .collect::<Vec<_>>()
                 .join("; ");
             if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 60)).await {

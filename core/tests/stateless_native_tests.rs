@@ -59,7 +59,6 @@ fn a_stateless_unit_has_no_repository_to_copy() {
             last_backup: 1,
             applied_hash: String::new(),
             manifest: None,
-            native: None,
             natives: vec![unit("drillsvc", true), unit("keeper", false)],
             enabled: true,
             incomplete_step: None,

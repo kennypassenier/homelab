@@ -128,7 +128,6 @@ fn record(m: &StackManifest) -> StackState {
         applied_hash: String::new(),
         manifest: Some(m.clone()),
         enabled: true,
-        native: None,
         natives: Vec::new(),
         incomplete_step: None,
         route_file: None,
@@ -591,7 +590,7 @@ async fn destroy_from_state_keeps_every_safety_gate() {
     assert!(!r.ok && r.error.unwrap().why.contains("no manifest"));
     // Unknown stack.
     assert!(!destroy_recorded(&c, "ghost", "ghost", true).await.ok);
-    assert!(exec.calls_containing("pct destroy").is_empty());
+    assert!(exec.ran("pct", &["destroy"]) == 0);
     assert_eq!(load_state(&exec).await.stacks.len(), 3);
 }
 
@@ -802,7 +801,6 @@ async fn a_native_unit_dropped_from_the_stack_is_stopped_and_unregistered_with_i
             .collect::<Vec<_>>(),
         vec!["kyu"]
     );
-    assert!(rec.native.is_none());
     let gone = after
         .retired
         .get("kyu/oldsvc")

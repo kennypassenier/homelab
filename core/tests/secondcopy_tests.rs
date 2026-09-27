@@ -114,7 +114,7 @@ fn stack_state(
         last_backup,
         applied_hash: String::new(),
         manifest,
-        native: None,
+
         natives: natives
             .into_iter()
             .map(|u| NativeServiceManifest {

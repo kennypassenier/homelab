@@ -118,6 +118,115 @@ async fn service_policies(
         .collect())
 }
 
+/// fix-118 (compose-update-verify-weak, 2026-09-27): F300, ported from the
+/// native units. The verify after `up -d` asked "did one service start",
+/// read once, right away: a two-service app with a crashed Postgres, or a
+/// container in a restart loop that is `running` for part of every cycle,
+/// passed as a good update. This asks whether the app STAYS up:
+///
+/// - every service in `want` (the ones that ran before the update) is
+///   running within 30 s,
+/// - and stays running through a 60 s settle window,
+/// - with every container's `RestartCount` unchanged — a counter, which no
+///   lucky sampling can hide a restart loop from,
+/// - and no container `unhealthy`; one whose healthcheck is still `starting`
+///   gets up to two more minutes to say `healthy`.
+///
+/// `services` is the fix-117 scope (` svc1 svc2`, or empty for the app).
+/// Each failure prints its own token, so the 04:00 reader can tell "never
+/// came up" from "came up and died".
+pub fn settle_script(stack: &str, app: &str, want: &[String], services: &str) -> String {
+    format!(
+        "cd '/opt/{stack}/{app}' || exit 1; \
+         want='{want}'; \
+         running() {{ docker compose ps --services --status running{svcs} | sort; }}; \
+         missing() {{ r=$(running); for w in $want; do echo \"$r\" | grep -qx \"$w\" || echo \"$w\"; done; }}; \
+         counts() {{ docker compose ps -q{svcs} | xargs -r docker inspect --format '{{{{.Name}}}} {{{{.RestartCount}}}}' | sort; }}; \
+         health() {{ docker compose ps -q{svcs} | xargs -r docker inspect --format '{{{{.Name}}}} {{{{if .State.Health}}}}{{{{.State.Health.Status}}}}{{{{end}}}}'; }}; \
+         i=0; while [ -n \"$(missing)\" ] && [ $i -lt 15 ]; do sleep 2; i=$((i+1)); done; \
+         m=$(missing); [ -z \"$m\" ] || {{ echo NOT_RUNNING $m; exit 1; }}; \
+         r0=$(counts); i=0; \
+         while [ $i -lt 12 ]; do sleep 5; \
+           m=$(missing); [ -z \"$m\" ] || {{ echo DIED_IN_WINDOW $m; exit 1; }}; \
+           [ \"$(counts)\" = \"$r0\" ] || {{ echo RESTART_LOOP; exit 1; }}; \
+           u=$(health | grep ' unhealthy$'); [ -z \"$u\" ] || {{ echo UNHEALTHY $u; exit 1; }}; \
+           i=$((i+1)); done; \
+         i=0; while health | grep -q ' starting$'; do \
+           [ $i -ge 24 ] && {{ echo NEVER_HEALTHY; exit 1; }}; sleep 5; i=$((i+1)); done; \
+         u=$(health | grep ' unhealthy$'); [ -z \"$u\" ] || {{ echo UNHEALTHY $u; exit 1; }}; \
+         echo HEALTHY",
+        stack = stack,
+        app = app,
+        want = want.join(" "),
+        svcs = services
+    )
+}
+
+/// fix-118: the services that were running before the update — the ones the
+/// settle check requires afterwards. A service that was already down is not
+/// the update's to raise.
+async fn running_services(
+    exec: &dyn Executor,
+    vmid: u16,
+    stack: &str,
+    app: &str,
+    services: &str,
+) -> Result<Vec<String>, CoreError> {
+    let out = super::util_pct_sh(
+        exec,
+        vmid,
+        &format!(
+            "cd '/opt/{}/{}' && docker compose ps --services --status running{}",
+            stack, app, services
+        ),
+        60,
+    )
+    .await?;
+    let mut names: Vec<String> = out
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|l| {
+            !l.is_empty()
+                && l.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        })
+        .map(str::to_string)
+        .collect();
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+/// fix-118: run the settle check. The outer error is the executor's; the
+/// inner one is the check's verdict.
+async fn settle(
+    exec: &dyn Executor,
+    vmid: u16,
+    stack: &str,
+    app: &str,
+    want: &[String],
+    services: &str,
+) -> Result<Result<(), String>, CoreError> {
+    let out =
+        super::util_pct_sh(exec, vmid, &settle_script(stack, app, want, services), 330).await?;
+    if out.success() {
+        return Ok(Ok(()));
+    }
+    let why = format!("{} {}", out.stdout.trim(), out.stderr.trim());
+    Ok(Err(why.trim().to_string()))
+}
+
+/// fix-118: did `up -d` start different images from the ones captured?
+fn images_changed(before: &[CapturedImage], after: &[CapturedImage]) -> bool {
+    let ids = |v: &[CapturedImage]| {
+        let mut ids: Vec<String> = v.iter().map(|c| c.image_id.clone()).collect();
+        ids.sort();
+        ids
+    };
+    ids(before) != ids(after)
+}
+
 async fn verify_app(
     exec: &dyn Executor,
     vmid: u16,
@@ -394,6 +503,14 @@ pub async fn update(
             Ok(StepOutcome::Unchanged)
         });
 
+        // fix-118: what ran before, which is what must run after.
+        let mut ran_before: Vec<String> = Vec::new();
+        let ran_step = format!("{} :: running before", app);
+        step!(runner, &ran_step, {
+            ran_before = running_services(exec, vmid, &stack, app, &services).await?;
+            Ok(StepOutcome::Unchanged)
+        });
+
         // O10: ask before walking in. Only Jellyfin is asked, because it is
         // the only service here where an update lands in somebody's evening —
         // and the check fails CLOSED, so an unreachable or unparseable answer
@@ -559,10 +676,30 @@ pub async fn update(
         });
 
         let verify_step = format!("{} :: verify", app);
+        let mut settle_why: Option<String> = None;
         step!(runner, &verify_step, {
-            if verify_app(exec, vmid, &stack, app).await? {
+            // fix-118: the quick reading first; then, when `up -d` started a
+            // new image, whether the app stays up (F300). A night that brought
+            // nothing new costs no settle window.
+            let mut healthy = verify_app(exec, vmid, &stack, app).await?;
+            if healthy {
+                let after = capture_app(exec, vmid, &stack, app).await?;
+                if images_changed(&captured, &after) {
+                    if let Err(why) =
+                        settle(exec, vmid, &stack, app, &ran_before, &services).await?
+                    {
+                        settle_why = Some(why);
+                        healthy = false;
+                    }
+                }
+            }
+            if healthy {
                 return Ok(StepOutcome::Unchanged);
             }
+            let settled = match &settle_why {
+                Some(why) => format!(" (settle check: {})", why),
+                None => String::new(),
+            };
             // Failed after update → roll back to the captured images (B6).
             if captured.is_empty() {
                 return Err(CoreError::Other(format!(
@@ -595,16 +732,22 @@ pub async fn update(
                 ),
                 None => String::new(),
             };
-            if verify_app(exec, vmid, &stack, app).await? {
+            // fix-118: the rollback is held to the same settle check.
+            let back = verify_app(exec, vmid, &stack, app).await?
+                && settle(exec, vmid, &stack, app, &ran_before, &services)
+                    .await?
+                    .is_ok();
+            if back {
                 Err(CoreError::Other(format!(
-                    "{} unhealthy after update — ROLLED BACK to previous image, now healthy. \
+                    "{} unhealthy after update{} — ROLLED BACK to previous image, now healthy. \
                      The new image is bad; check its release notes{}",
-                    app, kept
+                    app, settled, kept
                 )))
             } else {
                 Err(CoreError::Other(format!(
-                    "{} unhealthy after update AND after rollback — manual intervention needed{}",
-                    app, kept
+                    "{} unhealthy after update{} AND after rollback — manual intervention \
+                     needed{}",
+                    app, settled, kept
                 )))
             }
         });

@@ -1227,7 +1227,12 @@ or `SHIFT+U` in the TUI. Per app (`core/src/ops/update.rs:121-270`):
 5. **stop-first**: containers labelled `com.homelab.update.stop-first=true`
    are stopped with a 60-second grace first.
 6. **up** with `docker compose up -d --remove-orphans`.
-7. **verify**, and roll back when the app is not running (B6).
+7. **verify**, and roll back when the app is not running (B6). When `up -d`
+   started a new image, the app must also stay up (fix-118, the F300 check
+   of the native units): every service that ran before the update running
+   within 30 s and through a 60 s window, no container's restart count
+   moving, and no healthcheck `unhealthy` (a `starting` one gets two more
+   minutes). The rollback is held to the same check.
 
 The command sends only the stack file, so no secrets are needed
 (`client/src/main.rs:779-807`). Tests: `core/tests/m4_ops_tests.rs:662,694,737`.

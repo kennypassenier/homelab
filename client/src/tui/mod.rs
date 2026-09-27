@@ -6,6 +6,7 @@
 
 pub mod backend;
 pub mod fx;
+pub mod keys;
 pub mod model;
 pub mod theme;
 pub mod view;

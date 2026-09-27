@@ -1479,12 +1479,11 @@ fn h19_every_palette_action_reaches_a_real_handler() {
     // removing — and it drifted on the first change: six new actions were
     // wired into the dispatcher and the copy here still held eleven. So the
     // dispatcher source is read instead of mirrored.
-    use homelab_client::tui::model::PALETTE;
     let src = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/model.rs"),
     )
     .unwrap();
-    for action in PALETTE {
+    for action in homelab_client::tui::keys::palette() {
         assert!(
             src.contains(&format!("\"{}\" =>", action.id)),
             "palette action '{}' ({}) has no dispatcher arm",
@@ -2328,8 +2327,8 @@ fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
         op: "deploy-gateway".into(),
         step: "service checks".into(),
         what: "routes went 29 → 28".into(),
-        if_allowed: "de uitrol gaat door en legt het nieuwe aantal vast".into(),
-        if_stopped: "de uitrol faalt en bundelt een incident".into(),
+        if_allowed: "the deploy goes on and records the new count".into(),
+        if_stopped: "the deploy fails and bundles an incident".into(),
     });
 
     // It is drawn where the operator is already reading — over the feed, not
@@ -2337,17 +2336,18 @@ fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
     let out = render(&m);
     assert!(out.contains("service checks"), "the step must be named");
     assert!(out.contains("routes went 29"), "and what happened");
+    // fix-107: in the language of the rest of the interface.
     assert!(
-        out.contains("toelaten") && out.contains("stoppen"),
+        out.contains("[a] allow") && out.contains("[s] stop"),
         "both keys visible: {}",
         out
     );
     assert!(
-        out.contains("de uitrol gaat door"),
+        out.contains("the deploy goes on"),
         "each key says what it DOES, not just its label (D82)"
     );
     assert!(
-        out.contains("onbeheerd"),
+        out.contains("unattended"),
         "and that not answering is its own outcome"
     );
 
@@ -3049,6 +3049,104 @@ fn fix_106_meaningful_text_never_moves() {
             "the alert line moved at tick {}",
             tick
         );
+    }
+}
+
+/// tui-indicators-claim-too-much (expert panel, 2026-09-27): every stack's
+/// detail showed `safety whitelist ✓ hostname-guard ✓ fail-closed ✓` as a
+/// constant, and `drift none — intent == runtime` in green for stacks whose
+/// drift nobody computed. Only what was measured is shown.
+/// covers: fix-107
+#[test]
+fn fix_107_the_stack_detail_shows_only_what_was_measured() {
+    let mut m = ready_model();
+    press(&mut m, crossterm::event::KeyCode::Char('2'));
+    let out = render(&m);
+    assert!(!out.contains("whitelist ✓"), "a constant posing as a check");
+    assert!(!out.contains("intent == runtime"), "{}", out);
+    assert!(out.contains("unknown (no local files)"), "{}", out);
+
+    let fleet = m.fleet.as_mut().unwrap();
+    fleet.stacks[0].applied_hash = "h1".into();
+    m.local_stacks = vec![("syncthing".into(), "/nonexistent/syncthing".into())];
+    assert!(render(&m).contains("not compared yet"));
+    m.local_hashes.insert("syncthing".into(), "h1".into());
+    assert!(render(&m).contains("files match what the host applied"));
+    m.local_hashes.insert("syncthing".into(), "h2".into());
+    m.fleet.as_mut().unwrap().stacks[0].drift = true;
+    let out = render(&m);
+    assert!(out.contains("[CHANGED]"), "{}", out);
+    assert!(
+        !out.contains("[UPD]"),
+        "UPD read as SHIFT+U, update the images"
+    );
+}
+
+/// The key map said `1-4` for six tabs and left keys out; the palette,
+/// meant so that nothing needs a keybind first, had no deploy, plan, park,
+/// new stack, and its "selected stack" entries did not say
+/// which. The key map, the footer and the palette now come from one table.
+/// covers: fix-107
+#[test]
+fn fix_107_key_map_footer_and_palette_come_from_one_table() {
+    use homelab_client::tui::keys::{footer, palette, KEYMAP};
+    let mut m = ready_model();
+    press(&mut m, crossterm::event::KeyCode::Char('h'));
+    let help = render(&m);
+    assert!(help.contains("1-6"), "{}", help);
+    assert!(!help.contains("1-4"), "{}", help);
+    for b in KEYMAP.iter().filter(|b| b.shown_on(Tab::Dashboard)) {
+        assert!(help.contains(b.key), "help lacks {}: {}", b.key, help);
+    }
+    for tab in Tab::ALL {
+        for (key, _) in footer(tab) {
+            assert!(
+                KEYMAP.iter().any(|b| b.key == key && b.shown_on(tab)),
+                "footer key {} is not in the key map",
+                key
+            );
+        }
+    }
+    let labels: Vec<String> = palette().iter().map(|a| a.label.clone()).collect();
+    // Manual checks stay off the TUI by form I2 (see CLI_ONLY).
+    for wanted in ["deploy", "plan", "park", "new stack", "host update"] {
+        assert!(
+            labels.iter().any(|l| l.contains(wanted)),
+            "palette lacks {}: {:?}",
+            wanted,
+            labels
+        );
+    }
+    let mut m = ready_model();
+    m.palette_open = true;
+    m.palette_input = "deploy".into();
+    let out = render(&m);
+    assert!(out.contains("deploy: syncthing"), "{}", out);
+    assert!(
+        out.contains("SHIFT+D"),
+        "the palette names the key: {}",
+        out
+    );
+}
+
+/// The host-question window was Dutch in an English interface, and so was
+/// the deploy's own question.
+/// covers: fix-107
+#[test]
+fn fix_107_one_language_per_surface() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    for file in ["client/src/tui/view/focus.rs", "core/src/ops/deploy.rs"] {
+        let src = std::fs::read_to_string(root.join(file)).unwrap();
+        for dutch in ["toelaten", "stoppen", "onbeheerd", "de uitrol"] {
+            let code: String = src
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(!code.contains(dutch), "{} still says {:?}", file, dutch);
+        }
     }
 }
 

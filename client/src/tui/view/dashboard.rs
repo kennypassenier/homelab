@@ -289,8 +289,9 @@ fn draw_fleet(f: &mut Frame, model: &Model, area: Rect) {
             if !s.enabled {
                 flags.push_str("[OFF] ");
             }
+            // fix-107: CHANGED, not UPD (which read as SHIFT+U).
             if s.drift {
-                flags.push_str("[UPD] ");
+                flags.push_str("[CHANGED] ");
             }
             if !s.env_sealed {
                 flags.push_str("[NOENV]");

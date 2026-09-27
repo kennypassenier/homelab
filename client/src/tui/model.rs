@@ -145,6 +145,21 @@ pub struct Confirm {
     pub prompt: String,
 }
 
+/// fix-107: see [`Model::drift_state`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriftState {
+    /// The local files differ from what the host applied.
+    Changed,
+    /// Compared, and the same.
+    Same,
+    /// No stack directory here to compare with.
+    NoLocalFiles,
+    /// The host recorded no applied hash.
+    NeverApplied,
+    /// The local hash has not come back yet.
+    NotCompared,
+}
+
 /// fix-102 (tui-single-keys-no-confirm, 2026-09-27): a single key whose
 /// consequence lasts — park a stack, update the host, drop a retention tier,
 /// quit with something unsaved or running — states that consequence and
@@ -409,6 +424,24 @@ impl Model {
         let latest = self.latest_release.as_deref()?;
         (!self.host_version.is_empty() && crate::release::version_newer(latest, &self.host_version))
             .then_some(latest)
+    }
+
+    /// fix-107 (tui-indicators-claim-too-much, 2026-09-27): what is known
+    /// about a stack's drift. `drift none — intent == runtime` was shown in
+    /// green for stacks nobody compared, because the flag stays false when
+    /// there is nothing to compare.
+    pub fn drift_state(&self, s: &homelab_proto::StackView) -> DriftState {
+        if !self.local_stacks.iter().any(|(n, _)| *n == s.name) {
+            DriftState::NoLocalFiles
+        } else if s.applied_hash.is_empty() {
+            DriftState::NeverApplied
+        } else if !self.local_hashes.contains_key(&s.name) {
+            DriftState::NotCompared
+        } else if s.drift {
+            DriftState::Changed
+        } else {
+            DriftState::Same
+        }
     }
 
     pub fn stack_count(&self) -> usize {
@@ -904,21 +937,7 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 model.outbox.push(Command::GetState);
                 model.request_today();
             }
-            KeyCode::Char('u') => {
-                if let Some(tag) = model.host_update_available().map(String::from) {
-                    // fix-102: one Shift away from SHIFT+U (update the
-                    // selected stack), so it asks first.
-                    model.yes_no = Some(YesNo {
-                        title: format!("UPDATE HOST → {}", tag),
-                        prompt: format!(
-                            "Update the host daemon from v{} to {}? It replaces its own \
-                             binary and restarts itself; a failed selfcheck rolls back.",
-                            model.host_version, tag
-                        ),
-                        action: YesNoAction::HostUpdate(tag),
-                    });
-                }
-            }
+            KeyCode::Char('u') => ask_host_update(model),
             KeyCode::Char('D') => start_deploy(model),
             // The six operations Kenny reaches for in ordinary use (form T1).
             // They existed only on the command line, which meant opening a
@@ -971,65 +990,9 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 });
                 model.outbox.push(Command::Incidents);
             }
-            KeyCode::Char('e') => {
-                // H8 (light): toggle the selected stack's enabled flag.
-                // fix-102: it sits next to `r` and parking lasts, so the
-                // cost is stated and `y` is needed.
-                if let Some(fleet) = &model.fleet {
-                    if let Some(s) = fleet.stacks.get(model.selected_stack) {
-                        let (title, prompt) = if s.enabled {
-                            (
-                                format!("PARK {}", s.name),
-                                format!(
-                                    "Park {}? No nightly backup and no nightly update, and \
-                                     onboot is cleared: after a power cut it stays down. \
-                                     Running containers are not touched.",
-                                    s.name
-                                ),
-                            )
-                        } else {
-                            (
-                                format!("UNPARK {}", s.name),
-                                format!(
-                                    "Unpark {}? Nightly backups and updates resume, and it \
-                                     starts again after a power cut.",
-                                    s.name
-                                ),
-                            )
-                        };
-                        model.yes_no = Some(YesNo {
-                            title,
-                            prompt,
-                            action: YesNoAction::Park {
-                                stack: s.name.clone(),
-                                enabled: !s.enabled,
-                            },
-                        });
-                    }
-                }
-            }
+            KeyCode::Char('e') => ask_park(model),
             KeyCode::Char('p') => open_plan(model),
-            KeyCode::Char('n') => {
-                let vmid = next_free_vmid(model);
-                let first_ram = model.presets.first().map(|p| p.meta.ram_mb).unwrap_or(1024);
-                model.wizard = Some(Wizard {
-                    step: WizStep::Preset,
-                    preset_idx: 0,
-                    name: String::new(),
-                    name_suggested: false,
-                    ram: first_ram,
-                    cores: 2,
-                    disk: 8,
-                    swap: crate::scaffold::StackDefaults::default().swap_for(first_ram),
-                    swap_touched: false,
-                    vmid,
-                    res_field: ResField::Ram,
-                    disk_typing: false,
-                    storage_paths: Vec::new(),
-                    storage_idx: 0,
-                    storage_no_data: Vec::new(),
-                });
-            }
+            KeyCode::Char('n') => open_wizard(model),
             _ => {}
         },
         Tab::Logs => match key.code {
@@ -1271,96 +1234,10 @@ fn settings_webhook_edit_key(model: &mut Model, key: crossterm::event::KeyEvent)
     }
 }
 
-pub struct PaletteAction {
-    pub label: &'static str,
-    pub id: &'static str,
-}
-
-pub const PALETTE: &[PaletteAction] = &[
-    PaletteAction {
-        label: "go: dashboard",
-        id: "tab.dashboard",
-    },
-    PaletteAction {
-        label: "go: stacks",
-        id: "tab.stacks",
-    },
-    PaletteAction {
-        label: "go: log stream",
-        id: "tab.logs",
-    },
-    PaletteAction {
-        label: "go: doctor",
-        id: "tab.doctor",
-    },
-    PaletteAction {
-        label: "go: settings",
-        id: "tab.settings",
-    },
-    PaletteAction {
-        label: "go: shell",
-        id: "tab.shell",
-    },
-    PaletteAction {
-        label: "refresh state",
-        id: "refresh",
-    },
-    PaletteAction {
-        label: "run doctor",
-        id: "doctor",
-    },
-    // The six from form T1, reachable by name as well as by key — the point
-    // of the palette is that nothing in this interface requires knowing a
-    // keybind first.
-    PaletteAction {
-        label: "backup: selected stack",
-        id: "op.backup",
-    },
-    PaletteAction {
-        label: "update: selected stack",
-        id: "op.update",
-    },
-    PaletteAction {
-        label: "restore: selected stack (asks first)",
-        id: "op.restore",
-    },
-    PaletteAction {
-        label: "guards: apply to selected stack",
-        id: "op.guards",
-    },
-    PaletteAction {
-        label: "adopt: native services of selected stack",
-        id: "op.adopt",
-    },
-    PaletteAction {
-        label: "install-native: binaries of selected stack",
-        id: "op.install-native",
-    },
-    PaletteAction {
-        label: "fleet check: repo against reality",
-        id: "op.check",
-    },
-    PaletteAction {
-        label: "incidents: list captured bundles",
-        id: "op.incidents",
-    },
-    PaletteAction {
-        label: "cycle effects (F2)",
-        id: "fx",
-    },
-    PaletteAction {
-        label: "help",
-        id: "help",
-    },
-    PaletteAction {
-        label: "quit",
-        id: "quit",
-    },
-];
-
+// fix-107: the palette is drawn from the one key table, `tui::keys`.
 pub fn palette_matches(input: &str) -> Vec<usize> {
     let q = input.to_lowercase();
-    PALETTE
+    crate::tui::keys::palette()
         .iter()
         .enumerate()
         .filter(|(_, a)| q.is_empty() || a.label.to_lowercase().contains(&q))
@@ -1395,7 +1272,7 @@ fn palette_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         KeyCode::Enter => {
             let matches = palette_matches(&model.palette_input);
             if let Some(&ai) = matches.get(model.palette_sel) {
-                let id = PALETTE[ai].id;
+                let id = crate::tui::keys::palette()[ai].id;
                 model.palette_open = false;
                 run_action(model, id);
             }
@@ -1426,6 +1303,12 @@ fn run_action(model: &mut Model, id: &str) {
         "op.adopt" => start_native_adopt(model),
         "op.install-native" => start_native_install(model),
         "op.check" => start_fleet_check(model),
+        // fix-107: the palette offers every stack action a key does.
+        "op.new" => open_wizard(model),
+        "op.plan" => open_plan(model),
+        "op.deploy" => start_deploy(model),
+        "op.park" => ask_park(model),
+        "op.host-update" => ask_host_update(model),
         "op.restore" => {
             if let Some(name) = selected_stack_name(model) {
                 model.confirm = Some(Confirm {
@@ -1567,6 +1450,87 @@ fn confirm_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         }
         _ => {}
     }
+}
+
+/// H7: offer the host update, when a newer release is known (key `u`, and
+/// the palette since fix-107).
+fn ask_host_update(model: &mut Model) {
+    if let Some(tag) = model.host_update_available().map(String::from) {
+        // fix-102: one Shift away from SHIFT+U (update the
+        // selected stack), so it asks first.
+        model.yes_no = Some(YesNo {
+            title: format!("UPDATE HOST → {}", tag),
+            prompt: format!(
+                "Update the host daemon from v{} to {}? It replaces its own \
+                 binary and restarts itself; a failed selfcheck rolls back.",
+                model.host_version, tag
+            ),
+            action: YesNoAction::HostUpdate(tag),
+        });
+    }
+}
+
+/// H8 (light): park or unpark the selected stack (key `e`, and the palette
+/// since fix-107).
+fn ask_park(model: &mut Model) {
+    // H8 (light): toggle the selected stack's enabled flag.
+    // fix-102: it sits next to `r` and parking lasts, so the
+    // cost is stated and `y` is needed.
+    if let Some(fleet) = &model.fleet {
+        if let Some(s) = fleet.stacks.get(model.selected_stack) {
+            let (title, prompt) = if s.enabled {
+                (
+                    format!("PARK {}", s.name),
+                    format!(
+                        "Park {}? No nightly backup and no nightly update, and \
+                         onboot is cleared: after a power cut it stays down. \
+                         Running containers are not touched.",
+                        s.name
+                    ),
+                )
+            } else {
+                (
+                    format!("UNPARK {}", s.name),
+                    format!(
+                        "Unpark {}? Nightly backups and updates resume, and it \
+                         starts again after a power cut.",
+                        s.name
+                    ),
+                )
+            };
+            model.yes_no = Some(YesNo {
+                title,
+                prompt,
+                action: YesNoAction::Park {
+                    stack: s.name.clone(),
+                    enabled: !s.enabled,
+                },
+            });
+        }
+    }
+}
+
+/// G2: open the new-stack wizard (key `n`, and the palette since fix-107).
+fn open_wizard(model: &mut Model) {
+    let vmid = next_free_vmid(model);
+    let first_ram = model.presets.first().map(|p| p.meta.ram_mb).unwrap_or(1024);
+    model.wizard = Some(Wizard {
+        step: WizStep::Preset,
+        preset_idx: 0,
+        name: String::new(),
+        name_suggested: false,
+        ram: first_ram,
+        cores: 2,
+        disk: 8,
+        swap: crate::scaffold::StackDefaults::default().swap_for(first_ram),
+        swap_touched: false,
+        vmid,
+        res_field: ResField::Ram,
+        disk_typing: false,
+        storage_paths: Vec::new(),
+        storage_idx: 0,
+        storage_no_data: Vec::new(),
+    });
 }
 
 /// fix-102: what a `y` to an open question does.

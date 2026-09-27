@@ -3011,10 +3011,11 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 op: format!("deploy-{}", m.stack_name),
                 step: "service checks".into(),
                 what: bad.join("; "),
-                if_allowed: "de uitrol gaat door en legt de nieuwe waarde vast als de \
-                             normale stand"
-                    .into(),
-                if_stopped: "de uitrol faalt hier en bundelt een incident".into(),
+                // fix-107: in the language of the client that shows it.
+                if_allowed: "the deploy goes on and records the new value as the normal \
+                             one"
+                .into(),
+                if_stopped: "the deploy fails here and bundles an incident".into(),
             })
             .await;
         match answer {

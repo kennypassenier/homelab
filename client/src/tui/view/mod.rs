@@ -15,7 +15,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph, Tabs};
 
 use crate::tui::fx::{self, FlickerPhase, FxLevel};
-use crate::tui::model::{palette_matches, Conn, Model, Screen, Tab, PALETTE};
+use crate::tui::model::{palette_matches, Conn, Model, Screen, Tab};
 use crate::tui::theme::THEME;
 
 pub fn draw(f: &mut Frame, model: &Model) {
@@ -94,7 +94,7 @@ pub fn draw(f: &mut Frame, model: &Model) {
         draw_yes_no(f, q);
     }
     if model.help_open {
-        draw_help(f);
+        draw_help(f, model.tab);
     }
     if model.palette_open {
         draw_palette(f, model);
@@ -664,7 +664,9 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
             .map(|s| s.name.as_str())
             .collect();
         if !drifted.is_empty() {
-            attn.push(format!("⚠ UPD pending: {}", drifted.join(",")));
+            // fix-107: CHANGED, not UPD, which read as SHIFT+U (update
+            // the images) — this is files that differ from what was applied.
+            attn.push(format!("⚠ CHANGED, not deployed: {}", drifted.join(",")));
         }
         for s in fleet.stacks.iter().filter(|s| !s.env_sealed) {
             attn.push(format!("⚠ NOENV {} (deploy fails closed)", s.name));
@@ -771,49 +773,8 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
     // SHIFT+ for a capital. `[R] refresh` once sat beside SHIFT+R = restore,
     // and the ticker's "press U" beside SHIFT+U = update the selected stack
     // (test-plan part A, 2026-09-26, finding 2).
-    let keys: &[(&str, &str)] = match model.tab {
-        Tab::Dashboard | Tab::Stacks => &[
-            ("1-6/TAB", "tabs"),
-            ("n", "new stack"),
-            ("p", "plan"),
-            ("SHIFT+D", "deploy"),
-            ("r", "refresh"),
-            ("CTRL+K", "palette"),
-            ("h", "help"),
-            ("q", "quit"),
-        ],
-        Tab::Logs => &[
-            ("LEFT/RIGHT", "source"),
-            ("UP/DOWN", "scroll"),
-            ("SPACE", "follow"),
-            ("SHIFT+G", "tail"),
-            ("CTRL+K", "palette"),
-            ("q", "quit"),
-        ],
-        Tab::Doctor => &[
-            ("r/ENTER", "re-run"),
-            ("1-6/TAB", "tabs"),
-            ("CTRL+K", "palette"),
-            ("q", "quit"),
-        ],
-        Tab::Shell => &[
-            ("type+ENTER", "run"),
-            ("LEFT/RIGHT", "target (empty input)"),
-            ("UP", "recall"),
-            ("TAB", "tabs"),
-            ("CTRL+K", "palette"),
-        ],
-        Tab::Settings => &[
-            ("UP/DOWN", "field"),
-            ("LEFT/RIGHT", "value"),
-            ("a", "add tier"),
-            ("d", "del tier"),
-            ("ENTER", "edit webhook"),
-            ("SHIFT+S", "save"),
-            ("r", "reload"),
-            ("q", "quit"),
-        ],
-    };
+    // fix-107: from the one key table the key map and the palette use.
+    let keys = crate::tui::keys::footer(model.tab);
     // The status sits on the right and the hints take what is left, whole
     // hints only. Both used to be drawn across the full width, so a status
     // landed on top of the last hints: `[Q]link established` (finding 1).
@@ -848,10 +809,13 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
     );
 }
 
-fn draw_help(f: &mut Frame) {
+/// fix-107 (tui-indicators-claim-too-much, 2026-09-27): the key map of the
+/// tab in front of the operator, from the one key table. It used to be a
+/// list of its own that said `1-4` for six tabs and left keys out.
+fn draw_help(f: &mut Frame, tab: Tab) {
     let area = f.area();
-    let w = 60u16.min(area.width - 4);
-    let h = 24u16.min(area.height - 4);
+    let w = 76u16.min(area.width - 4);
+    let h = area.height.saturating_sub(2);
     let rect = Rect {
         x: (area.width - w) / 2,
         y: area.height / 8,
@@ -869,35 +833,19 @@ fn draw_help(f: &mut Frame) {
         .style(Style::new().bg(THEME.elevated).fg(THEME.text));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
-    let rows: &[(&str, &str)] = &[
-        ("1-4 or & é \" '", "switch tab (AZERTY-safe)"),
-        ("TAB / SHIFT+TAB", "cycle tabs"),
-        ("UP / DOWN", "move selection / scroll"),
-        ("LEFT / RIGHT", "log source (Logs tab)"),
-        ("SPACE", "follow logs"),
-        ("n / p / SHIFT+D", "new stack · plan · deploy"),
-        ("SHIFT+B", "back up the selected stack"),
-        ("SHIFT+U", "update the selected stack"),
-        ("SHIFT+R", "restore it (asks for the name first)"),
-        ("g", "apply the runaway guards"),
-        ("c", "fleet check — repo against reality"),
-        ("i", "incident bundles"),
-        ("r", "refresh fleet state"),
-        ("e", "park/unpark stack for nightly runs"),
-        ("u", "update the host binary when one is offered"),
-        ("CTRL+K", "command palette"),
-        ("F2", "cycle effect intensity"),
-        ("h", "this help"),
-        ("q", "quit"),
-    ];
-    let lines: Vec<Line> = rows
+    let lines: Vec<Line> = crate::tui::keys::KEYMAP
         .iter()
-        .map(|(k, v)| {
+        .filter(|b| b.shown_on(tab) && !b.key.is_empty())
+        .map(|b| {
             Line::from(vec![
-                Span::styled(format!("  {:<16}", k), THEME.hint()),
-                Span::styled(v.to_string(), Style::new().fg(THEME.text)),
+                Span::styled(format!("  {:<12}", b.key), THEME.hint()),
+                Span::styled(b.what, Style::new().fg(THEME.text)),
             ])
         })
+        .chain(std::iter::once(Line::from(Span::styled(
+            "  CTRL+K lists every action by name; other tabs have their own keys",
+            THEME.muted_style(),
+        ))))
         .collect();
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -950,6 +898,13 @@ fn draw_palette(f: &mut Frame, model: &Model) {
         rows[1],
     );
     let matches = palette_matches(&model.palette_input);
+    let actions = crate::tui::keys::palette();
+    // fix-107: "selected stack" says which one.
+    let selected = model
+        .fleet
+        .as_ref()
+        .and_then(|f| f.stacks.get(model.selected_stack))
+        .map(|s| s.name.clone());
     let items: Vec<ListItem> = matches
         .iter()
         .enumerate()
@@ -965,7 +920,13 @@ fn draw_palette(f: &mut Frame, model: &Model) {
             };
             ListItem::new(Line::from(vec![
                 Span::styled(if sel { "▶ " } else { "  " }, style),
-                Span::styled(PALETTE[ai].label, style),
+                Span::styled(
+                    match &selected {
+                        Some(name) => actions[ai].label.replace("selected stack", name),
+                        None => actions[ai].label.clone(),
+                    },
+                    style,
+                ),
             ]))
         })
         .collect();

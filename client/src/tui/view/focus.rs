@@ -137,16 +137,17 @@ pub fn draw(f: &mut Frame, model: &Model, focus: &Focus) {
             )),
             Line::from(""),
             Line::from(vec![
-                Span::styled("  [a] toelaten  ", THEME.ok().add_modifier(Modifier::BOLD)),
+                // fix-107: one language per surface; the TUI is English.
+                Span::styled("  [a] allow  ", THEME.ok().add_modifier(Modifier::BOLD)),
                 Span::styled(ask.if_allowed.clone(), Style::new().fg(THEME.muted)),
             ]),
             Line::from(vec![
-                Span::styled("  [s] stoppen   ", THEME.err().add_modifier(Modifier::BOLD)),
+                Span::styled("  [s] stop   ", THEME.err().add_modifier(Modifier::BOLD)),
                 Span::styled(ask.if_stopped.clone(), Style::new().fg(THEME.muted)),
             ]),
             Line::from(""),
             Line::from(Span::styled(
-                "  geen antwoord = onbeheerd; de stap gaat niet door",
+                "  no answer = unattended; the step does not go ahead",
                 Style::new().fg(THEME.faint),
             )),
         ];

@@ -327,7 +327,7 @@ before starting the TUI anywhere else:
 - **A question from the host**: when a deploy's service checks see a value go
   down, the host pauses and asks. Only `a` (allow) and `s` (stop) do anything
   until it is answered (`client/src/tui/model.rs:620-633`). The window
-  shows `[a] toelaten` and `[s] stoppen` (`client/src/tui/view/focus.rs:138-142`).
+  shows `[a] allow` and `[s] stop` (`client/src/tui/view/focus.rs:138-142`).
   Unanswered, it times out after `ask_timeout_s` seconds, 120 by default, and
   counts as a stop (`host/src/main.rs:146-152,669-671`,
   `core/src/ops/deploy.rs:2617-2659`). On the command line the question is
@@ -626,11 +626,17 @@ you answer with `homelab checks answer` (see section 3).
 
 The host stores a hash of what it last applied per stack
 (`core/src/ops/deploy.rs:2402`). The TUI hashes the local `stacks/<name>/`
-the same way (`core/src/manifest.rs:951`) and marks a stack `[UPD]` when the
-two differ (`client/src/tui/model.rs:490-509`,
-`client/src/tui/view/stacks.rs:59-61`); the ticker lists them as
-`⚠ UPD pending: <stacks>` (`client/src/tui/view/mod.rs:615`). Redeploy to
-converge. Only stacks found under the TUI's `stacks/` are compared.
+the same way (`core/src/manifest.rs:951`) and marks a stack `[CHANGED]` when
+the two differ (`client/src/tui/model.rs:490-509`,
+`client/src/tui/view/stacks.rs:59-61`); the alert line lists them as
+`⚠ CHANGED, not deployed: <stacks>` (`client/src/tui/view/mod.rs:615`).
+Redeploy to converge. Only stacks found in the repository's `stacks/` are
+compared; the detail pane says `unknown (no local files)`, `unknown (nothing
+applied recorded)` or `not compared yet` instead of a green `none` for any
+other (fix-107). The key map (`h`), the footer and the palette (`CTRL+K`)
+come from one table, `client/src/tui/keys.rs`; `h` shows the keys of the tab
+in front of you, and the palette names each action's key and the stack it
+would act on.
 
 #### B5 · Transaction journal
 

@@ -1694,6 +1694,35 @@ port = 5003
         assert!(kept, "armed after this daemon started: not its own");
     }
 
+    /// fix-124 (expert panel, exec-logged-verbatim, 2026-09-27): a remote
+    /// exec is recorded in audit.log and the journal before it runs, and was
+    /// recorded verbatim, so a password typed on the command line was kept
+    /// on pve indefinitely. The record still names the vmid and the command,
+    /// with the values the shared masker recognises taken out.
+    #[test]
+    fn fix_124_an_exec_command_is_masked_before_it_is_recorded() {
+        let line = exec_audit_line(
+            1_800_000_000,
+            108,
+            "PGPASSWORD=hunter2-x9 psql -h db -c 'select 1'; curl -H 'Authorization: Bearer tk-77' x",
+        );
+        assert!(
+            !line.contains("hunter2-x9") && !line.contains("tk-77"),
+            "{}",
+            line
+        );
+        assert!(
+            line.starts_with("1800000000 exec vmid=108 ") && line.contains("psql -h db"),
+            "the record still says what ran where: {}",
+            line
+        );
+        assert!(
+            line.ends_with('\n') && line.lines().count() == 1,
+            "{:?}",
+            line
+        );
+    }
+
     /// A `MakeWriter` into a shared buffer, to read what the journal gets.
     #[derive(Clone, Default)]
     struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -4045,6 +4074,23 @@ async fn notify(
 /// fix-36: remote exec checks the no-touch list the daemon actually runs
 /// with. It used `SafetyConfig::default()`, so a vmid host.toml added to the
 /// list (F8 lets config widen it) was still reachable through `homelab exec`.
+/// The audit.log line for one remote exec, which the journal repeats.
+///
+/// fix-124 (expert panel, exec-logged-verbatim, 2026-09-27): the command
+/// passes the shared secret masker first. It was recorded verbatim, so a
+/// password typed on an exec command line stayed on pve for good. The
+/// masker knows shapes (`NAME=value` for secret-looking names, URL
+/// passwords, `Bearer <token>`), not every secret: a bare password argument
+/// still lands, which the user guide says.
+fn exec_audit_line(ts: u64, vmid: u16, command: &str) -> String {
+    format!(
+        "{} exec vmid={} cmd={:?}\n",
+        ts,
+        vmid,
+        homelab_core::executor::mask_secrets(command)
+    )
+}
+
 fn exec_allowed(config: &Config, vmid: u16) -> Result<(), homelab_core::error::CoreError> {
     homelab_core::safety::exec_guard(config.exec_enabled, &config.safety, vmid)
 }
@@ -5373,7 +5419,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let audit = format!("{} exec vmid={} cmd={:?}\n", ts, vmid, command);
+            let audit = exec_audit_line(ts, vmid, &command);
             let audit_path = format!("{}/audit.log", state.config.state_dir);
             let _ = std::fs::OpenOptions::new()
                 .create(true)
@@ -5383,7 +5429,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     use std::io::Write as _;
                     f.write_all(audit.as_bytes())
                 });
-            info!("A6 exec vmid={} cmd={:?}", vmid, command);
+            info!("A6 {}", audit.trim_end());
             match homelab_core::executor::pct_sh(&exec, vmid, &command, 120).await {
                 Ok(out) => RpcResponse {
                     id: req.id,

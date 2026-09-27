@@ -465,7 +465,13 @@ Off until `exec_enabled = true` is set in `/etc/homelab/host.toml` on the host
 `remote exec is disabled (set exec_enabled = true in host.toml to allow it)`
 (`core/src/safety.rs:121`). Every call is appended to
 `/var/lib/homelab/audit.log` as `<unix-time> exec vmid=<n> cmd="<command>"`
-before it runs (`host/src/main.rs:3965-3979`). The command runs through
+before it runs, and the same line goes to the journal (`exec_audit_line`).
+The command is recorded after the shared secret masker (fix-124):
+`NAME=value` for a name holding TOKEN, SECRET, KEY, PASS, BEARER or
+CREDENTIAL, a password in a URL and `Bearer <token>` become `<redacted>`.
+Anything else is recorded as typed and kept on pve, so do not put a bare
+password on an exec command line; read it from a file inside the container
+instead (`cat /run/secret | tool --password-stdin`). The command runs through
 `sh -c` inside the container with a 120-second limit
 (`host/src/main.rs:3981`). A vmid on the no-touch list, compiled or added in
 `host.toml`, is refused even with exec on (`core/src/safety.rs:124-129`,

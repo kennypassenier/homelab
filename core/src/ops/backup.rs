@@ -892,11 +892,53 @@ pub async fn restore_into(
     Ok(())
 }
 
+/// fix-64 (restore-no-confirm-no-safety-snapshot, 2026-09-27): has the
+/// operator typed the stack's name for this restore? The TUI always asked;
+/// the command line went straight to the host, and the host took either. A
+/// restore overwrites live data, so the host refuses one that does not carry
+/// the name, whoever sent it.
+pub fn restore_confirmed(stack: &str, confirm: Option<&str>) -> Result<(), CoreError> {
+    match confirm {
+        Some(typed) if typed == stack => Ok(()),
+        Some(typed) => Err(CoreError::SafetyAbort(format!(
+            "restore of '{}' refused: the typed name '{}' does not match — nothing was stopped",
+            stack, typed
+        ))),
+        None => Err(CoreError::SafetyAbort(format!(
+            "restore of '{}' refused: the request carries no typed stack name — a client from \
+             before fix-64 cannot restore; update it (`homelab restore` asks for the name, \
+             `--yes` answers it for scripts)",
+            stack
+        ))),
+    }
+}
+
+/// E2 with the safety copy (fix-64) on. See `restore_with`.
 pub async fn restore(
     ctx: &OpCtx<'_>,
     m: &StackManifest,
     cfg: &BackupCfg,
     snapshot: &str,
+) -> OperationReport {
+    restore_with(ctx, m, cfg, snapshot, true).await
+}
+
+/// fix-64: where a restore keeps the data it is about to overwrite.
+fn pre_restore_dir(ctx: &OpCtx<'_>, m: &StackManifest) -> String {
+    format!(
+        "{}/pre-restore/{}-{}",
+        ctx.state_dir, m.stack_name, ctx.now_unix
+    )
+}
+
+/// E2, and `safety_copy` says whether the current data is copied aside
+/// first (fix-64). Off only on the operator's explicit `--no-safety-copy`.
+pub async fn restore_with(
+    ctx: &OpCtx<'_>,
+    m: &StackManifest,
+    cfg: &BackupCfg,
+    snapshot: &str,
+    safety_copy: bool,
 ) -> OperationReport {
     let op = format!("restore-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
@@ -993,6 +1035,74 @@ pub async fn restore(
         Ok(StepOutcome::Unchanged)
     });
 
+    // fix-64: when the damage happened before last night's backup, `latest`
+    // IS the damage, and the restore used to overwrite the only other copy
+    // of the data. The current data is copied aside first, with the stack
+    // down, into a directory of its own that nothing ever removes. Whether
+    // there is room is asked before anything is stopped.
+    let copy_dest = pre_restore_dir(ctx, m);
+    let all_paths: Vec<String> = groups
+        .iter()
+        .flat_map(|(_, paths)| paths.iter().cloned())
+        .collect();
+    if safety_copy {
+        step!(runner, "room for a safety copy", {
+            let quoted: Vec<String> = all_paths.iter().map(|p| super::util::shq(p)).collect();
+            let sizes = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &[
+                        "-c",
+                        &format!(
+                            "du -sbc {} | tail -1 | cut -f1; df -B1 --output=avail {} | tail -1; \
+                             test -e {} && echo exists || true",
+                            quoted.join(" "),
+                            super::util::shq(&ctx.state_dir),
+                            super::util::shq(&copy_dest)
+                        ),
+                    ],
+                    300,
+                ))
+                .await?;
+            if sizes.stdout.contains("exists") {
+                return Err(CoreError::SafetyAbort(format!(
+                    "{} already exists, and a safety copy is never written over — nothing has \
+                     been stopped",
+                    copy_dest
+                )));
+            }
+            let nums: Vec<u64> = sizes
+                .stdout
+                .split_whitespace()
+                .filter_map(|w| w.parse().ok())
+                .collect();
+            let enough = match nums[..] {
+                [size, avail] => avail >= size.saturating_mul(2).saturating_add(1 << 30),
+                _ => false,
+            };
+            if !enough {
+                return Err(CoreError::SafetyAbort(format!(
+                    "no room for a copy of the current data under {} ({}) :: the restore \
+                     overwrites it, and a copy needs twice its size plus 1 GiB free. Nothing has \
+                     been stopped. Free space, or restore without the copy with \
+                     `--no-safety-copy`",
+                    ctx.state_dir,
+                    sizes.stdout.trim().replace('\n', " / ")
+                )));
+            }
+            Ok(StepOutcome::Unchanged)
+        });
+    } else {
+        runner.log(
+            Level::Warn,
+            format!(
+                "[restore] --no-safety-copy: the current data of {} is overwritten without a \
+                 copy",
+                m.stack_name
+            ),
+        );
+    }
+
     // Stop the whole stack for a consistent restore.
     step!(runner, "quiesce stack", {
         for a in &m.apps {
@@ -1007,30 +1117,75 @@ pub async fn restore(
         Ok(StepOutcome::Changed)
     });
 
+    // fix-64: the copy, with the stack down so it is consistent. A copy that
+    // fails stops the restore; the stack is resumed below either way.
+    let copy_result = if safety_copy {
+        runner
+            .step("safety copy", || async {
+                let quoted: Vec<String> = all_paths.iter().map(|p| super::util::shq(p)).collect();
+                run_ok(
+                    exec,
+                    &Cmd::new(
+                        "sh",
+                        &[
+                            "-c",
+                            &format!(
+                                "mkdir -p {d} && cp -a --parents {src} {d}/",
+                                d = super::util::shq(&copy_dest),
+                                src = quoted.join(" ")
+                            ),
+                        ],
+                        cfg.restore_timeout_s,
+                    ),
+                )
+                .await?;
+                Ok(StepOutcome::Changed)
+            })
+            .await
+            .map(|_| true)
+    } else {
+        Ok(false)
+    };
+    if let Ok(true) = copy_result {
+        runner.log(
+            Level::Warn,
+            format!(
+                "[restore] the data as it was before this restore is kept at {} — nothing \
+                 removes it; delete it by hand once the restore is proven",
+                copy_dest
+            ),
+        );
+    }
+
     // G4 of the Phase-7 gate, and the same lesson `backup()` above already
     // carries in capitals: the restore may fail, but RESUME MUST ALWAYS RUN.
     // A fail-closed abort here leaves the stack composed down — after a
     // four-hour timeout on Google Drive, or a dropped connection — until a
     // human notices. That is a self-inflicted outage on the one operation
     // you run when something is already wrong.
-    let restore_result = runner
-        .step("restore data", || async {
-            for (owner, _) in &groups {
-                run_ok(
-                    exec,
-                    &restic(
-                        &cfg.restic_base,
-                        owner,
-                        &cfg.password_file,
-                        &["restore", snapshot, "--target", "/"],
-                        cfg.restore_timeout_s,
-                    ),
-                )
-                .await?;
-            }
-            Ok(StepOutcome::Changed)
-        })
-        .await;
+    let restore_result = match &copy_result {
+        Err(_) => Ok(StepOutcome::Unchanged),
+        Ok(_) => {
+            runner
+                .step("restore data", || async {
+                    for (owner, _) in &groups {
+                        run_ok(
+                            exec,
+                            &restic(
+                                &cfg.restic_base,
+                                owner,
+                                &cfg.password_file,
+                                &["restore", snapshot, "--target", "/"],
+                                cfg.restore_timeout_s,
+                            ),
+                        )
+                        .await?;
+                    }
+                    Ok(StepOutcome::Changed)
+                })
+                .await
+        }
+    };
 
     step!(runner, "resume stack", {
         for a in &m.apps {
@@ -1045,6 +1200,9 @@ pub async fn restore(
         Ok(StepOutcome::Changed)
     });
 
+    if let Err(e) = copy_result {
+        return runner.finish_err("safety copy", &e);
+    }
     if let Err(e) = restore_result {
         return runner.finish_err("restore data", &e);
     }

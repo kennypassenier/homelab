@@ -1390,7 +1390,16 @@ kept, and the reason must be at least 10 characters
 ```bash
 homelab restore stacks/syncthing              # latest snapshot
 homelab restore stacks/syncthing <snapshot-id>
+homelab restore stacks/syncthing --yes        # scripts: the name counts as typed
 ```
+
+Since fix-64 (2026-09-27) the command asks you to type the stack name, as the
+TUI always did, and the host refuses a restore request without it. Before it
+writes anything, with the stack down, the host copies the current data to
+`/var/lib/homelab/pre-restore/<stack>-<unix time>/` and prints where; nothing
+removes that copy. When there is no room for it (twice the data plus 1 GiB
+free) the restore stops before anything is stopped; `--no-safety-copy`
+restores without the copy, deliberately.
 
 The client prints `▶ restore <stack> from '<snapshot>'`
 (`client/src/main.rs:758-778`). The host runs `safety gates`, then

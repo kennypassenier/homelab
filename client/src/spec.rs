@@ -1142,7 +1142,10 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          ```\n\n\
          **A compose stack.** When the daemon is up, `homelab restore stacks/<stack> \
          [snapshot]` does the following, and by hand it is the same (`restore` in \
-         core/src/ops/backup.rs):\n\n```sh\n\
+         core/src/ops/backup.rs). It asks for the stack name first (`--yes` for scripts) \
+         and, with the stack down, copies the current data to \
+         `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it \
+         (fix-64; `--no-safety-copy` skips that copy):\n\n```sh\n\
          pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose down'   # every app\n\
          export RESTIC_REPOSITORY={base}/<app>-config                   # every repository of the stack\n\
          restic snapshots\n\

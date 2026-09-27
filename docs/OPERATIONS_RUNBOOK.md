@@ -795,10 +795,15 @@ docker, `Makefile:45-49`), then
 only; no secrets and no latch key needed (`client/src/main.rs:749-757`,
 `client/src/spec.rs:68-84`).
 
-**Restore to latest.** `homelab restore stacks/<name>`, or TUI `R`, which
-asks for the stack name first (`client/src/tui/model.rs:801-817`). The
-host checks every owning app's repository holds a snapshot, stops every app
-(`docker compose down`, **point of no return**), runs
+**Restore to latest.** `homelab restore stacks/<name>`, or TUI `R`; both ask
+for the stack name first, `--yes` answers it for scripts, and the host
+refuses a request without it (fix-64, `restore_confirmed` in
+`core/src/ops/backup.rs`). The host checks every owning app's repository
+holds a snapshot and that there is room for a copy of the current data,
+stops every app (`docker compose down`), copies the current data to
+`/var/lib/homelab/pre-restore/<stack>-<unix time>/` (kept; delete it by hand
+once the restore is proven; `--no-safety-copy` skips it), then
+(**point of no return**) runs
 `restic restore latest --target /` per repository, starts every app again
 even when the restore failed, and verifies they run
 (`core/src/ops/backup.rs:803-962`).

@@ -86,6 +86,10 @@ fn mock_hostname(exec: &MockExecutor, vmid: u16, stack: &str) {
     // HAS been deployed. A test about the other case says so itself with
     // `respond_first`.
     exec.respond_always("test -d", CmdOutput::ok("yes\n"));
+    // fix-64: and a host with room for a restore's safety copy: 1 kB of
+    // data, 50 GB free. A test about a full disk says so with
+    // `respond_first`.
+    exec.respond_always("du -sbc", CmdOutput::ok("1000\n50000000000\n"));
 }
 
 // ── C2: gated destroy ───────────────────────────────────────────────────────
@@ -654,6 +658,101 @@ async fn e2_restore_fails_when_app_not_running_after() {
         .unwrap()
         .why
         .contains("not running after restore"));
+}
+
+// ── fix-64: a restore asks first and keeps what it overwrites ──────────────
+
+/// fix-64 (restore-no-confirm-no-safety-snapshot, 2026-09-27): the TUI asked
+/// for the stack's name before a restore, the command line went straight to
+/// the host, and the host accepted either. A restore overwrites live data, so
+/// the host now refuses one whose request does not carry the typed name.
+#[test]
+fn fix_64_the_host_refuses_a_restore_without_the_typed_stack_name() {
+    use homelab_core::ops::backup::restore_confirmed;
+    assert!(restore_confirmed("paperwork", None).is_err());
+    assert!(restore_confirmed("paperwork", Some("paperwrk")).is_err());
+    assert!(restore_confirmed("paperwork", Some("paperwork")).is_ok());
+}
+
+const PRE_RESTORE_COPY: &str = "/var/lib/homelab/pre-restore/test-1760000000";
+
+/// fix-64: when the corruption happened before last night's backup, `latest`
+/// is the corruption, and the restore overwrote the only other copy of the
+/// data. The current data is now copied aside, with the stack down, before
+/// anything is written over it, and the copy is kept.
+#[tokio::test]
+async fn fix_64_a_restore_copies_the_current_data_aside_before_it_writes() {
+    use homelab_core::ops::backup::restore_with;
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("snapshots", CmdOutput::ok("ID  Time\nabc123  today\n"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = restore_with(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+        "latest",
+        true,
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let calls = exec.calls();
+    let pos = |n: &str| {
+        calls
+            .iter()
+            .position(|c| c.contains(n))
+            .unwrap_or_else(|| panic!("no call containing {:?} in {:#?}", n, calls))
+    };
+    assert!(
+        pos("compose down") < pos("cp -a"),
+        "copied with the stack down"
+    );
+    assert!(
+        pos("cp -a") < pos("restic restore"),
+        "copied before it is written over"
+    );
+    assert!(
+        calls[pos("cp -a")].contains("/appdata/test/test-config")
+            && calls[pos("cp -a")].contains(PRE_RESTORE_COPY),
+        "{}",
+        calls[pos("cp -a")]
+    );
+    assert!(
+        exec.calls_containing(&format!("rm -rf '{}'", PRE_RESTORE_COPY))
+            .is_empty(),
+        "the copy is kept"
+    );
+    assert!(
+        sink.lines().iter().any(|l| l.contains(PRE_RESTORE_COPY)),
+        "the transcript says where it is"
+    );
+}
+
+/// fix-64: no room for the copy refuses the restore before anything stops.
+#[tokio::test]
+async fn fix_64_no_room_for_the_safety_copy_refuses_before_anything_stops() {
+    use homelab_core::ops::backup::restore_with;
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("snapshots", CmdOutput::ok("ID  Time\nabc123  today\n"));
+    exec.respond_first("du -sbc", CmdOutput::ok("40000000000\n50000000000\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = restore_with(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &BackupCfg::default(),
+        "latest",
+        true,
+    )
+    .await;
+    assert!(!report.ok);
+    let why = report.error.unwrap().why;
+    assert!(why.contains("--no-safety-copy"), "{}", why);
+    assert!(exec.calls_containing("compose down").is_empty());
+    assert!(exec.calls_containing("restic restore").is_empty());
 }
 
 // ── D9/B6: managed updates with rollback ────────────────────────────────────
@@ -2270,6 +2369,8 @@ async fn f38_restore_honours_the_configured_timeout() {
     // repository holds no snapshots, so this test has to get past that to
     // reach the thing it is actually about — the timeout.
     exec.respond_always("snapshots", CmdOutput::ok("ID  Time\nabc123  today\n"));
+    // fix-64: and past the room check for the safety copy.
+    exec.respond_always("du -sbc", CmdOutput::ok("1000\n50000000000\n"));
     let sink = VecSink::new();
     let j = NullJournal;
     let cfg = BackupCfg {

@@ -3405,14 +3405,38 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
             resp
         }
-        Rpc::RestoreStack { manifest, snapshot } => {
+        Rpc::RestoreStack {
+            manifest,
+            snapshot,
+            confirm,
+            skip_safety_copy,
+        } => {
+            // fix-64: no typed name, no restore — whoever sent the request.
+            if let Err(e) = homelab_core::ops::backup::restore_confirmed(
+                &manifest.stack_name,
+                confirm.as_deref(),
+            ) {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e.to_string(),
+                    deferred: None,
+                };
+            }
             // The configured target and timeout, not the compiled defaults:
             // this is the path where a hardcoded 1800 s used to kill a large
             // restore over Google Drive at thirty minutes (F38).
             let cfg = state.config.backup.clone();
             run_mutating_op(state, &exec, req.id, "restore", |ctx| {
                 Box::pin(async move {
-                    homelab_core::ops::backup::restore(ctx, &manifest, &cfg, &snapshot).await
+                    homelab_core::ops::backup::restore_with(
+                        ctx,
+                        &manifest,
+                        &cfg,
+                        &snapshot,
+                        !skip_safety_copy,
+                    )
+                    .await
                 })
             })
             .await

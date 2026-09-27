@@ -61,6 +61,14 @@ pub enum Command {
     RestoreStack {
         manifest: Box<StackManifest>,
         snapshot: String,
+        /// fix-64: the stack name as the operator typed it. The host refuses
+        /// a restore without it; absent from clients before fix-64.
+        #[serde(default)]
+        confirm: Option<String>,
+        /// fix-64: `--no-safety-copy`, the deliberate way past the copy of
+        /// the current data a restore takes first.
+        #[serde(default)]
+        skip_safety_copy: bool,
     },
     /// D9/B6: managed update with rollback. `app: None` = whole stack.
     UpdateStack {

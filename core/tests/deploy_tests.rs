@@ -2793,6 +2793,153 @@ mod native_from_zero {
         );
     }
 
+    /// Two units on one stack that both read a file called `token.env`, the
+    /// shape of kyu-runner and http-switchboard on CT 109.
+    fn two_token_units_spec() -> DeploySpec {
+        let mut sp = native_spec();
+        sp.manifest.natives = vec!["runner".into(), "board".into()];
+        sp.manifest.storage = ["runner", "board"]
+            .iter()
+            .map(|unit| homelab_core::manifest::MountSpec {
+                host_path: format!("/appdata/drill/{unit}-config"),
+                mount_point: format!("/appdata/drill/{unit}-config"),
+                app: Some(unit.to_string()),
+                no_backup: None,
+                host_owner_uid: Some(100000),
+                no_data: false,
+            })
+            .collect();
+        sp.files.retain(|f| f.path != "kyu/kyu.service");
+        for unit in ["runner", "board"] {
+            sp.files.push(FileBlob {
+                path: format!("{unit}/{unit}.service"),
+                content: format!(
+                    "[Unit]\nDescription={unit}\n\n[Service]\nUser={unit}\n\
+                     EnvironmentFile=/appdata/drill/{unit}-config/token.env\n\
+                     ExecStart=/usr/local/bin/{unit}\n\n[Install]\nWantedBy=multi-user.target\n"
+                ),
+                mode: None,
+            });
+        }
+        sp
+    }
+
+    /// fix-37: the vault named a unit's file by its basename only, so two
+    /// units reading `token.env` shared ONE vault file and the vault kept
+    /// whichever was copied last. A rebuild would have handed both units the
+    /// same token.
+    ///
+    /// covers: fix-37
+    #[tokio::test]
+    async fn fix_37_two_units_with_the_same_file_name_keep_separate_vault_copies() {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        for unit in ["runner", "board"] {
+            exec.respond_always(&format!("id -u {unit}"), CmdOutput::ok("990"));
+            exec.respond_always(
+                &format!("test -s '/appdata/drill/{unit}-config/token.env'"),
+                CmdOutput::ok("yes"),
+            );
+            exec.respond_always(
+                &format!("test -x '/usr/local/bin/{unit}'"),
+                CmdOutput::ok("yes"),
+            );
+            exec.respond_always(
+                &format!("systemctl is-active {unit}"),
+                CmdOutput::ok("active"),
+            );
+            exec.respond_always(
+                &format!("cat '/appdata/drill/{unit}-config/token.env'"),
+                CmdOutput::ok(&format!("TOKEN={unit}-secret\n")),
+            );
+        }
+        let sink = VecSink::new();
+        let journal = NullJournal;
+        let report = deploy(&ctx(&exec, &sink, &journal), &two_token_units_spec()).await;
+        assert!(report.ok, "{:?}", report.error);
+        let runner = exec.file("/var/lib/homelab/secrets/drill/runner-config/token.env");
+        let board = exec.file("/var/lib/homelab/secrets/drill/board-config/token.env");
+        assert_eq!(
+            runner.as_deref(),
+            Some("TOKEN=runner-secret\n"),
+            "{:?}",
+            exec.file_paths()
+        );
+        assert_eq!(
+            board.as_deref(),
+            Some("TOKEN=board-secret\n"),
+            "{:?}",
+            exec.file_paths()
+        );
+    }
+
+    /// fix-37: the flat copy an older deploy left behind is ambiguous when two
+    /// units share the file name, so it is never restored into either; a
+    /// named missing file beats a unit started with the other one's token.
+    ///
+    /// covers: fix-37
+    #[tokio::test]
+    async fn fix_37_an_ambiguous_old_flat_vault_copy_is_not_restored() {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        for unit in ["runner", "board"] {
+            exec.respond_always(&format!("id -u {unit}"), CmdOutput::ok("990"));
+            exec.respond_always(
+                &format!("test -s '/appdata/drill/{unit}-config/token.env'"),
+                CmdOutput::ok(""),
+            );
+            exec.respond_always(
+                &format!("test -x '/usr/local/bin/{unit}'"),
+                CmdOutput::ok("yes"),
+            );
+        }
+        exec.seed_file(
+            "/var/lib/homelab/secrets/drill/token.env",
+            "TOKEN=whoever-was-last\n",
+        );
+        let sink = VecSink::new();
+        let journal = NullJournal;
+        let _ = deploy(&ctx(&exec, &sink, &journal), &two_token_units_spec()).await;
+        assert!(
+            !sink
+                .lines()
+                .iter()
+                .any(|l| l.contains("restored from the vault")),
+            "{:?}",
+            sink.lines()
+        );
+        assert!(exec
+            .calls_containing("systemctl enable --now runner")
+            .is_empty());
+    }
+
+    /// fix-37: a single unit's file keeps being restored from the flat copy an
+    /// older deploy wrote, so the change of vault layout loses nothing.
+    ///
+    /// covers: fix-37
+    #[tokio::test]
+    async fn fix_37_an_unambiguous_old_flat_vault_copy_is_still_restored() {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        exec.respond_always("id -u kyu", CmdOutput::ok("998"));
+        exec.respond_always(
+            "test -s '/appdata/drill/kyu-config/kyu.env'",
+            CmdOutput::ok(""),
+        );
+        exec.respond_always("test -x '/usr/local/bin/kyu'", CmdOutput::ok("yes"));
+        exec.seed_file("/var/lib/homelab/secrets/drill/kyu.env", "KYU_PORT=8080\n");
+        exec.enqueue("systemctl is-active kyu", CmdOutput::ok("inactive"));
+        exec.respond_always("systemctl is-active kyu", CmdOutput::ok("active"));
+        let sink = VecSink::new();
+        let journal = NullJournal;
+        let report = deploy(&ctx(&exec, &sink, &journal), &native_spec()).await;
+        assert!(report.ok, "{:?}", report.error);
+        assert!(sink
+            .lines()
+            .iter()
+            .any(|l| l.contains("restored from the vault")));
+    }
+
     #[tokio::test]
     async fn a_secret_that_exists_nowhere_stops_the_start_instead_of_looping() {
         let exec = MockExecutor::new();

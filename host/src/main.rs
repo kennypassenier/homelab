@@ -1580,8 +1580,19 @@ impl Executor for RealExecutor {
             }
             let tmp = format!("{}.tmp", path);
             {
-                let mut f =
-                    std::fs::File::create(&tmp).map_err(|e| CoreError::State(e.to_string()))?;
+                // Created with its final mode: a secret written into a file
+                // that is world-readable until the chmod below is readable in
+                // that window. `mode()` applies at creation (minus umask),
+                // and the explicit set_permissions afterwards still fixes the
+                // exact bits.
+                use std::os::unix::fs::OpenOptionsExt;
+                let _ = std::fs::remove_file(&tmp);
+                let mut f = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(mode)
+                    .open(&tmp)
+                    .map_err(|e| CoreError::State(e.to_string()))?;
                 f.write_all(content.as_bytes())
                     .map_err(|e| CoreError::State(e.to_string()))?;
                 f.sync_all().map_err(|e| CoreError::State(e.to_string()))?;

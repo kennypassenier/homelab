@@ -163,11 +163,24 @@ pub async fn orphan_files(
 
 /// A5: the vault filename for a file a unit reads.
 ///
-/// `/appdata/kyu/kyu-config/kyu.env` becomes `kyu.env`, so the vault holds
-/// `<state_dir>/secrets/<stack>/kyu.env` beside the per-app `.env` copies
-/// that compose stacks already get. Flat on purpose: two units on one stack
-/// cannot name the same file, because the paths are `<unit>-config/...`.
+/// fix-37: `<parent dir>/<name>`, so `/appdata/kyu/kyu-runner-config/token.env`
+/// becomes `kyu-runner-config/token.env` under `<state_dir>/secrets/<stack>/`.
+/// It used to be the bare file name, on the belief that two units on one
+/// stack cannot name the same file. They can: kyu-runner and
+/// http-switchboard both read `token.env`, so they shared ONE vault copy and
+/// the vault kept whichever was copied last; a rebuild would have given both
+/// the same token.
 fn vault_key(path: &str) -> String {
+    let mut parts = path.rsplit('/');
+    let name = parts.next().unwrap_or(path);
+    match parts.next() {
+        Some(dir) if !dir.is_empty() => format!("{}/{}", dir, name),
+        _ => name.to_string(),
+    }
+}
+
+/// The flat key older deploys wrote, still read when it is unambiguous.
+fn legacy_vault_key(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).to_string()
 }
 
@@ -2086,6 +2099,30 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             return Ok(StepOutcome::Unchanged);
         }
         let mut changed = false;
+        // fix-37: file names two or more units read. A flat vault copy
+        // written by an older deploy under such a name belongs to nobody in
+        // particular and is never restored.
+        let mut seen: std::collections::HashMap<String, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        for unit in &m.natives {
+            if let Some(blob) = spec
+                .files
+                .iter()
+                .find(|f| f.path == format!("{}/{}.service", unit, unit))
+            {
+                let need = crate::native::unit_prereqs(&blob.content);
+                for f in need.env_files.iter().chain(need.credentials.iter()) {
+                    seen.entry(legacy_vault_key(f))
+                        .or_default()
+                        .insert(f.clone());
+                }
+            }
+        }
+        let ambiguous = |f: &str| {
+            seen.get(&legacy_vault_key(f))
+                .map(|paths| paths.len() > 1)
+                .unwrap_or(false)
+        };
         for unit in &m.natives {
             let Some(blob) = spec
                 .files
@@ -2204,7 +2241,18 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     m.stack_name,
                     vault_key(f)
                 );
-                match exec.read_file(&vault).await {
+                let legacy = format!(
+                    "{}/secrets/{}/{}",
+                    ctx.state_dir,
+                    m.stack_name,
+                    legacy_vault_key(f)
+                );
+                let from_vault = match exec.read_file(&vault).await {
+                    Ok(c) if !c.trim().is_empty() => Ok(c),
+                    _ if !ambiguous(f) => exec.read_file(&legacy).await,
+                    other => other,
+                };
+                match from_vault {
                     Ok(content) if !content.trim().is_empty() => {
                         push_content(exec, m.vmid, f, &content, "600").await?;
                         log_info(format!("[native] {} restored from the vault", f));

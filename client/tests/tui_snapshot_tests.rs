@@ -2979,6 +2979,23 @@ fn fix_68_the_day_s_list_fills_the_today_panel_and_leaves_an_open_operation_alon
     assert!(out.contains("NOTHING NEEDS YOU"), "{}", out);
 }
 
+/// older-client-no-warning (expert panel, 2026-09-27): the TUI advertised
+/// only host updates; which client talks to which host was nowhere on the
+/// screen. The header names both.
+/// covers: fix-105
+#[test]
+fn fix_105_the_header_names_the_client_and_the_host_version() {
+    let mut m = ready_model();
+    m.host_version = "3.59.6".into();
+    let out = render(&m);
+    assert!(
+        out.contains(&format!("client v{}", env!("CARGO_PKG_VERSION"))),
+        "{}",
+        out
+    );
+    assert!(out.contains("host v3.59.6"), "{}", out);
+}
+
 fn press(m: &mut Model, code: crossterm::event::KeyCode) {
     use crossterm::event::{KeyEvent, KeyModifiers};
     homelab_client::tui::model::update(m, Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)));

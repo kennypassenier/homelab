@@ -98,6 +98,39 @@ pub async fn connect(host: &str, token: &str, repo_pin: Option<&str>) -> Result<
     })
 }
 
+/// fix-105 (older-client-no-warning, 2026-09-27): why `command` may not go
+/// from this client to a host at `host_version`, if it may not.
+///
+/// The mirror image of [`refuse_older_host`]. The gate refused only a client
+/// newer than the host; a stale client talking to a newer one parses the
+/// stack files with an older reader, and since ask-8 a field it drops is a
+/// field the host reads as "no longer declared, remove". Read-only commands
+/// still go through, so the mismatch can be looked at.
+pub fn refuse_older_client(command: &Command, host_version: &str) -> Option<String> {
+    let client = env!("CARGO_PKG_VERSION");
+    (crate::version::mutates(command) && crate::version::older(client, host_version)).then(|| {
+        format!(
+            "this client is v{} and the host is v{} :: an older client drops what it does \
+             not know, and the host reads a dropped field as \"no longer declared, remove\" \
+             — run 'homelab self-install' first",
+            client, host_version
+        )
+    })
+}
+
+/// fix-105: the warning a read-only command prints when this client is
+/// older than the host.
+pub fn older_client_warning(host_version: &str) -> Option<String> {
+    let client = env!("CARGO_PKG_VERSION");
+    crate::version::older(client, host_version).then(|| {
+        format!(
+            "this client is v{} and the host is v{} — 'homelab self-install' updates it; \
+             commands that change anything are refused until then",
+            client, host_version
+        )
+    })
+}
+
 /// Why `command` may not go to a host at `host_version`, if it may not.
 ///
 /// A client newer than the host loses whatever the host does not know about.

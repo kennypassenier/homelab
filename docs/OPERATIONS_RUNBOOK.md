@@ -719,6 +719,8 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
 5. **Verify.** `homelab ping` prints the host version and `"link up"`
    (`client/src/main.rs:1183-1194`).
 6. **New client** on every workstation, from the verified release asset:
+   `homelab self-install vx.y.z` does it in one step (fix-105: download,
+   checksum against `SHA256SUMS`, replace the running client). By hand:
 
    ```sh
    cd "$(mktemp -d)"

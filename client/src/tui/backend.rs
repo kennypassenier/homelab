@@ -109,7 +109,11 @@ impl Backend for RemoteBackend {
                         req_id += 1;
                         // The refusal comes back the way a failed operation
                         // does, so it lands where the operator is looking.
-                        if let Some(why) = crate::link::refuse_older_host(&cmd, &host_version) {
+                        // fix-105: and the other way round, a client older
+                        // than the host.
+                        if let Some(why) = crate::link::refuse_older_host(&cmd, &host_version)
+                            .or_else(|| crate::link::refuse_older_client(&cmd, &host_version))
+                        {
                             let refused = ServerMsg::RpcDone(homelab_proto::RpcResponse {
                                 id: req_id,
                                 ok: false,

@@ -156,7 +156,17 @@ host update (`client/src/version.rs:15-30`, `client/src/main.rs:1203-1213`).
 Read-only verbs such as `homelab check` and `homelab config` are refused too.
 The message ends with `run 'homelab release-update' first`. The reason is in
 the message: a host that predates a field ignores it, and the operation
-quietly does less than asked. The TUI has no such gate.
+quietly does less than asked. The TUI holds the same gate since fix-67.
+
+The other direction holds too (fix-105): when this client is older than the
+host, the same set of commands is refused with
+`... — run 'homelab self-install' first`, and the ones let through print
+`this client is v<x> and the host is v<y> — 'homelab self-install' updates it`
+first. `homelab self-install [tag]` downloads the release's `homelab`
+(newest when no tag is given), checks it against the release's
+`SHA256SUMS` and puts it where the running client lives; it needs `gh`, not
+the token. The TUI header shows `client v<x> · host v<y>`, yellow when the
+client is the older one.
 
 ### 0.4 Reading an answer
 

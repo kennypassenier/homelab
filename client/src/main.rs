@@ -181,7 +181,14 @@ async fn main() {
     // and `plan` (local validation only, D10).
     let needs_token = !matches!(
         cmd,
-        "help" | "plan" | "runbook" | "dashboard" | "presets" | "export" | "import"
+        "help"
+            | "plan"
+            | "runbook"
+            | "dashboard"
+            | "presets"
+            | "export"
+            | "import"
+            | "self-install"
     ) && !(cmd == "tui" && offline);
     if token.is_empty() && needs_token {
         die("HOMELAB_TOKEN is not set");
@@ -1092,6 +1099,34 @@ async fn main() {
                 Err(e) => die(&e),
             }
         }
+        // fix-105 (older-client-no-warning, 2026-09-27): the client updates
+        // itself the way `release-update` updates the host — the release's
+        // own binary, checksum-verified, then put where this one runs from.
+        // It was a five-line gh/sha256sum/install routine per workstation.
+        "self-install" => {
+            let tag = match args.get(2).cloned() {
+                Some(t) => t,
+                None => homelab_client::release::latest_release_tag()
+                    .unwrap_or_else(|| die("no release found (gh authenticated? release exists?)")),
+            };
+            let target = std::env::current_exe().unwrap_or_else(|e| {
+                die(&format!("cannot tell where this client runs from: {}", e))
+            });
+            println!(
+                "{}▶ self-install :: client {} from GitHub into {}{}",
+                C_CYAN,
+                tag,
+                target.display(),
+                C_RESET
+            );
+            let bytes = homelab_client::release::stage_client(&tag).unwrap_or_else(|e| die(&e));
+            println!("{}✓ checksum verified{}", C_GREEN, C_RESET);
+            homelab_client::release::install_binary(&bytes, &target).unwrap_or_else(|e| die(&e));
+            println!(
+                "{}✓ client {} installed{} — the next command runs it",
+                C_GREEN, tag, C_RESET
+            );
+        }
         "self-update" => {
             // H5: ship a new HOST binary over the line; the host selfchecks,
             // installs with an armed rollback, and restarts itself.
@@ -1317,6 +1352,7 @@ async fn main() {
                 "  homelab exec <vmid> <cmd...>        remote exec (A6, requires exec_enabled)"
             );
             println!("  homelab self-update <binary>        replace HOST binary w/ rollback (H5)");
+            println!("  homelab self-install [tag]          replace THIS client with a release's, checksum-verified");
             // G20 of the Phase-7 gate: eight verbs existed and appeared in no
             // help text at all, `install-native` and `release-update` among
             // them — the one that installs your own services and the one that
@@ -1490,6 +1526,16 @@ async fn rpc_exchange(
                 // data_mounts incident; the rule is in `link`).
                 if let Some(why) = homelab_client::link::refuse_older_host(&req.command, &version) {
                     die(&why);
+                }
+                // fix-105 (older-client-no-warning, 2026-09-27): the other
+                // direction — a stale client may not change anything, and
+                // says so when it only reads.
+                if let Some(why) = homelab_client::link::refuse_older_client(&req.command, &version)
+                {
+                    die(&why);
+                }
+                if let Some(warn) = homelab_client::link::older_client_warning(&version) {
+                    eprintln!("{}! {}{}", C_YELLOW, warn, C_RESET);
                 }
                 if !sent {
                     tx.send(Message::Text(serde_json::to_string(&req).unwrap().into()))

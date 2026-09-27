@@ -600,6 +600,20 @@ fn draw_tab_bar(f: &mut Frame, model: &Model, area: Rect) {
         Conn::Down => ("○ ", "LINK_DOWN", THEME.err()),
     };
 
+    // fix-105 (older-client-no-warning, 2026-09-27): which client talks to
+    // which host, in yellow when this client is the older one (it may then
+    // read, not change).
+    let client = env!("CARGO_PKG_VERSION");
+    let host = if model.host_version.is_empty() {
+        "?".to_string()
+    } else {
+        model.host_version.clone()
+    };
+    let versions_style = if crate::version::older(client, &model.host_version) {
+        Style::new().fg(THEME.yellow)
+    } else {
+        THEME.muted_style()
+    };
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(THEME.border_active())
@@ -610,6 +624,10 @@ fn draw_tab_bar(f: &mut Frame, model: &Model, area: Rect) {
         ]))
         .title(
             Line::from(vec![
+                Span::styled(
+                    format!("client v{} · host v{} ", client, host),
+                    versions_style,
+                ),
                 Span::styled(dot, conn_style),
                 Span::styled(conn_txt, conn_style),
                 Span::styled(

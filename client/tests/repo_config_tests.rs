@@ -172,3 +172,60 @@ fn the_committed_client_file_names_the_in_vlan_door_and_a_real_fingerprint() {
         pin
     );
 }
+
+/// cli-path-vs-name-and-cwd (expert panel, 2026-09-27): half the verbs took
+/// `stacks/<name>`, the other half `<name>`, and the wrong form answered
+/// "cannot read almanac/lxc-compose.yml" with no hint. Every spelling now
+/// names the same stack.
+/// covers: fix-101
+#[test]
+fn fix_101_every_spelling_of_a_stack_names_the_same_stack() {
+    use homelab_client::repo_config::stack_name;
+    for arg in [
+        "almanac",
+        "almanac/",
+        "stacks/almanac",
+        "stacks/almanac/",
+        "./stacks/almanac",
+        "/home/k/Projects/homelab/stacks/almanac",
+    ] {
+        assert_eq!(stack_name(arg), "almanac", "{}", arg);
+    }
+    // A unit inside a stack, and an app of a retired stack, keep their part.
+    assert_eq!(stack_name("stacks/kyu/kyu-runner"), "kyu/kyu-runner");
+    assert_eq!(stack_name("media/radarr"), "media/radarr");
+}
+
+/// The verbs read `./stacks`, so outside the repository `check` checked half
+/// the fleet and `deploy` found nothing. The repository is found once: up
+/// from the working directory, or where `HOMELAB_REPO` points.
+/// covers: fix-101
+#[test]
+fn fix_101_a_stack_resolves_from_its_name_from_any_directory() {
+    use homelab_client::repo_config::{repo_root, stack_dir, stacks_dir};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let elsewhere = scratch("elsewhere");
+
+    assert_eq!(
+        repo_root(&root.join("stacks/almanac"), None).as_deref(),
+        Some(root)
+    );
+    assert_eq!(
+        repo_root(&elsewhere, Some(root.to_str().unwrap())).as_deref(),
+        Some(root)
+    );
+    assert_eq!(repo_root(&elsewhere, None), None);
+    assert_eq!(
+        repo_root(&elsewhere, Some(elsewhere.to_str().unwrap())),
+        None
+    );
+
+    let almanac = root.join("stacks/almanac");
+    for arg in ["almanac", "stacks/almanac/", "almanac/"] {
+        assert_eq!(stack_dir(arg, &elsewhere, Some(root)), almanac, "{}", arg);
+    }
+    // Standing in the repository, the path as typed still works.
+    assert_eq!(stack_dir("stacks/almanac", root, Some(root)), almanac);
+    assert_eq!(stacks_dir(Some(root)), root.join("stacks"));
+    assert_eq!(stacks_dir(None), PathBuf::from("stacks"));
+}

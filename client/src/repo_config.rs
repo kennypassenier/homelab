@@ -72,6 +72,55 @@ pub fn find_repo_file(start: &Path) -> Option<PathBuf> {
     None
 }
 
+/// fix-101 (cli-path-vs-name-and-cwd, 2026-09-27): the repository root,
+/// found once. Up from `start` for `config/client.toml`, the way the address
+/// is found; else `env_repo` (`HOMELAB_REPO`, which `~/.config/homelab/env`
+/// may set) when it holds that file. The verbs read `./stacks`, so run from
+/// `/tmp` `check` compared half the fleet and `deploy` found nothing.
+pub fn repo_root(start: &Path, env_repo: Option<&str>) -> Option<PathBuf> {
+    let root_of = |file: PathBuf| file.parent()?.parent().map(Path::to_path_buf);
+    if let Some(root) = find_repo_file(start).and_then(root_of) {
+        return Some(root);
+    }
+    let dir = PathBuf::from(env_repo?.trim());
+    dir.join(REPO_FILE).is_file().then_some(dir)
+}
+
+/// fix-101: the stacks directory the verbs read: the repository's when one
+/// was found, else `stacks` where the command runs, as before.
+pub fn stacks_dir(root: Option<&Path>) -> PathBuf {
+    root.map(|r| r.join("stacks"))
+        .unwrap_or_else(|| PathBuf::from("stacks"))
+}
+
+/// fix-101: the stack an argument names, however it is spelled: `almanac`,
+/// `almanac/`, `stacks/almanac`, or a full path into a stacks directory all
+/// say `almanac`. A part below the stack (`kyu/kyu-runner`, `media/radarr`)
+/// is kept. The verbs that take a name answered `stack 'stacks/almanac' is
+/// not in host state` to the path form.
+pub fn stack_name(arg: &str) -> String {
+    let s = arg.trim().trim_end_matches('/');
+    let s = s.strip_prefix("./").unwrap_or(s);
+    let s = match s.rfind("stacks/") {
+        Some(i) if i == 0 || s[..i].ends_with('/') => &s[i + "stacks/".len()..],
+        _ => s,
+    };
+    s.to_string()
+}
+
+/// fix-101: the stack directory an argument names. The path as typed when it
+/// is a stack directory from `cwd` (with an `lxc-compose.yml` or a
+/// `service.yml`); otherwise the stack of that name in the repository's
+/// stacks directory. The verbs that take a path answered `homelab deploy
+/// almanac` with "cannot read almanac/lxc-compose.yml".
+pub fn stack_dir(arg: &str, cwd: &Path, root: Option<&Path>) -> PathBuf {
+    let typed = cwd.join(arg.trim());
+    if typed.join("lxc-compose.yml").is_file() || typed.join("service.yml").is_file() {
+        return typed.components().collect();
+    }
+    stacks_dir(root).join(stack_name(arg))
+}
+
 /// Read the repository file if there is one. A file that exists but cannot
 /// be parsed is an error, never an absence: standing rule 45 — an input the
 /// program could not parse is refused rather than quietly replaced by a

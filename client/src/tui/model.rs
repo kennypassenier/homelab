@@ -250,6 +250,10 @@ pub struct Model {
     pub doctor_text: Vec<String>,
     /// Deployable stack dirs found locally (name, path).
     pub local_stacks: Vec<(String, std::path::PathBuf)>,
+    /// fix-101: where the stacks and presets live — the repository's when
+    /// the command line found one, else `stacks` and `presets` here.
+    pub stacks_dir: std::path::PathBuf,
+    pub presets_dir: std::path::PathBuf,
     pub focus: Option<Focus>,
     pub plan: Option<Plan>,
     /// D6: spec awaiting the host's applied files for a real diff plan.
@@ -335,6 +339,8 @@ impl Model {
             help_open: false,
             doctor_text: Vec::new(),
             local_stacks: Vec::new(),
+            stacks_dir: std::path::PathBuf::from("stacks"),
+            presets_dir: std::path::PathBuf::from("presets"),
             focus: None,
             plan: None,
             plan_pending: None,
@@ -405,7 +411,7 @@ impl Model {
         }
         self.today_pending = true;
         self.outbox.push(Command::Today {
-            stack_files: crate::spec::stack_files_with_vmids("stacks"),
+            stack_files: crate::spec::stack_files_with_vmids(&self.stacks_dir.to_string_lossy()),
         });
     }
 
@@ -1682,7 +1688,8 @@ fn start_stack_op(model: &mut Model, op: StackOp) {
 /// Y4 from the TUI: the same fleet check `homelab check` runs, over the stack
 /// directories this client can see.
 fn start_fleet_check(model: &mut Model) {
-    let stack_files: Vec<(String, u16)> = crate::spec::stack_files_with_vmids("stacks");
+    let stack_files: Vec<(String, u16)> =
+        crate::spec::stack_files_with_vmids(&model.stacks_dir.to_string_lossy());
     if stack_files.is_empty() {
         model.status_line = "no stack files found under stacks/".into();
         return;
@@ -1875,6 +1882,7 @@ pub fn next_free_vmid(model: &Model) -> u16 {
 fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
     use crossterm::event::KeyCode;
     let presets = model.presets.clone();
+    let (stacks_dir, presets_dir) = (model.stacks_dir.clone(), model.presets_dir.clone());
     let n_presets = presets.len().max(1);
     let Some(w) = model.wizard.as_mut() else {
         return;
@@ -2002,7 +2010,7 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 // the manifest afterwards, so nothing is written before the
                 // question is answered.
                 w.storage_paths = crate::scaffold::preview_appdata_paths(
-                    std::path::Path::new("presets"),
+                    &presets_dir,
                     presets.get(w.preset_idx),
                     &w.name,
                     w.vmid,
@@ -2047,8 +2055,8 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                     .map(|(p, _)| p.clone())
                     .collect();
                 match crate::scaffold::scaffold_stack(
-                    std::path::Path::new("stacks"),
-                    std::path::Path::new("presets"),
+                    &stacks_dir,
+                    &presets_dir,
                     &crate::scaffold::StackParams {
                         name: &name,
                         vmid,

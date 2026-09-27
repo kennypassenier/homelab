@@ -124,10 +124,13 @@ Every verb needs `HOMELAB_TOKEN` except `help`, `plan`, `runbook`,
 the host but are not on that list, so they also stop with
 `HOMELAB_TOKEN is not set` when no token is configured.
 
-These verbs read or write paths **relative to the current directory**, so run
-them from the repository root:
+These verbs read or write paths in **the repository**: the directory above
+the working directory that holds `config/client.toml`, or, from anywhere
+else, the directory `HOMELAB_REPO` names (put `HOMELAB_REPO=~/Projects/homelab`
+in `~/.config/homelab/env` once). With neither, they fall back to the current
+directory (fix-101):
 
-| Verb | Reads / writes relative to the current directory | Source |
+| Verb | Reads / writes in the repository | Source |
 |---|---|---|
 | `homelab presets` | reads `presets/` | `client/src/main.rs:650` |
 | `homelab new` | reads `presets/`, writes `stacks/<name>/` | `client/src/main.rs:585,624-628` |
@@ -139,8 +142,11 @@ them from the repository root:
 | `homelab export` | writes `<name>-bundle.yml` here unless an output path is given | `client/src/main.rs:446-449` |
 | `homelab tui` | reads `stacks/` and `presets/` at start | `client/src/tui/mod.rs:47-48` |
 
-The verbs that take a stack path (`deploy`, `plan`, `backup`, ...) read the
-path you give them, so they work from anywhere as long as the path is right.
+A stack can be named the same way for every verb: `almanac`, `almanac/`,
+`stacks/almanac` and a full path all name the same stack. The verbs that read
+a stack directory (`deploy`, `plan`, `backup`, ...) take the path as typed
+when it is a stack directory from here, and otherwise the stack of that name
+in the repository.
 
 ### 0.3 The version gate
 

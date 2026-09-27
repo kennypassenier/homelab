@@ -424,3 +424,17 @@ fn readability_is_read_from_the_probe_output() {
     assert_eq!(readability("no-docker\n"), Readability::NoDocker);
     assert!(matches!(readability(""), Readability::Unknown(_)));
 }
+
+/// fix-44 follow-up, measured on the first live deploy (CT 104, 2026-09-27
+/// 18:09): the deploy granted the capability and Alloy read eight container
+/// logs (`loki_source_file_file_bytes_total` per file, Loki gained the
+/// `container_name` label), yet the probe said "cannot read". `runuser -u
+/// alloy` starts a fresh session without the service's ambient capability,
+/// so it asked about the user, not about the running Alloy. The probe now
+/// also reads the capability of the running service.
+#[test]
+fn the_readability_probe_asks_about_the_running_service_not_a_new_session() {
+    let s = homelab_core::ops::logshipper::readability_script();
+    assert!(s.contains("systemctl show -p MainPID --value alloy"), "{s}");
+    assert!(s.contains("CapAmb"), "{s}");
+}

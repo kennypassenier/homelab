@@ -8,11 +8,15 @@
 # line count was green throughout. The set of labels Loki knows is the reading
 # that was actually wrong.
 checks:
-  - name: "labels die loki kent"
+  # A count, allowed to grow: a deploy that repairs a shipper adds labels
+  # (2026-09-27, fix-44: container_name, filename and stream came back), and
+  # a regression removes them. As an exact list this check failed the very
+  # deploy that brought the container logs back.
+  - name: "aantal labels die loki kent"
     command: >-
       curl -s -m 15 http://127.0.0.1:3100/loki/api/v1/labels |
-      tr -d '[]{}"' | cut -d: -f3 | tr ',' '\n' | sort | tr '\n' ','
-    expect: must_match
+      tr -d '[]{}"' | cut -d: -f3 | tr ',' '\n' | grep -c .
+    expect: never_decreases
     layer: application
 
   - name: "loki is klaar"
@@ -21,5 +25,5 @@ checks:
     layer: process
     blind_spot: >-
       Loki saying it is ready to receive. It says nothing about whether
-      anything is sending — that question belongs to each stack's promtail and
+      anything is sending — that question belongs to each stack's Alloy and
       is asked by the fleet check.

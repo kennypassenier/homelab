@@ -339,11 +339,19 @@ const READ_DROPIN_BODY: &str = "[Service]\nAmbientCapabilities=CAP_DAC_READ_SEAR
 /// Printed by [`permissions_script`] when it wrote the drop-in.
 pub const DROPIN_WRITTEN: &str = "alloy-read-dropin-written";
 
-/// Asks, as the alloy user, whether the docker log directory can be listed.
+/// Asks whether the running Alloy can list the docker log directory: either
+/// the alloy user can on its own, or the service holds CAP_DAC_READ_SEARCH
+/// (bit 2 of `CapAmb`). `runuser -u alloy` alone is not the question: a new
+/// session does not carry the service's ambient capability, and on the first
+/// live deploy it said "cannot read" while Alloy was reading eight container
+/// logs (CT 104, 2026-09-27).
 pub fn readability_script() -> String {
     "if [ ! -d /var/lib/docker/containers ]; then echo no-docker; \
      elif runuser -u alloy -- ls /var/lib/docker/containers >/dev/null 2>&1; then echo readable; \
-     else echo denied; fi"
+     else pid=$(systemctl show -p MainPID --value alloy 2>/dev/null); \
+       amb=$(awk '/^CapAmb:/{print $2}' /proc/$pid/status 2>/dev/null); \
+       if [ -n \"$amb\" ] && [ $(( 0x$amb & 4 )) -ne 0 ]; then echo readable; else echo denied; fi; \
+     fi"
         .to_string()
 }
 

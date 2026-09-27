@@ -176,11 +176,8 @@ fn a_deferred_night_neither_parks_the_stack_nor_records_a_backup() {
         deferred,
         NightBackup::Deferred("kenny is watching Arrival".into())
     );
-    assert!(
-        !deferred.parks_the_stack(true),
-        "H8 must not park a stack for being in use — that punishes the house \
-         for using its own services"
-    );
+    // fix-59: a backup outcome never parks anything; only a failed update
+    // parks, and only the updates (`ops::enable::after_night`).
     assert!(
         !deferred.records_a_timestamp(),
         "nothing was backed up, so nothing may claim a fresh backup — the \
@@ -190,13 +187,10 @@ fn a_deferred_night_neither_parks_the_stack_nor_records_a_backup() {
 
 #[test]
 fn a_real_failure_still_parks_and_a_good_night_still_records() {
-    assert!(NightBackup::of(false, None).parks_the_stack(true));
     assert!(!NightBackup::of(false, None).records_a_timestamp());
     assert!(NightBackup::of(true, None).records_a_timestamp());
-    assert!(!NightBackup::of(true, None).parks_the_stack(true));
-    // A failed update parks the stack whatever the backup did.
-    assert!(NightBackup::of(true, None).parks_the_stack(false));
-    assert!(NightBackup::of(false, Some("in use")).parks_the_stack(false));
+    // fix-59: what parks is a failed update, and it parks the updates only;
+    // `fix_59_a_failed_night_never_stops_the_stacks_backups` holds that.
 }
 
 /// T5: services sharing one container share a fate.

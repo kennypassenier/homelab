@@ -350,7 +350,7 @@ stateDiagram-v2
     state "Retired, container gone, data, vault and repositories kept" as Removed
     state "Enabled, in the nightly rotation" as Enabled
     state "Parked by hand, onboot 0" as ParkedByHand
-    state "Auto-parked, onboot unchanged" as AutoParked
+    state "Updates auto-parked, backups continue" as AutoParked
     state "On the host, recorded in state" as OnHost
 
     [*] --> Scaffolded: homelab new
@@ -359,7 +359,7 @@ stateDiagram-v2
     state OnHost {
         [*] --> Enabled
         Enabled --> ParkedByHand: homelab disable
-        Enabled --> AutoParked: failed night
+        Enabled --> AutoParked: failed nightly update
         AutoParked --> ParkedByHand: homelab disable
         ParkedByHand --> Enabled: homelab enable
         AutoParked --> Enabled: fix, prove, homelab enable
@@ -383,12 +383,17 @@ stateDiagram-v2
 - Parked stacks show `[OFF]` in the TUI
   (`client/src/tui/view/dashboard.rs:208`, `client/src/tui/view/stacks.rs:63`).
 
-**Automatic park.** A failed night sets the flag in state only; `onboot`
-and the running containers are left alone (`host/src/main.rs:2483-2486`).
+**Automatic park.** Since fix-59 (2026-09-27) a failed nightly update parks
+the stack's automatic updates only (`HostState.updates_parked`,
+`core/src/ops/enable.rs` `after_night`); the stack stays enabled and keeps its
+nightly backup, and `onboot` and the running containers are left alone. A
+failed backup parks nothing. Before fix-59 the park set `enabled = false`,
+which stopped the backups too.
 The notification is named `stack-disabled-<stack>`
 (`host/src/main.rs:2812-2828`). Its text is `AUTO_PARK_NOTICE`
-(`core/src/ops/enable.rs`): no nightly backup and no update until
-re-enabled, onboot and the running containers left as they were. Before
+(`core/src/ops/enable.rs`): the nightly backup still runs, updates wait
+until `homelab enable`, onboot and the running containers left as they were.
+Before
 v3.58.4 it said "no onboot until re-enabled", which the automatic park never
 did (gap-22).
 
@@ -401,8 +406,8 @@ After an automatic park:
    `homelab backup-native <name>` (native).
 4. `homelab enable <name>`.
 
-A backup that stood aside because an app was in use never parks a stack
-(`core/src/ops/backup.rs:66-69`).
+A backup, failed or stood aside, never parks a stack (fix-59,
+`core/src/ops/enable.rs` `after_night`).
 
 ---
 

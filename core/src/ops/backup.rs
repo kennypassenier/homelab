@@ -63,11 +63,6 @@ impl NightBackup {
         }
     }
 
-    /// H8: does this night park the stack? Only a real failure does.
-    pub fn parks_the_stack(&self, update_ok: bool) -> bool {
-        matches!(self, NightBackup::Failed) || !update_ok
-    }
-
     /// May a `last_backup` timestamp be written? Only for work that happened.
     pub fn records_a_timestamp(&self) -> bool {
         matches!(self, NightBackup::Done)

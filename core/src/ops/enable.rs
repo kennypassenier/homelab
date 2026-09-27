@@ -69,10 +69,14 @@ pub async fn set_enabled(ctx: &OpCtx<'_>, stack_name: &str, enabled: bool) -> Op
         let rec = state.stacks.get_mut(stack_name).ok_or_else(|| {
             CoreError::Other(format!("stack '{}' vanished from host state", stack_name))
         })?;
-        if rec.enabled == enabled {
+        let flag_changed = rec.enabled != enabled;
+        rec.enabled = enabled;
+        // fix-59: enabling is also how a person lifts an automatic update
+        // park; the stack was never disabled for it.
+        let unparked = enabled && state.updates_parked.remove(stack_name).is_some();
+        if !flag_changed && !unparked {
             return Ok(StepOutcome::Unchanged);
         }
-        rec.enabled = enabled;
         store.save(state).await?;
         Ok(StepOutcome::Changed)
     });
@@ -100,5 +104,35 @@ pub async fn set_enabled(ctx: &OpCtx<'_>, stack_name: &str, enabled: bool) -> Op
 /// state-only on purpose: onboot and the running containers stay as they
 /// were, so a transient failure can never keep a stack down after a host
 /// reboot. Only `homelab disable` clears onboot.
-pub const AUTO_PARK_NOTICE: &str = "nightly run failed — stack parked (H8): no nightly backup \
-     and no update until re-enabled; onboot and the running containers are left as they were";
+///
+/// fix-59: only the automatic updates are parked; the nightly backup goes on.
+pub const AUTO_PARK_NOTICE: &str = "nightly update failed — automatic updates parked (H8): the \
+     nightly backup still runs, updates wait until `homelab enable`; onboot and the running \
+     containers are left as they were";
+
+/// H8: fold one stack's night into the state. Returns true when this night
+/// parked something that was not parked before, so the caller sends one
+/// notice rather than one every night.
+///
+/// fix-59 (failed-update-parks-backups, 2026-09-27): a failed night used to
+/// set `enabled = false`, and a disabled stack gets no nightly backup either,
+/// so one bad upstream image or one Drive error at the backup hour switched
+/// the stack's backups off until somebody noticed. Now a failed update parks
+/// the automatic updates only, and a failed backup parks nothing: it is
+/// tried again the next night, its own failure notification goes out every
+/// night it fails, and the backup-age check in `fleetcheck` escalates it.
+pub fn after_night(
+    state: &mut crate::state::HostState,
+    stack: &str,
+    update_ok: bool,
+    now: u64,
+) -> bool {
+    if update_ok || !state.stacks.contains_key(stack) {
+        return false;
+    }
+    if state.updates_parked.contains_key(stack) {
+        return false;
+    }
+    state.updates_parked.insert(stack.to_string(), now);
+    true
+}

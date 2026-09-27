@@ -437,7 +437,7 @@ reaches curl through a mode-600 header file,
 | `unparseable request dropped :: <e> :: <text>` | error | the host could not parse a client frame; the client waits forever for a reply | `host/src/main.rs:2755-2765` |
 | `scheduler: cannot determine local hour ('date' failed)` | error | this 20-minute tick did nothing | `host/src/main.rs:2263-2270` |
 | `scheduler: state unreadable` | error | the nightly round skipped this tick; see section 6 | `host/src/main.rs:2274-2280` |
-| `scheduler: nightly run for <stack> FAILED` | warn | the stack was auto-disabled (H8) | `host/src/main.rs:2426-2429`, `2483-2486` |
+| `scheduler: nightly update for <stack> FAILED` | warn | the stack's automatic updates were parked; its backups continue (H8, fix-59) | `park_after_night` in `host/src/main.rs` |
 | `scheduler: stack <name> is disabled` | info | a parked stack was skipped | `host/src/main.rs:2358` |
 | `scheduler: stack <name> has no stored manifest` | warn | nothing to back up or update from | `host/src/main.rs:2447` |
 | `scheduler: backup for <stack> stood aside` | info | a nightly backup deferred | `host/src/main.rs:2216` |
@@ -791,7 +791,7 @@ old (`host/src/main.rs:2246-2273`, `1941-1943`). Parked stacks are left out
 |---|---|---|---|
 | a stack is `disabled` in `homelab check` and was not backed up | a nightly run failed and the stack was parked (H8); the daemon log has the `FAILED` line and a notification went out once | fix the cause, then `homelab enable <stack>` | `host/src/main.rs:2472-2500`, `core/src/ops/fleetcheck.rs:587-597` |
 | a backup that stood aside did not park the stack | by design: a deferred backup is not a failed night | none | `core/src/ops/backup.rs:67-74` |
-| a rolled-back update parked the stack | a rolled-back update is a failure (section 8.5), and a failed update parks the stack | fix or pin the image, then re-enable | `host/src/main.rs:2466-2476` |
+| a rolled-back update parked the stack's updates | a rolled-back update is a failure (section 8.5), and a failed update parks the automatic updates (backups continue, fix-59) | fix or pin the image, then `homelab enable` | `park_after_night` in `host/src/main.rs` |
 | a CLI command started while the nightly backups run prints the round's lines and does not start | the backup phase holds the operation lock for the whole batch; your operation waits for it | wait, or use `homelab status` which does not take the lock | `host/src/main.rs:2177`, `2969` |
 | nothing ran at all | `backup_hour` is not set, or `date` failed, or state.json did not load | check the daemon log for the lines in section 5 | `host/src/main.rs:2255`, `2267-2280` |
 

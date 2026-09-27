@@ -160,6 +160,14 @@ pub struct HostState {
     /// instead of proving the same one twelve times.
     #[serde(default)]
     pub restore_drill_index: usize,
+    /// fix-59 (failed-update-parks-backups, 2026-09-27): stacks whose
+    /// automatic updates a failed nightly update parked, with the unix time
+    /// it happened. Only updates: a parked stack keeps its nightly backup.
+    /// The old park set `enabled = false`, which stopped the backups too, so
+    /// one bad upstream image meant no backup until somebody typed `homelab
+    /// enable`. `homelab enable <stack>` clears the entry.
+    #[serde(default)]
+    pub updates_parked: BTreeMap<String, u64>,
     /// ask-8 / ask-9: what a stack, app or native unit left behind when it
     /// left the files, keyed by `<stack>` for a whole stack and
     /// `<stack>/<name>` for an app or unit that left a stack still running.

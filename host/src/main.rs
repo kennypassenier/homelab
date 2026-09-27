@@ -2379,6 +2379,7 @@ async fn scheduler_loop(state: AppState) {
         let backup_done =
             run_backup_batch(&state, &exec, backup_jobs, state.config.backup_concurrency).await;
 
+        let updates_parked = snapshot.updates_parked.clone();
         for (name, st) in snapshot.stacks {
             if !plan.contains(&NightlyTask::Stack(name.clone())) {
                 if !st.enabled {
@@ -2407,9 +2408,22 @@ async fn scheduler_loop(state: AppState) {
                     .unwrap_or(NightBackup::Failed);
                 let mut update_ok = true;
                 let applied = Some(st.applied_at);
+                // fix-59: a stack whose updates a failed night parked is
+                // still backed up above, and not updated here.
+                let natives: &[homelab_core::native::NativeServiceManifest] =
+                    if updates_parked.contains_key(&name) {
+                        info!(
+                            "scheduler: automatic updates of {} are parked — skipped; \
+                             `homelab enable {}` resumes them",
+                            name, name
+                        );
+                        &[]
+                    } else {
+                        &st.natives
+                    };
                 // B1: the orchestrator's own release update, for the
                 // services whose policy hands it to the orchestrator.
-                for native in st.natives.iter().filter(|n| n.nightly_updates().release) {
+                for native in natives.iter().filter(|n| n.nightly_updates().release) {
                     let native = native.clone();
                     let r = run_mutating_op(&state, &exec, 0, "scheduled-release-update", |ctx| {
                         Box::pin(async move {
@@ -2419,7 +2433,7 @@ async fn scheduler_loop(state: AppState) {
                     .await;
                     update_ok &= r.ok;
                 }
-                for native in st.natives.iter().filter(|n| n.nightly_updates().own_cmd) {
+                for native in natives.iter().filter(|n| n.nightly_updates().own_cmd) {
                     let n2 = native.clone();
                     let r = run_mutating_op(&state, &exec, 0, "scheduled-update-native", |ctx| {
                         Box::pin(async move {
@@ -2437,34 +2451,9 @@ async fn scheduler_loop(state: AppState) {
                         let _ = store.save(s).await;
                     }
                 }
-                // A deferred backup is deliberately absent from this
-                // condition: it is not a failed night, and parking the stack
-                // for it would punish the house for using its own services.
-                if backup.parks_the_stack(update_ok) {
-                    let mut parked = false;
-                    if let Ok(mut s) = store.load().await {
-                        if let Some(rec) = s.stacks.get_mut(&name) {
-                            if rec.enabled {
-                                rec.enabled = false;
-                                parked = true;
-                                tracing::warn!(
-                                    "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
-                                    name, name
-                                );
-                            }
-                        }
-                        let _ = store.save(s).await;
-                    }
-                    if parked {
-                        notify_auto_disabled(
-                            &state,
-                            &exec,
-                            &name,
-                            homelab_core::ops::enable::AUTO_PARK_NOTICE,
-                        )
-                        .await;
-                    }
-                }
+                // fix-59: only a failed update parks, and only the updates; a
+                // failed or deferred backup is simply tried again tomorrow.
+                park_after_night(&state, &exec, &store, &name, update_ok, now).await;
                 continue;
             }
             let Some(manifest) = st.manifest else {
@@ -2486,6 +2475,15 @@ async fn scheduler_loop(state: AppState) {
                     let _ = store.save(s).await;
                 }
             }
+            // fix-59: parked updates are skipped; the backup above still ran.
+            if updates_parked.contains_key(&name) {
+                info!(
+                    "scheduler: automatic updates of {} are parked — skipped; \
+                     `homelab enable {}` resumes them",
+                    name, name
+                );
+                continue;
+            }
             let m2 = manifest.clone();
             let update_report = run_mutating_op(&state, &exec, 0, "scheduled-update", |ctx| {
                 Box::pin(
@@ -2493,35 +2491,11 @@ async fn scheduler_loop(state: AppState) {
                 )
             })
             .await;
-            // H8: a failed nightly run flips the flag off — one loud message,
-            // then silence instead of a fresh failure every night. State-only:
-            // onboot and the running containers are untouched, so a transient
-            // failure can never keep a stack from surviving a host reboot.
-            if backup.parks_the_stack(update_report.ok) {
-                let mut parked = false;
-                if let Ok(mut s) = store.load().await {
-                    if let Some(rec) = s.stacks.get_mut(&name) {
-                        if rec.enabled {
-                            rec.enabled = false;
-                            parked = true;
-                            tracing::warn!(
-                                "scheduler: nightly run for {} FAILED — stack auto-disabled (H8); investigate, then re-enable with `homelab enable {}`",
-                                name, name
-                            );
-                        }
-                    }
-                    let _ = store.save(s).await;
-                }
-                if parked {
-                    notify_auto_disabled(
-                        &state,
-                        &exec,
-                        &name,
-                        homelab_core::ops::enable::AUTO_PARK_NOTICE,
-                    )
-                    .await;
-                }
-            }
+            // H8: a failed nightly update parks the stack's updates — one
+            // loud message, then silence instead of a fresh failure every
+            // night. State-only: onboot and the running containers are
+            // untouched, and since fix-59 the nightly backup goes on.
+            park_after_night(&state, &exec, &store, &name, update_report.ok, now).await;
         }
 
         // H10: the host's own crown jewels — the secrets vault (holding the
@@ -2810,9 +2784,41 @@ fn spawn_mirror_push(state: &AppState) {
     });
 }
 
+/// H8: record what one stack's night parked, and say so once. The decision
+/// is `ops::enable::after_night`; this is the load, save and notice around it.
+async fn park_after_night(
+    state: &AppState,
+    exec: &RealExecutor,
+    store: &homelab_core::state::StateStore<'_>,
+    name: &str,
+    update_ok: bool,
+    now: u64,
+) {
+    let mut parked = false;
+    if let Ok(mut s) = store.load().await {
+        parked = homelab_core::ops::enable::after_night(&mut s, name, update_ok, now);
+        if parked {
+            tracing::warn!(
+                "scheduler: nightly update for {} FAILED — automatic updates parked, backups continue (H8, fix-59); investigate, then resume with `homelab enable {}`",
+                name, name
+            );
+            let _ = store.save(s).await;
+        }
+    }
+    if parked {
+        notify_auto_disabled(
+            state,
+            exec,
+            name,
+            homelab_core::ops::enable::AUTO_PARK_NOTICE,
+        )
+        .await;
+    }
+}
+
 /// A stack has just been parked by H8, which is the moment it stops being
-/// protected: no nightly backup and no update (onboot is left alone by the
-/// automatic park, gap-22).
+/// protected: since fix-59 no automatic update (its nightly backup goes on;
+/// onboot is left alone by the automatic park, gap-22).
 ///
 /// It used to be a `tracing::warn!` and nothing else. On 2026-08-31 the
 /// metrics stack parked itself after the run that stopped Alertmanager, and

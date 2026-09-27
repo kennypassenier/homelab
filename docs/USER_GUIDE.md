@@ -1951,11 +1951,15 @@ its detail (`client/src/tui/view/stacks.rs:62-64,117-121`), and the nightly
 run skips it and logs `scheduler: stack <name> is disabled — skipped`
 (`host/src/main.rs:2365-2371`).
 
-A failed nightly run parks the stack by itself: only the flag, `onboot` is
-left alone. The host logs
-`nightly run for <name> FAILED — stack auto-disabled (H8); investigate, then re-enable with`
+A failed nightly update parks the stack's automatic updates by itself
+(fix-59): the nightly backup goes on, `onboot` and the running containers are
+left alone. A failed backup parks nothing; it is tried again the next night.
+The host logs
+`nightly update for <name> FAILED — automatic updates parked, backups continue (H8, fix-59); investigate, then resume with`
 followed by the enable command, and sends a notification
-(`host/src/main.rs:2483-2511`). A redeploy keeps the flag as it was
+(`park_after_night` in `host/src/main.rs`). `homelab check` lists the stack
+as `automatic updates parked since <date>` until `homelab enable <name>`
+resumes them. A redeploy keeps the flag as it was
 (`core/src/ops/deploy.rs:2362-2378`), but a deploy does start a stopped
 container (`core/src/ops/deploy.rs:812-816`).
 

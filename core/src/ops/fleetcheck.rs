@@ -606,6 +606,25 @@ pub fn evaluate(
             });
         }
 
+        // fix-59: a failed nightly update parks the updates only. The backup
+        // still runs, so nothing else would ever say the updates stopped.
+        if let Some(since) = state.updates_parked.get(name) {
+            out.push(Finding {
+                severity: Severity::Broken,
+                subject: name.clone(),
+                what: format!(
+                    "automatic updates parked since {} after a failed nightly update; the \
+                     nightly backup still runs",
+                    crate::state::ymd(*since)
+                ),
+                remedy: format!(
+                    "read that night's update transcript, fix or pin the image, then \
+                     `homelab enable {}` resumes the updates",
+                    name
+                ),
+            });
+        }
+
         let age = now_unix.saturating_sub(st.last_backup);
         // Z3: a stack that keeps nothing worth keeping, by declaration, is
         // not a stack that was forgotten. Saying "never been backed up"

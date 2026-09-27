@@ -2,9 +2,11 @@
 //!
 //! Domain types (manifests, deploy specs) live in homelab-core and are
 //! re-exported here so both sides compile against the same definitions.
-//! Envelope: `{v, topic, id, payload}` — the version field lets a freshly
-//! self-updated HOST tell an older CLIENT to upgrade instead of failing
-//! cryptically.
+//! Frames are bare JSON: the host opens with `ServerMsg::Hello` (its version
+//! and `PROTO_VERSION`), the client sends `RpcRequest`s. Version skew is
+//! handled by the client, which refuses a mutating command to a host older
+//! than itself. (AR5 amended 2026-09-27: the `{v, topic, id, payload}`
+//! envelope it named was defined here and never used; it is gone.)
 
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +17,11 @@ pub use homelab_core::manifest::{
 pub use homelab_core::native::NativeServiceManifest;
 pub use homelab_core::retention::RetentionTier;
 
+/// Sent in `Hello`. Bumped when a change would make an older peer misread a
+/// frame (a field or message removed, renamed or given a new meaning); an
+/// added field or command is covered by the client's version gate and does
+/// not bump it (AR5, amended 2026-09-27). No such change has been made, so
+/// it is still 1.
 pub const PROTO_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -397,63 +404,6 @@ impl From<homelab_core::sink::Level> for LogLevel {
     }
 }
 
-// ── Envelope (AR5) ──────────────────────────────────────────────────────────
-// Every frame on the wire is wrapped: `{v, topic, id, payload}`. The version
-// field lets a freshly self-updated HOST tell an older CLIENT to upgrade
-// instead of failing on an unknown field.
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Topic {
-    Rpc,
-    Log,
-    Telemetry,
-    Transfer,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Envelope {
-    pub v: u32,
-    pub topic: Topic,
-    #[serde(default)]
-    pub id: u64,
-    pub payload: serde_json::Value,
-}
-
-impl Envelope {
-    pub fn wrap_server(msg: &ServerMsg) -> Self {
-        let topic = match msg {
-            ServerMsg::Log { .. } => Topic::Log,
-            ServerMsg::Transfer { .. } => Topic::Transfer,
-            _ => Topic::Rpc,
-        };
-        Self {
-            v: PROTO_VERSION,
-            topic,
-            id: 0,
-            payload: serde_json::to_value(msg).expect("serializable"),
-        }
-    }
-
-    pub fn wrap_request(req: &RpcRequest) -> Self {
-        Self {
-            v: PROTO_VERSION,
-            topic: Topic::Rpc,
-            id: req.id,
-            payload: serde_json::to_value(req).expect("serializable"),
-        }
-    }
-
-    /// Err(version) when the peer speaks a different protocol version.
-    pub fn check_version(&self) -> Result<(), u32> {
-        if self.v == PROTO_VERSION {
-            Ok(())
-        } else {
-            Err(self.v)
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServerMsg {
@@ -535,6 +485,33 @@ mod wire_tests {
                 )
             });
             assert_eq!(back.id, 42, "the envelope's id must not be overwritten");
+        }
+    }
+
+    /// AR5 as amended 2026-09-27 (architecture-decisions-not-built): frames
+    /// are bare JSON objects, `kind`-tagged from the host and `cmd`-tagged
+    /// with an `id` from the client. There is no `{v, topic, id, payload}`
+    /// envelope; the protocol version rides in `Hello`.
+    #[test]
+    fn frames_are_bare_json_and_the_version_rides_in_hello() {
+        let hello = serde_json::to_value(ServerMsg::Hello {
+            version: "3.60.0".into(),
+            proto: PROTO_VERSION,
+        })
+        .unwrap();
+        assert_eq!(hello["kind"], "hello");
+        assert_eq!(hello["proto"], PROTO_VERSION);
+        let req = serde_json::to_value(RpcRequest {
+            id: 7,
+            command: Command::Ping,
+        })
+        .unwrap();
+        assert_eq!(req["cmd"], "ping");
+        assert_eq!(req["id"], 7);
+        for frame in [&hello, &req] {
+            for key in ["v", "topic", "payload"] {
+                assert!(frame.get(key).is_none(), "{key} in {frame}");
+            }
         }
     }
 }

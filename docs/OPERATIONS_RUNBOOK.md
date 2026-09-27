@@ -165,6 +165,31 @@ at least 20 hours old (`host/src/main.rs:1952-1954`, `:2008-2013`).
    repeat damper (`host/src/main.rs:2679`), so the same findings can arrive
    more than once in one night.
 
+The same round as one picture, from the scheduler's tick to the fleet check:
+
+```mermaid
+flowchart TD
+    tick([Tick every 20 min]) --> hour{backup_hour set and<br/>equal to local hour?}
+    hour -- no --> wait([Wait for the next tick])
+    hour -- yes --> plan[Nightly plan<br/>enabled stacks whose last<br/>backup is 20 h or older]
+    plan --> backups[1 · Backups of due stacks<br/>backup_concurrency at a time<br/>under one lock hold]
+    backups --> updates[2 · Updates, stack by stack<br/>compose: policy auto<br/>native: release install<br/>then update_cmd]
+    updates --> failed{Backup failed or<br/>update failed?}
+    failed -- "yes<br/>(standing aside is not)" --> park[3 · Park the stack<br/>notify stack-disabled]
+    failed -- no --> meta
+    park --> meta[4 · Host-meta, if due]
+    meta --> drill[5 · Restore drill, if due<br/>one repository]
+    drill --> devices[6 · Device configurations]
+    devices --> zfs[7 · ZFS jobs]
+    zfs --> fleet[8 · Fleet check<br/>every tick in the hour]
+    fleet --> alarm{Anything more<br/>than noted?}
+    alarm -- yes --> notify[Notify fleet-check]
+    alarm -- no --> wait
+    notify --> wait
+```
+
+<sub>Source: `host/src/main.rs:2000-2035` (`nightly_plan`), `:2257-2695` (`scheduler_loop`), `core/src/ops/backup.rs:66-69` (`parks_the_stack`).</sub>
+
 **Where results go.** Each operation posts to `notify_webhook` and falls
 back to `notify_fallback_webhook` (`host/src/main.rs:2876-2936`). An
 identical failure repeated inside 20 hours is damped; a success always goes
@@ -180,8 +205,8 @@ incident bundle under `/var/lib/homelab/incidents`
 Workstation, repository root. Read-only: stop at any step.
 
 1. `homelab check`. Prints `"fleet check: repo and reality agree"` or one
-   block per finding with a `remedy:` line; exits 1 when there is any
-   finding (`host/src/main.rs:3189-3209`, `:3755-3760`). Run from the
+   block per finding with a `remedy:` line; exits 1 when there is a
+   `broken` or `drift` finding (`noted` ones do not fail it since gap-32) (`host/src/main.rs:3189-3209`, `:3755-3760`). Run from the
    repository root: without stack files it checks only the host's half and
    says so (`client/src/main.rs:317-336`).
 2. `homelab doctor`. Host disk, state file, backup age per stack, the Drive
@@ -301,6 +326,35 @@ update (`client/src/tui/model.rs:780-800`).
 
 The argument is the stack **name**, not a path
 (`client/src/main.rs:422-436`).
+
+Where parking sits in a stack's life, from scaffold to removal:
+
+```mermaid
+stateDiagram-v2
+    state "Scaffolded, stacks/name/ only" as Scaffolded
+    state "Removed, data, vault and repositories kept" as Removed
+    state "Enabled, in the nightly rotation" as Enabled
+    state "Parked by hand, onboot 0" as ParkedByHand
+    state "Auto-parked, onboot unchanged" as AutoParked
+    state "On the host, recorded in state" as OnHost
+
+    [*] --> Scaffolded: homelab new
+    Scaffolded --> [*]: delete stacks/name/
+    Scaffolded --> OnHost: homelab deploy
+    state OnHost {
+        [*] --> Enabled
+        Enabled --> ParkedByHand: homelab disable
+        Enabled --> AutoParked: failed night
+        AutoParked --> ParkedByHand: homelab disable
+        ParkedByHand --> Enabled: homelab enable
+        AutoParked --> Enabled: fix, prove, homelab enable
+    }
+    OnHost --> Removed: homelab destroy, or homelab forget
+    Removed --> OnHost: homelab deploy, refills /appdata from snapshots
+    Removed --> [*]: clean-up by hand, op-6 step 5
+```
+
+<sub>Source: `core/src/ops/enable.rs:24-104` (`set_enabled`, `AUTO_PARK_NOTICE`), `core/src/ops/deploy.rs:2359-2404` (a new record starts enabled, a redeploy keeps the flag), `host/src/main.rs:2428-2455`, `:2487-2511` (automatic park), `core/src/ops/destroy.rs:259`, `host/src/main.rs:3625-3687` (`forget`).</sub>
 
 - **Park:** `homelab disable <stack>`, or `e` on the selected stack in the
   TUI (a toggle, `client/src/tui/model.rs:837-850`). The nightly round
@@ -460,6 +514,46 @@ are `manual` (`stacks/kyu/service.yml:52`,
 `"is not signed (no <asset>)"` (`client/src/release.rs:145-156`), where
 the asset is `SHA256SUMS.minisig` (`core/src/release_sig.rs:15`).
 
+The release install, as `homelab release-update-native` and the nightly round run it for each service:
+
+```mermaid
+sequenceDiagram
+    participant W as Workstation
+    participant H as homelab-host
+    participant G as GitHub
+    participant C as Container
+    W->>H: homelab release-update-native stack
+    Note over H: the nightly round starts here too,<br/>for each service with update_policy auto
+    loop each service on the stack, stops at the first failure
+        H->>G: latest release of release_repo
+        alt no SHA256SUMS.minisig
+            H->>H: skip, try again next night
+        else signed
+            H->>G: fetch SHA256SUMS and SHA256SUMS.minisig
+            H->>H: verify the minisign signature
+            H->>C: sha256sum of the installed binary
+            alt checksum already matches
+                H->>H: nothing to install
+            else another binary
+                H->>G: download the asset
+                H->>H: checksum mismatch stops here
+                H->>C: copy the running binary to .prev, stage the new one beside it
+                H->>C: check the glibc the new binary needs
+                H->>C: stop, move into place, start, wait up to 10 s
+                alt unit active
+                    H->>C: drop .prev, record the service as adopt does
+                else not active
+                    H->>C: copy .prev back, restart
+                    Note over H,C: rolled back to the previous binary
+                end
+            end
+        end
+    end
+    H-->>W: report
+```
+
+<sub>Source: `core/src/ops/native.rs:935-1135` (`release_update`), `:265-507` (`install_native`), `core/src/release_sig.rs:19-40` (`verify_sums`), `host/src/main.rs:3522-3548`, `:2395-2408`.</sub>
+
 **A deploy never upgrades.** An installed binary is left in place and the
 log says `"already installed, not shipped"`
 (`core/src/ops/deploy.rs:2175-2197`).
@@ -526,6 +620,44 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
    ```
 
    or from the tagged tree with `make install` (`Makefile:131-138`).
+
+The same path as a sequence, including the rollback the host arms:
+
+```mermaid
+sequenceDiagram
+    actor O as Operator
+    participant W as Workstation
+    participant G as GitHub
+    participant H as homelab-host
+    participant S as systemd
+    O->>W: make release VERSION=x.y.z
+    W->>W: gate, stamp the version, commit, tag
+    W->>G: push with the tag
+    Note over W,G: point of no return
+    G->>G: release.yml runs the gate, builds, writes SHA256SUMS
+    O->>W: homelab release-update
+    W->>G: gh release download
+    G-->>W: homelab-host and SHA256SUMS
+    W->>W: check the checksum, no signature on these releases
+    W->>H: SelfUpdateHost over the TLS line
+    H->>H: candidate runs --selfcheck
+    alt selfcheck fails
+        H-->>W: refused, nothing replaced
+    else selfcheck passes
+        H->>H: copy the live binary to .prev, install, arm the rollback marker
+        H->>S: systemd-run, restart in 2 s
+        H-->>W: report
+        S->>H: restart homelab-host
+        alt serves for 5 s
+            H->>H: remove the marker, log self-update accepted
+        else dies with the marker in place
+            S->>S: OnFailure unit restores .prev, a unit not in this repository
+        end
+    end
+    O->>W: homelab ping
+```
+
+<sub>Source: `Makefile:51-119` (`release`), `.github/workflows/release.yml:6-40`, `client/src/main.rs:808-834`, `client/src/release.rs:55-62`, `core/src/ops/selfupdate.rs:51-131`, `host/src/main.rs:1882-1891`.</sub>
 
 **Rollback.** `core/src/ops/selfupdate.rs:1-7` describes an `OnFailure=`
 unit on the host that restores `.prev` while the marker is still there.
@@ -816,6 +948,26 @@ depends on: where are its other copies, what does each survive, and which
 commands put one back. Losing the whole host is DR_RUNBOOK.md; this is one
 key missing while the rest stands.
 
+Which recipe applies, by the secret that is gone and what is still there:
+
+```mermaid
+flowchart LR
+    start([A key is gone]) --> which{Which secret?}
+    which -- restic password --> copy{Offline copy<br/>exists?}
+    copy -- no --> l1c[lost-1c<br/>start a new chain]
+    copy -- "yes, host alive" --> l1a[lost-1a<br/>write .new, prove, move]
+    copy -- "yes, host gone" --> l1b[lost-1b<br/>DR_RUNBOOK.md Layer 3]
+    which -- TLS key or certificate --> keep{Keep the<br/>old identity?}
+    keep -- yes --> l2a[lost-2a<br/>restore the pair<br/>from host-meta]
+    keep -- no --> l2b[lost-2b<br/>new pair,<br/>new pin everywhere]
+    which -- API token --> l3[lost-3a to 3c by where it is missing<br/>lost-3d to rotate]
+    which -- workstation latch key --> l4[lost-4a escrow from the host<br/>lost-4b deploy from the vault]
+    which -- native service secret file --> l5[first copy that exists<br/>lost-5a vault<br/>lost-5b own backup<br/>lost-5c host-meta]
+    which -- Google Drive credentials --> l6[lost-6<br/>new rclone remote gdrive]
+```
+
+<sub>Source: the recipes below; each cites its own code.</sub>
+
 ### Every copy the code knows of
 
 | Secret | Copy | Survives | Does not survive |
@@ -841,6 +993,35 @@ key missing while the rest stands.
 Everything offsite hangs on one password. Nothing in the code checks that
 the password file exists: `homelab doctor` has no probe for it
 (`core/src/doctor.rs:45-188`, `host/src/main.rs:4286-4396`).
+
+The same dependency as a picture: the password sits inside the host-meta copy it encrypts, so the offline copy is the only way back in:
+
+```mermaid
+flowchart LR
+    offline["Offline copy<br/>outside the house"] -. "must match, op-18" .-> pw
+    subgraph pve["Proxmox host"]
+        subgraph vault["Vault /var/lib/homelab/secrets"]
+            pw["restic.pw"]
+            nsec["Native service<br/>secret files"]
+            escrow["latch escrow file"]
+        end
+        tls["TLS key and certificate"]
+        toml["host.toml<br/>API token and settings"]
+        rclone["rclone gdrive credentials<br/>in no backup"]
+    end
+    subgraph gd["Google Drive"]
+        hm[("host-meta-config")]
+        repos[("Stack and native<br/>repositories")]
+    end
+    vault -- copied into --> hm
+    tls -- copied into --> hm
+    toml -- copied into --> hm
+    pw == encrypts ==> hm
+    pw == encrypts ==> repos
+    rclone -. reaches .-> gd
+```
+
+<sub>Source: `core/src/ops/backup.rs` (`backup_host_meta`, from line 1058; `BackupCfg` defaults at `:193-194`), `client/src/spec.rs:1094-1100`, `docs/deployment/REGISTER.md` D105 (escrow).</sub>
 
 ### lost-1 · The restic password is gone
 

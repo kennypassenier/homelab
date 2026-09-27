@@ -15,6 +15,44 @@ homelab (crate client) --- wss://<host>/api/ws ---> homelab-host (crate host, sy
   pins the TLS cert, sends a bearer token             state under /var/lib/homelab
 ```
 
+The same shape with everything the two binaries talk to: one line between
+them, and each side reaches its own services; arrows follow the data.
+
+```mermaid
+flowchart LR
+    github["GitHub releases"]
+    subgraph WS["Workstation"]
+        direction TB
+        gh["gh"]
+        latch["latch"]
+        stacks[("stacks/ and presets/")]
+        client["homelab<br/>CLI and TUI"]
+    end
+    subgraph PVE["Proxmox host"]
+        direction TB
+        daemon["homelab-host<br/>systemd service"]
+        state[("/var/lib/homelab<br/>state, journal, vault")]
+        pct["pct exec / pct push"]
+        ct["LXC containers<br/>vmid-app-stack"]
+    end
+    gdrive[("Google Drive<br/>restic repositories")]
+    kyu["kyu hub"]
+    ha["Home Assistant"]
+
+    github -->|"release assets"| gh
+    gh --> client
+    latch -->|"latch cat .env"| client
+    stacks --> client
+    client ==>|"wss /api/ws<br/>pinned TLS + bearer token"| daemon
+    daemon --> state
+    daemon --> pct --> ct
+    daemon -->|"restic over rclone"| gdrive
+    daemon -->|"webhook POST"| kyu --> ha
+    daemon -.->|"fallback webhook"| ha
+    github -.->|"nightly native update"| daemon
+```
+<sub>Source: `client/src/main.rs`, `client/src/spec.rs`, `client/src/release.rs`, `host/src/main.rs`, `core/src/ops/backup.rs`, `core/src/ops/native.rs`.</sub>
+
 - Five workspace members (`Cargo.toml:3`); the release builds only
   `homelab-host` and `homelab` (`.github/workflows/release.yml:26`).
   `tui-preview` is a mockup on simulated data (`tui-preview/Cargo.toml:5`).
@@ -36,6 +74,51 @@ homelab (crate client) --- wss://<host>/api/ws ---> homelab-host (crate host, sy
 | `proto` | wire types, re-exporting core's domain types (`proto/src/lib.rs:11-16`) | depend on more than core and serde (`proto/Cargo.toml:8-11`) |
 | `host` | the real `Executor` (`host/src/main.rs:1518-1585`), config, TLS and websocket server, journal, scheduler, notifications | run `latch` or `gh` (neither occurs in `host/src`) |
 | `client` | CLI verbs, TUI, local validation, scaffolding; the only crate that runs `latch` (`client/src/spec.rs:375`) and `gh` (`client/src/release.rs:15`) | change the host except through an RPC |
+
+The dependency arrows point one way, towards `core`; `+` is what a crate
+may do and `-` what it may not.
+
+```mermaid
+classDiagram
+    direction LR
+    class client["homelab-client"] {
+        <<binary homelab>>
+        +CLI verbs and TUI
+        +local validation, scaffolding
+        +runs latch and gh
+        -change the host except through an RPC
+    }
+    class host["homelab-host"] {
+        <<binary homelab-host>>
+        +real Executor, config
+        +TLS and websocket server
+        +journal, scheduler, notifications
+        -run latch or gh
+    }
+    class proto["homelab-proto"] {
+        <<library>>
+        +wire types Command, ServerMsg
+        +re-exports core domain types
+        -depend on more than core and serde
+    }
+    class core["homelab-core"] {
+        <<library>>
+        +manifests, safety gates, runner
+        +state and every operation
+        -std fs, process, env or clock
+        -tokio
+    }
+    class tui_preview["tui-preview"] {
+        <<binary, mockup>>
+        +simulated data only
+    }
+    client ..> proto : uses
+    client ..> core : uses
+    host ..> proto : uses
+    host ..> core : uses
+    proto ..> core : re-exports
+```
+<sub>Source: `core/Cargo.toml`, `proto/Cargo.toml`, `host/Cargo.toml`, `client/Cargo.toml`, `tui-preview/Cargo.toml`.</sub>
 
 Not every decision sits in core: the nightly plan is a pure function in the
 host (`nightly_plan`, `host/src/main.rs:1967`), tested there (`:1237`).
@@ -62,6 +145,48 @@ reported as deferred, not failed (`core/src/runner.rs:170-189`).
 **Serial mutations (AR12).** One `op_lock` (`host/src/main.rs:1667`), taken
 in `run_mutating_op` (`:2944`); the nightly round takes it once and runs its
 backups side by side inside it (`:2155`).
+
+A deploy puts these patterns in order: the client assembles the spec, the
+host serialises it behind the lock, and core's runner drives `pct` one
+journalled step at a time.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as homelab (client)
+    participant L as latch
+    participant H as homelab-host
+    participant R as core deploy runner
+    participant P as pct and docker
+    C->>C: build_spec(stacks/name)
+    opt app listed in latch_secrets, no local .env
+        C->>L: latch cat stack/app/.env
+        L-->>C: env, kept in memory
+    end
+    C->>C: manifest::validate
+    opt stack has native units
+        C->>H: StageNativeBinary, one RPC per unit
+    end
+    C->>H: DeployStack(spec)
+    H->>H: take op_lock in run_mutating_op
+    H->>R: deploy(ctx, spec)
+    loop each step: validate, safety gates, provision, start apps, verify health, record state
+        R->>R: journal running
+        R->>P: pct create or clone, pct exec, pct push, docker compose up
+        P-->>R: exit code and output
+        R->>R: journal done or failed
+        H-->>C: Log lines as each step runs
+    end
+    R-->>H: OperationReport, first failure ends it
+    H->>H: notify, best effort
+    alt report ok
+        H->>H: spawn intent-mirror push
+    else a step failed
+        H->>H: write incident bundle
+    end
+    H-->>C: RpcDone ok, message
+```
+<sub>Source: `client/src/main.rs` (verb `deploy`), `client/src/spec.rs`, `host/src/main.rs` (`run_mutating_op`, `run_op_locked`), `core/src/ops/deploy.rs`, `core/src/runner.rs`.</sub>
 
 **Failure capture (AR13, AR14, AR16).** A failed op writes
 `<state_dir>/incidents/<ts>-<op>/`: `report.json`, `events.jsonl`,
@@ -128,6 +253,53 @@ key. Before that fix both returned valid without checking, and an impostor
 replaying the public certificate passed the pin.
 `client/tests/tls_pin_tests.rs` runs a real handshake against such an
 impostor.
+
+Three checks stand between the CLI and a command reaching the host: the pin,
+the handshake signature, and the bearer token; the version check after
+`Hello` decides whether a mutating command is sent at all.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as homelab (client)
+    participant S as pin files
+    participant V as PinnedVerifier
+    participant H as homelab-host
+    C->>S: read machine pin and repository pin
+    S-->>C: either, both or neither
+    C->>C: reconcile_pin, machine wins, repository fills a gap
+    alt machine and repository disagree
+        C->>C: stop with an error, no connection
+    end
+    C->>H: TLS ClientHello to wss://host/api/ws
+    H-->>V: certificate and handshake signature
+    V->>V: SHA-256 fingerprint of the certificate
+    alt no pin yet
+        V->>V: record it, trust on first use
+    else pin matches
+        V->>V: accept the certificate
+    else pin differs
+        V-->>C: certificate fingerprint mismatch, abort
+    end
+    V->>V: verify_tls12 or tls13 signature, host holds the key
+    C->>H: HTTP upgrade with Authorization Bearer
+    H->>H: bearer_ok against the configured token
+    alt token missing or wrong
+        H-->>C: 401 missing or invalid bearer token
+    else token matches
+        H-->>C: 101, websocket open
+    end
+    opt first connect
+        C->>S: save observed pin
+    end
+    H-->>C: Hello version, proto
+    alt mutating command and host older than client
+        C->>C: refuse, run release-update first
+    else read-only command, or host not older
+        C->>H: RpcRequest id, command
+    end
+```
+<sub>Source: `client/src/repo_config.rs` (`reconcile_pin`), `client/src/tls.rs`, `client/src/main.rs` (connect and `Hello` arm), `host/src/main.rs` (`ws_upgrade`, `bearer_ok`, `ws_session`).</sub>
 
 **What the host trusts.** `homelab self-update` and `homelab install-native`
 send a base64 binary, and all verification is the client's:
@@ -197,6 +369,36 @@ latch call in the workspace is the client's `latch cat`
   systemd `OnFailure=` unit (`selfupdate.rs:4-7`). That unit and
   `homelab-host.service` are in neither this repository nor the host-meta
   snapshot (`backup.rs:1001-1005,1056-1063`).
+
+The update as states: the marker is what separates an accepted binary
+from one the `OnFailure=` unit puts back.
+
+```mermaid
+stateDiagram-v2
+    direction TB
+    [*] --> Staged: SelfUpdateHost RPC writes staged-host
+    Staged --> Failed: selfcheck fails, nothing replaced
+    Staged --> Selfchecked: candidate --selfcheck exits 0
+    Selfchecked --> BackedUp: cp current to homelab-host.prev
+    BackedUp --> Installed: install -m 755 over current
+    Installed --> Armed: write selfupdate.pending
+    Armed --> RestartScheduled: systemd-run, restart in 2 s
+    RestartScheduled --> NewServing: systemctl restart
+    NewServing --> Accepted: 5 s of serving, marker deleted
+    NewServing --> RolledBack: unit fails while the marker exists
+    Failed --> [*]
+    Accepted --> [*]
+    RolledBack --> [*]
+    note right of Failed
+        Any later step fails the same way, with finish_err.
+        After install, the new binary stays with no restart scheduled.
+    end note
+    note right of RolledBack
+        The OnFailure= unit restores .prev.
+        It lives on the host only, not in this repository.
+    end note
+```
+<sub>Source: `core/src/ops/selfupdate.rs`, `host/src/main.rs` (`Rpc::SelfUpdateHost`, marker cleared after 5 s).</sub>
 - **Watchdog (B7).** `READY=1`, then `WATCHDOG=1` every 10 seconds
   (`host/src/main.rs:1862-1868`); nothing is sent when `NOTIFY_SOCKET` is
   unset (`:1734-1747`). Whether systemd enforces it depends on the unit on

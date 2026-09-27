@@ -44,6 +44,27 @@ key already in the environment is never overwritten (`client/src/main.rs:76-81`)
 does not parse stops every command rather than falling back to a default
 (`client/src/repo_config.rs:75-90`).
 
+The client settles the host address in this order, after first refusing a `config/client.toml` that does not parse:
+
+```mermaid
+flowchart TD
+    start([homelab verb]) --> parse{config/client.toml found<br/>upward, and unparseable?}
+    parse -- yes --> stop[Stop every command]
+    parse -- no --> env{HOMELAB_HOST typed<br/>before the command?}
+    env -- yes --> useEnv([Use that address])
+    env -- no --> repo{host set in<br/>config/client.toml?}
+    repo -- yes --> useRepo([Use the repository address])
+    repo -- no --> mach{HOMELAB_HOST in<br/>~/.config/homelab/env or ./.env?}
+    mach -- yes --> useMach([Use the machine address])
+    mach -- no --> def([Use the built-in default])
+    class stop stop
+    class useEnv,useRepo,useMach,def ok
+    classDef stop fill:#fdecea,stroke:#c62828,color:#7f1d1d
+    classDef ok fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+```
+
+Drawn from `client/src/main.rs` (`main`) and `client/src/repo_config.rs` (`load`, `resolve_host`).
+
 **Worked example: which door did I knock on?** `homelab ping` is the one verb
 that prints where its address came from (`client/src/main.rs:1190-1194`):
 
@@ -70,6 +91,30 @@ that differs from the pin, the connection is refused with
 `certificate fingerprint mismatch` (`client/src/tls.rs:63`). Both messages
 say what to delete; do that only after checking the fingerprint the host
 logs at start (`host/src/main.rs:1876`).
+
+The certificate pin is decided per connection like this:
+
+```mermaid
+flowchart TD
+    m{Pin in<br/>~/.config/homelab/pin?}
+    m -- no --> r1{pin in<br/>config/client.toml?}
+    r1 -- yes --> adopt[Adopt the repository pin<br/>and save it]
+    r1 -- no --> tofu[Trust the first certificate<br/>seen and save it]
+    m -- yes --> r2{config/client.toml names<br/>a different pin?}
+    r2 -- yes --> stop1[Stop: the two pins disagree]
+    r2 -- no --> keep[Use the machine pin]
+    adopt --> check{Host certificate<br/>matches the pin?}
+    keep --> check
+    check -- no --> stop2[Refuse: fingerprint mismatch]
+    check -- yes --> done([Connected])
+    tofu --> done
+    class stop1,stop2 stop
+    class done ok
+    classDef stop fill:#fdecea,stroke:#c62828,color:#7f1d1d
+    classDef ok fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+```
+
+Drawn from `client/src/repo_config.rs` (`reconcile_pin`), `client/src/main.rs` and `client/src/tls.rs`.
 
 ### 0.2 Which verbs need a token, and which read the working directory
 
@@ -161,6 +206,30 @@ Source: `client/src/tui/model.rs:36-45,751-761`.
 
 On the SHELL tab, typing owns the keyboard: only `TAB`, `SHIFT+TAB`, `F2`,
 `CTRL+K` and `CTRL+P` pass through (`client/src/tui/model.rs:699-710`).
+
+The main keys per tab at a glance; the tables in 1.1, 1.2 and 1.4 are the complete list:
+
+```mermaid
+flowchart LR
+    tui([homelab tui]) --> ds[1 DASHBOARD<br/>2 STACKS]
+    tui --> log[3 LOG_STREAM]
+    tui --> doc[4 DOCTOR]
+    tui --> set[5 SETTINGS]
+    tui --> sh[6 SHELL]
+    tui --> any[Any tab]
+    ds --> dsk["r refresh<br/>p change plan<br/>SHIFT+D deploy<br/>SHIFT+U stack update<br/>SHIFT+B backup<br/>SHIFT+R restore<br/>e park or unpark<br/>n new stack<br/>u host update"]
+    log --> logk[SPACE follow<br/>LEFT RIGHT filter]
+    doc --> dock[r run again]
+    set --> setk[SHIFT+S send to host]
+    sh --> shk[ENTER runs the line]
+    any --> anyk[TAB next tab<br/>CTRL+K palette<br/>h key map<br/>q quit]
+    classDef tab fill:#e8eaf6,stroke:#3949ab,color:#1a237e
+    classDef keys fill:#f5f5f5,stroke:#9e9e9e,color:#212121
+    class ds,log,doc,set,sh,any tab
+    class dsk,logk,dock,setk,shk,anyk keys
+```
+
+Drawn from `client/src/tui/model.rs` (key handling per tab).
 
 ### 1.2 Keys on DASHBOARD and STACKS
 
@@ -297,8 +366,38 @@ update, enable/disable, adoption, native updates and orphan pruning
 (`core/src/ops/destroy.rs`, step `hostname guard`). Tests:
 `core/tests/deploy_tests.rs:354`, `core/tests/m4_ops_tests.rs:1322`.
 
-`homelab guards <vmid>` and `homelab patch` check the no-touch list but not
-the hostname (`host/src/main.rs:3687-3727`, `core/src/ops/patch.rs`).
+`homelab guards <vmid>` and `homelab patch` check the hostname too since
+v3.58.4 (gap-33): `patch_fleet` runs the guard per stack, and requested
+guards go through `guards::apply_for_managed` (`core/src/ops/patch.rs`,
+`core/src/ops/guards.rs`).
+
+Every mutating operation passes these gates before its first command,
+`homelab guards` and `homelab patch` included since gap-33:
+
+```mermaid
+flowchart TD
+    op([Mutating operation]) --> nt{vmid on the<br/>no-touch list?}
+    nt -- yes --> refuse[Refuse, nothing runs]
+    nt -- no --> kind{Deploy?}
+    kind -- yes --> canon{Stack file hostname is<br/>VMID-app-STACK?}
+    canon -- no --> refuse
+    canon -- yes --> qm{vmid is a QEMU VM?}
+    qm -- yes --> refuse
+    qm -- no --> exists{Container exists?}
+    kind -- no --> exists
+    exists -- "no, deploy" --> create[Create it]
+    exists -- "no, other operation" --> missing[Fail: vmid does not exist]
+    exists -- yes --> live{Live hostname<br/>matches?}
+    live -- no --> refuse
+    live -- yes --> go([Run the operation])
+    create --> go
+    class refuse,missing stop
+    class go ok
+    classDef stop fill:#fdecea,stroke:#c62828,color:#7f1d1d
+    classDef ok fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+```
+
+Drawn from `core/src/safety.rs` (`check_deploy_target`) and `core/src/ops/mod.rs` (`guard_target`).
 
 #### A3 · Fail-closed behaviour
 
@@ -432,8 +531,9 @@ On every deploy (`core/src/ops/deploy.rs:884-895`) and on demand with
 | `docker-prune.service` / `.timer` | weekly `docker system prune -f --filter until=168h`, docker containers only | `core/src/ops/guards.rs:133-135,226-252` |
 | `/etc/apt/apt.conf.d/60homelab-clean` | apt autoclean | `core/src/ops/guards.rs:292` |
 
-`homelab guards <vmid>` works on any container not on the no-touch list,
-including ones this orchestrator did not build (`client/src/main.rs:290-302`).
+`homelab guards <vmid>` works only on a stack this host manages, after the
+hostname guard, and installs the docker guards only where the stack runs
+docker (gap-33, `guards::apply_for_managed`).
 
 A log the stack writes onto a borrowed directory (a `data_mounts` entry) gets
 a rotation rule when the entry says so:
@@ -594,6 +694,34 @@ homelab template-build 994 5 --base <vztmpl from the list>
    there (`core/src/ops/deploy.rs:849-859`).
 
 ### C · Provisioning and lifecycle
+
+The life of a stack from your side, with the verb that moves it on:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Scaffolded: homelab new, or n in the TUI
+    Scaffolded --> Valid: homelab plan passes
+    Valid --> Scaffolded: edit the files
+    Valid --> Deployed: homelab deploy
+    Deployed --> Incomplete: step failed
+    Incomplete --> Deployed: deploy again
+    Deployed --> Parked: homelab disable, or a failed night
+    Parked --> Deployed: homelab enable
+    Deployed --> Destroyed: homelab destroy
+    Parked --> Destroyed: homelab destroy
+    Destroyed --> Deployed: homelab deploy, /appdata kept
+    Destroyed --> [*]
+    note right of Deployed
+        backup, update, restore and
+        resize keep it in this state
+    end note
+    note left of Parked
+        Containers keep running.
+        The nightly run skips it.
+    end note
+```
+
+Drawn from `core/src/ops/deploy.rs`, `core/src/ops/enable.rs`, `core/src/ops/destroy.rs` and `host/src/main.rs` (nightly park).
 
 #### C1 · Declarative containers from `lxc-compose.yml`
 
@@ -1133,6 +1261,37 @@ file in C1, the one storage entry has `app: syncthing`, so its data goes to
 | `resume` | starts exactly what was stopped, then `compose up -d` per app; runs even when the snapshot failed |
 | `retention` | G8 tiers, or the stack's own (W2) |
 
+The same run as a sequence, from the command to the answer:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor You
+    participant C as homelab client
+    participant H as Host daemon
+    participant K as Stack container
+    participant R as restic repos<br/>one per owning app
+    You->>C: homelab backup stacks/syncthing
+    C->>H: the stack file only
+    H->>H: safety gates, owner conflict
+    alt Jellyfin in use, or cannot tell
+        H-->>C: deferred, nothing stopped
+    else free to run
+        H->>H: declared paths checked
+        H->>R: init repos, clear stale locks
+        H->>K: stop containers labelled backup.pause
+        loop each owning app
+            H->>R: restic backup of its /appdata paths
+        end
+        H->>K: start what was stopped, compose up -d
+        Note over H,K: resume runs even when a snapshot failed
+        H->>R: retention, G8 tiers or W2
+        H-->>C: backup complete, or the failed step
+    end
+```
+
+Drawn from `core/src/ops/backup.rs` (`backup`).
+
 Two storage flags change this (`core/src/manifest.rs:228-262`):
 `no_data: true` means the app keeps nothing (no repository, and the path must
 stay empty); `no_backup: "<reason>"` means the contents are deliberately not
@@ -1158,6 +1317,40 @@ app), `restore data` (`restic restore <snapshot> --target /` per owner),
 In the TUI, `SHIFT+R` restores the latest snapshot after you type the stack
 name; it is refused for native-only stacks (section 1.2). Read section 1.3
 before restoring from the TUI.
+
+A restore, step by step, including the two refusals that stop nothing:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor You
+    participant C as homelab client
+    participant H as Host daemon
+    participant K as Stack container
+    participant R as restic repos<br/>one per owning app
+    You->>C: homelab restore stacks/syncthing
+    C->>H: restore request, latest or a snapshot id
+    H->>H: safety gates, A1 and A2
+    alt a storage owner is a native unit
+        H-->>C: refused, see OPERATIONS_RUNBOOK op-11
+    else compose apps only
+        H->>R: snapshot present in every repo?
+        alt not found
+            H-->>C: refused, nothing stopped
+        else found
+            H->>K: docker compose down, per app
+            loop each owning app
+                H->>R: restic restore to /
+            end
+            H->>K: docker compose up -d, per app
+            Note over H,K: resume runs even when the restore failed
+            H->>K: verify every app is running
+            H-->>C: restored and verified
+        end
+    end
+```
+
+Drawn from `core/src/ops/backup.rs` (`restore`).
 
 A native service with `backup_from_newest` is archived from its own newest
 copy; such a copy is a complete database, to be put back as the live file with
@@ -1875,7 +2068,7 @@ shows it.
 | 9 | H6 has no reboot indicator and no TUI action | `core/src/ops/patch.rs`, `client/src/tui/model.rs:1104-1184` |
 | 10 | C6 has no overcommit warning in the wizard | `client/src/tui/model.rs:1806-1900` |
 | 11 | Fixed in v3.58.4 (gap-19): without a local `stacks/` directory, TUI backup and restore now refuse instead of acting on a manifest with no storage (section 1.3) | `client/src/tui/model.rs`, `start_stack_op` |
-| 12 | After the wizard, the status line says `SHIFT+D`, which deploys the stack under the cursor, not the new one | `client/src/tui/model.rs:1945-1949,1287-1295` |
+| 12 | Fixed in v3.58.4 (gap-20): after the wizard the status line names `homelab deploy stacks/<name>`, since SHIFT+D acts on the fleet list | `client/src/tui/model.rs` |
 | 13 | Fixed in v3.58.4 (gap-21): the placeholders name `r` | `client/src/tui/view/stacks.rs`, `client/src/tui/view/doctor.rs` |
 | 14 | `homelab new` and `homelab testplan` need a token although they never connect | `client/src/main.rs:144-150` |
 | 15 | `destroy`, `resize` and `prune-orphans` need latch for stacks with `latch_secrets` although they send no secret | `client/src/main.rs:487,923,953` |

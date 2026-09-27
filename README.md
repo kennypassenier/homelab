@@ -33,15 +33,41 @@ its answer.
 
 ## How it fits together
 
+The client on the workstation is the only thing you touch; everything else is
+reached by the daemon on the Proxmox host, over the one pinned link.
+
+```mermaid
+flowchart TB
+    subgraph ws["Workstation"]
+        repo["This repository<br/>stacks/, presets/,<br/>config/client.toml"]
+        cli["homelab<br/>CLI and TUI"]
+    end
+    subgraph pve["Proxmox host"]
+        daemon["homelab-host<br/>systemd service"]
+        vardir["/var/lib/homelab<br/>state, journal, incidents"]
+        cts["LXC containers"]
+    end
+    subgraph ext["External services"]
+        gh["GitHub releases"]
+        gdrive["Google Drive<br/>restic repositories"]
+        kyu["kyu hub"]
+        ha["Home Assistant"]
+        mirror["Git mirror<br/>(optional)"]
+    end
+
+    repo -->|reads| cli
+    cli -->|"gh: host release<br/>and checksum"| gh
+    cli <-->|"wss://host/api/ws<br/>TLS, pinned cert, bearer token"| daemon
+    daemon -->|pct| cts
+    daemon --> vardir
+    daemon -->|"native service<br/>releases"| gh
+    daemon -->|"restic over rclone"| gdrive
+    daemon -->|"notification,<br/>primary"| kyu
+    daemon -.->|"fallback route"| ha
+    daemon -.->|"intent repo push"| mirror
 ```
-workstation                          Proxmox host
-+-----------------+   wss://.../api/ws   +------------------+   pct, restic,
-| homelab (CLI,   | <------------------> | homelab-host     | ---> zfs, ...
-|  TUI)           |  TLS, pinned cert,   |  (systemd)       |
-+-----------------+  bearer token        +------------------+
-      reads stacks/, presets/,                 state in /var/lib/homelab,
-      config/client.toml                       config in /etc/homelab/host.toml
-```
+
+<sub>Source: `client/src/main.rs` (connect), `client/src/release.rs`, `core/src/ops/backup.rs` (`restic_base`), `core/src/ops/native.rs` (release check), `notify_raw` and `spawn_mirror_push` in `host/src/main.rs`.</sub>
 
 - **Domain logic lives in `core/`.** Every side effect goes through one
   `Executor` trait (`core/src/executor.rs`), so an operation can be tested
@@ -347,6 +373,37 @@ binary must answer `--selfcheck`, the running one is kept as
 service restarts. The new binary clears the marker only after five seconds of
 serving; if it never gets there, systemd's `OnFailure=` script restores the
 previous binary.
+
+The whole `homelab release-update` path, from the GitHub release to an
+accepted or rolled-back daemon:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as homelab client
+    participant GH as GitHub
+    participant H as homelab-host (running)
+    participant SD as systemd
+    participant N as homelab-host (new)
+
+    C->>GH: latest release tag (gh release view)
+    C->>GH: download homelab-host and SHA256SUMS
+    C->>C: check the SHA-256 and the size limit
+    C->>H: SelfUpdateHost, binary over the WebSocket
+    H->>H: selfcheck candidate (--selfcheck)
+    H->>H: keep the running binary as homelab-host.prev
+    H->>H: install candidate, arm the rollback marker
+    H->>SD: schedule a restart in 2 s
+    H-->>C: operation report
+    SD->>N: restart homelab-host
+    alt serves for 5 s
+        N->>N: clear the marker: self-update accepted
+    else exits before that
+        SD->>SD: OnFailure= script restores homelab-host.prev
+    end
+```
+
+<sub>Source: `client/src/release.rs:14-60`, `self_update` (`core/src/ops/selfupdate.rs:51-125`), marker clearing (`host/src/main.rs:1882-1891`); the `OnFailure=` unit lives on the host, not in this repository.</sub>
 
 ## What the daemon cannot start without
 

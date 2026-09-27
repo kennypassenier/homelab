@@ -9,7 +9,7 @@
 # TUI when the update badge appears.
 # ============================================================================
 
-.PHONY: help build test gate fmt clippy release host-binary hooks install
+.PHONY: help build test gate fmt clippy release host-binary hooks install diagrams
 
 help:
 	@echo "make build            debug build of the whole workspace"
@@ -39,6 +39,12 @@ fmt:
 
 clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
+
+# Render every Mermaid diagram in the documentation; fails on a broken one.
+# Needs node and a headless Chrome (see the script's header). Not part of the
+# gate, which must run without either.
+diagrams:
+	scripts/check-diagrams.sh
 
 gate: fmt clippy test
 

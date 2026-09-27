@@ -506,6 +506,13 @@ pub fn alarming(findings: &[Finding]) -> Vec<Finding> {
         .collect()
 }
 
+/// Whether `homelab check` passes: nothing alarming (gap-32). `noted`
+/// findings need nothing done and are printed only so they stay visible, so
+/// they no longer turn the answer into a failure (exit 1).
+pub fn check_passes(findings: &[Finding]) -> bool {
+    alarming(findings).is_empty()
+}
+
 /// The whole comparison, as one pure function.
 pub fn evaluate(
     state: &HostState,

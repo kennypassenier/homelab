@@ -867,6 +867,29 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          Placeholders: `<vmid>`, `<stack>`, `<app>` and `<unit>` are filled in from the \
          Stacks section near the end.\n\n",
     );
+    // Kenny, Phase 8 (2026-09-27): diagrams where they make things clearer.
+    // Which layer to open depends on what is still standing; the chart is
+    // the same decision the layer headings below walk through in prose.
+    doc.push_str(
+        "Which layer to open depends on what still works:\n\n\
+         ```mermaid\n\
+         flowchart TD\n\
+         \x20   start([Something is down]) --> host{Proxmox host<br/>still running?}\n\
+         \x20   host -- no --> full[Full-host rebuild order<br/>at the end of this document]\n\
+         \x20   host -- yes --> daemon{homelab-host<br/>daemon answers?}\n\
+         \x20   daemon -- no --> l1[Layer 1<br/>Recover the daemon]\n\
+         \x20   l1 --> meta{Its state and<br/>secrets present?}\n\
+         \x20   meta -- no --> l3[Layer 3<br/>Restore host-meta]\n\
+         \x20   meta -- yes --> stack\n\
+         \x20   l3 --> stack\n\
+         \x20   daemon -- yes --> stack{A stack's container<br/>missing or broken?}\n\
+         \x20   stack -- yes --> l2[Layer 2<br/>Rebuild the stack]\n\
+         \x20   stack -- no --> data{Only its data<br/>lost or damaged?}\n\
+         \x20   l2 --> data\n\
+         \x20   data -- yes --> l4[Layer 4<br/>Restore the data]\n\
+         \x20   data -- no --> l5[Layer 5<br/>ZFS replicas, if a<br/>replicated pool is affected]\n\
+         ```\n\n",
+    );
 
     // ── Layer 0 ──
     doc.push_str("## Layer 0: What runs where\n\n");

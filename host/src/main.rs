@@ -3777,7 +3777,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             );
             RpcResponse {
                 id: req.id,
-                ok: findings.is_empty(),
+                ok: homelab_core::ops::fleetcheck::check_passes(&findings),
                 message: render_findings(&findings),
                 deferred: None,
             }

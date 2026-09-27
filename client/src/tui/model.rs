@@ -1969,9 +1969,14 @@ fn wizard_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 ) {
                     Ok(s) => {
                         model.status_line = format!(
-                            "scaffolded stacks/{} ({} files) — press SHIFT+D to deploy",
+                            // gap-20: SHIFT+D deploys the stack under the
+                            // cursor in the fleet list, and a stack that was
+                            // never deployed is not in that list yet.
+                            "scaffolded stacks/{} ({} files) — deploy it with `homelab deploy \
+                             stacks/{}`; it joins the fleet list after that first deploy",
                             name,
-                            s.files.len()
+                            s.files.len(),
+                            name
                         );
                         model.local_stacks.push((name, s.dir));
                         model.local_stacks.sort();

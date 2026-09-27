@@ -55,6 +55,45 @@ daemon does; it cannot vouch for what that unit file says.
 
 ## 1. The evidence map
 
+Start from what you see and open the trace it points to; the table under the
+diagram says what writes each trace and when.
+
+```mermaid
+flowchart LR
+    subgraph Symptom
+        s1["A command failed"]
+        s2["It said success,<br/>but did the wrong thing"]
+        s3["The daemon will not start"]
+        s4["An operation was cut off<br/>(restart, crash, power loss)"]
+        s7["Disk, backups or<br/>offsite look wrong"]
+        s5["The nightly round<br/>skipped a stack"]
+        s6["The record and the<br/>machine disagree"]
+        s8["Who ran a command<br/>inside a container?"]
+    end
+    subgraph Trace["Trace to open"]
+        t1["Failure line<br/>(your terminal)"]
+        t2["Incident bundle<br/>incidents/ts-op/"]
+        t3["Daemon log<br/>journalctl -u homelab-host"]
+        t4["Operation journal<br/>journal.jsonl"]
+        t7["homelab doctor"]
+        t5["state.json"]
+        t6["homelab check"]
+        t8["audit.log"]
+    end
+    s1 --> t1
+    t1 -->|"names the bundle"| t2
+    s2 --> t3
+    s3 --> t3
+    s4 --> t4
+    s4 --> t7
+    s5 --> t5
+    s6 --> t6
+    s7 --> t7
+    s8 --> t8
+```
+
+<sub>Source: `write_bundle` (`core/src/incidents.rs:56`), `FileJournal` and `BroadcastSink` (`host/src/main.rs:1622-1681`), `StateStore` (`core/src/state.rs:198-231`), the exec audit (`host/src/main.rs:3994`).</sub>
+
 | Trace | Where | Written by | When | Answers |
 |---|---|---|---|---|
 | failure line | your terminal | client prints the host's reply (`client/src/main.rs:1267-1270`) | every failed command | what failed, why, what to do, where the bundle is |
@@ -143,6 +182,48 @@ for example `SAFETY ABORT: <reason>`, because the runner logs
 `core/src/error.rs:10`).
 
 ## 3. Incident bundles
+
+One failed mutating operation takes this path from the failing step to the
+notification, the bundle and the failure line; a deferred operation takes the
+upper branch and leaves no bundle.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as homelab client
+    participant H as run_op_locked<br/>(host)
+    participant R as Runner<br/>(core)
+    participant J as journal.jsonl
+    participant N as notify / notify_raw
+    participant W as kyu, then<br/>Home Assistant
+    participant B as write_bundle<br/>(core)
+
+    C->>H: mutating command over the WebSocket
+    H->>H: take the op lock, wrap the sink in a RecordingSink
+    H->>R: run the operation
+    R->>J: step "running"
+    R->>R: step body returns an error
+    R->>J: step "failed"
+    R--)C: transcript line "[step] error"
+    R->>J: step "-" "failed" or "deferred" (finish_err)
+    R-->>H: OperationReport, ok false, what/why/remedy
+    H->>N: notify(label, report)
+    Note over N: a repeat of the same failure<br/>inside the damper window is dropped
+    N->>W: POST to the primary route
+    opt primary did not answer 2xx
+        N->>W: POST to the fallback route
+    end
+    N->>N: record the outcome in state.json
+    alt report is deferred
+        H-->>C: "label deferred", no bundle
+    else report failed
+        H->>B: report, recorded events, versions
+        B-->>H: incidents/ts-op/
+        H-->>C: what :: why :: remedy :: incident bundle dir
+    end
+```
+
+<sub>Source: `run_op_locked` (`host/src/main.rs:2991-3101`), `notify`, `notify_raw` and `record_notify_outcome` (`host/src/main.rs:2834-2962`), `Runner::step` and `finish_err` (`core/src/runner.rs:76-190`), `write_bundle` (`core/src/incidents.rs:56-110`).</sub>
 
 ### What is in one
 
@@ -405,10 +486,10 @@ see and evaluates (`host/src/main.rs:3717-3750`). Each finding prints as
 `[broken]`, `[drift]` or `[noted]`, a subject, what is wrong, and a
 `remedy:` line (`host/src/main.rs:3178-3198`).
 
-- The command exits 1 whenever there is **any** finding, a `noted` one
-  included (`host/src/main.rs:3746`). The nightly run is stricter about what
-  it calls a problem: only non-`noted` findings raise a warning and a
-  notification (`host/src/main.rs:2646-2679`, `core/src/ops/fleetcheck.rs:501-507`).
+- The command exits 1 when there is a `broken` or `drift` finding; `noted`
+  ones are printed but do not fail it since v3.58.5 (gap-32,
+  `fleetcheck::check_passes`). The nightly run uses the same rule: only
+  non-`noted` findings raise a warning and a notification (`host/src/main.rs:2646-2679`, `core/src/ops/fleetcheck.rs:501-507`).
 - Run it from the repository root, or pass the stacks path. From anywhere
   else the client finds no stack files, says so, and checks only the host's
   half (`client/src/main.rs:311-327`).
@@ -453,6 +534,48 @@ The client's own refusals print as `error: <message>` and exit 1
 | `latch returned empty content for app '<app>' (<rel> in env '<env>')` | latch has no content for that file in that environment | commit and push the env file in latch | `client/src/spec.rs:402-407` |
 | `name mismatch` | the typed confirmation for destroy or prune-orphans did not match the stack name | nothing was sent to the host | `client/src/main.rs:935-937`, `975-977` |
 | `is waiting for a decision` | a step asked a question the command line cannot answer | see worked example B | `client/src/main.rs:1173-1182` |
+
+When the client cannot reach the host, walk its checks in the order it makes
+them; the first one that fails is the fault.
+
+```mermaid
+flowchart TD
+    start(["A command that needs the host fails"])
+    tok{"Token found in env,<br/>~/.config/homelab/env or ./.env?"}
+    pin{"Machine pin and<br/>repository pin agree?"}
+    net{"Host answers at<br/>the address?"}
+    fp{"Certificate matches the pin?<br/>(no pin yet: trusted and saved)"}
+    sig{"Server proves it holds<br/>the certificate's key?"}
+    auth{"Host accepts the token?"}
+    ver{"Mutating command to<br/>a host older than the client?"}
+    ok(["Link up: request sent"])
+
+    fix_tok["HOMELAB_TOKEN is not set<br/>add it to ~/.config/homelab/env"]
+    fix_pin["Refused before connecting<br/>worked example A"]
+    fix_net["connect error, no answer<br/>check the address; daemon down? 8.2"]
+    fix_fp["certificate fingerprint mismatch<br/>worked example A, section 9.2"]
+    fix_sig["connect error from TLS<br/>impostor or wrong host: stop"]
+    fix_auth["connect error, HTTP 401<br/>compare the tokens on both sides"]
+    fix_ver["host is vH and this client is vC<br/>run homelab release-update"]
+
+    start --> tok
+    tok -->|yes| pin
+    tok -->|no| fix_tok
+    pin -->|yes| net
+    pin -->|no| fix_pin
+    net -->|yes| fp
+    net -->|no| fix_net
+    fp -->|yes| sig
+    fp -->|no| fix_fp
+    sig -->|yes| auth
+    sig -->|no| fix_sig
+    auth -->|yes| ver
+    auth -->|no| fix_auth
+    ver -->|no| ok
+    ver -->|yes| fix_ver
+```
+
+<sub>Source: `client/src/main.rs:149` (token), `1103-1143` (pin, connect), `1205-1213` (version); `PinnedVerifier` (`client/src/tls.rs:49-90`); `bearer_ok` (`host/src/main.rs:2717-2723`).</sub>
 
 #### Worked example A: pin disagreement
 

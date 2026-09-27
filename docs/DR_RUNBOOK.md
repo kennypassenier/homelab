@@ -6,6 +6,26 @@ Written for the worst case: the TUI is unavailable, the `homelab-host` daemon is
 
 Placeholders: `<vmid>`, `<stack>`, `<app>` and `<unit>` are filled in from the Stacks section near the end.
 
+Which layer to open depends on what still works:
+
+```mermaid
+flowchart TD
+    start([Something is down]) --> host{Proxmox host<br/>still running?}
+    host -- no --> full[Full-host rebuild order<br/>at the end of this document]
+    host -- yes --> daemon{homelab-host<br/>daemon answers?}
+    daemon -- no --> l1[Layer 1<br/>Recover the daemon]
+    l1 --> meta{Its state and<br/>secrets present?}
+    meta -- no --> l3[Layer 3<br/>Restore host-meta]
+    meta -- yes --> stack
+    l3 --> stack
+    daemon -- yes --> stack{A stack's container<br/>missing or broken?}
+    stack -- yes --> l2[Layer 2<br/>Rebuild the stack]
+    stack -- no --> data{Only its data<br/>lost or damaged?}
+    l2 --> data
+    data -- yes --> l4[Layer 4<br/>Restore the data]
+    data -- no --> l5[Layer 5<br/>ZFS replicas, if a<br/>replicated pool is affected]
+```
+
 ## Layer 0: What runs where
 
 - **The daemon.** `homelab-host`, a systemd service on the Proxmox host. Program `/usr/local/bin/homelab-host`; the one before the last self-update is kept at `/usr/local/bin/homelab-host.prev`. Configuration `/etc/homelab/host.toml` (the `HOMELAB_CONFIG` variable overrides the path). State directory `/var/lib/homelab` (the `state_dir` setting overrides it). Listens on port 8443 over TLS.

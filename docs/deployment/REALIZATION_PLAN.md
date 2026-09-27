@@ -409,6 +409,7 @@ written as part of passing it.
 | Form P1 · v1 latch archive | 2026-09-02 | remove it from the secrets repo | D106 |
 | **Phase 7 gate · 23 gaps** | 2026-09-02 | **22 × Dichten, 1 × Later (G6, the fact-gatherer's tests)**. He took none of the two 'accept as known limitation' recommendations: the quarterly restore drill (G14) and the register's 133 untested 'fixed' claims (G19) are both to be closed rather than written down as accepted | this table; per-gap rows below as they land |
 | **Phase 8 gate · documents** | 2026-09-27 | **README, USER_GUIDE, OPERATIONS_RUNBOOK, DEBUGGING_GUIDE, ARCHITECTURE_REFERENCE and the two generated documents (TEST_PLAN, DR_RUNBOOK): Herschrijven** — all six rewritten from code and tests, then put to him again, although all 39 false statements the check found had been corrected. **legacy-move: Verplaatsen** (eleven finished documents to `docs/legacy/`). **extra-docs: Goedkeuren** (the sixteen extras below keep their place) | step-17, `docs/legacy/README.md`, the table below |
+| **Phase 8 gate · rewritten documents** | 2026-09-27 | **Goedkeuren** for README, USER_GUIDE, OPERATIONS_RUNBOOK, DEBUGGING_GUIDE, ARCHITECTURE_REFERENCE and the two generated documents; **Akkoord** on the report of fix-34 to fix-38. Remark: add UML diagrams and professional visuals where they help | step-18, step-19 |
 
 ### Phase 8 · the documents beyond the nine, and why each stays
 

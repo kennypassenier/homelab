@@ -1469,3 +1469,33 @@ fn fix_26_a_directory_owned_by_someone_else_than_declared_is_drift() {
         "an unreadable directory is not a mismatch"
     );
 }
+
+/// gap-32: `homelab check` answered "not ok" (exit 1) when the only findings
+/// were `noted` ones, which by definition need nothing done; the nightly
+/// round already filtered those out with `alarming`. Both now use one rule.
+///
+/// covers: gap-32
+#[test]
+fn gap_32_noted_findings_alone_do_not_make_the_check_fail() {
+    use homelab_core::ops::fleetcheck::{check_passes, Finding, Severity};
+    let noted = Finding {
+        severity: Severity::Noted,
+        subject: "registry".into(),
+        what: "deliberately not backed up".into(),
+        remedy: "nothing".into(),
+    };
+    assert!(check_passes(std::slice::from_ref(&noted)));
+    let drift = Finding {
+        severity: Severity::Drift,
+        ..noted
+    };
+    assert!(!check_passes(&[drift]));
+    let host = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../host/src/main.rs"),
+    )
+    .unwrap();
+    assert!(
+        host.contains("ok: homelab_core::ops::fleetcheck::check_passes(&findings)"),
+        "the host's `homelab check` must answer with the same rule"
+    );
+}

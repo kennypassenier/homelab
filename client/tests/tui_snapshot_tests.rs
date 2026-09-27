@@ -1310,15 +1310,18 @@ fn h17_runbook_generator_structural_snapshot() {
         !doc.contains("homelab-backups/<stack>-config"),
         "the copy-pasteable export must not contradict the sentence above it"
     );
-    // And a native stack must not be told to deploy compose apps it has none
-    // of.
+    // A native stack has two routes, and the runbook must name both for what
+    // they are. gap-32: this used to forbid `homelab deploy` for a native
+    // stack, but deploy does rebuild one (its "native units" step, in
+    // core/src/ops/deploy.rs), while adopt only re-registers a service that
+    // is already running.
     assert!(
         doc.contains("`homelab adopt stacks/gamma`"),
-        "a native stack needs its own recovery path"
+        "re-registering a running native service must be named"
     );
     assert!(
-        !doc.contains("`homelab deploy stacks/gamma`"),
-        "and must not be told to run the compose path"
+        doc.contains("`homelab deploy stacks/<stack>` rebuilds a native stack too"),
+        "and so must the route that rebuilds one"
     );
     let _ = std::fs::remove_dir_all(&tmp);
 }

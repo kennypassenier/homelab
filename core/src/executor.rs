@@ -25,6 +25,33 @@ impl Cmd {
     pub fn rendered(&self) -> String {
         format!("{} {}", self.program, self.args.join(" "))
     }
+
+    /// The command as a shell would have to be given it: every argument that
+    /// is not a plain word is single-quoted.
+    ///
+    /// fix-38: the transcript's `[run ]` lines, and so an incident's
+    /// `commands.sh`, used `rendered()`, which joins arguments with spaces.
+    /// A `sh -c` script argument then came back as loose words, and replaying
+    /// `pct exec 110 -- sh -c cd '/opt/x' && docker compose up -d` ran the
+    /// second half on the host.
+    pub fn shell_line(&self) -> String {
+        std::iter::once(self.program.as_str())
+            .chain(self.args.iter().map(String::as_str))
+            .map(shell_word)
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+fn shell_word(a: &str) -> String {
+    let plain = !a.is_empty()
+        && a.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_./:=@%+,-".contains(c));
+    if plain {
+        a.to_string()
+    } else {
+        format!("'{}'", a.replace('\'', "'\\''"))
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -124,7 +151,7 @@ impl<'a> TracingExecutor<'a> {
 #[async_trait]
 impl Executor for TracingExecutor<'_> {
     async fn run(&self, cmd: &Cmd) -> Result<CmdOutput, CoreError> {
-        self.line(format!("[run ] {}", cmd.rendered()));
+        self.line(format!("[run ] {}", cmd.shell_line()));
         let out = self.inner.run(cmd).await?;
         for l in out.stdout.lines().chain(out.stderr.lines()).take(20) {
             if !l.trim().is_empty() {

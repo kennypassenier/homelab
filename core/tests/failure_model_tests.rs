@@ -242,3 +242,44 @@ async fn recording_sink_tees_and_records() {
     assert_eq!(inner.lines(), vec!["hello".to_string()]);
     assert_eq!(rec.events().len(), 1);
 }
+
+// fix-38: commands.sh joined arguments with single spaces, so an argument
+// holding a whole shell script came back as separate words. Replayed, the
+// line `pct exec 110 -- sh -c cd '/opt/x' && docker compose up -d` runs
+// `cd` inside the container and `docker compose up -d` ON THE HOST.
+#[tokio::test]
+async fn fix_38_a_replayed_command_keeps_its_script_argument_whole() {
+    use homelab_core::executor::{Cmd, Executor, TracingExecutor};
+    let exec = MockExecutor::new();
+    exec.respond_always("pct exec", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let traced = TracingExecutor::new(&exec, &sink);
+    let script = "cd '/opt/x' && docker compose up -d";
+    traced
+        .run(&Cmd::new(
+            "pct",
+            &["exec", "110", "--", "sh", "-c", script],
+            30,
+        ))
+        .await
+        .unwrap();
+    let replay = commands_script(&sink.events());
+    let line = replay
+        .lines()
+        .find(|l| l.starts_with("pct "))
+        .expect("the command is in the script");
+    assert_eq!(
+        line,
+        r#"pct exec 110 -- sh -c 'cd '\''/opt/x'\'' && docker compose up -d'"#
+    );
+    // And the shell reads it back as exactly those seven words.
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("set -- {}; printf '%s\\n' \"$#\" \"$7\"", line))
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("7\n{}\n", script)
+    );
+}

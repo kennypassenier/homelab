@@ -92,11 +92,14 @@ endif
 	@# Wait while CI on HEAD is still running: measured on 2026-09-27, the
 	@# day's releases were tagged while the push's own CI was mid-run, so the
 	@# guard below read "no verdict" and let every one through
-	@# (make-release-guard-no-wait). 20 minutes at most.
+	@# (make-release-guard-no-wait). 20 minutes at most. An unpushed HEAD
+	@# makes the API answer an error body, not a number: that is no runs, not
+	@# a reason to wait (it waited the full 20 minutes on 2026-09-27).
 	@for i in $$(seq 1 40); do \
 		p=$$(gh api "repos/{owner}/{repo}/commits/$$(git rev-parse HEAD)/check-runs" \
-			--jq '[.check_runs[] | select(.status != "completed")] | length' 2>/dev/null || echo 0); \
-		[ "$${p:-0}" -eq 0 ] && break; \
+			--jq '[.check_runs[] | select(.status != "completed")] | length' 2>/dev/null); \
+		case "$$p" in ''|*[!0-9]*) p=0 ;; esac; \
+		[ "$$p" -eq 0 ] && break; \
 		[ $$i -eq 1 ] && echo "  · CI on HEAD still running ($$p check(s)) — waiting"; \
 		sleep 30; \
 	done

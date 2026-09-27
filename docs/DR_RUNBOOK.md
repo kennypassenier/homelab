@@ -401,7 +401,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 ### metrics (vmid 113)
 
 - Container: hostname `113-app-metrics`, ip `10.10.10.13/24` on `vmbr0` VLAN 10, 2 core(s), 2560 MiB RAM, 0 MiB swap, 16 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 60.
-- Apps (docker compose, started in this order): prometheus, alertmanager, pve-exporter, loki, grafana. Files in the container under `/opt/metrics/<app>/`.
+- Apps (docker compose, started in this order): prometheus, alertmanager, pve-exporter, loki, loki-push, grafana. Files in the container under `/opt/metrics/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/metrics`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
   - `rclone:gdrive:homelab-backups/alertmanager-config`: `/appdata/metrics/alertmanager-config`

@@ -506,6 +506,7 @@ fn a_receiver_the_shipper_could_not_open_is_refused_at_plan_time() {
         listen: "0.0.0.0:514".into(),
         protocol: "udp".into(),
         format: "rfc5424".into(),
+        allow_from: vec![],
     }];
     let err = validate_manifest(&bad).expect_err("port 514 cannot be bound unprivileged");
     let msg = err.to_string();
@@ -525,6 +526,15 @@ fn a_receiver_the_shipper_could_not_open_is_refused_at_plan_time() {
         .expect_err("a protocol or format Alloy does not speak")
         .to_string();
     assert!(msg.contains("sctp") && msg.contains("cef"), "{}", msg);
+
+    // fix-93: an allowed sender is an address; anything else would become a
+    // regex that keeps nothing, or everything.
+    let mut loose = gw.clone();
+    loose.syslog_receivers[0].allow_from = vec!["opnsense.lan".into()];
+    let msg = validate_manifest(&loose)
+        .expect_err("allow_from takes IP addresses")
+        .to_string();
+    assert!(msg.contains("opnsense.lan"), "{}", msg);
 }
 
 /// Kenny, 2026-09-27: the watch list is declarative, all of it. A monitor no
@@ -872,4 +882,76 @@ fn fix_90_loki_and_grafana_run_on_the_metrics_stack() {
             assert!(!text.contains(old), "{} still names {old}", f.display());
         }
     }
+}
+
+/// Kenny's triage answers 2026-09-27: loki-unauthenticated-open ("alleen
+/// afleveren, lezen intern, wissen uit") and the Loki half of
+/// alloy-not-updated-loki-stale-pin. Measured from CT 116 the same day: the
+/// one container strangers can reach read 19,681 lines of the house's logs in
+/// an hour through 10.10.10.4:3100, and Loki ran `deletion_mode:
+/// filter-and-delete`, version 3.0.0 of 2024-04-08. From the LAN only pushes
+/// reach Loki now; reading stays on the stack's own network and loopback.
+///
+/// covers: fix-93
+#[test]
+fn fix_93_loki_takes_only_pushes_from_the_lan_and_deletes_nothing() {
+    let read = |p: &str| std::fs::read_to_string(stacks_dir().join(p)).unwrap();
+    let loki = read("metrics/loki/docker-compose.yml");
+    assert!(
+        loki.contains(
+            "image: grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193"
+        ),
+        "{loki}"
+    );
+    assert!(loki.contains("\"127.0.0.1:3101:3100\""), "{loki}");
+    assert!(
+        !loki.contains("\"3100:3100\""),
+        "the full API is not on the LAN"
+    );
+    let config = read("metrics/loki/loki-config.yaml");
+    assert!(config.contains("deletion_mode: disabled"), "{config}");
+    // The front: one app of its own, on the LAN port Alloy already pushes to.
+    let (_, metrics) = compose_stacks()
+        .into_iter()
+        .find(|(n, _)| n == "metrics")
+        .unwrap();
+    assert!(metrics.apps.iter().any(|a| a == "loki-push"));
+    let front = read("metrics/loki-push/docker-compose.yml");
+    assert!(front.contains("\"3100:8080\""), "{front}");
+    let conf = read("metrics/loki-push/nginx.conf");
+    for want in [
+        "location = /loki/api/v1/push {",
+        "limit_except POST { deny all; }",
+        "location = /ready {",
+        "limit_except GET { deny all; }",
+        "return 403;",
+    ] {
+        assert!(conf.contains(want), "{want}\n{conf}");
+    }
+    assert_eq!(
+        conf.matches("location ").count(),
+        3,
+        "push, ready and the refusal; nothing else is let through: {conf}"
+    );
+    let checks = read("metrics/loki/checks.yml");
+    assert!(checks.contains("http://127.0.0.1:3101/loki/api/v1/labels"));
+    assert!(
+        !checks.contains("127.0.0.1:3100"),
+        "Loki's own port is 3101"
+    );
+    let front_checks = read("metrics/loki-push/checks.yml");
+    assert!(front_checks.contains("http://127.0.0.1:3100/loki/api/v1/labels"));
+    assert!(front_checks.contains("[ \"$c\" = 403 ]"));
+    // OPNsense sends from its VLAN 10 address: measured on CT 104's veth on
+    // 2026-09-27, every packet to 1514 came from 10.10.10.1.
+    let (_, gateway) = compose_stacks()
+        .into_iter()
+        .find(|(n, _)| n == "gateway")
+        .unwrap();
+    let r = gateway
+        .syslog_receivers
+        .iter()
+        .find(|r| r.host == "opnsense")
+        .unwrap();
+    assert_eq!(r.allow_from, vec!["10.10.10.1".to_string()]);
 }

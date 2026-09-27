@@ -272,6 +272,7 @@ mod syslog_receiver {
             listen: "0.0.0.0:1514".into(),
             protocol: "udp".into(),
             format: "rfc5424".into(),
+            allow_from: vec![],
         }
     }
 
@@ -313,6 +314,49 @@ mod syslog_receiver {
         );
     }
 
+    /// fix-93 (expert panel 2026-09-27, loki-unauthenticated-open): the
+    /// receiver took lines from any sender on the LAN, so any container could
+    /// write lines labelled as the firewall. With `allow_from` only those
+    /// addresses are kept; the rest are dropped before they reach Loki. A
+    /// `keep` among the source's own relabel rules does not drop anything
+    /// (run against Alloy 1.20.0 the same day: the refused line arrived), so
+    /// the filter is a pipeline `loki.relabel` between the source and the
+    /// writer, on a `sender` label the source copies and the filter removes.
+    /// covers: fix-93
+    #[test]
+    fn fix_93_a_receiver_keeps_only_the_senders_it_names() {
+        let mut r = opnsense();
+        r.allow_from = vec!["10.10.10.1".into()];
+        let c = config(
+            "gateway",
+            "104-app-gateway",
+            "http://10.10.10.13:3100",
+            &[r],
+        );
+        let copy = "  rule {\n    source_labels = [\"__syslog_connection_ip_address\"]\n    target_label  = \"sender\"\n  }\n";
+        assert!(c.contains(copy), "{c}");
+        assert!(
+            c.contains("  forward_to    = [loki.relabel.syslog_opnsense_sender.receiver]\n"),
+            "{c}"
+        );
+        let filter = "loki.relabel \"syslog_opnsense_sender\" {\n  forward_to = [loki.write.default.receiver]\n  rule {\n    source_labels = [\"sender\"]\n    regex         = \"10\\\\.10\\\\.10\\\\.1\"\n    action        = \"keep\"\n  }\n  rule {\n    regex  = \"sender\"\n    action = \"labeldrop\"\n  }\n}\n";
+        assert!(c.contains(filter), "{c}");
+        assert_eq!(
+            c.matches("loki.write.default.receiver").count(),
+            4,
+            "the filter, not the source, now reaches the writer:\n{c}"
+        );
+        // Unset, nothing is filtered, as before.
+        let c = config(
+            "gateway",
+            "104-app-gateway",
+            "http://10.10.10.13:3100",
+            &[opnsense()],
+        );
+        assert!(!c.contains("__syslog_connection_ip_address"), "{c}");
+        assert!(!c.contains("syslog_opnsense_sender"), "{c}");
+    }
+
     /// Ten other containers render this same file. A receiver that leaked
     /// into all of them would open UDP 1514 on every one and, worse, label
     /// whatever arrived there as OPNsense.
@@ -332,6 +376,7 @@ mod syslog_receiver {
             listen: "0.0.0.0:1515".into(),
             protocol: "udp".into(),
             format: "rfc3164".into(),
+            allow_from: vec![],
         };
         let c = config(
             "gateway",

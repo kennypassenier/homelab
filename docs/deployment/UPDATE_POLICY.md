@@ -19,9 +19,9 @@ continuation is `nicholas-fedor/watchtower`, deliberately not adopted.
 
 | Class | Label | When | Today |
 |---|---|---|---|
-| **Automatic** | `auto` | a failed update is cheap and the rollback is proven | syncthing, promtail, and the arr-suite once it is managed |
-| **Manual** | `manual` | a silent failure is expensive | traefik, cloudflared, crowdsec, prometheus, alertmanager, grafana, loki, goaccess, http-switchboard |
-| **Pinned** | `manual` + a pinned tag | a new version can break something that only shows up hours later | jellyfin (hardware transcoding), gluetun (VPN throughput) |
+| **Automatic** | `auto` | a failed update is cheap and the rollback is proven | syncthing, promtail, loki-push (Loki's nginx front, fix-93), and the arr-suite once it is managed |
+| **Manual** | `manual` | a silent failure is expensive | traefik, cloudflared, crowdsec, prometheus, alertmanager, grafana, goaccess, http-switchboard |
+| **Pinned** | `manual` + a pinned tag | a new version can break something that only shows up hours later | jellyfin (hardware transcoding), gluetun (VPN throughput), loki (3.7.8 by digest since fix-93, 2026-09-27: an upgrade reads a database of every log line, so it is a deliberate step with a count afterwards) |
 
 `manual` and `auto` are the only values the code understands. `auto-after-N-days`
 appears in the orchestrator's own `FEATURES.md` under D9 and was never built —

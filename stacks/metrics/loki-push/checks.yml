@@ -1,0 +1,28 @@
+# loki-push is the only way into Loki from the LAN (fix-93,
+# loki-unauthenticated-open, 2026-09-27). Two readings, one for each half of
+# its job: what must pass does, and what must not pass does not.
+checks:
+  # The question every Alloy and Uptime Kuma asks, through the front.
+  - name: "loki is klaar via de voordeur"
+    command: "curl -s -m 10 http://127.0.0.1:3100/ready"
+    expect: must_match
+    layer: process
+    blind_spot: >-
+      Proves the front reaches Loki for a GET. A push is a POST with a body,
+      which this does not send; the fleet check's count of arriving lines is
+      the reading that proves pushes pass.
+
+  # Asked of the port every other container reaches, because a front that
+  # let reads through again would look perfectly healthy from everywhere
+  # else.
+  - name: "de LAN-poort weigert lezen"
+    command: >-
+      c=$(curl -s -o /dev/null -w '%{http_code}' -m 10
+      http://127.0.0.1:3100/loki/api/v1/labels);
+      [ "$c" = 403 ] && echo geweigerd
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      Asked on this container's own loopback, which reaches the same front
+      as the LAN. It says nothing about a firewall in between, and nothing
+      about who can push: every container on the LAN still can.

@@ -48,6 +48,11 @@ pub struct FactsInputs {
     pub no_touch: Vec<u16>,
     pub prometheus_url: Option<String>,
     pub loki_url: Option<String>,
+    /// fix-93: the container Loki runs in. Set, the log question is asked
+    /// from inside it on [`crate::ops::logshipper::LOKI_QUERY_LOOPBACK`],
+    /// because the LAN port takes pushes only; unset, it is asked at
+    /// `loki_url` from the host, as before.
+    pub loki_vmid: Option<u16>,
     pub logs_window: String,
     pub grafana_dashboards_dir: Option<String>,
     /// Now, in seconds since the epoch. Core never reads a clock.
@@ -581,6 +586,13 @@ pub async fn gather_live_facts(
                     "unit"
                 };
                 if let Some(base) = loki.as_deref() {
+                    // fix-93: the LAN port takes pushes only, so with Loki's
+                    // container named the question goes in there, to the
+                    // loopback port that carries the full API.
+                    let base = match inp.loki_vmid {
+                        Some(_) => crate::ops::logshipper::LOKI_QUERY_LOOPBACK,
+                        None => base,
+                    };
                     // A label matcher is not decoration (F79): lines kept
                     // arriving for months without the label the dashboards
                     // query by. Counting LABELLED lines is the question that
@@ -592,8 +604,25 @@ pub async fn gather_live_facts(
                         label,
                         window
                     );
+                    let cmd = match inp.loki_vmid {
+                        Some(vmid) => Cmd::new(
+                            "pct",
+                            &[
+                                "exec",
+                                &vmid.to_string(),
+                                "--",
+                                "curl",
+                                "-s",
+                                "-m",
+                                "10",
+                                &q,
+                            ],
+                            30,
+                        ),
+                        None => Cmd::new("curl", &["-s", "-m", "10", &q], 20),
+                    };
                     c.logs_recent = Some(
-                        exec.run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
+                        exec.run(&cmd)
                             .await
                             .map(|o| o.stdout.contains("\"value\""))
                             .unwrap_or(false),

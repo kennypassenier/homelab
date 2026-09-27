@@ -88,6 +88,10 @@ struct FileConfig {
     /// is deliberate: an unasked question must never become a finding.
     prometheus_url: Option<String>,
     loki_url: Option<String>,
+    /// fix-93 (2026-09-27): the container Loki runs in. Loki's LAN port
+    /// takes pushes only since then, so the coverage check asks from inside
+    /// this container. Absent = asked at `loki_url` from the host.
+    loki_vmid: Option<u16>,
     /// How far back the log-coverage question looks. A quiet service is not
     /// a broken one: `homepage` and `kp-soft` ship a few hundred lines a day
     /// and none at all in a given hour, and the first version of this check
@@ -205,6 +209,8 @@ struct Config {
     /// is deliberate: an unasked question must never become a finding.
     prometheus_url: Option<String>,
     loki_url: Option<String>,
+    /// fix-93: where the log question is asked; see the file field.
+    loki_vmid: Option<u16>,
     /// Window for the log-coverage question; see the file field.
     logs_window: String,
     /// D5: git remote URL for the offsite intent mirror; None = off.
@@ -287,6 +293,7 @@ const KNOWN_TOP: &[&str] = &[
     "notify_fallback_auth_bearer",
     "prometheus_url",
     "loki_url",
+    "loki_vmid",
     "logs_window",
     "retention",
     "exec_enabled",
@@ -446,6 +453,7 @@ fn load_config_from(path: String) -> Config {
         notify_fallback_auth_bearer: file.notify_fallback_auth_bearer.clone(),
         prometheus_url: file.prometheus_url.clone(),
         loki_url: file.loki_url.clone(),
+        loki_vmid: file.loki_vmid,
         logs_window: file.logs_window.clone().unwrap_or_else(default_logs_window),
         mirror_remote: file.mirror_remote,
         safety: {
@@ -566,6 +574,8 @@ fn render_settings_toml(
         prometheus_url: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         loki_url: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        loki_vmid: Option<u16>,
         logs_window: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         mirror_remote: Option<&'a String>,
@@ -628,6 +638,7 @@ fn render_settings_toml(
         notify_fallback_auth_bearer: config.notify_fallback_auth_bearer.as_ref(),
         prometheus_url: config.prometheus_url.as_ref(),
         loki_url: config.loki_url.as_ref(),
+        loki_vmid: config.loki_vmid,
         logs_window: (config.logs_window != default_logs_window()).then_some(&config.logs_window),
         mirror_remote: config.mirror_remote.as_ref(),
         no_touch: (config.safety.no_touch != SafetyConfig::default().no_touch)
@@ -1194,6 +1205,7 @@ port = 5003
             notify_auth_bearer: Some("a-token-that-must-survive-a-save".into()),
             prometheus_url: Some("http://10.10.10.13:9090".into()),
             loki_url: Some("http://10.10.10.13:3100".into()),
+            loki_vmid: Some(113),
             logs_window: "6h".into(),
             mirror_remote: Some("git@github.com:k/m.git".into()),
             safety: SafetyConfig {
@@ -1311,6 +1323,9 @@ port = 5003
         );
         // fix-90: where Grafana runs, once it left the gateway.
         assert_eq!(parsed.grafana_vmid, Some(113));
+        // fix-93: where the log question is asked, now that the LAN port
+        // takes pushes only.
+        assert_eq!(parsed.loki_vmid, Some(113));
     }
 
     /// fix-90 (2026-09-27, gateway-shared-no-limits): Grafana moved to the
@@ -3834,6 +3849,7 @@ async fn gather_live_facts(
         no_touch: state.config.safety.no_touch.to_vec(),
         prometheus_url: state.config.prometheus_url.clone(),
         loki_url: state.config.loki_url.clone(),
+        loki_vmid: state.config.loki_vmid,
         logs_window: sane_window(&state.config.logs_window),
         grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         now_unix: std::time::SystemTime::now()

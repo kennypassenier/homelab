@@ -217,6 +217,7 @@ loki.source.file "syslog" {{
 /// `host` is the declared label and not what the sender claims.
 fn receiver_block(stack: &str, r: &crate::manifest::SyslogReceiver) -> String {
     let name = format!("syslog_{}", r.host.replace('-', "_"));
+    let (copy_sender, forward, filter) = sender_filter(&name, &r.allow_from);
     format!(
         r#"
 // ── Syslog receiver: {host} ─────────────────────────────────────────────────
@@ -234,12 +235,12 @@ loki.source.syslog "{name}" {{
     }}
   }}
   relabel_rules = loki.relabel.{name}.rules
-  forward_to    = [loki.write.default.receiver]
+  forward_to    = [{forward}]
 }}
 
 loki.relabel "{name}" {{
   forward_to = []
-  rule {{
+{copy_sender}  rule {{
     source_labels = ["__syslog_message_app_name"]
     target_label  = "app"
   }}
@@ -252,15 +253,76 @@ loki.relabel "{name}" {{
     target_label  = "facility"
   }}
 }}
-"#,
+{filter}"#,
         host = r.host,
         name = name,
         listen = r.listen,
         protocol = r.protocol,
         format = r.format,
-        stack = stack
+        stack = stack,
     )
 }
+
+/// fix-93 (expert panel 2026-09-27, loki-unauthenticated-open): the
+/// receiver took lines from anyone on the LAN, so any container could write
+/// lines labelled as the firewall. With `allow_from` set, lines from other
+/// senders are dropped before they reach Loki.
+///
+/// Two steps, because the obvious one does nothing: a `keep` among the
+/// source's own `relabel_rules` only decides the labels, and a line whose
+/// labels were dropped is still shipped with the listener's static ones
+/// (measured with Alloy 1.20.0 on 2026-09-27: the refused sender's line
+/// arrived, only without its app label). So the source copies the sender's
+/// address into a `sender` label, and a `loki.relabel` in the pipeline,
+/// which does drop what it does not keep, filters on it and removes the
+/// label again. The addresses are validated as IPs by the manifest, so
+/// escaping the dots is all the regex needs; Alloy anchors it.
+///
+/// Returns the copy rule, the source's `forward_to` target and the filter
+/// component. An empty `allow_from` renders what gap-11 rendered: every
+/// sender is kept.
+fn sender_filter(name: &str, allow_from: &[String]) -> (String, String, String) {
+    if allow_from.is_empty() {
+        return (
+            String::new(),
+            "loki.write.default.receiver".into(),
+            String::new(),
+        );
+    }
+    let regex = allow_from
+        .iter()
+        .map(|a| a.replace('.', "\\\\."))
+        .collect::<Vec<_>>()
+        .join("|");
+    let copy = "  rule {\n    source_labels = [\"__syslog_connection_ip_address\"]\n    \
+                target_label  = \"sender\"\n  }\n"
+        .to_string();
+    let filter = format!(
+        r#"
+// Only the senders the stack file allows (fix-93).
+loki.relabel "{name}_sender" {{
+  forward_to = [loki.write.default.receiver]
+  rule {{
+    source_labels = ["sender"]
+    regex         = "{regex}"
+    action        = "keep"
+  }}
+  rule {{
+    regex  = "sender"
+    action = "labeldrop"
+  }}
+}}
+"#
+    );
+    (copy, format!("loki.relabel.{name}_sender.receiver"), filter)
+}
+
+/// Where the host asks Loki's query API from inside Loki's own container
+/// (fix-93). The LAN port takes pushes only; the full API is published on
+/// this loopback port of that container and nowhere else, which
+/// `stacks/metrics/loki/docker-compose.yml` declares and a stack-file test
+/// holds to this value.
+pub const LOKI_QUERY_LOOPBACK: &str = "http://127.0.0.1:3101";
 
 /// The package default, which the deploy restores when it finds anything
 /// else (gap-11).

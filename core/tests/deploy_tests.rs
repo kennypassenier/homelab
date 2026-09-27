@@ -3298,6 +3298,7 @@ async fn a_gateway_deploy_renders_the_receiver_and_restores_single_file_mode() {
         listen: "0.0.0.0:1514".into(),
         protocol: "udp".into(),
         format: "rfc5424".into(),
+        allow_from: vec![],
     }];
     let mut c = ctx(&exec, &sink, &journal);
     c.loki_url = Some("http://10.10.10.13:3100".into());

@@ -43,6 +43,12 @@ compactor:
 
 limits_config:
   retention_period: 744h  # 31 days
+  # fix-93 (Kenny's answer to loki-unauthenticated-open, 2026-09-27): no
+  # log line is deleted through the API. Measured that day: the running
+  # Loki said `deletion_mode: filter-and-delete`, so anyone who could reach
+  # it could ask it to remove the lines about their own intrusion.
+  # Retention above still ages lines out.
+  deletion_mode: disabled
 
 # Changing this file restarts Loki on the next metrics deploy; the deploy then
 # re-reads Loki's readiness for up to 60 s before calling it a change

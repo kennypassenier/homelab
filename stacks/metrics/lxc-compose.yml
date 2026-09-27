@@ -87,8 +87,9 @@ storage:
     app: grafana
 # alertmanager was deployed by hand on 2026-08-30 and was missing here, so a
 # deploy of this stack would not have started it. Loki before Grafana: the
-# datasource Grafana provisions at start should already answer.
-apps: [prometheus, alertmanager, pve-exporter, loki, grafana]
+# datasource Grafana provisions at start should already answer. loki-push is
+# Loki's front on the LAN port (fix-93): pushes and /ready, nothing else.
+apps: [prometheus, alertmanager, pve-exporter, loki, loki-push, grafana]
 latch_secrets: [pve-exporter, grafana]
 
 # Pushes traefik-routes.yml to the gateway's watched routes directory.

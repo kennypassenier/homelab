@@ -1569,13 +1569,20 @@ compose, installs Alloy in the container. `loki_url` is the base address
 Alloy pushes to (`/loki/api/v1/push` is added to it); since Loki moved to the
 metrics stack (fix-90, 2026-09-27) it is `http://10.10.10.13:3100`, and it was
 `http://10.10.10.4:3100` while Loki ran on the gateway. Changing it reaches a
-container at that stack's next deploy, which renders its Alloy config again (`core/src/ops/deploy.rs:1958-1967`,
+container at that stack's next deploy, which renders its Alloy config again.
+That port takes pushes only since fix-93, so the coverage check in
+`homelab check` asks Loki from inside its container instead: set
+`loki_vmid = 113` beside `loki_url`, and the host runs the query there on
+`127.0.0.1:3101`; unset, it asks `loki_url` from the host as before (`core/src/ops/deploy.rs:1958-1967`,
 `core/src/ops/logshipper.rs`). An install that fails does not fail the
 deploy; it logs a warning that the container is shipping no logs
 (`core/src/ops/deploy.rs:1968-1978`). A stack may open syslog receivers for
 devices that cannot run a shipper, with `syslog_receivers:` entries of `host`,
 `listen` (port 1024 or higher), `protocol` (`udp`/`tcp`) and `format`
-(`rfc5424`/`rfc3164`) (`core/src/manifest.rs:95-137,509-563`);
+(`rfc5424`/`rfc3164`), and optionally `allow_from`, a list of sender IP
+addresses whose lines are kept; every other sender's lines are dropped before
+they reach Loki (fix-93; the gateway allows OPNsense's 10.10.10.1 only)
+(`core/src/manifest.rs:95-137,509-563`);
 `stacks/gateway/lxc-compose.yml:144` is the example.
 
 #### F2 · Live log streaming in the TUI

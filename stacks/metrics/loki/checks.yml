@@ -14,13 +14,15 @@ checks:
   # deploy that brought the container logs back.
   - name: "aantal labels die loki kent"
     command: >-
-      curl -s -m 15 http://127.0.0.1:3100/loki/api/v1/labels |
+      curl -s -m 15 http://127.0.0.1:3101/loki/api/v1/labels |
       tr -d '[]{}"' | cut -d: -f3 | tr ',' '\n' | grep -c .
     expect: never_decreases
     layer: application
 
+  # On Loki's own loopback port (fix-93): the LAN port belongs to loki-push,
+  # whose checks ask the same question through the front.
   - name: "loki is klaar"
-    command: "curl -s -m 10 http://127.0.0.1:3100/ready"
+    command: "curl -s -m 10 http://127.0.0.1:3101/ready"
     expect: must_match
     layer: process
     blind_spot: >-

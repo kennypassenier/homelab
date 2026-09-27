@@ -17,6 +17,7 @@ fn inputs() -> FactsInputs {
         no_touch: vec![100, 101],
         prometheus_url: None,
         loki_url: None,
+        loki_vmid: None,
         logs_window: "24h".into(),
         grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
@@ -489,4 +490,45 @@ async fn fix_90_the_dashboard_question_is_asked_where_grafana_runs() {
     );
     let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
     assert_eq!(media.dashboard_provisioned, Some(true));
+}
+
+/// fix-93 (expert panel 2026-09-27, loki-unauthenticated-open): the LAN port
+/// takes pushes only, so the host can no longer read Loki from outside. With
+/// `loki_vmid` set it asks from inside Loki's container, on the loopback port
+/// the stack publishes there, and the push address stays what Alloy uses.
+/// covers: fix-93
+#[tokio::test]
+async fn fix_93_the_log_question_is_asked_inside_lokis_container() {
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        &serde_json::json!({
+            "schema_version": 1,
+            "stacks": {
+                "media": {"vmid": 106, "hostname": "106-app-media", "apps": ["jellyfin"], "applied_at": 1, "manifest": null}
+            }
+        })
+        .to_string(),
+    );
+    exec.respond_always(
+        "stack%3D%22media%22%2Ccontainer_name",
+        CmdOutput::ok(r#"{"data":{"result":[{"value":[1,"42"]}]}}"#),
+    );
+    let mut inp = inputs();
+    inp.loki_url = Some("http://10.10.10.13:3100".into());
+    inp.loki_vmid = Some(113);
+    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
+    let asked = exec.calls_containing("loki/api/v1/query");
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    let inside = format!(
+        "{}/loki/api/v1/query?",
+        homelab_core::ops::logshipper::LOKI_QUERY_LOOPBACK
+    );
+    assert!(
+        asked[0].starts_with("pct exec 113 -- curl ") && asked[0].contains(&inside),
+        "{asked:?}"
+    );
+    assert!(!asked[0].contains("10.10.10.13:3100"), "{asked:?}");
+    let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
+    assert_eq!(media.logs_recent, Some(true));
 }

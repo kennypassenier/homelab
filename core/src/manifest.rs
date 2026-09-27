@@ -134,6 +134,12 @@ pub struct SyslogReceiver {
     /// carries the app name, severity and facility the relabel rules read.
     #[serde(default = "rfc5424")]
     pub format: String,
+    /// fix-93 (expert panel 2026-09-27, loki-unauthenticated-open): the
+    /// sender addresses whose lines are kept; a line from anywhere else is
+    /// dropped before it reaches Loki. Empty = every sender, as before. The
+    /// port itself stays open to the LAN; closing it is a firewall's job.
+    #[serde(default)]
+    pub allow_from: Vec<String>,
 }
 
 fn udp() -> String {
@@ -553,6 +559,18 @@ fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
                 "syslog receiver '{}' has protocol '{}' — Alloy speaks udp or tcp",
                 r.host, r.protocol
             ));
+        }
+        // fix-93: each entry becomes an anchored regex on the sender's
+        // address, so a name would keep nothing and a pattern could keep
+        // anything.
+        for a in &r.allow_from {
+            if a.parse::<std::net::IpAddr>().is_err() {
+                problems.push(format!(
+                    "syslog receiver '{}' allows '{}', which is not an IP address — write \
+                     the sender's address as it arrives, e.g. 10.10.10.1",
+                    r.host, a
+                ));
+            }
         }
         if !matches!(r.format.as_str(), "rfc5424" | "rfc3164") {
             problems.push(format!(

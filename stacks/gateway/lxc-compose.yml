@@ -133,3 +133,10 @@ syslog_receivers:
     listen: 0.0.0.0:1514
     protocol: udp
     format: rfc5424
+    # fix-93 (Kenny's answer to loki-unauthenticated-open, 2026-09-27: only
+    # OPNsense). Lines from any other sender are dropped before they reach
+    # Loki, so no container can write lines labelled as the firewall. The
+    # address is the firewall's VLAN 10 interface, not 10.10.5.1: measured on
+    # CT 104's veth that day, every packet to 1514 came from 10.10.10.1. The
+    # port itself stays reachable; only a firewall rule can close it.
+    allow_from: [10.10.10.1]

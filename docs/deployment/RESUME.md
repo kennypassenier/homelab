@@ -69,10 +69,12 @@ already gone.
 runs and delivers nothing is the fault this project keeps finding):
 
 ```sh
-curl -s -G "http://10.10.10.13:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={stack="<naam>"}' \
-  --data-urlencode "start=$(( $(date +%s) - 600 ))000000000" \
-  --data-urlencode "end=$(date +%s)000000000" --data-urlencode 'limit=1'
+# Reads go through CT 113's loopback since fix-93: the LAN port takes
+# pushes only.
+ssh pve "pct exec 113 -- curl -s -G http://127.0.0.1:3101/loki/api/v1/query_range \
+  --data-urlencode 'query={stack=\"<naam>\"}' \
+  --data-urlencode start=$(( $(date +%s) - 600 ))000000000 \
+  --data-urlencode end=$(date +%s)000000000 --data-urlencode limit=1"
 ```
 
 Zero streams after a migration = that stack is broken, whatever the container

@@ -45,7 +45,7 @@ Is it running, and if not, why:
 systemctl status homelab-host
 journalctl -u homelab-host -n 50 --no-pager
 curl -sk https://127.0.0.1:8443/api/health     # answers: ok
-curl -sk https://127.0.0.1:8443/api/version
+/usr/local/bin/homelab-host --version        # the installed version (/api/version takes the token)
 ```
 
 The daemon refuses to start, and says so in the journal, when `/etc/homelab/host.toml` does not parse as TOML, when it is not a valid host config, or when the token is shorter than 16 characters. A key it does not know is a `WARNING` line, not a refusal.

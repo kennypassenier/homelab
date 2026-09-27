@@ -1002,7 +1002,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          systemctl status {svc}\n\
          journalctl -u {svc} -n 50 --no-pager\n\
          curl -sk https://127.0.0.1:{port}/api/health     # answers: ok\n\
-         curl -sk https://127.0.0.1:{port}/api/version\n\
+         {cur} --version        # the installed version (/api/version takes the token)\n\
          ```\n\n\
          The daemon refuses to start, and says so in the journal, when `{toml}` does not \
          parse as TOML, when it is not a valid host config, or when the token is shorter \

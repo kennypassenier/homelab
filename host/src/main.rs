@@ -535,6 +535,19 @@ fn load_config_from(path: String) -> Config {
             w
         );
     }
+    // fix-126: said at every start until the route moves to TLS.
+    for route in plaintext_bearer_routes(
+        cfg.initial_settings.notify_webhook.as_deref(),
+        cfg.notify_auth_bearer.as_deref(),
+        cfg.notify_fallback_webhook.as_deref(),
+        cfg.notify_fallback_auth_bearer.as_deref(),
+    ) {
+        tracing::warn!(
+            "notification route {} sends its bearer token over plain HTTP — anything on that \
+             network segment can read it; an https:// route (kyu behind Traefik) closes this",
+            route
+        );
+    }
     cfg
 }
 
@@ -1763,6 +1776,99 @@ port = 5003
         assert_eq!(got, [0o700, 0o700, 0o600, 0o700, 0o600, 0o600]);
     }
 
+    /// One plain HTTP GET against `addr`, with an optional bearer token;
+    /// returns the status code and the body.
+    async fn http_get(addr: SocketAddr, path: &str, token: Option<&str>) -> (u16, String) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let auth = token
+            .map(|t| format!("Authorization: Bearer {}\r\n", t))
+            .unwrap_or_default();
+        s.write_all(
+            format!(
+                "GET {} HTTP/1.1\r\nHost: x\r\n{}Connection: close\r\n\r\n",
+                path, auth
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).await.unwrap();
+        let code = out
+            .split_whitespace()
+            .nth(1)
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(0);
+        let body = out.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+        (code, body)
+    }
+
+    /// fix-126 (expert panel, unauth-version-plaintext-kyu, 2026-09-27):
+    /// `/api/version` told any neighbour which release runs, which is what a
+    /// probe needs to pick a known fault. It now takes the token like the
+    /// line itself; `/api/health` stays open, it says only `ok`.
+    #[tokio::test]
+    async fn fix_126_the_version_endpoint_needs_the_token() {
+        let path = format!("/tmp/homelab-fix126-{}.toml", std::process::id());
+        std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
+        let state = test_state(load_config_from(path));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = app_router(state.clone());
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap()
+        });
+        let (code, body) = http_get(addr, "/api/version", None).await;
+        assert_eq!(code, 401, "no token, no version: {}", body);
+        assert!(!body.contains(VERSION), "{}", body);
+        assert_eq!(state.auth_failures.snapshot().count, 1, "and it is counted");
+        let (code, body) = http_get(addr, "/api/version", Some("0123456789abcdef0123")).await;
+        assert_eq!((code, body.trim()), (200, VERSION));
+        assert_eq!(http_get(addr, "/api/health", None).await.0, 200);
+    }
+
+    /// fix-126: a notification route that sends the bearer token over plain
+    /// HTTP is named at start. The token to kyu crossed VLAN 10 in clear
+    /// text, where an ARP-spoofing container reads it.
+    #[test]
+    fn fix_126_a_bearer_sent_over_plain_http_is_named() {
+        let routes = plaintext_bearer_routes(
+            Some("http://10.10.10.9:8080/publish/notify.kenny"),
+            Some("tok"),
+            Some("http://10.10.5.101:8123/api/webhook/abc"),
+            None,
+        );
+        assert_eq!(routes.len(), 1, "{:?}", routes);
+        assert!(
+            routes[0].starts_with("http://10.10.10.9:8080"),
+            "{:?}",
+            routes
+        );
+        assert!(
+            !routes[0].contains("notify.kenny"),
+            "path withheld: {:?}",
+            routes
+        );
+        assert!(plaintext_bearer_routes(
+            Some("https://kyu.example/publish"),
+            Some("tok"),
+            None,
+            None
+        )
+        .is_empty());
+        assert!(
+            plaintext_bearer_routes(Some("http://127.0.0.1:8080/x"), Some("tok"), None, None)
+                .is_empty(),
+            "loopback never crosses a wire"
+        );
+    }
+
     /// A `MakeWriter` into a shared buffer, to read what the journal gets.
     #[derive(Clone, Default)]
     struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -2591,14 +2697,57 @@ fn accept_pending_update(state_dir: &str, started_at: u64) {
     }
 }
 
+/// fix-126 (expert panel, unauth-version-plaintext-kyu, 2026-09-27):
+/// notification routes that send a bearer token over plain HTTP to another
+/// machine, shown as `route_for_log` shows them. The kyu publish token
+/// crossed VLAN 10 in clear text, where any container that can ARP-spoof
+/// reads it. Moving the route to TLS is a change on the machines, so the
+/// daemon says it at start rather than refusing.
+fn plaintext_bearer_routes(
+    primary: Option<&str>,
+    primary_bearer: Option<&str>,
+    fallback: Option<&str>,
+    fallback_bearer: Option<&str>,
+) -> Vec<String> {
+    let loopback = |url: &str| {
+        let host = homelab_core::notify::route_for_log(url);
+        let host = host.trim_start_matches("http://");
+        host.starts_with("127.") || host.starts_with("localhost") || host.starts_with("[::1]")
+    };
+    [(primary, primary_bearer), (fallback, fallback_bearer)]
+        .into_iter()
+        .filter_map(|(url, bearer)| Some((url?, bearer?)))
+        .filter(|(url, _)| url.starts_with("http://") && !loopback(url))
+        .map(|(url, _)| homelab_core::notify::route_for_log(url))
+        .collect()
+}
+
 /// The daemon's routes. One function for `main` and the tests, so a test of
 /// the 401 path runs the real one.
 fn app_router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(|| async { "ok" }))
-        .route("/api/version", get(|| async { VERSION }))
+        .route("/api/version", get(version_endpoint))
         .route("/api/ws", get(ws_upgrade))
         .with_state(state)
+}
+
+/// fix-126: the version for a caller holding the token. It was open, and it
+/// told any neighbour on the VLAN which release runs.
+async fn version_endpoint(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    if bearer_ok(
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+        &state.config.token,
+    ) {
+        VERSION.into_response()
+    } else {
+        log_refused(&state, peer, "/api/version");
+        (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response()
+    }
 }
 
 /// T69: the asker that reaches a watching operator over the live line.

@@ -435,8 +435,10 @@ certificate it creates once in `/var/lib/homelab/tls-cert.pem` and
 `Authorization: Bearer <token>`; without it the answer is 401
 `missing or invalid bearer token` (`host/src/main.rs:2717-2723`). The daemon
 refuses to start with a token shorter than 16 characters
-(`host/src/main.rs:409-419`). `/api/health` and `/api/version` answer without
-a token (`host/src/main.rs:1864-1865`). Pinning is described in 0.1; test
+(`host/src/main.rs:409-419`). `/api/health` answers without a token;
+`/api/version` needs it since fix-126 (`app_router`). Every refusal is a
+journal line `401 on <path> from <address>` and counts toward the `refused
+connections` line of `homelab doctor` (fix-120). Pinning is described in 0.1; test
 `client/tests/tls_pin_tests.rs:33`.
 
 #### A5 · Secrets vault on the host
@@ -1653,8 +1655,8 @@ without a token, for a container not yet under management
 #### F5 · Health API
 
 **Status:** Built, narrower than FEATURES.md. `GET /api/health` answers `ok`
-and `GET /api/version` the version, both without a token
-(`host/src/main.rs:1863-1867`). Host metrics travel over the authenticated
+without a token; `GET /api/version` answers the version to a caller with the
+bearer token and 401 to anyone else (fix-126, `app_router`). Host metrics travel over the authenticated
 WebSocket (C6), not over HTTP.
 
 ```bash

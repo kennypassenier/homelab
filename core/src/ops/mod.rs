@@ -21,6 +21,7 @@ pub mod mirror;
 pub mod monitors;
 pub mod native;
 pub mod patch;
+pub mod pins;
 pub mod reconcile;
 pub mod registry_cache;
 pub mod resize;

@@ -5,7 +5,12 @@
 # than a one-line change.
 services:
   goaccess:
-    image: allinurl/goaccess:latest
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the digest CT 104
+    # ran that day. It is a `:latest` build of 2026-09-03 that reports itself
+    # as GoAccess 1.11; Docker Hub's `1.11` tag names an older build of the
+    # same version, so the tag here is the version and the digest is the
+    # image. Moving it is an edit of this line.
+    image: allinurl/goaccess:1.11@sha256:95fd6193c6c5e9e7a3702261dd9c3063f0a83b23ecbed487927a019e92328bca
     container_name: goaccess
     networks:
       - gateway_net

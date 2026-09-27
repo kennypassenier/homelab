@@ -3179,6 +3179,30 @@ async fn scheduler_loop(state: AppState) {
             }
         }
 
+        // fix-83 (manual-images-latest-unpinned, 2026-09-27): record the
+        // digest every `manual` container runs, and ask each declared
+        // upstream for its latest release, so the fleet check below can say
+        // when a pinned app has fallen behind. Read-only on the containers;
+        // GitHub is asked at most once a night (the answer is cached in
+        // state), every call is bounded, and state is loaded again after the
+        // reading so a deploy that saved meanwhile is not overwritten.
+        if let Ok(snapshot) = store.load().await {
+            let (facts, notes) = homelab_core::ops::pins::gather(
+                &exec,
+                &snapshot,
+                &state.config.safety.no_touch,
+                now,
+            )
+            .await;
+            for n in notes {
+                info!("{}", n);
+            }
+            if let Ok(mut s) = store.load().await {
+                homelab_core::ops::pins::apply(&mut s, facts);
+                let _ = store.save(s).await;
+            }
+        }
+
         // Y4: after the night's work, hold the record against the machine.
         // Unconditional, because the findings this exists for are precisely
         // the ones that produce no failure of their own: a stack whose

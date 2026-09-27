@@ -13,8 +13,10 @@
 services:
   supersync-db:
     # postgres 16-alpine as running on CT 111 on 2026-08-31, by digest: a
-    # major-version surprise here is a migration, not an update.
-    image: postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    # major-version surprise here is a migration, not an update. fix-82
+    # (manual-images-latest-unpinned, 2026-09-27) adds the version the image
+    # reports (PG_VERSION=16.15); the digest is unchanged and still decides.
+    image: postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: supersync-db
     restart: unless-stopped
     env_file:

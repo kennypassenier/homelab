@@ -227,10 +227,15 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
         // Port 8081, not cadvisor's own 8080: gluetun already publishes 8080
         // on the downloader stack, and one uniform port keeps the scrape
         // config to a single pattern.
+        // fix-82: the same pinned reference the guard starts, so a fresh
+        // clone does not fetch a second cAdvisor at its first deploy.
         let stage = pct_sh(
             exec,
             cfg.temp_vmid,
-            "mkdir -p /opt/cadvisor && docker pull gcr.io/cadvisor/cadvisor:latest && docker pull grafana/promtail:3.0.0",
+            &format!(
+                "mkdir -p /opt/cadvisor && docker pull {} && docker pull grafana/promtail:3.0.0",
+                super::guards::CADVISOR_IMAGE
+            ),
             900,
         )
         .await?;

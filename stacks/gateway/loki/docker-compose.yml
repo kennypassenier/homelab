@@ -4,7 +4,9 @@
 # want to be able to look back at.
 services:
   loki:
-    image: grafana/loki:3.0.0
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the digest CT 104
+    # ran that day beside the tag it already had.
+    image: grafana/loki:3.0.0@sha256:757b5fadf816a1396f1fea598152947421fa49cb8b2db1ddd2a6e30fae003253
     container_name: loki
     networks:
       - gateway_net
@@ -25,6 +27,7 @@ services:
       # read auto until 2026-09-02 (F192), so the ratified decision and
       # the fleet disagreed for as long as both existed.
       - "com.homelab.update.policy=manual"
+      - "com.homelab.update.upstream=github.com/grafana/loki"
 
 # One network for the whole stack, created by the deploy. Without it every app
 # is its own compose project on its own default network, and Traefik cannot

@@ -21,7 +21,9 @@
 # cache is one restic repository and one thing to delete when it grows.
 
 x-cache: &cache
-  image: registry:2.8.3
+  # fix-82 (manual-images-latest-unpinned, 2026-09-27): the digest CT 117
+  # ran that day beside the tag it already had.
+  image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
   restart: unless-stopped
   environment: &cache-env
     REGISTRY_STORAGE_DELETE_ENABLED: "true"
@@ -32,6 +34,7 @@ x-cache: &cache
     - registry_net
   labels:
     - com.homelab.update.policy=manual
+    - com.homelab.update.upstream=github.com/distribution/distribution
 
 services:
   cache-dockerhub:

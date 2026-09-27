@@ -3,7 +3,10 @@
 # entryPoints: [web].
 services:
   traefik:
-    image: traefik:latest
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
+    # digest CT 104 ran that day. `:latest` let a rebuild pull whatever was
+    # newest; moving it is an edit of this line.
+    image: traefik:v3.7.12@sha256:9c2a54d87f76f5c2f5f2682c68394af92fb12c0a2686798d6462a3f84bd78eaf
     container_name: traefik
     networks:
       - gateway_net
@@ -90,6 +93,7 @@ services:
       # read auto until 2026-09-02 (F192), so the ratified decision and
       # the fleet disagreed for as long as both existed.
       - "com.homelab.update.policy=manual"
+      - "com.homelab.update.upstream=github.com/traefik/traefik"
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 10s

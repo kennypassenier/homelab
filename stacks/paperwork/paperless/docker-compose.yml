@@ -18,7 +18,9 @@
 
 services:
   paperless:
-    image: ghcr.io/paperless-ngx/paperless-ngx:3.1.0
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the digest CT 114
+    # ran that day beside the tag it already had.
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.1.0@sha256:49eba766581b9134cfa6b584b9eb718355fb9cfbd44b2a7c9c72a427d4891648
     container_name: paperless
     restart: unless-stopped
     # No depends_on: each app in a stack is its own compose project, so a
@@ -66,6 +68,7 @@ services:
       - com.homelab.backup.pause=true
       # Paperless runs database migrations on start and they are one-way.
       - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/paperless-ngx/paperless-ngx
     networks:
       - paperwork_net
 

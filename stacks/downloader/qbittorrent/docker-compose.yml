@@ -67,7 +67,10 @@ services:
     restart: unless-stopped
 
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
+    # digest CT 105 ran that day (the tag is linuxserver's own build tag);
+    # moving it is an edit of this line.
+    image: lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls474@sha256:a00b6a597a3832a1814cde0ef60abc55c94644f3f80902c3432f6af6de8d4a96
     container_name: qbittorrent
     network_mode: "service:gluetun"
     depends_on:
@@ -93,4 +96,5 @@ services:
       # they are being written is how a torrent restarts from zero.
       - com.homelab.backup.pause=true
       - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/linuxserver/docker-qbittorrent
     restart: unless-stopped

@@ -8,7 +8,12 @@
 
 services:
   paperless-db:
-    image: postgres:17-alpine
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the digest CT 114
+    # ran that day. `17-alpine` moves with every rebuild; the image reports
+    # PG_VERSION=17.11, and Docker Hub has since rebuilt `17.11-alpine`
+    # under a new digest, so the tag says the version and the digest keeps
+    # the exact image.
+    image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     container_name: paperless-db
     restart: unless-stopped
     env_file:

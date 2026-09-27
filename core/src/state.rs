@@ -204,6 +204,16 @@ pub struct HostState {
     /// last known value, and since when.
     #[serde(default)]
     pub home_address_error: Option<String>,
+    /// fix-83 (manual-images-latest-unpinned, 2026-09-27): per stack, per
+    /// container, the image and digest each `manual` container ran when the
+    /// nightly round last looked. The stack file says what SHOULD run; this
+    /// says what did, read off the container.
+    #[serde(default)]
+    pub running_images: BTreeMap<String, BTreeMap<String, crate::ops::pins::RunningImage>>,
+    /// fix-83: the last answer about each declared upstream, cached so GitHub
+    /// is asked at most once a night.
+    #[serde(default)]
+    pub upstream_releases: BTreeMap<String, crate::ops::pins::UpstreamRelease>,
 }
 
 /// fix-62: what the restore drill knows about one repository.

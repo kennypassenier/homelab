@@ -80,6 +80,38 @@ by the nightly run within a day, with its rollback; `manual` apps only by
 registry cache with its fallback. When the container cannot say what it
 holds, the deploy pulls — the old behaviour — rather than assume.
 
+## Every manual image names its version and digest (amendment, 2026-09-27)
+
+Expert panel finding `manual-images-latest-unpinned`, Kenny's answer
+"vastzetten-plus-melding" (fix-82). Nine `manual` apps ran `:latest`, so a
+rebuild pulled whatever was newest that day and nothing recorded what had
+run before. Every `manual` image, cAdvisor's in the guards too, is now
+written as `name:<version>@sha256:<digest>`, set to exactly what each
+container ran on 2026-09-27 (measured with `docker inspect`, and checked
+that each pinned reference resolves to the running image, so the next
+deploy pulls nothing). The digest decides what runs; the tag says which
+version that is. Two branch builds that no release tag names, gluetun and
+supersync, stay pinned by digest alone, and the test that holds this rule
+(`every_manual_image_is_pinned_to_an_exact_version_and_its_digest`) lists
+them with the reason.
+
+Moving a pinned app is an edit of its `image:` line followed by a deploy of
+its stack: the deploy finds the new digest missing and pulls it. That road
+has no rollback; the nightly `auto` update keeps its own.
+
+**Knowing when to move (fix-83).** The nightly round records, in host state
+(`running_images`), the image and digest every `manual` container runs. A
+service that declares `com.homelab.update.upstream=github.com/<owner>/<repo>`
+has that repository's latest release asked from the host (`curl -m 20`
+against the public API, at most once a night, the answer cached in state as
+`upstream_releases`; when GitHub does not answer, the rest wait for the next
+night). When the pinned version is older, `homelab check` and the nightly
+fleet check print one `noted` line naming both versions. Noted, not drift:
+being behind is a fact to decide on, not a fault. Services without a
+declared upstream (goaccess, both postgres databases, kp-soft, and the two
+digest-only branch builds) are not compared; the label is what opts a
+service in.
+
 ## Jellyfin, and never during a stream
 
 O10: before updating Jellyfin the orchestrator asks its API which sessions are

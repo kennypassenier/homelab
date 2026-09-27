@@ -3,7 +3,9 @@
 
 services:
   actual:
-    image: actualbudget/actual-server:25.12.0
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): the digest CT 114
+    # ran that day beside the tag it already had.
+    image: actualbudget/actual-server:25.12.0@sha256:7f38b450cc3b7523dd5377792895e58b9cf333769e5a27f89e643b6f5fc60565
     container_name: actual
     restart: unless-stopped
     environment:
@@ -21,6 +23,7 @@ services:
       # Y1 class: manual. Actual migrates its budget file format on upgrade
       # and the migration is one-way, so a version step is a decision.
       - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/actualbudget/actual
     networks:
       - paperwork_net
 

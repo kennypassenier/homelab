@@ -14,7 +14,9 @@
 
 services:
   kp-soft:
-    image: ghcr.io/kennypassenier/kp-soft:v0.4.0
+    # fix-82 (manual-images-latest-unpinned, 2026-09-27): plus the digest
+    # CT 116 ran that day, so a re-pushed tag cannot change what runs.
+    image: ghcr.io/kennypassenier/kp-soft:v0.4.0@sha256:b9fd7be0bd3e6cb62a06a6eb31350ecd6499d66edd6eddd04f71aa57f552c29b
     container_name: kp-soft
     restart: unless-stopped
     # The .env is NOT passed through wholesale. Its names are prefixed in

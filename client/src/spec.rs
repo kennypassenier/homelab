@@ -1033,7 +1033,8 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          Debian 12 in docker and leaves it at `target-debian/release/homelab-host`.\n\n\
          {units}\
          **The certificate pin.** The daemon's certificate is `{state}/tls-cert.pem` with \
-         `{state}/tls-key.pem`; when either is missing at start it makes a new pair \
+         `{state}/tls-key.pem`; when either is missing, empty or unreadable at start it makes a \
+         new pair, each file written whole (fix-128) \
          (host/src/tls.rs). Clients refuse a certificate whose SHA-256 fingerprint differs \
          from the `pin` in `config/client.toml`, and from the copy each machine keeps in \
          `~/.config/homelab/pin`. Compare:\n\n```sh\n\

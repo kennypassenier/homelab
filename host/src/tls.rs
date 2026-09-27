@@ -18,7 +18,21 @@ pub fn ensure_cert(dir: &str, hostname: &str) -> std::io::Result<(CertPaths, Str
     let cert_path = format!("{}/tls-cert.pem", dir);
     let key_path = format!("{}/tls-key.pem", dir);
 
-    if !Path::new(&cert_path).exists() || !Path::new(&key_path).exists() {
+    if !pair_is_whole(&cert_path, &key_path) {
+        // fix-128 (expert panel, tls-first-boot-power-cut, 2026-09-27): a
+        // pair that is not whole is replaced whole. A power cut during the
+        // first boot used to leave a key without its certificate, or an
+        // empty certificate, and the daemon crash-looped on it until
+        // someone deleted the files by hand. No client can hold a pin for a
+        // pair that never served, and a broken pair of a host that did
+        // serve fails the pin loudly, which is the safe way round.
+        if Path::new(&cert_path).exists() || Path::new(&key_path).exists() {
+            eprintln!(
+                "WARNING: {} and {} are not a whole pair — making a new certificate; clients \
+                 that pinned the old one will refuse it until their pin is updated",
+                cert_path, key_path
+            );
+        }
         let mut params =
             rcgen::CertificateParams::new(vec![hostname.to_string(), "localhost".to_string()])
                 .map_err(std::io::Error::other)?;
@@ -28,19 +42,10 @@ pub fn ensure_cert(dir: &str, hostname: &str) -> std::io::Result<(CertPaths, Str
             .push(rcgen::DnType::CommonName, "homelab-host");
         let key = rcgen::KeyPair::generate().map_err(std::io::Error::other)?;
         let cert = params.self_signed(&key).map_err(std::io::Error::other)?;
-        std::fs::write(&cert_path, cert.pem())?;
-        // Key is private material — create it 0600 from the first byte
-        // (write-then-chmod leaves a world-readable window; hardening H21).
-        {
-            use std::io::Write as _;
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut f = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&key_path)?;
-            f.write_all(key.serialize_pem().as_bytes())?;
-        }
+        // The key first and the certificate last, each written whole: a
+        // certificate on disk means its key already is.
+        write_atomic(&key_path, key.serialize_pem().as_bytes(), 0o600)?;
+        write_atomic(&cert_path, cert.pem().as_bytes(), 0o644)?;
     }
 
     let fingerprint = fingerprint_of(&cert_path)?;
@@ -51,6 +56,44 @@ pub fn ensure_cert(dir: &str, hostname: &str) -> std::io::Result<(CertPaths, Str
         },
         fingerprint,
     ))
+}
+
+/// fix-128: both files present, the certificate decodes, the key is a PEM
+/// private key.
+fn pair_is_whole(cert_path: &str, key_path: &str) -> bool {
+    let cert_ok = std::fs::read_to_string(cert_path)
+        .ok()
+        .filter(|pem| pem.contains("BEGIN CERTIFICATE"))
+        .and_then(|pem| pem_to_der(&pem).ok())
+        .is_some_and(|der| !der.is_empty());
+    let key_ok = std::fs::read_to_string(key_path)
+        .is_ok_and(|pem| pem.contains("-----BEGIN") && pem.contains("PRIVATE KEY-----"));
+    cert_ok && key_ok
+}
+
+/// fix-128: write `bytes` to `path` so that a power cut leaves the old file
+/// or the new one, never a torn one: a temp file created with its final
+/// mode (the key is never readable by others, not even for a moment), fsync,
+/// rename, fsync of the directory.
+fn write_atomic(path: &str, bytes: &[u8], mode: u32) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt;
+    let tmp = format!("{}.tmp", path);
+    let _ = std::fs::remove_file(&tmp);
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    if let Some(parent) = Path::new(path).parent() {
+        std::fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
 }
 
 /// SHA-256 fingerprint (hex, colon-separated) of the DER form of a PEM cert.
@@ -103,4 +146,68 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
         }
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh_dir(tag: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("homelab-tls-{}-{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.to_string_lossy().into_owned()
+    }
+
+    /// fix-128 (expert panel, tls-first-boot-power-cut, 2026-09-27): a power
+    /// cut during the first boot could leave the key without the
+    /// certificate. The next start then failed `create_new` on the key and
+    /// the daemon crash-looped until someone deleted the file by hand.
+    #[test]
+    fn fix_128_a_key_without_its_certificate_is_replaced_by_a_new_pair() {
+        let dir = fresh_dir("keyonly");
+        std::fs::write(format!("{}/tls-key.pem", dir), "half a key").unwrap();
+        let got = ensure_cert(&dir, "homelab-host");
+        let cert = std::fs::read_to_string(format!("{}/tls-cert.pem", dir)).unwrap_or_default();
+        let key = std::fs::read_to_string(format!("{}/tls-key.pem", dir)).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(got.is_ok(), "{:?}", got.err());
+        assert!(cert.contains("BEGIN CERTIFICATE"), "{}", cert);
+        assert!(key.contains("PRIVATE KEY"), "{}", key);
+    }
+
+    /// fix-128: the certificate was written with a plain `std::fs::write`, no
+    /// fsync, so a power cut could leave it empty; the daemon then panicked
+    /// on `load tls` at every start.
+    #[test]
+    fn fix_128_an_empty_certificate_is_replaced_by_a_new_pair() {
+        let dir = fresh_dir("emptycert");
+        ensure_cert(&dir, "homelab-host").expect("first pair");
+        std::fs::write(format!("{}/tls-cert.pem", dir), "").unwrap();
+        let got = ensure_cert(&dir, "homelab-host");
+        let cert = std::fs::read_to_string(format!("{}/tls-cert.pem", dir)).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(got.is_ok(), "{:?}", got.err());
+        assert!(cert.contains("BEGIN CERTIFICATE"));
+    }
+
+    /// A whole pair is never replaced: the fingerprint is what every client
+    /// pins.
+    #[test]
+    fn fix_128_a_whole_pair_is_kept() {
+        let dir = fresh_dir("keep");
+        let (_, first) = ensure_cert(&dir, "homelab-host").expect("first pair");
+        let (_, again) = ensure_cert(&dir, "homelab-host").expect("second start");
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(format!("{}/tls-key.pem", dir))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(first, again);
+        assert_eq!(mode, 0o600);
+    }
 }

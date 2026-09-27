@@ -3184,17 +3184,39 @@ async fn main() {
     let app = app_router(state);
 
     // A4: TLS with a self-signed cert; the client pins this fingerprint.
-    let (certs, fingerprint) =
-        tls::ensure_cert(&config.state_dir, "homelab-host").expect("tls cert");
+    // fix-128: a clear line instead of a panic when even a new pair cannot be
+    // made or loaded (a full or read-only disk); systemd restarts and the
+    // journal says why.
+    let (certs, fingerprint) = match tls::ensure_cert(&config.state_dir, "homelab-host") {
+        Ok(pair) => pair,
+        Err(e) => {
+            error!(
+                "FATAL: cannot make or read the TLS certificate in {} :: {} — check that the \
+                 directory is writable and the disk is not full",
+                config.state_dir, e
+            );
+            std::process::exit(1);
+        }
+    };
     info!(
         "homelab-host v{} listening on {} (TLS)",
         VERSION, config.listen
     );
     info!("TLS fingerprint SHA256:{}", fingerprint);
     let tls_config =
-        axum_server::tls_rustls::RustlsConfig::from_pem_file(&certs.cert_pem, &certs.key_pem)
+        match axum_server::tls_rustls::RustlsConfig::from_pem_file(&certs.cert_pem, &certs.key_pem)
             .await
-            .expect("load tls");
+        {
+            Ok(c) => c,
+            Err(e) => {
+                error!(
+                    "FATAL: {} and {} do not load as a TLS pair :: {} — move both aside and \
+                 restart; the daemon makes a new pair (clients must then re-pin)",
+                    certs.cert_pem, certs.key_pem, e
+                );
+                std::process::exit(1);
+            }
+        };
 
     // H5 / fix-121: a pending self-update is accepted by the first
     // authenticated request this daemon answers (`accept_pending_update`),

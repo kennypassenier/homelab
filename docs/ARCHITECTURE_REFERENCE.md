@@ -230,7 +230,7 @@ refused. Newer schema: refused (`:198-223`). The real `write_file` writes
 `<path>.tmp` (created with its final mode since fix-37), fsyncs, sets the
 mode, renames (`host/src/main.rs`, `write_file`);
 the mode comes after the content, so a 0600 file briefly has the default
-mode. The TLS key avoids that by creating with 0600 (`host/src/tls.rs:32-43`).
+mode. The TLS pair is written through a temp file created with its final mode (0600 for the key), fsynced and renamed, key first; a pair that is not whole at start is replaced whole (fix-128, `host/src/tls.rs`).
 
 **Fail direction.** Operations fail closed: the first failed step ends them.
 Notification and the intent-mirror push run after the op and cannot fail it

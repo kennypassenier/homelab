@@ -144,7 +144,7 @@ else
 fi
 ```
 
-**The certificate pin.** The daemon's certificate is `/var/lib/homelab/tls-cert.pem` with `/var/lib/homelab/tls-key.pem`; when either is missing at start it makes a new pair (host/src/tls.rs). Clients refuse a certificate whose SHA-256 fingerprint differs from the `pin` in `config/client.toml`, and from the copy each machine keeps in `~/.config/homelab/pin`. Compare:
+**The certificate pin.** The daemon's certificate is `/var/lib/homelab/tls-cert.pem` with `/var/lib/homelab/tls-key.pem`; when either is missing, empty or unreadable at start it makes a new pair, each file written whole (fix-128) (host/src/tls.rs). Clients refuse a certificate whose SHA-256 fingerprint differs from the `pin` in `config/client.toml`, and from the copy each machine keeps in `~/.config/homelab/pin`. Compare:
 
 ```sh
 journalctl -u homelab-host | grep 'TLS fingerprint' | tail -1

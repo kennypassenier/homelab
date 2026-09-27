@@ -11,7 +11,7 @@ Placeholders: `<vmid>`, `<stack>`, `<app>` and `<unit>` are filled in from the S
 - **The daemon.** `homelab-host`, a systemd service on the Proxmox host. Program `/usr/local/bin/homelab-host`; the one before the last self-update is kept at `/usr/local/bin/homelab-host.prev`. Configuration `/etc/homelab/host.toml` (the `HOMELAB_CONFIG` variable overrides the path). State directory `/var/lib/homelab` (the `state_dir` setting overrides it). Listens on port 8443 over TLS.
 - **Clients** reach the daemon at `10.10.10.250:8443`. The address and the certificate pin are in `config/client.toml` in the repository; each machine's token is `HOMELAB_TOKEN` in `~/.config/homelab/env`.
 - **The state directory** holds `state.json` (what is deployed where), `repo/` (a git history of every file each deploy sent), `secrets/` (the vault, below), `tls-cert.pem` and `tls-key.pem` (the daemon's certificate), `journal.jsonl` and `incidents/` (operation records) and `restic-cache/`.
-- **The vault** `/var/lib/homelab/secrets`: `restic.pw` (the one password for every repository), `<stack>/<app>.env` for each compose app that has an `.env`, and `<stack>/<file>` for each env or credential file a native unit reads.
+- **The vault** `/var/lib/homelab/secrets`: `restic.pw` (the one password for every repository), `<stack>/<app>.env` for each compose app that has an `.env`, and `<stack>/<dir>/<file>` for each env or credential file a native unit reads, where `<dir>` is the directory that file sits in (two units may both read a `token.env`).
 - **Backups** are restic repositories behind `rclone:gdrive:homelab-backups`. The name is `<owner>-config`: one per owning app for a compose stack, one per unit for a native stack, `host-meta-config` for the daemon's own state, and `<name>-config` for each `[[device_backups]]` entry in `/etc/homelab/host.toml`. Every repository opens with the same password file `/var/lib/homelab/secrets/restic.pw`. (`BackupCfg::default()` in core/src/ops/backup.rs; `restic_base` and `restic_password_file` in `/etc/homelab/host.toml` override both.)
 - **App data** lives on the host under `/appdata/<stack>/<app>-config` and is bind-mounted into the container at the same path, so a container can be rebuilt without touching it.
 - **ZFS pools** referenced by the stack files: `HDD12TB` (mounted by downloader, media), `HDD18TB` (mounted by downloader, media), `HDD2TB` (mounted by gateway), `HDD4TB` (mounted by media). Replication jobs are the `[[zfs_jobs]]` entries in `/etc/homelab/host.toml` (Layer 5).
@@ -122,7 +122,7 @@ A unit starts only when its program, its account and the files named by `Environ
 ```sh
 pct push <vmid> /var/lib/homelab/repo/stacks/<stack>/<unit>/<unit>.service /etc/systemd/system/<unit>.service
 pct exec <vmid> -- useradd --system --no-create-home --shell /usr/sbin/nologin <user>   # User= in the unit
-pct push <vmid> /var/lib/homelab/secrets/<stack>/<file> <path-the-unit-reads> --perms 600
+pct push <vmid> /var/lib/homelab/secrets/<stack>/<dir>/<file> <path-the-unit-reads> --perms 600
 pct push <vmid> ./<asset> <program-path> --perms 755   # the verified release binary, see below
 pct exec <vmid> -- systemctl daemon-reload
 pct exec <vmid> -- systemctl enable --now <unit>
@@ -232,7 +232,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
   - program `/opt/almanac/bin/almanac`, from the GitHub release `kennypassenier/almanac` (asset `almanac`); update policy manual.
   - unit file `stacks/almanac/almanac/almanac.service` in the repository; the container's copy is `/etc/systemd/system/almanac.service`.
   - data: repository `rclone:gdrive:homelab-backups/almanac-config`, archive `/almanac-data.tar` holding a tar of `/appdata/almanac/almanac-config`.
-  - vault copy of almanac (`/appdata/almanac/almanac-config/latch.env`): `/var/lib/homelab/secrets/almanac/latch.env`.
+  - vault copy of almanac (`/appdata/almanac/almanac-config/latch.env`): `/var/lib/homelab/secrets/almanac/almanac-config/latch.env`.
   - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/almanac`. Adoption only records a service that is already active; it never starts one.
 - Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
 
@@ -296,19 +296,19 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
   - program `/opt/http-switchboard/bin/http-switchboard`, from the GitHub release `kennypassenier/http-switchboard` (asset `http-switchboard`); update policy manual.
   - unit file `stacks/kyu/http-switchboard/http-switchboard.service` in the repository; the container's copy is `/etc/systemd/system/http-switchboard.service`.
   - data: repository `rclone:gdrive:homelab-backups/http-switchboard-config`, archive `/http-switchboard-data.tar` holding a tar of `/appdata/kyu/http-switchboard-config`.
-  - vault copy of http-switchboard (`/appdata/kyu/http-switchboard-config/token.env`): `/var/lib/homelab/secrets/kyu/token.env`, SHARED with kyu-runner (`/appdata/kyu/kyu-runner-config/token.env`). The vault keeps one file per basename per stack, so it holds whichever unit's file was written last; check it against each unit before a rebuild relies on it.
+  - vault copy of http-switchboard (`/appdata/kyu/http-switchboard-config/token.env`): `/var/lib/homelab/secrets/kyu/http-switchboard-config/token.env`.
   - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/kyu/http-switchboard`. Adoption only records a service that is already active; it never starts one.
 - Unit `kyu`:
   - program `/opt/kyu/bin/kyu`, from the GitHub release `kennypassenier/kyu` (asset `kyu`); update policy auto.
   - unit file `stacks/kyu/kyu/kyu.service` in the repository; the container's copy is `/etc/systemd/system/kyu.service`.
   - data: repository `rclone:gdrive:homelab-backups/kyu-config`, archive `/kyu-data.tar` holding the newest file matching `/appdata/kyu/kyu-config/kyu.backup-*.db` (the service's own verified copy, refused when older than 26 h), not the live directory. That copy is a complete database: put it back as the live file and delete any `-wal`/`-shm` beside it (the comment above `backup_from_newest` in `stacks/kyu/service.yml` names the file).
-  - vault copy of kyu (`/appdata/kyu/kyu-config/kyu.env`): `/var/lib/homelab/secrets/kyu/kyu.env`.
+  - vault copy of kyu (`/appdata/kyu/kyu-config/kyu.env`): `/var/lib/homelab/secrets/kyu/kyu-config/kyu.env`.
   - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/kyu`. Adoption only records a service that is already active; it never starts one.
 - Unit `kyu-runner`:
   - program `/opt/kyu-runner/bin/kyu-runner`, from the GitHub release `kennypassenier/kyu-runner` (asset `kyu-runner`); update policy auto.
   - unit file `stacks/kyu/kyu-runner/kyu-runner.service` in the repository; the container's copy is `/etc/systemd/system/kyu-runner.service`.
   - data: repository `rclone:gdrive:homelab-backups/kyu-runner-config`, archive `/kyu-runner-data.tar` holding a tar of `/appdata/kyu/kyu-runner-config`.
-  - vault copy of kyu-runner (`/appdata/kyu/kyu-runner-config/token.env`): `/var/lib/homelab/secrets/kyu/token.env`, SHARED with http-switchboard (`/appdata/kyu/http-switchboard-config/token.env`). The vault keeps one file per basename per stack, so it holds whichever unit's file was written last; check it against each unit before a rebuild relies on it.
+  - vault copy of kyu-runner (`/appdata/kyu/kyu-runner-config/token.env`): `/var/lib/homelab/secrets/kyu/kyu-runner-config/token.env`.
   - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/kyu/kyu-runner`. Adoption only records a service that is already active; it never starts one.
 - Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
 

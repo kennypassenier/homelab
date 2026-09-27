@@ -452,16 +452,16 @@ fn rclone_parts(restic_base: &str) -> Option<(String, String)> {
     Some((remote.to_string(), path.to_string()))
 }
 
-/// The vault file deploy.rs keeps for a file a native unit reads: the
-/// basename only, under `<state_dir>/secrets/<stack>/` (`vault_key` in
-/// core/src/ops/deploy.rs). Repeated here because that function is private;
-/// the runbook must name the same file the deploy restores from.
+/// The vault file deploy.rs keeps for a file a native unit reads:
+/// `<state_dir>/secrets/<stack>/<parent dir>/<name>` since fix-37. Calls the
+/// deploy's own `vault_key`, so the runbook cannot name another file than the
+/// one the deploy restores from.
 fn vault_file(vault: &str, stack: &str, path: &str) -> String {
     format!(
         "{}/{}/{}",
         vault,
         stack,
-        path.rsplit('/').next().unwrap_or(path)
+        homelab_core::ops::deploy::vault_key(path)
     )
 }
 
@@ -644,8 +644,9 @@ fn runbook_stack_section(
                 if who.len() > 1 {
                     s.push_str(&format!(
                         "  - vault copy of {}: `{}`, SHARED with {}. The vault keeps one file \
-                         per basename per stack, so it holds whichever unit's file was \
-                         written last; check it against each unit before a rebuild relies on it.\n",
+                         per directory and name per stack, so it holds whichever unit's file \
+                         was written last; check it against each unit before a rebuild relies \
+                         on it.\n",
                         path,
                         vf,
                         who.iter()
@@ -883,7 +884,8 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          `incidents/` (operation records) and `restic-cache/`.\n\
          - **The vault** `{vault}`: `restic.pw` (the one password for every repository), \
          `<stack>/<app>.env` for each compose app that has an `.env`, and \
-         `<stack>/<file>` for each env or credential file a native unit reads.\n\
+         `<stack>/<dir>/<file>` for each env or credential file a native unit reads, where \
+         `<dir>` is the directory that file sits in (two units may both read a `token.env`).\n\
          - **Backups** are restic repositories behind `{base}`. The name is \
          `<owner>-config`: one per owning app for a compose stack, one per unit for a native \
          stack, `host-meta-config` for the daemon's own state, and `<name>-config` for each \
@@ -1029,7 +1031,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          order before it starts anything; by hand it is the same order:\n\n```sh\n\
          pct push <vmid> {state}/repo/stacks/<stack>/<unit>/<unit>.service /etc/systemd/system/<unit>.service\n\
          pct exec <vmid> -- useradd --system --no-create-home --shell /usr/sbin/nologin <user>   # User= in the unit\n\
-         pct push <vmid> {vault}/<stack>/<file> <path-the-unit-reads> --perms 600\n\
+         pct push <vmid> {vault}/<stack>/<dir>/<file> <path-the-unit-reads> --perms 600\n\
          pct push <vmid> ./<asset> <program-path> --perms 755   # the verified release binary, see below\n\
          pct exec <vmid> -- systemctl daemon-reload\n\
          pct exec <vmid> -- systemctl enable --now <unit>\n\

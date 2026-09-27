@@ -170,7 +170,7 @@ pub async fn orphan_files(
 /// http-switchboard both read `token.env`, so they shared ONE vault copy and
 /// the vault kept whichever was copied last; a rebuild would have given both
 /// the same token.
-fn vault_key(path: &str) -> String {
+pub fn vault_key(path: &str) -> String {
     let mut parts = path.rsplit('/');
     let name = parts.next().unwrap_or(path);
     match parts.next() {

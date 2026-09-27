@@ -1,216 +1,1172 @@
-# Operations runbook — the recurring work
+# Operations runbook
 
-Day-to-day and periodic operations for a healthy homelab. One-time setup is
-in [legacy/v2-build/V2_PILOT_HANDOFF.md](legacy/v2-build/V2_PILOT_HANDOFF.md); disaster recovery is in
-[DR_RUNBOOK.md](DR_RUNBOOK.md); failures in
-[DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md).
+The recurring work on the homelab orchestrator, as numbered procedures.
+Every procedure says which terminal each step runs in, where its point of
+no return is, and how to check the result. Behaviour is cited as
+`file:line` against the release commit of v3.58.3 on `main` (`5bebcf6`,
+`Cargo.toml:6`), so a changed line leads straight to the paragraph that
+depends on it.
 
-**Where to run these.** `homelab …` runs from anywhere on the workstation.
-Anything else — `restic`, `rclone`, `pct`, `systemctl`, `journalctl` — is on
-the **Proxmox host** (`ssh root@10.10.5.250`), because that is where the
-daemon, the vault and the containers are.
+Not in this document:
 
-## Routine: nothing (that's the point)
+- losing the whole Proxmox host: [DR_RUNBOOK.md](DR_RUNBOOK.md), generated
+  by `homelab runbook`;
+- diagnosing a fault: [DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md);
+- what each feature does: [USER_GUIDE.md](USER_GUIDE.md);
+- changing the code, gates and hooks: [DEVELOPMENT.md](DEVELOPMENT.md);
+- writing a preset: [PRESET_GUIDE.md](PRESET_GUIDE.md).
 
-The nightly scheduler (04:00, adjustable in SETTINGS) backs up every managed
-stack and updates `auto`-policy apps. Failures announce themselves through
-kyu (topic `homelab.ops`, delivered by kyu-runner on CT 109, with the direct
-HA webhook as fallback) into `/media/homelab_events.log` (and as
-notifications once the toggle is on). The whole map of who notifies how is
-`docs/deployment/NOTIFICATIONS_INVENTORY.md`. Unattended-upgrades patches security updates inside every
-container daily. You only act when an event says so.
+Quoted messages are written as `"..."` and are exact substrings of the
+source; `<...>` marks a value the program fills in.
 
-## Weekly-ish glance
+| # | Procedure |
+|---|---|
+| op-0 | Conventions: terminals, credentials, one operation at a time |
+| op-1 | The nightly round: what runs, in which order |
+| op-2 | The morning check |
+| op-3 | Add a compose stack |
+| op-4 | Change a compose stack: redeploy, update, patch, resize |
+| op-5 | Park and unpark a stack |
+| op-6 | Remove a stack |
+| op-7 | Add a native service |
+| op-8 | Update a native service |
+| op-9 | Release the orchestrator and roll it out |
+| op-10 | Back up and restore a compose stack on demand |
+| op-11 | Restore a native service's data (by hand) |
+| op-12 | The host's own backup (host-meta) |
+| op-13 | ZFS snapshots and replication |
+| op-14 | Golden templates |
+| op-15 | After a power cut |
+| op-16 | Credentials: inventory and renewal |
+| op-17 | A key is gone: every copy, and how to put one back |
+| op-18 | Prove the offline restic password |
+| op-19 | Known discrepancies between messages and behaviour |
 
-```bash
-homelab doctor                  # host self-checks green?
-homelab tui                     # dashboard: drift flags? apps down? capacity?
-```
-Check the events log in HA (Media → local → homelab_events.log) for
-anything `ok:false` you missed.
+---
 
-## Adding a service
+## op-0 · Conventions
 
-1. Preset exists? `homelab presets`. If not: [PRESET_GUIDE.md](PRESET_GUIDE.md)
-   (vendor compose? feed it + [LLM_COMPOSE_CONVERSION.md](LLM_COMPOSE_CONVERSION.md)
-   to an LLM).
-2. TUI `n` → wizard → scaffold.
-3. Secrets? Name them under `latch_secrets:` in the stack file (D12);
-   latch supplies them in memory at deploy. A local
-   `stacks/<name>/<app>/.env` is only an override and wins when present.
-4. `p` to preview, `SHIFT+D` (or `homelab deploy stacks/<name>`).
-5. First backup: `homelab backup stacks/<name>` (creates the repo).
-6. Commit the stack dir to git.
+**Two terminals.**
 
-## Updating things
+- *Workstation* (bash): the machine with this repository and the `homelab`
+  client. Run `homelab` from the repository root. `new`, `presets`,
+  `runbook` and `check` read `stacks/` and `presets/` relative to the
+  working directory (`client/src/main.rs:311`, `:585`, `:650`, `:906`), and
+  the host address and certificate pin come from `config/client.toml`,
+  found by walking up from the working directory
+  (`client/src/repo_config.rs:62-73`, `:103-120`).
+- *Host* (root shell on Proxmox): `restic`, `rclone`, `pct`, `systemctl`,
+  `journalctl`. The daemon is the systemd unit `homelab-host`
+  (`core/src/ops/selfupdate.rs:46`), its config `/etc/homelab/host.toml`
+  (`host/src/main.rs:372`), its state directory `/var/lib/homelab`
+  (`host/src/main.rs:426-429`). `<proxmox-host>` below is that machine; the
+  client reaches it at the `host` in `config/client.toml`
+  (`config/client.toml:15`).
 
-| What | How | Cadence |
+**The client's token.** Read from `HOMELAB_TOKEN` in the environment, then
+`~/.config/homelab/env`, then `./.env`; the first place that sets a key wins
+(`client/src/main.rs:45-87`). Every verb except `help`, `plan`, `runbook`,
+`dashboard`, `presets`, `export`, `import` and `tui --offline` stops with
+`"HOMELAB_TOKEN is not set"` when there is none
+(`client/src/main.rs:144-150`).
+
+**One operation at a time.** Every mutating operation takes the host's one
+lock (`host/src/main.rs:2980`); the nightly backup phase holds it for its
+whole batch (`host/src/main.rs:2188`). A command typed during the backup
+hour waits for the batch.
+
+**Client newer than host.** A mutating command against an older host is
+refused and the message ends in `"run 'homelab release-update' first"`
+(`client/src/main.rs:1203-1213`). `release-update` itself is exempt
+(`client/src/version.rs:15-30`).
+
+**Questions.** A step that must ask (for example, an app is in use) cannot
+be answered from the command line: the CLI prints the question and the host
+answers `Unattended` after `ask_timeout_s`, default 120 s
+(`client/src/main.rs:1173-1182`, `host/src/main.rs:669-671`, `:1750-1759`).
+In the TUI the question takes the keyboard: `a` allows, `s` stops
+(`client/src/tui/model.rs:624-633`).
+
+**Abort-safety.** Each procedure marks its point of no return. The host
+journals every step to `/var/lib/homelab/journal.jsonl` before it runs; an
+operation cut off half way is logged at the next start with
+`"re-running it is safe (idempotent)"` (`host/src/main.rs:1668-1692`,
+`:1812-1823`) and shown by `homelab doctor` under "interrupted operations"
+(`core/src/doctor.rs:178-185`).
+
+**Branch.** Commits go to `main`.
+
+---
+
+## op-1 · The nightly round
+
+Nothing to do by hand. This is what runs, so the morning can be read.
+
+**When.** The scheduler wakes every 20 minutes (`host/src/main.rs:2260`)
+and does nothing unless `backup_hour` is set and the host's local hour
+(`date +%H`) equals it (`host/src/main.rs:2262-2284`). Without a
+`backup_hour` the daemon logs `"scheduler idle (backup_hour not set)"` at
+start (`host/src/main.rs:1854-1860`). `homelab config` prints the hour as
+`nightly run : HH:00`, or `off` (`client/src/main.rs:1242-1246`).
+
+To change the hour: TUI, Settings tab (key `5`), first row, Left/Right,
+then `S` to save. The host writes it to `host.toml` and uses it from the
+next tick, no restart (`client/src/tui/model.rs:945-1010`,
+`host/src/main.rs:4064-4102`).
+
+**Which stacks.** A stack is due when it is enabled and its last backup is
+at least 20 hours old (`host/src/main.rs:1952-1954`, `:2008-2013`).
+
+**In order, inside the backup hour:**
+
+1. **Backups** of every due stack, `backup_concurrency` at a time (default
+   3, `host/src/main.rs:675-677`), under one hold of the lock
+   (`host/src/main.rs:2334-2363`).
+   - Compose stack: containers labelled `com.homelab.backup.pause=true`
+     are stopped, each owning app's paths go into its own repository
+     `<restic_base>/<app>-config`, the stopped containers are started again
+     whether or not the snapshot worked, then retention
+     (`core/src/ops/backup.rs:296-708`).
+   - Native service: a `tar` stream of its data straight into
+     `restic --stdin`, repository `<unit>-config`
+     (`core/src/ops/native.rs:591-627`).
+   - An app in use makes the whole stack stand aside: nothing stopped, no
+     snapshot, no timestamp, not a failure (`core/src/ops/backup.rs:397-415`,
+     `:34-74`).
+   - The phase ends with `"scheduler: backup phase took <time> for <n>
+     stack(s), <k> at a time"` (`core/src/ops/backup.rs:250-267`).
+2. **Updates**, one stack at a time (`host/src/main.rs:2365-2512`).
+   - Compose: apps labelled `com.homelab.update.policy=auto` are pulled and
+     recreated, with rollback (`host/src/main.rs:2476-2482`,
+     `core/src/ops/update.rs:84-87`, `:126`).
+   - Native: first the orchestrator's release install for every service
+     with `update_policy: auto` (`host/src/main.rs:2395-2408`), then every
+     service's own `update_cmd` under supervision
+     (`host/src/main.rs:2409-2418`). See op-8.
+3. **Parking.** A stack whose backup failed, or whose update failed, is set
+   to disabled and one notification goes out (`host/src/main.rs:2483-2511`,
+   `core/src/ops/backup.rs:66-69`). See op-5.
+4. **Host-meta**, the host's own backup, when due
+   (`host/src/main.rs:2518-2539`). See op-12.
+5. **Restore drill**: at most one repository per night, only when the last
+   passed drill is older than `restore_drill_interval_s` (default 90
+   days), round robin over the stack and native repositories
+   (`host/src/main.rs:2548-2582`, `core/src/ops/restoredrill.rs:24-30`,
+   `:55-88`).
+6. **Device configurations** from `device_backups` in `host.toml`, one GET
+   per device into restic (`host/src/main.rs:2588-2609`).
+7. **ZFS** snapshots and replication, when `zfs_jobs` is set
+   (`host/src/main.rs:2612-2626`). See op-13.
+8. **Fleet check**: the stored record held against the machine. It runs on
+   every tick inside the backup hour, also when nothing was due, and sends
+   a `fleet-check` notification when anything is more than "noted"
+   (`host/src/main.rs:2628-2693`, `core/src/ops/fleetcheck.rs:501-507`).
+   The hour has up to three ticks and this path does not go through the
+   repeat damper (`host/src/main.rs:2679`), so the same findings can arrive
+   more than once in one night.
+
+**Where results go.** Each operation posts to `notify_webhook` and falls
+back to `notify_fallback_webhook` (`host/src/main.rs:2876-2936`). An
+identical failure repeated inside 20 hours is damped; a success always goes
+out (`host/src/main.rs:1807-1809`, `:2847-2855`, `core/src/notify.rs:45-57`). A failed operation writes an
+incident bundle under `/var/lib/homelab/incidents`
+(`host/src/main.rs:3077-3085`), listed by `homelab incidents`
+(`host/src/main.rs:4255-4277`).
+
+---
+
+## op-2 · The morning check
+
+Workstation, repository root. Read-only: stop at any step.
+
+1. `homelab check`. Prints `"fleet check: repo and reality agree"` or one
+   block per finding with a `remedy:` line; exits 1 when there is any
+   finding (`host/src/main.rs:3189-3209`, `:3755-3760`). Run from the
+   repository root: without stack files it checks only the host's half and
+   says so (`client/src/main.rs:317-336`).
+2. `homelab doctor`. Host disk, state file, backup age per stack, the Drive
+   remote, mirror lag, interrupted operations (`core/src/doctor.rs:45-188`).
+3. `homelab incidents`. One directory per failed operation.
+4. `homelab checks`. The questions only a person can answer; record one
+   with `homelab checks answer <id> ok|nok [note]`
+   (`client/src/main.rs:388-421`).
+5. Host, only when one of the above points there:
+
+   ```sh
+   journalctl -u homelab-host --since today --no-pager | grep -E 'scheduler|restore drill|fleet check|self-update'
+   ```
+
+**Worked example.** `homelab check` reports a broken `restore drill`
+finding whose remedy reads `"check the repository and the password file"`
+(`core/src/ops/restoredrill.rs:123-141`). The drill restores into a scratch
+directory and judges by the largest file that came back
+(`host/src/main.rs:2040-2083`), so this means a repository did not give
+back real data. First prove the password (op-18), then look at that one
+repository with `restic snapshots` on the host (op-10).
+
+---
+
+## op-3 · Add a compose stack
+
+Workstation, repository root, unless stated.
+
+1. **Pick a preset.** `homelab presets` lists the catalogue, local, no
+   network (`client/src/main.rs:648-669`). Three lines of the real output
+   on 2026-09-27:
+
+   ```text
+   mealie           512 MiB  Recipes + meal planning  [mealie]
+   syncthing        512 MiB  Obsidian vault peer  [syncthing]
+   uptime-kuma      512 MiB  Uptime monitoring  [uptime-kuma]
+   ```
+
+2. **Scaffold.**
+   `homelab new <name> --preset <preset> --vmid <n>` with optional
+   `--ram`, `--cores`, `--disk`, `--swap` and repeatable
+   `--no-data <path>`, or TUI key `n` on the Dashboard or Stacks tab
+   (`client/src/main.rs:556-647`, `client/src/tui/model.rs:852-872`). The
+   vmid determines address and hostname (`client/src/main.rs:598-600`).
+   Only `stacks/<name>/` is written.
+
+   Worked example (name and vmid are illustrative; pick a vmid no stack
+   uses):
+
+   ```sh
+   homelab new recipes --preset mealie --vmid 120
+   ```
+
+3. **Secrets.** Two ways, reported on every deploy:
+   - latch: list the app under `latch_secrets:` in
+     `stacks/<name>/lxc-compose.yml` and keep its `.env` in latch at
+     `<name>/<app>/.env`. The latch project is rooted at `stacks/`; at
+     deploy time the client runs
+     `latch cat <stack>/<app>/.env --env $HOMELAB_LATCH_ENV --expand`
+     (`client/src/spec.rs:303-412`). Without `HOMELAB_LATCH_ENV` the deploy
+     stops with `"latch_secrets is set but HOMELAB_LATCH_ENV is not"`
+     (`client/src/spec.rs:356-360`).
+   - a plain `stacks/<name>/<app>/.env`, which git ignores (`.gitignore:1`).
+
+   A local file wins over latch. Each deploy prints one line per app, for
+   example `[env] mealie <- latch` or `"local .env (latch skipped)"`
+   (`client/src/spec.rs:316-332`, `client/tests/latch_secrets_tests.rs:241-260`).
+4. **Validate locally.** `homelab plan stacks/<name>`: needs no token and
+   no connection to the host (`client/src/main.rs:142-147`), same validator
+   as the deploy. Success prints
+   `"✓ valid"` and `"would deploy vmid <n>: <k> file(s), <m> env(s)"`
+   (`client/src/main.rs:673-691`).
+5. **Deploy.** `homelab deploy stacks/<name>`, or in the TUI select the
+   stack and press `p` (preview, Enter runs it) or `D` (runs now)
+   (`client/src/tui/model.rs:669-689`, `:793`, `:851`).
+   **Point of no return:** the container is created. Every empty `/appdata`
+   directory is first refilled from its own latest snapshot if one exists
+   (`core/src/ops/deploy.rs:355-452`); for a new app there is none and the
+   log says `"is empty and has no snapshot"`.
+6. **First backup.** `homelab backup stacks/<name>`. Creates the
+   repositories (`restic init` is idempotent,
+   `core/src/ops/backup.rs:493-507`) and records the time
+   (`host/src/main.rs:3334-3350`). An app name that another stack already
+   uses owns the same repository; the stack recorded later is refused
+   (`core/src/ops/backup.rs:315-373`).
+7. **Manual checks.** `homelab checks` lists what the deploy registered for
+   a person to confirm (`core/src/state.rs:121-134`).
+8. **Regenerate the DR runbook.** `homelab runbook` rewrites
+   `docs/DR_RUNBOOK.md` from `stacks/` (`client/src/main.rs:899-913`).
+9. Commit `stacks/<name>/` and `docs/DR_RUNBOOK.md` on `main`.
+
+**Undo.** Before step 5, delete `stacks/<name>/`. After step 5, op-6.
+
+---
+
+## op-4 · Change a compose stack
+
+Workstation, repository root.
+
+| Change | Command | What it does |
 |---|---|---|
-| One app | `homelab update stacks/<name> <app>` | when release notes please you |
-| App automatically | label `com.homelab.update.policy=auto` | nightly |
-| Container OS (security) | unattended-upgrades | automatic daily |
-| Container OS (full) | `homelab patch` | monthly-ish |
-| The daemon itself | `make release VERSION=x.y.z` then `homelab release-update` — see below | when we ship changes |
-| Golden template | destroy CT 999 → `homelab template-build 999 <v+1>` | after major Debian updates |
+| Edited compose files or `lxc-compose.yml` | `homelab deploy stacks/<name>` | Re-applies. Files the repository dropped are reported, not deleted. |
+| Delete what the repository dropped | `homelab prune-orphans stacks/<name>` | Asks for the stack name; removes files one by one with `rm -f`, never a directory (`client/src/main.rs:914-948`, `host/src/main.rs:3556-3623`). |
+| New image versions now | `homelab update stacks/<name> [app]`, TUI `U` | Every named app, whatever its policy; rollback when unhealthy; an app in use is skipped (`core/src/ops/update.rs:84-87`, `:157-170`). |
+| New image versions nightly | label `com.homelab.update.policy=auto` | Only those apps (`core/src/ops/update.rs:126`). |
+| OS packages in every managed container | `homelab patch` | `apt-get dist-upgrade` one container at a time; the first failure stops the run (`core/src/ops/patch.rs:22-73`); targets are the stacks in state (`host/src/main.rs:3371-3385`). |
+| More RAM, cores or disk | edit `resources:`, then `homelab resize stacks/<name>` | Grows a running container; shrinking a running one is refused (`core/src/ops/resize.rs:1-4`). |
+| Runaway guards on a container this suite did not build | `homelab guards <vmid>` | Log caps, journald limits, logrotate, weekly prune; refused on the no-touch list (`host/src/main.rs:3687-3727`). |
 
-## Making a release (H7 flow)
-*(H7 = release-driven host updates: the TUI spots a newer GitHub release
-and installs it over the line on a keypress.)*
+In the TUI, `U` updates the selected stack; lowercase `u` is the host
+update (`client/src/tui/model.rs:780-800`).
 
-Working on the code itself — gates, commit hooks, the full release
-walkthrough — is [DEVELOPMENT.md](DEVELOPMENT.md). One line matters even if
-you never touch the code: **after cloning this repo on any machine, run
-`make hooks` once**, or commits are accepted with failing tests.
+---
 
+## op-5 · Park and unpark a stack
 
-The normal path for shipping daemon changes, end to end:
+The argument is the stack **name**, not a path
+(`client/src/main.rs:422-436`).
 
-1. Land your changes on `main` with the gates green (`make gate`).
-2. `make release VERSION=x.y.z` — runs the full gate locally, stamps the
-   workspace version, commits, tags `vx.y.z` and pushes. Refuses on a dirty
-   tree or an existing tag. Version rule: breaking/architectural = major,
-   feature = minor, fix = patch.
-3. GitHub CI re-runs the gate (a red gate blocks the release) and publishes
-   `homelab-host`, `homelab` and `SHA256SUMS` as a GitHub Release.
-   Watch with `gh run watch`.
-4. Publishing changes nothing on the host. Roll out deliberately:
-   the TUI shows "⬆ HOST UPDATE vx.y.z" — press `u` (lowercase: `U` updates the selected stack instead); or run
-   `homelab release-update`. The client downloads the release, verifies the
-   checksum, and ships it over the line into the existing self-update
-   pipeline (selfcheck → backup → armed rollback → restart).
-5. If the new daemon crashes on start, systemd rolls back to the previous
-   binary automatically — nothing to do but read the incident.
+- **Park:** `homelab disable <stack>`, or `e` on the selected stack in the
+  TUI (a toggle, `client/src/tui/model.rs:837-850`). The nightly round
+  skips it and `onboot` is set to 0; no container is started or stopped
+  (`core/src/ops/enable.rs:1-6`, `:56-65`). Transcript:
+  `"nightly runs skip it, onboot off; containers left as they are"`
+  (`core/src/ops/enable.rs:89`).
+- **Unpark:** `homelab enable <stack>`. Back in the rotation; `onboot`
+  returns to the manifest's `boot.onboot` (`core/src/ops/enable.rs:46-47`,
+  `:56-65`).
+- Parked stacks show `[OFF]` in the TUI
+  (`client/src/tui/view/dashboard.rs:208`, `client/src/tui/view/stacks.rs:63`).
 
-Emergency path without GitHub: `make host-binary` +
-`homelab self-update target-debian/release/homelab-host`.
+**Automatic park.** A failed night sets the flag in state only; `onboot`
+and the running containers are left alone (`host/src/main.rs:2483-2486`).
+The notification is named `stack-disabled-<stack>`
+(`host/src/main.rs:2812-2828`). Its text says `"no onboot until
+re-enabled"`, which is not what the automatic park does; see op-19.
 
-## Parking a service (H8)
+After an automatic park:
 
-`homelab disable <stack>` (or `e` on the stack in the TUI) parks a stack:
-nightly backup+update runs skip it and onboot is cleared, so it stays down
-across host reboots. Containers are NOT stopped — do that manually if you
-want it down now (`pct stop` in Proxmox is always respected; the flag never
-fights you). `homelab enable <stack>` reverses both. A failed nightly run
-auto-parks the stack after one loud message so it cannot fail every night;
-investigate, then re-enable.
+1. Workstation: `homelab incidents`; host:
+   `journalctl -u homelab-host --no-pager | grep FAILED`.
+2. Fix the cause.
+3. Prove it: `homelab backup stacks/<name>` (compose) or
+   `homelab backup-native <name>` (native).
+4. `homelab enable <name>`.
 
-## The host's own crown jewels (H10)
+A backup that stood aside because an app was in use never parks a stack
+(`core/src/ops/backup.rs:66-69`).
 
-Every nightly run ends with a `host-meta` snapshot: the secrets vault
-(including `restic.pw` — the key to EVERY other backup), `state.json`, the
-TLS certificate + key, `/etc/homelab/host.toml` (F180), the SMART
-collector files, and the intent repo with its full deploy history.
-On demand: `homelab backup-host-meta`.
+---
 
-**Exact recovery path after losing the host disk** (write this down offline —
-you cannot read it from the machine that died):
+## op-6 · Remove a stack
 
+1. Workstation, repository root: `homelab destroy stacks/<name>`. It asks
+   `Type the stack name '<name>' to confirm destroy:`; anything else stops
+   it with `"name mismatch"` and nothing happens
+   (`client/src/main.rs:949-988`). It builds the full deploy spec, so a
+   stack with `latch_secrets` needs a working latch key here
+   (`client/src/main.rs:953`, `client/src/spec.rs:86-117`).
+2. The host then checks the name, the no-touch list and the live hostname,
+   and **backs the stack up first**. If that backup fails it refuses with
+   `"refusing to destroy"`; `--no-backup` skips the backup and the message
+   calls that `"a decision, not a retry"`
+   (`core/src/ops/destroy.rs:58-159`).
+3. **Point of no return:** `pct destroy --purge`. Then the metrics target,
+   the Grafana dashboard, the gateway route and the state record go
+   (`core/src/ops/destroy.rs:161-262`).
+4. What survives, so a redeploy can restore: `/appdata/<stack>/`, the vault
+   `/var/lib/homelab/secrets/<stack>/`, the restic repositories and the
+   intent repo history (`core/src/ops/destroy.rs:254-255`, `:267`,
+   `core/src/ops/deploy.rs:1135-1137`).
+5. Clean up only when sure. Irreversible. Host:
+
+   ```sh
+   rm -rf /appdata/<stack>
+   rm -rf /var/lib/homelab/secrets/<stack>
+   rclone purge gdrive:homelab-backups/<app>-config   # once per owning app; DR_RUNBOOK.md lists them per stack
+   ```
+
+   Older host-meta snapshots keep a copy of that vault directory until
+   their retention forgets them (op-12).
+6. Workstation: `git rm -r stacks/<name>`, `homelab runbook`, commit on
+   `main`.
+
+**A record whose container is already gone:** `homelab forget <stack>`.
+Refused with `"still names a live container"` while any container carries
+the recorded hostname; touches no container (`host/src/main.rs:3624-3686`).
+
+---
+
+## op-7 · Add a native service
+
+A native service is a binary under systemd in its own container, no
+docker. Worked example throughout: `stacks/almanac`.
+
+**Files** (workstation):
+
+- `stacks/<stack>/lxc-compose.yml` with `native_only: true`, `apps: []`,
+  `natives: [<unit>]` and one `storage:` entry per service with
+  `app: <unit>` (`stacks/almanac/lxc-compose.yml:23`, `:73-87`).
+- `stacks/<stack>/service.yml` for one service, or
+  `stacks/<stack>/<unit>/service.yml` when several share the container
+  (`client/src/spec.rs:189-198`; `stacks/kyu` has both shapes). Rules:
+  hostname `<vmid>-app-<stack>`, `data_dirs` or `stateless: true`,
+  `release_repo` as `owner/name`, and `update_policy: auto` only with a
+  `release_repo` (`core/src/native.rs:101-187`).
+- `stacks/<stack>/<unit>/<unit>.service`, the unit file. The deploy refuses
+  a native unit without it (`core/src/ops/deploy.rs:2126-2137`).
+
+**Steps:**
+
+1. `homelab plan stacks/<stack>`. For a unit with `release_repo` this also
+   fetches and verifies the newest release through `gh`, because it builds
+   the full spec (`client/src/spec.rs:162`, `:187-237`).
+2. `homelab deploy stacks/<stack>`. **Point of no return:** the container
+   is created. The deploy writes the unit, creates its `User=`, installs
+   the binary only where none exists, and starts the unit only when every
+   `EnvironmentFile=`/`LoadCredential=` file and the binary are present;
+   otherwise the log says `"NOT started"` and names what is missing
+   (`core/src/ops/deploy.rs:2097-2291`). Binaries come from signed
+   releases only (`client/src/release.rs:75-77`).
+3. A first install has no env file anywhere yet; it cannot be invented
+   (`core/src/ops/deploy.rs:2284-2287`). Host, with the path from the
+   unit's `EnvironmentFile=` and the user from its `User=`:
+
+   ```sh
+   pct push <vmid> ./<file> <EnvironmentFile path> --perms 600
+   pct exec <vmid> -- chown <user>:<user> <EnvironmentFile path>
+   ```
+
+4. `homelab deploy stacks/<stack>` again: the log says the unit is not
+   running and starts it (`core/src/ops/deploy.rs:2323-2350`).
+5. `homelab adopt stacks/<stack>` (or `stacks/<stack>/<unit>` per service).
+   Refuses unless the unit is active; records the service so the nightly
+   round backs it up and updates it from tonight
+   (`core/src/ops/native.rs:31-240`). A deploy keeps registered services
+   but never registers new ones (`core/src/ops/deploy.rs:2368-2378`).
+6. `homelab deploy stacks/<stack>` a third time. Only a deploy that finds
+   the unit **active** copies its env and credential files into the vault,
+   under the file's parent directory and name, for example
+   `/var/lib/homelab/secrets/kyu/kyu-runner-config/token.env`
+   (`core/src/ops/deploy.rs:164-180`, `:2297-2318`). Until this run the env
+   file exists in one place.
+7. `homelab backup-native <stack>`, `homelab runbook`, commit on `main`.
+
+Instead of steps 2 to 5 for the binary, `homelab install-native
+stacks/<stack>[/<unit>] [<tag>]` installs binary and unit into an existing
+container, keeps the previous binary, rolls back when the new one does not
+come up, and adopts at the end (`client/src/main.rs:192-287`,
+`core/src/ops/native.rs:265-507`).
+
+---
+
+## op-8 · Update a native service
+
+| Route | What runs | Which services |
+|---|---|---|
+| Nightly release install | Host asks the GitHub API for the latest release, requires `SHA256SUMS.minisig` signed with key 1C88AB06D43C0B16, compares the checksum with the installed binary, installs under an armed rollback (`core/src/ops/native.rs:919-1131`, `core/src/release_sig.rs:10-40`) | only `update_policy: auto` (`host/src/main.rs:2395-2399`) |
+| Nightly self-update | the service's own `update_cmd`; binary preserved, restart only when it changed, 20 s to come up then a settle window that also watches `NRestarts`, rollback from outside (`core/src/ops/native.rs:701-720`, `:1174-1333`) | every service with an `update_cmd`, whatever `update_policy` says (`host/src/main.rs:2409-2418`) |
+| `homelab release-update-native <stack>` | the release install, now | every service on the stack, policy not consulted (`host/src/main.rs:3521-3555`) |
+| `homelab install-native stacks/<stack>/<unit> [<tag>]` | one service, latest or a named tag, downloaded and verified on the workstation with `gh` (`client/src/release.rs:75-173`) | the one named |
+| `homelab update-native <stack>` | every `update_cmd`, now | every service on the stack |
+
+Today `kyu` and `kyu-runner` are `auto`, `http-switchboard` and `almanac`
+are `manual` (`stacks/kyu/service.yml:52`,
+`stacks/kyu/kyu-runner/service.yml:39`,
+`stacks/kyu/http-switchboard/service.yml:39`, `stacks/almanac/service.yml:73`).
+
+**Signatures.** An unsigned release is skipped by the nightly round with
+`"is not signed yet"` and tried again the next night
+(`core/src/ops/native.rs:982-993`); the workstation refuses one with
+`"is not signed (no <asset>)"` (`client/src/release.rs:145-156`), where
+the asset is `SHA256SUMS.minisig` (`core/src/release_sig.rs:15`).
+
+**A deploy never upgrades.** An installed binary is left in place and the
+log says `"already installed, not shipped"`
+(`core/src/ops/deploy.rs:2175-2197`).
+
+**Outcomes to recognise:** `"rolled back to the previous binary"` with
+either `"service restored and active"` or `"ROLLBACK ALSO FAILED"`
+(`core/src/ops/native.rs:432-448`, `:1270-1282`).
+
+**Worked example: hold one service on an older release.**
+
+1. Workstation: `homelab install-native stacks/kyu/http-switchboard <signed-tag>`.
+2. Its `update_cmd` still runs every night and is the service's own
+   updater. To keep the older version, remove `update_cmd` from
+   `stacks/kyu/http-switchboard/service.yml`, then refresh the host's copy
+   with `homelab adopt stacks/kyu/http-switchboard`. The nightly log then
+   says `"the manifest the host has"` and that it carries no `update_cmd`
+   (`core/src/ops/native.rs:1186-1209`).
+3. Do not use `homelab release-update-native kyu` meanwhile: it installs
+   the latest release of every service on the stack, this one included.
+
+---
+
+## op-9 · Release the orchestrator and roll it out
+
+Workstation, repository root, on `main`, after `make hooks` once per clone
+(`Makefile:25-29`).
+
+1. **Rehearse.** `make release VERSION=x.y.z DRY=1`. Checks the version
+   format, a clean tree, that the tag is new, and the CI verdict on `HEAD`;
+   ends with `"every check passed, nothing tagged or pushed"`
+   (`Makefile:51-104`). Refusals: `"working tree not clean"`,
+   `"already exists"`, `"refusing: CI on HEAD says"`.
+2. **Release.** `make release VERSION=x.y.z`. Runs `make gate`, stamps the
+   version, commits `release: vx.y.z [meta]`, tags and pushes
+   (`Makefile:105-118`). **Point of no return:** the push. The tag starts
+   `.github/workflows/release.yml`, which runs the gate again and
+   publishes `homelab-host`, `homelab` and `SHA256SUMS`
+   (`.github/workflows/release.yml:6-40`). Watch with `gh run watch`.
+3. **Roll out to the host.** `homelab release-update` (newest) or
+   `homelab release-update vx.y.z`; or TUI key `u` when the dashboard shows
+   `"HOST UPDATE <tag> available"` (`client/src/main.rs:808-834`,
+   `client/src/tui/model.rs:780-792`, `client/src/tui/view/mod.rs:601-605`).
+   The client downloads with `gh`, checks the checksum, and ships the
+   binary over the line. There is no signature on the orchestrator's own
+   releases, only the checksum (`client/src/release.rs:55-62`).
+4. On the host: the candidate must pass `--selfcheck` before anything is
+   replaced; then the live binary is copied to
+   `/usr/local/bin/homelab-host.prev`, the new one installed, a rollback
+   marker armed and a restart scheduled 2 s later
+   (`core/src/ops/selfupdate.rs:39-131`). The new daemon removes the marker
+   after 5 s of serving and logs `"self-update accepted"`
+   (`host/src/main.rs:1882-1891`).
+5. **Verify.** `homelab ping` prints the host version and `"link up"`
+   (`client/src/main.rs:1183-1194`).
+6. **New client** on every workstation, from the verified release asset:
+
+   ```sh
+   cd "$(mktemp -d)"
+   gh release download vx.y.z --repo kennypassenier/homelab -p homelab -p SHA256SUMS   # repo: client/src/release.rs:10
+   sha256sum -c --ignore-missing SHA256SUMS
+   install -m 755 homelab ~/.cargo/bin/homelab
+   homelab help | head -1
+   ```
+
+   or from the tagged tree with `make install` (`Makefile:131-138`).
+
+**Rollback.** `core/src/ops/selfupdate.rs:1-7` describes an `OnFailure=`
+unit on the host that restores `.prev` while the marker is still there.
+That unit file is not in this repository. Check it exists:
+
+```sh
+systemctl show homelab-host -p OnFailure
 ```
-restic -r rclone:gdrive:homelab-backups/host-meta-config restore latest --target /
+
+By hand, host:
+
+```sh
+install -m 755 /usr/local/bin/homelab-host.prev /usr/local/bin/homelab-host
+systemctl restart homelab-host
 ```
 
-Note the repo is `host-meta-config` — every repo carries the `-config`
-suffix. It is encrypted with the restic password that lives INSIDE it, so
-an offline copy of `/var/lib/homelab/secrets/restic.pw` (password manager,
-second machine) is what makes this recoverable at all. Without it the
-backups are unopenable — no exception, no recovery service.
+**Without GitHub.** Workstation: `make host-binary` (Debian 12 build in
+docker, `Makefile:45-49`), then
+`homelab self-update target-debian/release/homelab-host`
+(`client/src/main.rs:835-855`).
 
-## ZFS snapshots + replication (E8)
+---
 
-Declared in `/etc/homelab/host.toml`:
+## op-10 · Back up and restore a compose stack on demand
+
+**Backup.** `homelab backup stacks/<name>`, or TUI `B`. Sends the manifest
+only; no secrets and no latch key needed (`client/src/main.rs:749-757`,
+`client/src/spec.rs:68-84`).
+
+**Restore to latest.** `homelab restore stacks/<name>`, or TUI `R`, which
+asks for the stack name first (`client/src/tui/model.rs:801-817`). The
+host checks every owning app's repository holds a snapshot, stops every app
+(`docker compose down`, **point of no return**), runs
+`restic restore latest --target /` per repository, starts every app again
+even when the restore failed, and verifies they run
+(`core/src/ops/backup.rs:803-962`).
+
+**Restore to a named snapshot.** `homelab restore stacks/<name> <id>`. The
+id must exist in **every** owning app's repository, otherwise the restore
+stops before anything is stopped with `"is not in the repository for"`
+(`core/src/ops/backup.rs:836-880`). A restic snapshot id belongs to one
+repository, so on a stack with more than one owning app only `latest`
+passes. One app to an older snapshot, by hand, on the host:
+
+```sh
+export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<app>-config
+export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
+export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
+restic snapshots                                        # read-only: pick <id>
+pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose down'
+restic restore <id> --target / --include <host_path of that app>
+pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose up -d'
+```
+
+The repository layout, password file and cache directory are the ones the
+backup uses (`core/src/ops/backup.rs:32`, `:88-105`, `:124-134`).
+
+---
+
+## op-11 · Restore a native service's data (by hand)
+
+The procedure is DR_RUNBOOK.md Layer 4, "A native stack"
+(`client/src/spec.rs:1127-1142`). In short, and why:
+
+- Do not use `homelab restore` for a native stack. The nightly snapshot of a
+  native service is one tar stream stored as `/<unit>-data.tar`
+  (`core/src/ops/native.rs:611-615`); `homelab restore` runs
+  `restic restore <snapshot> --target /` (`core/src/ops/backup.rs:903-915`),
+  which writes that tar file to the host's `/` and unpacks nothing. Where
+  restic stores a stdin snapshot was checked with restic 0.19.1 on the
+  workstation: `restic ls --json` reports the path `/almanac-data.tar`; the host's
+  restic version may differ.
+- The archive holds paths without the leading `/`
+  (`appdata/almanac/almanac-config/...`): GNU tar strips it from the
+  absolute paths the backup passes (`core/src/ops/native.rs:611-613`).
+  Unpack it inside the container so owners stay the container's own.
+
+Worked example, host, almanac on CT 112:
+
+```sh
+export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/almanac-config
+export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
+export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
+restic snapshots --path /almanac-data.tar
+restic dump --path /almanac-data.tar latest /almanac-data.tar | tar -tvf - | head   # read-only look
+pct exec 112 -- systemctl stop almanac                                              # point of no return
+restic dump --path /almanac-data.tar latest /almanac-data.tar | pct exec 112 -- tar -xf - -C /
+pct exec 112 -- systemctl start almanac
+```
+
+- **almanac:** after a restore, compare
+  `ls /appdata/almanac/almanac-config/profiles/` with the sources retired
+  since the snapshot (DR_RUNBOOK.md Layer 4, `client/src/spec.rs:1143-1149`).
+- **kyu:** its snapshot is the newest of kyu's own nightly copies, not the
+  live database (`stacks/kyu/service.yml:37-48`). Put the copy back as
+  `/appdata/kyu/kyu-config/kyu.db` and delete any `kyu.db-wal` and
+  `kyu.db-shm` beside it (`stacks/kyu/service.yml:43-47`). `kyu.env` is not
+  in that snapshot (op-17, lost-5).
+
+No test in this repository exercises this procedure.
+
+---
+
+## op-12 · The host's own backup (host-meta)
+
+**What it holds** (`core/src/ops/backup.rs:964-1087`):
+
+| Path | What it is |
+|---|---|
+| `/var/lib/homelab/secrets` | `restic.pw`, the per-stack vault, anything else put there |
+| `/var/lib/homelab/state.json` | what is deployed where |
+| `/var/lib/homelab/tls-cert.pem`, `tls-key.pem` | the daemon's TLS identity |
+| `/var/lib/homelab/repo` | the intent repo with its history |
+| `/etc/homelab/host.toml` | token and every setting |
+| three SMART collector files | only those present |
+
+**Repository:** `rclone:gdrive:homelab-backups/host-meta-config`
+(`core/src/ops/backup.rs:94`, `:1010-1021`). It is encrypted with the
+`restic.pw` it contains; see op-17.
+
+**Not in it:** the rclone configuration that holds the Google Drive
+credentials, the `homelab-host` binary, and the systemd units. Nothing in
+the list above names them (`core/src/ops/backup.rs:1056-1065`).
+
+**When:** nightly when due (op-1 step 4), and on demand with
+`homelab backup-host-meta` (`host/src/main.rs:3392-3416`).
+
+**Nobody watches it.** No fleet-check finding and no doctor line reads its
+age: `last_host_meta` is written by the scheduler and by
+`homelab backup-host-meta`, and read only by the nightly plan
+(`core/src/state.rs:113-117`, `host/src/main.rs:2014-2023`, `:2531`,
+`:3408`). The nightly
+restore drill never picks it: the drill list is built from stacks and
+native services only (`core/src/ops/restoredrill.rs:55-77`,
+`host/src/main.rs:2301-2319`). A failure logs
+`"scheduler: host-meta backup FAILED"` and sends the operation's
+notification (`host/src/main.rs:2534-2538`, `:3038`).
+
+**R12a · Check its age** (host, read-only):
+
+```sh
+export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/host-meta-config
+export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
+export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
+restic snapshots --latest 1
+restic ls latest /var/lib/homelab/secrets
+```
+
+**R12b · Drill it** (host; writes only to a scratch directory):
+
+```sh
+restic restore latest --target /root/hm-drill \
+  --include /var/lib/homelab/secrets --include /etc/homelab/host.toml \
+  --include /var/lib/homelab/tls-cert.pem --include /var/lib/homelab/tls-key.pem
+diff -r /root/hm-drill/var/lib/homelab/secrets /var/lib/homelab/secrets && echo vault-same
+cmp /root/hm-drill/etc/homelab/host.toml /etc/homelab/host.toml && echo config-same
+cmp /root/hm-drill/var/lib/homelab/tls-key.pem /var/lib/homelab/tls-key.pem && echo key-same
+rm -rf /root/hm-drill
+```
+
+A difference is expected only for files changed since the snapshot's time.
+
+---
+
+## op-13 · ZFS snapshots and replication
+
+**Declared** in `host.toml`, one table per job; nothing is discovered
+(`core/src/ops/zfs.rs:1-16`, `:34-40`). The file that was live on
+2026-09-02, kept as a test fixture (`host/src/main.rs:878-890`):
 
 ```toml
 [[zfs_jobs]]
 source = "HDD2TB"
 target = "HDD18TB/replica/HDD2TB"
-
-[[zfs_jobs]]
-source = "HDD4TB"
-target = "HDD18TB/replica/HDD4TB"
 ```
 
-The retired cron script replicated into `HDD18TB/REPLICA_2TB` and
-`REPLICA_4TB`. Those datasets are LEFT ALONE as frozen history (53
-snapshots, May–August 2026): its retention pruned parents and children on
-different schedules, so that subtree can no longer accept an incremental
-stream. Nothing had to be destroyed — the new chain simply lives next to it.
-Delete the old datasets whenever you are comfortable:
-`zfs destroy -r HDD18TB/REPLICA_2TB` (and `_4TB`).
+Put `[[zfs_jobs]]` tables after every top-level key: a key written below a
+`[table]` header belongs to that table, and the daemon warns
+`"is not a setting this daemon reads and is being ignored"`
+(`host/src/main.rs:257-273`, `:391-398`).
 
-Runs at the end of every nightly run and on demand with
-`homelab zfs-replicate`. Snapshots are named `homelab-YYYYMMDD-HHMM`; the
-old `backup-*` snapshots from the retired cron script are left untouched.
+**Runs** nightly (op-1 step 7) and on demand with `homelab zfs-replicate`
+(`host/src/main.rs:3789-3808`). Per job: `zfs snapshot -r
+<source>@homelab-YYYYMMDD-HHMM`, then an incremental send from the newest
+snapshot both sides share, or a full seed when the target holds no
+snapshots at all; received with `-x mountpoint` so a replica never claims
+its source's live mountpoint; then retention on both sides with the same
+tiers as restic, destroying only snapshots with the `homelab-` prefix
+(`core/src/ops/zfs.rs:161-353`).
 
-**When it refuses**: "share no snapshot, but the target already holds N
-snapshots". That means the incremental chain broke (a snapshot was deleted,
-or a pool was re-created). Re-seeding would destroy the replica's history,
-so it stops. Investigate first; if a fresh seed really is what you want,
-`zfs destroy -r <target>` yourself and re-run. This refusal is the whole
-reason the feature exists — the script it replaces destroyed and re-sent
-automatically, which is one bad night away from losing every replica.
+**When it refuses.** `"<source> and <target> share no snapshot, but
+<target> already holds <n> snapshot(s) (subtree included). Re-seeding would
+destroy that history, so this job stops here."`
+(`core/src/ops/zfs.rs:281-291`). The incremental chain broke. Host:
 
-**Mail vs webhook**: the retired script mailed its own HTML report; that mail
-is gone with it. E8 reports the way everything else does — the Home Assistant
-webhook and, on failure, an incident bundle. Proxmox keeps sending its own
-mails (vzdump, cluster alerts) through `/etc/pve/notifications.cfg` →
-`mail-to-root` → the GMail SMTP target; that is Proxmox's own channel and is
-untouched by the homelab.
+1. Read-only look at both sides:
 
-**Media is deliberately out of scope**: HDD12TB and the 18TB data are films
-and series — re-downloadable, and there is no room to replicate them.
+   ```sh
+   zfs list -H -t snapshot -o name,creation -s creation -r <source> | tail
+   zfs list -H -t snapshot -o name,creation -s creation -r <target> | tail
+   ```
 
-## Backup verification (quarterly drill)
+2. Find why the chain broke. A fresh seed is Kenny's decision, because it
+   destroys the replica's history.
+3. Only then: `zfs destroy -r <target>` (**point of no return**), and
+   `homelab zfs-replicate` from the workstation.
 
-```bash
-homelab restore stacks/<name>       # latest snapshot, full verify chain
-```
-Do it on a low-stakes stack. A backup that has never been restored is a
-hope, not a backup. Also verify the Drive side once in a while:
-`rclone lsd gdrive:homelab-backups` on the host.
+`"no zfs jobs configured (zfs_jobs in host.toml)"` means `homelab
+zfs-replicate` ran with no jobs (`core/src/ops/zfs.rs:171-176`).
 
-**Keep an offline copy of `/var/lib/homelab/secrets/restic.pw`** — without
-it every backup, old and new, is unreadable.
+---
 
-## Resource changes
+## op-14 · Golden templates
 
-Edit the manifest, then `homelab resize stacks/<name>` (live grow). Shrink:
-stop the container first, or let the next destroy+deploy apply it.
+1. `homelab templates` lists clonable template containers and OS tarballs
+   (`host/src/main.rs:3899-3934`).
+2. `homelab template-build <temp-vmid> <version> [--privileged] --base <vztmpl>`
+   (`client/src/main.rs:505-543`). Always pass both numbers: a missing or
+   unreadable one falls back to vmid 999 and version 1
+   (`client/src/main.rs:507-508`). Always pass `--base`: the default base
+   is a Debian 12 tarball (`core/src/ops/template.rs:47-51`). The temp vmid
+   must be free and off the no-touch list (`core/src/ops/template.rs:113`).
+3. The container at that vmid becomes the template, named
+   `<os>-homelab-v<version>` with `-priv` for `--privileged`
+   (`core/src/ops/template.rs:92-97`, `:291`). Stacks use it with
+   `template: clone:<vmid>` (`core/src/ops/template.rs:317`). Build one
+   unprivileged and one `--privileged`: a clone cannot change its privilege
+   level (`core/src/ops/template.rs:40-44`).
 
-## Removing a service
+---
 
-```bash
-homelab destroy stacks/<name>    # typed-name confirm; /appdata survives
-```
-Data cleanup afterwards is deliberate and manual: the `/appdata/<stack>/`
-dir on the host, and `rclone purge gdrive:homelab-backups/<app>-config` for each app of the
-stack (repos are named after the owning app since D25)
-once you're sure. Remove the stack dir from git last.
+## op-15 · After a power cut
 
-## After a power cut
+Nothing to do in the normal case.
 
-Nothing to do: containers come back per boot order, the daemon announces
-`host-online` to HA with any interrupted operation named; interrupted
-operations are safe to re-run. If the daemon itself doesn't come back:
-DEBUGGING_GUIDE §5 (`daemon-failed`).
+- Containers start per the `boot:` block of their stack file, `onboot` and
+  `order` (example `stacks/almanac/lxc-compose.yml:56-58`), unless parked
+  with `homelab disable` (op-5).
+- The daemon logs each interrupted operation with
+  `"re-running it is safe (idempotent)"` and, 3 s after start, sends a
+  `host-online` notification carrying its version and anything left
+  mid-flight (`host/src/main.rs:1812-1846`).
+- Re-run whatever that notification or `homelab doctor` lists under
+  "interrupted operations".
 
-## Certificates, tokens, credentials inventory
+If the daemon does not come back: DEBUGGING_GUIDE.md, and DR_RUNBOOK.md
+Layer 1.
 
-| Credential | Lives | Rotate/renew |
+---
+
+## op-16 · Credentials: inventory and renewal
+
+| Credential | Lives (code) | Renew or rotate |
 |---|---|---|
-| API bearer token | `~/.config/homelab/env` (client; a `./.env` in the repo also works) + host.toml | rotate by editing both |
-| TLS cert + pin | `/var/lib/homelab` + `~/.config/homelab/pin` | regenerate = delete cert files, restart daemon, re-pin, and update `pin` in the committed `config/client.toml` (otherwise a fresh machine adopts the old pin) |
-| restic password | host secrets + **offline copy** | never rotate lightly (old repos!) |
-| Google Drive OAuth | host rclone.conf (own client) | re-auth: `rclone authorize` flow |
-| OPNsense API (H2) | `/var/lib/homelab/secrets/opnsense` | OPNsense → Access → Users |
-| PVE metrics token (F4) | metrics stack `.env` | Proxmox → API tokens |
-| App secrets | latch (`latch_secrets:` in the stack file, D12); a local stack `.env` overrides | redeploy after editing |
+| API bearer token | host: `token` in `host.toml`, or `HOMELAB_TOKEN` in the daemon's environment, which wins (`host/src/main.rs:409-419`); every workstation: `HOMELAB_TOKEN`, `~/.config/homelab/env` or `./.env` (`client/src/main.rs:45-87`) | op-17 K3d |
+| TLS key and certificate | host: `/var/lib/homelab/tls-key.pem`, `tls-cert.pem`, made once, never renewed by the code (`host/src/tls.rs:14-54`) | op-17 lost-2 |
+| TLS pin (public) | `pin` in `config/client.toml` (committed) and `~/.config/homelab/pin` per machine (`client/src/repo_config.rs:27-40`, `client/src/lib.rs:15-34`) | op-17 K2b |
+| restic password | host: `/var/lib/homelab/secrets/restic.pw`, or `restic_password_file` in `host.toml` (`core/src/ops/backup.rs:124-134`, `host/src/main.rs:479`); one password for every repository (`core/src/ops/backup.rs:88-105`) | none in code; see op-17 lost-1 |
+| Google Drive (rclone remote `gdrive`) | rclone's own configuration on the host; the backup target is `rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:127`) | `rclone config reconnect gdrive:`; `homelab doctor` shows `offsite (Drive)` as `token invalid/expired` when the listing fails (`core/src/doctor.rs:141-157`) |
+| Notification bearers | `notify_auth_bearer`, `notify_fallback_auth_bearer` in `host.toml`, not editable from the TUI (`host/src/main.rs:65-85`, `:178-183`); written for each send to `/var/lib/homelab/secrets/notify-route-<n>.header` (`core/src/notify.rs:188-190`) | edit `host.toml`, restart (K3d step 2 shows the edit-then-restart pattern) |
+| Device backup credential and pin | `cred_file` (curl `-K` format) and `pin` (`sha256//<base64>`) per `[[device_backups]]` (`core/src/ops/devicebackup.rs:37-73`) | see below |
+| Stack app secrets | latch, or a local `stacks/<stack>/<app>/.env`; copy on the host in the vault (`client/src/spec.rs:303-412`, `core/src/ops/deploy.rs:1132-1139`) | change in latch, then `homelab deploy stacks/<stack>` |
+| Native service env and credential files | the path in the unit's `EnvironmentFile=`/`LoadCredential=`; copy in the vault (`core/src/ops/deploy.rs:2223-2318`) | op-17 lost-5 |
+| Workstation latch key | latch's credential store; this repository only calls `latch cat` (`client/src/spec.rs:374-378`) | op-17 lost-4 |
+| GitHub CLI on the workstation | `gh` auth, used by `release-update`, `install-native` and native deploys (`client/src/release.rs:12-26`, `:92-117`) | `gh auth login` |
 
-## Standing rules
+**Device pin after the device's certificate changes.** The pin is the
+certificate's public-key hash, so a renewed certificate breaks it
+(`core/src/ops/devicebackup.rs:59-72`). Host, with the address from that
+device's `url`:
 
-- Red CI blocks merge; every bug becomes a test; docs update with the
-  milestone that changes them.
-- The Proxmox host is never touched outside an agreed step.
-- The no-touch list is code, not convention — extend it in
-  `core/src/safety.rs` when new unmanaged guests appear.
-- vmid 108 is the Syncthing stack now. Throwaway drills use `stacks/drill`
-  on vmid 119 and are destroyed in the same sitting.
+```sh
+openssl s_client -connect <device-ip>:443 </dev/null 2>/dev/null \
+  | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der \
+  | openssl dgst -sha256 -binary | base64
+```
+
+Set `pin = "sha256//<that value>"` in the `[[device_backups]]` table,
+`systemctl restart homelab-host` straight after the edit (K3d explains
+why), then `homelab backup-devices` from the workstation.
+
+---
+
+## op-17 · A key is gone: every copy, and how to put one back
+
+The question this section answers for every secret the orchestrator
+depends on: where are its other copies, what does each survive, and which
+commands put one back. Losing the whole host is DR_RUNBOOK.md; this is one
+key missing while the rest stands.
+
+### Every copy the code knows of
+
+| Secret | Copy | Survives | Does not survive |
+|---|---|---|---|
+| restic password | `/var/lib/homelab/secrets/restic.pw` (`core/src/ops/backup.rs:128`) | container loss | host root disk loss |
+| | inside every `host-meta-config` snapshot (`core/src/ops/backup.rs:971`, `:1056-1064`) | host loss | cannot be opened without the password itself |
+| | offline copy "in Kenny's Bitwarden": stated in the generated DR runbook, Layer 3 (`client/src/spec.rs:1071-1075`); no code reads or checks it | everything the house loses | nothing proves it matches until op-18 is run |
+| TLS key and certificate | `/var/lib/homelab/tls-key.pem`, `tls-cert.pem` (`host/src/tls.rs:18-19`) | daemon reinstall | host root disk loss |
+| | `host-meta-config` (`core/src/ops/backup.rs:973-974`) | host loss | loss of the restic password |
+| TLS pin (public) | `config/client.toml` in git; `~/.config/homelab/pin` per machine; the daemon logs it at every start as `"TLS fingerprint SHA256:"` (`host/src/main.rs:1876`) | anything, via git | nothing to protect |
+| API token | `host.toml` (`host/src/main.rs:409-412`) | daemon restart | host root disk loss |
+| | the running daemon's memory, written back by a TUI settings save (`host/src/main.rs:524-652`, `:702-723`; test `settings_render_keeps_every_config_field`, `host/src/main.rs:963-1069`) | loss of the file while the daemon runs | a daemon restart |
+| | `host-meta-config` (`core/src/ops/backup.rs:989`) | host loss | loss of the restic password |
+| | every workstation's `~/.config/homelab/env` or `./.env` | host loss | reinstall of that machine |
+| Workstation latch key | latch's credential store on the workstation; not handled by this repository | see latch's runbook | see latch's runbook |
+| | an escrow file in `/var/lib/homelab/secrets/`: recorded in `docs/deployment/REGISTER.md` D105 (2026-09-02), not created by any code here; carried by `host-meta-config` because the whole directory is (`core/src/ops/backup.rs:971`) | host loss | loss of the restic password; useless without the escrow passphrase, which Kenny holds |
+| Native service secrets (e.g. `latch.env`, `kyu.env`, `token.env`) | the live file under `/appdata/<stack>/<unit>-config/` on the host (bind mount) | container loss | host root disk loss |
+| | vault `/var/lib/homelab/secrets/<stack>/<unit>-config/<file>` (`core/src/ops/deploy.rs:164-180`, `:2297-2318`); a flat `<stack>/<file>` from before fix-37 is still read when no two units share the name (`core/src/ops/deploy.rs:2244-2254`) | container loss | host root disk loss |
+| | the service's own restic repository, when the file lies in `data_dirs` and the service has no `backup_from_newest` (`core/src/ops/native.rs:591-600`): yes for almanac, kyu-runner, http-switchboard; **no for kyu** (`stacks/kyu/service.yml:48`) | host loss | loss of the restic password |
+| | `host-meta-config`, through the vault | host loss | loss of the restic password |
+| Google Drive credentials (rclone) | rclone's configuration on the host only | container loss | host root disk loss: **in no backup this code makes** (`core/src/ops/backup.rs:1056-1065`) |
+
+Everything offsite hangs on one password. Nothing in the code checks that
+the password file exists: `homelab doctor` has no probe for it
+(`core/src/doctor.rs:45-188`, `host/src/main.rs:4286-4396`).
+
+### lost-1 · The restic password is gone
+
+**What breaks.** Every backup stops its paused containers, fails at the
+snapshot, starts them again (`core/src/ops/backup.rs:545-645`), and the
+night parks each due stack (op-5). Host-meta and the restore drill fail. The
+dangerous one: a deploy onto an empty `/appdata` directory treats "no
+readable snapshot" as a new app and starts it empty, logging
+`"is empty and has no snapshot"` (`core/src/ops/deploy.rs:393-406`).
+**Until lost-1 is done, deploy nothing whose `/appdata` is empty.**
+
+**Never generate a new password over it.** `restic init` failures are
+ignored (`core/src/ops/backup.rs:493-507`), so every repository that does
+not exist yet would be created under the new password while all existing
+ones stay locked under the old: two passwords, silently.
+
+**K1a · Host alive, offline copy available.** Host, root, bash:
+
+1. Which file is in use:
+
+   ```sh
+   grep -n '^restic_password_file' /etc/homelab/host.toml   # nothing = /var/lib/homelab/secrets/restic.pw
+   ls -l /var/lib/homelab/secrets/restic.pw
+   ```
+
+2. Write the offline copy to a new file, never over the old path:
+
+   ```sh
+   install -d -m 700 /var/lib/homelab/secrets
+   ( umask 077; read -rs PW; printf '%s' "$PW" > /var/lib/homelab/secrets/restic.pw.new; unset PW )
+   ```
+
+3. Prove it opens the key repository and one stack repository. Read-only:
+
+   ```sh
+   export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw.new
+   export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
+   RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/host-meta-config restic snapshots --latest 1
+   RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<app>-config restic snapshots --latest 1
+   ```
+
+   restic answers `Fatal: wrong password or no key found` (exit 12,
+   checked with restic 0.19.1) when the copy is wrong: stop here, the old
+   state is untouched.
+4. **Point of no return**, only after step 3 listed snapshots:
+
+   ```sh
+   mv /var/lib/homelab/secrets/restic.pw.new /var/lib/homelab/secrets/restic.pw
+   chmod 600 /var/lib/homelab/secrets/restic.pw
+   unset RESTIC_PASSWORD_FILE
+   ```
+
+5. Workstation: `homelab backup-host-meta`, then `homelab enable <stack>`
+   for every stack the TUI shows `[OFF]` since the password went missing,
+   then `homelab check`.
+
+**K1b · Host gone.** DR_RUNBOOK.md Layer 3, after two things it assumes:
+the offline password written to `/var/lib/homelab/secrets/restic.pw` as in
+K1a step 2 (without `.new`), and an rclone remote named exactly `gdrive`
+(lost-6), because the Drive credentials are in no backup.
+
+**K1c · No copy anywhere.** Nothing written under that password can be
+read, by anyone. There is no way to put it back. What remains is to start a
+new chain: a new password file and a new `restic_base` in `host.toml`
+(`host/src/main.rs:119-124`, `:475-486`), so new repositories do not
+collide with the locked ones, then `systemctl restart homelab-host`, a
+backup of every stack and `homelab backup-host-meta`.
+
+### lost-2 · The TLS key or certificate is gone
+
+**What happens.** The daemon makes a new pair whenever either file is
+missing (`host/src/tls.rs:21`), at start and also whenever a client asks
+for the fleet state, which the TUI does on refresh with `r`
+(`host/src/main.rs:4196`, `client/src/tui/model.rs:779`). The next start serves it; every workstation then
+refuses with `"certificate fingerprint mismatch"`
+(`client/src/tls.rs:49-67`).
+
+**Restore or remove the pair together.** With the certificate missing and
+the key present, generation overwrites the certificate, then fails to
+create the key file (`host/src/tls.rs:31-43`), and the daemon stops at
+start (`host/src/main.rs:1870-1871`). From then on both files exist and do
+not belong together, and nothing regenerates them.
+
+**K2a · Put the old identity back** (every pin stays valid). Host; needs
+the restic password (lost-1):
+
+1. Stop the daemon so nothing regenerates while you work (not during the
+   backup hour):
+
+   ```sh
+   systemctl stop homelab-host
+   ```
+
+2. Restore into a scratch directory; nothing live changes:
+
+   ```sh
+   export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/host-meta-config
+   export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
+   export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
+   restic restore latest --target /root/tls-restore \
+     --include /var/lib/homelab/tls-cert.pem --include /var/lib/homelab/tls-key.pem
+   ls -l /root/tls-restore/var/lib/homelab/
+   ```
+
+3. **Point of no return**, install both:
+
+   ```sh
+   install -m 644 /root/tls-restore/var/lib/homelab/tls-cert.pem /var/lib/homelab/tls-cert.pem
+   install -m 600 /root/tls-restore/var/lib/homelab/tls-key.pem /var/lib/homelab/tls-key.pem
+   systemctl start homelab-host
+   journalctl -u homelab-host -n 30 --no-pager | grep 'TLS fingerprint'
+   rm -rf /root/tls-restore
+   ```
+
+4. Workstation: `grep '^pin' config/client.toml` shows the same
+   fingerprint; `homelab ping` connects.
+
+**K2b · Accept a new identity.**
+
+1. Host:
+
+   ```sh
+   systemctl stop homelab-host
+   rm -f /var/lib/homelab/tls-cert.pem /var/lib/homelab/tls-key.pem
+   systemctl start homelab-host
+   journalctl -u homelab-host -n 30 --no-pager | grep 'TLS fingerprint'
+   openssl x509 -in /var/lib/homelab/tls-cert.pem -noout -fingerprint -sha256
+   ```
+
+   Both lines show the same colon-separated SHA-256 of the certificate
+   (`host/src/tls.rs:56-68`).
+2. Workstation, repository root: set `pin` in `config/client.toml` to that
+   value, commit on `main`, push.
+3. Every workstation, in this order: `git pull` in the repository, then
+   `rm ~/.config/homelab/pin`, then `homelab ping` from the repository. It
+   prints `"pinned host certificate SHA256:<fp> from <file>"`, the file
+   being `config/client.toml` (`client/src/main.rs:1101-1117`,
+   `client/src/repo_config.rs:29`). Deleting the pin before pulling adopts
+   the old pin from the old file, and the next command then refuses with
+   `"the host certificate pinned on this machine"`
+   (`client/src/repo_config.rs:140-167`): delete it again after the pull.
+4. Workstation: `homelab backup-host-meta`, so the offsite copy holds the
+   new pair.
+
+**Only a workstation's pin file is gone.** Nothing to do: the next command
+run inside the repository takes the pin from `config/client.toml`
+(`client/src/repo_config.rs:158-161`). Outside the repository it trusts
+the first certificate it sees and says `"verify this matches the
+fingerprint the host printed at boot"` (`client/src/main.rs:1143-1155`).
+
+### lost-3 · The API token is gone
+
+**K3a · Gone from one workstation.** Workstation (bash). The first line
+that sets a key wins (`client/src/main.rs:79-81`), so remove a stale one
+before adding:
+
+```sh
+sed -i '/^HOMELAB_TOKEN=/d' ~/.config/homelab/env 2>/dev/null
+( umask 077; ssh root@<proxmox-host> "sed -n 's/^token *= *\"\(.*\)\"/HOMELAB_TOKEN=\1/p' /etc/homelab/host.toml" >> ~/.config/homelab/env )
+homelab ping
+```
+
+If that adds nothing, the host may take its token from the environment:
+`systemctl show homelab-host -p Environment` on the host.
+
+**K3b · `host.toml` gone, daemon still running.** The daemon holds the
+whole configuration in memory and a settings save writes all of it back,
+token included (`host/src/main.rs:524-652`, `:702-723`; guarded by the test
+`settings_render_keeps_every_config_field`, `host/src/main.rs:963-1069`).
+Nothing needs the restic password.
+
+1. Host: `mkdir -p /etc/homelab`.
+2. TUI: Settings tab (`5`), `S`. Expect `"settings saved and applied"`
+   (`host/src/main.rs:4084-4094`).
+3. Host: `grep -c '^token' /etc/homelab/host.toml` prints 1.
+4. Workstation: `homelab backup-host-meta`.
+
+**K3c · `host.toml` gone and the daemon restarted.** It will not start:
+`"FATAL: token must be set (>=16 chars) via <path> or HOMELAB_TOKEN"`
+(`host/src/main.rs:409-419`). Restore it from host-meta. Host; needs the
+restic password:
+
+```sh
+export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/host-meta-config
+export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
+export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
+restic restore latest --target /root/hm --include /etc/homelab/host.toml
+install -m 600 /root/hm/etc/homelab/host.toml /etc/homelab/host.toml   # point of no return
+systemctl restart homelab-host
+rm -rf /root/hm
+```
+
+Settings changed after that snapshot are lost; read them back with
+`homelab config`.
+
+**K3d · Rotate** (leaked, or no copy left). Host, bash:
+
+1. Check the environment does not override the file:
+   `systemctl show homelab-host -p Environment | grep -c HOMELAB_TOKEN`
+   prints 0.
+2. Edit and restart in one line. A TUI settings save in between would write
+   the old in-memory token back (`host/src/main.rs:609`, `:702-723`):
+
+   ```sh
+   NEW=$(openssl rand -hex 32) && sed -i "s/^token *= *\".*\"/token = \"$NEW\"/" /etc/homelab/host.toml && systemctl restart homelab-host; unset NEW
+   ```
+
+   The token must be at least 16 characters (`host/src/main.rs:413`).
+3. Every workstation: K3a.
+4. Workstation: `homelab backup-host-meta`.
+
+### lost-4 · The workstation latch key is gone
+
+This repository neither stores nor loads it: its only latch call is
+`latch cat` from the workstation at deploy time
+(`client/src/spec.rs:374-378`). Its own copies and recovery belong to
+latch: `~/Projects/latch-rs/docs/OPERATIONS_RUNBOOK.md` op-6 (key backup),
+op-14 (escrow) and op-15 (recover after losing every key). latch restores an
+escrow with `latch key restore <file>`
+(`~/Projects/latch-rs/crates/cli/src/main.rs:243-246`).
+
+**What still works without it.** `backup`, `restore` and `update` send the
+manifest only (`client/src/main.rs:749-807`, `client/src/spec.rs:68-84`).
+`deploy`, `destroy`, `resize`, `prune-orphans` and `plan` build the full
+spec, which calls latch for every app listed under `latch_secrets` that has
+no local `.env`, and stop when latch cannot answer
+(`client/src/main.rs:487`, `:678`, `:696`, `:923`, `:953`).
+
+**K4a · Get the escrow from the host** (REGISTER D105 records it there;
+the file name is not in code). Host: `ls -l /var/lib/homelab/secrets/`.
+Workstation:
+
+```sh
+scp root@<proxmox-host>:/var/lib/homelab/secrets/<escrow file> ~/latch-escrow.tmp
+latch key restore ~/latch-escrow.tmp        # asks for the escrow passphrase
+shred -u ~/latch-escrow.tmp
+homelab plan stacks/<stack with latch_secrets>   # prints [env] <app> <- latch
+```
+
+If the host lost it too, restore `/var/lib/homelab/secrets` from
+host-meta first (R12b shows the restore into a scratch directory).
+
+**K4b · Deploy meanwhile, without the key and without copying a secret off
+the host.** For an app whose env the client does not send, the deploy puts
+back the vault copy (`core/src/ops/deploy.rs:1140-1152`), and with no
+`latch_secrets` the client never calls latch (`client/src/spec.rs:340-342`).
+Workstation:
+
+1. Delete the `latch_secrets:` line from `stacks/<stack>/lxc-compose.yml`.
+   Do not commit this.
+2. `homelab deploy stacks/<stack>`; the log shows
+   `"restored from vault"` per app (`core/src/ops/deploy.rs:1150`).
+3. `git checkout -- stacks/<stack>/lxc-compose.yml`.
+
+This only works for an app that has been deployed before, so the vault has
+its env.
+
+### lost-5 · A native service's secret file is gone
+
+For example almanac's `latch.env`, which is how latch inside CT 112 gets
+its key (`stacks/almanac/service.yml:20`, `:43-47`,
+`stacks/almanac/almanac/almanac.service:23`).
+
+**K5a · The vault has it** (the service was deployed while running, op-7
+step 6). Workstation: `homelab deploy stacks/<stack>`. Before starting the
+unit, the deploy puts the vault copy back when the file is missing or
+empty and logs `"restored from the vault"`
+(`core/src/ops/deploy.rs:2223-2263`). Check on the host first:
+`ls -lR /var/lib/homelab/secrets/<stack>/`.
+
+**K5b · Vault missing too, file in the service's own backup** (almanac,
+kyu-runner, http-switchboard). op-11, extracting only that file:
+
+```sh
+restic dump --path /<unit>-data.tar latest /<unit>-data.tar | tar -xOf - appdata/<stack>/<unit>-config/<file> > /root/<file>
+```
+
+then place it with `pct push` as in op-7 step 3, and `homelab deploy
+stacks/<stack>` twice (op-7 steps 4 and 6) so the vault has it again.
+
+**K5c · Only in host-meta** (kyu's `kyu.env`). Restore
+`/var/lib/homelab/secrets/<stack>` from host-meta into a scratch directory
+as in R12b, copy the file back to the same place under
+`/var/lib/homelab/secrets/<stack>/`, then K5a.
+
+### lost-6 · The Google Drive credentials are gone
+
+Host. The remote must be called `gdrive`: the backup target is
+`rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:127`) and
+`homelab doctor` looks for exactly that name (`host/src/main.rs:4321-4326`).
+
+```sh
+rclone config                          # new remote "gdrive", type drive, OAuth in a browser
+rclone lsd gdrive:homelab-backups --max-depth 1    # the doctor's own probe
+```
+
+The probe is `host/src/main.rs:4327-4343`.
+
+Expired rather than gone: `rclone config reconnect gdrive:`. Then
+`homelab doctor` on the workstation shows `offsite (Drive)` as ok.
+
+---
+
+## op-18 · Prove the offline restic password
+
+Nothing in the code checks that the offline copy is the password in use,
+and every offsite backup depends on it (op-17). Host, root, bash, read-only.
+Run it after any change to the password and on a fixed rhythm:
+
+```sh
+read -rs RESTIC_PASSWORD && export RESTIC_PASSWORD      # paste the offline copy
+env -u RESTIC_PASSWORD_FILE RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/host-meta-config \
+  RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache restic snapshots --latest 1
+unset RESTIC_PASSWORD
+```
+
+A snapshot listed and exit 0: the offline copy opens the key repository.
+`Fatal: wrong password or no key found` (exit 12, restic 0.19.1 on the
+workstation): the offline copy is not the password in use. Find out which
+is right before anything else happens to either.
+
+---
+
+## op-19 · Known discrepancies between messages and behaviour
+
+Found while writing this runbook. Each line says what to believe.
+
+| Where | Says | Code does |
+|---|---|---|
+| Automatic park notification (`host/src/main.rs:2450`, `:2507`) | `"no onboot until re-enabled"` | leaves `onboot` untouched (`host/src/main.rs:2483-2486`); only `homelab disable` clears it |
+| `Makefile:8`, `:23` | press `U` in the TUI for the host update | host update is `u`; `U` updates the selected stack (`client/src/tui/model.rs:780-800`) |
+| Doctor remedy for Drive (`core/src/doctor.rs:155`) | `"local backups still run"` | with the default `restic_base` every backup goes to `rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:127`); no local copy is made |
+| `stacks/almanac/lxc-compose.yml:16-17` | `homelab restore stacks/almanac` puts the data back | see op-11 |
+| Doc comment `core/src/ops/native.rs:513-514` | repository `<stack>-config` | repository `<unit>-config` (`core/src/ops/native.rs:536`, `:613`, `:623`) |

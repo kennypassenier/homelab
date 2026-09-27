@@ -1515,3 +1515,74 @@ fn gap_32_noted_findings_alone_do_not_make_the_check_fail() {
         "the host's `homelab check` must answer with the same rule"
     );
 }
+
+/// check-output-buries-problem (expert panel, 2026-09-27): live, the header
+/// said `9 finding(s)`, two were `[noted]` ("nothing to do"), and the one
+/// `[broken]` item was seventh of nine because the list was sorted by
+/// subject. A summary comes first, then the items grouped by severity.
+/// covers: fix-103
+#[test]
+fn fix_103_the_check_leads_with_a_summary_and_the_broken_items() {
+    use homelab_core::ops::fleetcheck::{render, Finding};
+    let f = |severity, subject: &str| Finding {
+        severity,
+        subject: subject.into(),
+        what: format!("{} is off", subject),
+        remedy: format!("fix {}", subject),
+    };
+    let findings = vec![
+        f(Severity::Noted, "almanac"),
+        f(Severity::Drift, "gateway"),
+        f(Severity::Drift, "kyu"),
+        f(Severity::Broken, "zzz-last-by-name"),
+    ];
+    let text = render(&findings);
+    let first = text.lines().next().unwrap();
+    assert_eq!(
+        first,
+        "fleet check: 1 broken · 2 drift · 1 noted (nothing to do)"
+    );
+    let at = |needle: &str| {
+        text.find(needle)
+            .unwrap_or_else(|| panic!("{needle}: {text}"))
+    };
+    assert!(at("[broken] zzz-last-by-name") < at("[drift] gateway"));
+    assert!(at("[drift] kyu") < at("[noted] almanac"));
+    assert_eq!(render(&[]), "fleet check: repo and reality agree");
+}
+
+/// The same finding: remedies carried rationale and history ("Printing the
+/// question at the end of a deploy was how they went unanswered", F-ids).
+/// A remedy says what to do; the why lives in the docs and the register.
+/// covers: fix-103
+#[test]
+fn fix_103_remedies_say_what_to_do_not_what_happened() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for file in ["src/ops/fleetcheck.rs", "src/ops/manualchecks.rs"] {
+        let src = std::fs::read_to_string(root.join(file)).unwrap();
+        for (at, _) in src.match_indices("remedy: ") {
+            let rest = &src[at..];
+            // Only a field being set, not the word inside a format string.
+            let value = &rest["remedy: ".len()..];
+            if !(value.starts_with('"') || value.starts_with("format!")) {
+                continue;
+            }
+            // A literal ends at `.into()`, a `format!` at its closing `),`.
+            let end = [".into()", "),\n"]
+                .iter()
+                .filter_map(|p| rest.find(p))
+                .min()
+                .unwrap_or(rest.len());
+            let remedy = &rest[..end];
+            for history in ["(F", "was how", "for weeks", "(2026-", "used to"] {
+                assert!(
+                    !remedy.contains(history),
+                    "{}: a remedy carries history ({:?}): {}",
+                    file,
+                    history,
+                    remedy
+                );
+            }
+        }
+    }
+}

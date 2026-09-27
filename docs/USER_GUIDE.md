@@ -2025,13 +2025,24 @@ The client sends the vmid every stack file claims; the host adds what it can
 see and compares (`client/src/main.rs:310-338`, `host/src/main.rs:3773-3806`).
 From outside the repository with no path, it says the stack-file half is
 `SKIPPED` and checks only the host's half (`client/src/main.rs:317-327`). The
-answer (`render_findings`, `host/src/main.rs:3190-3210`):
+answer (`render`, `core/src/ops/fleetcheck.rs`, fix-103) leads with a count
+per severity and then groups the findings, broken first, each group printed
+in its own colour (red, yellow, dim):
 
 ```text
-fleet check: <n> finding(s)
-  [<broken|drift|noted>] <subject> — <what>
+fleet check: <b> broken · <d> drift · <n> noted (nothing to do)
+broken — not doing its job now:
+  [broken] <subject> — <what>
+      remedy: <remedy>
+drift — works, bites on the next deploy or outage:
+  [drift] <subject> — <what>
+      remedy: <remedy>
+noted — nothing to do:
+  [noted] <subject> — <what>
       remedy: <remedy>
 ```
+
+A group with nothing in it is left out, of the summary too.
 
 or `fleet check: repo and reality agree`. The command exits 0 when no finding
 is `broken` or `drift`; `noted` findings are printed and do not fail it

@@ -167,8 +167,7 @@ pub fn evaluate_manual(state: &HostState, now: u64, answer_max_age_s: u64) -> Ve
                 examples(&texts)
             ),
             remedy: "`homelab checks` lists them with their ids; \
-                     `homelab checks answer <id> ok|nok` records one. Printing the question \
-                     at the end of a deploy was how they went unanswered"
+                     `homelab checks answer <id> ok|nok` records one"
                 .into(),
         });
     }

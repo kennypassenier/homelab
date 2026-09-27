@@ -1550,6 +1550,12 @@ async fn rpc_exchange(
                 if !echo_reply {
                     return (resp.ok, fleet_seen, Some(resp));
                 }
+                // fix-103: a fleet check is printed group by group, each in
+                // its own colour, instead of one red block.
+                if resp.message.starts_with("fleet check:") {
+                    print_check(&resp.message, resp.ok);
+                    return (resp.ok, fleet_seen, Some(resp));
+                }
                 if !resp.ok {
                     println!("{}✗ {}{}", C_RED, resp.message, C_RESET);
                     return (false, fleet_seen, Some(resp));
@@ -1571,6 +1577,26 @@ async fn rpc_exchange(
         C_RED, C_RESET
     );
     (false, fleet_seen, None)
+}
+
+/// fix-103 (check-output-buries-problem, 2026-09-27): the fleet check with
+/// the summary first and each severity group in its own colour.
+fn print_check(msg: &str, ok: bool) {
+    use homelab_client::output::{check_tones, Tone};
+    for (i, (tone, line)) in check_tones(msg).into_iter().enumerate() {
+        let color = match tone {
+            Tone::Broken => C_RED,
+            Tone::Drift => C_YELLOW,
+            Tone::Noted => C_DIM,
+            Tone::Plain => C_GREEN,
+        };
+        let mark = match (i, ok) {
+            (0, true) => "✓ ",
+            (0, false) => "✗ ",
+            _ => "",
+        };
+        println!("{}{}{}{}", color, mark, line, C_RESET);
+    }
 }
 
 /// Read one line the operator typed after `prompt` (typed-name gates).

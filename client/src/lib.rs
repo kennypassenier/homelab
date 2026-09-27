@@ -3,6 +3,7 @@
 
 pub mod apply;
 pub mod link;
+pub mod output;
 pub mod release;
 pub mod repo_config;
 pub mod scaffold;

@@ -2799,11 +2799,7 @@ async fn scheduler_loop(state: AppState) {
                         }
                     );
                 } else {
-                    tracing::warn!(
-                        "fleet check: {} finding(s)\n{}",
-                        findings.len(),
-                        render_findings(&findings)
-                    );
+                    tracing::warn!("{}", render_findings(&findings));
                     // The finding text is already in the log above; the
                     // webhook exists so it leaves the machine.
                     // F86: through op_payload like every other event, so the
@@ -3439,26 +3435,10 @@ async fn record_backup_time(state: &AppState, stack: &str) {
     }
 }
 
+/// fix-103: one rendering for `homelab check`, the TUI and the nightly log —
+/// a summary first, then the findings grouped by severity.
 fn render_findings(findings: &[homelab_core::ops::fleetcheck::Finding]) -> String {
-    use homelab_core::ops::fleetcheck::Severity;
-    if findings.is_empty() {
-        return "fleet check: repo and reality agree".into();
-    }
-    let mut s = format!("fleet check: {} finding(s)\n", findings.len());
-    for f in findings {
-        s.push_str(&format!(
-            "  [{}] {} — {}\n      remedy: {}\n",
-            match f.severity {
-                Severity::Broken => "broken",
-                Severity::Drift => "drift",
-                Severity::Noted => "noted",
-            },
-            f.subject,
-            f.what,
-            f.remedy
-        ));
-    }
-    s
+    homelab_core::ops::fleetcheck::render(findings)
 }
 
 /// T85: where a stack's binaries wait between `StageNativeBinary` and the

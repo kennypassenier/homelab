@@ -126,6 +126,99 @@ pub async fn write_bundle(
     Ok(dir)
 }
 
+// ── Retention (fix-131) ─────────────────────────────────────────────────────
+
+/// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
+/// bundles older than this many days are removed. Nothing pruned them (90
+/// on pve that day, the oldest from the first deploys), and they are in no
+/// backup, so a limit is the difference between a record and a slow leak.
+/// Generous on purpose: a quarter covers every failure worth reading back.
+pub const BUNDLE_MAX_AGE_DAYS: u64 = 90;
+/// fix-131: at most this many bundles are kept, newest first, so a
+/// crash-looping night cannot fill the disk inside the age limit.
+pub const BUNDLE_MAX_COUNT: usize = 200;
+
+/// fix-131: the bundle directories to remove from `names`, oldest first.
+/// A bundle is `<unix-ts>-<op>`; a name that is not is not the pruner's to
+/// judge and stays.
+pub fn bundles_to_prune(
+    names: &[String],
+    now: u64,
+    max_age_days: u64,
+    max_count: usize,
+) -> Vec<String> {
+    let mut dated: Vec<(u64, &String)> = names
+        .iter()
+        .filter_map(|n| {
+            let (ts, op) = n.split_once('-')?;
+            (!op.is_empty()).then_some(())?;
+            Some((ts.parse::<u64>().ok()?, n))
+        })
+        .collect();
+    // Newest first: the first `max_count` young enough are kept.
+    dated.sort_by_key(|d| std::cmp::Reverse(d.0));
+    let oldest_kept = now.saturating_sub(max_age_days * 86_400);
+    let mut kept = 0usize;
+    let mut gone: Vec<(u64, &String)> = Vec::new();
+    for (ts, n) in dated {
+        if ts >= oldest_kept && kept < max_count {
+            kept += 1;
+        } else {
+            gone.push((ts, n));
+        }
+    }
+    gone.sort_by_key(|(ts, _)| *ts);
+    gone.into_iter().map(|(_, n)| n.clone()).collect()
+}
+
+/// fix-131: past this size the journal is compacted to half of it.
+pub const JOURNAL_MAX_BYTES: usize = 4 * 1024 * 1024;
+
+/// fix-131: the journal cut back to its newest lines, or None when
+/// `content` is within `max_bytes`. It grew for good and was read whole at
+/// every start and failure. The cut keeps whole lines, about half of
+/// `max_bytes` of the newest ones, and in front of them the last record of
+/// every operation still marked running, so `interrupted_ops` reads the same
+/// answer after the cut as before it.
+pub fn compact_journal(content: &str, max_bytes: usize) -> Option<String> {
+    if content.len() <= max_bytes {
+        return None;
+    }
+    let lines: Vec<&str> = content.lines().collect();
+    let interrupted: Vec<String> = interrupted_ops(content)
+        .into_iter()
+        .map(|(op, _)| op)
+        .collect();
+    // The last line of each interrupted operation, by index.
+    let mut keep_idx: Vec<usize> = interrupted
+        .iter()
+        .filter_map(|op| {
+            lines.iter().rposition(|l| {
+                serde_json::from_str::<serde_json::Value>(l)
+                    .ok()
+                    .and_then(|v| v.get("op").and_then(|o| o.as_str()).map(|o| o == op))
+                    .unwrap_or(false)
+            })
+        })
+        .collect();
+    let mut budget =
+        (max_bytes / 2).saturating_sub(keep_idx.iter().map(|i| lines[*i].len() + 1).sum());
+    let mut start = lines.len();
+    while start > 0 && lines[start - 1].len() < budget {
+        budget -= lines[start - 1].len() + 1;
+        start -= 1;
+    }
+    keep_idx.retain(|i| *i < start);
+    keep_idx.sort_unstable();
+    keep_idx.extend(start..lines.len());
+    let mut out = String::new();
+    for i in keep_idx {
+        out.push_str(lines[i]);
+        out.push('\n');
+    }
+    Some(out)
+}
+
 // ── Interrupted-operation detection (AR13) ──────────────────────────────────
 
 /// Parse journal JSONL content and report operations whose most recent record

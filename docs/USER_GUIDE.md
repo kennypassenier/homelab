@@ -421,8 +421,9 @@ without a `.env` in the payload gets the host's vault copy if there is one
 and otherwise none (`core/src/ops/deploy.rs:1140-1151`). Only a failed
 *nightly* run disables a stack (H8).
 
-List the bundles with `homelab incidents` or `i` in the TUI
-(`host/src/main.rs:4255-4277`).
+List the bundles with `homelab incidents` or `i` in the TUI, and read one
+with `homelab incidents show <name>` (fix-131). Bundles older than 90 days,
+and all but the newest 200, are removed by the daemon.
 
 #### A4 · TLS with a pinned certificate on the client-host line
 
@@ -2250,7 +2251,8 @@ and stores it with restic; without that list it answers
 ### `homelab status`, `homelab incidents`, `homelab testplan`
 
 `status` prints `pct list` and the raw `state.json` (`host/src/main.rs:3227-3240`).
-`incidents` lists the incident bundle directories (A3). `testplan` rebuilds
+`incidents` lists the incident bundle directories (A3); `incidents show
+<name>` prints one bundle's error, versions and transcript end (fix-131). `testplan` rebuilds
 `docs/deployment/TEST_PLAN.md` from the test files and the realization plan;
 run it from the repository root (`client/src/main.rs:882-898`).
 

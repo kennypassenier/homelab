@@ -422,6 +422,64 @@ fn fix_130_doctor_reports_exposure_files_privilege_host_meta_drill_and_space() {
     }
 }
 
+/// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
+/// nothing pruned the incident bundles (90 on pve that day). Bundles older
+/// than the age limit go, and past the count limit the oldest go; a name
+/// that is not `<unix-ts>-<op>` is not the pruner's to judge and stays.
+#[test]
+fn fix_131_old_and_surplus_incident_bundles_are_pruned() {
+    let day = 86_400u64;
+    let now = 1_800_000_000u64;
+    let names: Vec<String> = vec![
+        format!("{}-deploy-media", now - 100 * day),
+        format!("{}-backup-kyu", now - 10 * day),
+        format!("{}-deploy-gateway", now - 9 * day),
+        format!("{}-update-home", now - day),
+        "notes-by-hand".into(),
+    ];
+    let gone = incidents::bundles_to_prune(&names, now, 90, 2);
+    assert_eq!(
+        gone,
+        vec![names[0].clone(), names[1].clone()],
+        "the 100-day-old one by age, then the oldest beyond two"
+    );
+    assert!(incidents::bundles_to_prune(&names[1..], now, 90, 200).is_empty());
+}
+
+/// fix-131: journal.jsonl grew for good and was read whole at every start.
+/// Past the limit it keeps its newest lines, and the last record of every
+/// operation still marked running, so an interrupted operation is still
+/// reported after the compaction.
+#[test]
+fn fix_131_a_compacted_journal_keeps_its_tail_and_every_interrupted_op() {
+    let mut journal = String::from(
+        "{\"ts\":1,\"op\":\"deploy-media\",\"step\":\"pull images\",\"status\":\"running\"}\n",
+    );
+    for i in 0..2000 {
+        journal.push_str(&format!(
+            "{{\"ts\":{},\"op\":\"backup-kyu\",\"step\":\"snapshot\",\"status\":\"complete\"}}\n",
+            10 + i
+        ));
+    }
+    assert!(incidents::compact_journal(&journal, journal.len() + 1).is_none());
+    let small = incidents::compact_journal(&journal, 40_000).expect("compacted");
+    assert!(small.len() <= 40_000, "{} bytes", small.len());
+    assert!(
+        small.ends_with("\"status\":\"complete\"}\n"),
+        "the newest lines stay"
+    );
+    assert!(
+        small
+            .lines()
+            .all(|l| serde_json::from_str::<serde_json::Value>(l).is_ok()),
+        "whole lines only"
+    );
+    assert_eq!(
+        interrupted_ops(&small),
+        vec![("deploy-media".to_string(), "pull images".to_string())]
+    );
+}
+
 // ── RecordingSink tees to inner sink AND records ────────────────────────────
 
 #[tokio::test]

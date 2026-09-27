@@ -256,19 +256,25 @@ Four things about these files that are easy to get wrong:
    `core/src/executor.rs`). Bundles written before that version joined
    arguments with single spaces; read the next subsection before running a
    line from one of those.
-4. **Nothing prunes bundles.** No code in this repository removes
-   directories under `incidents/` or trims `journal.jsonl`; they grow until
-   someone removes them.
+4. **Bundles and the journal are bounded (fix-131).** At start and after
+   every nightly tick the daemon removes bundles older than 90 days and all
+   but the newest 200, and cuts `journal.jsonl` back to its newest ~2 MiB
+   once it passes 4 MiB, keeping the last record of every operation still
+   marked running (`incidents::bundles_to_prune`, `compact_journal`). Neither
+   is in a backup; a bundle worth keeping longer is copied off by hand.
 
 ### Worked example: reading the bundle from section 2
 
-`homelab incidents` lists bundle names only, sorted
-(`host/src/main.rs:4244-4266`); there is no verb that returns their contents.
-Reading them takes a shell on the Proxmox host.
+`homelab incidents` lists the bundle names, sorted; `homelab incidents
+show <name>` prints one: the operation, what failed, why and the remedy, the
+versions, and the last 60 transcript lines, masked (fix-131). The rest of the
+bundle (the state at the failure, the journal tail, `commands.sh`) is read on
+the Proxmox host.
 
 ```bash
 # workstation
 homelab incidents
+homelab incidents show 1760000000-deploy-syncthing
 ```
 
 ```bash

@@ -238,7 +238,8 @@ names `homelab release-update`. The steps below are the parts it merges.
    there so kept data is never forgotten (op-6 step 6).
 2. `homelab doctor`. Host disk, state file, backup age per stack, the Drive
    remote, mirror lag, interrupted operations (`core/src/doctor.rs:45-188`).
-3. `homelab incidents`. One directory per failed operation.
+3. `homelab incidents`. One directory per failed operation;
+   `homelab incidents show <name>` reads one (fix-131).
 4. `homelab checks`. The questions only a person can answer; record one
    with `homelab checks answer <id> ok|nok [note]`, or accept a deliberate
    `nok` for a while with `homelab checks answer <id> accept <days> <reason>`

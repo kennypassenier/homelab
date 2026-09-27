@@ -724,7 +724,22 @@ async fn main() {
         }
         "status" => rpc(&host, &token, Command::Status).await,
         "doctor" => rpc(&host, &token, Command::Doctor).await,
-        "incidents" => rpc(&host, &token, Command::Incidents).await,
+        // fix-131: `incidents show <name>` reads one bundle; it took a root
+        // shell on pve before.
+        "incidents" => match (args.get(2).map(String::as_str), args.get(3)) {
+            (None, _) => rpc(&host, &token, Command::Incidents).await,
+            (Some("show"), Some(name)) => {
+                rpc(&host, &token, Command::IncidentShow { name: name.clone() }).await
+            }
+            (Some("show"), None) => {
+                die("usage: homelab incidents show <name> (the names `homelab incidents` lists)")
+            }
+            (Some(other), _) => die(&format!(
+                "unknown: homelab incidents {} :: `homelab incidents` lists, `homelab incidents \
+                 show <name>` reads one",
+                other
+            )),
+        },
         "plan" => {
             // D6/D10: validate locally and show what would be sent — no network.
             let dir = args
@@ -1234,6 +1249,7 @@ async fn main() {
             println!("homelab v{} — usage:", env!("CARGO_PKG_VERSION"));
             println!("  homelab today [stacks/]             what needs you: doctor, check, incidents, manual checks in one list");
             println!("  homelab ping|status|doctor|incidents");
+            println!("  homelab incidents show <name>       one incident bundle: error, versions, transcript end");
             println!("  homelab plan stacks/<name>          validate and show the spec (no host; runs latch/gh for secrets and native releases)");
             println!("  homelab deploy stacks/<name>");
             println!("  homelab backup stacks/<name>        restic snapshot (E1)");

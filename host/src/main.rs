@@ -1572,6 +1572,100 @@ port = 5003
         );
     }
 
+    /// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
+    /// `homelab incidents` listed names only; reading a bundle took a root
+    /// shell on pve. `incidents show <name>` brings the error, the versions
+    /// and the end of the transcript to the workstation, and a name that is
+    /// not a plain bundle name is refused before it becomes a path.
+    #[tokio::test]
+    async fn fix_131_incident_show_reads_one_bundle_and_nothing_else() {
+        let dir = std::env::temp_dir().join(format!("homelab-fix131-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let bundle = dir.join("incidents/1800000000-deploy-media");
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(
+            bundle.join("report.json"),
+            r#"{"op":"deploy-media","steps":[],"ok":false,"error":{"what":"pull images failed","why":"image not found","remedy":"check the tag"}}"#,
+        )
+        .unwrap();
+        std::fs::write(bundle.join("versions.txt"), "host=3.60.0\nproto=1\n").unwrap();
+        // Written the way `write_bundle` writes them.
+        let line = |m: &str| {
+            let ev = PipelineEvent::Line {
+                level: homelab_core::sink::Level::Info,
+                source: "HOST".into(),
+                msg: m.into(),
+            };
+            format!("{}\n", serde_json::to_string(&ev).unwrap())
+        };
+        std::fs::write(
+            bundle.join("events.jsonl"),
+            format!(
+                "{}{}",
+                line("[run ] docker compose pull"),
+                line("image not found")
+            ),
+        )
+        .unwrap();
+        let toml = dir.join("host.toml");
+        std::fs::write(
+            &toml,
+            format!(
+                "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        let state = test_state(load_config_from(toml.to_string_lossy().into_owned()));
+        let show = |name: &str| RpcRequest {
+            id: 3,
+            command: Rpc::IncidentShow { name: name.into() },
+        };
+        let got = handle_rpc(&state, show("1800000000-deploy-media")).await;
+        let refused = handle_rpc(&state, show("../../etc")).await;
+        let missing = handle_rpc(&state, show("1800000001-deploy-x")).await;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(got.ok, "{}", got.message);
+        for want in [
+            "pull images failed",
+            "image not found",
+            "check the tag",
+            "host=3.60.0",
+            "docker compose pull",
+        ] {
+            assert!(
+                got.message.contains(want),
+                "{} missing from:\n{}",
+                want,
+                got.message
+            );
+        }
+        assert!(
+            !refused.ok && refused.message.contains("not a bundle name"),
+            "{}",
+            refused.message
+        );
+        assert!(!missing.ok, "{}", missing.message);
+    }
+
+    /// fix-131: the pruner removes what `bundles_to_prune` names, on disk.
+    #[test]
+    fn fix_131_old_bundles_are_removed_from_disk() {
+        let dir = std::env::temp_dir().join(format!("homelab-fix131p-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let now = 1_800_000_000u64;
+        let old = dir.join(format!("incidents/{}-deploy-media", now - 100 * 86_400));
+        let young = dir.join(format!("incidents/{}-deploy-kyu", now - 86_400));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&young).unwrap();
+        std::fs::write(old.join("report.json"), "{}").unwrap();
+        let removed = prune_incidents(&dir.to_string_lossy(), now);
+        let (old_gone, young_kept) = (!old.exists(), young.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(removed, 1);
+        assert!(old_gone && young_kept);
+    }
+
     /// A session over a real socket on a free local port, with `handler` in
     /// place of `handle_rpc`. Returns the address to connect to.
     async fn serve_on_loopback<H, Fut>(handler: H) -> SocketAddr
@@ -3246,6 +3340,16 @@ async fn main() {
 
     // fix-125: records written before the private modes existed.
     tighten_private_paths(&config.state_dir);
+    // fix-131: bound the daemon's own records before anything runs, so
+    // nothing writes the journal while it is cut.
+    compact_journal_file(&config.state_dir);
+    prune_incidents(
+        &config.state_dir,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    );
 
     // AR13: surface any operation the previous run left mid-flight.
     let mut interrupted: Vec<String> = Vec::new();
@@ -4260,6 +4364,19 @@ async fn scheduler_loop(state: AppState) {
                     .await;
                 }
             }
+        }
+
+        // fix-131: the daemon's own records, bounded every night. Under the
+        // operation lock, so no operation appends to the journal while it
+        // is cut; off the async workers, since both are plain file work.
+        {
+            let _guard = state.op_lock.lock().await;
+            let dir = state.config.state_dir.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                compact_journal_file(&dir);
+                prune_incidents(&dir, now);
+            })
+            .await;
         }
     }
 }
@@ -6325,6 +6442,19 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // fix-131: one bundle, read on the workstation.
+        Rpc::IncidentShow { name } => {
+            let (ok, message) = match incident_text(&state.config.state_dir, &name) {
+                Ok(text) => (true, text),
+                Err(why) => (false, why),
+            };
+            RpcResponse {
+                id: req.id,
+                ok,
+                message,
+                deferred: None,
+            }
+        }
         Rpc::Incidents => {
             let dir = format!("{}/incidents", state.config.state_dir);
             let list = std::fs::read_dir(&dir)
@@ -6349,6 +6479,146 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
         }
     }
+}
+
+/// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
+/// remove the bundles older than `BUNDLE_MAX_AGE_DAYS` and those beyond the
+/// newest `BUNDLE_MAX_COUNT`; returns how many went. Nothing pruned them.
+fn prune_incidents(state_dir: &str, now: u64) -> usize {
+    use homelab_core::incidents::{bundles_to_prune, BUNDLE_MAX_AGE_DAYS, BUNDLE_MAX_COUNT};
+    let dir = format!("{}/incidents", state_dir);
+    let names: Vec<String> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    let mut removed = 0;
+    for name in bundles_to_prune(&names, now, BUNDLE_MAX_AGE_DAYS, BUNDLE_MAX_COUNT) {
+        match std::fs::remove_dir_all(format!("{}/{}", dir, name)) {
+            Ok(()) => removed += 1,
+            Err(e) => tracing::warn!("incidents: could not remove {} :: {}", name, e),
+        }
+    }
+    if removed > 0 {
+        info!(
+            "incidents: removed {} bundle(s) older than {} days or beyond the newest {}",
+            removed, BUNDLE_MAX_AGE_DAYS, BUNDLE_MAX_COUNT
+        );
+    }
+    removed
+}
+
+/// fix-131: cut journal.jsonl back when it has outgrown its limit
+/// (`incidents::compact_journal`), written whole through a temp file.
+/// Called only while nothing writes the journal: at start, and under the
+/// operation lock.
+fn compact_journal_file(state_dir: &str) {
+    let path = format!("{}/journal.jsonl", state_dir);
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Some(cut) = homelab_core::incidents::compact_journal(
+        &content,
+        homelab_core::incidents::JOURNAL_MAX_BYTES,
+    ) else {
+        return;
+    };
+    let tmp = format!("{}.compact.tmp", path);
+    let written = (|| -> std::io::Result<()> {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let _ = std::fs::remove_file(&tmp);
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(cut.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, &path)
+    })();
+    match written {
+        Ok(()) => info!(
+            "journal.jsonl: cut from {} to {} bytes, interrupted operations kept",
+            content.len(),
+            cut.len()
+        ),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            tracing::warn!("journal.jsonl: could not compact :: {}", e);
+        }
+    }
+}
+
+/// fix-131: one incident bundle as text: what failed, the versions, the
+/// end of the transcript and where the rest is. `name` must be a bundle
+/// name as `homelab incidents` lists it, checked before it becomes a path.
+fn incident_text(state_dir: &str, name: &str) -> Result<String, String> {
+    const TAIL: usize = 60;
+    let plain = !name.is_empty()
+        && name.split_once('-').is_some_and(|(ts, op)| {
+            !op.is_empty() && !ts.is_empty() && ts.chars().all(|c| c.is_ascii_digit())
+        })
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !plain {
+        return Err(format!(
+            "'{}' is not a bundle name :: `homelab incidents` lists them (<unix-time>-<operation>)",
+            name
+        ));
+    }
+    let dir = format!("{}/incidents/{}", state_dir, name);
+    if !std::path::Path::new(&dir).is_dir() {
+        return Err(format!(
+            "no bundle named {} :: `homelab incidents` lists the ones kept (bundles older than {} \
+             days are removed)",
+            name,
+            homelab_core::incidents::BUNDLE_MAX_AGE_DAYS
+        ));
+    }
+    let read = |f: &str| std::fs::read_to_string(format!("{}/{}", dir, f)).unwrap_or_default();
+    let mask = homelab_core::executor::mask_secrets;
+    let mut out = format!("incident {}\n", name);
+    if let Ok(report) = serde_json::from_str::<serde_json::Value>(&read("report.json")) {
+        let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
+        out.push_str(&format!("  operation: {}\n", s(&report["op"])));
+        let err = &report["error"];
+        if !err.is_null() {
+            out.push_str(&format!("  what:   {}\n", mask(&s(&err["what"]))));
+            out.push_str(&format!("  why:    {}\n", mask(&s(&err["why"]))));
+            out.push_str(&format!("  remedy: {}\n", mask(&s(&err["remedy"]))));
+        }
+    }
+    let versions = read("versions.txt");
+    out.push_str(&format!(
+        "  versions: {}\n",
+        versions.split_whitespace().collect::<Vec<_>>().join(" ")
+    ));
+    let lines: Vec<String> = read("events.jsonl")
+        .lines()
+        .filter_map(|l| serde_json::from_str::<PipelineEvent>(l).ok())
+        .filter_map(|e| match e {
+            PipelineEvent::Line { msg, .. } => Some(mask(&msg)),
+            _ => None,
+        })
+        .collect();
+    let from = lines.len().saturating_sub(TAIL);
+    out.push_str(&format!(
+        "last {} of {} transcript line(s):\n",
+        lines.len() - from,
+        lines.len()
+    ));
+    for l in &lines[from..] {
+        out.push_str(&format!("  {}\n", l));
+    }
+    out.push_str(&format!(
+        "the whole bundle, root only on the host: {} (commands.sh replays what ran)\n",
+        dir
+    ));
+    Ok(out)
 }
 
 /// fix-130: what the new doctor probes need from the configuration.

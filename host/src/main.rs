@@ -163,6 +163,14 @@ struct FileConfig {
     /// three services quiet at once.
     #[serde(default = "default_backup_concurrency")]
     backup_concurrency: usize,
+    /// fix-96 (single-offsite-copy-no-integrity-check, 2026-09-27): the ZFS
+    /// dataset that holds the second repository set, e.g. `HDD4TB/restic`.
+    /// Absent = no second copy (the nightly `restic check` of the Google
+    /// Drive copy runs either way).
+    second_copy_dataset: Option<String>,
+    /// fix-96: how often one repository's check also reads a slice of its
+    /// data. Default 30 days (Kenny: monthly).
+    integrity_data_read_interval_s: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -250,6 +258,10 @@ struct Config {
     /// chose three (form Y4): about a third of the wait, and never more than
     /// three services quiet at once.
     backup_concurrency: usize,
+    /// fix-96: the second repository set's dataset; None = no second copy.
+    second_copy_dataset: Option<String>,
+    /// fix-96: how often a repository's check reads data.
+    integrity_data_read_interval_s: u64,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
 }
@@ -304,6 +316,8 @@ const KNOWN_TOP: &[&str] = &[
     "backup_concurrency",
     "watched_backups",
     "device_backups",
+    "second_copy_dataset",
+    "integrity_data_read_interval_s",
 ];
 const KNOWN_REGISTRY_CACHE: &[&str] = &["host", "upstreams", "pull_timeout_secs"];
 const KNOWN_UPSTREAM: &[&str] = &["registry", "port"];
@@ -490,6 +504,10 @@ fn load_config_from(path: String) -> Config {
         kuma_monitors_file: file.kuma_monitors_file,
         backup_concurrency: file.backup_concurrency,
         ask_timeout_s: file.ask_timeout_s,
+        second_copy_dataset: file.second_copy_dataset.clone(),
+        integrity_data_read_interval_s: file
+            .integrity_data_read_interval_s
+            .unwrap_or(homelab_core::ops::secondcopy::DEFAULT_DATA_READ_INTERVAL_S),
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -603,6 +621,12 @@ fn render_settings_toml(
         backup_concurrency: Option<usize>,
         #[serde(skip_serializing_if = "Option::is_none")]
         ask_timeout_s: Option<u64>,
+        // fix-96: a save that dropped this would end the second copy in
+        // silence, since the fleet check says nothing about an unconfigured one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        second_copy_dataset: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        integrity_data_read_interval_s: Option<u64>,
     }
     let bdef = homelab_core::ops::backup::BackupCfg::default();
     let out = Out {
@@ -648,6 +672,10 @@ fn render_settings_toml(
             .then_some(config.backup_concurrency),
         ask_timeout_s: (config.ask_timeout_s != default_ask_timeout_s())
             .then_some(config.ask_timeout_s),
+        second_copy_dataset: config.second_copy_dataset.as_ref(),
+        integrity_data_read_interval_s: (config.integrity_data_read_interval_s
+            != homelab_core::ops::secondcopy::DEFAULT_DATA_READ_INTERVAL_S)
+            .then_some(config.integrity_data_read_interval_s),
     };
     toml::to_string_pretty(&out).map_err(|e| e.to_string())
 }
@@ -1210,6 +1238,10 @@ port = 5003
             ),
             backup_concurrency: 3,
             ask_timeout_s: 120,
+            // fix-96: a settings save must not drop the second copy.
+            second_copy_dataset: Some("HDD4TB/restic".into()),
+            integrity_data_read_interval_s:
+                homelab_core::ops::secondcopy::DEFAULT_DATA_READ_INTERVAL_S,
             initial_settings: homelab_proto::HostConfigView {
                 backup_hour: Some(4),
                 notify_webhook: Some("http://ha/webhook/x".into()),
@@ -1290,6 +1322,10 @@ port = 5003
         );
         assert_eq!(parsed.retention.as_ref().map(|r| r.len()), Some(3));
         assert_eq!(parsed.no_touch, Some(vec![100, 101]));
+        // fix-96: dropping this would silently end the second copy, and the
+        // fleet check says nothing about a copy that is not configured.
+        assert_eq!(parsed.second_copy_dataset.as_deref(), Some("HDD4TB/restic"));
+        assert_eq!(parsed.integrity_data_read_interval_s, None);
         assert_eq!(parsed.gateway_vmid, Some(112));
         assert_eq!(
             parsed.gateway_routes_dir.as_deref(),
@@ -1473,9 +1509,12 @@ port = 5003
             last_host_meta: 0,
             last_zfs: 0,
             last_restore_drill: 0,
+            last_integrity_check: 0,
             restore_drill_interval_s: 90 * 24 * 3600,
             zfs_configured: false,
             devices_configured: false,
+            second_copy_configured: false,
+            last_second_copy: 0,
         };
         assert!(
             nightly_plan(4, 4, 1_000_000, &[], &never).contains(&NightlyTask::RestoreDrill),
@@ -1493,6 +1532,48 @@ port = 5003
             !nightly_plan(4, 4, 1_000_000, &[], &fresh).contains(&NightlyTask::RestoreDrill),
             "drilled an hour ago: not again tonight"
         );
+    }
+
+    /// fix-96 (single-offsite-copy-no-integrity-check, 2026-09-27): the
+    /// second copy runs once a night when configured, the rotating restic
+    /// check once a night either way, both in the backup hour.
+    #[test]
+    fn fix96_the_second_copy_and_the_check_are_planned_once_a_night() {
+        let now = 1_000_000;
+        let due = NightlyState {
+            last_host_meta: now,
+            last_zfs: 0,
+            last_restore_drill: now,
+            last_integrity_check: 0,
+            restore_drill_interval_s: 90 * 24 * 3600,
+            zfs_configured: false,
+            devices_configured: false,
+            second_copy_configured: true,
+            last_second_copy: 0,
+        };
+        let plan = nightly_plan(4, 4, now, &[], &due);
+        assert!(plan.contains(&NightlyTask::SecondCopy), "{:?}", plan);
+        assert!(plan.contains(&NightlyTask::IntegrityCheck), "{:?}", plan);
+        assert!(
+            nightly_plan(4, 5, now, &[], &due).is_empty(),
+            "outside the backup hour nothing runs"
+        );
+        let unconfigured = NightlyState {
+            second_copy_configured: false,
+            ..due
+        };
+        let plan = nightly_plan(4, 4, now, &[], &unconfigured);
+        assert!(!plan.contains(&NightlyTask::SecondCopy));
+        assert!(
+            plan.contains(&NightlyTask::IntegrityCheck),
+            "the Google Drive copy is checked with or without a second one"
+        );
+        let done = NightlyState {
+            last_second_copy: now - 3600,
+            last_integrity_check: now - 3600,
+            ..due
+        };
+        assert!(nightly_plan(4, 4, now, &[], &done).is_empty());
     }
 
     /// F259 · a watcher pointed at a path no writer writes to.
@@ -1583,11 +1664,14 @@ port = 5003
             &[("a".into(), true, fresh)],
             &NightlyState {
                 last_restore_drill: now,
+                last_integrity_check: now,
                 restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: 0,
                 last_zfs: now,
                 zfs_configured: false,
                 devices_configured: false,
+                second_copy_configured: false,
+                last_second_copy: 0,
             },
         );
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
@@ -1600,11 +1684,14 @@ port = 5003
             &[("a".into(), true, stale), ("b".into(), true, stale)],
             &NightlyState {
                 last_restore_drill: now,
+                last_integrity_check: now,
                 restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: 0,
                 last_zfs: now,
                 zfs_configured: false,
                 devices_configured: false,
+                second_copy_configured: false,
+                last_second_copy: 0,
             },
         );
         assert_eq!(
@@ -1624,11 +1711,14 @@ port = 5003
             &[("a".into(), true, fresh)],
             &NightlyState {
                 last_restore_drill: now,
+                last_integrity_check: now,
                 restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: fresh,
                 last_zfs: now,
                 zfs_configured: false,
                 devices_configured: false,
+                second_copy_configured: false,
+                last_second_copy: 0,
             },
         );
         assert!(plan.is_empty());
@@ -1641,11 +1731,14 @@ port = 5003
             &[("a".into(), true, stale)],
             &NightlyState {
                 last_restore_drill: now,
+                last_integrity_check: now,
                 restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: 0,
                 last_zfs: now,
                 zfs_configured: false,
                 devices_configured: false,
+                second_copy_configured: false,
+                last_second_copy: 0,
             }
         )
         .is_empty());
@@ -1659,11 +1752,14 @@ port = 5003
             &[("a".into(), false, stale)],
             &NightlyState {
                 last_restore_drill: now,
+                last_integrity_check: now,
                 restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: 0,
                 last_zfs: now,
                 zfs_configured: false,
                 devices_configured: false,
+                second_copy_configured: false,
+                last_second_copy: 0,
             },
         );
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
@@ -1681,11 +1777,14 @@ port = 5003
             &[],
             &NightlyState {
                 last_restore_drill: now,
+                last_integrity_check: now,
                 restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: stale,
                 last_zfs: stale,
                 zfs_configured: false,
                 devices_configured: false,
+                second_copy_configured: false,
+                last_second_copy: 0,
             },
         );
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
@@ -1697,11 +1796,14 @@ port = 5003
             &[],
             &NightlyState {
                 last_restore_drill: now,
+                last_integrity_check: now,
                 restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: stale,
                 last_zfs: stale,
                 zfs_configured: true,
                 devices_configured: false,
+                second_copy_configured: false,
+                last_second_copy: 0,
             },
         );
         assert_eq!(plan, vec![NightlyTask::HostMeta, NightlyTask::Zfs]);
@@ -1713,11 +1815,14 @@ port = 5003
             &[],
             &NightlyState {
                 last_restore_drill: now,
+                last_integrity_check: now,
                 restore_drill_interval_s: 90 * 24 * 3600,
                 last_host_meta: stale,
                 last_zfs: now - 3600,
                 zfs_configured: true,
                 devices_configured: false,
+                second_copy_configured: false,
+                last_second_copy: 0,
             },
         );
         assert_eq!(plan, vec![NightlyTask::HostMeta]);
@@ -2450,6 +2555,12 @@ enum NightlyTask {
     /// rather than a slot of its own — it is one small GET, and a device
     /// whose config changed today is exactly a night the vault changed too.
     DeviceConfig,
+    /// fix-96: `restic copy` of every repository into the second repository
+    /// set, after the backups and before the ZFS replication carries the
+    /// pool to HDD18TB.
+    SecondCopy,
+    /// fix-96: `restic check` of one repository, both copies, in turn.
+    IntegrityCheck,
 }
 
 /// H12 pattern: the whole nightly decision as a pure function, so "does the
@@ -2468,6 +2579,11 @@ struct NightlyState {
     last_restore_drill: u64,
     restore_drill_interval_s: u64,
     devices_configured: bool,
+    /// fix-96: whether a second copy is configured, when it last ran, and
+    /// when the rotating check last ran.
+    second_copy_configured: bool,
+    last_second_copy: u64,
+    last_integrity_check: u64,
 }
 
 fn nightly_plan(
@@ -2503,6 +2619,19 @@ fn nightly_plan(
         )
     {
         plan.push(NightlyTask::RestoreDrill);
+    }
+    // fix-96: once a night each, in the backup hour.
+    if st.second_copy_configured && backup_due(cfg_hour, local_hour, st.last_second_copy, now) {
+        plan.push(NightlyTask::SecondCopy);
+    }
+    if local_hour == cfg_hour
+        && homelab_core::ops::restoredrill::due(
+            st.last_integrity_check,
+            now,
+            homelab_core::ops::secondcopy::DEFAULT_CHECK_INTERVAL_S,
+        )
+    {
+        plan.push(NightlyTask::IntegrityCheck);
     }
     plan
 }
@@ -2826,6 +2955,18 @@ async fn scheduler_loop(state: AppState) {
         // fix-62: whose turn it is, read before the loop below consumes the
         // snapshot's stacks.
         let drill_pick = homelab_core::ops::restoredrill::pick(&snapshot, &drill_repos);
+        // fix-96: every repository with the retention its source keeps, for
+        // the second copy and the rotating restic check.
+        let copy_policies = homelab_core::ops::secondcopy::repo_policies(
+            &snapshot,
+            &state
+                .config
+                .device_backups
+                .iter()
+                .map(|d| d.name.clone())
+                .collect::<Vec<_>>(),
+            &tiers,
+        );
         let plan = nightly_plan(
             hour,
             local_hour,
@@ -2838,6 +2979,9 @@ async fn scheduler_loop(state: AppState) {
                 restore_drill_interval_s: state.config.restore_drill_interval_s,
                 zfs_configured: !state.config.zfs_jobs.is_empty(),
                 devices_configured: !state.config.device_backups.is_empty(),
+                second_copy_configured: state.config.second_copy_dataset.is_some(),
+                last_second_copy: snapshot.last_second_copy,
+                last_integrity_check: snapshot.last_integrity_check,
             },
         );
         // Y1: every due backup runs first, several at a time, under one
@@ -3078,6 +3222,71 @@ async fn scheduler_loop(state: AppState) {
                          being kept",
                         name
                     );
+                }
+            }
+        }
+
+        // fix-96 (single-offsite-copy-no-integrity-check, 2026-09-27): every
+        // repository copied into the second repository set, after all of
+        // tonight's backups and before the ZFS replication below, so the
+        // replica on HDD18TB carries tonight's copy too.
+        if plan.contains(&NightlyTask::SecondCopy) {
+            if let Some(ds) = state.config.second_copy_dataset.clone() {
+                let cfg = state.config.backup.clone();
+                let repos = copy_policies.clone();
+                let report = run_mutating_op(&state, &exec, 0, "second-copy", |ctx| {
+                    Box::pin(async move {
+                        homelab_core::ops::secondcopy::copy_all(ctx, &cfg, &ds, &repos).await
+                    })
+                })
+                .await;
+                if !report.ok {
+                    tracing::error!(
+                        "scheduler: the second copy did not complete — the repositories it names \
+                         exist on Google Drive only tonight"
+                    );
+                }
+            }
+        }
+
+        // fix-96: one repository checked per night, both copies; once a month
+        // per repository the check also reads a slice of the data. Read after
+        // the copy above, which records which repositories have a copy yet.
+        if plan.contains(&NightlyTask::IntegrityCheck) {
+            if let Ok(fresh) = store.load().await {
+                let names: Vec<String> = copy_policies.iter().map(|p| p.repo.clone()).collect();
+                if let Some(repo) = homelab_core::ops::secondcopy::pick(&fresh, &names) {
+                    let subset = homelab_core::ops::secondcopy::data_subset(
+                        &fresh,
+                        &repo,
+                        now,
+                        state.config.integrity_data_read_interval_s,
+                    );
+                    let local = state
+                        .config
+                        .second_copy_dataset
+                        .clone()
+                        .filter(|_| homelab_core::ops::secondcopy::check_local(&fresh, &repo));
+                    let cfg = state.config.backup.clone();
+                    let report = run_mutating_op(&state, &exec, 0, "restic-check", |ctx| {
+                        Box::pin(async move {
+                            homelab_core::ops::secondcopy::check_repo(
+                                ctx,
+                                &cfg,
+                                &repo,
+                                local.as_deref(),
+                                subset,
+                            )
+                            .await
+                        })
+                    })
+                    .await;
+                    if !report.ok {
+                        tracing::error!(
+                            "scheduler: restic check found a problem — {}",
+                            report.message
+                        );
+                    }
                 }
             }
         }
@@ -3871,10 +4080,13 @@ async fn gather_live_facts(
             .map(|d| d.as_secs())
             .unwrap_or(0),
     };
-    let (facts, notes) = homelab_core::ops::facts::gather_live_facts(exec, &inp, stack_files).await;
+    let (mut facts, notes) =
+        homelab_core::ops::facts::gather_live_facts(exec, &inp, stack_files).await;
     for n in notes {
         info!("{}", n);
     }
+    // fix-96: so the check can say when a configured second copy stops.
+    facts.second_copy_dataset = state.config.second_copy_dataset.clone();
     facts
 }
 

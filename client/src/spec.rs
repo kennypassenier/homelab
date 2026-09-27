@@ -968,6 +968,14 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          `[[device_backups]]` entry in `{toml}`. Every repository opens with the same \
          password file `{pw}`. (`BackupCfg::default()` in core/src/ops/backup.rs; \
          `restic_base` and `restic_password_file` in `{toml}` override both.)\n\
+         - **A second copy** of every repository, when `second_copy_dataset` is set in \
+         `{toml}` (fix-96): each night after the backups, `restic copy` writes \
+         `<owner>-config` into a local repository of the same name on that ZFS dataset \
+         (`HDD4TB/restic` mounts at `/HDD4TB/restic`), with the same password file and the \
+         same retention, and the ZFS replication carries it to its replica pool. When Google \
+         Drive is unreachable or damaged, use it in place of `{base}` in every command below: \
+         `RESTIC_REPOSITORY=/HDD4TB/restic/<owner>-config`. One repository per night is \
+         checked with `restic check` on both copies (core/src/ops/secondcopy.rs).\n\
          - **App data** lives on the host under `/appdata/<stack>/<app>-config` and is \
          bind-mounted into the container at the same path, so a container can be rebuilt \
          without touching it.\n\

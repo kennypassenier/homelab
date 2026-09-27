@@ -109,7 +109,13 @@ impl NightBackup {
 }
 
 /// Build a Cmd that runs restic with the repo env inline (via `env`).
-fn restic(base: &str, stack: &str, password_ref: &str, args: &[&str], timeout: u64) -> Cmd {
+pub(crate) fn restic(
+    base: &str,
+    stack: &str,
+    password_ref: &str,
+    args: &[&str],
+    timeout: u64,
+) -> Cmd {
     // The host wraps this so RESTIC_PASSWORD comes from its secret store; here
     // we pass a reference the host resolves. In tests the MockExecutor just
     // records the argv. Path join uses "/" — everything lives under one

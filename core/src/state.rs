@@ -191,6 +191,55 @@ pub struct HostState {
     /// becomes something nobody knows is there.
     #[serde(default)]
     pub retired: BTreeMap<String, RetiredRecord>,
+    /// fix-96 (single-offsite-copy-no-integrity-check, 2026-09-27): when the
+    /// nightly copy of every repository into the second repository set last
+    /// ran, and what each repository's copy did. 0 = never.
+    #[serde(default)]
+    pub last_second_copy: u64,
+    #[serde(default)]
+    pub second_copies: BTreeMap<String, CopyRecord>,
+    /// fix-96: when the rotating `restic check` last ran, and its record per
+    /// repository (both copies).
+    #[serde(default)]
+    pub last_integrity_check: u64,
+    #[serde(default)]
+    pub integrity: BTreeMap<String, IntegrityRecord>,
+}
+
+/// fix-96: what the nightly `restic copy` of one repository did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CopyRecord {
+    /// Unix time of the last attempt, copied or not.
+    #[serde(default)]
+    pub last_attempt: u64,
+    /// Unix time of the last copy that completed.
+    #[serde(default)]
+    pub last_ok: u64,
+    /// Why the last attempt failed. None = it did not.
+    #[serde(default)]
+    pub last_error: Option<String>,
+}
+
+/// fix-96: what `restic check` last said about one repository, per copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct IntegrityRecord {
+    /// Unix time of the last check of this repository, passed or not.
+    #[serde(default)]
+    pub last_check: u64,
+    /// Unix time of the last check that also read a subset of the data.
+    #[serde(default)]
+    pub last_data_read: u64,
+    /// Which slice (`n` of `--read-data-subset=n/t`) the next data read takes,
+    /// so successive reads walk the whole repository instead of sampling.
+    #[serde(default)]
+    pub next_subset: u32,
+    /// Why the last check of the Google Drive copy failed. None = it passed.
+    #[serde(default)]
+    pub drive_error: Option<String>,
+    /// Why the last check of the second copy failed. None = it passed or was
+    /// not checked.
+    #[serde(default)]
+    pub local_error: Option<String>,
 }
 
 /// fix-62: what the restore drill knows about one repository.

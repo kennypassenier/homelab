@@ -84,6 +84,9 @@ pub struct LiveFacts {
     /// fix-26: storage directories whose owner on disk is not the declared
     /// `host_owner_uid`. Only mismatches are kept.
     pub owners: Vec<OwnerFact>,
+    /// fix-96: the configured `second_copy_dataset`, or None when no second
+    /// copy is configured (and then nothing is said about one).
+    pub second_copy_dataset: Option<String>,
 }
 
 /// fix-26: one storage directory owned by someone other than its stack file
@@ -786,6 +789,13 @@ pub fn evaluate(
         state,
         now_unix,
         crate::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S,
+    ));
+    // fix-96: the second copy and the rotating restic check.
+    out.extend(crate::ops::secondcopy::evaluate_copies(
+        state,
+        now_unix,
+        live.second_copy_dataset.as_deref(),
+        crate::ops::secondcopy::DEFAULT_CHECK_INTERVAL_S,
     ));
     out.extend(crate::ops::manualchecks::evaluate_manual(
         state,

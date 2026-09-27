@@ -6,7 +6,7 @@
 # every library untouched inside the programs.
 #
 # The numbers it is measured against were recorded while everything was
-# running (M8_CT106_PREFLIGHT.md): 896 movies, 203 series, 5462 episodes and
+# running (docs/legacy/m8/M8_CT106_PREFLIGHT.md): 896 movies, 203 series, 5462 episodes and
 # 58 collections in Jellyfin; 209 series in Sonarr, 955 movies in Radarr,
 # 5 indexers in Prowlarr. And the recovery net was exercised before anything
 # was touched, not promised: a fresh vzdump restored onto a throwaway vmid,

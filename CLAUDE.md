@@ -169,13 +169,13 @@ it is the resume point and is kept current as part of the work, not afterwards.
 | Doc | Purpose |
 |---|---|
 | docs/SCOPE.md | goals, non-goals, constraints (Phase 0, retro-fitted) |
-| docs/INVENTORY.md | brownfield sweep + flaw list (Phase 1, retro-fitted) |
+| docs/legacy/v2-build/INVENTORY.md | brownfield sweep + flaw list (Phase 1, retro-fitted; archived 2026-09-27) |
 | docs/FEATURES.md | rated feature list, permanent IDs A1–H6 (Phase 2, frozen) |
 | docs/ARCHITECTURE_DECISIONS.md | AR1–16, frozen (Phases 3–4) |
 | docs/REALIZATION_PLAN.md | milestones M0–M6 + status (Phase 5) |
 | docs/TEST_PLAN.md | per-feature test steps, offline + live (Phase 7) |
 | docs/USER_GUIDE.md · DEBUGGING_GUIDE.md · OPERATIONS_RUNBOOK.md · ARCHITECTURE_REFERENCE.md | Phase 8 set |
-| docs/MIGRATION_INVENTORY.md | M5 migration completeness contract |
+| docs/legacy/m8/MIGRATION_INVENTORY.md | M5 migration completeness contract (finished; archived 2026-09-27) |
 | docs/PRESET_GUIDE.md · LLM_COMPOSE_CONVERSION.md | preset catalog how-to |
 
 ## Gates (enforced)

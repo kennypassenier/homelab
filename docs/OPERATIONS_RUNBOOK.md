@@ -1,7 +1,7 @@
 # Operations runbook — the recurring work
 
 Day-to-day and periodic operations for a healthy homelab. One-time setup is
-in [V2_PILOT_HANDOFF.md](V2_PILOT_HANDOFF.md); disaster recovery is in
+in [legacy/v2-build/V2_PILOT_HANDOFF.md](legacy/v2-build/V2_PILOT_HANDOFF.md); disaster recovery is in
 [DR_RUNBOOK.md](DR_RUNBOOK.md); failures in
 [DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md).
 

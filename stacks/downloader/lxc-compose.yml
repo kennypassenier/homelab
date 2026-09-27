@@ -6,7 +6,7 @@
 # pointed at.
 #
 # Measured on the live container before it was touched, not assumed
-# (M8_CT105_PREFLIGHT.md):
+# (docs/legacy/m8/M8_CT105_PREFLIGHT.md):
 #
 #   - It stays PRIVILEGED. The downloads tree is owned by host uid 1000, and
 #     qBittorrent runs as PUID 1000. In a privileged container those are the

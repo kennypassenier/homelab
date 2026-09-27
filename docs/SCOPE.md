@@ -62,4 +62,4 @@ the fleet flawlessly, makes adding services trivial, and is fun to operate.
 - Existing stacks (104/105/106) keep running untouched until migration. ✔
 - Every Must feature live with its FEATURES.md test scenario passing. ✔
 - Migration (M5) moves platform/media/downloader with zero config loss —
-  the completeness rule of MIGRATION_INVENTORY.md. (open)
+  the completeness rule of docs/legacy/m8/MIGRATION_INVENTORY.md. (open)

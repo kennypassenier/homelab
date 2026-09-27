@@ -120,7 +120,7 @@ homelab plan stacks/syncthing      # validates locally, no network
 
 **Prerequisites (one-time, Proxmox host — after the demo):**
 1. HOST daemon installed as a systemd service with its TLS cert + token
-   (see V2_PILOT_HANDOFF.md). Confirm: `curl -k https://10.10.5.250:8443/api/health`.
+   (see docs/legacy/v2-build/V2_PILOT_HANDOFF.md). Confirm: `curl -k https://10.10.5.250:8443/api/health`.
 2. Old zombie `host-daemon.service` stopped/disabled.
 3. `~/Projects/homelab/.env` has HOMELAB_HOST + HOMELAB_TOKEN.
 

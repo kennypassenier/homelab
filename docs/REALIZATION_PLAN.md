@@ -38,7 +38,7 @@ homelab/
 ├── stacks/               real stack manifests (syncthing first)
 ├── templates/            user-overridable minijinja templates (AR8)
 └── docs/                 FEATURES.md · ARCHITECTURE_DECISIONS.md · this plan ·
-                          V2_PILOT_HANDOFF.md · generated runbook (E7)
+                          docs/legacy/v2-build/V2_PILOT_HANDOFF.md · generated runbook (E7)
 ```
 
 Legacy `client-app/`, `host-daemon/`, `lxc-daemon/`, `tui-preview/` stay
@@ -98,7 +98,7 @@ Install HOST on Proxmox (unit from the handoff, TLS + token). Deploy
 `stacks/syncthing`: C1 provision, bootstrap + B2 guards + A7, D1 push-sync,
 C3 boot policy, H1 traefik route, F1 promtail, D8, B3 gates. E1+E3+E5 backups
 with the fresh rclone token. B4 drift live. Verification checklist from
-V2_PILOT_HANDOFF.md (incl. runaway-guard checks and the Loki label query).
+docs/legacy/v2-build/V2_PILOT_HANDOFF.md (incl. runaway-guard checks and the Loki label query).
 **Done when**: syncthing hub syncs desktop+phone; backup → wipe → E3
 auto-restore round-trip proven; `homelab doctor` all green; pilot runs 2 weeks
 unattended with zero manual interventions.
@@ -127,7 +127,7 @@ golden-template. Awaiting Kenny: D5 mirror remote+key, H2 OPNsense API
 creds, F4 PVE token, CT 107/111 decommission go, his own test pass
 (TEST_PLAN Part A/B). Next: M6 comprehensive documentation, then M5
 migration after the demo. H6 fleet patching DONE + live-proven. Migration prep:
-docs/MIGRATION_INVENTORY.md complete (every mount MIGRATE/RECREATE).
+docs/legacy/m8/MIGRATION_INVENTORY.md complete (every mount MIGRATE/RECREATE).
 Presets are DATA now (presets/ dir + docs/PRESET_GUIDE.md, 2026-08-11) —
 adding an app to the catalog is mkdir + two files, no recompile; the
 manifest apps-list bug (stack name vs app dir name) is fixed with a

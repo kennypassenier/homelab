@@ -39,7 +39,7 @@ Start here:
 Design history: [docs/FEATURES.md](docs/FEATURES.md) (the feature registry,
 IDs A1–H8), [docs/ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md)
 (AR1–19), [docs/REALIZATION_PLAN.md](docs/REALIZATION_PLAN.md) (milestones),
-[docs/MIGRATION_INVENTORY.md](docs/MIGRATION_INVENTORY.md) (the M5 plan).
+[docs/legacy/m8/MIGRATION_INVENTORY.md](docs/legacy/m8/MIGRATION_INVENTORY.md) (the M5 plan, finished 2026-09-01).
 Pre-rewrite documentation is archived under [docs/legacy/](docs/legacy/).
 
 ## Repository layout

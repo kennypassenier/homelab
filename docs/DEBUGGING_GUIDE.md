@@ -114,15 +114,19 @@ Which operations leave which traces:
   (`host/src/main.rs:2955-3089`). They get journal records, a notification,
   and an incident bundle when they fail. The labels are: adopt,
   apply-guards, backup, backup-native, deploy, destroy, device-backup,
-  host-meta-backup, install-native, patch, release-update-native, resize,
-  restore, self-update, set-enabled, template-build, update, update-native,
-  zfs-replicate, and the scheduler's scheduled-backup,
+  forget, host-meta-backup, install-native, patch, release-update-native,
+  resize, restore, self-update, set-enabled, template-build, update,
+  update-native, wipe, zfs-replicate, and the scheduler's scheduled-backup,
   scheduled-backup-native, scheduled-update, scheduled-update-native and
-  scheduled-release-update (`host/src/main.rs:2187-4120`).
+  scheduled-release-update (`host/src/main.rs:2187-4120`). `forget` and
+  `wipe` joined the list on 2026-09-27 (`host/src/main.rs:3638-3706`); a
+  destroy from the recorded manifest (`homelab apply`, or `homelab destroy`
+  without the stack directory) runs under the label destroy.
 - **Everything else** (ping, status, doctor, incidents, check, checks,
-  config, forget, exec) answers directly from `handle_rpc`
-  (`host/src/main.rs:3207-4267`). No journal record, no bundle, no
-  notification. `exec` alone leaves a line in `audit.log`.
+  config, exec, prune-orphans, and the list `homelab wipe` shows before it
+  asks) answers directly from `handle_rpc` (`host/src/main.rs:3207-4267`).
+  No journal record, no bundle, no notification. `exec` alone leaves a line
+  in `audit.log`.
 
 ## 2. Reading the failure line
 
@@ -461,6 +465,7 @@ Fields to look at when debugging (`core/src/state.rs:14-62`, `108-158`):
 | `last_notify_ok`, `last_notify_failed`, `last_notify_error` | whether notifications arrive, and the last failure's reason |
 | `last_restore_drill`, `last_restore_drill_error` | whether the last restore drill proved anything |
 | `manual_checks` | the questions only a person can answer, and their answers |
+| `retired` | what a destroyed or forgotten stack, or an app or native unit that left its stack, still keeps: kind, vmid, date, repositories, `/appdata` paths, vault paths; keyed `<stack>` or `<stack>/<name>`. Only `homelab wipe` removes an entry, or a deploy that brings it back (`core/src/state.rs:158-204`, `core/src/ops/retired.rs:175-180`) |
 
 How it loads (`core/src/state.rs:198-223`):
 
@@ -492,7 +497,13 @@ see and evaluates (`host/src/main.rs:3717-3750`). Each finding prints as
   non-`noted` findings raise a warning and a notification (`host/src/main.rs:2646-2679`, `core/src/ops/fleetcheck.rs:501-507`).
 - Run it from the repository root, or pass the stacks path. From anywhere
   else the client finds no stack files, says so, and checks only the host's
-  half (`client/src/main.rs:311-327`).
+  half (`client/src/main.rs:311-327`). That half cannot see a deleted stack
+  directory: the `drift` finding for a stack in state without a stack file
+  needs the stack files (`core/src/ops/fleetcheck.rs:678-716`), and the
+  nightly check never has them (`host/src/main.rs:2646`).
+- Every retired stack, app or unit is one `noted` line that names what it
+  keeps and the `homelab wipe` command (`core/src/ops/retired.rs:190-219`).
+  It is the reminder that data is being kept on purpose, not a fault.
 
 ### `homelab doctor`
 
@@ -535,7 +546,11 @@ The client's own refusals print as `error: <message>` and exit 1
 | `latch_secrets is set but HOMELAB_LATCH_ENV is not` | the stack reads secrets from latch but no latch environment is named | add `HOMELAB_LATCH_ENV=` to `~/.config/homelab/env` | `client/src/spec.rs:356-360` |
 | `cannot run latch for app '<app>': <e>` | the `latch` binary is not on PATH | install latch | `client/src/spec.rs:375-385` |
 | `latch returned empty content for app '<app>' (<rel> in env '<env>')` | latch has no content for that file in that environment | commit and push the env file in latch | `client/src/spec.rs:402-407` |
-| `name mismatch` | the typed confirmation for destroy or prune-orphans did not match the stack name | nothing was sent to the host | `client/src/main.rs:935-937`, `975-977` |
+| `name mismatch` | the typed confirmation for destroy, prune-orphans or wipe did not match the name | nothing was sent to the host (for wipe: the list was fetched, nothing deleted) | `client/src/main.rs:854`, `1052`, `1087`, `1122` |
+| `no stacks directory at '<dir>'` | `homelab apply` found no stacks directory at the given or default path | run it from the repository root or pass the path | `client/src/main.rs:715-721` |
+| `could not read the host's state — nothing applied` | `homelab apply` did not get the host's state back | check the link with `homelab ping` | `client/src/main.rs:723-727` |
+| `<stack>: validation failed: <e> — nothing applied` | one stack under `stacks/` does not validate; apply builds every stack before sending anything | fix that stack file, or run `homelab plan stacks/<stack>` for the detail | `client/src/main.rs:739-749` |
+| `deploy of <stack> failed — apply stopped here` | a deploy inside `homelab apply` failed; later stacks were not deployed and nothing was destroyed | read that deploy's failure line; re-run apply after the fix | `client/src/main.rs:781-791` |
 | `is waiting for a decision` | a step asked a question the command line cannot answer | see worked example B | `client/src/main.rs:1173-1182` |
 
 When the client cannot reach the host, walk its checks in the order it makes
@@ -667,17 +682,20 @@ remedy starts `This gate exists to protect unmanaged guests.`
 | `remote exec is disabled (set exec_enabled = true in host.toml to allow it)` | `homelab exec` is off by default | enable it in host.toml if you need it | `core/src/safety.rs:118-123`, `host/src/main.rs:435` |
 | `vmid <n> is on the no-touch list` … `exec refused regardless of config` | `homelab exec` into a protected guest; the configured list counts, including host.toml additions | none | `core/src/safety.rs:124-128`, `host/src/main.rs:2853-2855` |
 | `vmid <n> is on the no-touch list :: this list is the one thing that is never worked around` | `homelab guards` on a protected guest | none | `host/src/main.rs:3679-3689` |
+| `has no manifest recorded in host state (an adopted service)` | destroy from the record (`homelab apply`, or `homelab destroy` without the stack directory) on a stack the host never deployed | remove the container by hand, then `homelab forget <stack>` | `core/src/ops/destroy.rs:432-437` |
+| `holds a manifest for '<m>' — refusing to guess which one is meant` | the state record and the manifest in it name different stacks | look at `state.json` (section 6) | `core/src/ops/destroy.rs:439-443` |
+| `still names a live container` | `homelab forget` on a record whose container still exists | destroy it instead, or rename it first | `core/src/ops/destroy.rs:383-386` |
 
 ### 8.4 Deploy failures by step
 
 The deploy's steps, in order: validate, safety gates, baseline,
 registry cache, hardware readiness, host storage, auto-restore check,
 metrics discovery, provision container, wait for systemd, bootstrap docker,
-runaway guards, log rotation, commit intent, push files, start apps,
-storage ownership, verify health, then the optional gateway route, grafana
-dashboard, homepage services and uptime monitors, then orphan files,
-garbage collect, log shipper, native units, record state, reconcile and
-service checks (`core/src/ops/deploy.rs:215-2483`).
+runaway guards, log rotation, retire dropped, commit intent, push files,
+start apps, storage ownership, verify health, then the optional gateway
+route, retire gateway route, grafana dashboard, homepage services and uptime
+monitors, then orphan files, garbage collect, log shipper, native units,
+record state, reconcile and service checks (`core/src/ops/deploy.rs:265-2808`).
 
 A deploy that fails at any step except validate, safety gates, registry
 cache and hardware readiness (the four that run before anything changes) is
@@ -698,7 +716,27 @@ recorded in state.json with `incomplete_step` set
 | `stack declares native unit '<u>' but <u>/<u>.service is not in the stack` | native units | the unit file is missing from the stack directory | add it | `core/src/ops/deploy.rs:2094-2101` |
 | `could not place <path> on the container (<e>)` | native units | moving the binary into place failed; nothing was replaced | the why carries the shell's stderr | `core/src/ops/deploy.rs:2173-2180` |
 
-Not an error, but a common surprise: a deploy of a native stack does not
+Not errors, but surprises since 2026-09-27: a deploy **removes** what the
+stack files no longer declare, and says so per item. If something vanished
+after a deploy, search its transcript (section 5) or incident bundle for
+these lines:
+
+| Transcript line (verbatim) | What was removed | Source |
+|---|---|---|
+| `[orphans] removed <path> — no longer in the stack's files` | a file under `/opt/<stack>/` the stack no longer sends | `core/src/ops/deploy.rs:2137-2140` |
+| `[orphans] removed <path> — the stack no longer places it` | a `rootfs/` file; a unit or timer was `systemctl disable --now` first | `core/src/ops/deploy.rs:1101-1104` |
+| `[native] <unit> left the stack file — stopped and disabled` | a native unit dropped from `natives:`; its data and repository are kept | `core/src/ops/deploy.rs:1162-1165` |
+| `is no longer declared — detached; the directory` | a mount point; the host directory is kept | `core/src/ops/deploy.rs:844-848` |
+| `[route] <path> removed — the stack file no longer declares it` | the old route file after `gateway_route:` was dropped or the vmid changed | `core/src/ops/deploy.rs:1973-1976` |
+| `app '<app>' removed (config dirs kept)` | an app dropped from `apps:` | `core/src/ops/deploy.rs:2179` |
+
+To get a removed file back, put it back in the stack's files and deploy; the
+intent repository on the host has the last version that was deployed
+(`git -C /var/lib/homelab/repo log -- stacks/<stack>/`, section 1). Data is
+never among these removals: `/appdata`, repositories and vault copies stay
+until `homelab wipe` (section 8.10).
+
+Also not an error: a deploy of a native stack does not
 upgrade a binary that is already installed. The transcript says
 `already installed, not shipped` for it; upgrades go through
 `homelab release-update-native` or the nightly updater
@@ -793,6 +831,43 @@ A selection. Every finding carries its own remedy line.
 | `its last deploy stopped at "<step>" and never finished` | see section 8.4 | `core/src/ops/fleetcheck.rs:1018-1026` |
 | `the last drill did not prove a restore: <e>` | the last restore drill failed | `core/src/ops/restoredrill.rs:136` |
 | `<n> check(s) only a person can answer are open, e.g. <examples>` | run `homelab checks` | `core/src/ops/manualchecks.rs:164-168` |
+| `but has no stack file in the repository` | `drift`: the stack runs and is in state, but `stacks/<stack>/` is gone. `homelab apply` destroys it after its name is typed; put the directory back to keep it | `core/src/ops/fleetcheck.rs:700-714` |
+| `retired <date> (<kind>, vmid <n>) — kept: restic <repos>; /appdata <dirs>; vault <paths>` | `noted`: data a retired stack, app or unit keeps on purpose; `homelab wipe <key>` deletes it | `core/src/ops/retired.rs:199-216` |
+| `monitor(s) watch a stack the fleet no longer has` | `drift`: the Uptime Kuma seeder left undeclared monitors in place because removing them all would have taken more than a quarter of the monitors at once; `refused` in `last-seed.json` says why | `core/src/ops/fleetcheck.rs:1045-1059` |
+
+### 8.10 Removal, apply and wipe
+
+| Symptom (verbatim) | Cause | First action | Source |
+|---|---|---|---|
+| `nothing retired is recorded as '<name>'` | `homelab wipe` for a key with no retired record | the keys are the subjects of the `noted` lines in `homelab check`: `<stack>` or `<stack>/<app>` | `core/src/ops/retired.rs:269` |
+| `is a managed stack, not a retired one` | `homelab wipe` named a stack that runs | nothing; a running stack is never wiped | `core/src/ops/retired.rs:262-267` |
+| `is managed again — its record is stale; deploy it once to clear it` | the stack came back without a deploy clearing its retired record | `homelab deploy stacks/<stack>` | `core/src/ops/retired.rs:272-277` |
+| `is back in stack '<s>' — refusing to delete what it uses` | the app or unit is listed in its stack again | nothing to wipe while it is used | `core/src/ops/retired.rs:278-291` |
+| `is not an rclone remote — only those can be wiped from` | `restic_base` is not `rclone:...`, so the repositories cannot be purged from here; nothing was deleted | remove them by hand with that backend's own tool | `core/src/ops/retired.rs:413-419` |
+| `typed name '<t>' does not match '<k>' — nothing deleted` | the host's own check of the wipe confirmation | type the key exactly | `core/src/ops/retired.rs:378-383` |
+| `KEPT (a managed stack still uses it)` in the wipe list | a repository or `/appdata` directory in the record is used by a stack that runs (an app moved stacks, D25) | nothing; it is left alone | `core/src/ops/retired.rs:251-253`, `:293-338` |
+
+A wipe that fails part-way stops at that step and keeps the retired record
+(`core/src/ops/retired.rs:357-362`); what was already deleted stays deleted,
+and running `homelab wipe <key>` again lists what is left. The operation
+runs as label `wipe` (section 1), so a failure leaves an incident bundle.
+
+The Uptime Kuma seeder prints its own lines in the log of the `kuma-seeder`
+container of the uptime stack, vmid 107 (`stacks/uptime/lxc-compose.yml:11`),
+one run per hour (`SEED_INTERVAL_SECONDS=3600` in its compose file):
+
+```sh
+# Proxmox host
+pct exec 107 -- docker logs --tail 50 kuma-seeder
+```
+
+
+| Seeder line (verbatim) | Meaning | Source |
+|---|---|---|
+| `(no file declares it)` | a monitor no file declares was removed | `stacks/uptime/kuma-seeder/seed.py:331` |
+| `now points at` | a monitor's URL or hostname was corrected to the file's | `stacks/uptime/kuma-seeder/seed.py:326` |
+| `the desired list looks truncated, so nothing is removed` | more than `max(3, a quarter of all monitors)` would have gone; nothing was removed | `stacks/uptime/kuma-seeder/seed.py:260-263` |
+| `no generated host-monitor list, so nothing is judged` | `host-monitors.json` is missing or unreadable; nothing was removed | `stacks/uptime/kuma-seeder/seed.py:257-258` |
 
 ## 9. When the daemon cannot start: its keys and their other copies
 
@@ -965,7 +1040,8 @@ covers keeping one.
 
 In every table row whose first cell starts with a backtick span, every
 backtick span in that first cell is a verbatim fragment of the source in
-`client/src`, `core/src` or `host/src`: a message, a file name or a field
+`client/src`, `core/src` or `host/src`, or of the Uptime Kuma seeder
+`stacks/uptime/kuma-seeder/seed.py`: a message, a file name or a field
 name. This script checks them. It joins Rust's `\`-continued string lines,
 unescapes `\"`, turns each `<name>` into "any format placeholder", splits
 on ` … `, and looks every fragment up in the source. Run it from the
@@ -978,6 +1054,7 @@ src = ""
 for d in ("client/src", "core/src", "host/src"):
     for p in pathlib.Path(d).rglob("*.rs"):
         src += p.read_text() + "\n"
+src += pathlib.Path("stacks/uptime/kuma-seeder/seed.py").read_text() + "\n"
 src = re.sub(r"\\\n\s*", "", src).replace('\\"', '"')
 bad = 0
 for n, line in enumerate(pathlib.Path("docs/DEBUGGING_GUIDE.md").read_text().splitlines(), 1):

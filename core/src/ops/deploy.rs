@@ -2941,17 +2941,24 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // G17: registering them is the half that was missing. Printing a
     // question at the end of a transcript is not asking anybody anything.
     let questions = crate::ops::manualchecks::questions_of(&spec.checks);
-    if !questions.is_empty() {
+    // Registered even when the list is empty: that is how a stack that
+    // dropped its last question loses it (declarative, step-22).
+    {
         let store = StateStore::new(ctx.exec, &ctx.state_dir);
         if let Ok(mut st) = store.load().await {
+            let before = st.manual_checks.len();
             crate::ops::manualchecks::register(
                 &mut st,
                 &spec.manifest.stack_name,
                 &questions,
                 ctx.now_unix,
             );
-            let _ = store.save(st).await;
+            if !questions.is_empty() || st.manual_checks.len() != before {
+                let _ = store.save(st).await;
+            }
         }
+    }
+    if !questions.is_empty() {
         let lines: Vec<String> = questions
             .iter()
             .map(|(app, text)| {

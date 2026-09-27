@@ -13,8 +13,9 @@
 # a container the deploy verification reads as "not running", and a one-shot
 # only ever seeds the fleet as it was at deploy time — a stack created an
 # hour later stays unwatched until somebody remembers. Seeding is idempotent
-# (a monitor whose name exists is left exactly as it is), so re-running it
-# costs one API call per monitor and changes nothing.
+# (a declared monitor that exists keeps its settings; only its address follows
+# the file), and a monitor nothing declares is removed, so re-running it
+# changes nothing once Kuma equals the files.
 services:
   kuma-seeder:
     image: python:3.12-slim

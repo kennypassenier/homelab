@@ -19,11 +19,13 @@ Two halves, deliberately split (D87, D90):
     template would replace knowledge with a guess, and a monitor that is red
     from birth teaches its reader to ignore the whole board.
 
-Idempotent: a monitor whose name already exists is left exactly as it is,
-including Kenny's own edits to it. Nothing here ever deletes a monitor —
-stale ones are reported and left alone, the same rule the deploy follows for
-orphaned files (Kenny, form H2b). Removing somebody's monitor is the
-irreversible direction, and this runs when nobody is watching.
+Declarative (Kenny, 2026-09-27): Uptime Kuma holds exactly what this file and
+the generated host list declare. A declared monitor is added once and then
+only its address is kept equal to the file; a monitor nothing declares is
+removed, a hand-made one included, since those belong in this file too. A
+run that would remove more than a quarter of the monitors at once is refused
+as a truncated list. This replaces the 2026-09-01 rule (H2b) that the seeder
+never deletes a monitor.
 """
 
 import json
@@ -301,10 +303,9 @@ def seed_once(api, host_monitors, have_generated_list):
         added += 1
         print(f"[seed]   + {name}", flush=True)
 
-    # Declarative (Kenny, 2026-09-27): a monitor this seeder owns whose entry
-    # left the files is removed; a hand-made one is only ever reported. The
-    # F158 shape (a monitor for a stack that is gone, red or green forever)
-    # is what this removes.
+    # Declarative (Kenny, 2026-09-27): a monitor no file declares is removed,
+    # a hand-made one included. The F158 shape (a monitor for a stack that is
+    # gone, red or green forever) is what this removes.
     #
     # Only when there is a list to compare against. Without the generated
     # file, "not in the fleet" means "the file was missing", and on the first

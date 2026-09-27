@@ -13,9 +13,11 @@ command; the workspace builds no program that runs inside a container. What
 the fleet should look like is written as plain files in this repository:
 stacks in `stacks/`, the app catalog in `presets/`.
 
-This tree is version **3.58.2** (`Cargo.toml`). Which version the host runs is
-not something a file here can know: `homelab ping` asks the daemon and prints
-its answer.
+`Cargo.toml` says version **3.58.10**. Which version the host runs is not
+something a file here can know: `homelab ping` asks the daemon and prints its
+answer. `homelab apply`, `homelab wipe` and the removals described under
+[Stack lifecycle](#stack-lifecycle) were committed after the v3.58.10 tag
+(commit `ad03664`); a host built before that does not have them.
 
 ## Contents
 
@@ -229,15 +231,24 @@ and for a stack with `natives` they fetch each service's release through `gh`
 | Command | What it does |
 |---|---|
 | `homelab new <name> --preset <p> --vmid <n>` | scaffold `stacks/<name>` from a preset; optional `--ram`, `--cores`, `--disk`, `--swap`, repeatable `--no-data <path>` |
-| `homelab deploy stacks/<name>` | validate, then create or reconcile the container |
+| `homelab deploy stacks/<name>` | validate, then create or reconcile the container, and remove what the stack's files no longer declare (files, units, native services, mounts, an old route); data stays |
+| `homelab apply [stacks/] [--no-backup]` | deploy every stack whose files differ from what the host last applied; a stack still on the host whose directory is gone is destroyed only after you type its name |
 | `homelab backup stacks/<name>` | restic snapshot of the stack |
 | `homelab restore stacks/<name> [snapshot]` | restore, `latest` by default |
 | `homelab update stacks/<name> [app]` | pull and recreate one app or all, with rollback |
 | `homelab resize stacks/<name>` | apply the manifest's memory, cores and disk to the running container |
 | `homelab enable <stack>` / `homelab disable <stack>` | take a stack in or out of the nightly schedule; disabling also clears start-on-boot; neither starts nor stops a container (`core/src/ops/enable.rs`) |
-| `homelab prune-orphans stacks/<name>` | remove files the repository no longer has; asks you to type the stack name |
-| `homelab destroy stacks/<name> [--no-backup]` | back up, then destroy; asks you to type the stack name |
-| `homelab forget <stack>` | drop a stale state record; touches no container |
+| `homelab prune-orphans stacks/<name>` | remove files the repository no longer has, without a deploy; asks you to type the stack name. A deploy already does this |
+| `homelab destroy stacks/<name> [--no-backup]` | back up, then destroy; asks you to type the stack name. Works from the manifest the host recorded when the directory is gone |
+| `homelab forget <stack>` | for a stack whose container is already gone: drop its record and everything registered for it; touches no container |
+| `homelab wipe <stack>[/<app>]` | delete the backups, `/appdata` directories and vault copies a destroyed stack, or a removed app or service, kept; shows the list and asks you to type the name |
+
+What leaves the files leaves the machine, except data: a destroy, a forget or
+a removed app keeps its backups, `/appdata` and vault copies, and
+`homelab check` lists them as `noted` until `homelab wipe` deletes them
+(`core/src/ops/retired.rs`). The full list of what a stack registers and
+what removes it is
+[docs/deployment/REGISTRATION_SURFACE.md](docs/deployment/REGISTRATION_SURFACE.md).
 
 `backup`, `restore` and `update` read only `lxc-compose.yml`: they need no
 secrets on the workstation.
@@ -322,8 +333,14 @@ All of these are code; the file named is where each one lives.
 - **Hostname guard.** A deploy is refused when the manifest's hostname is not
   `<vmid>-app-<stack>`, when the vmid is a QEMU VM, or when an existing
   container on that vmid has a different hostname (`core/src/safety.rs`).
-- **Typed confirmation.** `destroy` and `prune-orphans` ask for the stack name
-  and stop on a mismatch (`client/src/main.rs`).
+- **Typed confirmation.** `destroy`, each destroy inside `apply`, `wipe` and
+  `prune-orphans` ask for the name and stop on a mismatch
+  (`client/src/main.rs`); the host checks the name again
+  (`core/src/ops/destroy.rs`, `core/src/ops/retired.rs`).
+- **Nothing automatic deletes kept data.** The restic repositories,
+  `/appdata` directories and vault copies of anything removed are deleted
+  only by `homelab wipe`, never by a deploy, `apply` or the nightly round
+  (`core/src/ops/retired.rs`).
 - **Backup before destroy.** Unless `--no-backup` is given, which is announced
   in the transcript (`core/src/ops/destroy.rs`).
 - **Remote exec is off by default** and never allowed on a no-touch vmid.

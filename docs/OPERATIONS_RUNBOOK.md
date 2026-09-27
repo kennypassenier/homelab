@@ -5,7 +5,12 @@ Every procedure says which terminal each step runs in, where its point of
 no return is, and how to check the result. Behaviour is cited as
 `file:line` against the release commit of v3.58.3 on `main` (`5bebcf6`,
 `Cargo.toml:6`), so a changed line leads straight to the paragraph that
-depends on it.
+depends on it. The parts that describe the declarative cleanup of
+2026-09-27 (op-2 step 1, op-4, op-5's diagram, op-6, op-7's last part, the
+retired rows in op-17 and op-19) cite commit `ad03664` instead; that code
+is newer than the v3.58.10 release, so the host needs a build that contains
+it before `homelab apply`, `homelab wipe` and the removals below exist
+there.
 
 Not in this document:
 
@@ -27,7 +32,7 @@ source; `<...>` marks a value the program fills in.
 | op-3 | Add a compose stack |
 | op-4 | Change a compose stack: redeploy, update, patch, resize |
 | op-5 | Park and unpark a stack |
-| op-6 | Remove a stack |
+| op-6 | Remove a stack, and wipe what it kept |
 | op-7 | Add a native service |
 | op-8 | Update a native service |
 | op-9 | Release the orchestrator and roll it out |
@@ -208,7 +213,15 @@ Workstation, repository root. Read-only: stop at any step.
    block per finding with a `remedy:` line; exits 1 when there is a
    `broken` or `drift` finding (`noted` ones do not fail it since gap-32) (`host/src/main.rs:3189-3209`, `:3755-3760`). Run from the
    repository root: without stack files it checks only the host's half and
-   says so (`client/src/main.rs:317-336`).
+   says so (`client/src/main.rs:317-336`). Two findings to expect since
+   2026-09-27: a `drift` line
+   `"is in host state (vmid <n>) but has no stack file in the repository"`
+   for a stack whose directory you deleted (op-6 route A;
+   `core/src/ops/fleetcheck.rs:678-716`), and one `noted` line per retired
+   stack, app or unit, naming the repositories, `/appdata` and vault paths
+   still kept and the `homelab wipe` command for them
+   (`core/src/ops/retired.rs:190-219`). `noted` needs nothing today; it is
+   there so kept data is never forgotten (op-6 step 6).
 2. `homelab doctor`. Host disk, state file, backup age per stack, the Drive
    remote, mirror lag, interrupted operations (`core/src/doctor.rs:45-188`).
 3. `homelab incidents`. One directory per failed operation.
@@ -309,8 +322,10 @@ Workstation, repository root.
 
 | Change | Command | What it does |
 |---|---|---|
-| Edited compose files or `lxc-compose.yml` | `homelab deploy stacks/<name>` | Re-applies. Files the repository dropped are reported, not deleted. |
-| Delete what the repository dropped | `homelab prune-orphans stacks/<name>` | Asks for the stack name; removes files one by one with `rm -f`, never a directory (`client/src/main.rs:914-948`, `host/src/main.rs:3556-3623`). |
+| Edited compose files or `lxc-compose.yml` | `homelab deploy stacks/<name>` | Re-applies, and removes what the files no longer declare: files under `/opt/<name>/` (one `rm -f` each, never a directory, never `.env`), `rootfs/` units and timers (disabled first), native units dropped from `natives:` (data kept), mounts no longer declared (host directory kept), an old route file (`core/src/ops/deploy.rs:1044-1189`, `:782-848`, `:1937-1986`, `:2104-2143`). |
+| Every changed stack at once | `homelab apply` | Deploys each stack whose files differ from what the host applied; one that fails stops the rest (`client/src/main.rs:704-791`). A stack whose directory is gone is offered for destruction (op-6 route A). |
+| Delete what the repository dropped, without a deploy | `homelab prune-orphans stacks/<name>` | Asks for the stack name; removes the same files a deploy would, `rm -f` one by one. After any deploy since `ad03664` it finds nothing (`client/src/main.rs:1031-1063`, `host/src/main.rs:3557-3633`). |
+| Remove an app | delete it from `apps:`, `homelab deploy stacks/<name>` | Its containers stop and `/opt/<name>/<app>` goes; its `/appdata`, repository and vault copy are kept and recorded as retired `<name>/<app>` (`core/src/ops/deploy.rs:2145-2182`, `:2630-2644`). Wipe them with op-6 step 6. |
 | New image versions now | `homelab update stacks/<name> [app]`, TUI `U` | Every named app, whatever its policy; rollback when unhealthy; an app in use is skipped (`core/src/ops/update.rs:84-87`, `:157-170`). |
 | New image versions nightly | label `com.homelab.update.policy=auto` | Only those apps (`core/src/ops/update.rs:126`). |
 | OS packages in every managed container | `homelab patch` | `apt-get dist-upgrade` one container at a time; the first failure stops the run (`core/src/ops/patch.rs:22-73`); targets are the stacks in state (`host/src/main.rs:3371-3385`). |
@@ -332,7 +347,7 @@ Where parking sits in a stack's life, from scaffold to removal:
 ```mermaid
 stateDiagram-v2
     state "Scaffolded, stacks/name/ only" as Scaffolded
-    state "Removed, data, vault and repositories kept" as Removed
+    state "Retired, container gone, data, vault and repositories kept" as Removed
     state "Enabled, in the nightly rotation" as Enabled
     state "Parked by hand, onboot 0" as ParkedByHand
     state "Auto-parked, onboot unchanged" as AutoParked
@@ -349,12 +364,12 @@ stateDiagram-v2
         ParkedByHand --> Enabled: homelab enable
         AutoParked --> Enabled: fix, prove, homelab enable
     }
-    OnHost --> Removed: homelab destroy, or homelab forget
-    Removed --> OnHost: homelab deploy, refills /appdata from snapshots
-    Removed --> [*]: clean-up by hand, op-6 step 5
+    OnHost --> Removed: homelab destroy, homelab forget, or homelab apply once stacks/name/ is gone
+    Removed --> OnHost: homelab deploy, /appdata still there or refilled from snapshots
+    Removed --> [*]: homelab wipe name, op-6 step 6
 ```
 
-<sub>Source: `core/src/ops/enable.rs:24-104` (`set_enabled`, `AUTO_PARK_NOTICE`), `core/src/ops/deploy.rs:2359-2404` (a new record starts enabled, a redeploy keeps the flag), `host/src/main.rs:2428-2455`, `:2487-2511` (automatic park), `core/src/ops/destroy.rs:259`, `host/src/main.rs:3625-3687` (`forget`).</sub>
+<sub>Source: `core/src/ops/enable.rs:24-104` (`set_enabled`, `AUTO_PARK_NOTICE`), `core/src/ops/deploy.rs:2596-2689` (a new record starts enabled, a redeploy keeps the flag), `host/src/main.rs:2428-2455`, `:2487-2511` (automatic park), `core/src/ops/destroy.rs:293-321` (the record goes, a retired record comes), `:345-403` (`forget`), `client/src/apply.rs` (`apply`), `core/src/ops/retired.rs:363-468` (`wipe`).</sub>
 
 - **Park:** `homelab disable <stack>`, or `e` on the selected stack in the
   TUI (a toggle, `client/src/tui/model.rs:837-850`). The nightly round
@@ -391,42 +406,103 @@ A backup that stood aside because an app was in use never parks a stack
 
 ---
 
-## op-6 · Remove a stack
+## op-6 · Remove a stack, and wipe what it kept
+
+Two routes to the same destroy. Both ask for the stack name, back the stack
+up first, and keep its data (step 5). Pick A when the repository should
+say what runs, B when you want to remove one stack by its path.
+
+**Route A: delete the directory, then apply.**
+
+1. Workstation, repository root: `git rm -r stacks/<name>`, commit on
+   `main`. Nothing changes on the host yet. `homelab check` now reports
+   `"but has no stack file in the repository"` for it (op-2).
+2. `homelab apply`. It builds every remaining stack first and stops with
+   `"nothing applied"` if one does not build (a missing latch key does
+   that, op-17 lost-4) (`client/src/main.rs:733-756`). It deploys what
+   changed, then lists the stack as
+   `✗ <name> — in host state, no <dir>/<name>/` (`<dir>` is `stacks`) and asks
+   `Type the stack name '<name>' to destroy it:`. Enter keeps it and says
+   `"nothing destroyed"` (`client/src/main.rs:792-827`). Go to step 3.
+
+**Route B: destroy by path.**
 
 1. Workstation, repository root: `homelab destroy stacks/<name>`. It asks
    `Type the stack name '<name>' to confirm destroy:`; anything else stops
    it with `"name mismatch"` and nothing happens
-   (`client/src/main.rs:949-988`). It builds the full deploy spec, so a
-   stack with `latch_secrets` needs a working latch key here
-   (`client/src/main.rs:953`, `client/src/spec.rs:86-117`).
-2. The host then checks the name, the no-touch list and the live hostname,
+   (`client/src/main.rs:1065-1135`). With the directory present it builds
+   the full deploy spec, so a stack with `latch_secrets` needs a working
+   latch key here (`client/src/main.rs:1100`, `client/src/spec.rs:86-117`).
+   When the directory is already gone it destroys from the manifest the host
+   recorded and needs no latch (`client/src/main.rs:1070-1099`).
+
+**Then, either route:**
+
+3. The host checks the name, the no-touch list and the live hostname,
    and **backs the stack up first**. If that backup fails it refuses with
    `"refusing to destroy"`; `--no-backup` skips the backup and the message
    calls that `"a decision, not a retry"`
-   (`core/src/ops/destroy.rs:58-159`).
-3. **Point of no return:** `pct destroy --purge`. Then the metrics target,
-   the Grafana dashboard, the gateway route and the state record go
-   (`core/src/ops/destroy.rs:161-262`).
-4. What survives, so a redeploy can restore: `/appdata/<stack>/`, the vault
-   `/var/lib/homelab/secrets/<stack>/`, the restic repositories and the
-   intent repo history (`core/src/ops/destroy.rs:254-255`, `:267`,
-   `core/src/ops/deploy.rs:1135-1137`).
-5. Clean up only when sure. Irreversible. Host:
+   (`core/src/ops/destroy.rs:58-159`). A stack recorded without a manifest
+   (adopted, never deployed) cannot be destroyed from the record: the host
+   answers `"has no manifest recorded in host state"`
+   (`core/src/ops/destroy.rs:432-437`); remove its container by hand, then
+   `homelab forget <name>`.
+4. **Point of no return:** `pct destroy --purge`. Then the metrics target,
+   the Grafana dashboard, the gateway route, the state record and its manual
+   checks go, and the front page and the Uptime Kuma host list are
+   rewritten without it; the seeder removes the host monitor within its hour
+   (`core/src/ops/destroy.rs:176-332`, `core/src/ops/fleetfiles.rs:236-271`,
+   `stacks/uptime/kuma-seeder/docker-compose.yml`).
+5. What survives: `/appdata/<name>/`, the vault
+   `/var/lib/homelab/secrets/<name>/`, the restic repositories and the
+   intent repo history. The destroy records them in state as retired
+   (`core/src/ops/destroy.rs:299-316`, `core/src/ops/retired.rs:59-102`),
+   and every `homelab check` names them in a `noted` line until step 6. A
+   redeploy of the same stack uses them and clears the record
+   (`core/src/ops/retired.rs:175-180`).
+6. **Wipe, only when sure. Irreversible.** Workstation:
+   `homelab wipe <name>`. It prints the list first and deletes nothing:
 
-   ```sh
-   rm -rf /appdata/<stack>
-   rm -rf /var/lib/homelab/secrets/<stack>
-   rclone purge gdrive:homelab-backups/<app>-config   # once per owning app; DR_RUNBOOK.md lists them per stack
+   ```text
+   wipe '<name>' deletes, permanently:
+     restic repository  <owner>-config
+     /appdata directory /appdata/<name>/<owner>-config
+     vault copy         /var/lib/homelab/secrets/<name>
    ```
 
-   Older host-meta snapshots keep a copy of that vault directory until
-   their retention forgets them (op-12).
-6. Workstation: `git rm -r stacks/<name>`, `homelab runbook`, commit on
-   `main`.
+   then asks `Type '<name>' to delete all of the above, permanently:`
+   (`client/src/main.rs:831-865`, `core/src/ops/retired.rs:237-255`).
+   Anything a managed stack still uses is listed as `KEPT` and left. The
+   host purges each repository with `rclone purge`, removes the directories
+   with `rm -rf --`, and drops the record last; a failure keeps the record,
+   so running it again continues (`core/src/ops/retired.rs:363-468`). An
+   app or native unit that left a stack still running is wiped the same way
+   as `homelab wipe <name>/<app>`.
+
+   Only when the wipe refuses with `"is not an rclone remote"` (a
+   `restic_base` other than `rclone:...`), remove the repositories by hand
+   on the host with the tool for that backend, then run the wipe again for
+   the rest.
+
+   Older host-meta snapshots keep a copy of the vault directory until their
+   retention forgets them (op-12).
+7. Workstation: `homelab runbook`, commit on `main` (route B: also
+   `git rm -r stacks/<name>`).
 
 **A record whose container is already gone:** `homelab forget <stack>`.
 Refused with `"still names a live container"` while any container carries
-the recorded hostname; touches no container (`host/src/main.rs:3624-3686`).
+the recorded hostname; touches no container. Otherwise it runs step 4
+without the `pct destroy` and records the stack as retired, so step 6
+applies (`core/src/ops/destroy.rs:334-403`, `host/src/main.rs:3638-3644`).
+
+**Worked example: route A for the drill stack.** `git rm -r stacks/drill`,
+commit, `homelab apply`, type `drill`. The drill stack declares no storage,
+so step 3 logs
+`"declares no storage, so there is nothing to back up from the host"`
+instead of taking a backup (`core/src/ops/destroy.rs:128-143`). Its only
+service is stateless (`stacks/drill/drillsvc/service.yml:11`), so the retired
+record names no repository and no `/appdata`, only the vault;
+`homelab wipe drill` then deletes `/var/lib/homelab/secrets/drill` and the record.
 
 ---
 
@@ -490,6 +566,28 @@ stacks/<stack>[/<unit>] [<tag>]` installs binary and unit into an existing
 container, keeps the previous binary, rolls back when the new one does not
 come up, and adopts at the end (`client/src/main.rs:192-287`,
 `core/src/ops/native.rs:265-507`).
+
+**Remove one native service from a stack that stays** (workstation,
+repository root):
+
+1. Delete the unit from `natives:` in `stacks/<stack>/lxc-compose.yml`, and
+   its directory `stacks/<stack>/<unit>/`.
+2. `homelab deploy stacks/<stack>`. **Point of no return:** step
+   `retire dropped` runs `systemctl disable --now <unit>`, removes
+   `/etc/systemd/system/<unit>.service` and the program, and reloads
+   systemd; the log says `"left the stack file — stopped and disabled"` and
+   `"data directories and its restic repository are kept"`. The unit leaves
+   the stack's record, so the nightly round stops backing it up and
+   updating it (`core/src/ops/deploy.rs:1107-1189`, `:2611-2629`).
+3. Its data inside the container, its `<unit>-config` repository and its
+   vault copies are kept and recorded as retired `<stack>/<unit>`
+   (`core/src/ops/retired.rs:147-172`). `homelab check` names them; delete
+   them only when sure with `homelab wipe <stack>/<unit>` (op-6 step 6).
+
+Only a unit an earlier version of the stack file listed in `natives:` is
+retired this way. One that `homelab adopt` registered and no stack file ever
+named is left running (`core/src/ops/deploy.rs:285-297`, test
+`an_adopted_unit_the_stack_never_declared_is_not_retired`).
 
 ---
 
@@ -919,8 +1017,8 @@ Layer 1.
 | Google Drive (rclone remote `gdrive`) | rclone's own configuration on the host; the backup target is `rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:127`) | `rclone config reconnect gdrive:`; `homelab doctor` shows `offsite (Drive)` as `token invalid/expired` when the listing fails (`core/src/doctor.rs:141-157`) |
 | Notification bearers | `notify_auth_bearer`, `notify_fallback_auth_bearer` in `host.toml`, not editable from the TUI (`host/src/main.rs:65-85`, `:178-183`); written for each send to `/var/lib/homelab/secrets/notify-route-<n>.header` (`core/src/notify.rs:188-190`) | edit `host.toml`, restart (lost-3d step 2 shows the edit-then-restart pattern) |
 | Device backup credential and pin | `cred_file` (curl `-K` format) and `pin` (`sha256//<base64>`) per `[[device_backups]]` (`core/src/ops/devicebackup.rs:37-73`) | see below |
-| Stack app secrets | latch, or a local `stacks/<stack>/<app>/.env`; copy on the host in the vault (`client/src/spec.rs:303-412`, `core/src/ops/deploy.rs:1132-1139`) | change in latch, then `homelab deploy stacks/<stack>` |
-| Native service env and credential files | the path in the unit's `EnvironmentFile=`/`LoadCredential=`; copy in the vault (`core/src/ops/deploy.rs:2223-2318`) | op-17 lost-5 |
+| Stack app secrets | latch, or a local `stacks/<stack>/<app>/.env`; copy on the host in the vault (`client/src/spec.rs:303-412`, `core/src/ops/deploy.rs:1443-1449`), kept after the app or stack is removed until `homelab wipe` (op-6 step 6) | change in latch, then `homelab deploy stacks/<stack>` |
+| Native service env and credential files | the path in the unit's `EnvironmentFile=`/`LoadCredential=`; copy in the vault (`core/src/ops/deploy.rs:2533-2554`), kept after the unit or stack is removed until `homelab wipe` | op-17 lost-5 |
 | Workstation latch key | latch's credential store; this repository only calls `latch cat` (`client/src/spec.rs:374-378`) | op-17 lost-4 |
 | GitHub CLI on the workstation | `gh` auth, used by `release-update`, `install-native` and native deploys (`client/src/release.rs:12-26`, `:92-117`) | `gh auth login` |
 
@@ -989,6 +1087,12 @@ flowchart LR
 | | the service's own restic repository, when the file lies in `data_dirs` and the service has no `backup_from_newest` (`core/src/ops/native.rs:591-600`): yes for almanac, kyu-runner, http-switchboard; **no for kyu** (`stacks/kyu/service.yml:48`) | host loss | loss of the restic password |
 | | `host-meta-config`, through the vault | host loss | loss of the restic password |
 | Google Drive credentials (rclone) | rclone's configuration on the host only | container loss | host root disk loss: **in no backup this code makes** (`core/src/ops/backup.rs:1056-1065`) |
+| Secrets of a retired stack, app or native unit | the vault paths in its retired record: the whole `/var/lib/homelab/secrets/<stack>` for a stack, the app's `.env` or the unit's files for an app or unit (`core/src/ops/retired.rs:59-172`); for a stack also its `/appdata` directories, where a native service's live env file sits, and its repositories | destroy, forget, and the deploy that dropped it: all keep them (`core/src/ops/retired.rs:1-15`) | `homelab wipe <key>`: every recorded vault path, `/appdata` directory and repository goes in one operation (`core/src/ops/retired.rs:408-449`); after that only older `host-meta-config` snapshots still hold the vault copy |
+
+A wipe is the one command that removes several copies of a secret at once
+on purpose. Before `homelab wipe` of a stack whose service might come back,
+check the list it prints (op-6 step 6): a vault copy on it is the copy lost-5a
+restores from, and after the wipe lost-5c (host-meta) is the only way back.
 
 Everything offsite hangs on one password. Nothing in the code checks that
 the password file exists: `homelab doctor` has no probe for it
@@ -1359,3 +1463,7 @@ Found while writing this runbook. Each line says what to believe.
 | Doctor remedy for Drive | fixed in v3.58.4 (gap-27) | says no backup can be written until the token is refreshed |
 | `stacks/almanac/lxc-compose.yml` | fixed in v3.58.4 (gap-28) | points at op-11; `homelab restore` refuses a native stack |
 | Doc comment in `core/src/ops/native.rs` | fixed in v3.58.4 | says `<unit>-config` |
+| Module docstring of `stacks/uptime/kuma-seeder/seed.py:22-26` | "Nothing here ever deletes a monitor" | since `0ffae9c` the seeder removes every monitor no file declares (`seed.py:327-331`); believe the code |
+| Comment at `seed.py:304-305` | "a hand-made one is only ever reported" | a hand-made monitor that no file declares is removed like any other (`plan_owned`, `seed.py:259`; test `step_21_the_seeder_keeps_uptime_kuma_equal_to_the_files`) |
+| Comment in `stacks/uptime/kuma-seeder/docker-compose.yml` | "a monitor whose name exists is left exactly as it is" | the seeder corrects its URL or hostname when the file says otherwise (`seed.py:250-256`, `:321-326`) |
+| Manual checks after a deploy | "Questions that disappeared from the stack files are dropped" (`core/src/ops/manualchecks.rs:48-49`) | only while the stack still has a `manual:` line; with none left the deploy skips the registration and the old questions stay until destroy or forget (`core/src/ops/deploy.rs:2944`) |

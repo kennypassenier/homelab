@@ -135,6 +135,7 @@ them from the repository root:
 | `homelab runbook` | reads `stacks/`, writes `docs/DR_RUNBOOK.md` unless an output path is given | `client/src/main.rs:902-906` |
 | `homelab testplan` | reads `core/tests`, `client/tests`, `docs/deployment/REALIZATION_PLAN.md`; writes `docs/deployment/TEST_PLAN.md` unless an output path is given | `client/src/main.rs:883-891` |
 | `homelab check` | reads `stacks/` unless a path is given | `client/src/main.rs:311` |
+| `homelab apply` | reads `stacks/` unless a path is given | `client/src/main.rs:709-713` |
 | `homelab export` | writes `<name>-bundle.yml` here unless an output path is given | `client/src/main.rs:446-449` |
 | `homelab tui` | reads `stacks/` and `presets/` at start | `client/src/tui/mod.rs:47-48` |
 
@@ -699,18 +700,20 @@ The life of a stack from your side, with the verb that moves it on:
 
 ```mermaid
 stateDiagram-v2
+    state "Retired: container gone, data kept" as Retired
     [*] --> Scaffolded: homelab new, or n in the TUI
     Scaffolded --> Valid: homelab plan passes
     Valid --> Scaffolded: edit the files
-    Valid --> Deployed: homelab deploy
+    Valid --> Deployed: homelab deploy, or homelab apply
     Deployed --> Incomplete: step failed
     Incomplete --> Deployed: deploy again
     Deployed --> Parked: homelab disable, or a failed night
     Parked --> Deployed: homelab enable
-    Deployed --> Destroyed: homelab destroy
-    Parked --> Destroyed: homelab destroy
-    Destroyed --> Deployed: homelab deploy, /appdata kept
-    Destroyed --> [*]
+    Deployed --> Retired: homelab destroy, or homelab apply once stacks/name/ is gone
+    Parked --> Retired: homelab destroy, or homelab apply
+    Deployed --> Retired: homelab forget, container already lost
+    Retired --> Deployed: homelab deploy, /appdata still there
+    Retired --> [*]: homelab wipe name
     note right of Deployed
         backup, update, restore and
         resize keep it in this state
@@ -719,9 +722,14 @@ stateDiagram-v2
         Containers keep running.
         The nightly run skips it.
     end note
+    note right of Retired
+        homelab check shows it as noted.
+        Backups, /appdata and vault
+        stay until homelab wipe.
+    end note
 ```
 
-Drawn from `core/src/ops/deploy.rs`, `core/src/ops/enable.rs`, `core/src/ops/destroy.rs` and `host/src/main.rs` (nightly park).
+Drawn from `core/src/ops/deploy.rs`, `core/src/ops/enable.rs`, `core/src/ops/destroy.rs`, `core/src/ops/retired.rs`, `client/src/apply.rs` and `host/src/main.rs` (nightly park).
 
 #### C1 · Declarative containers from `lxc-compose.yml`
 
@@ -786,8 +794,11 @@ A **`rootfs/` directory** maps onto the container's `/` for two places only:
 (pushed with mode 755). Anything else under `rootfs/` fails validation
 (`core/src/manifest.rs:355-403`). A changed unit or timer reloads systemd, and
 a changed timer is enabled and started; a service is never restarted by this
-(`core/src/ops/deploy.rs:1098-1130`). `stacks/kyu/rootfs/` is the example in
-the repository.
+(`core/src/ops/deploy.rs:1409-1442`). A file you delete from `rootfs/` is
+removed from the container by the next deploy; a `.service`, `.timer`,
+`.socket` or `.path` unit is `systemctl disable --now` first, and systemd
+reloads afterwards (step `retire dropped`, `core/src/ops/deploy.rs:1044-1106`,
+`:1181-1183`). `stacks/kyu/rootfs/` is the example in the repository.
 
 **Worked example: check a stack without the host.**
 
@@ -803,31 +814,57 @@ network (`client/src/main.rs:673-691`). It prints
 
 #### C2 · Gated destroy
 
-**Status:** Built. Command line only; the TUI has no destroy key.
+**Status:** Built. Command line only; the TUI has no destroy key, and the
+two newer destroy paths are on the command line only as well
+(`CLI_ONLY` in `client/tests/tui_snapshot_tests.rs`).
 
 ```bash
 homelab destroy stacks/drill
 ```
 
 The client asks `Type the stack name '<stack>' to confirm destroy: ` and stops
-with `name mismatch — aborted` on anything else (`client/src/main.rs:965-977`).
+with `name mismatch — aborted` on anything else (`client/src/main.rs:1111-1123`).
 The host then runs, in order: `confirm`, `no-touch check`, `hostname guard`,
 `backup before destroy`, `stop container`, `lift protection`,
-`destroy container` (`pct destroy --purge`), `remove metrics discovery`,
-`remove grafana dashboard`, `remove gateway route`, `update state`
-(`core/src/ops/destroy.rs`). `/appdata` and the secrets vault are kept, so a
-later deploy of the same stack gets its data back through E3.
+`destroy container` (`pct destroy --purge`), and then the same unregister
+steps `homelab forget` runs: `remove metrics discovery`,
+`remove grafana dashboard`, `remove gateway route`, `update state` and
+`fleet files` (`core/src/ops/destroy.rs:35-199`, `:207-332`). `update state`
+drops the stack's record and its manual checks and records the stack as
+retired; `fleet files` rewrites the front page and the Uptime Kuma host list
+without it (`core/src/ops/fleetfiles.rs:236-271`).
+
+**What a destroy keeps.** The stack's `/appdata` directories, its vault
+directory `/var/lib/homelab/secrets/<stack>` and its restic repositories stay,
+so a later deploy of the same stack gets its data back through E3. They stay
+until you delete them with `homelab wipe <stack>` (section 3); nothing
+automatic ever does (`core/src/ops/retired.rs:1-15`). Until then
+`homelab check` names them in a `noted` line.
 
 The backup before a destroy is taken on every destroy. If it fails, the
 destroy is refused with `pass --no-backup to destroy anyway, which is a decision, not a retry`.
-`--no-backup` skips it and says so (`client/src/main.rs:955-964`,
-`core/src/ops/destroy.rs`, step `backup before destroy`). A stack without
-storage is destroyed with a warning that anything inside the container goes
-with it. Tests: `core/tests/m4_ops_tests.rs:94,114,133`.
+`--no-backup` skips it and says so (`client/src/main.rs:1069`, `:1104-1109`,
+`core/src/ops/destroy.rs:116-159`). A stack without storage is destroyed
+with a warning that anything inside the container goes with it. Tests:
+`core/tests/m4_ops_tests.rs:94,114,133`.
 
-`homelab destroy` reads the whole stack, secrets included
-(`client/src/main.rs:953`), so a stack with `latch_secrets` needs latch and
-`HOMELAB_LATCH_ENV` even though a destroy uses no secret.
+**When `stacks/<name>/` is already gone.** Without a
+`stacks/<name>/lxc-compose.yml` the client prints
+`! no <dir>/lxc-compose.yml — destroying '<stack>' from the manifest the host recorded`,
+asks for the name the same way, and sends the destroy with the manifest the
+host stored at its last deploy (`client/src/main.rs:1070-1099`,
+`destroy_recorded` in `core/src/ops/destroy.rs:414-446`). Every gate above
+still runs. A stack the host holds no manifest for (adopted, never
+deployed) is refused with `has no manifest recorded in host state`; remove
+that container by hand, then `homelab forget <stack>`. Tests:
+`destroy_works_from_the_manifest_recorded_in_state` and
+`destroy_from_state_keeps_every_safety_gate`
+(`core/tests/declarative_cleanup_tests.rs:483,503`).
+
+With the directory present, `homelab destroy` reads the whole stack, secrets
+included (`client/src/main.rs:1100`), so a stack with `latch_secrets` needs
+latch and `HOMELAB_LATCH_ENV` even though a destroy uses no secret. The path
+from the recorded manifest reads no stack files and needs neither.
 
 #### C3 · Boot policy fleet-wide
 
@@ -952,6 +989,21 @@ logs `already installed, not shipped — upgrades go through the nightly updater
 followed by the release-update command (`core/src/ops/deploy.rs:2175-2197`,
 tests `core/tests/deploy_tests.rs:2649,2677`).
 
+**Removing a native unit from a stack.** Delete the unit from `natives:` in
+`lxc-compose.yml` and deploy. The deploy's step `retire dropped` runs
+`systemctl disable --now <unit>`, removes `/etc/systemd/system/<unit>.service`
+and the program, reloads systemd, and takes the unit out of the stack's
+record; the transcript says `[native] <unit> left the stack file — stopped and disabled`
+and `[native] <unit>'s data directories and its restic repository are kept`
+(`core/src/ops/deploy.rs:1107-1180`, `:2611-2629`). Its data directories
+inside the container, its `<unit>-config` repository and its vault copies
+stay, recorded as retired `<stack>/<unit>` until `homelab wipe <stack>/<unit>`
+(`core/src/ops/retired.rs:147-172`). Only a unit an earlier version of the
+stack file listed is retired; one that `homelab adopt` registered and no stack
+file ever named is left alone (`core/src/ops/deploy.rs:285-297`, test
+`an_adopted_unit_the_stack_never_declared_is_not_retired`,
+`core/tests/declarative_cleanup_tests.rs:762`).
+
 **Worked example: the rollback drill** (deployment decision B7,
 `docs/deployment/REGISTER.md`, row B7). `scripts/drill-native-rollback.sh`
 deploys the throwaway `stacks/drill` (one fake service, `drillsvc`), installs
@@ -979,10 +1031,11 @@ homelab deploy stacks/syncthing
 **Worked example: what a deploy does.** The client validates first and
 prints `▶ deploy <stack> :: vmid <vmid> :: <n> file(s), <m> env(s)`, plus one
 `[env] <app> <- <source>` line per app with secrets
-(`client/src/main.rs:692-709`, `client/src/spec.rs:316-332`). Each native
-binary is sent in a message of its own first (`client/src/main.rs:710-746`).
-The host then runs these steps in this order (`core/src/ops/deploy.rs`, the
-`step!` calls from line 228 to 2531):
+(`client/src/main.rs:692-702`, `:1466-1476`, `client/src/spec.rs:316-332`).
+Each native binary is sent in a message of its own first
+(`deploy_spec`, `client/src/main.rs:1477-1513`). The host then runs these
+steps in this order (`core/src/ops/deploy.rs`, the `step!` calls from line
+265 to 2808):
 
 | Step | What it does |
 |---|---|
@@ -994,28 +1047,30 @@ The host then runs these steps in this order (`core/src/ops/deploy.rs`, the
 | `host storage` | creates `/appdata/...` directories and sets their owner |
 | `auto-restore check` | E3: refills empty data directories from their latest snapshot |
 | `metrics discovery` | writes this stack's Prometheus target file, when configured (F4) |
-| `provision container` | creates or clones the container (C1, B8), attaches mounts, H4 devices, W3 boot policy, protection flag; starts it if stopped |
+| `provision container` | creates or clones the container (C1, B8), attaches mounts and detaches the ones the stack no longer declares, H4 devices, W3 boot policy, protection flag; starts it if stopped |
 | `wait for systemd` | waits until the container reports running or degraded |
 | `bootstrap docker` | installs docker when missing; skipped for native-only stacks |
 | `runaway guards` | B2 and A7 |
 | `log rotation` | rules for `data_mounts` that ask for them (B2) |
-| `commit intent` | D4 |
+| `retire dropped` | removes `rootfs/` files the stack dropped (units disabled first) and native units dropped from `natives:` (D3, C7) |
+| `commit intent` | D4; files the stack dropped leave the copy |
 | `push files` | files, `rootfs/` files and `.env` files (A5); verified by hash afterwards |
 | `start apps` | `docker compose up` per app |
 | `storage ownership` | each app can write its own data directory |
 | `verify health` | B3 |
 | `gateway route` | H1, when the stack has a route |
+| `retire gateway route` | removes the old route file when the stack dropped `gateway_route:` or moved vmid (H1) |
 | `grafana dashboard`, `homepage services`, `uptime monitors` | fleet-wide generated files, each only when configured on the host |
-| `orphan files` | reports files the repository no longer has (D3) |
+| `orphan files` | removes files under `/opt/<stack>/` the repository no longer has (D3) |
 | `garbage collect` | D3 |
 | `log shipper` | F1, when configured |
 | `native units` | installs unit files and missing binaries (C7) |
-| `record state` | stores the manifest, the intent hash and the flags |
+| `record state` | stores the manifest, the intent hash and the flags; records apps and units that left as retired |
 | `reconcile`, `service checks` | B3 |
 
 A message larger than 256 MiB is refused by the client before it is sent,
 with a message that says it is a size limit and not a network fault
-(`client/src/version.rs:59-73`, `client/src/main.rs:1076-1081`).
+(`client/src/version.rs:59-73`, `client/src/main.rs:1237-1242`).
 
 #### D2 · Activation gating
 
@@ -1031,22 +1086,50 @@ Add an app: create `stacks/<stack>/<app>/docker-compose.yml`, add the name to
 `apps:`, deploy. Remove an app: delete it from `apps:` and deploy; the host
 runs `docker compose down --remove-orphans` for it and deletes
 `/opt/<stack>/<app>`, logging `app '<app>' removed (config dirs kept)`
-(`core/src/ops/deploy.rs:1909-1946`, test `core/tests/m4_ops_tests.rs:2206`).
-Its `/appdata` directory stays.
+(`core/src/ops/deploy.rs:2145-2182`, test `core/tests/m4_ops_tests.rs:2244`).
+Its `/appdata` directory, its restic repository and its vault copy
+`/var/lib/homelab/secrets/<stack>/<app>.env` stay; the deploy records them as
+retired `<stack>/<app>`, which `homelab check` shows as `noted` until
+`homelab wipe <stack>/<app>` deletes them (`core/src/ops/deploy.rs:2630-2644`,
+`core/src/ops/retired.rs:106-143`). Putting the app back in `apps:` and
+deploying clears the record (`core/src/ops/retired.rs:175-180`).
 
-A *file* removed from the repository is only reported by the deploy, never
-deleted: `[orphans] <n> file(s) on the container that the repository no longer has`
-(`core/src/ops/deploy.rs:1884-1907`). To delete them:
+**A file removed from the repository is removed from the container by the
+next deploy** (since ask-8, 2026-09-27; before that the deploy only reported
+it). Step `orphan files` deletes every file under `/opt/<stack>/` that the
+stack no longer sends, one `rm -f` each, never a directory, and logs
+`[orphans] removed <path> — no longer in the stack's files` per file
+(`core/src/ops/deploy.rs:2104-2143`). It leaves alone: `.env` files, which
+come from the vault; on the gateway, the directories where other stacks'
+dashboards and route files are generated; and the files of an app that is
+leaving, which the garbage collection above needs for its
+`docker compose down` (`core/src/ops/deploy.rs:133-199`). Tests:
+`the_deploy_removes_files_the_stack_no_longer_declares`,
+`generated_dashboards_on_the_gateway_are_never_orphans`,
+`a_removed_apps_files_are_left_for_the_garbage_collector`
+(`core/tests/declarative_cleanup_tests.rs:543,576,1204`).
 
 ```bash
 homelab prune-orphans stacks/syncthing
 ```
 
-It asks for the stack name like a destroy, re-checks A1 and A2 on the host,
-and removes each listed file with `rm -f`, never a directory. `.env` files are
-never listed (`client/src/main.rs:914-948`, `host/src/main.rs:3556-3623`,
-`core/src/ops/deploy.rs:130-161`). Like destroy, it reads the whole stack,
-secrets included (`client/src/main.rs:923`).
+still exists and removes the same set after you type the stack name
+(`client/src/main.rs:1031-1063`, `host/src/main.rs:3557-3633`). After a
+deploy it finds nothing and answers
+`nothing to remove — everything under /opt/<stack> is in the repository`;
+it is kept for a container that has not been deployed since. Like destroy,
+it reads the whole stack, secrets included (`client/src/main.rs:1039`).
+
+**A mount the stack no longer declares is detached.** When `lxc-compose.yml`
+drops a `storage` or `data_mounts` entry, the next deploy runs
+`pct set <vmid> --delete mpN` for it and logs
+`[mounts] <mpN> (<dir>) is no longer declared — detached; the directory on the host is kept`.
+Only a mount whose host directory this stack declares now or declared in the
+record before is detached; one no version of the stack file named is logged
+as attached by hand and left (`core/src/ops/deploy.rs:782-848`, test
+`a_mount_the_stack_no_longer_declares_is_detached_and_its_directory_kept`,
+`core/tests/declarative_cleanup_tests.rs:784`). A running container sees the
+change after a reboot (`core/src/ops/deploy.rs:865`).
 
 #### D4 · Intent history on the host
 
@@ -1218,8 +1301,9 @@ Refusals, all before anything is sent (`client/src/spec.rs:346-408`):
 - `latch cat <path> --env <env> failed: <latch's message>`
 - `latch returned empty content for app '<app>'`
 
-Verbs that build the full payload call latch: `plan`, `deploy`, `export`,
-`destroy`, `resize`, `prune-orphans`, and every per-stack action in the TUI
+Verbs that build the full payload call latch: `plan`, `deploy`, `apply` (for
+every stack it finds), `export`, `destroy` (when the stack directory exists),
+`resize`, `prune-orphans`, and every per-stack action in the TUI
 (`client/src/tui/model.rs:1296-1299`). On the command line, `backup`,
 `restore` and `update` send only the stack file and need no secrets
 (`client/src/spec.rs:68-84`, `client/src/main.rs:749-807`). Test:
@@ -1369,8 +1453,9 @@ deploy: it logs
 `core/tests/m4_ops_tests.rs:1397,1432,1504,1534`.
 
 **Worked example: rebuild a container with its data.** After
-`homelab destroy stacks/<name>` the `/appdata` directories still exist, so the
-next deploy finds them full and restores nothing. When a data directory is
+`homelab destroy stacks/<name>` the `/appdata` directories still exist (until
+`homelab wipe <name>`, C2), so the next deploy finds them full and restores
+nothing. When a data directory is
 empty (a new host, or a deleted directory), the same deploy finds it empty,
 finds a snapshot, and restores it before the app starts.
 
@@ -1529,10 +1614,11 @@ After every host operation, and once at start, the host POSTs one JSON event
 **Status:** Built as an ordinary stack. `stacks/metrics` runs prometheus,
 alertmanager and pve-exporter (`stacks/metrics/lxc-compose.yml:53`). With
 `metrics_targets_dir` set on the host, every deploy writes the stack's
-Prometheus target file and destroy removes it
-(`core/src/ops/deploy.rs:455-481`, `core/src/ops/destroy.rs`). With
+Prometheus target file and destroy and forget remove it
+(`core/src/ops/deploy.rs:521-544`, `core/src/ops/destroy.rs:218-228`). With
 `grafana_dashboards_dir` set, every deploy writes the stack's generated Grafana
-dashboard into the gateway (`core/src/ops/deploy.rs:1608-1666`).
+dashboard into the gateway, and destroy and forget remove it
+(`core/src/ops/deploy.rs:1994-2046`, `core/src/ops/destroy.rs:233-262`).
 `homelab dashboard <stack> <app>...` prints the same dashboard JSON locally,
 without a token, for a container not yet under management
 (`client/src/main.rs:856-879`).
@@ -1739,8 +1825,17 @@ fragment only to the gateway vmid and only into the routes directory
 (defaults 104 and `/opt/traefik-config/routes`, both settable in `host.toml`)
 (`core/src/safety.rs:24-37,90-110`, `host/src/main.rs:461-466`). When that
 directory is under `/appdata/`, it is written on the host side; otherwise it
-is pushed into the gateway (`core/src/ops/deploy.rs:1584-1606`). Traefik's
+is pushed into the gateway (`core/src/ops/deploy.rs:1914-1935`). Traefik's
 file watch picks it up.
+
+The route file goes away again in three cases: a destroy or a forget of the
+stack (`core/src/ops/destroy.rs:264-287`), and a deploy of a stack that
+dropped `gateway_route:` or moved to another vmid, which removes the old
+`<vmid>-app-<stack>.yml` and logs
+`[route] <path> removed — the stack file no longer declares it`
+(step `retire gateway route`, `core/src/ops/deploy.rs:1937-1986`; tests
+`core/tests/declarative_cleanup_tests.rs:349,372`). The front page follows,
+since it is rendered from these files (section 4).
 
 #### H2 · OPNsense Kea DHCP reservations
 
@@ -1921,10 +2016,10 @@ homelab check ~/Projects/homelab/stacks
 ```
 
 The client sends the vmid every stack file claims; the host adds what it can
-see and compares (`client/src/main.rs:310-338`, `host/src/main.rs:3728-3761`).
+see and compares (`client/src/main.rs:310-338`, `host/src/main.rs:3773-3806`).
 From outside the repository with no path, it says the stack-file half is
 `SKIPPED` and checks only the host's half (`client/src/main.rs:317-327`). The
-answer (`host/src/main.rs:3189-3209`):
+answer (`render_findings`, `host/src/main.rs:3190-3210`):
 
 ```text
 fleet check: <n> finding(s)
@@ -1932,21 +2027,38 @@ fleet check: <n> finding(s)
       remedy: <remedy>
 ```
 
-or `fleet check: repo and reality agree`, which is the only answer that exits
-0. Among the findings (`core/src/ops/fleetcheck.rs:510-720` and the
-`evaluate_*` functions after it): a template a stack clones that does not
-exist, a record whose vmid does not exist, parked stacks, backups that never
-ran or are old, a stack file that claims a vmid somebody else owns, a route to
-nothing, boot policy and resource drift (W3), deploys recorded as incomplete,
-and a notification path whose last delivery failed. The host runs the same
-check after every nightly run and notifies only when a finding is alarming
-(`host/src/main.rs:2628-2694`).
+or `fleet check: repo and reality agree`. The command exits 0 when no finding
+is `broken` or `drift`; `noted` findings are printed and do not fail it
+(`check_passes`, `core/src/ops/fleetcheck.rs:515-517`). Among the findings
+(`core/src/ops/fleetcheck.rs:520-758` and the `evaluate_*` functions after
+it): a template a stack clones that does not exist, a record whose vmid does
+not exist, parked stacks, backups that never ran or are old, a stack file that
+claims a vmid somebody else owns, a route to nothing, boot policy and resource
+drift (W3), deploys recorded as incomplete, and a notification path whose last
+delivery failed. Two came with the declarative cleanup (2026-09-27):
+
+- `drift` for a stack in host state whose directory under `stacks/` has
+  neither `lxc-compose.yml` nor `service.yml`:
+  `is in host state (vmid <n>) but has no stack file in the repository — stacks/<stack>/ is gone`,
+  remedy `` `homelab apply` lists it and destroys it after you type its name ``
+  (`core/src/ops/fleetcheck.rs:678-716`). Only when the client sent stack
+  files at all, so the nightly check, which has none, never raises it.
+- `noted`, one per retired stack, app or unit: what it left and the wipe
+  command (`core/src/ops/retired.rs:190-219`); section 3, `homelab wipe`.
+
+The host runs the same check after every nightly run and notifies only when a
+finding is not `noted` (`host/src/main.rs:2646-2690`).
 
 ### `homelab checks`: what only a person can confirm
 
 The `manual:` lines of every `checks.yml` (B3) are registered when their
-stack is deployed, each with a short id (`core/src/ops/deploy.rs:2662-2697`,
-`core/src/ops/manualchecks.rs:29-43`).
+stack is deployed, each with a short id (`core/src/ops/deploy.rs:2939-2952`,
+`core/src/ops/manualchecks.rs:29-43`). A question that left the files is
+dropped by the next deploy of its stack, but only while the stack still has
+at least one `manual:` line: with none left the deploy does not call the
+registration at all (`core/src/ops/deploy.rs:2944`,
+`core/src/ops/manualchecks.rs:69-74`), and the old questions stay until the
+stack is destroyed or forgotten (`core/src/ops/destroy.rs:298`).
 
 ```bash
 homelab checks                              # list them
@@ -1962,12 +2074,116 @@ verdict is the note (`client/src/main.rs:388-421`). An unknown id answers
 `no manual check has id <id>` (`host/src/main.rs:3878-3882`). Redeploying
 never resets an answer (`core/src/ops/manualchecks.rs:45-50`).
 
-### `homelab forget <stack>`: drop a stale record
+### `homelab forget <stack>`: drop a stale record and its registrations
 
-Removes a stack from the host's state without touching any container, and only
-when no container in `pct list` still carries its hostname; otherwise it
-refuses with `this record is current, not stale`
-(`host/src/main.rs:3624-3686`). Use it after a container was removed by hand.
+For a stack whose container is already gone (removed by hand, or lost).
+Refused while any container in `pct list` still carries the recorded
+hostname, with `this record is current, not stale`. Otherwise it runs the
+same unregister steps as a destroy, without touching any container: route,
+metrics target, dashboard, state record and manual checks, then the front
+page and the Uptime Kuma host list (`forget` and `unregister` in
+`core/src/ops/destroy.rs:207-403`). It records the stack as retired, so its
+backups, `/appdata` and vault are kept and named by `homelab check`. It runs
+as the operation `forget` under the operation lock
+(`host/src/main.rs:3638-3644`). Tests:
+`forget_unregisters_everything_a_destroy_unregisters`,
+`forget_still_refuses_a_record_whose_container_is_live`,
+`a_forgotten_stack_is_recorded_as_retired_too`
+(`core/tests/declarative_cleanup_tests.rs:215,281,985`).
+
+### `homelab apply`: the whole stacks directory against the host
+
+```bash
+homelab apply                    # reads ./stacks
+homelab apply ~/Projects/homelab/stacks --no-backup
+```
+
+Asks the host for its state, builds and validates every stack directory that
+has an `lxc-compose.yml` (latch and `gh` included), and stops before sending
+anything when one fails: `<stack>: validation failed: <e> — nothing applied`
+(`client/src/main.rs:704-756`). Then it prints the plan
+(`client/src/main.rs:760-779`):
+
+```text
+▶ apply :: <n> to deploy · <m> unchanged · <k> gone from the files
+  = <stack>                                   same intent hash as the host applied
+  ↑ <stack>                                   changed, or never applied
+  ✗ <stack> — in host state, no <dir>/<stack>/
+```
+
+`<dir>` is the stacks directory apply read, `stacks` by default.
+
+A stack is unchanged when the host's `applied_hash` equals the intent hash of
+the local files (manifest, files and env, so a secret changed in latch counts
+as a change) (`client/src/apply.rs:30-54`, `intent_hash` in
+`core/src/manifest.rs:948-974`). The changed stacks are deployed one after
+another with the same path as `homelab deploy`; the first failure stops
+everything after it: `deploy of <stack> failed — apply stopped here; nothing after it was deployed and nothing was destroyed`
+(`client/src/main.rs:781-791`).
+
+Each stack in state whose directory is gone is destroyed only after you type
+its name at `Type the stack name '<stack>' to destroy it: `; Enter keeps it
+(`kept <stack> — nothing destroyed`). The destroy runs from the manifest the
+host recorded, with every C2 gate and the backup first unless `--no-backup`
+(`client/src/main.rs:792-827`). The nightly round never does any of this.
+Tests: `client/tests/apply_tests.rs:21,47`.
+
+**Worked example: retire a stack.** Delete `stacks/drill/` in your checkout.
+`homelab check` now reports
+`is in host state (vmid 119) but has no stack file in the repository — stacks/drill/ is gone`.
+Run `homelab apply`, type `drill` at the prompt. The drill stack declares no
+storage, so the destroy says
+`declares no storage, so there is nothing to back up from the host`
+and removes the container (`core/src/ops/destroy.rs:128-143`). From then on
+`homelab check` shows one `noted` line for it; its service is stateless
+(`stacks/drill/drillsvc/service.yml:11`), so only the vault is kept (real
+output of the finding for that record):
+
+```text
+  [noted] drill — retired 2026-09-27 (stack, vmid 119) — kept: restic none; /appdata none; vault /var/lib/homelab/secrets/drill
+      remedy: kept on purpose until you decide (ask-9); `homelab wipe drill` deletes exactly these after you type the name
+```
+
+### `homelab wipe <name>`: delete what a retired stack, app or unit kept
+
+A destroy, a forget, and a deploy that dropped an app or a native unit keep
+the data they leave behind and record it in state under `retired`: the
+restic repositories, the `/appdata` directories and the vault copies
+(`core/src/state.rs:158-204`, `core/src/ops/retired.rs:56-172`). Kenny's rule
+(REGISTER ask-9): kept until you decide, never deleted by anything automatic.
+`homelab check` names each entry as `noted`. Real output of that finding for
+the record a destroy of `stacks/syncthing` would leave (one `storage` entry
+owned by `syncthing`, so one repository, `core/src/ops/retired.rs:36-44`,
+`:59-101`), in the format `homelab check` prints:
+
+```text
+  [noted] syncthing — retired 2026-09-27 (stack, vmid 108) — kept: restic syncthing-config; /appdata /appdata/syncthing/syncthing-config; vault /var/lib/homelab/secrets/syncthing
+      remedy: kept on purpose until you decide (ask-9); `homelab wipe syncthing` deletes exactly these after you type the name
+```
+
+`homelab wipe syncthing` (a stack) or `homelab wipe media/bazarr` (an app or
+unit that left a stack) first shows the list and deletes nothing
+(`client/src/main.rs:831-848`):
+
+```text
+wipe 'syncthing' deletes, permanently:
+  restic repository  syncthing-config
+  /appdata directory /appdata/syncthing/syncthing-config
+  vault copy         /var/lib/homelab/secrets/syncthing
+```
+
+then asks `Type '<name>' to delete all of the above, permanently: `
+(`client/src/main.rs:849-855`). The host deletes the repositories with
+`rclone purge`, the directories and vault copies with `rm -rf --`, and the
+record last (`core/src/ops/retired.rs:363-468`). A repository or directory a
+managed stack still uses is shown as `KEPT (a managed stack still uses it)`
+and left. Refusals: `nothing retired is recorded as '<name>'`; a managed
+stack (`is a managed stack, not a retired one`); an app or unit that is back
+in its stack (`refusing to delete what it uses`); a `restic_base` that is not
+an `rclone:` remote (`core/src/ops/retired.rs:260-292`, `:413-419`). Tests:
+`core/tests/declarative_cleanup_tests.rs:1109,1135,1172`. The full list of
+what is kept and why is in
+[deployment/REGISTRATION_SURFACE.md](deployment/REGISTRATION_SURFACE.md).
 
 ### `homelab backup-host-meta` and `homelab backup-devices`
 
@@ -1986,13 +2202,21 @@ run it from the repository root (`client/src/main.rs:882-898`).
 
 ---
 
-## 4 · The front page
+## 4 · The front page and the watch list
 
-The Homepage dashboard's `services.yaml` is generated, not maintained. When
-`homepage_services_file` is set in `host.toml`, every deploy of any stack
-reads every route fragment in the gateway's routes directory and rewrites the
-file with one tile per destination (`core/src/ops/deploy.rs:1668-1809`). A
-service with a route appears by itself; a service without one does not. The
+Two fleet-wide files are generated rather than maintained, both by
+`core/src/ops/fleetfiles.rs`: Homepage's `services.yaml` and the Uptime Kuma
+seeder's `host-monitors.json`. Every deploy writes both, and since
+2026-09-27 a destroy and a forget rewrite both too, so a removed stack leaves
+the front page and the watch list without waiting for another deploy
+(`regenerate_after_removal`, `core/src/ops/fleetfiles.rs:236-271`).
+
+The Homepage dashboard's `services.yaml`: when `homepage_services_file` is set
+in `host.toml`, every deploy of any stack reads every route fragment in the
+gateway's routes directory and rewrites the file with one tile per
+destination (`core/src/ops/fleetfiles.rs:32-175`, called from
+`core/src/ops/deploy.rs:2056-2060`). A service with a route appears by
+itself; a service without one does not. The
 generated file starts with a comment saying that edits to it are overwritten
 on the next deploy (`core/src/ops/homepage.rs:362-373`).
 
@@ -2024,7 +2248,7 @@ group_order: [Media, Papierwerk, Huis, Eigen, Infrastructuur]
 and `paperless` the widget is generated. Its API key is read from the app's
 own configuration on every deploy, except for paperless, which reads
 `HOMEPAGE_VAR_PAPERLESS` from Homepage's own environment
-(`core/src/ops/homepage.rs:137-188`, `core/src/ops/deploy.rs:1749-1792`). A
+(`core/src/ops/homepage.rs:137-188`, `core/src/ops/fleetfiles.rs:110-149`). A
 `widget:` written under `extra` wins over the generated one
 (`core/src/ops/homepage.rs:445-466`).
 
@@ -2032,7 +2256,7 @@ own configuration on every deploy, except for paperless, which reads
 
 - *Change a description or icon*: edit the block's `extra`, then
   `homelab deploy stacks/home`. The host reads the overlay from its own intent
-  repository (`core/src/ops/deploy.rs:1716-1748`), so the change takes effect
+  repository (`core/src/ops/fleetfiles.rs:75-109`), so the change takes effect
   when `stacks/home` is deployed; `stacks/home` uses latch (D12).
 - *Move a service to another heading*: change `group`; add a new heading to
   `group_order` or it sorts alphabetically after the named ones.
@@ -2045,8 +2269,65 @@ own configuration on every deploy, except for paperless, which reads
 `[t51] overlay: <n> entr(y/ies) from <path>`,
 `[t51] widget keys read from the applications themselves: <n>` and
 `[t51] <file> — <n> stack(s) on the front page`
-(`core/src/ops/deploy.rs:1740-1800`). A drop in the key count means an app
-moved its configuration.
+(`core/src/ops/fleetfiles.rs:98-105`, `:150-167`). A drop in the key count
+means an app moved its configuration.
+
+### The watch list in Uptime Kuma
+
+Uptime Kuma holds exactly the monitors the files declare, and nothing else
+(step-21, Kenny 2026-09-27: even a hand-made monitor is declared in a file).
+Two files declare them:
+
+- `host · <stack>`, one ping per stack in host state, generated into
+  `host-monitors.json` when `kuma_monitors_file` is set in `host.toml`
+  (`core/src/ops/fleetfiles.rs:183-229`);
+- `APPLICATION_MONITORS` in `stacks/uptime/kuma-seeder/seed.py:57-95`, one
+  HTTP check per service endpoint, written by hand because which path a
+  service answers on is knowledge no manifest holds. The hub's own `kyu`
+  monitor, made by hand in Kuma before the seeder existed, is declared there
+  under the same name so its history stays (`seed.py:74-77`).
+
+The `kuma-seeder` app in the uptime stack runs every
+`SEED_INTERVAL_SECONDS=3600` (`stacks/uptime/kuma-seeder/docker-compose.yml`).
+Each run adds what is missing, tags every declared monitor `homelab-seeder`,
+corrects a monitor whose URL or hostname differs from its file entry, and
+removes every monitor no file declares (`seed_once`,
+`stacks/uptime/kuma-seeder/seed.py:274-374`). It removes nothing when the
+generated list is missing, or when more than `max(3, a quarter of all
+monitors)` would go at once; then it warns
+`the desired list looks truncated, so nothing is removed` and the fleet check
+reports the leftovers as `drift` on `uptime kuma` (`seed.py:241-264`,
+`core/src/ops/fleetcheck.rs:1045-1059`). `APPLICATION_MONITORS` is read when
+the seeder process starts (`seed.py:377-399`); a deploy of `stacks/uptime`
+that changes `seed.py` restarts the seeder app, because a changed file under
+an app whose compose file did not change gets `docker compose restart`
+(`core/src/ops/deploy.rs:1688-1714`).
+
+**Recipes.**
+
+- *Watch a new endpoint*: add a `(name, url, accepted codes)` line to
+  `APPLICATION_MONITORS` and `homelab deploy stacks/uptime`; the transcript
+  says `[config] kuma-seeder restarted`, and the new monitor appears on that
+  run.
+- *Stop watching something*: delete its line; the seeder removes the monitor.
+  A monitor added in the Kuma UI and not declared is removed on the next run
+  as well.
+- *A stack's host monitor*: nothing to do. Deploy adds it, destroy and forget
+  remove it.
+
+Real output of one run, against a stand-in for the Kuma API that holds one
+monitor no file declares and one whose address was changed by hand:
+
+```text
+[seed]   ~ gateway · grafana now points at http://10.10.10.4:3000/api/health
+[seed]   - host · drill (no file declares it)
+[seed] 0 added, 37 already existed, 1 corrected, 1 removed, 0 stale
+```
+
+The verdict also goes to `last-seed.json` (fields `added`, `skipped`,
+`stale`, `removed`, `corrected`, `refused`, `judged`; `seed.py:354-365`),
+which the fleet check reads. More, including the truncation refusal, in
+[deployment/REGISTRATION_SURFACE.md](deployment/REGISTRATION_SURFACE.md).
 
 ---
 
@@ -2071,7 +2352,7 @@ shows it.
 | 12 | Fixed in v3.58.4 (gap-20): after the wizard the status line names `homelab deploy stacks/<name>`, since SHIFT+D acts on the fleet list | `client/src/tui/model.rs` |
 | 13 | Fixed in v3.58.4 (gap-21): the placeholders name `r` | `client/src/tui/view/stacks.rs`, `client/src/tui/view/doctor.rs` |
 | 14 | `homelab new` and `homelab testplan` need a token although they never connect | `client/src/main.rs:144-150` |
-| 15 | `destroy`, `resize` and `prune-orphans` need latch for stacks with `latch_secrets` although they send no secret | `client/src/main.rs:487,923,953` |
+| 15 | `resize`, `prune-orphans` and `destroy` of a stack whose directory exists need latch for stacks with `latch_secrets` although they send no secret; `apply` builds every stack, so it needs latch for all of them | `client/src/main.rs:487,1039,1100`, `:740-741` |
 | 16 | Fixed in v3.58.4 (gap-29): the help line for `export\|import` says it writes or reads a stack-definition bundle | `client/src/main.rs` |
 | 17 | Fixed in v3.58.4 (gap-33): `homelab patch` and requested guards check the A2 hostname guard, and requested guards skip the docker guards on a native stack | `core/src/ops/patch.rs`, `core/src/ops/guards.rs` (`apply_for_managed`) |
 | 18 | The DASHBOARD's online dot and app states are not measured: the host reports every recorded stack online and every app running | `host/src/main.rs:4216-4229` |

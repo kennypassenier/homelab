@@ -1226,3 +1226,41 @@ async fn a_removed_apps_files_are_left_for_the_garbage_collector() {
         1
     );
 }
+
+// ── 14 · a stack that drops its last manual question loses it ──────────────
+
+/// Found by the documentation pass the same day: the deploy only
+/// re-registered manual questions when the stack still had at least one, so
+/// a stack that dropped its LAST `manual:` line kept the old question in
+/// `homelab checks` until it was destroyed.
+/// covers: step-22
+#[tokio::test]
+async fn a_stack_that_drops_its_last_manual_question_loses_it() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec, "syncthing");
+    let mut st = HostState::default();
+    st.manual_checks.extend([
+        check("syncthing", "syncthing", "Kijk of de sync loopt."),
+        check("media", "jellyfin", "Speel een film af."),
+    ]);
+    seed_state(&exec, st).await;
+    let sink = VecSink::new();
+    let j = NullJournal;
+    // spec() declares no checks at all.
+    assert!(
+        deploy(&ctx(&exec, &sink, &j), &spec(110, "syncthing"))
+            .await
+            .ok
+    );
+    let after = load_state(&exec).await;
+    assert!(
+        after.manual_checks.values().all(|r| r.stack != "syncthing"),
+        "{:?}",
+        after.manual_checks
+    );
+    assert_eq!(
+        after.manual_checks.len(),
+        1,
+        "another stack's question stays"
+    );
+}

@@ -4,7 +4,9 @@ For the maintainer who comes back after months. Every statement names the
 file and line that makes it true; the reasons live in
 [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) (AR1 to AR19). Read at
 v3.58.2 (`Cargo.toml:6`) on 2026-09-27; the commands behind the numbers are at
-the end.
+the end. The paragraph "Declarative registration" in section 3 and the rows
+that mention `apply`, `wipe` or retired data were added at commit `ad03664`
+(after v3.58.10) and cite that commit.
 
 ## 1. Shape
 
@@ -226,6 +228,40 @@ Notification and the intent-mirror push run after the op and cannot fail it
 (`host/src/main.rs:3002-3004`, `:2754-2765`). A `host.toml` that does not
 parse stops the daemon; unknown keys are warned about by name (`:369-396`).
 
+**Declarative registration (step-21, step-22, ask-8, ask-9).** What the
+files declare is added; what leaves them is removed; data is kept until a
+person wipes it. Three mechanisms carry that, and a new registration has to
+join all three:
+
+- *A deploy knows what left.* It reads the stack's previous record
+  (`prior`, `core/src/ops/deploy.rs:276-297`) and the intent repo's copy of
+  the files before overwriting it, and removes the difference: `rootfs/`
+  files and dropped native units (step `retire dropped`, `:1044-1189`),
+  repo files (`:1195-1220`), an old route file (`:1937-1986`), orphan files
+  under `/opt/<stack>/` (`:2104-2143`, with `generated_dirs` keeping the
+  gateway's generated directories out, `:146-158`), undeclared mounts
+  (`:782-848`).
+- *Destroy and forget share one `unregister`* (`core/src/ops/destroy.rs:207-332`):
+  metrics target, dashboard, route, state record and manual checks, then the
+  fleet-wide files rendered again from what remains
+  (`core/src/ops/fleetfiles.rs:236-271`). `destroy_recorded` (`:414-446`)
+  runs the ordinary destroy from the manifest in state, so `homelab apply`
+  (`client/src/apply.rs`, `client/src/main.rs:704-827`) can remove a stack
+  whose directory is gone with every gate intact.
+- *Data is recorded, not deleted.* `HostState.retired`
+  (`core/src/state.rs:158-204`) names each retired stack, app or unit's
+  repositories, `/appdata` paths and vault paths; the fleet check shows each
+  as `Noted` (`core/src/ops/retired.rs:190-219`); only `wipe`
+  (`:363-468`), behind a typed name and path checks (`wipe_plan`,
+  `:260-355`), deletes them. `DestroyRecorded` and `WipeRetired` are
+  command-line only (`CLI_ONLY` in `client/tests/tui_snapshot_tests.rs`).
+
+The Uptime Kuma seeder follows the same rule outside the Rust code: it
+removes every monitor no file declares, with a refusal when more than a
+quarter would go at once (`plan_owned`, `stacks/uptime/kuma-seeder/seed.py:241-264`).
+The full surface, one row per registration, is
+[deployment/REGISTRATION_SURFACE.md](deployment/REGISTRATION_SURFACE.md).
+
 **Presets are data.** `presets/<name>/` holds `preset.yml` and app
 directories (10 presets). The scaffolder derives the manifest's `storage:`
 from every `/appdata/` bind in the compose files, so a data path is written
@@ -323,8 +359,9 @@ deploy pushes it to `/opt/<stack>/<app>/.env` (mode 600) and keeps a vault
 copy at `<state_dir>/secrets/<stack>/<app>.env` (0600; a native unit's file
 at `<stack>/<parent dir>/<name>` since fix-37); an app the client
 sent nothing for gets the vault copy back
-(`core/src/ops/deploy.rs:1119-1139`). The intent repo gets files, not env
-(`:893-900`). The `pct push` staging file is 0600 and removed after the push
+(`core/src/ops/deploy.rs:1443-1480`). The intent repo gets files, not env
+(`:1192-1224`). Vault copies outlive the app, unit or stack they belong to
+until `homelab wipe` (`core/src/ops/retired.rs:1-15`). The `pct push` staging file is 0600 and removed after the push
 (`core/src/ops/util.rs:99-122`).
 
 **Credentials in argv.** `/proc/<pid>/cmdline` is world-readable. The device
@@ -346,7 +383,7 @@ read with `curl -H @<file>` since v3.58.3 (fix-35,
 | API token | `token` in `/etc/homelab/host.toml` or `HOMELAB_TOKEN` (`host/src/main.rs:371,404-407`); client: environment, `~/.config/homelab/env`, `./.env` (`client/src/main.rs:49-88`) | `host.toml` is in the host-meta snapshot (`core/src/ops/backup.rs:989,1056-1063`) | the daemon exits with "FATAL: token must be set (>=16 chars) via ... or HOMELAB_TOKEN" (`host/src/main.rs:408-414`); any string of 16 or more characters, set on both sides, works |
 | TLS cert and key | `<state_dir>/tls-*.pem` | host-meta snapshot (`backup.rs:973-974`) | a new pair is generated at start without a warning (`host/src/tls.rs:21`); pinned clients refuse with "certificate fingerprint mismatch" (`client/src/tls.rs:58-61`) |
 | restic password | `restic_password_file`, default `/var/lib/homelab/secrets/restic.pw` (`backup.rs:128`) | only inside the host-meta snapshot, encrypted with this same password (`backup.rs:971,1056-1066`) | no backup or restore runs, and no copy the code makes can open itself. The out-of-band copy is an operations matter: OPERATIONS_RUNBOOK.md asks for an offline copy of `restic.pw` |
-| stack `.env` | latch or a local file on the workstation | container `.env`, host vault, host-meta snapshot | a redeploy re-seals from the client or restores from the vault (`deploy.rs:1119-1139`) |
+| stack `.env` | latch or a local file on the workstation | container `.env`, host vault (kept after the app or stack is gone, until `homelab wipe`), host-meta snapshot | a redeploy re-seals from the client or restores from the vault (`deploy.rs:1443-1480`) |
 
 **Precondition for any future key-escrow step (gap-15).** The latch project
 reported that a separate `LATCH_HOME` does not isolate the OS keyring:
@@ -466,6 +503,8 @@ Looks wrong, is deliberate:
 | You want | Touch |
 |---|---|
 | an operation | `core/src/ops/<name>.rs` (Runner, guards), a `Command` variant (`proto/src/lib.rs:22`), a host arm through `run_mutating_op` if it mutates, a client verb, `MockExecutor` tests |
+| a registration outside the container (a file on another machine, a list entry) | the deploy step that adds it, its removal in `unregister` (`core/src/ops/destroy.rs:207`), a removal in the deploy when the stack file can drop it, a row in `docs/deployment/REGISTRATION_SURFACE.md`, a test in `core/tests/declarative_cleanup_tests.rs` |
+| data a removal must keep | a path in the `RetiredRecord` (`core/src/state.rs:183-204`), filled in `core/src/ops/retired.rs`, so `wipe` can find it |
 | a catalog app | `presets/<name>/` only |
 | a host setting | `FileConfig` and `KNOWN_TOP` in `host/src/main.rs` (`:274`), or the daemon warns it is unknown |
 | a safety rule | `core/src/safety.rs` and a test that proves the refusal |
@@ -478,4 +517,5 @@ Measured 2026-09-27 in the repository root on a clean tree at commit b7bf57b:
 - 5 workspace members (`Cargo.toml:3`); 10 presets (`ls presets | wc -l`).
 - 41 verb names in the dispatch `match` of `client/src/main.rs` (from line
   152): the arm patterns `^        "[a-z0-9-]+"( \| "[a-z0-9-]+")*`, names
-  extracted, `sort -u | wc -l`.
+  extracted, `sort -u | wc -l`. The same count at `ad03664` is 43: `apply`
+  and `wipe` were added.

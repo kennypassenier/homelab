@@ -153,11 +153,14 @@ at least 20 hours old (`host/src/main.rs:1952-1954`, `:2008-2013`).
    `core/src/ops/backup.rs:66-69`). See op-5.
 4. **Host-meta**, the host's own backup, when due
    (`host/src/main.rs:2518-2539`). See op-12.
-5. **Restore drill**: at most one repository per night, only when the last
-   passed drill is older than `restore_drill_interval_s` (default 90
-   days), round robin over the stack and native repositories
-   (`host/src/main.rs:2548-2582`, `core/src/ops/restoredrill.rs:24-30`,
-   `:55-88`).
+5. **Restore drill**: one repository per night (`restore_drill_interval_s`
+   defaults to 20 hours since fix-62; it was 90 days), the one drilled
+   longest ago first, over the stack and native repositories, `host-meta`
+   and the device configurations. Every `.tar` that comes back must list
+   with `tar -tf`. Each repository keeps its own record
+   (`HostState.restore_drills`), so a failure stands until that repository
+   passes (`core/src/ops/restoredrill.rs`, `run_restore_drill` in
+   `host/src/main.rs`).
 6. **Device configurations** from `device_backups` in `host.toml`, one GET
    per device into restic (`host/src/main.rs:2588-2609`).
 7. **ZFS** snapshots and replication, when `zfs_jobs` is set
@@ -894,10 +897,9 @@ the list above names them (`core/src/ops/backup.rs:1056-1065`).
 age: `last_host_meta` is written by the scheduler and by
 `homelab backup-host-meta`, and read only by the nightly plan
 (`core/src/state.rs:113-117`, `host/src/main.rs:2014-2023`, `:2531`,
-`:3408`). The nightly
-restore drill never picks it: the drill list is built from stacks and
-native services only (`core/src/ops/restoredrill.rs:55-77`,
-`host/src/main.rs:2301-2319`). A failure logs
+`:3408`). Since fix-62 the nightly restore drill takes `host-meta` in its
+turn like any other repository (`all_drill_repos` in
+`core/src/ops/restoredrill.rs`). A failure logs
 `"scheduler: host-meta backup FAILED"` and sends the operation's
 notification (`host/src/main.rs:2534-2538`, `:3038`).
 

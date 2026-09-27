@@ -1472,23 +1472,30 @@ plans the night (`host/src/main.rs:2257-2333,2000-2035`):
    (`backup_concurrency`, `host/src/main.rs:164-165,675-677`), all under the
    one operation lock, so they never overlap a deploy
    (`host/src/main.rs:2172-2188`).
-2. Then, one stack at a time: image updates for `auto` apps (D9); for native
-   stacks the release update of `auto` services and the supervised
-   self-update of every service (C7).
+2. Then, one stack at a time and only when that stack's backup ran tonight
+   (fix-60): image updates for `auto` apps (D9); for native stacks the
+   release update of `auto` services and the supervised self-update of
+   `auto` and `self` services (C7, fix-58).
 3. The host's own backup (`host-meta-config` repository: vault, state,
    TLS files, intent repository, `/etc/homelab/host.toml`,
    `core/src/ops/backup.rs:967-1010`).
-4. A restore drill of one repository in turn, when the last passed drill is
-   older than `restore_drill_interval_s` (default 90 days,
-   `core/src/ops/restoredrill.rs:24`): it restores into a scratch directory,
-   judges the result by its file count and largest file, and deletes it
-   (`host/src/main.rs:2040-2083,2541-2582`).
+4. A restore drill of one repository, when the last passed drill is older
+   than `restore_drill_interval_s` (default 20 hours, so every night; it was
+   90 days until fix-62): the repository drilled longest ago goes first, over
+   the stack and native repositories, `host-meta` and each device
+   configuration. It restores into a scratch directory, judges the result by
+   its file count and largest file and by whether every `.tar` in it lists,
+   records the outcome per repository, and deletes the scratch copy
+   (`core/src/ops/restoredrill.rs`, `run_restore_drill` in
+   `host/src/main.rs`). A repository whose drill failed stays a finding until
+   that repository passes.
 5. Device configuration backups and ZFS jobs (E8), when configured.
 6. A fleet check of what the host can see, with a notification only when a
    finding is alarming (`host/src/main.rs:2628-2694`).
 
 With no nightly hour set, nothing runs (`host/src/main.rs:2264-2267`). A stack
-whose night fails (backup failed or an update failed) is parked (H8). A
+whose nightly update fails has its automatic updates parked (H8, fix-59); its
+backups go on, and a failed backup parks nothing. A
 deferred backup is neither a failure nor a backup
 (`core/src/ops/backup.rs:34-86`).
 

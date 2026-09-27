@@ -10,18 +10,32 @@
 //! restore was declared identical to live by comparing two md5 sums that both
 //! belonged to a zero-byte file (F217, F219) — so the verdict here refuses to
 //! be satisfied by empty files, and looks at the LARGEST file that came back
-//! rather than the first. And it is round-robin rather than "always the
-//! biggest repository", so over a year every repository gets its turn instead
-//! of one being proven twelve times.
+//! rather than the first. And it rotates rather than always taking the
+//! biggest repository, so every repository gets its turn.
+//!
+//! fix-62 (restore-drill-covers-almost-nothing, 2026-09-27): "over a year"
+//! was never true. One repository per 90 days over about thirty repositories
+//! is one rotation every 7.4 years, and one drill had run in total. A failure
+//! was cleared by the next repository's pass, host-meta and the device
+//! repositories were never drilled, and a torn tar passed the size rule. Now
+//! one repository is drilled every night (a rotation in about a month), each
+//! repository keeps its own record, the host's own repositories are in the
+//! rotation, and a native unit's tar has to list.
 
 use crate::ops::fleetcheck::{Finding, Severity};
 use crate::state::HostState;
 
-/// How long a passed drill counts for. B3 says quarterly; 90 days is that.
+/// How long a passed drill counts for: one night. Twenty hours rather than
+/// twenty-four for the same reason as the backup's own check — the nightly
+/// tick lands a few minutes earlier some nights, and a 24-hour rule would
+/// then skip every other night.
 ///
 /// Configurable per standing rule 27 — every caller passes it, and the host
 /// reads it from `host.toml`.
-pub const DEFAULT_DRILL_INTERVAL_S: u64 = 90 * 24 * 3600;
+pub const DEFAULT_DRILL_INTERVAL_S: u64 = 20 * 3600;
+
+/// The repository that holds the host's own vault, state and TLS material.
+pub const HOST_META_REPO: &str = "host-meta";
 
 /// Is a drill due? A drill that has never run is always due — that is the
 /// state this project was in for its whole life.
@@ -119,6 +133,79 @@ pub fn verdict(files: usize, largest_bytes: u64) -> Outcome {
     }
 }
 
+/// fix-62: the whole rotation — the stacks' repositories plus the host's own
+/// (`host-meta`: the vault holding the restic password, state.json, TLS) and
+/// each device configuration (`<name>-config`, route A). Those two kinds were
+/// never drilled, and host-meta is the one a full-host rebuild starts from.
+pub fn all_drill_repos(
+    stacks: &[(Vec<crate::manifest::MountSpec>, String, Vec<String>)],
+    devices: &[String],
+) -> Vec<String> {
+    let mut out = drill_repos(stacks);
+    out.push(HOST_META_REPO.to_string());
+    out.extend(devices.iter().cloned());
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// fix-62: whose turn it is tonight — the repository drilled longest ago,
+/// never-drilled ones first, ties by name. A cursor into a sorted list used
+/// to decide this, and a repository that failed then waited a whole
+/// rotation; ordering by the last attempt keeps the rotation and needs no
+/// cursor that a changed list can shift.
+pub fn pick(state: &HostState, repos: &[String]) -> Option<String> {
+    let mut sorted = repos.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    sorted.into_iter().min_by_key(|r| {
+        state
+            .restore_drills
+            .get(r)
+            .map(|d| d.last_attempt)
+            .unwrap_or(0)
+    })
+}
+
+/// fix-62: fold one finished drill into the state. The failure is kept on
+/// the repository it belongs to until that repository passes; another
+/// repository's pass no longer clears it. Records of repositories that left
+/// the rotation are dropped, so a retired stack's last error does not stand
+/// forever.
+pub fn record(state: &mut HostState, repos: &[String], repo: &str, outcome: &Outcome, now: u64) {
+    state
+        .restore_drills
+        .retain(|name, _| repos.iter().any(|r| r == name));
+    let rec = state.restore_drills.entry(repo.to_string()).or_default();
+    rec.last_attempt = now;
+    match outcome {
+        Outcome::Passed { .. } => {
+            rec.last_pass = now;
+            rec.last_error = None;
+            state.last_restore_drill = now;
+        }
+        Outcome::Failed(why) => rec.last_error = Some(why.clone()),
+    }
+    state.last_restore_drill_repo = repo.to_string();
+    // The per-repository record carries the error now; the single field is
+    // left for state written before it and cleared by the first new drill.
+    state.last_restore_drill_error = None;
+}
+
+/// fix-62: a restore that brought back a tar which `tar -tf` cannot read
+/// proves nothing about that unit's data, however large the file is.
+pub fn with_archives(outcome: Outcome, unreadable: &[String]) -> Outcome {
+    match outcome {
+        Outcome::Passed { .. } if !unreadable.is_empty() => Outcome::Failed(format!(
+            "{} archive(s) came back that tar cannot read: {} — a torn archive has content \
+             and proves nothing",
+            unreadable.len(),
+            unreadable.join(", ")
+        )),
+        other => other,
+    }
+}
+
 /// What the state says about the drill: overdue, or failed and left that way.
 pub fn evaluate_drill(state: &HostState, now: u64, interval_s: u64) -> Vec<Finding> {
     let mut out = Vec::new();
@@ -138,9 +225,41 @@ pub fn evaluate_drill(state: &HostState, now: u64, interval_s: u64) -> Vec<Findi
                      with content in it — check the repository and the password file"
                 .into(),
         });
+    }
+    // fix-62: one finding per repository whose own last drill failed, until
+    // that repository passes.
+    for (repo, rec) in &state.restore_drills {
+        let Some(err) = &rec.last_error else {
+            continue;
+        };
+        out.push(Finding {
+            severity: Severity::Broken,
+            subject: format!("restore drill · {}", repo),
+            what: format!(
+                "the last drill of this repository did not prove a restore: {}{}",
+                err,
+                if rec.last_pass == 0 {
+                    " (it has never passed)".to_string()
+                } else {
+                    format!(" (last passed {})", crate::state::ymd(rec.last_pass))
+                }
+            ),
+            remedy: "the backup for this repository is a hypothesis until one comes back \
+                     with content in it — check the repository and the password file; the \
+                     nightly round tries it again in its turn"
+                .into(),
+        });
+    }
+    if !out.is_empty() {
         return out;
     }
-    if due(state.last_restore_drill, now, interval_s) {
+    // A night's grace on top of the interval: a drill that ran at 04:05
+    // yesterday is not overdue at 10:00 today.
+    if due(
+        state.last_restore_drill,
+        now,
+        interval_s.saturating_add(24 * 3600),
+    ) {
         let days = if state.last_restore_drill == 0 {
             "never".to_string()
         } else {

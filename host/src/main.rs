@@ -2090,7 +2090,31 @@ async fn run_restore_drill(
                 .await
                 .map(|o| o.stdout.trim().parse::<u64>().unwrap_or(0))
                 .unwrap_or(0);
-            verdict(count, largest)
+            // fix-62: a native unit's backup is one tar; a torn one has
+            // content and passed the size rule, so each must also list.
+            let unreadable: Vec<String> = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &[
+                        "-c",
+                        &format!(
+                            "find {} -type f -name '*.tar' | while read -r f; do \
+                             tar -tf \"$f\" >/dev/null 2>&1 || echo \"$f\"; done",
+                            target
+                        ),
+                    ],
+                    600,
+                ))
+                .await
+                .map(|o| {
+                    o.stdout
+                        .lines()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            homelab_core::ops::restoredrill::with_archives(verdict(count, largest), &unreadable)
         }
     };
     // Always: a drill that leaves a full restore behind fills the disk the
@@ -2315,7 +2339,7 @@ async fn scheduler_loop(state: AppState) {
             .map(|(n, st)| (n.clone(), st.enabled, st.last_backup))
             .collect();
         // G14: taken before the loop below consumes `snapshot.stacks`.
-        let drill_repos: Vec<String> = homelab_core::ops::restoredrill::drill_repos(
+        let drill_repos: Vec<String> = homelab_core::ops::restoredrill::all_drill_repos(
             &snapshot
                 .stacks
                 .iter()
@@ -2333,7 +2357,16 @@ async fn scheduler_loop(state: AppState) {
                     )
                 })
                 .collect::<Vec<_>>(),
+            &state
+                .config
+                .device_backups
+                .iter()
+                .map(|d| d.name.clone())
+                .collect::<Vec<_>>(),
         );
+        // fix-62: whose turn it is, read before the loop below consumes the
+        // snapshot's stacks.
+        let drill_pick = homelab_core::ops::restoredrill::pick(&snapshot, &drill_repos);
         let plan = nightly_plan(
             hour,
             local_hour,
@@ -2540,36 +2573,33 @@ async fn scheduler_loop(state: AppState) {
         // comparing two md5 sums that both belonged to a zero-byte file, and
         // a drill that can be satisfied by empty files rehearses nothing.
         if plan.contains(&NightlyTask::RestoreDrill) {
-            if let Some((repo, next)) = homelab_core::ops::restoredrill::next_repo(
-                &drill_repos,
-                snapshot.restore_drill_index,
-            ) {
+            if let Some(repo) = drill_pick.clone() {
                 let cfg = homelab_core::ops::backup::BackupCfg {
                     tiers: tiers.clone(),
                     ..state.config.backup.clone()
                 };
                 let target = format!("{}/restore-drill", state.config.state_dir);
                 let outcome = run_restore_drill(&exec, &cfg, &repo, &target).await;
-                if let Ok(mut sn) = store.load().await {
-                    sn.restore_drill_index = next;
-                    sn.last_restore_drill_repo = repo.clone();
-                    match &outcome {
-                        homelab_core::ops::restoredrill::Outcome::Passed {
-                            files,
-                            largest_bytes,
-                        } => {
-                            sn.last_restore_drill = now;
-                            sn.last_restore_drill_error = None;
-                            info!(
-                                "restore drill: {} came back with {} file(s), largest {} bytes",
-                                repo, files, largest_bytes
-                            );
-                        }
-                        homelab_core::ops::restoredrill::Outcome::Failed(why) => {
-                            sn.last_restore_drill_error = Some(why.clone());
-                            tracing::error!("restore drill: {} proved nothing :: {}", repo, why);
-                        }
+                match &outcome {
+                    homelab_core::ops::restoredrill::Outcome::Passed {
+                        files,
+                        largest_bytes,
+                    } => info!(
+                        "restore drill: {} came back with {} file(s), largest {} bytes",
+                        repo, files, largest_bytes
+                    ),
+                    homelab_core::ops::restoredrill::Outcome::Failed(why) => {
+                        tracing::error!("restore drill: {} proved nothing :: {}", repo, why)
                     }
+                }
+                if let Ok(mut sn) = store.load().await {
+                    homelab_core::ops::restoredrill::record(
+                        &mut sn,
+                        &drill_repos,
+                        &repo,
+                        &outcome,
+                        now,
+                    );
                     let _ = store.save(sn).await;
                 }
             }

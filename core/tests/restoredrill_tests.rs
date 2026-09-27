@@ -17,9 +17,10 @@ fn a_drill_that_has_never_run_is_always_due() {
 
 #[test]
 fn a_passed_drill_counts_for_the_configured_window_and_not_a_day_longer() {
+    // fix-62: the default is one night now; the rule itself is unchanged.
     let last = 100 * DAY;
-    assert!(!due(last, last + 89 * DAY, DEFAULT_DRILL_INTERVAL_S));
-    assert!(due(last, last + 90 * DAY, DEFAULT_DRILL_INTERVAL_S));
+    assert!(!due(last, last + 89 * DAY, 90 * DAY));
+    assert!(due(last, last + 90 * DAY, 90 * DAY));
     // The window is Kenny's, not the author's.
     assert!(due(last, last + 8 * DAY, 7 * DAY));
 }
@@ -196,4 +197,106 @@ fn f290_the_list_is_owners_deduplicated_not_mounts() {
         vec![],
     )];
     assert_eq!(drill_repos(&stacks), vec!["home".to_string(), "kyu".into()]);
+}
+
+// ── fix-62: the drill covered almost nothing ────────────────────────────────
+
+use homelab_core::ops::restoredrill::{all_drill_repos, pick, record, with_archives};
+
+fn thirty_repos() -> Vec<String> {
+    (0..30).map(|i| format!("repo{:02}", i)).collect()
+}
+
+fn passed() -> Outcome {
+    Outcome::Passed {
+        files: 3,
+        largest_bytes: 1000,
+    }
+}
+
+/// fix-62 (restore-drill-covers-almost-nothing, 2026-09-27): one repository
+/// per 90 days over about thirty repositories is one full rotation every
+/// 7.4 years. Nights run at the same hour, a few minutes apart; every
+/// repository must have come up within a month of them.
+#[test]
+fn fix_62_every_repository_is_drilled_within_a_month_of_nights() {
+    let repos = thirty_repos();
+    let mut st = HostState::default();
+    let start = 1_800_000_000u64;
+    for night in 0..31u64 {
+        // A few minutes earlier than the night before, as the scheduler's
+        // 20-minute tick allows.
+        let now = start + night * DAY - night * 180;
+        if !due(st.last_restore_drill, now, DEFAULT_DRILL_INTERVAL_S) {
+            continue;
+        }
+        let repo = pick(&st, &repos).unwrap();
+        record(&mut st, &repos, &repo, &passed(), now);
+    }
+    let drilled: Vec<&String> = repos
+        .iter()
+        .filter(|r| st.restore_drills.get(*r).is_some_and(|d| d.last_pass > 0))
+        .collect();
+    assert_eq!(drilled.len(), 30, "drilled: {:?}", drilled);
+}
+
+/// fix-62: a failed repository was reported for one night, then the next
+/// repository's pass cleared the error and it was not tried again for years.
+#[test]
+fn fix_62_a_failed_repository_stays_a_finding_after_another_one_passes() {
+    let repos: Vec<String> = vec!["paperless".into(), "sonarr".into()];
+    let mut st = HostState::default();
+    record(
+        &mut st,
+        &repos,
+        "paperless",
+        &Outcome::Failed("the restore itself failed: wrong password".into()),
+        100 * DAY,
+    );
+    record(&mut st, &repos, "sonarr", &passed(), 101 * DAY);
+    let f = evaluate_drill(&st, 101 * DAY + 3600, DEFAULT_DRILL_INTERVAL_S);
+    assert!(
+        f.iter().any(|f| f.severity == Severity::Broken
+            && f.subject.contains("paperless")
+            && f.what.contains("wrong password")),
+        "{:?}",
+        f
+    );
+    // And it comes up again before the ones that passed.
+    assert_eq!(pick(&st, &repos).as_deref(), Some("paperless"));
+    // Until it passes: then the finding goes.
+    record(&mut st, &repos, "paperless", &passed(), 102 * DAY);
+    assert!(evaluate_drill(&st, 102 * DAY + 3600, DEFAULT_DRILL_INTERVAL_S).is_empty());
+}
+
+/// fix-62: the host's own repository (the vault holding the restic password,
+/// state.json, TLS) and the device configurations were never drilled.
+#[test]
+fn fix_62_host_meta_and_device_repositories_are_in_the_rotation() {
+    let stacks = vec![(
+        vec![mount("/appdata/media/jellyfin-config", Some("jellyfin"))],
+        "media".to_string(),
+        vec![],
+    )];
+    let repos = all_drill_repos(&stacks, &["opnsense".to_string()]);
+    for want in ["jellyfin", "host-meta", "opnsense"] {
+        assert!(
+            repos.contains(&want.to_string()),
+            "{} missing: {:?}",
+            want,
+            repos
+        );
+    }
+}
+
+/// fix-62: a native unit's backup is one tar file; a torn one has content
+/// and passed the size rule.
+#[test]
+fn fix_62_an_archive_tar_cannot_read_fails_the_drill() {
+    let out = with_archives(passed(), &["/r/kyu-data.tar".to_string()]);
+    match out {
+        Outcome::Failed(why) => assert!(why.contains("/r/kyu-data.tar"), "{}", why),
+        other => panic!("a torn archive passed: {:?}", other),
+    }
+    assert_eq!(with_archives(passed(), &[]), passed());
 }

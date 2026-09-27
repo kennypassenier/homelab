@@ -160,6 +160,10 @@ pub struct HostState {
     /// instead of proving the same one twelve times.
     #[serde(default)]
     pub restore_drill_index: usize,
+    /// fix-62: the drill's record per repository, so a failure is remembered
+    /// until that repository passes instead of until any other one does.
+    #[serde(default)]
+    pub restore_drills: BTreeMap<String, DrillRecord>,
     /// fix-59 (failed-update-parks-backups, 2026-09-27): stacks whose
     /// automatic updates a failed nightly update parked, with the unix time
     /// it happened. Only updates: a parked stack keeps its nightly backup.
@@ -179,6 +183,20 @@ pub struct HostState {
     /// becomes something nobody knows is there.
     #[serde(default)]
     pub retired: BTreeMap<String, RetiredRecord>,
+}
+
+/// fix-62: what the restore drill knows about one repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DrillRecord {
+    /// Unix time of the last drill of this repository, passed or not.
+    #[serde(default)]
+    pub last_attempt: u64,
+    /// Unix time of the last drill of this repository that proved a restore.
+    #[serde(default)]
+    pub last_pass: u64,
+    /// Why the last drill of this repository proved nothing. None = it did.
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 /// What kind of thing left the files.

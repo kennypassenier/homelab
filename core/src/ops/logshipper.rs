@@ -125,7 +125,15 @@ loki.process "docker" {{
   // name is under `attrs.tag`. Reading `attrs.name` instead is what left
   // three dashboards empty for months (F72).
   stage.json {{
-    expressions = {{ output = "log", stream = "stream", attrs = "attrs" }}
+    expressions = {{ output = "log", stream = "stream", attrs = "attrs", time = "time" }}
+  }}
+  // The time docker wrote, not the time Alloy read the line: after fix-44
+  // Alloy read each container's whole log at once, and hours of lines would
+  // have landed at one instant (expert panel 2026-09-27,
+  // docker-log-timestamps-wrong).
+  stage.timestamp {{
+    source = "time"
+    format = "RFC3339Nano"
   }}
   stage.json {{
     expressions = {{ container_name = "tag" }}

@@ -451,3 +451,17 @@ fn the_docker_pipeline_drops_the_per_container_filename_label() {
     assert!(docker.contains("stage.label_drop"), "{docker}");
     assert!(docker.contains("\"filename\""), "{docker}");
 }
+
+/// Expert panel 2026-09-27 (docker-log-timestamps-wrong): the docker pipeline
+/// used the moment Alloy read a line as its time. After the read-access fix
+/// (fix-44) Alloy read each container's whole log at once, so hours of lines
+/// landed in Loki at one instant. Docker writes the real time in `time`.
+#[test]
+fn container_lines_keep_the_time_docker_wrote() {
+    let c = config("media", "106-app-media", "http://10.10.10.4:3100", &[]);
+    let docker = &c[c.find("loki.process \"docker\"").unwrap()..];
+    let docker = &docker[..docker.find("forward_to").unwrap()];
+    assert!(docker.contains("time = \"time\""), "{docker}");
+    assert!(docker.contains("stage.timestamp"), "{docker}");
+    assert!(docker.contains("RFC3339Nano"), "{docker}");
+}

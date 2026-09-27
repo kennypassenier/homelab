@@ -128,6 +128,7 @@ fn record(m: &StackManifest) -> StackState {
         native: None,
         natives: Vec::new(),
         incomplete_step: None,
+        route_file: None,
     }
 }
 
@@ -350,8 +351,9 @@ async fn a_stack_that_drops_its_gateway_route_loses_the_route_file() {
     let exec = MockExecutor::new();
     script_existing(&exec, 110, "syncthing", "");
     let mut st = HostState::default();
-    st.stacks
-        .insert("syncthing".into(), record(&manifest(110, "syncthing")));
+    let mut rec = record(&manifest(110, "syncthing"));
+    rec.route_file = Some("110-app-syncthing.yml".into());
+    st.stacks.insert("syncthing".into(), rec);
     seed_state(&exec, st).await;
     let sink = VecSink::new();
     let j = NullJournal;
@@ -373,8 +375,9 @@ async fn a_stack_that_moves_to_another_vmid_loses_the_old_route_file() {
     let exec = MockExecutor::new();
     script_fresh(&exec, "syncthing");
     let mut st = HostState::default();
-    st.stacks
-        .insert("syncthing".into(), record(&manifest(110, "syncthing")));
+    let mut rec = record(&manifest(110, "syncthing"));
+    rec.route_file = Some("110-app-syncthing.yml".into());
+    st.stacks.insert("syncthing".into(), rec);
     seed_state(&exec, st).await;
     let sink = VecSink::new();
     let j = NullJournal;
@@ -393,6 +396,58 @@ async fn a_stack_that_moves_to_another_vmid_loses_the_old_route_file() {
             .iter()
             .any(|c| c.contains("rm -f")),
         "the new one stays"
+    );
+}
+
+/// fix-41: the route retirement removed `<vmid>-app-<stack>.yml` for any
+/// stack without a `gateway_route`, including a route written by hand on the
+/// gateway: almanac's `112-app-almanac.yml` would have gone on its next
+/// deploy, and almanac.kp-soft.dev with it (found by the network reviewer,
+/// 2026-09-27). Only a route file a deploy of this stack wrote, recorded in
+/// state, is retired.
+/// covers: fix-41
+#[tokio::test]
+async fn a_hand_written_route_file_is_never_retired() {
+    let exec = MockExecutor::new();
+    script_existing(&exec, 112, "almanac", "");
+    let mut st = HostState::default();
+    st.stacks
+        .insert("almanac".into(), record(&manifest(112, "almanac")));
+    seed_state(&exec, st).await;
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut sp = spec(112, "almanac");
+    sp.gateway_route = None;
+    let report = deploy(&ctx(&exec, &sink, &j), &sp).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        !exec
+            .calls_containing("112-app-almanac.yml")
+            .iter()
+            .any(|c| c.contains("rm -f")),
+        "a route no deploy of this stack wrote must stay: {:?}",
+        exec.calls()
+    );
+}
+
+/// fix-41: a deploy records the route file it wrote, so a later drop can
+/// retire exactly that file.
+/// covers: fix-41
+#[tokio::test]
+async fn a_deploy_records_the_route_file_it_wrote() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec, "syncthing");
+    let sink = VecSink::new();
+    let j = NullJournal;
+    assert!(
+        deploy(&ctx(&exec, &sink, &j), &spec(110, "syncthing"))
+            .await
+            .ok
+    );
+    let st = load_state(&exec).await;
+    assert_eq!(
+        st.stacks["syncthing"].route_file.as_deref(),
+        Some("110-app-syncthing.yml")
     );
 }
 

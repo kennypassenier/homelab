@@ -40,6 +40,11 @@ pub struct StackState {
     /// it. Nothing should read this — read `natives`.
     #[serde(default)]
     pub native: Option<crate::native::NativeServiceManifest>,
+    /// fix-41: the gateway route file a deploy of this stack wrote. Only this
+    /// file is ever retired; a route written by hand on the gateway (almanac,
+    /// kyu, Home Assistant) is not the stack's to remove.
+    #[serde(default)]
+    pub route_file: Option<String>,
     /// T5: native services on this stack (bare binaries under systemd). A
     /// stack has either `manifest` (compose) or `natives`, never both. A list
     /// because the layout puts kyu, kyu-runner and http-switchboard on one

@@ -24,6 +24,7 @@ fn state_with_stack(applied_at: u64) -> HostState {
             native: None,
             natives: Vec::new(),
             incomplete_step: None,
+            route_file: None,
         },
     );
     st

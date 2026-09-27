@@ -249,6 +249,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
                 natives,
                 enabled: true,
                 incomplete_step: None,
+                route_file: None,
             },
         );
         store.save(state).await?;

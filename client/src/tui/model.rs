@@ -1617,7 +1617,17 @@ fn start_fleet_check(model: &mut Model) {
 
 fn start_deploy(model: &mut Model) {
     match resolve_spec(model) {
-        Ok((spec, _synthetic)) => {
+        // fix-41: a deploy removes what the stack does not declare, and the
+        // synthetic spec declares nothing: deploying it would detach the
+        // stack's mounts and delete its files.
+        Ok((spec, true)) => {
+            model.status_line = format!(
+                "Deploy needs stacks/{}/ — without the stack file there is nothing to deploy, \
+                 and a deploy removes what is not declared; start the TUI from the repository root",
+                spec.manifest.stack_name
+            );
+        }
+        Ok((spec, false)) => {
             model.focus = Some(Focus {
                 title: format!(
                     "DEPLOY {} :: vmid {}",

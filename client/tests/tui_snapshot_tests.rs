@@ -2806,3 +2806,32 @@ fn gap_19_backup_and_restore_refuse_a_stack_without_its_local_stack_file() {
         );
     }
 }
+
+/// fix-41: SHIFT+D without a local `stacks/<name>/` deployed the synthetic
+/// manifest, which declares no files, mounts or route. Since the declarative
+/// cleanup (v3.59.0) a deploy removes whatever is not declared, so that would
+/// detach the stack's mounts and delete its compose files (found by the
+/// usability reviewer, 2026-09-27). Deploy refuses a synthetic spec, like
+/// backup and restore (gap-19).
+///
+/// covers: fix-41
+#[test]
+fn fix_41_deploy_refuses_a_stack_without_its_local_stack_file() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use homelab_client::tui::model::{update, Msg};
+
+    let mut m = ready_model();
+    m.tab = homelab_client::tui::model::Tab::Stacks;
+    m.local_stacks = Vec::new();
+    m.selected_stack = 0;
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT)),
+    );
+    assert!(
+        m.outbox.is_empty(),
+        "nothing may be deployed: {:?}",
+        m.outbox
+    );
+    assert!(m.status_line.contains("stacks/"), "{:?}", m.status_line);
+}

@@ -98,6 +98,7 @@ async fn mark_incomplete(
                     manifest: Some(m.clone()),
                     enabled: true,
                     native: None,
+                    route_file: None,
                     natives: Vec::new(),
                     incomplete_step: Some(step.to_string()),
                 },
@@ -1970,17 +1971,18 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // page, which is rendered from these files. Only when the stack had a
     // record: a stack deployed for the first time has nothing of its own to
     // take away.
-    let stale_routes: Vec<String> = match prior.as_ref() {
-        Some(p) => {
+    // fix-41: only the route file a deploy of this stack recorded writing is
+    // retired, when the stack no longer declares it or now writes another
+    // name (a changed vmid). A route written by hand on the gateway is never
+    // this stack's to remove.
+    let stale_routes: Vec<String> = match prior.as_ref().and_then(|p| p.route_file.clone()) {
+        Some(written) => {
             let keep = spec.gateway_route.as_ref().map(|r| r.filename.clone());
-            let mut v: Vec<String> = Vec::new();
-            for vmid in [p.vmid, m.vmid] {
-                let f = format!("{}-app-{}.yml", vmid, m.stack_name);
-                if Some(&f) != keep.as_ref() && !v.contains(&f) {
-                    v.push(f);
-                }
+            if Some(&written) != keep.as_ref() {
+                vec![written]
+            } else {
+                Vec::new()
             }
-            v
         }
         None => Vec::new(),
     };
@@ -2711,6 +2713,9 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 native: prior_native,
                 natives: prior_natives,
                 incomplete_step: None,
+                // fix-41: the route this deploy wrote, the only one a later
+                // deploy may retire.
+                route_file: spec.gateway_route.as_ref().map(|r| r.filename.clone()),
             },
         );
         store.save(state).await?;

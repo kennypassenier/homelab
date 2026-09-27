@@ -564,6 +564,9 @@ print(json.dumps([len(d3), r3 is not None]))
         .arg("-c")
         .arg(script)
         .env("PYTHONPATH", &dir)
+        // Never leave __pycache__ in the stack directory: the client refuses
+        // a non-UTF-8 file in a stack, and the next deploy failed on it.
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .output()
         .expect("python3 must be available (it is in the CI image)");
     assert!(

@@ -73,3 +73,91 @@ fn fix_39_secret_named_assignments_are_masked_in_output_lines() {
         "grep '^REGISTRY_TOKEN=' f"
     );
 }
+
+/// fix-56 (expert panel, secret-mask-too-narrow, 2026-09-27): the fix-39
+/// masker knew one shape, upper-case `NAME=value` with an unquoted value.
+/// The logging reviewer ran it over the shapes the fleet actually prints and
+/// every one of these passed through in plain text. Each row is pinned.
+///
+/// covers: fix-39
+#[test]
+fn fix_56_every_secret_shape_the_fleet_prints_is_masked() {
+    use homelab_core::executor::trace_line;
+    let secret = "s3cr3tVALUE";
+    let rows = [
+        format!("KYU_TOKEN=\"{secret}\""),
+        format!("export API_KEY='{secret}'"),
+        format!("password={secret}"),
+        format!("SUPERSYNC_SMTP_PASS={secret}"),
+        format!("  DB_PASSWORD: {secret}"),
+        format!("secret_key = \"{secret}\""),
+        format!(r#"{{"password": "{secret}", "user": "kenny"}}"#),
+        format!("DATABASE_URL=postgres://paperless:{secret}@db:5432/paperless"),
+        format!("Authorization: Bearer {secret}"),
+        format!("GET https://api.example/v1?api_key={secret}&page=2"),
+        format!("--password={secret}"),
+    ];
+    for row in &rows {
+        let got = trace_line(row);
+        assert!(!got.contains(secret), "leaked: {row:?} -> {got:?}");
+        assert!(got.contains("<redacted>"), "says so: {row:?} -> {got:?}");
+    }
+    // What is kept around a masked value.
+    let got = trace_line(&format!(r#"{{"password": "{secret}", "user": "kenny"}}"#));
+    assert!(got.contains(r#""user": "kenny""#), "{got}");
+    let got = trace_line(&format!(
+        "DATABASE_URL=postgres://paperless:{secret}@db:5432/x"
+    ));
+    assert!(
+        got.contains("postgres://paperless:") && got.contains("@db:5432/x"),
+        "{got}"
+    );
+    let got = trace_line(&format!(
+        "GET https://api.example/v1?api_key={secret}&page=2"
+    ));
+    assert!(got.contains("&page=2"), "{got}");
+    // And what is not a secret stays exactly as it was.
+    for plain in [
+        "KYU_LISTEN=0.0.0.0:8080",
+        "grep '^REGISTRY_TOKEN=' f",
+        "PAPERLESS_CONSUMER_POLLING=30",
+        "KEY=$(cat /run/secrets/x)",
+        "restic -r rclone:gdrive:homelab-backups/test-config snapshots --json",
+        "https://github.com/kennypassenier/homelab/releases/download/v3.59.6/x",
+        "Container 110-app-paperless  Started",
+    ] {
+        assert_eq!(trace_line(plain), plain);
+    }
+}
+
+/// fix-56: the `[run ]` line itself was never masked, so a secret passed as an
+/// argument reached the transcript, the journal and the incident bundle.
+///
+/// covers: fix-39
+#[tokio::test]
+async fn fix_56_the_run_line_is_masked_too() {
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    let tracer = TracingExecutor::new(&exec, &sink);
+    tracer
+        .run(&Cmd::new(
+            "pct",
+            &[
+                "exec",
+                "109",
+                "--",
+                "sh",
+                "-c",
+                "echo KYU_TOKEN=s3cr3tVALUE > /x",
+            ],
+            30,
+        ))
+        .await
+        .unwrap();
+    let lines = sink.lines();
+    assert!(lines.iter().any(|l| l.starts_with("[run ]")), "{lines:?}");
+    assert!(
+        !lines.iter().any(|l| l.contains("s3cr3tVALUE")),
+        "{lines:?}"
+    );
+}

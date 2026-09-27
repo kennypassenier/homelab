@@ -214,18 +214,31 @@ Do this first when the host itself was lost: every later step needs the vault it
 /var/lib/homelab/state.json     # what is deployed where
 /var/lib/homelab/tls-cert.pem   # the certificate the clients pin
 /var/lib/homelab/tls-key.pem
-/var/lib/homelab/repo           # the git history of every deployed file
+/var/lib/homelab/repo           # the history of every deployed file
 /etc/homelab/host.toml     # token, webhooks, zfs_jobs and every other setting
-/usr/local/bin/smart-textfile-collector.py     # these three only when present
-/etc/systemd/system/smart-collector.service
-/etc/systemd/system/smart-collector.timer
 ```
 
-Not in it: the `homelab-host` program and its unit file (Layer 1), rclone's own configuration, `journal.jsonl`, `incidents/` and `restic-cache/`.
+and, each only when it was present on the host (`HOST_META_EXTRAS` in core/src/ops/backup.rs): the SMART collector, the network bridges, Proxmox's storage and job definitions, the VM configurations (Home Assistant's USB passthrough), the swappiness drop-in and rclone's own configuration:
+
+```sh
+/usr/local/bin/smart-textfile-collector.py
+/etc/systemd/system/smart-collector.service
+/etc/systemd/system/smart-collector.timer
+/etc/network/interfaces
+/etc/pve/storage.cfg
+/etc/pve/jobs.cfg
+/etc/pve/qemu-server
+/etc/sysctl.d/99-homelab-swappiness.conf
+/root/.config/rclone/rclone.conf
+```
+
+Not in it: the `homelab-host` program and its unit file (Layer 1), `journal.jsonl`, `incidents/` and `restic-cache/`.
 
 **The password is inside the thing it opens.** `restic.pw` is in this repository, and the same password opens every repository, so an offline copy of it is the one thing this whole runbook cannot do without. The code keeps no second copy. The offline copy is in Kenny's Bitwarden: the one statement in this document that no code can confirm.
 
-**rclone first.** restic reaches Google Drive through rclone's remote `gdrive`, whose configuration is in no backup. On a fresh host install `restic` and `rclone`, run `rclone config` to create the remote `gdrive` again, then:
+**Do not start the daemon before this restore.** A daemon that starts on an empty host takes a host-meta snapshot of that empty state in its first night, and from then on `latest` is the empty host. So pick the snapshot by its ID, never by `latest`.
+
+**rclone first.** restic reaches Google Drive through rclone's remote `gdrive`. Its configuration is in this repository, which cannot be opened without it: on a fresh host install `restic` and `rclone`, run `rclone config` to create the remote `gdrive` again (or restore from the second copy, when its pool survived), then:
 
 ```sh
 rclone lsd gdrive:homelab-backups          # the remote works and the folder is there
@@ -234,12 +247,12 @@ install -d -m 700 /var/lib/homelab/secrets
 export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/host-meta-config
 export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
 export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
-restic snapshots
-restic ls latest | head -50
-restic restore latest --target /
+restic snapshots                      # the newest one from before the loss: note its ID
+restic ls <ID> | head -50
+restic restore <ID> --target /
 ```
 
-The snapshot stores absolute paths, so `--target /` puts every file back where it was. Then start the daemon (Layer 1, when its program is not there yet) and do Layer 1's pin check: the restored certificate keeps the fingerprint the clients already pin.
+The snapshot stores absolute paths, so `--target /` puts every file back where it was. Only then start the daemon (Layer 1, when its program is not there yet) and do Layer 1's pin check: the restored certificate keeps the fingerprint the clients already pin.
 
 ## Layer 4: Restore a stack's data
 

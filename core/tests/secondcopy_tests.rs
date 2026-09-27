@@ -219,8 +219,10 @@ fn every_repository_is_copied_under_the_retention_its_source_keeps() {
         "W2: the stack's own policy"
     );
     assert_eq!(tiers_of("kyu"), Some(fleet()));
-    // The source of these two is never pruned, so the copy must not be
-    // either: pruning only the copy would re-copy the same snapshots nightly.
+    // fix-111: host-meta is pruned by the fleet tiers at source, so its copy is.
+    assert_eq!(tiers_of("host-meta"), Some(fleet()));
+    // A device configuration is never pruned at source, so the copy must not
+    // be either: pruning only the copy would re-copy the same snapshots nightly.
     assert_eq!(tiers_of("opnsense"), None);
 }
 

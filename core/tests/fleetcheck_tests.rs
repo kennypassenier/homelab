@@ -56,6 +56,11 @@ fn check(state: &HostState, live: &LiveFacts) -> Vec<homelab_core::ops::fleetche
     if s.last_integrity_check == 0 {
         s.last_integrity_check = NOW;
     }
+    // fix-111: and the host-meta backup, which a fixture with stacks would
+    // otherwise report as never taken.
+    if s.last_host_meta == 0 {
+        s.last_host_meta = NOW;
+    }
     // Same treatment for the seeder: a fixture that says nothing about it
     // would otherwise report "never ran" in every test here. The tests that
     // ARE about it call `evaluate_seed` directly.

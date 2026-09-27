@@ -95,10 +95,14 @@ pub fn repo_policies(
             add(owner, Some(tiers.clone()));
         }
     }
-    // host-meta and the device configurations are never pruned at source.
+    // fix-111: host-meta is pruned by the fleet-wide tiers.
     if state.last_host_meta > 0 {
-        add(crate::ops::restoredrill::HOST_META_REPO.to_string(), None);
+        add(
+            crate::ops::restoredrill::HOST_META_REPO.to_string(),
+            Some(fleet.to_vec()),
+        );
     }
+    // The device configurations are never pruned at source.
     for d in devices {
         add(d.clone(), None);
     }

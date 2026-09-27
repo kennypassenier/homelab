@@ -1239,6 +1239,27 @@ pub async fn restore_with(
     runner.finish_ok()
 }
 
+/// Host files outside `state_dir` that the host-meta snapshot carries when
+/// they exist. Public so the disaster-recovery runbook lists the same set.
+pub const HOST_META_EXTRAS: &[&str] = &[
+    "/usr/local/bin/smart-textfile-collector.py",
+    "/etc/systemd/system/smart-collector.service",
+    "/etc/systemd/system/smart-collector.timer",
+    // fix-111 (host-meta-gaps, 2026-09-27): what a rebuilt host needs and no
+    // backup held. The VLAN bridges every container sits on; the storage and
+    // job definitions; the VM configurations, which carry Home Assistant's
+    // Zigbee USB passthrough (VM 101) — read from pmxcfs on the host, the VMs
+    // themselves are not touched; the swappiness drop-in; and rclone's
+    // remote, without which restic cannot reach Google Drive at all. All
+    // tiny, and all skipped when absent like the three above.
+    "/etc/network/interfaces",
+    "/etc/pve/storage.cfg",
+    "/etc/pve/jobs.cfg",
+    "/etc/pve/qemu-server",
+    "/etc/sysctl.d/99-homelab-swappiness.conf",
+    "/root/.config/rclone/rclone.conf",
+];
+
 /// H10 hardening: snapshot the host's own critical metadata — the secrets
 /// vault, state.json, and TLS material — into a dedicated `host-meta` repo.
 /// Without this, losing the host disk loses the keys needed for recovery.
@@ -1276,14 +1297,7 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
     // Absent paths are skipped rather than fatal: a host that never had the
     // SMART collector is not a broken backup, and restic refuses the whole
     // snapshot if any source is missing.
-    let host_extras: Vec<String> = [
-        "/usr/local/bin/smart-textfile-collector.py",
-        "/etc/systemd/system/smart-collector.service",
-        "/etc/systemd/system/smart-collector.timer",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
+    let host_extras: Vec<String> = HOST_META_EXTRAS.iter().map(|s| s.to_string()).collect();
 
     step!(runner, "init repo", {
         // gap-24: read the answer; only "already exists" is harmless.
@@ -1353,6 +1367,47 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
                 &cfg.password_file,
                 &args,
                 600,
+            ),
+        )
+        .await?;
+        Ok(StepOutcome::Changed)
+    });
+
+    // fix-111 (host-meta-gaps, 2026-09-27): this repository was never
+    // pruned, so every rotated secret was kept for ever. The fleet-wide
+    // tiers apply, whose last tier is unbounded: history stays, one
+    // snapshot per bucket.
+    step!(runner, "retention", {
+        let out = run_ok(
+            exec,
+            &restic(
+                &cfg.restic_base,
+                "host-meta",
+                &cfg.password_file,
+                &["snapshots", "--json"],
+                300,
+            ),
+        )
+        .await?;
+        let doomed = crate::retention::forget_list(
+            &parse_snapshots_json(&out.stdout),
+            &cfg.tiers,
+            ctx.now_unix,
+        );
+        if doomed.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let mut args: Vec<&str> = vec!["forget"];
+        args.extend(doomed.iter().map(|s| s.as_str()));
+        args.push("--prune");
+        run_ok(
+            exec,
+            &restic(
+                &cfg.restic_base,
+                "host-meta",
+                &cfg.password_file,
+                &args,
+                900,
             ),
         )
         .await?;

@@ -540,6 +540,40 @@ pub fn nightly_report_due(
     fingerprint != last_fingerprint || now.saturating_sub(last_sent) >= NIGHTLY_REPORT_REPEAT_S
 }
 
+/// fix-111: older than this, the host-meta backup has stopped: two nights.
+pub const HOST_META_MAX_AGE_S: u64 = 48 * 3600;
+
+/// fix-111 (host-meta-gaps, 2026-09-27): the daemon's own repository — the
+/// vault with the restic password, state.json, TLS and host.toml — had no
+/// doctor line and no finding, so a host-meta backup that stopped was
+/// reported nowhere until the host was lost. A host that manages no stack
+/// yet is left alone: there is nothing of its own worth keeping.
+pub fn evaluate_host_meta(state: &HostState, now: u64) -> Vec<Finding> {
+    if state.stacks.is_empty() {
+        return Vec::new();
+    }
+    let age = now.saturating_sub(state.last_host_meta);
+    if state.last_host_meta != 0 && age <= HOST_META_MAX_AGE_S {
+        return Vec::new();
+    }
+    vec![Finding {
+        severity: Severity::Broken,
+        subject: "host-meta".into(),
+        what: if state.last_host_meta == 0 {
+            "the daemon's own state (vault, state.json, TLS, host.toml) has never been backed up"
+                .into()
+        } else {
+            format!(
+                "the daemon's own state was last backed up {} hours ago",
+                age / 3600
+            )
+        },
+        remedy: "a lost host disk now loses the vault and the restic password with it; run \
+                 `homelab backup-host-meta` and read why the nightly one failed"
+            .into(),
+    }]
+}
+
 /// fix-65: how often a standing alarming set is sent again.
 pub const NIGHTLY_REPORT_REPEAT_S: u64 = 7 * 24 * 3600;
 
@@ -790,6 +824,7 @@ pub fn evaluate(
         now_unix,
         crate::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S,
     ));
+    out.extend(evaluate_host_meta(state, now_unix));
     // fix-96: the second copy and the rotating restic check.
     out.extend(crate::ops::secondcopy::evaluate_copies(
         state,

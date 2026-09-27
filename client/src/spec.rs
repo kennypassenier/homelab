@@ -1122,6 +1122,12 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
 
     // ── Layer 3 ──
     doc.push_str("## Layer 3: Restore the daemon's own state (host-meta)\n\n");
+    // fix-111 (host-meta-gaps, 2026-09-27): the extras are the list the backup
+    // itself uses, so the two cannot drift apart again.
+    let extras = homelab_core::ops::backup::HOST_META_EXTRAS
+        .iter()
+        .map(|p| format!("{}\n", p))
+        .collect::<String>();
     doc.push_str(&format!(
         "Do this first when the host itself was lost: every later step needs the vault it \
          brings back. The repository is `{base}/host-meta-config`, written nightly and by \
@@ -1131,39 +1137,49 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          {state}/state.json     # what is deployed where\n\
          {state}/tls-cert.pem   # the certificate the clients pin\n\
          {state}/tls-key.pem\n\
-         {state}/repo           # the git history of every deployed file\n\
+         {state}/repo           # the history of every deployed file\n\
          {toml}     # token, webhooks, zfs_jobs and every other setting\n\
-         /usr/local/bin/smart-textfile-collector.py     # these three only when present\n\
-         /etc/systemd/system/smart-collector.service\n\
-         /etc/systemd/system/smart-collector.timer\n\
          ```\n\n\
-         Not in it: the `homelab-host` program and its unit file (Layer 1), rclone's own \
-         configuration, `journal.jsonl`, `incidents/` and `restic-cache/`.\n\n\
+         and, each only when it was present on the host (`HOST_META_EXTRAS` in \
+         core/src/ops/backup.rs): the SMART collector, the network bridges, Proxmox's \
+         storage and job definitions, the VM configurations (Home Assistant's USB \
+         passthrough), the swappiness drop-in and rclone's own configuration:\n\n```sh\n\
+         {extras}\
+         ```\n\n\
+         Not in it: the `homelab-host` program and its unit file (Layer 1), `journal.jsonl`, \
+         `incidents/` and `restic-cache/`.\n\n\
          **The password is inside the thing it opens.** `restic.pw` is in this repository, \
          and the same password opens every repository, so an offline copy of it is the one \
          thing this whole runbook cannot do without. The code keeps no second copy. The \
          offline copy is in Kenny's Bitwarden: the one statement in this document that no \
          code can confirm.\n\n\
-         **rclone first.** restic reaches Google Drive through rclone's remote `{remote}`, \
-         whose configuration is in no backup. On a fresh host install `restic` and `rclone`, \
-         run `rclone config` to create the remote `{remote}` again, then:\n\n```sh\n\
+         **Do not start the daemon before this restore.** A daemon that starts on an empty \
+         host takes a host-meta snapshot of that empty state in its first night, and from \
+         then on `latest` is the empty host. So pick the snapshot by its ID, never by \
+         `latest`.\n\n\
+         **rclone first.** restic reaches Google Drive through rclone's remote `{remote}`. \
+         Its configuration is in this repository, which cannot be opened without it: on a \
+         fresh host install `restic` and `rclone`, run `rclone config` to create the remote \
+         `{remote}` again (or restore from the second copy, when its pool survived), \
+         then:\n\n```sh\n\
          rclone lsd {remote}:{folder}          # the remote works and the folder is there\n\
          install -d -m 700 {vault}\n\
          # write the offline copy of the password to {pw}, mode 600\n\
          export RESTIC_REPOSITORY={base}/host-meta-config\n\
          export RESTIC_PASSWORD_FILE={pw}\n\
          export RESTIC_CACHE_DIR={cache}\n\
-         restic snapshots\n\
-         restic ls latest | head -50\n\
-         restic restore latest --target /\n\
+         restic snapshots                      # the newest one from before the loss: note its ID\n\
+         restic ls <ID> | head -50\n\
+         restic restore <ID> --target /\n\
          ```\n\n\
          The snapshot stores absolute paths, so `--target /` puts every file back where it \
-         was. Then start the daemon (Layer 1, when its program is not there yet) and do \
+         was. Only then start the daemon (Layer 1, when its program is not there yet) and do \
          Layer 1's pin check: the restored certificate keeps the fingerprint the \
          clients already pin.\n\n",
         base = base,
         state = state,
         toml = host_toml,
+        extras = extras,
         remote = remote,
         folder = folder,
         vault = vault,

@@ -506,7 +506,7 @@ Looks wrong, is deliberate:
 | a registration outside the container (a file on another machine, a list entry) | the deploy step that adds it, its removal in `unregister` (`core/src/ops/destroy.rs:207`), a removal in the deploy when the stack file can drop it, a row in `docs/deployment/REGISTRATION_SURFACE.md`, a test in `core/tests/declarative_cleanup_tests.rs` |
 | data a removal must keep | a path in the `RetiredRecord` (`core/src/state.rs:183-204`), filled in `core/src/ops/retired.rs`, so `wipe` can find it |
 | a catalog app | `presets/<name>/` only |
-| a host setting | `FileConfig` and `KNOWN_TOP` in `host/src/main.rs` (`:274`), or the daemon warns it is unknown |
+| a host setting | a field of `FileConfig` in `host/src/main.rs` and its resolved value in `Config`; `unknown_keys` and the settings save follow the struct |
 | a safety rule | `core/src/safety.rs` and a test that proves the refusal |
 
 ## Numbers

@@ -2793,6 +2793,48 @@ mod native_from_zero {
         );
     }
 
+    /// fix-39: keeping the vault current read each native unit's env file with
+    /// `cat` through the tracing executor, which echoes a command's output into
+    /// the transcript. Every deploy of CT 109 therefore wrote KYU_TOKEN,
+    /// KYU_SECRET_KEY and both hub tokens into the client's terminal, the host's
+    /// journal and any incident bundle. The value must appear nowhere in the
+    /// transcript.
+    ///
+    /// covers: fix-39
+    #[tokio::test]
+    async fn fix_39_a_secret_file_read_for_the_vault_never_reaches_the_transcript() {
+        let exec = MockExecutor::new();
+        script_fresh(&exec);
+        exec.respond_always("id -u kyu", CmdOutput::ok("998"));
+        exec.respond_always(
+            "test -s '/appdata/drill/kyu-config/kyu.env'",
+            CmdOutput::ok("yes"),
+        );
+        exec.respond_always("test -x '/usr/local/bin/kyu'", CmdOutput::ok("yes"));
+        exec.respond_always("systemctl is-active kyu", CmdOutput::ok("active"));
+        exec.respond_always(
+            "cat '/appdata/drill/kyu-config/kyu.env'",
+            CmdOutput::ok("KYU_TOKEN=s3cr3t-value-fix39\n"),
+        );
+        let sink = VecSink::new();
+        let journal = NullJournal;
+        let spec = native_spec();
+        let report = deploy(&ctx(&exec, &sink, &journal), &spec).await;
+        assert!(report.ok, "{:?}", report.error);
+        assert_eq!(
+            exec.file("/var/lib/homelab/secrets/drill/kyu-config/kyu.env")
+                .as_deref(),
+            Some("KYU_TOKEN=s3cr3t-value-fix39\n"),
+            "the vault still gets its copy"
+        );
+        let leaked: Vec<String> = sink
+            .lines()
+            .into_iter()
+            .filter(|l| l.contains("s3cr3t-value-fix39"))
+            .collect();
+        assert!(leaked.is_empty(), "secret in the transcript: {leaked:?}");
+    }
+
     /// Two units on one stack that both read a file called `token.env`, the
     /// shape of kyu-runner and http-switchboard on CT 109.
     fn two_token_units_spec() -> DeploySpec {

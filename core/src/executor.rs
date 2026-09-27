@@ -11,6 +11,10 @@ pub struct Cmd {
     pub program: String,
     pub args: Vec<String>,
     pub timeout_s: u64,
+    /// fix-39: the output is a secret. The tracing executor logs the command
+    /// but never its output, so the value reaches no transcript, journal or
+    /// incident bundle.
+    pub quiet: bool,
 }
 
 impl Cmd {
@@ -19,7 +23,14 @@ impl Cmd {
             program: program.to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
             timeout_s,
+            quiet: false,
         }
+    }
+
+    /// Mark the output as secret (fix-39): traced as a command, never echoed.
+    pub fn quiet(mut self) -> Self {
+        self.quiet = true;
+        self
     }
 
     pub fn rendered(&self) -> String {
@@ -153,6 +164,13 @@ impl Executor for TracingExecutor<'_> {
     async fn run(&self, cmd: &Cmd) -> Result<CmdOutput, CoreError> {
         self.line(format!("[run ] {}", cmd.shell_line()));
         let out = self.inner.run(cmd).await?;
+        if cmd.quiet {
+            self.line(format!(
+                "  (output withheld: {} bytes, secret)",
+                out.stdout.len()
+            ));
+            return Ok(out);
+        }
         for l in out.stdout.lines().chain(out.stderr.lines()).take(20) {
             if !l.trim().is_empty() {
                 self.line(format!("  {}", trace_line(l)));
@@ -182,6 +200,19 @@ pub async fn run_ok(exec: &dyn Executor, cmd: &Cmd) -> Result<CmdOutput, CoreErr
             detail: format!("rc={} :: {}", out.code, out.stderr.trim()),
         })
     }
+}
+
+/// Read a secret inside an LXC via `pct exec`: like `pct_sh`, but the output
+/// never reaches the transcript (fix-39).
+pub async fn pct_sh_secret(
+    exec: &dyn Executor,
+    vmid: u16,
+    script: &str,
+    timeout_s: u64,
+) -> Result<CmdOutput, CoreError> {
+    let vm = vmid.to_string();
+    exec.run(&Cmd::new("pct", &["exec", &vm, "--", "sh", "-c", script], timeout_s).quiet())
+        .await
 }
 
 /// Run a shell script inside an LXC via `pct exec`.

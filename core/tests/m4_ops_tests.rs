@@ -2208,6 +2208,36 @@ async fn e3_env_restored_from_vault_when_client_sends_none() {
     );
 }
 
+/// gap-27 follow-up: an app whose `.env` exists only on the container (the
+/// client sent none, the vault has none) gets it copied INTO the vault on
+/// deploy. syncthing on CT 108 had such a file since 2026-08-29 and nowhere
+/// else; the doctor's env check, made real on the Phase 9 form, found it.
+///
+/// covers: gap-27
+#[tokio::test]
+async fn gap_27_an_env_only_on_the_container_is_copied_into_the_vault() {
+    use homelab_core::ops::deploy::deploy;
+    let exec = MockExecutor::new();
+    deploy_mocks(&exec);
+    exec.respond_always("ls -A", CmdOutput::ok("config\n"));
+    exec.respond_always("cat '/opt/test/app/.env'", CmdOutput::ok("PUID=1000\n"));
+    let spec = deploy_spec(manifest(108, "test")); // env is empty, vault is empty
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        exec.file("/var/lib/homelab/secrets/test/app.env")
+            .as_deref(),
+        Some("PUID=1000\n"),
+        "the container's .env must be sealed into the vault"
+    );
+    assert_eq!(
+        exec.file_mode("/var/lib/homelab/secrets/test/app.env"),
+        Some(0o600)
+    );
+}
+
 #[tokio::test]
 async fn d3_removed_app_is_stopped_and_deleted_but_config_kept() {
     use homelab_core::ops::deploy::deploy;

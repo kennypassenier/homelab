@@ -1144,10 +1144,28 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     continue;
                 }
                 let vault = format!("{}/secrets/{}/{}.env", ctx.state_dir, m.stack_name, app);
+                let dest = format!("/opt/{}/{}/.env", m.stack_name, app);
                 if let Ok(env) = exec.read_file(&vault).await {
-                    let dest = format!("/opt/{}/{}/.env", m.stack_name, app);
                     push_content(exec, m.vmid, &dest, &env, "600").await?;
                     log_info(format!("[vault] {} restored from vault", dest));
+                } else {
+                    // gap-27: an .env that exists only on the container (no
+                    // client copy, no vault copy) is sealed into the vault,
+                    // so a lost container gets it back. Read, never echoed.
+                    let got = crate::executor::pct_sh_secret(
+                        exec,
+                        m.vmid,
+                        &format!("cat {} 2>/dev/null || true", crate::ops::util::shq(&dest)),
+                        60,
+                    )
+                    .await?;
+                    if !got.stdout.trim().is_empty() {
+                        exec.write_file(&vault, &got.stdout, 0o600).await?;
+                        log_info(format!(
+                            "[vault] {} sealed from the container (values not logged)",
+                            dest
+                        ));
+                    }
                 }
             }
             Ok(StepOutcome::Changed)
@@ -2299,7 +2317,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 // .env copies: a file that exists in exactly one place is one
                 // disk failure from being gone.
                 for f in need.env_files.iter().chain(need.credentials.iter()) {
-                    let got = pct_sh(
+                    // fix-39: a secret, read without echoing it.
+                    let got = crate::executor::pct_sh_secret(
                         exec,
                         m.vmid,
                         &format!("cat {} 2>/dev/null || true", crate::ops::util::shq(f)),

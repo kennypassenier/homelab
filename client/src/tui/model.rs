@@ -1673,6 +1673,7 @@ fn start_stack_op(model: &mut Model, op: StackOp) {
             manifest: Box::new(m),
             snapshot: "latest".into(),
             skip_safety_copy: false,
+            app: None,
         },
         StackOp::Update => Command::UpdateStack {
             manifest: Box::new(m),

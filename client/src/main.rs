@@ -929,26 +929,27 @@ async fn main() {
         }
         "restore" => {
             // fix-64: flags may stand anywhere; the rest is dir then snapshot.
-            let yes = args.iter().any(|a| a == "--yes");
-            let skip_safety_copy = args.iter().any(|a| a == "--no-safety-copy");
-            let positional: Vec<&String> = args
-                .iter()
-                .skip(2)
-                .filter(|a| !a.starts_with("--"))
-                .collect();
-            let dir = positional.first().unwrap_or_else(|| {
-                die("usage: homelab restore stacks/<name> [snapshot] [--yes] [--no-safety-copy]")
-            });
-            let snapshot = positional
-                .get(1)
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "latest".into());
+            // fix-112: `--app <name>` restores one app of the stack.
+            let homelab_client::RestoreArgs {
+                dir,
+                snapshot,
+                app,
+                yes,
+                skip_safety_copy,
+            } = homelab_client::restore_args(args.get(2..).unwrap_or(&[]))
+                .unwrap_or_else(|e| die(&e));
             // F294: the manifest alone, for the same reason as F291 above.
-            let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            let manifest = spec::build_manifest(Path::new(&dir)).unwrap_or_else(|e| die(&e));
             let stack = manifest.stack_name.clone();
             println!(
-                "{}▶ restore {} from '{}'{}",
-                C_YELLOW, stack, snapshot, C_RESET
+                "{}▶ restore {}{} from '{}'{}",
+                C_YELLOW,
+                stack,
+                app.as_deref()
+                    .map(|a| format!(" :: {}", a))
+                    .unwrap_or_default(),
+                snapshot,
+                C_RESET
             );
             // fix-64: a restore overwrites live data, so the command line asks
             // for the name the way the TUI always did; `--yes` answers it
@@ -978,6 +979,7 @@ async fn main() {
                     snapshot,
                     confirm: Some(confirm),
                     skip_safety_copy,
+                    app,
                 },
             )
             .await;
@@ -1228,7 +1230,7 @@ async fn main() {
             println!("  homelab plan stacks/<name>          validate and show the spec (no host; runs latch/gh for secrets and native releases)");
             println!("  homelab deploy stacks/<name>");
             println!("  homelab backup stacks/<name>        restic snapshot (E1)");
-            println!("  homelab restore stacks/<name> [snap] [--yes] [--no-safety-copy]  restore from snapshot (E2); asks for the name, keeps a copy of the current data");
+            println!("  homelab restore stacks/<name> [snap] [--app <app>] [--yes] [--no-safety-copy]  restore from snapshot (E2), one night across the stack's repositories; asks for the name, keeps a copy of the current data");
             println!("  homelab update stacks/<name> [app]  pull+up with rollback (D9/B6)");
             println!(
                 "  homelab patch                       apt dist-upgrade all managed stacks (H6)"

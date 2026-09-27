@@ -4279,6 +4279,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             snapshot,
             confirm,
             skip_safety_copy,
+            app,
         } => {
             // fix-64: no typed name, no restore — whoever sent the request.
             if let Err(e) = homelab_core::ops::backup::restore_confirmed(
@@ -4298,12 +4299,13 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             let cfg = state.config.backup.clone();
             run_mutating_op(state, &exec, req.id, "restore", |ctx| {
                 Box::pin(async move {
-                    homelab_core::ops::backup::restore_with(
+                    homelab_core::ops::backup::restore_app(
                         ctx,
                         &manifest,
                         &cfg,
                         &snapshot,
                         !skip_safety_copy,
+                        app.as_deref(),
                     )
                     .await
                 })

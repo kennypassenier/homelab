@@ -69,6 +69,10 @@ pub enum Command {
         /// the current data a restore takes first.
         #[serde(default)]
         skip_safety_copy: bool,
+        /// fix-112: restore one app of the stack; None (and every client
+        /// before fix-112) restores the whole stack.
+        #[serde(default)]
+        app: Option<String>,
     },
     /// D9/B6: managed update with rollback. `app: None` = whole stack.
     UpdateStack {

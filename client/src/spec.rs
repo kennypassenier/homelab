@@ -1201,11 +1201,16 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          core/src/ops/backup.rs). It asks for the stack name first (`--yes` for scripts) \
          and, with the stack down, copies the current data to \
          `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it \
-         (fix-64; `--no-safety-copy` skips that copy):\n\n```sh\n\
+         (fix-64; `--no-safety-copy` skips that copy). With that copy taken it empties each \
+         data directory first, so no file the snapshot lacks stays behind. `--app <app>` \
+         restores one app and leaves the others running. A stack with several repositories \
+         is restored to one night: the newest `run-<unix time>` tag every one of its \
+         repositories has, or the night of the snapshot ID given (fix-112):\n\n```sh\n\
          pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose down'   # every app\n\
          export RESTIC_REPOSITORY={base}/<app>-config                   # every repository of the stack\n\
-         restic snapshots\n\
-         restic restore latest --target /\n\
+         restic snapshots --tag run-<unix time>                          # the same night in each\n\
+         find /appdata/<stack>/<app>-config -mindepth 1 -delete          # only after copying it aside\n\
+         restic restore <ID> --target /\n\
          pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose up -d'  # every app, in order\n\
          ```\n\n\
          The snapshots store the absolute host paths (`/appdata/<stack>/<app>-config`), so \

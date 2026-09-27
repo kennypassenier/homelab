@@ -1391,7 +1391,14 @@ kept, and the reason must be at least 10 characters
 homelab restore stacks/syncthing              # latest snapshot
 homelab restore stacks/syncthing <snapshot-id>
 homelab restore stacks/syncthing --yes        # scripts: the name counts as typed
+homelab restore stacks/media --app sonarr     # one app; the others keep running
 ```
+
+Since fix-112 (2026-09-27) a stack with several repositories is restored to
+one night across all of them (the `run-<unix time>` tag every backup
+writes), never each repository's own newest; with the safety copy taken,
+each data directory is emptied before restic writes into it, so no file the
+snapshot does not have stays behind.
 
 Since fix-64 (2026-09-27) the command asks you to type the stack name, as the
 TUI always did, and the host refuses a restore request without it. Before it

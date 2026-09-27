@@ -263,13 +263,14 @@ export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
 export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
 ```
 
-**A compose stack.** When the daemon is up, `homelab restore stacks/<stack> [snapshot]` does the following, and by hand it is the same (`restore` in core/src/ops/backup.rs). It asks for the stack name first (`--yes` for scripts) and, with the stack down, copies the current data to `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it (fix-64; `--no-safety-copy` skips that copy):
+**A compose stack.** When the daemon is up, `homelab restore stacks/<stack> [snapshot]` does the following, and by hand it is the same (`restore` in core/src/ops/backup.rs). It asks for the stack name first (`--yes` for scripts) and, with the stack down, copies the current data to `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it (fix-64; `--no-safety-copy` skips that copy). With that copy taken it empties each data directory first, so no file the snapshot lacks stays behind. `--app <app>` restores one app and leaves the others running. A stack with several repositories is restored to one night: the newest `run-<unix time>` tag every one of its repositories has, or the night of the snapshot ID given (fix-112):
 
 ```sh
 pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose down'   # every app
 export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<app>-config                   # every repository of the stack
-restic snapshots
-restic restore latest --target /
+restic snapshots --tag run-<unix time>                          # the same night in each
+find /appdata/<stack>/<app>-config -mindepth 1 -delete          # only after copying it aside
+restic restore <ID> --target /
 pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose up -d'  # every app, in order
 ```
 

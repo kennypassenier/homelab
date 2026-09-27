@@ -117,14 +117,16 @@ impl NativeServiceManifest {
     /// service. Decided here rather than in the scheduler loop so it is a
     /// test instead of an assumption.
     pub fn nightly_updates(&self) -> NightlyUpdates {
-        // fix-58: the policy gates both paths. `auto` keeps both, exactly as
-        // before; `manual` gets neither.
+        // fix-58: the policy gates both paths; `manual` gets neither.
+        // fix-148 (native-update-mechanism, Kenny 2026-09-27, form "Keuzes
+        // helpers"): one mechanism per policy. `auto` used to run both the
+        // signed release update and the unit's own `update_cmd`, two paths to
+        // the same binary with different checks (the kit's own verb does not
+        // check the ecosystem signature, fix-29). `auto` is the signed release
+        // update only; the unit's own verb runs only under `self`.
         NightlyUpdates {
             release: self.update_policy == UpdatePolicy::Auto,
-            own_cmd: matches!(
-                self.update_policy,
-                UpdatePolicy::Auto | UpdatePolicy::OwnVerb
-            ),
+            own_cmd: self.update_policy == UpdatePolicy::OwnVerb,
         }
     }
 }

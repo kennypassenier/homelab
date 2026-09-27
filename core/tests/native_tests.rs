@@ -1420,8 +1420,9 @@ fn fix_58_a_manual_native_with_an_update_cmd_gets_no_nightly_update() {
         !n.own_cmd,
         "manual: the unit's own update verb must not run either"
     );
-    // `self` (almanac): its own verb and nothing else; `auto` keeps both, as
-    // before.
+    // `self` (almanac): its own verb and nothing else. fix-148 (Kenny,
+    // 2026-09-27, form "Keuzes helpers"): `auto` gets the signed release
+    // update only; the unit's own verb runs only under `self`.
     let own = NativeServiceManifest {
         update_policy: UpdatePolicy::OwnVerb,
         ..manual.clone()
@@ -1433,7 +1434,10 @@ fn fix_58_a_manual_native_with_an_update_cmd_gets_no_nightly_update() {
         ..manual.clone()
     }
     .nightly_updates();
-    assert!(auto.own_cmd && auto.release);
+    assert!(
+        auto.release && !auto.own_cmd,
+        "auto: the signed release update, and not the unit's own verb as well"
+    );
     // `self` without a verb to run is a stack file mistake.
     let why = validate_native(&NativeServiceManifest {
         update_policy: UpdatePolicy::OwnVerb,

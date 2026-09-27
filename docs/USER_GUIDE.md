@@ -977,8 +977,9 @@ Tests: `core/tests/native_tests.rs:1473,1508`.
 
 **Update policy** (deployment decision B1, `docs/deployment/UPDATE_POLICY.md`
 and `docs/deployment/REGISTER.md`, row B1): a service with `update_policy: auto`
-gets the latest signed release installed by the nightly run before its
-supervised self-update; `self` services get only their own `update_cmd`; `manual`
+gets the latest signed release installed by the nightly run, and nothing else
+(fix-148: its own `update_cmd` no longer runs as well); `self` services get only
+their own `update_cmd`; `manual`
 services are left alone at night, neither release-updated nor self-updated
 (fix-58, `NativeServiceManifest::nightly_updates`). `update_policy: auto` without a
 `release_repo` fails validation (`core/src/native.rs:163-167`). The host reads

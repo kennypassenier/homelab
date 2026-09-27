@@ -110,6 +110,16 @@ Type=oneshot
 ExecStart=/usr/local/lib/homelab-rollback.sh
 ```
 
+`/etc/systemd/journald.conf.d/homelab-limits.conf` (mode 644):
+
+```ini
+# Written by homelab-host (core/src/hostunits.rs); edit it there, not here.
+# pve's journal held 4 GB back to 2026-04-05 with no limit of its own
+# (Kenny, 2026-09-27, pve-journal-tokens: "journal begrenzen").
+[Journal]
+SystemMaxUse=2G
+```
+
 `/usr/local/lib/homelab-rollback.sh` (mode 755):
 
 ```sh

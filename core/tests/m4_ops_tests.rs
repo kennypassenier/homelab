@@ -1080,6 +1080,36 @@ async fn daemon_units_ship_with_the_binary_and_a_self_update_installs_them() {
     );
 }
 
+/// Kenny's choice 2026-09-27 (pve-journal-tokens: "journal begrenzen"): pve's
+/// journal was 4 GB back to 2026-04-05 with no limit of its own. The cap
+/// ships with the binary like the units, and journald is restarted only when
+/// the cap was just written.
+#[tokio::test]
+async fn the_journal_cap_ships_with_the_binary_and_restarts_journald_once() {
+    use homelab_core::hostunits::UNITS;
+    let exec = MockExecutor::new();
+    exec.respond_always("--selfcheck", CmdOutput::ok("3.61.0\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = self_update(&ctx(&exec, &sink, &j), &SelfUpdateCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let cap = UNITS
+        .iter()
+        .find(|u| u.path == "/etc/systemd/journald.conf.d/homelab-limits.conf")
+        .expect("the journal cap is one of the host files");
+    assert!(cap.content.contains("SystemMaxUse=2G"));
+    assert_eq!(exec.calls_containing("restart systemd-journald").len(), 1);
+
+    // Unchanged on a later update: no restart.
+    let again = MockExecutor::new();
+    again.respond_always("--selfcheck", CmdOutput::ok("3.61.1\n"));
+    for u in UNITS {
+        again.seed_file(u.path, u.content);
+    }
+    let _ = self_update(&ctx(&again, &sink, &j), &SelfUpdateCfg::default()).await;
+    assert!(again.calls_containing("systemd-journald").is_empty());
+}
+
 /// Doctor names a unit on pve that differs from the one the binary carries.
 #[test]
 fn doctor_reports_host_units_that_drifted() {

@@ -92,15 +92,28 @@ pub async fn self_update(ctx: &OpCtx<'_>, cfg: &SelfUpdateCfg) -> OperationRepor
     // restart already runs under them.
     step!(runner, "install host units", {
         let mut changed = false;
+        let mut journald = false;
         for u in crate::hostunits::UNITS {
             let live = exec.read_file(u.path).await.ok();
             if live.as_deref() != Some(u.content) {
+                if let Some(dir) = std::path::Path::new(u.path).parent() {
+                    let dir = dir.to_string_lossy().to_string();
+                    run_ok(exec, &Cmd::new("mkdir", &["-p", &dir], 30)).await?;
+                }
                 exec.write_file(u.path, u.content, u.mode).await?;
                 changed = true;
+                journald |= u.path == crate::hostunits::JOURNALD_CAP;
             }
         }
         if changed {
             run_ok(exec, &Cmd::new("systemctl", &["daemon-reload"], 30)).await?;
+            if journald {
+                run_ok(
+                    exec,
+                    &Cmd::new("systemctl", &["restart", "systemd-journald"], 60),
+                )
+                .await?;
+            }
             Ok(StepOutcome::Changed)
         } else {
             Ok(StepOutcome::Unchanged)

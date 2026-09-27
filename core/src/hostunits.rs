@@ -15,6 +15,10 @@ pub struct HostUnit {
     pub mode: u32,
 }
 
+/// pve's journal cap (Kenny, 2026-09-27). journald reads it only when it
+/// restarts, so the self-update restarts journald when this file changed.
+pub const JOURNALD_CAP: &str = "/etc/systemd/journald.conf.d/homelab-limits.conf";
+
 pub const UNITS: &[HostUnit] = &[
     HostUnit {
         path: "/etc/systemd/system/homelab-host.service",
@@ -24,6 +28,11 @@ pub const UNITS: &[HostUnit] = &[
     HostUnit {
         path: "/etc/systemd/system/homelab-host-rollback.service",
         content: include_str!("../assets/host-units/homelab-host-rollback.service"),
+        mode: 0o644,
+    },
+    HostUnit {
+        path: JOURNALD_CAP,
+        content: include_str!("../assets/host-units/homelab-journald.conf"),
         mode: 0o644,
     },
     HostUnit {

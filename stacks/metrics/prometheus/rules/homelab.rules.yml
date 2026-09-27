@@ -21,17 +21,36 @@ groups:
           description: "Prometheus cannot scrape {{ $labels.instance }} ({{ $labels.host }})."
 
       - alert: FilesystemAlmostFull
-        # Excludes pseudo-filesystems: tmpfs and overlay report their own sizes
-        # and would fire constantly without saying anything about real storage.
+        # One alert per DEVICE, not per mount. The hypervisor's root is
+        # bind-mounted into every container, so counted per mount a full
+        # pve root arrived as 14 alerts, each named after a container
+        # (expert panel 2026-09-27, measured: 14 hosts, 27 series).
+        # Pseudo-filesystems are excluded: tmpfs and overlay report their own
+        # sizes and would fire constantly without saying anything about real
+        # storage.
         expr: >
-          100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}
-          / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} * 100) > 90
+          max by (device) (
+            100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} * 100)
+          ) > 90
         for: 15m
         labels:
           severity: warning
         annotations:
-          summary: "{{ $labels.host }}: {{ $labels.mountpoint }} is over 90% full"
-          description: "Filesystem {{ $labels.mountpoint }} on {{ $labels.host }} has less than 10% free."
+          summary: "{{ $labels.device }} is over 90% full"
+          description: "Filesystem {{ $labels.device }} has less than 10% free ({{ $value | printf \"%.0f\" }}% used)."
+
+      - alert: HypervisorRootFillingUp
+        # Prometheus itself, the logs and pmxcfs all live on pve's root. The
+        # rule looks at the trend over six hours, so a runaway grows into an
+        # alert before the disk is full rather than after.
+        expr: predict_linear(node_filesystem_avail_bytes{role="hypervisor",mountpoint="/"}[6h], 3 * 86400) < 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "pve's root filesystem will be full within 3 days at this rate"
+          description: "{{ $value | humanize1024 }}B predicted free in 3 days on pve's /."
 
       - alert: DiskPendingSectors
         # The earliest warning a drive gives: sectors it can no longer read
@@ -53,3 +72,85 @@ groups:
         annotations:
           summary: "{{ $labels.model }} failed its own SMART self-assessment"
           description: "Drive {{ $labels.device }} ({{ $labels.model }}, serial {{ $labels.serial }}) reports itself as failing."
+
+      # ── Missing data ─────────────────────────────────────────────────
+      # The rules above fire only while their metric exists. A drive that
+      # stops answering SMART disappears from the metrics, and a rule on a
+      # vanished series never fires (expert panel 2026-09-27,
+      # alert-rules-blind-to-missing-data).
+      - alert: SmartCollectorStale
+        # The collector on pve writes its own last-run time; 6 hours means
+        # at least a few runs missed.
+        expr: time() - smart_collector_last_run_seconds > 6 * 3600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The SMART collector on pve has not run for {{ $value | humanizeDuration }}"
+          description: "No drive health has been read since then; every disk rule is blind."
+
+      - alert: DriveMissing
+        # A drive whose health was reported a day ago and is not now.
+        expr: smart_device_health_ok offset 1d unless on (serial) smart_device_health_ok
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Drive {{ $labels.model }} (serial {{ $labels.serial }}) stopped reporting"
+          description: "It answered SMART a day ago and does not now: a dying or unplugged drive."
+
+      - alert: ZpoolNotOnline
+        # Every pool on pve is a single disk, so anything but online is loss
+        # of redundancy that was never there, or loss of the pool.
+        expr: node_zfs_zpool_state{state!="online"} == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ZFS pool {{ $labels.zpool }} is {{ $labels.state }}"
+          description: "Pool {{ $labels.zpool }} on pve reports state {{ $labels.state }}."
+
+      - alert: TargetDown
+        # HostDown covers the node exporters; this covers every other job,
+        # so a service's own metrics going quiet is not silence.
+        expr: up{job!="node"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} has not answered Prometheus for 10 minutes"
+          description: "Scrape target {{ $labels.instance }} (job {{ $labels.job }}) is down."
+
+      - alert: AlmanacJournalUnreadable
+        expr: almanac_journal_readable == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Almanac cannot read its own journal"
+          description: "Events accepted now may not be delivered to Google Calendar."
+
+      - alert: SystemdUnitFailed
+        # Only units this fleet actually depends on. The template leftovers
+        # (openipmi, nvmf-autoconnect) are masked by the deploy instead of
+        # being listed here as noise.
+        expr: node_systemd_unit_state{state="failed", name=~"docker\\.service|alloy\\.service|node-exporter\\.service|prometheus-node-exporter\\.service|kyu.*\\.service|almanac.*\\.service|http-switchboard.*\\.service"} == 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.name }} has failed on {{ $labels.host }}"
+          description: "systemd reports {{ $labels.name }} failed on {{ $labels.host }}."
+
+      # ── The alert chain itself ───────────────────────────────────────
+      # A Watchdog rule routed to an Uptime Kuma push monitor follows once
+      # that push path exists; an always-firing rule on today's single route
+      # would reach the phone every 12 hours.
+      - alert: AlertDeliveryFailing
+        expr: increase(alertmanager_notifications_failed_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alertmanager failed to deliver {{ $value | printf \"%.0f\" }} notification(s) via {{ $labels.integration }}"
+          description: "Alerts are not reaching the phone. Check the kyu token and CT 109."

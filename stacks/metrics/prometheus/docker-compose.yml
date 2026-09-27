@@ -6,6 +6,10 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=90d
+      # The TSDB lives on pve's root (/dev/mapper/pve-root, shared with
+      # pmxcfs and the logs): 6.33 GB and +0.22 GB a day on 2026-09-27. A
+      # cardinality blow-up must hit this cap, not fill the hypervisor.
+      - --storage.tsdb.retention.size=15GB
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./rules:/etc/prometheus/rules:ro

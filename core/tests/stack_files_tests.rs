@@ -613,3 +613,38 @@ fn traefik_and_the_bouncer_read_the_visitor_address_from_the_tunnel() {
         "trusting every sender would let anyone on the LAN pick their own address"
     );
 }
+
+/// Expert panel 2026-09-27: the metrics stack could fill pve's root with no
+/// size cap (tsdb-on-pve-root-no-cap: 6.33 GB growing 0.22 GB a day on
+/// /dev/mapper/pve-root), a full pve root arrived as 14 alerts named after
+/// containers (disk-alert-fanout-wrong-host), rules on vanished series never
+/// fired (alert-rules-blind-to-missing-data), and nothing watched delivery
+/// (alert-chain-unwatched).
+#[test]
+fn the_metrics_stack_caps_its_disk_and_alerts_on_missing_data() {
+    let dir = stacks_dir().join("metrics/prometheus");
+    let compose = std::fs::read_to_string(dir.join("docker-compose.yml")).unwrap();
+    assert!(compose.contains("--storage.tsdb.retention.size=15GB"));
+    let rules = std::fs::read_to_string(dir.join("rules/homelab.rules.yml")).unwrap();
+    for alert in [
+        "SmartCollectorStale",
+        "DriveMissing",
+        "ZpoolNotOnline",
+        "TargetDown",
+        "AlmanacJournalUnreadable",
+        "SystemdUnitFailed",
+        "AlertDeliveryFailing",
+        "HypervisorRootFillingUp",
+    ] {
+        assert!(rules.contains(&format!("alert: {alert}")), "{alert}");
+    }
+    assert!(
+        rules.contains("max by (device)"),
+        "one filesystem alert per device, not per bind mount"
+    );
+    let prom = std::fs::read_to_string(dir.join("prometheus.yml")).unwrap();
+    assert!(
+        prom.contains("job_name: alertmanager"),
+        "AlertDeliveryFailing reads Alertmanager's own counters"
+    );
+}

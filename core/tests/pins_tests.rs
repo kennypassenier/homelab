@@ -31,7 +31,6 @@ fn stack(vmid: u16, name: &str) -> StackState {
         last_backup: NOW,
         applied_hash: String::new(),
         manifest: None,
-        native: None,
         natives: Vec::new(),
         incomplete_step: None,
         enabled: true,

@@ -236,7 +236,6 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
                 last_backup,
                 applied_hash: String::new(),
                 manifest: None,
-                native: None,
                 natives,
                 enabled: true,
                 incomplete_step: None,

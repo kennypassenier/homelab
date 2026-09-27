@@ -125,7 +125,6 @@ fn record(m: &StackManifest) -> StackState {
         applied_hash: String::new(),
         manifest: Some(m.clone()),
         enabled: true,
-        native: None,
         natives: Vec::new(),
         incomplete_step: None,
         route_file: None,
@@ -798,7 +797,6 @@ async fn a_native_unit_dropped_from_the_stack_is_stopped_and_unregistered_with_i
             .collect::<Vec<_>>(),
         vec!["kyu"]
     );
-    assert!(rec.native.is_none());
     let gone = after
         .retired
         .get("kyu/oldsvc")

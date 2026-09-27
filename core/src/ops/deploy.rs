@@ -97,7 +97,6 @@ async fn mark_incomplete(
                     applied_hash: String::new(),
                     manifest: Some(m.clone()),
                     enabled: true,
-                    native: None,
                     route_file: None,
                     natives: Vec::new(),
                     incomplete_step: Some(step.to_string()),
@@ -2844,23 +2843,17 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         //
         // ask-8: except a unit the stack FILE dropped from `natives:` — the
         // step "retire dropped" stopped it, and it leaves the record here.
-        let (prior_native, prior_natives) = state
+        let prior_natives: Vec<crate::native::NativeServiceManifest> = state
             .stacks
             .get(&m.stack_name)
             .map(|s| {
-                let native = s
-                    .native
-                    .clone()
-                    .filter(|n| !dropped_natives.contains(&n.unit));
-                let natives: Vec<crate::native::NativeServiceManifest> = s
-                    .natives
+                s.natives
                     .iter()
                     .filter(|n| !dropped_natives.contains(&n.unit))
                     .cloned()
-                    .collect();
-                (native, natives)
+                    .collect()
             })
-            .unwrap_or((None, Vec::new()));
+            .unwrap_or_default();
         // ask-8 / ask-9: an app or unit that left the files leaves its
         // backups, /appdata and vault copies behind, KEPT until `homelab
         // wipe`; recorded here with the date it left. A stack or app that is
@@ -2913,7 +2906,6 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 applied_hash: manifest::intent_hash(spec),
                 manifest: Some(m.clone()),
                 enabled,
-                native: prior_native,
                 natives: prior_natives,
                 incomplete_step: None,
                 // fix-41: the route this deploy wrote, the only one a later

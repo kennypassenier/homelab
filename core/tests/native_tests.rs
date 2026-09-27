@@ -434,11 +434,36 @@ async fn t5_pre_list_state_migrates_on_load() {
         "the single service moved into the list"
     );
     assert_eq!(st.natives[0].unit, "almanac");
-    assert!(
-        st.native.is_none(),
-        "the legacy field is cleared after the move"
-    );
+    // The legacy field no longer exists on `StackState` (fix-137), so there
+    // is nothing left to clear; `a_saved_state_has_one_field_for_native_services`
+    // checks that it is not written back.
     assert_eq!(st.last_backup, 2, "unrelated bookkeeping is untouched");
+}
+
+/// legacy-native-field (expert panel, 2026-09-27): the pre-T5 `native`
+/// field is migrated when state is read and never written again, so the
+/// file holds one field for one fact. Two fields could disagree after a
+/// partial write, and the deploy carried both along.
+#[tokio::test]
+async fn a_saved_state_has_one_field_for_native_services() {
+    use homelab_core::state::StateStore;
+    let exec = MockExecutor::new();
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{"almanac":{
+          "vmid":112,"hostname":"112-app-almanac","apps":[],"applied_at":1,
+          "native":{"stack_name":"almanac","vmid":112,"hostname":"112-app-almanac",
+            "unit":"almanac","binary":"/opt/almanac/bin/almanac","env_file":null,
+            "data_dirs":["/appdata/almanac/almanac-config"],"update_cmd":null},
+          "natives":[]}}}"#,
+    );
+    let store = StateStore::new(&exec, "/var/lib/homelab");
+    store.update(|_| ()).await.unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_str(&exec.file("/var/lib/homelab/state.json").unwrap()).unwrap();
+    let st = &saved["stacks"]["almanac"];
+    assert!(st.get("native").is_none(), "legacy field written: {st}");
+    assert_eq!(st["natives"][0]["unit"], "almanac", "{st}");
 }
 
 /// D25 for native services: the repository is named after the SERVICE, not

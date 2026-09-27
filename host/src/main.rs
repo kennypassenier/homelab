@@ -1861,6 +1861,7 @@ port = 5003
                 natives: Vec::new(),
                 incomplete_step: None,
                 route_file: None,
+                extra_route_files: Vec::new(),
             },
         );
         hs.stacks.insert(
@@ -1878,6 +1879,7 @@ port = 5003
                 natives: Vec::new(),
                 incomplete_step: None,
                 route_file: None,
+                extra_route_files: Vec::new(),
             },
         );
         let (total, used, committed, cores, load1) =

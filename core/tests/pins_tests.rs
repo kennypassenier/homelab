@@ -36,6 +36,7 @@ fn stack(vmid: u16, name: &str) -> StackState {
         incomplete_step: None,
         enabled: true,
         route_file: None,
+        extra_route_files: Vec::new(),
     }
 }
 

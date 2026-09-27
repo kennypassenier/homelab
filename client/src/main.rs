@@ -36,6 +36,20 @@ fn die(msg: &str) -> ! {
     std::process::exit(1);
 }
 
+/// fix-92 (routes-outside-repo-unvalidated, 2026-09-27): every route in the
+/// stacks directory `base`, held against every other before anything is
+/// sent — one owner per hostname, every backend a stack's address or
+/// declared external. The whole directory rather than the one stack: a
+/// duplicate hostname is a fact about two stacks, and the one being planned
+/// may be either of them.
+fn check_fleet_routes(base: &Path) {
+    match spec::fleet_route_problems(base) {
+        Ok(problems) if problems.is_empty() => {}
+        Ok(problems) => die(&format!("route check failed:\n  {}", problems.join("\n  "))),
+        Err(e) => die(&format!("route check: {}", e)),
+    }
+}
+
 /// Fill HOMELAB_HOST/HOMELAB_TOKEN from a config file when they are not
 /// already in the environment.
 ///
@@ -731,6 +745,7 @@ async fn main() {
                 .get(2)
                 .unwrap_or_else(|| die("usage: homelab plan stacks/<name>"));
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            check_fleet_routes(Path::new(dir).parent().unwrap_or(Path::new(".")));
             match homelab_core::manifest::validate(&spec) {
                 Ok(()) => println!(
                     "{}✓ valid{} — {} would deploy vmid {}: {} file(s), {} env(s)",
@@ -753,6 +768,7 @@ async fn main() {
             if let Err(e) = homelab_core::manifest::validate(&spec) {
                 die(&format!("validation failed: {}", e));
             }
+            check_fleet_routes(Path::new(dir).parent().unwrap_or(Path::new(".")));
             let ok = deploy_spec(&host, &token, spec).await;
             std::process::exit(if ok { 0 } else { 1 });
         }
@@ -775,6 +791,7 @@ async fn main() {
                     base
                 ));
             }
+            check_fleet_routes(base_path);
             let (ok, fleet) = rpc_collect(&host, &token, Command::GetState).await;
             let fleet = match fleet {
                 Some(f) if ok => f,

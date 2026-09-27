@@ -37,6 +37,7 @@ fn one_stack() -> homelab_core::state::HostState {
             natives: Vec::new(),
             incomplete_step: None,
             route_file: None,
+            extra_route_files: Vec::new(),
         },
     );
     st

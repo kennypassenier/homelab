@@ -56,6 +56,7 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
             mode: None,
         }],
         env: std::collections::BTreeMap::new(),
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     }

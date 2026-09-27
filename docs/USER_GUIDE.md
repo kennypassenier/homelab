@@ -1883,6 +1883,45 @@ dropped `gateway_route:` or moved to another vmid, which removes the old
 `core/tests/declarative_cleanup_tests.rs:349,372`). The front page follows,
 since it is rendered from these files (section 4).
 
+A route file that keeps a name of its own is an `extra_routes` entry (fix-91,
+2026-09-27). It exists for the files that were written by hand on the
+gateway before the repository held them: almanac's route became an ordinary
+`gateway_route`, and `manual-kyu.yml` (stack kyu), `manual-homeassistant.yml`
+and `manual-routes.yml` (stack gateway) keep their names, because a rename
+would leave the old file routing the same hostname beside the new one. Each
+is read from `routes/<filename>` in the stack directory and never enters the
+container:
+
+```yaml
+extra_routes:
+  - filename: manual-routes.yml
+    external: ["https://10.10.5.1", "https://10.10.5.250:8006"]
+```
+
+`external` names each backend in the file that is not a stack's own
+container, exactly as the file writes it (Home Assistant, OPNsense,
+Proxmox). A deploy writes the files, records them in host state and retires
+one the stack stops declaring; destroy and forget remove the recorded ones.
+A file on the gateway that no deploy recorded is never removed
+(`client/tests/route_files_tests.rs`, `core/tests/route_files_tests.rs`).
+
+`homelab plan`, `homelab deploy`, `homelab apply` and a deploy from the TUI
+first hold every route in the stacks directory against every other (fix-92)
+and stop with `route check failed:` and one line per problem when:
+
+- two route files claim the same hostname (F115's shape);
+- two stacks declare the same route file name;
+- a backend is neither a stack's address nor listed under `external:`;
+- an `external:` entry names a backend its file does not route to;
+- a route file is not valid YAML.
+
+The whole directory is checked, not only the stack named, because a
+duplicate hostname is a fact about two stacks. The nightly check and
+`homelab check` report, as drift, every file in the gateway's routes
+directory that no stack's deploy recorded, whatever its extension; homelab
+never deletes such a file itself (`core/tests/route_check_tests.rs`,
+`client/tests/route_check_tests.rs`).
+
 #### H2 · OPNsense Kea DHCP reservations
 
 **Status:** Removed. Built and then removed (FEATURES.md amendment of

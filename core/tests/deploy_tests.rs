@@ -66,6 +66,7 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
             mode: None,
         }],
         env: std::collections::BTreeMap::new(),
+        extra_routes: Vec::new(),
         gateway_route: Some(GatewayRoute {
             gateway_vmid: 104,
             filename: "110-app-syncthing.yml".into(),

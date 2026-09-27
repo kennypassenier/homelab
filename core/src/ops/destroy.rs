@@ -263,24 +263,37 @@ async fn unregister(
 
     runner
         .step("remove gateway route", || async {
-            let dest = format!(
-                "{}/{}-app-{}.yml",
-                ctx.safety.gateway_routes_dir, vmid, stack_name
-            );
-            let _ = exec
-                .run(&Cmd::new(
-                    "pct",
-                    &[
-                        "exec",
-                        &ctx.safety.gateway_vmid.to_string(),
-                        "--",
-                        "rm",
-                        "-f",
-                        &dest,
-                    ],
-                    30,
-                ))
-                .await?;
+            let mut files = vec![format!("{}-app-{}.yml", vmid, stack_name)];
+            // fix-91: the `extra_routes` files this stack's deploy recorded go
+            // with it. They carry a name of their own, so the derived one above
+            // does not reach them, and a router left behind for a stack that
+            // is gone is F115. Only recorded files: a route written by hand
+            // that no deploy recorded stays (fix-41).
+            let recorded = crate::state::StateStore::new(exec, &ctx.state_dir)
+                .load()
+                .await
+                .ok()
+                .and_then(|s| s.stacks.get(stack_name).cloned())
+                .map(|st| st.extra_route_files)
+                .unwrap_or_default();
+            files.extend(recorded);
+            for f in &files {
+                let dest = format!("{}/{}", ctx.safety.gateway_routes_dir, f);
+                let _ = exec
+                    .run(&Cmd::new(
+                        "pct",
+                        &[
+                            "exec",
+                            &ctx.safety.gateway_vmid.to_string(),
+                            "--",
+                            "rm",
+                            "-f",
+                            &dest,
+                        ],
+                        30,
+                    ))
+                    .await?;
+            }
             Ok(StepOutcome::Changed)
         })
         .await

@@ -431,6 +431,36 @@ pub async fn gather_live_facts(
         facts.containers = parse_pct_list(&out.stdout);
     }
 
+    // fix-92: every name in the routes directory, whatever its extension, so
+    // the check can name a file no stack declares. `*.yml` below would miss
+    // the `.bak` that was there on 2026-09-27. Only a listing that ran counts:
+    // an unreadable directory is no fact, not an empty one.
+    if let Ok(out) = exec
+        .run(&Cmd::new(
+            "pct",
+            &[
+                "exec",
+                &inp.gateway_vmid.to_string(),
+                "--",
+                "sh",
+                "-c",
+                &format!("ls -1A '{}'", inp.gateway_routes_dir),
+            ],
+            30,
+        ))
+        .await
+    {
+        if out.success() {
+            facts.route_files = out
+                .stdout
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect();
+        }
+    }
+
     // Gateway routes: read every fragment, pull out the address it forwards
     // to, and ask whether anything is listening there. A route that resolves
     // to nothing is only ever found by someone who needs it.

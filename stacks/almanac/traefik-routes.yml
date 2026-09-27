@@ -1,0 +1,43 @@
+# Traefik route for Almanac (CT 112) — the event-to-calendar hub.
+#
+# Only the operator dashboard is the point of exposing this: Kenny
+# asked to be able to open it while away from home. Every source that
+# actually posts events — Home Assistant, Grafana, Uptime Kuma — is on
+# the LAN and keeps talking to 10.10.10.12:8080 directly.
+#
+# /metrics is deliberately NOT reachable from the outside. It is
+# unauthenticated on purpose, because a scraper that cannot log in
+# reports a healthy service as down; that trade is right on a private
+# network and wrong on the public internet. It carries no tokens and no
+# payload content, but it does say how busy the household is and when.
+# Prometheus on CT 113 scrapes it over the LAN, where it still answers
+# normally.
+#
+# The block is a path rewrite rather than a deny, because Traefik has
+# no native deny: the request is sent to a path Almanac does not serve
+# and comes back as its ordinary 404.
+
+http:
+  routers:
+    almanac:
+      rule: "Host(`almanac.kp-soft.dev`)"
+      entryPoints: [web]
+      service: almanac
+
+    almanac-block-metrics:
+      rule: "Host(`almanac.kp-soft.dev`) && PathPrefix(`/metrics`)"
+      entryPoints: [web]
+      priority: 100
+      middlewares: [almanac-not-here]
+      service: almanac
+
+  middlewares:
+    almanac-not-here:
+      replacePath:
+        path: "/not-exposed"
+
+  services:
+    almanac:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.12:8080"

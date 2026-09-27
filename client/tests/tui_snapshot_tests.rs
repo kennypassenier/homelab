@@ -256,6 +256,7 @@ fn plan_modal_previews_changes() {
             manifest,
             files: vec![],
             env: Default::default(),
+            extra_routes: Vec::new(),
             gateway_route: None,
             checks: Default::default(),
         }),
@@ -1420,6 +1421,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
             ),
         ],
         env: Default::default(),
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     };
@@ -2016,6 +2018,9 @@ fn every_stack_manifest_agrees_with_the_directories_beside_it() {
             .unwrap()
             .flatten()
             .filter(|e| e.path().is_dir())
+            // fix-91: `routes/` holds the stack's extra route files, bound
+            // for the gateway; the deploy never ships it into the container.
+            .filter(|e| e.file_name() != "routes")
             .filter(|e| {
                 std::fs::read_dir(e.path())
                     .map(|mut rd| rd.next().is_some())

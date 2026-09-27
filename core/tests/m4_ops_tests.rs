@@ -1225,6 +1225,7 @@ fn b4_intent_hash_changes_with_any_file_edit() {
             mode: None,
         }],
         env: Default::default(),
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     };
@@ -1278,6 +1279,7 @@ async fn h4_gpu_and_vpn_flags_produce_device_config() {
             mode: None,
         }],
         env: Default::default(),
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     };
@@ -1320,6 +1322,7 @@ async fn h4_no_flags_no_device_config() {
             mode: None,
         }],
         env: Default::default(),
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     };
@@ -1465,6 +1468,7 @@ async fn b8_clone_template_provisions_via_pct_clone() {
             mode: None,
         }],
         env: Default::default(),
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     };
@@ -1596,6 +1600,7 @@ fn v8_validate_rejects_undeclared_appdata_bind() {
             mode: None,
         }],
         env: Default::default(),
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     };
@@ -1726,6 +1731,7 @@ fn deploy_spec(m: StackManifest) -> homelab_core::manifest::DeploySpec {
             mode: None,
         }],
         env: Default::default(),
+        extra_routes: Vec::new(),
         gateway_route: None,
         checks: Default::default(),
     }
@@ -3159,6 +3165,7 @@ async fn protection_is_set_after_all_drive_changes() {
                 mode: None,
             }],
             env: Default::default(),
+            extra_routes: Vec::new(),
             gateway_route: None,
             checks: Default::default(),
         };

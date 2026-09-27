@@ -46,6 +46,11 @@ pub struct StackState {
     /// kyu, Home Assistant) is not the stack's to remove.
     #[serde(default)]
     pub route_file: Option<String>,
+    /// fix-91: the `extra_routes` files a deploy of this stack wrote. Same
+    /// rule as `route_file`: only these are ever retired or removed by a
+    /// destroy, so a file on the gateway that no deploy recorded stays.
+    #[serde(default)]
+    pub extra_route_files: Vec<String>,
     /// T5: native services on this stack (bare binaries under systemd). A
     /// stack has either `manifest` (compose) or `natives`, never both. A list
     /// because the layout puts kyu, kyu-runner and http-switchboard on one

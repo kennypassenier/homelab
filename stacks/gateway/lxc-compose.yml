@@ -136,6 +136,27 @@ latch_secrets: [traefik, cloudflared, grafana]
 gateway_route:
   filename: 104-app-gateway.yml
 
+# fix-91 (expert panel, routes-outside-repo-unvalidated, 2026-09-27): the
+# routes to what homelab does not manage. Home Assistant (VM 101), OPNsense
+# (VM 100) and Proxmox itself are no stacks, but the route to each lives on
+# this gateway, so it belongs to this stack. Both files were written by hand
+# on CT 104 and lived nowhere else; routes/ holds them byte for byte, read
+# from CT 104 the day they were brought in, under the names they have there,
+# so the first deploy changes nothing.
+#
+# `external` names every backend in the file that is not a stack's own
+# container, exactly as the file writes it. `homelab plan`, `deploy` and
+# `apply` refuse a backend that is neither a stack's address nor declared
+# here (fix-92), so a route to the management network cannot appear without
+# a line in this file saying so.
+extra_routes:
+  - filename: manual-homeassistant.yml
+    external: ["http://10.10.10.2:8123"]
+  # ha.kp-soft.dev above; opn.kp-soft.dev and prox.kp-soft.dev here — the
+  # OPNsense and Proxmox login pages.
+  - filename: manual-routes.yml
+    external: ["https://10.10.5.1", "https://10.10.5.250:8006"]
+
 
 # gap-11 (2026-09-18): OPNsense ships its logs here as RFC 5424 over UDP —
 # `System › Settings › Logging / targets` on the firewall names

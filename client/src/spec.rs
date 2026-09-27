@@ -28,6 +28,12 @@ struct StackFile {
     /// env content either way.
     #[serde(default)]
     latch_secrets: Vec<String>,
+    /// fix-100 (apply-no-confirm-creates-drill, 2026-09-27): a stack that
+    /// exists to be created and destroyed in one sitting, like the rollback
+    /// drill. `homelab apply` and the DR runbook leave it out; it is deployed
+    /// only by name. Client-side only, so it never reaches the intent hash.
+    #[serde(default)]
+    ephemeral: bool,
 }
 
 #[derive(Deserialize)]
@@ -457,6 +463,29 @@ pub fn scan_local_stacks(base: &Path) -> Vec<(String, PathBuf)> {
     out.sort();
     out
 }
+
+/// fix-100: does this stack directory say `ephemeral: true`? A file that
+/// does not parse is not ephemeral: the verbs that read it report the parse
+/// error themselves.
+pub fn is_ephemeral(dir: &Path) -> bool {
+    let path = dir.join("lxc-compose.yml");
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| parse_stack_file(&raw, &path).ok())
+        .is_some_and(|f| f.ephemeral)
+}
+
+/// fix-100 (apply-no-confirm-creates-drill, 2026-09-27): the stacks the
+/// repository declares as part of the fleet, which `apply` holds the host to
+/// and the DR runbook rebuilds. Every directory with an `lxc-compose.yml`
+/// used to count, so the throwaway drill stack (vmid 119) would have been
+/// created by the next `homelab apply` and rebuilt after a disaster.
+pub fn declared_stacks(base: &Path) -> Vec<(String, PathBuf)> {
+    scan_local_stacks(base)
+        .into_iter()
+        .filter(|(_, dir)| !is_ephemeral(dir))
+        .collect()
+}
 // ── E7: the disaster-recovery runbook ───────────────────────────────────────
 //
 // Rewritten at the Phase 8 gate (Kenny, "Herschrijven", 2026-09-27): every
@@ -797,7 +826,9 @@ fn runbook_stack_section(
 /// Returns the number of stacks included.
 pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, String> {
     use homelab_core::ops::backup::{BackupCfg, RESTIC_CACHE_DIR};
-    let stacks = scan_local_stacks(stacks_dir);
+    // fix-100: a stack made to be destroyed in the same sitting is not
+    // something a rebuild should bring back.
+    let stacks = declared_stacks(stacks_dir);
     let bcfg = BackupCfg::default();
     let su = homelab_core::ops::selfupdate::SelfUpdateCfg::default();
     let state = runbook_state_dir(&bcfg);

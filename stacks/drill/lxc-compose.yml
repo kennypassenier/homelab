@@ -19,6 +19,9 @@ stack_name: drill
 vmid: 119
 hostname: 119-app-drill
 native_only: true
+# fix-100 (2026-09-27): `homelab apply` would have created CT 119, and the
+# DR runbook would have rebuilt it. Deployed by name only.
+ephemeral: true
 
 network:
   ip: 10.10.10.19/24

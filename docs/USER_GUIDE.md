@@ -2113,6 +2113,15 @@ anything when one fails: `<stack>: validation failed: <e> — nothing applied`
 
 `<dir>` is the stacks directory apply read, `stacks` by default.
 
+Under each `↑` line the plan lists what that deploy changes, file by file,
+against the files the host last applied: `+` new, `~` changed, `-` removed by
+the deploy; a stack the host has never applied reads `new: creates CT <vmid>`.
+A stack file with `ephemeral: true` (the rollback drill) is listed as `·` and
+never deployed by apply; `homelab deploy stacks/drill` still deploys it. Then
+apply asks `Deploy these <n> stack(s)? [y/N]`; anything but `y` ends with
+`not confirmed — nothing deployed, nothing destroyed` and exit 1. `--yes`
+answers yes for a script; `--dry-run` prints the plan and stops (fix-100).
+
 A stack is unchanged when the host's `applied_hash` equals the intent hash of
 the local files (manifest, files and env, so a secret changed in latch counts
 as a change) (`client/src/apply.rs:30-54`, `intent_hash` in

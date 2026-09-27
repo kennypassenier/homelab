@@ -746,6 +746,10 @@ async fn main() {
                 .cloned()
                 .unwrap_or_else(|| "stacks".into());
             let skip_backup = args.iter().any(|a| a == "--no-backup");
+            // fix-100 (apply-no-confirm-creates-drill, 2026-09-27): the plan
+            // used to be printed and deployed in the same breath.
+            let dry_run = args.iter().any(|a| a == "--dry-run");
+            let assume_yes = args.iter().any(|a| a == "--yes");
             let base_path = Path::new(&base);
             if !base_path.is_dir() {
                 die(&format!(
@@ -770,7 +774,13 @@ async fn main() {
             let mut local: Vec<(String, String)> = Vec::new();
             let mut specs: std::collections::BTreeMap<String, homelab_proto::DeploySpec> =
                 std::collections::BTreeMap::new();
-            for (name, dir) in spec::scan_local_stacks(base_path) {
+            let declared = spec::declared_stacks(base_path);
+            let ephemeral: Vec<String> = spec::scan_local_stacks(base_path)
+                .into_iter()
+                .map(|(n, _)| n)
+                .filter(|n| !declared.iter().any(|(d, _)| d == n))
+                .collect();
+            for (name, dir) in declared {
                 let sp = spec::build_spec(&dir)
                     .unwrap_or_else(|e| die(&format!("{}: {} — nothing applied", name, e)));
                 if let Err(e) = homelab_core::manifest::validate(&sp) {
@@ -802,14 +812,78 @@ async fn main() {
             for n in &plan.unchanged {
                 println!("{}  = {}{}", C_DIM, n, C_RESET);
             }
+            for n in &ephemeral {
+                println!(
+                    "{}  · {} — ephemeral: deployed by name only, never by apply{}",
+                    C_DIM, n, C_RESET
+                );
+            }
             for n in &plan.deploy {
                 println!("  ↑ {}", n);
+                // fix-100: what the deploy changes, file by file, removals
+                // included — the host's applied files against the local ones.
+                let Some(sp) = specs.get(n) else { continue };
+                if !host_pairs.iter().any(|(h, _)| h == n) {
+                    println!(
+                        "{}      new: creates CT {}{}",
+                        C_DIM, sp.manifest.vmid, C_RESET
+                    );
+                    continue;
+                }
+                let applied: Vec<homelab_proto::FileBlob> =
+                    rpc_reply(&host, &token, Command::GetApplied { stack: n.clone() })
+                        .await
+                        .filter(|r| r.ok)
+                        .and_then(|r| serde_json::from_str(&r.message).ok())
+                        .unwrap_or_else(|| {
+                            die(&format!(
+                                "could not read what the host applied for {} — nothing applied",
+                                n
+                            ))
+                        });
+                let changes = homelab_client::apply::file_changes(&sp.files, &applied);
+                if changes.is_empty() {
+                    println!(
+                        "{}      files unchanged (secrets or settings differ){}",
+                        C_DIM, C_RESET
+                    );
+                }
+                for c in changes {
+                    println!("      {}", c);
+                }
             }
             for n in &plan.destroy {
                 println!(
                     "{}  ✗ {} — in host state, no {}/{}/{}",
                     C_YELLOW, n, base, n, C_RESET
                 );
+            }
+            let answer = if dry_run || assume_yes || plan.deploy.is_empty() {
+                None
+            } else {
+                use std::io::Write as _;
+                eprint!("Deploy these {} stack(s)? [y/N] ", plan.deploy.len());
+                std::io::stderr().flush().ok();
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .map(|_| line)
+            };
+            match homelab_client::apply::decide(
+                dry_run,
+                assume_yes || plan.deploy.is_empty(),
+                answer.as_deref(),
+            ) {
+                homelab_client::apply::Decision::Preview => {
+                    println!("dry run — nothing deployed, nothing destroyed");
+                    std::process::exit(0);
+                }
+                homelab_client::apply::Decision::Decline => {
+                    die("not confirmed — nothing deployed, nothing destroyed")
+                }
+                homelab_client::apply::Decision::Deploy => {}
             }
             for name in &plan.deploy {
                 let Some(sp) = specs.remove(name) else {
@@ -1179,7 +1253,7 @@ async fn main() {
                 "  homelab patch                       apt dist-upgrade all managed stacks (H6)"
             );
             println!("  homelab destroy stacks/<name>       gated destroy (C2; from the host's record when the dir is gone)");
-            println!("  homelab apply [stacks/] [--no-backup]  deploy what changed, destroy what left the files after its name is typed (ask-8)");
+            println!("  homelab apply [stacks/] [--dry-run] [--yes] [--no-backup]  show the plan, ask once, deploy what changed, destroy what left the files after its name is typed (ask-8)");
             println!("  homelab wipe <stack>[/<app>]        delete what a retired stack or app kept: backups, /appdata, vault (ask-9)");
             println!("  homelab prune-orphans stacks/<name>  remove files the repo dropped (H2b; the deploy does this itself now)");
             println!(

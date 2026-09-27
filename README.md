@@ -232,7 +232,7 @@ and for a stack with `natives` they fetch each service's release through `gh`
 |---|---|
 | `homelab new <name> --preset <p> --vmid <n>` | scaffold `stacks/<name>` from a preset; optional `--ram`, `--cores`, `--disk`, `--swap`, repeatable `--no-data <path>` |
 | `homelab deploy stacks/<name>` | validate, then create or reconcile the container, and remove what the stack's files no longer declare (files, units, native services, mounts, an old route); data stays |
-| `homelab apply [stacks/] [--no-backup]` | deploy every stack whose files differ from what the host last applied; a stack still on the host whose directory is gone is destroyed only after you type its name |
+| `homelab apply [stacks/] [--dry-run] [--yes] [--no-backup]` | show the per-file plan, ask once, then deploy every stack whose files differ from what the host last applied; a stack still on the host whose directory is gone is destroyed only after you type its name; an `ephemeral: true` stack is left out |
 | `homelab backup stacks/<name>` | restic snapshot of the stack |
 | `homelab restore stacks/<name> [snapshot]` | restore, `latest` by default |
 | `homelab update stacks/<name> [app]` | pull and recreate one app or all, with rollback |

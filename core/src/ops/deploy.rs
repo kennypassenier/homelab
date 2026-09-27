@@ -604,6 +604,27 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             return Ok(StepOutcome::Unchanged);
         };
         let path = crate::ops::discovery::target_file(dir, &m.stack_name);
+        // fix-145 (expert panel 2026-09-27, inbox-ct118-unmanaged): a native
+        // stack whose every unit is declared unmeasured (`metrics: false`,
+        // inbox under Kenny's "Grenzen zetten") runs no node exporter, so a
+        // target here would be an endpoint nothing answers on and an alert
+        // that never clears. The fleet check already respects the flag.
+        let unmeasured = m.apps.is_empty()
+            && crate::state::StateStore::new(exec, &ctx.state_dir)
+                .load()
+                .await
+                .ok()
+                .and_then(|s| s.stacks.get(&m.stack_name).cloned())
+                .is_some_and(|st| {
+                    !st.natives.is_empty() && st.natives.iter().all(|n| n.metrics == Some(false))
+                });
+        if unmeasured {
+            log_info(format!(
+                "[t1] {} is declared unmeasured (metrics: false) — no scrape target",
+                m.stack_name
+            ));
+            return Ok(StepOutcome::Unchanged);
+        }
         // A stack with apps runs docker; a native-service stack does not.
         let body =
             crate::ops::discovery::targets_json(&m.stack_name, &m.network.ip, !m.apps.is_empty());

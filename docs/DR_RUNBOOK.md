@@ -353,6 +353,18 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 - Data, one restic repository per owning app:
   - `rclone:gdrive:homelab-backups/homepage-config`: `/appdata/home/homepage-config`
 
+### inbox (vmid 118)
+
+- Container: hostname `118-app-inbox`, ip `10.10.10.18/24` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order unset.
+- Runs no docker: native systemd services only.
+- Unit `inbox`:
+  - program `/opt/inbox/bin/inbox`, from the GitHub release `kennypassenier/chassis-rs` (asset `inbox`); update policy manual.
+  - unit file `stacks/inbox/inbox/inbox.service` in the repository; the container's copy is `/etc/systemd/system/inbox.service`.
+  - data: repository `rclone:gdrive:homelab-backups/inbox-config`, archive `/inbox-data.tar` holding a tar of `/var/lib/inbox`.
+  - vault copy of inbox (`/etc/inbox/inbox.env`): `/var/lib/homelab/secrets/inbox/inbox/inbox.env`.
+  - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/inbox`. Adoption only records a service that is already active; it never starts one.
+- Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
+
 ### kp-soft (vmid 116)
 
 - Container: hostname `116-app-kp-soft`, ip `10.10.10.16/24` on `vmbr0` VLAN 10, 2 core(s), 2048 MiB RAM, 0 MiB swap, 16 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 75.
@@ -455,12 +467,6 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
   - `rclone:gdrive:homelab-backups/uptime-kuma-config`: `/appdata/uptime/uptime-kuma-config`
   - `rclone:gdrive:homelab-backups/kuma-seeder-config`: `/appdata/uptime/kuma-seeder-config`
 
-## Adopted services without a container file
-
-These directories hold a `service.yml` and no `lxc-compose.yml`: the service was adopted into a container this suite did not build, so nothing here can rebuild the container. Once adopted, its data is backed up nightly like any native unit's (Layer 4).
-
-- **inbox** (vmid 118, hostname `118-app-inbox`): unit `inbox`, program `/opt/inbox/bin/inbox`; data in `rclone:gdrive:homelab-backups/inbox-config` as `/inbox-data.tar`, a tar of `/var/lib/inbox`; re-register with `homelab adopt stacks/inbox` (needs the daemon).
-
 ## Full-host rebuild order
 
 1. Install Proxmox and recreate the networks the stack files use: `vmbr0` VLAN 10 (gateway `10.10.10.1`). Clients expect the daemon at `10.10.10.250:8443`.
@@ -468,5 +474,5 @@ These directories hold a `service.yml` and no `lxc-compose.yml`: the service was
 3. Install `restic` and `rclone`, recreate the rclone remote `gdrive`, write `/var/lib/homelab/secrets/restic.pw` from the offline copy, and restore `host-meta-config` (Layer 3).
 4. Put back the `homelab-host` program and its unit file, start it, and check the certificate fingerprint against the pin (Layer 1).
 5. Restore the guests this suite never touches (vmid 100, 101, 102, 103) from Proxmox's own backups: `qmrestore` for a VM, `pct restore` for a container.
-6. Rebuild the templates the stacks clone: `clone:997` (privileged), `clone:998` (unprivileged). `homelab template-build <vmid> <version>` builds an unprivileged one at that vmid, and `homelab template-build <vmid> <version> --privileged` a privileged one.
-7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), uptime (107), syncthing (108), kyu (109), almanac (112), metrics (113), productivity (111), paperwork (114), kp-soft (116), home (115), downloader (105), media (106), drill (119). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.
+6. Rebuild the templates the stacks clone: `clone:996` (unprivileged), `clone:997` (privileged), `clone:998` (unprivileged). `homelab template-build <vmid> <version>` builds an unprivileged one at that vmid, and `homelab template-build <vmid> <version> --privileged` a privileged one.
+7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), uptime (107), syncthing (108), kyu (109), almanac (112), metrics (113), productivity (111), paperwork (114), kp-soft (116), home (115), downloader (105), media (106), inbox (118), drill (119). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.

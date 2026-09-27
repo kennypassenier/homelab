@@ -3199,6 +3199,62 @@ mod native_from_zero {
             sink.lines()
         );
     }
+
+    /// fix-145 (expert panel 2026-09-27, inbox-ct118-unmanaged): inbox gets
+    /// a container file, and Kenny's "Grenzen zetten" (Phase 9 form,
+    /// 2026-09-27) says Prometheus does not measure it (`metrics: false` in
+    /// its service.yml). The deploy's metrics discovery wrote a node target
+    /// for every stack it deployed, so the first deploy of that file would
+    /// have handed Prometheus an endpoint nothing answers on (no node
+    /// exporter on CT 118) and a permanently firing alert.
+    #[tokio::test]
+    async fn fix_145_a_native_stack_declared_unmeasured_gets_no_scrape_target() {
+        let targets = "/appdata/metrics/prometheus-config/targets";
+        for (metrics, want_target) in [("false", false), ("true", true)] {
+            let exec = MockExecutor::new();
+            native_ready(&exec);
+            let unit: homelab_core::native::NativeServiceManifest = serde_yaml::from_str(&format!(
+                "stack_name: drill\nvmid: 118\nhostname: 118-app-drill\nunit: kyu\n\
+                     binary: /usr/local/bin/kyu\nmetrics: {}\n",
+                metrics
+            ))
+            .unwrap();
+            let mut hs = homelab_core::state::HostState::default();
+            hs.stacks.insert(
+                "drill".into(),
+                homelab_core::state::StackState {
+                    applied_source: None,
+                    vmid: 118,
+                    hostname: "118-app-drill".into(),
+                    apps: vec!["kyu".into()],
+                    applied_at: 0,
+                    last_backup: 0,
+                    applied_hash: String::new(),
+                    manifest: None,
+                    enabled: true,
+                    native: None,
+                    route_file: None,
+                    natives: vec![unit],
+                    incomplete_step: None,
+                },
+            );
+            homelab_core::state::StateStore::new(&exec, "/var/lib/homelab")
+                .save(hs)
+                .await
+                .unwrap();
+            let sink = VecSink::new();
+            let j = NullJournal;
+            let mut c = ctx(&exec, &sink, &j);
+            c.metrics_targets_dir = Some(targets.into());
+            let report = deploy(&c, &native_spec()).await;
+            assert!(report.ok, "{:?}", report.error);
+            assert_eq!(
+                exec.file(&format!("{}/drill.json", targets)).is_some(),
+                want_target,
+                "metrics: {metrics}"
+            );
+        }
+    }
 }
 
 /// F307: the security matcher must key on the codename, never on the archive

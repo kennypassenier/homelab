@@ -490,6 +490,12 @@ pub async fn update(
             }
             let mut retags = String::new();
             for c in &captured {
+                // A digest reference (`name:tag@sha256:…`, every pinned image
+                // since fix-82) names one image for ever, and docker refuses
+                // to create a tag with a digest in it. Nothing to re-tag.
+                if c.repo_tag.contains('@') {
+                    continue;
+                }
                 retags.push_str(&format!("docker tag {} {} && ", c.image_id, c.repo_tag));
             }
             super::util_pct_sh(

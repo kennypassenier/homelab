@@ -834,6 +834,33 @@ async fn b6_failed_update_rolls_back_to_captured_image() {
     assert!(tag_calls[0].contains("--force-recreate"));
 }
 
+/// fix-82 follow-up (2026-09-27): with images pinned as `name:tag@sha256:…`,
+/// `docker tag <id> <ref>` is refused ("refusing to create a tag with a
+/// digest reference"), so the rollback failed before it recreated anything.
+/// A digest reference names one image for ever; there is nothing to re-tag.
+#[tokio::test]
+async fn a_rollback_of_a_digest_pinned_image_does_not_try_to_tag_it() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_first("busy-check", CmdOutput::ok("<no value>\n"));
+    exec.respond_always(
+        "docker inspect --format",
+        CmdOutput::ok("sha256:oldimg myimg:1.2@sha256:abc\n"),
+    );
+    exec.enqueue("ps --status running --services", CmdOutput::ok(""));
+    exec.enqueue("ps --status running --services", CmdOutput::ok("app\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, false).await;
+    assert!(!report.ok);
+    assert!(
+        exec.calls_containing("docker tag").is_empty(),
+        "{:?}",
+        exec.calls()
+    );
+    assert_eq!(exec.calls_containing("--force-recreate").len(), 1);
+}
+
 /// The mocks an automatic update needs to reach its data copy: policy `auto`,
 /// nobody watching, running image `sha256:old`, and `pulled` as what the
 /// compose file resolves to after the pull.

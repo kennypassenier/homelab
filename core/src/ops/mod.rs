@@ -27,6 +27,7 @@ pub mod restoredrill;
 pub mod retired;
 pub mod selfupdate;
 pub mod template;
+pub mod today;
 pub mod update;
 pub mod util;
 pub mod zfs;

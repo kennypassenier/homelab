@@ -10,16 +10,13 @@
 //! Config via env: HOMELAB_HOST (host:port), HOMELAB_TOKEN.
 
 use std::path::Path;
-use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::Connector;
 
 use homelab_proto::{Command, LogLevel, RpcRequest, ServerMsg};
 
-use homelab_client::{load_pin, save_pin, spec, tui};
+use homelab_client::{spec, tui};
 
 const C_RESET: &str = "\x1b[0m";
 const C_CYAN: &str = "\x1b[36m";
@@ -158,6 +155,7 @@ async fn main() {
                 Box::new(tui::backend::RemoteBackend {
                     host: host.clone(),
                     token: token.clone(),
+                    repo_pin: REPO_PIN.get().cloned().flatten(),
                 })
             };
             if let Err(e) = tui::run(backend).await {
@@ -335,6 +333,42 @@ async fn main() {
                 );
             }
             rpc(&host, &token, Command::FleetCheck { stack_files }).await;
+        }
+        // fix-68 (four-answers-to-is-anything-wrong, 2026-09-27): the morning
+        // question in one verb. `check`, `doctor`, `incidents` and `checks`
+        // each gave part of the answer, and the operator merged them in his
+        // head; this asks the host for all of it and prints one verdict.
+        "today" => {
+            let base = args.get(2).cloned().unwrap_or_else(|| "stacks".into());
+            let stack_files = crate::spec::stack_files_with_vmids(&base);
+            if stack_files.is_empty() {
+                println!(
+                    "{}▶ today :: no stack files under '{}' — the check reads only what the \
+                     HOST can see; run this from the repository root, or pass the path{}",
+                    C_YELLOW, base, C_RESET
+                );
+            } else {
+                println!(
+                    "{}▶ today :: doctor, fleet check ({} stack file(s)), incidents, manual \
+                     checks — about a minute{}",
+                    C_CYAN,
+                    stack_files.len(),
+                    C_RESET
+                );
+            }
+            let reply = rpc_reply(&host, &token, Command::Today { stack_files })
+                .await
+                .unwrap_or_else(|| die("the host did not answer"));
+            let today: homelab_core::ops::today::Today = serde_json::from_str(&reply.message)
+                .unwrap_or_else(|_| die(&format!("the host answered: {}", reply.message)));
+            let color = if today.needs_you() { C_YELLOW } else { C_GREEN };
+            let text = homelab_core::ops::today::render(&today);
+            let (body, verdict) = text.rsplit_once('\n').unwrap_or(("", text.as_str()));
+            if !body.is_empty() {
+                println!("{}", body);
+            }
+            println!("{}{}{}", color, verdict, C_RESET);
+            std::process::exit(if today.needs_you() { 1 } else { 0 });
         }
         "backup-native" => {
             let stack = args
@@ -1134,6 +1168,7 @@ async fn main() {
         }
         _ => {
             println!("homelab v{} — usage:", env!("CARGO_PKG_VERSION"));
+            println!("  homelab today [stacks/]             what needs you: doctor, check, incidents, manual checks in one list");
             println!("  homelab ping|status|doctor|incidents");
             println!("  homelab plan stacks/<name>          validate and show the spec (no host; runs latch/gh for secrets and native releases)");
             println!("  homelab deploy stacks/<name>");
@@ -1222,6 +1257,30 @@ async fn rpc_collect(
     token: &str,
     command: Command,
 ) -> (bool, Option<homelab_proto::FleetState>) {
+    let (ok, fleet, _) = rpc_exchange(host, token, command, true).await;
+    (ok, fleet)
+}
+
+/// fix-68: the host's reply handed back instead of printed, for a verb whose
+/// reply is data to render (`today`).
+async fn rpc_reply(
+    host: &str,
+    token: &str,
+    command: Command,
+) -> Option<homelab_proto::RpcResponse> {
+    rpc_exchange(host, token, command, false).await.2
+}
+
+async fn rpc_exchange(
+    host: &str,
+    token: &str,
+    command: Command,
+    echo_reply: bool,
+) -> (
+    bool,
+    Option<homelab_proto::FleetState>,
+    Option<homelab_proto::RpcResponse>,
+) {
     let mut fleet_seen: Option<homelab_proto::FleetState> = None;
     // F303: the size guard lives HERE, where every command passes, and not in
     // the three call sites that happened to remember it.
@@ -1246,64 +1305,21 @@ async fn rpc_collect(
     let is_ping = matches!(command, Command::Ping);
     let mut payload_seen = false;
     let mut done: Option<bool> = None;
-    let url = format!("wss://{}/api/ws", host);
-    let mut request = url
-        .clone()
-        .into_client_request()
-        .unwrap_or_else(|e| die(&format!("bad url {}: {}", url, e)));
-    request.headers_mut().insert(
-        "Authorization",
-        format!("Bearer {}", token).parse().unwrap(),
-    );
-
-    // A4: pin the host certificate (TOFU on first connect) — unless the
-    // repository names the fingerprint (feat-client-1), in which case a
-    // fresh machine pins that instead of trusting whatever answers first.
-    let decision = homelab_client::repo_config::reconcile_pin(
-        load_pin(),
-        REPO_PIN.get().and_then(|p| p.as_deref()),
-    )
-    .unwrap_or_else(|e| die(&e));
-    if decision.adopted_from_repo {
-        if let Some(fp) = decision.pin.as_deref() {
-            save_pin(fp);
-            eprintln!(
-                "{}● pinned host certificate SHA256:{} from {}{}",
-                C_YELLOW,
-                fp,
-                homelab_client::repo_config::REPO_FILE,
-                C_RESET
-            );
-        }
-    }
-    let pin = decision.pin;
-    let first_connect = pin.is_none();
-    let verifier = homelab_client::tls::PinnedVerifier::new(pin);
-    let tls_config = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(verifier.clone())
-        .with_no_client_auth();
-    let connector = Connector::Rustls(Arc::new(tls_config));
-
-    let (ws, _) = tokio_tungstenite::connect_async_tls_with_config(
-        request,
-        // fix-30: the same ceiling the host accepts. tungstenite's
-        // default frame limit is 16 MiB, so any larger event from the
-        // host closed the link mid-operation.
-        Some(
-            tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
-                .max_message_size(Some(homelab_client::version::MAX_WS_FRAME))
-                .max_frame_size(Some(homelab_client::version::MAX_WS_FRAME)),
+    // fix-67: the pin, the frame ceiling and the version gate live in one
+    // place, shared with the TUI, whose own copy had drifted from this one.
+    let link =
+        homelab_client::link::connect(host, token, REPO_PIN.get().and_then(|p| p.as_deref()))
+            .await
+            .unwrap_or_else(|e| die(&e));
+    match &link.pinned {
+        Some(homelab_client::link::Pinned::FromRepo(fp)) => eprintln!(
+            "{}● pinned host certificate SHA256:{} from {}{}",
+            C_YELLOW,
+            fp,
+            homelab_client::repo_config::REPO_FILE,
+            C_RESET
         ),
-        false,
-        Some(connector),
-    )
-    .await
-    .unwrap_or_else(|e| die(&format!("connect {}: {}", url, e)));
-
-    if first_connect {
-        if let Some(fp) = verifier.observed() {
-            save_pin(&fp);
+        Some(homelab_client::link::Pinned::FirstUse(fp)) => {
             eprintln!(
                 "{}● pinned host certificate SHA256:{}{}",
                 C_YELLOW, fp, C_RESET
@@ -1313,8 +1329,9 @@ async fn rpc_collect(
                 C_DIM, C_RESET
             );
         }
+        None => {}
     }
-    let (mut tx, mut rx) = ws.split();
+    let (mut tx, mut rx) = link.ws.split();
 
     // The request is deliberately NOT sent yet: it goes out only after the
     // host has said which version it is. See the Hello arm below.
@@ -1353,24 +1370,11 @@ async fn rpc_collect(
                         println!("{}  via {} ({}){}", C_DIM, host, src, C_RESET);
                     }
                 }
-                // A client newer than the host loses whatever the host does
-                // not know about. Serde drops an unknown field silently, so
-                // the deploy succeeds and simply does less than it was asked
-                // to: on 2026-08-31 a host one release behind ignored the
-                // `data_mounts` block, the downloader came up without its
-                // disks, and 73 torrents went to `missingFiles`. Nothing said
-                // a word. So the client refuses to send a mutating command to
-                // an older host, and says which command fixes it.
-                if homelab_client::version::mutates(&req.command)
-                    && homelab_client::version::older(&version, env!("CARGO_PKG_VERSION"))
-                {
-                    die(&format!(
-                        "host is v{} and this client is v{} :: a host that predates a \
-                         field ignores it silently, which is how a deploy quietly does \
-                         less than you asked — run 'homelab release-update' first",
-                        version,
-                        env!("CARGO_PKG_VERSION")
-                    ));
+                // The client refuses to send a mutating command to an older
+                // host, and says which command fixes it (the 2026-08-31
+                // data_mounts incident; the rule is in `link`).
+                if let Some(why) = homelab_client::link::refuse_older_host(&req.command, &version) {
+                    die(&why);
                 }
                 if !sent {
                     tx.send(Message::Text(serde_json::to_string(&req).unwrap().into()))
@@ -1428,27 +1432,30 @@ async fn rpc_collect(
                 fleet_seen = Some(*fleet);
             }
             ServerMsg::RpcDone(resp) => {
+                if !echo_reply {
+                    return (resp.ok, fleet_seen, Some(resp));
+                }
                 if !resp.ok {
                     println!("{}✗ {}{}", C_RED, resp.message, C_RESET);
-                    return (false, fleet_seen);
+                    return (false, fleet_seen, Some(resp));
                 }
                 if homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
                     println!("{}✓ {}{}", C_GREEN, resp.message, C_RESET);
-                    return (true, fleet_seen);
+                    return (true, fleet_seen, Some(resp));
                 }
                 done = Some(true);
             }
         }
         if done.is_some() && homelab_client::rpc_can_exit(awaits_payload, payload_seen, true) {
             println!("{}✓ ok{}", C_GREEN, C_RESET);
-            return (true, fleet_seen);
+            return (true, fleet_seen, None);
         }
     }
     eprintln!(
         "{}✗ connection closed before RPC completed{}",
         C_RED, C_RESET
     );
-    (false, fleet_seen)
+    (false, fleet_seen, None)
 }
 
 /// Read one line the operator typed after `prompt` (typed-name gates).

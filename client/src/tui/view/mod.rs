@@ -649,11 +649,32 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
         calm.push("TLS pinned".into());
     }
 
+    // fix-68 (four-answers-to-is-anything-wrong, 2026-09-27): the verdict is
+    // the day's list, the one `homelab today` prints — doctor, check,
+    // incidents and manual checks — and never "the containers run". The old
+    // "ALL SYSTEMS NOMINAL" read none of those, and said it in the same
+    // minute `homelab check` listed a broken item.
+    let verdict = match &model.today {
+        Some(t) if t.needs_you() => {
+            attn.insert(
+                0,
+                format!(
+                    "⚠ {} — the TODAY panel on the dashboard lists them",
+                    t.verdict()
+                ),
+            );
+            None
+        }
+        Some(t) => Some(format!("● {}", t.verdict().to_uppercase())),
+        None if model.today_pending => Some("● checking what needs you…".to_string()),
+        None => Some("● not yet checked what needs you — press r".to_string()),
+    };
+
     // If anything needs attention, show that (yellow); else calm (faint).
     let (segs, color) = if !attn.is_empty() {
         (attn, THEME.yellow)
     } else {
-        let mut c = vec!["● ALL SYSTEMS NOMINAL".to_string()];
+        let mut c = vec![verdict.unwrap_or_default()];
         c.extend(calm);
         (c, THEME.faint)
     };

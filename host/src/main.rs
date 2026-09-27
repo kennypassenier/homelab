@@ -1143,6 +1143,123 @@ port = 5003
             .any(|c| c.health != homelab_core::doctor::Health::Ok));
     }
 
+    /// A session over a real socket on a free local port, with `handler` in
+    /// place of `handle_rpc`. Returns the address to connect to.
+    async fn serve_on_loopback<H, Fut>(handler: H) -> SocketAddr
+    where
+        H: Fn(AppState, RpcRequest) -> Fut + Clone + Send + Sync + 'static,
+        Fut: std::future::Future<Output = RpcResponse> + Send + 'static,
+    {
+        // Loaded by path, not through HOMELAB_CONFIG, for the reason fix-36's
+        // test gives: tests run in parallel and another one sets it.
+        let path = format!("/tmp/homelab-loopback-test-{}.toml", std::process::id());
+        std::fs::write(&path, "token = \"0123456789abcdef0123\"\n").unwrap();
+        let config = load_config_from(path);
+        let (log_tx, _) = broadcast::channel(64);
+        let state = AppState {
+            config: config.clone(),
+            log_tx,
+            op_lock: Arc::new(Mutex::new(())),
+            pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
+            damper: Arc::new(std::sync::Mutex::new(
+                homelab_core::notify::NotifyDamper::new(20 * 3600),
+            )),
+        };
+        let app = Router::new()
+            .route(
+                "/ws",
+                get(
+                    move |ws: WebSocketUpgrade, State(st): State<AppState>| async move {
+                        ws.on_upgrade(move |s| serve_ws(s, st, handler))
+                    },
+                ),
+            )
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        addr
+    }
+
+    /// Stands in for a deploy whose service check reaches a question: it asks
+    /// through the real `LiveAsker` and reports the answer it got. `Answer`
+    /// goes to the real handler, which is what delivers it.
+    async fn asking_handler(st: AppState, req: RpcRequest) -> RpcResponse {
+        if matches!(req.command, Rpc::Answer { .. }) {
+            return handle_rpc(&st, req).await;
+        }
+        let asker = LiveAsker {
+            state: &st,
+            timeout_s: 5,
+        };
+        let q = homelab_core::ask::Question {
+            op: "deploy-gateway".into(),
+            step: "service checks".into(),
+            what: "routes went from 29 to 28".into(),
+            if_allowed: "the deploy goes on".into(),
+            if_stopped: "the deploy stops".into(),
+        };
+        let answer = homelab_core::ask::Asker::ask(&asker, &q).await;
+        RpcResponse {
+            id: req.id,
+            ok: answer.may_continue(),
+            message: format!("{:?}", answer),
+            deferred: None,
+        }
+    }
+
+    /// covers: fix-66
+    ///
+    /// An operation started over a connection asks a question, and the
+    /// operator answers over the SAME connection, which is what the TUI does.
+    /// Until 2026-09-27 the session read the next frame only after the
+    /// running request returned, so the answer sat unread behind the deploy
+    /// that was waiting for it, and every question asked of a TUI-started
+    /// operation ended as Unattended whatever was pressed
+    /// (host-questions-unanswerable). Real socket, real session loop.
+    #[tokio::test]
+    async fn fix_66_an_answer_on_the_same_connection_reaches_the_waiting_operation() {
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let addr = serve_on_loopback(asking_handler).await;
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+            .await
+            .expect("connect to the loopback session");
+        let (mut tx, mut rx) = ws.split();
+        let frame = |req: RpcRequest| WsMsg::Text(serde_json::to_string(&req).unwrap().into());
+        tx.send(frame(RpcRequest {
+            id: 1,
+            command: Rpc::Ping,
+        }))
+        .await
+        .unwrap();
+        let verdict = tokio::time::timeout(Duration::from_secs(20), async {
+            while let Some(Ok(WsMsg::Text(t))) = rx.next().await {
+                match serde_json::from_str::<ServerMsg>(&t).unwrap() {
+                    ServerMsg::Ask { id, .. } => {
+                        tx.send(frame(RpcRequest {
+                            id: 2,
+                            command: Rpc::Answer { id, allow: true },
+                        }))
+                        .await
+                        .unwrap();
+                    }
+                    ServerMsg::RpcDone(r) if r.id == 1 => return r.message,
+                    _ => {}
+                }
+            }
+            "the connection closed".to_string()
+        })
+        .await
+        .expect("the operation never finished");
+        assert_eq!(
+            verdict, "Allow",
+            "the operator allowed over the same connection, but the operation heard: {}",
+            verdict
+        );
+    }
+
     #[test]
     fn h12_scheduler_clock_logic() {
         // Weird `date` output never silently disables the scheduler.
@@ -2755,6 +2872,21 @@ async fn ws_upgrade(
 }
 
 async fn ws_session(socket: WebSocket, state: AppState) {
+    serve_ws(socket, state, |st, req| async move {
+        handle_rpc(&st, req).await
+    })
+    .await
+}
+
+/// One client's session: the Hello, the forwarder that carries broadcasts and
+/// answers out, and the loop that reads requests. The request handler is a
+/// parameter so a test can drive the real session over a real socket with a
+/// handler that asks a question (fix-66).
+async fn serve_ws<H, Fut>(socket: WebSocket, state: AppState, handler: H)
+where
+    H: Fn(AppState, RpcRequest) -> Fut + Clone + Send + Sync + 'static,
+    Fut: std::future::Future<Output = RpcResponse> + Send + 'static,
+{
     let (mut tx, mut rx) = socket.split();
     let hello = ServerMsg::Hello {
         version: VERSION.into(),
@@ -2780,6 +2912,29 @@ async fn ws_session(socket: WebSocket, state: AppState) {
         }
     });
 
+    // fix-66 (host-questions-unanswerable, 2026-09-27): requests are READ
+    // continuously and RUN by a worker, one at a time and in arrival order.
+    // Before this the loop ran each request inline, so the next frame was not
+    // read until the current request returned. The TUI sends its answer to a
+    // question over the same connection as the deploy that asked it; that
+    // answer sat unread behind the deploy waiting for it, and every question
+    // ended as Unattended whatever the operator pressed.
+    //
+    // Everything except an answer keeps its order: the TUI tells replies
+    // apart by the order it sent the requests in, not by id.
+    let (work_tx, mut work_rx) = tokio::sync::mpsc::unbounded_channel::<RpcRequest>();
+    let worker = {
+        let out_tx = out_tx.clone();
+        let state = state.clone();
+        let handler = handler.clone();
+        tokio::spawn(async move {
+            while let Some(req) = work_rx.recv().await {
+                let resp = handler(state.clone(), req).await;
+                let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+            }
+        })
+    };
+
     while let Some(Ok(Message::Text(text))) = rx.next().await {
         let req = match serde_json::from_str::<RpcRequest>(&text) {
             Ok(r) => r,
@@ -2792,10 +2947,33 @@ async fn ws_session(socket: WebSocket, state: AppState) {
                 continue;
             }
         };
-        let resp = handle_rpc(&state, req).await;
-        let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+        if runs_beside_the_queue(&req.command) {
+            let (out_tx, state, handler) = (out_tx.clone(), state.clone(), handler.clone());
+            tokio::spawn(async move {
+                let resp = handler(state, req).await;
+                let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+            });
+        } else if work_tx.send(req).is_err() {
+            break;
+        }
     }
+    // The client went away. What it already asked for still runs to the end,
+    // as it did when the loop ran requests inline: a deploy is not abandoned
+    // halfway because a laptop lid closed.
+    drop(work_tx);
+    let _ = worker.await;
     forward.abort();
+}
+
+/// fix-66: requests that must not wait behind the one in flight. An answer
+/// only hands a value to an operation that is parked waiting for it; queued
+/// behind that same operation it can never arrive.
+fn runs_beside_the_queue(command: &Rpc) -> bool {
+    // fix-68: `today` reads for about a minute (doctor plus the fleet check);
+    // in the queue it would hold up every deploy and refresh the TUI sends
+    // after opening. It changes nothing, and the TUI recognises its reply by
+    // shape rather than by order.
+    matches!(command, Rpc::Answer { .. } | Rpc::Today { .. })
 }
 
 /// D5: push the intent repo to the offsite mirror, detached — a failing
@@ -3149,6 +3327,63 @@ async fn native_from_state(
 /// G6 (T79): the gathering itself now lives in `homelab_core::ops::facts`,
 /// behind an executor, with tests; this is the host's thin adapter that
 /// hands it the configuration and logs what it measured.
+/// fix-68: the three readings `homelab today` merges — doctor, the fleet
+/// check with its manual checks, and the incident bundles — gathered the
+/// same way their own verbs gather them.
+async fn gather_today(
+    exec: &RealExecutor,
+    state: &AppState,
+    stack_files: &[(String, u16)],
+) -> homelab_core::ops::today::Today {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let probes = gather_probes(
+        exec,
+        &state.config.state_dir,
+        state.config.mirror_remote.as_deref(),
+        now,
+    )
+    .await;
+    let checks = homelab_core::doctor::diagnose(&probes);
+    let live = gather_live_facts(exec, state, stack_files).await;
+    let incidents: Vec<String> = std::fs::read_dir(format!("{}/incidents", state.config.state_dir))
+        .map(|rd| {
+            let mut names: Vec<String> = rd
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect();
+            names.sort();
+            names
+        })
+        .unwrap_or_default();
+    match homelab_core::state::StateStore::new(exec, &state.config.state_dir)
+        .load()
+        .await
+    {
+        Ok(snapshot) => {
+            let findings = homelab_core::ops::fleetcheck::evaluate(
+                &snapshot,
+                &live,
+                now,
+                homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+                homelab_core::ops::fleetcheck::GrowthLimits::default(),
+            );
+            homelab_core::ops::today::assemble(&checks, &findings, &incidents, &snapshot, now)
+        }
+        Err(e) => {
+            let mut t =
+                homelab_core::ops::today::assemble(&checks, &[], &[], &Default::default(), now);
+            t.unread.push(format!(
+                "state unreadable, so the fleet check and the incidents were not read: {}",
+                e
+            ));
+            t
+        }
+    }
+}
+
 async fn gather_live_facts(
     exec: &RealExecutor,
     state: &AppState,
@@ -3821,6 +4056,17 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // fix-68: always ok with a JSON body. A part that could not be read
+        // travels inside it as `unread`, so the TUI can tell this reply from
+        // any other by its shape and never mistakes a failure of it for the
+        // end of an operation it has open.
+        Rpc::Today { stack_files } => RpcResponse {
+            id: req.id,
+            ok: true,
+            message: serde_json::to_string(&gather_today(&exec, state, &stack_files).await)
+                .unwrap_or_default(),
+            deferred: None,
+        },
         // T69: the operator answered a suspended step. Delivering it is all
         // that happens here — the step itself is parked on a channel inside
         // the operation, not on this task.

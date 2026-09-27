@@ -100,8 +100,10 @@ Launch: `homelab tui --offline` (needs a real terminal, ≥100×30 recommended).
 ### A12 · Ticker (attention-first)
 1. Watch the bottom strip. With the demo fleet (media drifted, no env) it
    shows "⚠ UPD pending: media", "⚠ NOENV media", app-down warnings.
-- **Pass:** only actionable items scroll; nothing needing attention → "● ALL
-  SYSTEMS NOMINAL" + live telemetry.
+- **Pass:** only actionable items scroll; the day's verdict leads: "⚠ N
+  things need you" while the TODAY panel lists anything, "● NOTHING NEEDS
+  YOU" + live telemetry only when it lists nothing (fix-68; before the host
+  has answered: "● checking what needs you…").
 
 ### A13 · Small-terminal guard
 1. Resize the terminal below 80×24.

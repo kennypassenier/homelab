@@ -2,17 +2,11 @@
 //! accepts Commands". Production is the real wss+pinned connection; tests use a
 //! scripted TestBackend. The TUI cannot tell them apart.
 
-use std::sync::Arc;
-
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::Connector;
 
-use homelab_proto::{Command, RpcRequest, ServerMsg};
-
-use crate::tls;
+use homelab_proto::{Command, LogLevel, RpcRequest, ServerMsg};
 
 /// What the TUI receives from whatever it's connected to.
 #[derive(Debug, Clone)]
@@ -40,6 +34,8 @@ pub trait Backend {
 pub struct RemoteBackend {
     pub host: String,
     pub token: String,
+    /// The fingerprint `config/client.toml` names, when there is one.
+    pub repo_pin: Option<String>,
 }
 
 impl Backend for RemoteBackend {
@@ -48,65 +44,84 @@ impl Backend for RemoteBackend {
         let (evt_tx, evt_rx) = mpsc::channel::<BackendEvent>(256);
 
         tokio::spawn(async move {
-            let url = format!("wss://{}/api/ws", self.host);
-            let mut request = match url.clone().into_client_request() {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = evt_tx
-                        .send(BackendEvent::Disconnected(format!("bad url: {}", e)))
-                        .await;
-                    return;
-                }
-            };
-            request.headers_mut().insert(
-                "Authorization",
-                format!("Bearer {}", self.token).parse().unwrap(),
-            );
-
-            let pin = crate::load_pin();
-            let first = pin.is_none();
-            let verifier = tls::PinnedVerifier::new(pin);
-            let tls_config = rustls::ClientConfig::builder()
-                .dangerous()
-                .with_custom_certificate_verifier(verifier.clone())
-                .with_no_client_auth();
-            let connector = Connector::Rustls(Arc::new(tls_config));
-
-            let ws = match tokio_tungstenite::connect_async_tls_with_config(
-                request,
-                None,
-                false,
-                Some(connector),
-            )
-            .await
+            // fix-67 (tui-connection-skips-guards, 2026-09-27): the same
+            // connect as the command line — the repository's pin, the fix-30
+            // frame ceiling — instead of a copy that had drifted from it.
+            let link = match crate::link::connect(&self.host, &self.token, self.repo_pin.as_deref())
+                .await
             {
-                Ok((ws, _)) => ws,
+                Ok(l) => l,
                 Err(e) => {
-                    let _ = evt_tx
-                        .send(BackendEvent::Disconnected(format!("connect: {}", e)))
-                        .await;
+                    let _ = evt_tx.send(BackendEvent::Disconnected(e)).await;
                     return;
                 }
             };
-            let fingerprint = verifier.observed();
-            if first {
-                if let Some(fp) = &fingerprint {
-                    crate::save_pin(fp);
+            let fingerprint = link.fingerprint.clone();
+            let (mut tx, mut rx) = link.ws.split();
+
+            // The version gate needs the host's version before any command
+            // goes out, so nothing is sent until the Hello has been read; the
+            // command line waits for it the same way.
+            let host_version = loop {
+                match rx.next().await {
+                    Some(Ok(Message::Text(t))) => {
+                        if let Ok(sm) = serde_json::from_str::<ServerMsg>(&t) {
+                            if let ServerMsg::Hello { version, .. } = &sm {
+                                let version = version.clone();
+                                let _ = evt_tx
+                                    .send(BackendEvent::Connected {
+                                        version: version.clone(),
+                                        fingerprint,
+                                    })
+                                    .await;
+                                let _ = evt_tx.send(BackendEvent::Server(sm)).await;
+                                break version;
+                            }
+                        }
+                    }
+                    Some(Ok(_)) => {}
+                    Some(Err(e)) => {
+                        let _ = evt_tx
+                            .send(BackendEvent::Disconnected(format!("ws: {}", e)))
+                            .await;
+                        return;
+                    }
+                    None => {
+                        let _ = evt_tx
+                            .send(BackendEvent::Disconnected(
+                                "closed before the host said hello".into(),
+                            ))
+                            .await;
+                        return;
+                    }
                 }
-            }
-            let (mut tx, mut rx) = ws.split();
-            let _ = evt_tx
-                .send(BackendEvent::Connected {
-                    version: String::new(),
-                    fingerprint,
-                })
-                .await;
+            };
 
             let mut req_id = 1u64;
+            // fix-66: requests that were answers. The host now reads an answer
+            // while the operation that asked is still running, so its reply
+            // arrives first; the model pairs replies with requests by order,
+            // and would take it for the operation's own end.
+            let mut answers: std::collections::HashSet<u64> = Default::default();
             loop {
                 tokio::select! {
                     Some(cmd) = cmd_rx.recv() => {
                         req_id += 1;
+                        // The refusal comes back the way a failed operation
+                        // does, so it lands where the operator is looking.
+                        if let Some(why) = crate::link::refuse_older_host(&cmd, &host_version) {
+                            let refused = ServerMsg::RpcDone(homelab_proto::RpcResponse {
+                                id: req_id,
+                                ok: false,
+                                message: why,
+                                deferred: None,
+                            });
+                            if evt_tx.send(BackendEvent::Server(refused)).await.is_err() { break; }
+                            continue;
+                        }
+                        if matches!(cmd, Command::Answer { .. }) {
+                            answers.insert(req_id);
+                        }
                         let req = RpcRequest { id: req_id, command: cmd };
                         if tx.send(Message::Text(serde_json::to_string(&req).unwrap().into())).await.is_err() {
                             let _ = evt_tx.send(BackendEvent::Disconnected("send failed".into())).await;
@@ -117,6 +132,14 @@ impl Backend for RemoteBackend {
                         match msg {
                             Some(Ok(Message::Text(t))) => {
                                 if let Ok(sm) = serde_json::from_str::<ServerMsg>(&t) {
+                                    let sm = match sm {
+                                        ServerMsg::RpcDone(r) if answers.remove(&r.id) => ServerMsg::Log {
+                                            level: if r.ok { LogLevel::Info } else { LogLevel::Warn },
+                                            source: "HOST".into(),
+                                            msg: r.message,
+                                        },
+                                        other => other,
+                                    };
                                     if evt_tx.send(BackendEvent::Server(sm)).await.is_err() { break; }
                                 }
                             }
@@ -218,6 +241,17 @@ impl Backend for DemoBackend {
                             }
                             Some(Command::DeployStack(spec)) => {
                                 play_demo_deploy(&evt_tx, &spec.manifest.stack_name).await;
+                            }
+                            Some(Command::Today { .. }) => {
+                                let today = homelab_core::ops::today::Today::default();
+                                let _ = evt_tx.send(BackendEvent::Server(ServerMsg::RpcDone(
+                                    homelab_proto::RpcResponse {
+                                        id: 0,
+                                        ok: true,
+                                        message: serde_json::to_string(&today).unwrap_or_default(),
+                                        deferred: None,
+                                    },
+                                ))).await;
                             }
                             Some(Command::GetConfig) => {
                                 let _ = evt_tx

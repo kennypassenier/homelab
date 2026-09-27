@@ -75,6 +75,13 @@ pub enum Msg {
     Backend(BackendEvent),
     /// H7: result of the startup release check (side channel).
     ReleaseTag(Option<String>),
+    /// fix-69: a local stack's intent hash, computed off the UI thread, and
+    /// the lines that computing it would once have printed over the screen.
+    LocalHash {
+        stack: String,
+        hash: Result<String, String>,
+        notes: Vec<String>,
+    },
 }
 
 /// Focus mode (mockup-approved): a near-fullscreen task window showing only
@@ -280,6 +287,17 @@ pub struct Model {
     pub settings_dirty: bool,
     pub settings_editing_webhook: Option<String>,
 
+    /// fix-69: local stacks whose intent hash the run loop is asked to
+    /// compute off the UI thread, and the last hash computed per stack.
+    pub local_hash_requested: Vec<(String, std::path::PathBuf)>,
+    pub local_hashes: std::collections::HashMap<String, String>,
+
+    /// fix-68: the day's verdict — doctor, check, incidents and manual checks
+    /// in one list — as the host last gave it. `None` until it has answered.
+    pub today: Option<homelab_core::ops::today::Today>,
+    /// A `Today` request is on the wire.
+    pub today_pending: bool,
+
     pub should_quit: bool,
     /// Commands the update fn wants sent to the backend this cycle.
     pub outbox: Vec<Command>,
@@ -336,6 +354,10 @@ impl Model {
             settings_row: 0,
             settings_dirty: false,
             settings_editing_webhook: None,
+            local_hash_requested: Vec::new(),
+            local_hashes: std::collections::HashMap::new(),
+            today: None,
+            today_pending: false,
             should_quit: false,
             outbox: Vec::new(),
         }
@@ -374,6 +396,19 @@ impl Model {
         }
     }
 
+    /// fix-68: ask the host for the day's verdict, unless a request for it is
+    /// already out. It reads for about a minute; the host runs it beside the
+    /// queue, so nothing else waits for it.
+    pub fn request_today(&mut self) {
+        if self.today_pending {
+            return;
+        }
+        self.today_pending = true;
+        self.outbox.push(Command::Today {
+            stack_files: crate::spec::stack_files_with_vmids("stacks"),
+        });
+    }
+
     fn push_log(&mut self, level: LogLevel, source: String, msg: String) {
         if self.logs.len() > 500 {
             self.logs.pop_front();
@@ -390,6 +425,28 @@ pub fn update(model: &mut Model, msg: Msg) {
     match msg {
         Msg::ReleaseTag(tag) => {
             model.latest_release = tag;
+        }
+        Msg::LocalHash { stack, hash, notes } => {
+            for line in notes {
+                model.push_log(LogLevel::Info, "LOCAL".into(), line);
+            }
+            match hash {
+                Ok(h) => {
+                    if let Some(fleet) = model.fleet.as_mut() {
+                        for s in fleet.stacks.iter_mut().filter(|s| s.name == stack) {
+                            if !s.applied_hash.is_empty() {
+                                s.drift = h != s.applied_hash;
+                            }
+                        }
+                    }
+                    model.local_hashes.insert(stack, h);
+                }
+                Err(e) => model.push_log(
+                    LogLevel::Warn,
+                    "LOCAL".into(),
+                    format!("{} :: drift not computed: {}", stack, e),
+                ),
+            }
         }
         Msg::Tick => {
             model.tick += 1;
@@ -427,6 +484,9 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
             model.fingerprint = fingerprint;
             model.status_line = "link established".into();
             model.outbox.push(Command::GetState);
+            // A new connection has no request of its own on the wire.
+            model.today_pending = false;
+            model.request_today();
         }
         BackendEvent::Disconnected(why) => {
             model.conn = Conn::Down;
@@ -491,20 +551,24 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 // B4: drift = the host's applied intent hash differs from the
                 // hash of the local stack directory. Only computable for
                 // stacks we have locally.
+                //
+                // fix-69 (tui-refresh-blocks-on-downloads, 2026-09-27): the
+                // local hash is computed off this thread (it runs `latch`),
+                // asked for here and folded in by `Msg::LocalHash`. Until it
+                // arrives the last one known is used.
                 for stack in fleet.stacks.iter_mut() {
                     if stack.applied_hash.is_empty() {
                         continue;
                     }
-                    let local = model
-                        .local_stacks
-                        .iter()
-                        .find(|(n, _)| *n == stack.name)
-                        .map(|(_, dir)| dir.clone());
-                    if let Some(dir) = local {
-                        if let Ok(spec) = crate::spec::build_spec(&dir) {
-                            let local_hash = homelab_core::manifest::intent_hash(&spec);
-                            stack.drift = local_hash != stack.applied_hash;
-                        }
+                    if let Some(local) = model.local_hashes.get(&stack.name) {
+                        stack.drift = *local != stack.applied_hash;
+                    }
+                    if let Some((_, dir)) =
+                        model.local_stacks.iter().find(|(n, _)| *n == stack.name)
+                    {
+                        model
+                            .local_hash_requested
+                            .push((stack.name.clone(), dir.clone()));
                     }
                 }
                 model.fleet = Some(*fleet);
@@ -519,6 +583,19 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 model.settings_row = 0;
             }
             ServerMsg::RpcDone(resp) => {
+                // fix-68: the day's verdict runs beside the host's queue, so
+                // its reply can arrive in the middle of anything — an open
+                // deploy window, a pending plan. It is recognised by its
+                // shape, first, and never taken for another request's reply.
+                if model.today_pending {
+                    if let Ok(t) =
+                        serde_json::from_str::<homelab_core::ops::today::Today>(&resp.message)
+                    {
+                        model.today = Some(t);
+                        model.today_pending = false;
+                        return;
+                    }
+                }
                 if let Some(spec) = model.plan_pending.take() {
                     // D6: the host answered GetApplied with the applied files.
                     let applied: Vec<homelab_proto::FileBlob> =
@@ -776,7 +853,10 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                     model.selected_stack = (model.selected_stack + n - 1) % n;
                 }
             }
-            KeyCode::Char('r') => model.outbox.push(Command::GetState),
+            KeyCode::Char('r') => {
+                model.outbox.push(Command::GetState);
+                model.request_today();
+            }
             KeyCode::Char('u') => {
                 if let Some(tag) = model.host_update_available().map(String::from) {
                     model.focus = Some(Focus {
@@ -1245,7 +1325,10 @@ fn run_action(model: &mut Model, id: &str) {
         "tab.doctor" => model.switch_tab(Tab::Doctor),
         "tab.settings" => model.switch_tab(Tab::Settings),
         "tab.shell" => model.switch_tab(Tab::Shell),
-        "refresh" => model.outbox.push(Command::GetState),
+        "refresh" => {
+            model.outbox.push(Command::GetState);
+            model.request_today();
+        }
         "doctor" => {
             model.switch_tab(Tab::Doctor);
             model.outbox.push(Command::Doctor);

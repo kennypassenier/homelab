@@ -35,7 +35,15 @@
 /// and a log line answers WHY it is not. Their exact case — "did almanac
 /// process anything today?" — was already answerable from Prometheus while
 /// the panel beside it sat empty.
-fn metric_panels(stack: &str, native: bool) -> Vec<(&'static str, String)> {
+///
+/// fix-70 (native-uptime-panel-wrong, 2026-09-27): that first version drew
+/// "Service uptime" as `time() - node_boot_time_seconds`, which inside an LXC
+/// is the hypervisor kernel's boot time: 58.5 days on kyu and on almanac
+/// alike, measured the day both were redeployed, and a unit that kept dying
+/// would have shown the same number. Nor did it add the counters it promised.
+/// A unit's state and the uptime the service reports itself are what answer
+/// "is it alive"; `units` are the stack's systemd units.
+fn metric_panels(stack: &str, units: &[String], native: bool) -> Vec<(&'static str, String)> {
     if native {
         return vec![
             (
@@ -53,20 +61,34 @@ fn metric_panels(stack: &str, native: bool) -> Vec<(&'static str, String)> {
                 ),
             ),
             (
-                // Not "restarts per container": there are none. This is the
-                // service's own uptime, which answers the same question for a
-                // systemd unit — a number that keeps resetting is a unit that
-                // keeps dying.
-                "Service uptime",
+                // Not "restarts per container": there are none. One line per
+                // unit from node_exporter's systemd collector, 1 while the
+                // unit is active. `[.]` rather than an escaped dot: the
+                // expression is embedded in JSON, where a backslash would
+                // need escaping of its own.
+                "Units active (1 = running)",
                 format!(
-                    "time() - node_boot_time_seconds{{stack=\"{s}\"}}",
-                    s = stack
+                    "node_systemd_unit_state{{stack=\"{s}\",state=\"active\",name=~\"({u})[.]service\"}}",
+                    s = stack,
+                    u = units.join("|")
                 ),
             ),
             (
                 "Filesystem used",
                 format!(
                     "100 - (node_filesystem_avail_bytes{{stack=\"{s}\",mountpoint=\"/\"}} / node_filesystem_size_bytes{{stack=\"{s}\",mountpoint=\"/\"}} * 100)",
+                    s = stack
+                ),
+            ),
+            (
+                // The uptime the service itself exports, under its own
+                // scrape job (named after the stack, as kyu's and almanac's
+                // are). It resets on every restart, so a unit that keeps
+                // dying shows as a saw-tooth. Empty for a service that
+                // exports none.
+                "Service uptime (as the service reports it)",
+                format!(
+                    "{{job=\"{s}\",__name__=~\".+_uptime_seconds\"}}",
                     s = stack
                 ),
             ),
@@ -108,7 +130,12 @@ pub fn dashboard_json(stack: &str, apps: &[String]) -> String {
 /// `native` = the stack runs systemd units rather than docker containers.
 pub fn dashboard_json_for(stack: &str, apps: &[String], native: bool) -> String {
     let mut panels = String::new();
-    for (i, (title, expr)) in metric_panels(stack, native).into_iter().enumerate() {
+    let metrics = metric_panels(stack, apps, native);
+    // fix-70: the native set has five panels, the docker set four. The error
+    // panels below number and place themselves after however many there are;
+    // with four that is ids 5-7 at y 16, byte for byte what it always was.
+    let (log_id, log_y) = (metrics.len() + 1, metrics.len().div_ceil(2) * 8);
+    for (i, (title, expr)) in metrics.into_iter().enumerate() {
         let id = i + 1;
         if id > 1 {
             panels.push_str(",\n");
@@ -151,35 +178,40 @@ pub fn dashboard_json_for(stack: &str, apps: &[String], native: bool) -> String 
     panels.push_str(&format!(
         concat!(
             ",\n    {{\n",
-            "      \"id\": 5,\n",
+            "      \"id\": {id1},\n",
             "      \"type\": \"stat\",\n",
             "      \"title\": \"Errors in range\",\n",
             "      \"datasource\": {{\"type\": \"loki\", \"uid\": \"loki\"}},\n",
-            "      \"gridPos\": {{\"h\": 5, \"w\": 6, \"x\": 0, \"y\": 16}},\n",
+            "      \"gridPos\": {{\"h\": 5, \"w\": 6, \"x\": 0, \"y\": {y1}}},\n",
             "      \"options\": {{\"reduceOptions\": {{\"calcs\": [\"lastNotNull\"]}}, \"colorMode\": \"value\", \"graphMode\": \"none\"}},\n",
             "      \"targets\": [{{\"expr\": \"sum(count_over_time({e} [$__range]))\", \"queryType\": \"instant\", \"refId\": \"A\"}}]\n",
             "    }},\n",
             "    {{\n",
-            "      \"id\": 6,\n",
+            "      \"id\": {id2},\n",
             "      \"type\": \"bargauge\",\n",
             "      \"title\": \"Errors by container\",\n",
             "      \"description\": \"One container producing thousands while the rest produce single digits is the normal shape here, and the useful one: it says where to look first.\",\n",
             "      \"datasource\": {{\"type\": \"loki\", \"uid\": \"loki\"}},\n",
-            "      \"gridPos\": {{\"h\": 5, \"w\": 18, \"x\": 6, \"y\": 16}},\n",
+            "      \"gridPos\": {{\"h\": 5, \"w\": 18, \"x\": 6, \"y\": {y1}}},\n",
             "      \"options\": {{\"displayMode\": \"gradient\", \"orientation\": \"horizontal\", \"reduceOptions\": {{\"calcs\": [\"lastNotNull\"]}}}},\n",
             "      \"targets\": [{{\"expr\": \"topk(10, sum by (container_name) (count_over_time({e} [$__range])))\", \"queryType\": \"instant\", \"refId\": \"A\"}}]\n",
             "    }},\n",
             "    {{\n",
-            "      \"id\": 7,\n",
+            "      \"id\": {id3},\n",
             "      \"type\": \"logs\",\n",
             "      \"title\": \"Error lines\",\n",
             "      \"datasource\": {{\"type\": \"loki\", \"uid\": \"loki\"}},\n",
-            "      \"gridPos\": {{\"h\": 12, \"w\": 24, \"x\": 0, \"y\": 21}},\n",
+            "      \"gridPos\": {{\"h\": 12, \"w\": 24, \"x\": 0, \"y\": {y2}}},\n",
             "      \"options\": {{\"showTime\": true, \"showLabels\": true, \"sortOrder\": \"Descending\", \"wrapLogMessage\": true, \"dedupStrategy\": \"none\"}},\n",
             "      \"targets\": [{{\"expr\": \"{e}\", \"refId\": \"A\"}}]\n",
             "    }}"
         ),
         e = err.replace('"', "\\\""),
+        id1 = log_id,
+        id2 = log_id + 1,
+        id3 = log_id + 2,
+        y1 = log_y,
+        y2 = log_y + 5,
     ));
 
     format!(

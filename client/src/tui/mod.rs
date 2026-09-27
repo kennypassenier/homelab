@@ -230,6 +230,33 @@ pub async fn run(backend: Box<dyn Backend>) -> std::io::Result<()> {
             });
         }
 
+        // fix-69: the drift badge's local hashes. `latch` runs for each, so
+        // they are computed here, off the event loop, one after another, and
+        // come back as messages; nothing they print reaches the screen.
+        if !model.local_hash_requested.is_empty() {
+            let wanted = std::mem::take(&mut model.local_hash_requested);
+            let tx = side_tx.clone();
+            tokio::spawn(async move {
+                for (stack, dir) in wanted {
+                    let computed =
+                        tokio::task::spawn_blocking(move || crate::spec::local_intent_hash(&dir))
+                            .await
+                            .unwrap_or_else(|e| Err(e.to_string()));
+                    let (hash, notes) = match computed {
+                        Ok((h, notes)) => (Ok(h), notes),
+                        Err(e) => (Err(e), Vec::new()),
+                    };
+                    if tx
+                        .send(Msg::LocalHash { stack, hash, notes })
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+        }
+
         // Flush queued commands from the pure update to the backend.
         for cmd in model.outbox.drain(..) {
             let _ = cmd_tx.send(cmd).await;

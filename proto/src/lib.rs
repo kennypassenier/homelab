@@ -156,6 +156,12 @@ pub enum Command {
     /// stop; a question that is never answered times out on the host into
     /// `Unattended`, which is not the same thing and says so.
     Answer {
+        /// fix-66: on the wire as `question`. A command is flattened into
+        /// `RpcRequest`, whose own `id` is the request's; a field called `id`
+        /// here wrote a second `id` key into the same object, the host could
+        /// not parse the frame and dropped it, and no answer ever arrived
+        /// (found 2026-09-27 by the first round-trip test).
+        #[serde(rename = "question")]
         id: u64,
         allow: bool,
     },
@@ -222,6 +228,12 @@ pub enum Command {
     /// exist, how they are named, when each stack was last backed up, and
     /// whether every gateway route reaches something that answers.
     FleetCheck {
+        stack_files: Vec<(String, u16)>,
+    },
+    /// fix-68: doctor, the fleet check (with its manual checks) and the open
+    /// incident bundles as one list and one verdict. The reply's message is
+    /// a JSON `homelab_core::ops::today::Today`, rendered by the caller.
+    Today {
         stack_files: Vec<(String, u16)>,
     },
     /// H8 (light): flip a stack's enabled flag. Disabled = nightly scheduler

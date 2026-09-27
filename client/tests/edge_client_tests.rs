@@ -8,7 +8,7 @@ use homelab_client::edge::{curl_argv, curl_config, token_path};
 
 #[test]
 fn fix_143_the_token_goes_to_curl_on_stdin_never_in_argv() {
-    let token = "tok-0123456789";
+    let token = "0123456789abcdef0123";
     let url = "https://api.cloudflare.com/client/v4/zones/z/dns_records";
     let argv = curl_argv();
     assert!(

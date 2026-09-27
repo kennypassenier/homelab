@@ -12,7 +12,9 @@ description = "Test fixtures: the fixed dummy bearer token and named test secret
 condition = "AND"
 paths = ['''(^|/)tests/.*\.rs$''', '''^host/src/main\.rs$''']
 regexTarget = "line"
-regexes = ['''0123456789abcdef0123''', '''adopt-secret-gap27''']
+# `tok-0123456789`: the first fix-143 client test (commit 92d71d1), in the
+# history for good; the test itself now uses the dummy above.
+regexes = ['''0123456789abcdef0123''', '''adopt-secret-gap27''', '''tok-0123456789''']
 
 [[allowlists]]
 description = "Content hashes of applied apps, once recorded in stack files"
@@ -24,6 +26,7 @@ regexes = ['''^\s+[a-z0-9-]+: [0-9a-f]{64}$''']
 [[allowlists]]
 description = "Cloudflare Access capture: a service token's id names it, the secret is not in the file"
 condition = "AND"
-paths = ['''^captured/gateway/cloudflare-access\.json$''']
+# fix-143: the edge test feeds the capture's own answer back, id included.
+paths = ['''^captured/gateway/cloudflare-access\.json$''', '''^core/tests/edge_tests\.rs$''']
 regexTarget = "line"
-regexes = ['''"token_id": "[0-9a-f-]{36}"''']
+regexes = ['''"token_id": "a836cb28-4c6e-440c-ac2b-b4317ee0b44c"''']

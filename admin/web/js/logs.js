@@ -1,0 +1,113 @@
+// Pure view model for a stack's logs tab (feat-ops-4). The dashboard's
+// server asks Loki; the page picks the window, the app and a text to look
+// for, and all three live in the address.
+
+/**
+ * @typedef {{ts_ms: number, source: string, stream: string, level: string,
+ *   line: string}} LogLine
+ */
+
+/** The windows a person picks from, seconds. */
+export const SINCE = /** @type {const} */ ([
+  { value: "900", label: "15 min" },
+  { value: "3600", label: "1 hour" },
+  { value: "21600", label: "6 hours" },
+  { value: "86400", label: "24 hours" },
+  { value: "604800", label: "7 days" },
+]);
+
+/** The value of the app choice that means the stack's system journal. */
+export const JOURNAL = "journal";
+
+/**
+ * The page's log settings from its query string.
+ * @param {URLSearchParams} params
+ */
+export function logSettings(params) {
+  /** @type {string} */
+  const since =
+    SINCE.find((s) => s.value === params.get("since"))?.value ?? "3600";
+  const app = params.get("app") ?? "";
+  const q = params.get("q") ?? "";
+  return { since, app, q, follow: params.get("follow") === "1" };
+}
+
+/**
+ * The route to ask.
+ * @param {string} stack
+ * @param {{since: string, app: string, q: string}} s
+ * @param {number} [limit]
+ */
+export function logsUrl(stack, s, limit = 1000) {
+  const p = new URLSearchParams({
+    stack,
+    since: s.since,
+    limit: String(limit),
+  });
+  if (s.app) p.set("app", s.app);
+  if (s.q) p.set("q", s.q);
+  return `/data/logs?${p}`;
+}
+
+/**
+ * A level as a badge tone.
+ * @param {string} level
+ * @returns {"ok" | "warn" | "bad" | ""}
+ */
+export function levelTone(level) {
+  const l = level.toLowerCase();
+  if (
+    ["error", "err", "critical", "crit", "fatal", "alert", "emerg"].includes(l)
+  )
+    return "bad";
+  if (["warn", "warning"].includes(l)) return "warn";
+  if (l === "") return "";
+  return "ok";
+}
+
+/**
+ * The time of a line to the second, in the viewer's locale.
+ * @param {number} ms unix milliseconds
+ * @param {import("./format.js").TimeOptions} [opts]
+ */
+export function lineTime(ms, opts = {}) {
+  return new Intl.DateTimeFormat(opts.locale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: opts.timeZone,
+  }).format(new Date(ms));
+}
+
+/**
+ * The app choices: every app the stack runs, and its journal.
+ * @param {string[]} apps
+ */
+export function appChoices(apps) {
+  return [
+    { value: "", label: "Every app and the journal" },
+    ...[...apps].sort().map((a) => ({ value: a, label: a })),
+    { value: JOURNAL, label: "System journal" },
+  ];
+}
+
+/**
+ * The table's rows, newest first.
+ * @param {LogLine[]} lines
+ * @param {import("./format.js").TimeOptions} [opts]
+ */
+export function logRows(lines, opts) {
+  return [...lines]
+    .sort((a, b) => b.ts_ms - a.ts_ms)
+    .map((l) => ({
+      ms: l.ts_ms,
+      time: lineTime(l.ts_ms, opts),
+      source: l.source || "—",
+      level: l.level || "—",
+      tone: levelTone(l.level),
+      stream: l.stream,
+      line: l.line,
+    }));
+}

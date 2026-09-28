@@ -1,13 +1,22 @@
-// The one store (arch-frontend): the fleet snapshot from /data/fleet, kept
-// current by the live channel. Pages subscribe and are told on every change.
+// The one store (arch-frontend): the fleet snapshot from /data/fleet and the
+// host's open questions from /data/asks, kept current by the live channel.
+// Pages subscribe and are told on every change.
 
 /**
  * @typedef {{fleet: import("./fleet.js").Fleet | null, up: boolean | null,
- *   link: string}} StoreState
+ *   link: string, hostVersion: string | null, hostBuild: string | null,
+ *   asks: import("./asks.js").Ask[]}} StoreState
  */
 
 /** @type {StoreState} */
-const state = { fleet: null, up: null, link: "connecting…" };
+const state = {
+  fleet: null,
+  up: null,
+  link: "connecting…",
+  hostVersion: null,
+  hostBuild: null,
+  asks: [],
+};
 /** @type {Set<() => void>} */
 const subs = new Set();
 
@@ -31,26 +40,37 @@ function setLink(up, text) {
   state.link = text;
 }
 
+/**
+ * @param {string} url
+ * @returns {Promise<any>} the JSON body, or null
+ */
+async function getJson(url) {
+  const r = await fetch(url, { headers: { accept: "application/json" } });
+  if (r.redirected && new URL(r.url).pathname === "/login") {
+    location.assign("/login");
+    return null;
+  }
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
 async function load() {
   try {
-    const r = await fetch("/data/fleet", {
-      headers: { accept: "application/json" },
-    });
-    if (r.redirected && new URL(r.url).pathname === "/login") {
-      location.assign("/login");
-      return;
-    }
-    if (!r.ok) {
-      setLink(false, `could not read the fleet (HTTP ${r.status})`);
-      emit();
-      return;
-    }
-    const body = await r.json();
+    const body = await getJson("/data/fleet");
+    if (!body) return;
     state.fleet = body.fleet;
+    state.hostVersion = body.host_version ?? null;
+    state.hostBuild = body.host_build ?? null;
     if (body.link_error) setLink(false, `host link down: ${body.link_error}`);
     else if (body.host_version) setLink(true, `host ${body.host_version}`);
+  } catch (e) {
+    setLink(false, `could not read the fleet (${String(e)})`);
+  }
+  try {
+    const body = await getJson("/data/asks");
+    if (body) state.asks = body.asks ?? [];
   } catch {
-    setLink(false, "the dashboard did not answer");
+    // The questions come again with the next live event.
   }
   emit();
 }
@@ -64,12 +84,29 @@ export function start() {
   });
   events.addEventListener("link", (e) => {
     const d = JSON.parse(/** @type {MessageEvent} */ (e).data);
+    if (d.up) {
+      state.hostVersion = d.host_version ?? null;
+      state.hostBuild = d.host_build ?? null;
+    }
     setLink(
       d.up,
       d.up ? `host ${d.host_version}` : `host link down: ${d.error}`,
     );
     emit();
   });
+  events.addEventListener("asks", (e) => {
+    state.asks = JSON.parse(/** @type {MessageEvent} */ (e).data).asks ?? [];
+    emit();
+  });
   events.addEventListener("resync", () => void load());
   void load();
+}
+
+/**
+ * Replace the open questions (after an answer, before the live event).
+ * @param {import("./asks.js").Ask[]} asks
+ */
+export function setAsks(asks) {
+  state.asks = asks;
+  emit();
 }

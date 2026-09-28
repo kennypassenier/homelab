@@ -2,7 +2,16 @@
 // host did in the last fourteen days.
 
 import { historyRows, incidentRows } from "../activity.js";
-import { badgeCell, errorBox, fetchReport, h, tableBlock, td } from "../dom.js";
+import { agoEl, setAgo } from "../ago.js";
+import {
+  badgeCell,
+  bindTableUrl,
+  errorBox,
+  fetchReport,
+  h,
+  tableBlock,
+  td,
+} from "../dom.js";
 import { formatTime, humanDuration } from "../format.js";
 import { sortKeys } from "../sortkeys.js";
 import {
@@ -54,18 +63,33 @@ export function mount(root) {
   });
   const incErr = h("div");
   const histErr = h("div");
+  const incAgo = agoEl("read");
+  const histAgo = agoEl("read");
   root.replaceChildren(
-    h("h1", null, "Activity"),
+    h(
+      "div",
+      { class: "title-row" },
+      h("h1", null, "Activity"),
+      h(
+        "a",
+        { href: "/app/timeline", class: "kp-button" },
+        "See it on the timeline",
+      ),
+    ),
     h("h2", null, "Incidents"),
     incErr,
     inc.wrap,
+    h("p", null, incAgo),
     h("h2", null, "History"),
     histErr,
     hist.wrap,
+    h("p", null, histAgo),
   );
   const detach = attachDataTables(root, { compare: keys.compare(compare) });
   const incTable = dataTable(inc.wrap);
   const histTable = dataTable(hist.wrap);
+  const unbindI = bindTableUrl(incTable, "incidents");
+  const unbindH = bindTableUrl(histTable, "history");
   const abort = new AbortController();
 
   const loadIncidents = async () => {
@@ -89,6 +113,7 @@ export function mount(root) {
     );
     incTable?.refresh();
     incTable?.state("ready");
+    setAgo(incAgo, Date.now() / 1000);
   };
 
   const loadHistory = async () => {
@@ -127,6 +152,7 @@ export function mount(root) {
     );
     histTable?.refresh();
     histTable?.state("ready");
+    setAgo(histAgo, Date.now() / 1000);
   };
 
   const retry = (/** @type {Event} */ e) => {
@@ -139,6 +165,8 @@ export function mount(root) {
   return () => {
     abort.abort();
     root.removeEventListener("kp-datatable-retry", retry);
+    unbindI();
+    unbindH();
     detach();
   };
 }

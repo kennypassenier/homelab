@@ -1,48 +1,77 @@
 // The client-side router's pure half (arch-frontend): a path in, a page
 // out. chassis answers index.html for every extensionless path under /app/.
+// feat-overview-8: every page and every stack tab has its own path; what a
+// page filters on lives in the query string (urlstate.js), so any state a
+// person can see is a link they can keep.
+
+/** The stack page's tabs (feat-stacks-1), in order. */
+export const STACK_TABS = /** @type {const} */ ([
+  { tab: "overview", label: "Overview" },
+  { tab: "apps", label: "Apps" },
+  { tab: "history", label: "History" },
+  { tab: "logs", label: "Logs" },
+  { tab: "checks", label: "Checks" },
+]);
+
+/** @typedef {(typeof STACK_TABS)[number]["tab"]} StackTab */
 
 /**
- * @typedef {{page: "overview"} | {page: "stack", name: string} |
- *   {page: "activity"} | {page: "checks"} | {page: "doctor"} |
- *   {page: "notfound", path: string}} Route
+ * @typedef {{page: "overview"} | {page: "host"} |
+ *   {page: "stack", name: string, tab: StackTab} |
+ *   {page: "activity"} | {page: "timeline"} | {page: "checks"} |
+ *   {page: "doctor"} | {page: "notfound", path: string}} Route
  */
 
 /** The navigation bar, in order. */
 export const NAV = /** @type {const} */ ([
   { page: "overview", href: "/app/", label: "Overview" },
+  { page: "host", href: "/app/host", label: "Host" },
   { page: "activity", href: "/app/activity", label: "Activity" },
+  { page: "timeline", href: "/app/timeline", label: "Timeline" },
   { page: "checks", href: "/app/checks", label: "Checks" },
   { page: "doctor", href: "/app/doctor", label: "Doctor" },
 ]);
 
+/** @type {Record<string, Route>} */
+const FIXED = {
+  "": { page: "overview" },
+  host: { page: "host" },
+  activity: { page: "activity" },
+  timeline: { page: "timeline" },
+  checks: { page: "checks" },
+  doctor: { page: "doctor" },
+};
+
 /**
- * @param {string} pathname
+ * @param {string} pathname a path, with or without a query string
  * @returns {Route}
  */
 export function route(pathname) {
-  const rest = pathname.replace(/^\/app\/?/, "").replace(/\/+$/, "");
-  if (pathname !== "/app" && !pathname.startsWith("/app/"))
-    return { page: "notfound", path: pathname };
-  if (rest === "") return { page: "overview" };
-  if (rest === "activity") return { page: "activity" };
-  if (rest === "checks") return { page: "checks" };
-  if (rest === "doctor") return { page: "doctor" };
-  const m = /^stacks\/([^/]+)$/.exec(rest);
+  const path = pathname.split(/[?#]/)[0];
+  if (path !== "/app" && !path.startsWith("/app/"))
+    return { page: "notfound", path };
+  const rest = path.replace(/^\/app\/?/, "").replace(/\/+$/, "");
+  if (Object.hasOwn(FIXED, rest)) return FIXED[rest];
+  const m = /^stacks\/([^/]+)(?:\/([^/]+))?$/.exec(rest);
   if (m) {
+    const tab = STACK_TABS.find((t) => t.tab === (m[2] ?? "overview"));
+    if (!tab) return { page: "notfound", path };
     try {
-      return { page: "stack", name: decodeURIComponent(m[1]) };
+      return { page: "stack", name: decodeURIComponent(m[1]), tab: tab.tab };
     } catch {
-      return { page: "notfound", path: pathname };
+      return { page: "notfound", path };
     }
   }
-  return { page: "notfound", path: pathname };
+  return { page: "notfound", path };
 }
 
 /**
- * The link of one stack's page.
+ * The link of one stack's page, or of one of its tabs.
  * @param {string} name
+ * @param {StackTab} [tab]
  */
-export const stackHref = (name) => `/app/stacks/${encodeURIComponent(name)}`;
+export const stackHref = (name, tab = "overview") =>
+  `/app/stacks/${encodeURIComponent(name)}${tab === "overview" ? "" : `/${tab}`}`;
 
 /**
  * The navigation bar for a route, the current page marked. A stack page has
@@ -72,18 +101,13 @@ export function navEntries(r) {
  * @param {Route} r
  */
 export function pageTitle(r) {
-  switch (r.page) {
-    case "overview":
-      return "Homelab · Overview";
-    case "stack":
-      return `Homelab · ${r.name}`;
-    case "activity":
-      return "Homelab · Activity";
-    case "checks":
-      return "Homelab · Checks";
-    case "doctor":
-      return "Homelab · Doctor";
-    default:
-      return "Homelab · Not found";
+  if (r.page === "stack") {
+    const tab = STACK_TABS.find((t) => t.tab === r.tab);
+    return r.tab === "overview"
+      ? `Homelab · ${r.name}`
+      : `Homelab · ${r.name} · ${tab?.label}`;
   }
+  if (r.page === "notfound") return "Homelab · Not found";
+  const n = NAV.find((x) => x.page === r.page);
+  return `Homelab · ${n?.label}`;
 }

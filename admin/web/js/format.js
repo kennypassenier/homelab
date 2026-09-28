@@ -58,3 +58,17 @@ export function formatTime(unix, opts = {}) {
     timeZone: opts.timeZone,
   }).format(new Date(unix * 1000));
 }
+
+/**
+ * "measured 12 s ago", "read 2 min 5 s ago" (feat-overview-4): how old a
+ * reading is, in the units `humanDuration` uses. A moment in the future (a
+ * clock ahead of this one) reads as 0 s.
+ * @param {string} verb what happened at `at` ("measured", "read")
+ * @param {number | null | undefined} at unix seconds
+ * @param {number} now unix seconds
+ * @returns {string}
+ */
+export function agoText(verb, at, now) {
+  if (at == null || !Number.isFinite(at)) return `not ${verb} yet`;
+  return `${verb} ${humanDuration(Math.max(0, now - at))} ago`;
+}

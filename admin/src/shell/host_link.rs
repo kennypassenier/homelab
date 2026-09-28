@@ -18,9 +18,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use chassis::shell::live::Live;
 use futures_util::{SinkExt, StreamExt};
 use homelab_proto::{Command, RpcRequest, RpcResponse, ServerMsg};
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::core::asks::Asks;
 use crate::core::fleet::{fleet_view, FleetView};
 
 /// Where the host lives and how to prove who we are.
@@ -37,6 +38,10 @@ pub struct Snapshot {
     pub fleet: Option<FleetView>,
     /// The host's version as it said in Hello, e.g. "3.61.4".
     pub host_version: Option<String>,
+    /// `git describe` of the tree the host was built from (Hello `build`).
+    pub host_build: Option<String>,
+    /// feat-ops-2: the questions the host asked and may still wait on.
+    pub asks: Asks,
     /// Why the line is down, when it is.
     pub link_error: Option<String>,
     /// arch-exposure, lock 2: the house's public address as the host last
@@ -48,33 +53,79 @@ pub type Shared = Arc<RwLock<Snapshot>>;
 
 type Reply = oneshot::Sender<Result<RpcResponse, String>>;
 
+/// One command for the link task, with where its reply goes and (milestone
+/// act) where the id it went out under is told, so the caller can pick its
+/// own lines out of the host's `Log` stream.
+pub struct Asked {
+    command: Command,
+    reply: Reply,
+    sent: Option<oneshot::Sender<u64>>,
+}
+
+/// What the link task drains: the commands, and the channel it republishes
+/// the host's `Log`, `Ask` and `Transfer` messages on (milestone act).
+pub struct HostAsks {
+    rx: mpsc::Receiver<Asked>,
+    events: broadcast::Sender<ServerMsg>,
+}
+
 /// The pages' way to ask the host something.
 #[derive(Clone)]
 pub struct HostClient {
-    tx: mpsc::Sender<(Command, Reply)>,
+    tx: mpsc::Sender<Asked>,
     timeout: Duration,
+    events: broadcast::Sender<ServerMsg>,
 }
 
 impl HostClient {
     /// A client and the receiving end the link task drains.
-    pub fn new(timeout: Duration) -> (Self, mpsc::Receiver<(Command, Reply)>) {
+    pub fn new(timeout: Duration) -> (Self, HostAsks) {
         let (tx, rx) = mpsc::channel(64);
-        (HostClient { tx, timeout }, rx)
+        let (events, _) = broadcast::channel(1024);
+        (
+            HostClient {
+                tx,
+                timeout,
+                events: events.clone(),
+            },
+            HostAsks { rx, events },
+        )
+    }
+
+    /// milestone act: every `Log`, `Ask` and `Transfer` the host sends on
+    /// the one line, from now on.
+    pub fn subscribe(&self) -> broadcast::Receiver<ServerMsg> {
+        self.events.subscribe()
     }
 
     /// Send one command and wait for its reply, at most `timeout`.
     pub async fn ask(&self, command: Command) -> Result<RpcResponse, String> {
+        self.ask_traced(command, self.timeout, None).await
+    }
+
+    /// milestone act: like `ask`, with its own time limit, and the id the
+    /// command went out under sent to `sent` the moment it is on the line.
+    pub async fn ask_traced(
+        &self,
+        command: Command,
+        timeout: Duration,
+        sent: Option<oneshot::Sender<u64>>,
+    ) -> Result<RpcResponse, String> {
         let (reply, wait) = oneshot::channel();
         self.tx
-            .send((command, reply))
+            .send(Asked {
+                command,
+                reply,
+                sent,
+            })
             .await
             .map_err(|_| "the host link is not running".to_string())?;
-        match tokio::time::timeout(self.timeout, wait).await {
+        match tokio::time::timeout(timeout, wait).await {
             Ok(Ok(answer)) => answer,
             Ok(Err(_)) => Err("the host link stopped before the answer came".into()),
             Err(_) => Err(format!(
                 "no answer from the host within {} s",
-                self.timeout.as_secs()
+                timeout.as_secs()
             )),
         }
     }
@@ -84,9 +135,17 @@ pub struct LinkConfig {
     pub poll: Duration,
     pub backoff_min: Duration,
     pub backoff_max: Duration,
+    /// feat-ops-2: how long the host waits for an answer (arch-config).
+    pub ask_timeout_s: u64,
 }
 
-fn now_s() -> u64 {
+/// feat-ops-2: tell every open page which questions are open now.
+pub async fn publish_asks(shared: &Shared, live: &Live) {
+    let open = shared.read().await.asks.open(now_s());
+    let _ = live.publish("asks", &serde_json::json!({ "asks": open, "now": now_s() }));
+}
+
+pub fn now_s() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -99,7 +158,7 @@ pub async fn run(
     cfg: LinkConfig,
     shared: Shared,
     live: Live,
-    mut asks: mpsc::Receiver<(Command, Reply)>,
+    mut asks: HostAsks,
 ) {
     let mut backoff = cfg.backoff_min;
     loop {
@@ -121,7 +180,7 @@ async fn session(
     cfg: &LinkConfig,
     shared: &Shared,
     live: &Live,
-    asks: &mut mpsc::Receiver<(Command, Reply)>,
+    asks: &mut HostAsks,
 ) -> Result<(), String> {
     let mut pending: HashMap<u64, Reply> = HashMap::new();
     let result = session_loop(target, cfg, shared, live, asks, &mut pending).await;
@@ -139,27 +198,39 @@ async fn session_loop(
     cfg: &LinkConfig,
     shared: &Shared,
     live: &Live,
-    asks: &mut mpsc::Receiver<(Command, Reply)>,
+    asks: &mut HostAsks,
     pending: &mut HashMap<u64, Reply>,
 ) -> Result<(), String> {
     let built_in = homelab_client::repo_config::built_in_pin();
     let link = homelab_client::link::connect(&target.addr, &target.token, None, built_in).await?;
     let (mut tx, mut rx) = link.ws.split();
-    let mut next_id: u64 = 1;
+    // milestone act: ids start at the second the line opened, shifted past
+    // any id a CLI or TUI session uses (they count from 1), so a `Log`'s
+    // `req` names this session's request and an id is never reused after a
+    // reconnect. Stays below 2^53, so the browser reads it exactly.
+    let mut next_id: u64 = now_s() << 20;
     let mut tick = tokio::time::interval(cfg.poll);
     let mut greeted = false;
 
     loop {
         tokio::select! {
-            Some((command, reply)) = asks.recv(), if greeted => {
+            Some(Asked { command, reply, sent }) = asks.rx.recv(), if greeted => {
                 let id = next_id;
                 next_id += 1;
                 let req = RpcRequest { id, command };
                 let text = serde_json::to_string(&req).map_err(|e| e.to_string())?;
                 pending.insert(id, reply);
                 tx.send(Message::Text(text.into())).await.map_err(|e| format!("send: {e}"))?;
+                if let Some(sent) = sent {
+                    let _ = sent.send(id);
+                }
             }
             _ = tick.tick(), if greeted => {
+                // feat-ops-2: a question past the host's wait is gone there.
+                let expired = shared.write().await.asks.prune(now_s());
+                if expired {
+                    publish_asks(shared, live).await;
+                }
                 let req = RpcRequest { id: next_id, command: Command::GetState };
                 next_id += 1;
                 let text = serde_json::to_string(&req).map_err(|e| e.to_string())?;
@@ -171,7 +242,7 @@ async fn session_loop(
                 let Message::Text(text) = msg else { continue };
                 let Ok(server_msg) = serde_json::from_str::<ServerMsg>(&text) else { continue };
                 match server_msg {
-                    ServerMsg::Hello { version, .. } => {
+                    ServerMsg::Hello { version, build, .. } => {
                         greeted = true;
                         // arch-host-link: this session tells replies apart
                         // by id, so its reads need not wait behind a deploy.
@@ -184,9 +255,22 @@ async fn session_loop(
                         tx.send(Message::Text(text.into())).await.map_err(|e| format!("send: {e}"))?;
                         let mut s = shared.write().await;
                         s.host_version = Some(version.clone());
+                        s.host_build = build.clone();
                         s.link_error = None;
                         drop(s);
-                        let _ = live.publish("link", &serde_json::json!({ "up": true, "host_version": version }));
+                        let _ = live.publish("link", &serde_json::json!({ "up": true, "host_version": version, "host_build": build }));
+                    }
+                    // feat-ops-2: an operation stopped and waits for a person.
+                    // It also goes on to whoever follows the line (act).
+                    ask @ ServerMsg::Ask { .. } => {
+                        if let ServerMsg::Ask { id, op, step, what, if_allowed, if_stopped, boot } = ask.clone() {
+                            shared.write().await.asks.heard(
+                                id, boot, op, step, what, if_allowed, if_stopped,
+                                now_s(), cfg.ask_timeout_s,
+                            );
+                        }
+                        publish_asks(shared, live).await;
+                        let _ = asks.events.send(ask);
                     }
                     ServerMsg::State(state) => {
                         let view = fleet_view(&state, now_s());
@@ -209,6 +293,11 @@ async fn session_loop(
                         if let Some(reply) = pending.remove(&resp.id) {
                             let _ = reply.send(Ok(resp));
                         }
+                    }
+                    // milestone act: operation lines, questions and byte
+                    // counters go to whoever follows them (actions, progress).
+                    other @ (ServerMsg::Log { .. } | ServerMsg::Transfer { .. }) => {
+                        let _ = asks.events.send(other);
                     }
                     _ => {}
                 }

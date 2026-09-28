@@ -4,18 +4,27 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Homelab</title>
+    <!-- feat-settings-2: the stored theme before the first paint (chassis'
+         copy of kp-themes' no-flash snippet; no inline script under CSP). -->
+    <script src="/static/theme-boot.js"></script>
     <link rel="stylesheet" href="/static/kp/dist/kp-themes.css" />
     <link rel="stylesheet" href="/app/css/app.css" />
     <script type="module" src="/app/js/main.js"></script>
   </head>
   <body>
     <div class="kp-nav-wrap">
-      <nav class="kp-nav" aria-label="Pages">
+      <nav class="kp-nav" aria-label="Pages" id="bar">
         <a class="kp-nav__brand" href="/app/">Homelab</a>
         <ul class="kp-nav__links" id="nav"></ul>
         <p id="link" class="link" aria-live="polite">connecting…</p>
       </nav>
     </div>
+    <section
+      class="shell asks"
+      id="asks"
+      aria-label="The host is asking"
+      hidden
+    ></section>
     <main class="shell" id="page"></main>
   </body>
 </html>

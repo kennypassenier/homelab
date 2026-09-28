@@ -297,6 +297,7 @@ async fn fix_67_the_tui_reads_a_message_larger_than_sixteen_mib() {
             serde_json::to_string(&ServerMsg::Log {
                 req: None,
                 ts: None,
+                by: None,
                 step: None,
                 level: homelab_proto::LogLevel::Info,
                 source: "HOST".into(),

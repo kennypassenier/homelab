@@ -1,27 +1,35 @@
 // The dashboard shell (arch-frontend): the navigation bar, the history-API
 // router and the one store. Each page is its own module with a `mount`
 // that returns its cleanup; chassis answers index.html for every
-// extensionless path under /app/, so a deep link lands here too.
+// extensionless path under /app/, so a deep link lands here too
+// (feat-overview-8). The palette, the shortcuts, the theme menu and the
+// host's questions sit around every page (chrome.js).
 
+import { startAgoTicker } from "./ago.js";
+import { mountChrome } from "./chrome.js";
 import { h } from "./dom.js";
 import { navEntries, pageTitle, route } from "./router.js";
 import { current, start, subscribe } from "./store.js";
 import { mount as activity } from "./pages/activity.js";
 import { mount as checks } from "./pages/checks.js";
 import { mount as doctor } from "./pages/doctor.js";
+import { mount as host } from "./pages/host.js";
 import { mount as overview } from "./pages/overview.js";
 import { mount as stack } from "./pages/stack.js";
+import { mount as timeline } from "./pages/timeline.js";
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
 const nav = /** @type {HTMLElement} */ (document.getElementById("nav"));
+const bar = /** @type {HTMLElement} */ (document.getElementById("bar"));
+const asks = /** @type {HTMLElement} */ (document.getElementById("asks"));
 const link = /** @type {HTMLElement} */ (document.getElementById("link"));
 
 /** @type {() => void} */
 let cleanup = () => {};
 
-/** @param {string} href */
+/** @param {string} href a path under /app/, with its query string */
 function navigate(href) {
-  if (href === location.pathname) return;
+  if (href === location.pathname + location.search) return;
   history.pushState(null, "", href);
   render();
 }
@@ -43,11 +51,17 @@ function render() {
     case "overview":
       cleanup = overview(page, { navigate });
       break;
+    case "host":
+      cleanup = host(page, { navigate });
+      break;
     case "stack":
-      cleanup = stack(page, { name: r.name });
+      cleanup = stack(page, { name: r.name, tab: r.tab, navigate });
       break;
     case "activity":
       cleanup = activity(page);
+      break;
+    case "timeline":
+      cleanup = timeline(page, { navigate });
       break;
     case "checks":
       cleanup = checks(page);
@@ -81,7 +95,7 @@ document.addEventListener("click", (e) => {
     return;
   if (/\.[a-z0-9]+$/i.test(url.pathname)) return;
   e.preventDefault();
-  navigate(url.pathname);
+  navigate(url.pathname + url.search);
 });
 window.addEventListener("popstate", render);
 
@@ -90,5 +104,10 @@ subscribe(() => {
   link.textContent = s.link;
   link.dataset.up = String(s.up);
 });
+mountChrome(
+  { nav: bar, asks },
+  { navigate, route: () => route(location.pathname) },
+);
+startAgoTicker();
 start();
 render();

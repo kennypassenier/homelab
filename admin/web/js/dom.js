@@ -2,6 +2,12 @@
 // block every table uses (ui-tables), the error box and report fetching.
 
 import { routeError } from "./doctor.js";
+import {
+  replaceTableParams,
+  tableFromParams,
+  tableToParams,
+} from "./urlstate.js";
+import { VIEW_EVENT } from "/static/kp/js/datatable.js";
 
 /**
  * @template {keyof HTMLElementTagNameMap} K
@@ -44,7 +50,9 @@ export function badgeCell(st) {
  * sortable columns, Shift+click for a second key, its sort remembered
  * under its own name, no row selection.
  * @param {{remember: string, caption: string, search: string,
- *   columns: Column[], state?: "loading"}} spec
+ *   columns: Column[], state?: "loading", pageSize?: number,
+ *   pageSizes?: string}} spec pageSize/pageSizes: page a long table
+ *   (the logs) instead of showing every row
  */
 export function tableBlock(spec) {
   const tbody = h("tbody");
@@ -66,8 +74,9 @@ export function tableBlock(spec) {
     "data-kp-datatable": "",
     "data-kp-sort-multi": "",
     "data-kp-remember": spec.remember,
-    "data-kp-page-sizes": "none",
+    "data-kp-page-sizes": spec.pageSizes ?? "none",
   };
+  if (spec.pageSize) wrapAttrs["data-kp-page-size"] = String(spec.pageSize);
   if (spec.state) wrapAttrs["data-kp-state"] = spec.state;
   const wrap = h(
     "div",
@@ -103,6 +112,14 @@ export function tableBlock(spec) {
         role: "status",
         "aria-live": "polite",
       }),
+      ...(spec.pageSize
+        ? [
+            h("div", {
+              class: "kp-datatable__pager",
+              "data-kp-datatable-pager": "",
+            }),
+          ]
+        : []),
     ),
   );
   return { wrap, tbody };
@@ -123,14 +140,14 @@ export function errorBox(e) {
 }
 
 /**
- * Ask a report route. The login redirect and a 502 both come back as a
- * RouteError, never as a thrown exception.
+ * Ask a JSON route. The login redirect and an error answer both come back
+ * as a RouteError, never as a thrown exception (an abort still throws).
  * @param {string} url
  * @param {string} what
  * @param {AbortSignal} [signal]
- * @returns {Promise<{ok: true, report: any} | {ok: false, error: import("./doctor.js").RouteError}>}
+ * @returns {Promise<{ok: true, body: any} | {ok: false, error: import("./doctor.js").RouteError}>}
  */
-export async function fetchReport(url, what, signal) {
+export async function fetchJson(url, what, signal) {
   /** @type {Response} */
   let r;
   try {
@@ -152,5 +169,109 @@ export async function fetchReport(url, what, signal) {
   }
   if (!r.ok || !body || typeof body !== "object")
     return { ok: false, error: routeError(what, r.status, body) };
-  return { ok: true, report: /** @type {any} */ (body).report };
+  return { ok: true, body };
+}
+
+/**
+ * Ask a report route: the host's JSON answer is under `report`.
+ * @param {string} url
+ * @param {string} what
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ok: true, report: any} | {ok: false, error: import("./doctor.js").RouteError}>}
+ */
+export async function fetchReport(url, what, signal) {
+  const r = await fetchJson(url, what, signal);
+  if (!r.ok) return r;
+  return { ok: true, report: r.body.report };
+}
+
+/**
+ * feat-overview-8: a table's search and filters live in the address. What
+ * the address holds is applied once; every change is written back without a
+ * new history entry, so Back still leaves the page.
+ * @param {import("/static/kp/js/datatable.js").DataTableHandle | null} handle
+ * @param {string} name the table's remember name
+ * @returns {() => void} stop following
+ */
+export function bindTableUrl(handle, name) {
+  if (!handle) return () => {};
+  const wanted = tableFromParams(name, new URLSearchParams(location.search));
+  if (wanted.query) handle.query(wanted.query);
+  for (const [col, v] of Object.entries(wanted.filters))
+    handle.filter(Number(col), v);
+  const write = () => {
+    const v = handle.view();
+    const search = replaceTableParams(
+      location.search,
+      name,
+      tableToParams(name, { query: v.query, filters: v.filters }),
+    );
+    if (search !== location.search)
+      history.replaceState(history.state, "", location.pathname + search);
+  };
+  handle.element.addEventListener(VIEW_EVENT, write);
+  return () => handle.element.removeEventListener(VIEW_EVENT, write);
+}
+
+/**
+ * Label and value pairs as a definition list.
+ * @param {HTMLElement} dl
+ * @param {{label: string, value: string}[]} facts
+ */
+export function fillFacts(dl, facts) {
+  dl.replaceChildren(
+    ...facts.flatMap((x) => [h("dt", null, x.label), h("dd", null, x.value)]),
+  );
+}
+
+/**
+ * kp-themes progress bars in one group, so the tracks line up.
+ * @param {{label: string, pct: number, value: string}[]} bars
+ */
+export function progressGroup(bars) {
+  return h(
+    "div",
+    { class: "kp-progress-group" },
+    ...bars.map((b) => {
+      const p = h("progress", {
+        class: "kp-progress",
+        max: "100",
+        value: String(Math.max(0, Math.min(100, b.pct))),
+        "aria-label": b.label,
+      });
+      return h(
+        "div",
+        { class: "kp-progress__wrap" },
+        h("span", { class: "kp-progress__label" }, b.label),
+        p,
+        h("span", { class: "kp-progress__value" }, b.value),
+      );
+    }),
+  );
+}
+
+/**
+ * The same kp tab row for every tabbed page: links, so each tab has its own
+ * address (feat-overview-8), marked the ARIA way.
+ * @param {string} label
+ * @param {{href: string, label: string, current: boolean}[]} tabs
+ */
+export function tabRow(label, tabs) {
+  return h(
+    "div",
+    { class: "kp-tabs__list", role: "tablist", "aria-label": label },
+    ...tabs.map((t) =>
+      h(
+        "a",
+        {
+          class: "kp-tab",
+          role: "tab",
+          href: t.href,
+          "aria-selected": String(t.current),
+          ...(t.current ? { "aria-current": "page" } : {}),
+        },
+        t.label,
+      ),
+    ),
+  );
 }

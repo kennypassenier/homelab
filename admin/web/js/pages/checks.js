@@ -2,7 +2,16 @@
 // open ones first. Answering comes with the actions milestone.
 
 import { checkRows } from "../checks.js";
-import { badgeCell, errorBox, fetchReport, h, tableBlock, td } from "../dom.js";
+import { agoEl, setAgo } from "../ago.js";
+import {
+  badgeCell,
+  bindTableUrl,
+  errorBox,
+  fetchReport,
+  h,
+  tableBlock,
+  td,
+} from "../dom.js";
 import { formatTime } from "../format.js";
 import { sortKeys } from "../sortkeys.js";
 import {
@@ -43,9 +52,17 @@ export function mount(root) {
   });
   const err = h("div");
   const summary = h("p", { class: "measured" });
-  root.replaceChildren(h("h1", null, "Checks"), err, summary, t.wrap);
+  const ago = agoEl("read");
+  root.replaceChildren(
+    h("h1", null, "Checks"),
+    err,
+    summary,
+    t.wrap,
+    h("p", null, ago),
+  );
   const detach = attachDataTables(root, { compare: keys.compare(compare) });
   const table = dataTable(t.wrap);
+  const unbind = bindTableUrl(table, "checks");
   const abort = new AbortController();
 
   const load = async () => {
@@ -83,6 +100,7 @@ export function mount(root) {
     );
     table?.refresh();
     table?.state("ready");
+    setAgo(ago, Date.now() / 1000);
   };
   const retry = () => void load();
   root.addEventListener("kp-datatable-retry", retry);
@@ -90,6 +108,7 @@ export function mount(root) {
   return () => {
     abort.abort();
     root.removeEventListener("kp-datatable-retry", retry);
+    unbind();
     detach();
   };
 }

@@ -687,6 +687,13 @@ pub enum ServerMsg {
         /// without parsing `msg` (feat-ops-6, "step 3/35").
         #[serde(default, skip_serializing_if = "Option::is_none")]
         step: Option<StepMark>,
+        /// milestone act (homelab-admin, 2026-09-28): the name of the token
+        /// whose session asked for the operation that printed this line
+        /// ("admin", "wsl", "legacy"); None for the host's own work. `req`
+        /// alone is per session, so two sessions' request 5 look alike; this
+        /// tells them apart, and milestone `follow` shows who is acting.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<String>,
     },
     /// T69: an operation has stopped and is waiting for a person.
     ///

@@ -1,26 +1,46 @@
-// arch-frontend: the router's pure half.
+// arch-frontend, feat-overview-8, feat-stacks-1: the router's pure half.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { navEntries, pageTitle, route, stackHref } from "../js/router.js";
+import {
+  STACK_TABS,
+  navEntries,
+  pageTitle,
+  route,
+  stackHref,
+} from "../js/router.js";
 
 test("paths under /app/ name their page", () => {
   assert.deepEqual(route("/app/"), { page: "overview" });
   assert.deepEqual(route("/app"), { page: "overview" });
+  assert.deepEqual(route("/app/host"), { page: "host" });
   assert.deepEqual(route("/app/activity"), { page: "activity" });
+  assert.deepEqual(route("/app/timeline?days=3"), { page: "timeline" });
   assert.deepEqual(route("/app/checks/"), { page: "checks" });
   assert.deepEqual(route("/app/doctor"), { page: "doctor" });
   assert.deepEqual(route("/app/stacks/media"), {
     page: "stack",
     name: "media",
+    tab: "overview",
   });
   assert.equal(route("/app/nope").page, "notfound");
+  assert.equal(route("/app/constructor").page, "notfound");
   assert.equal(route("/app/stacks/a/b").page, "notfound");
+  assert.equal(route("/app/stacks/a/b/c").page, "notfound");
   assert.equal(route("/elsewhere").page, "notfound");
 });
 
-test("a stack link round-trips through the router", () => {
-  const name = "odd name";
-  assert.deepEqual(route(stackHref(name)), { page: "stack", name });
+test("every stack tab has its own path and round-trips", () => {
+  for (const { tab } of STACK_TABS) {
+    const href = stackHref("odd name", tab);
+    assert.deepEqual(route(href), { page: "stack", name: "odd name", tab });
+  }
+  assert.equal(stackHref("media"), "/app/stacks/media");
+  assert.equal(stackHref("media", "logs"), "/app/stacks/media/logs");
+  assert.deepEqual(route("/app/stacks/media/logs?app=sonarr"), {
+    page: "stack",
+    name: "media",
+    tab: "logs",
+  });
 });
 
 test("the navigation marks the current page, a stack page beside the overview", () => {
@@ -30,8 +50,9 @@ test("the navigation marks the current page, a stack page beside the overview", 
       .map((n) => n.label);
   assert.deepEqual(cur("/app/"), ["Overview"]);
   assert.deepEqual(cur("/app/doctor"), ["Doctor"]);
-  const onStack = navEntries(route("/app/stacks/media"));
-  assert.equal(onStack.length, 5);
+  assert.deepEqual(cur("/app/host"), ["Host"]);
+  const onStack = navEntries(route("/app/stacks/media/apps"));
+  assert.equal(onStack.length, 7);
   assert.deepEqual(onStack[1], {
     href: "/app/stacks/media",
     label: "Stack media",
@@ -39,4 +60,10 @@ test("the navigation marks the current page, a stack page beside the overview", 
   });
   assert.deepEqual(cur("/app/nope"), []);
   assert.equal(pageTitle(route("/app/stacks/media")), "Homelab · media");
+  assert.equal(
+    pageTitle(route("/app/stacks/media/logs")),
+    "Homelab · media · Logs",
+  );
+  assert.equal(pageTitle(route("/app/timeline")), "Homelab · Timeline");
+  assert.equal(pageTitle(route("/app/x")), "Homelab · Not found");
 });

@@ -34,6 +34,10 @@ pub enum HistoryEntry {
         /// The request that asked for it; None for the host's own work.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         req: Option<u64>,
+        /// milestone act: the token name whose session asked for it; None
+        /// for the host's own work and for entries written before the field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<String>,
         ok: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         deferred: Option<String>,

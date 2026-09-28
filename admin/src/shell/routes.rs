@@ -8,12 +8,17 @@
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use chassis::shell::live::Live;
 use homelab_proto::Command;
 use serde::Deserialize;
 
-use super::host_link::{HostClient, Shared};
+use super::host_link::{now_s, publish_asks, HostClient, Shared};
+use super::loki::Loki;
+use crate::core::asks::AnswerRequest;
+use crate::core::guests::parse_status;
+use crate::core::logs::LogQuery;
 
 #[derive(Clone)]
 struct Ctx {
@@ -27,6 +32,7 @@ async fn fleet(State(c): State<Ctx>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "fleet": s.fleet,
         "host_version": s.host_version,
+        "host_build": s.host_build,
         "link_error": s.link_error,
     }))
 }
@@ -113,4 +119,161 @@ pub fn router(shared: Shared, host: HostClient) -> Router {
         .route("/data/current-op", get(current_op))
         .route("/data/history", get(history))
         .with_state(Ctx { shared, host })
+}
+
+/// The read milestone's routes that need more than the host line: the live
+/// channel (questions) and Loki (logs).
+#[derive(Clone)]
+pub struct ReadCtx {
+    pub shared: Shared,
+    pub host: HostClient,
+    pub live: Live,
+    pub loki: Option<Loki>,
+}
+
+fn refused(status: StatusCode, what: &str, why: &str, fix: &str) -> Response {
+    (
+        status,
+        Json(serde_json::json!({ "what": what, "why": why, "fix": fix })),
+    )
+        .into_response()
+}
+
+/// feat-overview-2: the host's own facts from the newest fleet reading.
+async fn host(State(c): State<ReadCtx>) -> Json<serde_json::Value> {
+    let s = c.shared.read().await;
+    Json(serde_json::json!({
+        "host": s.fleet.as_ref().map(|f| &f.host),
+        "counts": s.fleet.as_ref().map(|f| &f.counts),
+        "measured_at": s.fleet.as_ref().map(|f| f.measured_at),
+        "host_version": s.host_version,
+        "host_build": s.host_build,
+        "link_error": s.link_error,
+    }))
+}
+
+/// feat-overview-2: the containers on the host, from `status` (`pct list`).
+async fn guests(State(c): State<ReadCtx>) -> Response {
+    match c.host.ask(Command::Status).await {
+        Ok(r) if r.ok => Json(serde_json::json!({
+            "guests": parse_status(&r.message),
+            "measured_at": now_s(),
+        }))
+        .into_response(),
+        Ok(r) => failed(
+            "the host's containers",
+            format!(
+                "the host answered: {}",
+                r.message.chars().take(200).collect::<String>()
+            ),
+        ),
+        Err(e) => failed("the host's containers", e),
+    }
+}
+
+/// feat-ops-2: the questions the host is waiting on now.
+async fn asks(State(c): State<ReadCtx>) -> Json<serde_json::Value> {
+    let now = now_s();
+    let open = c.shared.read().await.asks.open(now);
+    Json(serde_json::json!({ "asks": open, "now": now }))
+}
+
+/// feat-ops-2: answer one question, or refuse a stale answer. The answer is
+/// checked against the questions the dashboard heard (same start of the
+/// host, same operation and step, not past the host's wait) before anything
+/// is sent; the host checks the start again.
+///
+/// `send` puts the command on the host line (the route: `HostClient::ask`;
+/// a test: a fake host).
+pub async fn answer_ask<F, Fut>(
+    shared: &Shared,
+    live: &Live,
+    req: AnswerRequest,
+    now: u64,
+    send: F,
+) -> Response
+where
+    F: FnOnce(Command) -> Fut,
+    Fut: std::future::Future<Output = Result<homelab_proto::RpcResponse, String>>,
+{
+    const WHAT: &str = "the answer";
+    let command = match shared.read().await.asks.check(&req, now) {
+        Ok(command) => command,
+        Err(refusal) => {
+            return refused(
+                StatusCode::CONFLICT,
+                WHAT,
+                refusal.why(),
+                "nothing was sent; the page shows the questions that are open now",
+            )
+        }
+    };
+    match send(command).await {
+        Ok(r) => {
+            // Delivered or not, the host no longer waits on this id.
+            shared.write().await.asks.forget(&req.boot, req.id);
+            publish_asks(shared, live).await;
+            if r.ok {
+                Json(serde_json::json!({ "ok": true, "message": r.message })).into_response()
+            } else {
+                refused(
+                    StatusCode::CONFLICT,
+                    WHAT,
+                    &format!("the host did not take it: {}", r.message),
+                    "the operation went on without this answer; its outcome is on the Activity page",
+                )
+            }
+        }
+        Err(e) => failed(
+            WHAT,
+            format!("{e}; whether the host received it is unknown"),
+        ),
+    }
+}
+
+async fn answer(State(c): State<ReadCtx>, Json(req): Json<AnswerRequest>) -> Response {
+    let host = c.host.clone();
+    answer_ask(&c.shared, &c.live, req, now_s(), |command| async move {
+        host.ask(command).await
+    })
+    .await
+}
+
+/// feat-ops-4: a stack's container logs, asked of Loki by this server.
+async fn logs(State(c): State<ReadCtx>, Query(q): Query<LogQuery>) -> Response {
+    let Some(loki) = &c.loki else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the logs",
+            "no Loki is configured for this dashboard",
+            "set admin.loki_url (or HOMELAB_ADMIN_LOKI_URL) to Loki's address, e.g. http://10.10.10.13:3100",
+        );
+    };
+    let now = now_s();
+    match loki.query(&q, now).await {
+        Ok(found) => Json(serde_json::json!({
+            "lines": found.lines,
+            "logql": found.logql,
+            "from": found.from,
+            "to": found.to,
+            "measured_at": now,
+        }))
+        .into_response(),
+        Err(e) => refused(
+            StatusCode::BAD_GATEWAY,
+            "the logs",
+            &e,
+            "check that Loki answers queries from this dashboard (CT 113, port 3100)",
+        ),
+    }
+}
+
+pub fn read_router(ctx: ReadCtx) -> Router {
+    Router::new()
+        .route("/data/host", get(host))
+        .route("/data/host/guests", get(guests))
+        .route("/data/asks", get(asks))
+        .route("/data/asks/answer", post(answer))
+        .route("/data/logs", get(logs))
+        .with_state(ctx)
 }

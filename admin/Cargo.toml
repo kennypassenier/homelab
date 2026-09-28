@@ -12,6 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 homelab-proto = { path = "../proto" }
+# milestone act: the deploy guard and the history types, shared with the CLI.
+homelab-core = { path = "../core" }
 # arch-crates: the client library (link, tls) without the terminal UI.
 homelab-client = { path = "../client", default-features = false }
 # tech-chassis-dep: a released chassis-rs only, never a rev or a path.
@@ -20,9 +22,11 @@ axum = "0.8"
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 futures-util.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
+thiserror.workspace = true
 toml.workspace = true
 base64.workspace = true
 # chassis brings rustls with `ring`, the client with `aws-lc-rs`; with both
@@ -35,6 +39,11 @@ rustls = "0.23"
 # compiles in (no new C code).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 aws-lc-rs = "1"
+
+[dev-dependencies]
+# milestone act: the action routes are called in-process (already in the tree
+# through axum).
+tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true

@@ -1670,6 +1670,7 @@ port = 5003
             recent_cap: 2,
             timings: std::sync::Mutex::new(Vec::new()),
             subject: std::sync::Mutex::new(None),
+            by: None,
         };
         sink.emit(PipelineEvent::StepStarted {
             op: "deploy".into(),
@@ -1729,6 +1730,7 @@ port = 5003
             req: Some(9),
             ts: Some(1_800_000_010),
             step: None,
+            by: None,
         });
         let resp = handle_rpc(
             &state,
@@ -1798,6 +1800,7 @@ port = 5003
             recent_cap: 10,
             timings: std::sync::Mutex::new(Vec::new()),
             subject: std::sync::Mutex::new(None),
+            by: None,
         };
         sink.emit(PipelineEvent::StepStarted {
             op: "deploy media".into(),
@@ -1877,6 +1880,7 @@ port = 5003
                         msg: "question".into(),
                         req: None,
                         ts: None,
+                        by: None,
                         step: None,
                     },
                 },
@@ -2017,6 +2021,78 @@ port = 5003
             ok: true,
             message: format!("ran {}", req.command.name()),
             deferred: None,
+        }
+    }
+
+    /// Answers with the token name the request runs under.
+    async fn by_handler(_st: AppState, req: RpcRequest) -> RpcResponse {
+        RpcResponse {
+            id: req.id,
+            ok: true,
+            message: requested_by().unwrap_or_else(|| "<none>".into()),
+            deferred: None,
+        }
+    }
+
+    /// milestone act: the token name reaches the handler of a queued
+    /// request and of a read beside the queue alike; outside a session
+    /// there is none.
+    #[tokio::test]
+    async fn act_the_token_name_reaches_the_operation_queued_or_beside() {
+        let (state, _dir) = scoped_state("by");
+        let addr = serve_state_on_loopback(state, by_handler).await;
+        let replies = session_replies(
+            addr,
+            "operate-token-bbbbbbbbbbbbbb",
+            vec![
+                (
+                    1,
+                    Rpc::SessionOptions {
+                        reads_beside_queue: true,
+                    },
+                ),
+                (2, Rpc::BackupDevices),
+                (3, Rpc::GetState),
+            ],
+        )
+        .await;
+        for id in [2, 3] {
+            let r = replies.iter().find(|r| r.0 == id).expect("a reply");
+            assert_eq!(r.2, "dash-operate", "{:?}", replies);
+        }
+        assert_eq!(requested_by(), None);
+    }
+
+    /// milestone act: every line of an operation carries who asked for it.
+    #[test]
+    fn act_the_sink_stamps_the_token_name_on_every_line() {
+        use homelab_core::sink::PipelineEvent;
+        let (tx, mut rx) = broadcast::channel(16);
+        let sink = BroadcastSink {
+            log_tx: tx,
+            req: Some(3),
+            recent: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            recent_cap: 10,
+            timings: std::sync::Mutex::new(Vec::new()),
+            subject: std::sync::Mutex::new(None),
+            by: Some("admin".into()),
+        };
+        sink.emit(PipelineEvent::StepStarted {
+            op: "deploy-media".into(),
+            step: "pull".into(),
+        });
+        sink.emit(PipelineEvent::Line {
+            level: homelab_core::sink::Level::Info,
+            source: "HOST".into(),
+            msg: "pulled".into(),
+        });
+        for _ in 0..2 {
+            match rx.try_recv().unwrap() {
+                ServerMsg::Log { by, req, .. } => {
+                    assert_eq!((by.as_deref(), req), (Some("admin"), Some(3)))
+                }
+                other => panic!("{:?}", other),
+            }
         }
     }
 
@@ -2240,6 +2316,7 @@ port = 5003
                     req: None,
                     step: None,
                     ts: None,
+                    by: None,
                     level: homelab_proto::LogLevel::Debug,
                     source: "HOST".into(),
                     msg: format!("noise {}", i),
@@ -3321,6 +3398,22 @@ struct BroadcastSink {
     /// first step said it was about.
     timings: std::sync::Mutex<Vec<homelab_core::history::StepTiming>>,
     subject: std::sync::Mutex<Option<String>>,
+    /// milestone act: the token name of the session that asked for this
+    /// operation, stamped on every line; None for the host's own work.
+    by: Option<String>,
+}
+
+tokio::task_local! {
+    /// milestone act (homelab-admin, 2026-09-28): the token name of the
+    /// session whose request is being handled. Set by `serve_ws` around the
+    /// handler, read where an operation's sink is built, so the name reaches
+    /// every line and the history entry without a new handler parameter.
+    static REQUESTED_BY: String;
+}
+
+/// The token name of the session this task handles a request for, if any.
+fn requested_by() -> Option<String> {
+    REQUESTED_BY.try_with(|n| n.clone()).ok()
 }
 
 impl Sink for BroadcastSink {
@@ -3367,6 +3460,7 @@ impl Sink for BroadcastSink {
                     req: self.req,
                     ts: Some(unix_now()),
                     step: None,
+                    by: self.by.clone(),
                 }
             }
             // fix-122: step starts and ends reach the journal too; they went
@@ -3387,6 +3481,7 @@ impl Sink for BroadcastSink {
                         finished: false,
                         changed: false,
                     }),
+                    by: self.by.clone(),
                 }
             }
             PipelineEvent::StepFinished { op, step, changed } => {
@@ -3409,6 +3504,7 @@ impl Sink for BroadcastSink {
                         finished: true,
                         changed,
                     }),
+                    by: self.by.clone(),
                 }
             }
             PipelineEvent::Bytes {
@@ -5349,11 +5445,14 @@ where
         let out_tx = out_tx.clone();
         let state = state.clone();
         let handler = handler.clone();
+        let by = who.name.clone();
         tokio::spawn(async move {
             use tracing::Instrument as _;
             while let Some(req) = work_rx.recv().await {
                 let span = rpc_span(&req);
-                let resp = handler(state.clone(), req).instrument(span).await;
+                let resp = REQUESTED_BY
+                    .scope(by.clone(), handler(state.clone(), req).instrument(span))
+                    .await;
                 let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
                 // fix-121: an answered request is what accepts an update.
                 accept_pending_update(&state.config.state_dir, state.started_at);
@@ -5444,10 +5543,13 @@ where
         }
         if runs_beside_the_queue(&req.command) || (reads_beside && req.command.is_read_only()) {
             let (out_tx, state, handler) = (out_tx.clone(), state.clone(), handler.clone());
+            let by = who.name.clone();
             tokio::spawn(async move {
                 use tracing::Instrument as _;
                 let span = rpc_span(&req);
-                let resp = handler(state.clone(), req).instrument(span).await;
+                let resp = REQUESTED_BY
+                    .scope(by, handler(state.clone(), req).instrument(span))
+                    .await;
                 let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
                 accept_pending_update(&state.config.state_dir, state.started_at);
             });
@@ -5474,6 +5576,7 @@ fn lag_catch_up(
         req: None,
         step: None,
         ts: None,
+        by: None,
         level: homelab_proto::LogLevel::Warn,
         source: "HOST".into(),
         msg: format!(
@@ -5860,6 +5963,7 @@ async fn lock_ops(state: &AppState) -> tokio::sync::MutexGuard<'_, ()> {
         req: None,
         step: None,
         ts: None,
+        by: None,
         level: homelab_proto::LogLevel::Warn,
         source: "HOST".into(),
         msg,
@@ -5874,6 +5978,7 @@ fn progress_line(state: &AppState, line: &str) {
         req: None,
         step: None,
         ts: None,
+        by: None,
         level: homelab_proto::LogLevel::Info,
         source: "CHECK".into(),
         msg: line.to_string(),
@@ -5967,6 +6072,7 @@ where
         recent_cap: state.config.recent_lines,
         timings: std::sync::Mutex::new(Vec::new()),
         subject: std::sync::Mutex::new(None),
+        by: requested_by(),
     };
     let sink = homelab_core::incidents::RecordingSink::new(&broadcast);
     let journal = FileJournal {
@@ -6008,6 +6114,7 @@ where
             label: label.to_string(),
             subject: broadcast.subject.lock().ok().and_then(|s| s.clone()),
             req: (req_id != 0).then_some(req_id),
+            by: broadcast.by.clone(),
             ok: report.ok,
             deferred: report.deferred.clone(),
             error: report.error.as_ref().map(|e| e.what.clone()),

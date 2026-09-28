@@ -1,7 +1,7 @@
 // Pure view-model functions for the fleet page (arch-frontend): no DOM, no
 // clock of their own, so `node --test` can drive them.
 
-import { humanDuration } from "./format.js";
+import { agoText, humanDuration } from "./format.js";
 
 /**
  * @typedef {{name: string, running: boolean, restarts: number}} App
@@ -11,7 +11,8 @@ import { humanDuration } from "./format.js";
  *   hostname?: string, apps?: App[], uptime_s?: number | null,
  *   applied_source?: string | null}} Stack
  * @typedef {{name: string, cpu_pct: number, ram_used_mb: number,
- *   ram_total_mb: number, disk_pct: number}} Host
+ *   ram_total_mb: number, disk_pct: number, ram_committed_mb?: number,
+ *   cores_total?: number, load1_x100?: number}} Host
  * @typedef {{measured_at: number, host: Host, stacks: Stack[],
  *   counts: {stacks: number, online: number, parked: number}}} Fleet
  */
@@ -36,10 +37,7 @@ export function stackState(s) {
  * @returns {string}
  */
 export function measuredAgo(measuredAt, now) {
-  const d = Math.max(0, Math.round(now - measuredAt));
-  if (d < 60) return `measured ${d} s ago`;
-  if (d < 3600) return `measured ${Math.floor(d / 60)} min ${d % 60} s ago`;
-  return `measured ${Math.floor(d / 3600)} h ${Math.floor((d % 3600) / 60)} min ago`;
+  return agoText("measured", measuredAt, now);
 }
 
 /**

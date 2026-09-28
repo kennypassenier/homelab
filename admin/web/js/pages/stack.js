@@ -1,22 +1,155 @@
-// One stack's page (feat-stacks-1, first cut): its facts and its apps,
-// from the same live snapshot as the overview.
+// One stack's page (feat-stacks-1) with its tabs: overview, apps, history,
+// logs and checks. The tab is in the path (/app/stacks/media/logs), what a
+// tab filters on is in the query string (feat-overview-8).
 
-import { measuredAgo, stackDetail } from "../fleet.js";
-import { badgeCell, h, tableBlock, td } from "../dom.js";
+import { historyRows, incidentRows } from "../activity.js";
+import { agoEl, setAgo } from "../ago.js";
+import { checkRows } from "../checks.js";
+import {
+  badgeCell,
+  bindTableUrl,
+  errorBox,
+  fetchJson,
+  fetchReport,
+  fillFacts,
+  h,
+  tabRow,
+  tableBlock,
+  td,
+} from "../dom.js";
+import { stackDetail } from "../fleet.js";
+import { formatTime, humanDuration } from "../format.js";
+import {
+  JOURNAL,
+  SINCE,
+  appChoices,
+  logRows,
+  logSettings,
+  logsUrl,
+} from "../logs.js";
+import { STACK_TABS, stackHref } from "../router.js";
+import { sortKeys } from "../sortkeys.js";
+import { stackChecks, stackEntries, stackIncidents } from "../stacktabs.js";
 import { current, subscribe } from "../store.js";
-import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import { setParams } from "../urlstate.js";
+import {
+  attachDataTables,
+  compare,
+  dataTable,
+} from "/static/kp/js/datatable.js";
+import { attachLogs } from "/static/kp/js/log.js";
+import { watchTabOverflow } from "/static/kp/js/overlays.js";
+
+/** How far back the history tab reads. */
+const HISTORY_DAYS = 30;
+
+/**
+ * @typedef {{name: string, tab: import("../router.js").StackTab,
+ *   navigate: (href: string) => void}} Params
+ */
 
 /**
  * @param {HTMLElement} root
- * @param {{name: string}} params
+ * @param {Params} params
  * @returns {() => void}
  */
 export function mount(root, params) {
   const title = h("h1", null, `Stack ${params.name}`);
   const state = h("span", { class: "state" });
-  const facts = h("dl", { class: "facts" });
   const missing = h("p", { class: "kp-alert kp-alert--warning", hidden: "" });
-  const measured = h("p", { class: "measured" });
+  const panel = h("div", {
+    class: "kp-tabs__panel",
+    role: "tabpanel",
+    id: "stack-panel",
+    "aria-label": STACK_TABS.find((t) => t.tab === params.tab)?.label ?? "",
+  });
+  const tabs = tabRow(
+    `Stack ${params.name}`,
+    STACK_TABS.map((t) => ({
+      href: stackHref(params.name, t.tab),
+      label: t.label,
+      current: t.tab === params.tab,
+    })),
+  );
+  root.replaceChildren(
+    h("p", { class: "crumb" }, h("a", { href: "/app/" }, "← Overview")),
+    h("div", { class: "title-row" }, title, state),
+    missing,
+    tabs,
+    panel,
+  );
+
+  // The header is live on every tab: the state badge, or the note that the
+  // host has no such stack.
+  const header = () => {
+    const f = current().fleet;
+    if (!f) return;
+    const d = stackDetail(f, params.name);
+    missing.hidden = d != null;
+    if (!d) {
+      missing.textContent = `The host's fleet has no stack called "${params.name}".`;
+      state.replaceChildren();
+      return;
+    }
+    state.className = `state ${d.state.tone}`;
+    state.replaceChildren(h("span", null, d.state.label));
+  };
+  const unsub = subscribe(header);
+  header();
+  // A row wider than a phone scrolls, the open tab kept in view (kp-themes).
+  const stopOverflow = watchTabOverflow(
+    tabs,
+    () => tabs.querySelector('[aria-selected="true"]') ?? undefined,
+  );
+
+  /** @type {Record<string, (p: HTMLElement, params: Params) => () => void>} */
+  const panels = {
+    overview: overviewTab,
+    apps: appsTab,
+    history: historyTab,
+    logs: logsTab,
+    checks: checksTab,
+  };
+  const stop = panels[params.tab](panel, params);
+  return () => {
+    unsub();
+    stopOverflow();
+    stop();
+  };
+}
+
+/** @type {(p: HTMLElement, params: Params) => () => void} */
+function overviewTab(panel, params) {
+  const facts = h("dl", { class: "facts" });
+  const ago = agoEl("measured", null, { live: true });
+  const counts = h("p", null);
+  panel.replaceChildren(
+    h("section", { class: "kp-card", "aria-label": "Stack" }, facts),
+    counts,
+    h("p", null, ago),
+  );
+  const render = () => {
+    const f = current().fleet;
+    const d = stackDetail(f, params.name);
+    if (!f || !d) return;
+    fillFacts(facts, d.facts);
+    const down = d.apps.filter((a) => a.running !== "running").length;
+    counts.replaceChildren(
+      `${d.apps.length} apps, ${down} not running. `,
+      h("a", { href: stackHref(params.name, "apps") }, "See the apps"),
+      " · ",
+      h("a", { href: stackHref(params.name, "logs") }, "Read the logs"),
+    );
+    setAgo(ago, f.measured_at);
+  };
+  const unsub = subscribe(render);
+  render();
+  return unsub;
+}
+
+/** @type {(p: HTMLElement, params: Params) => () => void} */
+function appsTab(panel, params) {
+  const ago = agoEl("measured", null, { live: true });
   const t = tableBlock({
     remember: "stack-apps",
     caption: "Apps",
@@ -30,46 +163,17 @@ export function mount(root, params) {
         filter: "choice",
       },
       { label: "Restarts", sort: "number" },
+      { label: "Logs", sort: "text" },
     ],
   });
-  root.replaceChildren(
-    h("p", { class: "crumb" }, h("a", { href: "/app/" }, "← Overview")),
-    h("div", { class: "title-row" }, title, state),
-    missing,
-    h("section", { class: "kp-card", "aria-label": "Stack" }, facts),
-    t.wrap,
-    measured,
-  );
-  const detach = attachDataTables(root);
+  panel.replaceChildren(t.wrap, h("p", null, ago));
+  const detach = attachDataTables(panel);
   const table = dataTable(t.wrap);
-
-  const tick = () => {
-    const f = current().fleet;
-    if (f) measured.textContent = measuredAgo(f.measured_at, Date.now() / 1000);
-  };
-
+  const unbind = bindTableUrl(table, "apps");
   const render = () => {
     const f = current().fleet;
-    if (!f) return;
     const d = stackDetail(f, params.name);
-    if (!d) {
-      missing.hidden = false;
-      missing.textContent = `The host's fleet has no stack called "${params.name}".`;
-      facts.replaceChildren();
-      state.replaceChildren();
-      t.tbody.replaceChildren();
-      table?.refresh();
-      return;
-    }
-    missing.hidden = true;
-    state.className = `state ${d.state.tone}`;
-    state.replaceChildren(h("span", null, d.state.label));
-    facts.replaceChildren(
-      ...d.facts.flatMap((x) => [
-        h("dt", null, x.label),
-        h("dd", null, x.value),
-      ]),
-    );
+    if (!f || !d) return;
     t.tbody.replaceChildren(
       ...d.apps.map((a) =>
         h(
@@ -78,19 +182,393 @@ export function mount(root, params) {
           td(a.name),
           badgeCell({ label: a.running, tone: a.tone }),
           td(a.restarts, "num"),
+          h(
+            "td",
+            null,
+            h(
+              "a",
+              {
+                href: `${stackHref(params.name, "logs")}?app=${encodeURIComponent(a.name)}`,
+              },
+              `${a.name} logs`,
+            ),
+          ),
         ),
       ),
     );
     table?.refresh();
-    tick();
+    setAgo(ago, f.measured_at);
   };
-
   const unsub = subscribe(render);
-  const timer = setInterval(tick, 1000);
   render();
   return () => {
     unsub();
-    clearInterval(timer);
+    unbind();
+    detach();
+  };
+}
+
+/** @type {(p: HTMLElement, params: Params) => () => void} */
+function historyTab(panel, params) {
+  const keys = sortKeys();
+  /** @param {number | null} unix */
+  const time = (unix) =>
+    unix == null ? "—" : keys.note("time", formatTime(unix), unix);
+  const ago = agoEl("read");
+  const err = h("div");
+  const hist = tableBlock({
+    remember: "stack-history",
+    caption: `What the host did with ${params.name}, last ${HISTORY_DAYS} days`,
+    search: "Search the history",
+    state: "loading",
+    columns: [
+      { label: "Started", sort: "time" },
+      { label: "What", sort: "text" },
+      { label: "Took", sort: "duration" },
+      {
+        label: "Outcome",
+        sort: "text",
+        order: "failed,running,deferred,ok,done",
+        filter: "choice",
+      },
+      { label: "Detail", sort: "text" },
+    ],
+  });
+  const inc = tableBlock({
+    remember: "stack-incidents",
+    caption: `Incidents of ${params.name}`,
+    search: "Search incidents",
+    state: "loading",
+    columns: [
+      { label: "When", sort: "time" },
+      { label: "Operation", sort: "text" },
+      { label: "Bundle", sort: "text" },
+    ],
+  });
+  panel.replaceChildren(err, hist.wrap, inc.wrap, h("p", null, ago));
+  const detach = attachDataTables(panel, { compare: keys.compare(compare) });
+  const histTable = dataTable(hist.wrap);
+  const incTable = dataTable(inc.wrap);
+  const unbindH = bindTableUrl(histTable, "history");
+  const unbindI = bindTableUrl(incTable, "incidents");
+  const abort = new AbortController();
+  const load = async () => {
+    histTable?.state("loading");
+    incTable?.state("loading");
+    const since = Math.floor(Date.now() / 1000) - HISTORY_DAYS * 86400;
+    const [hr, ir] = await Promise.all([
+      fetchReport(`/data/history?since=${since}`, "the history", abort.signal),
+      fetchReport("/data/incidents", "the incidents", abort.signal),
+    ]);
+    err.replaceChildren(
+      ...(hr.ok ? [] : [errorBox(hr.error)]),
+      ...(ir.ok ? [] : [errorBox(ir.error)]),
+    );
+    if (hr.ok) {
+      const rows = historyRows(
+        stackEntries(hr.report?.entries ?? [], params.name),
+      );
+      hist.tbody.replaceChildren(
+        ...rows.map((x) =>
+          h(
+            "tr",
+            null,
+            td(time(x.start)),
+            td(x.what),
+            td(
+              x.took == null
+                ? "—"
+                : keys.note("duration", humanDuration(x.took), x.took),
+              "num",
+            ),
+            badgeCell(x.outcome),
+            td(x.detail),
+          ),
+        ),
+      );
+      histTable?.refresh();
+      histTable?.state("ready");
+    } else histTable?.state("failed");
+    if (ir.ok) {
+      const names = stackIncidents(ir.report?.incidents ?? [], params.name);
+      inc.tbody.replaceChildren(
+        ...incidentRows(names).map((x) =>
+          h("tr", null, td(time(x.at)), td(x.op), td(x.name, "mono")),
+        ),
+      );
+      incTable?.refresh();
+      incTable?.state("ready");
+    } else incTable?.state("failed");
+    setAgo(ago, Date.now() / 1000);
+  };
+  const retry = () => void load().catch(() => {});
+  panel.addEventListener("kp-datatable-retry", retry);
+  retry();
+  return () => {
+    abort.abort();
+    panel.removeEventListener("kp-datatable-retry", retry);
+    unbindH();
+    unbindI();
+    detach();
+  };
+}
+
+/** @type {(p: HTMLElement, params: Params) => () => void} */
+function logsTab(panel, params) {
+  const keys = sortKeys();
+  let settings = logSettings(new URLSearchParams(location.search));
+  const appSel = h("select", { class: "kp-field__input", id: "logs-app" });
+  let appsShown = "";
+  // The choices follow the fleet: a deep link can arrive before it does.
+  const fillApps = () => {
+    const apps =
+      stackDetail(current().fleet, params.name)?.apps.map((a) => a.name) ?? [];
+    const sig = apps.join(",");
+    if (sig === appsShown && appSel.options.length > 0) return;
+    appsShown = sig;
+    appSel.replaceChildren(
+      ...appChoices(apps).map((c) => h("option", { value: c.value }, c.label)),
+    );
+    // An app the fleet does not list (yet) is still a valid address.
+    if (!new Set([...apps, JOURNAL, ""]).has(settings.app))
+      appSel.append(h("option", { value: settings.app }, settings.app));
+    appSel.value = settings.app;
+  };
+  fillApps();
+  const unsubApps = subscribe(fillApps);
+  const sinceSel = h(
+    "select",
+    { class: "kp-field__input", id: "logs-since" },
+    ...SINCE.map((c) => h("option", { value: c.value }, c.label)),
+  );
+  sinceSel.value = settings.since;
+  const text = h("input", {
+    class: "kp-field__input",
+    id: "logs-q",
+    type: "search",
+    placeholder: "Only lines containing…",
+  });
+  text.value = settings.q;
+  const follow = h("input", {
+    class: "kp-field__check",
+    type: "checkbox",
+    id: "logs-follow",
+  });
+  follow.checked = settings.follow;
+  const refresh = h(
+    "button",
+    { type: "button", class: "kp-button" },
+    "Refresh",
+  );
+  const ago = agoEl("read");
+  const logql = h("p", { class: "measured mono", id: "logs-logql" });
+  const err = h("div");
+  const t = tableBlock({
+    remember: "logs",
+    pageSize: 100,
+    pageSizes: "50,100,250,1000",
+    caption: `Logs of ${params.name}`,
+    search: "Search these lines",
+    state: "loading",
+    columns: [
+      { label: "Time", sort: "time" },
+      { label: "App", sort: "text", filter: "choice" },
+      {
+        label: "Level",
+        sort: "text",
+        order: "error,warn,warning,info,informational,notice,debug,—",
+        filter: "choice",
+      },
+      { label: "Line", sort: "text", cls: "wide" },
+    ],
+  });
+  const field = (
+    /** @type {string} */ label,
+    /** @type {HTMLElement} */ control,
+  ) =>
+    h(
+      "div",
+      { class: "kp-field logs-field" },
+      h("label", { class: "kp-field__label", for: control.id }, label),
+      control,
+    );
+  panel.replaceChildren(
+    h(
+      "form",
+      { class: "logs-controls", role: "search", "aria-label": "Which logs" },
+      field("App", appSel),
+      field("Window", sinceSel),
+      field("Lines containing", text),
+      h("label", { class: "logs-follow" }, follow, " Follow (every 5 s)"),
+      refresh,
+    ),
+    err,
+    t.wrap,
+    h("p", null, ago),
+    logql,
+  );
+  const detach = attachDataTables(panel, { compare: keys.compare(compare) });
+  const table = dataTable(t.wrap);
+  const unbind = bindTableUrl(table, "logs");
+  let abort = new AbortController();
+  /** @type {ReturnType<typeof setInterval> | null} */
+  let timer = null;
+
+  const load = async () => {
+    abort.abort();
+    abort = new AbortController();
+    table?.state("loading");
+    const r = await fetchJson(
+      logsUrl(params.name, settings),
+      "the logs",
+      abort.signal,
+    );
+    if (!r.ok) {
+      err.replaceChildren(errorBox(r.error));
+      table?.state("failed");
+      return;
+    }
+    err.replaceChildren();
+    const rows = logRows(r.body.lines ?? []);
+    t.tbody.replaceChildren(
+      ...rows.map((x) => {
+        const src = h(
+          "td",
+          null,
+          h("span", { "data-kp-source": x.source }, x.source),
+        );
+        return h(
+          "tr",
+          null,
+          td(keys.note("time", x.time, x.ms), "num"),
+          src,
+          x.tone ? badgeCell({ label: x.level, tone: x.tone }) : td(x.level),
+          td(x.line, "mono logline"),
+        );
+      }),
+    );
+    attachLogs(t.tbody);
+    table?.refresh();
+    table?.state("ready");
+    logql.textContent = `${rows.length} lines · LogQL: ${r.body.logql}`;
+    setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
+  };
+
+  const apply = () => {
+    settings = {
+      app: appSel.value,
+      since: sinceSel.value,
+      q: text.value.trim(),
+      follow: follow.checked,
+    };
+    const search = setParams(location.search, {
+      app: settings.app,
+      since: settings.since === "3600" ? null : settings.since,
+      q: settings.q,
+      follow: settings.follow ? "1" : null,
+    });
+    history.replaceState(history.state, "", location.pathname + search);
+    if (timer) clearInterval(timer);
+    timer = settings.follow
+      ? setInterval(() => void load().catch(() => {}), 5000)
+      : null;
+    void load().catch(() => {});
+  };
+  appSel.addEventListener("change", apply);
+  sinceSel.addEventListener("change", apply);
+  follow.addEventListener("change", apply);
+  text.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      apply();
+    }
+  });
+  refresh.addEventListener("click", apply);
+  panel.addEventListener("kp-datatable-retry", apply);
+  apply();
+  return () => {
+    abort.abort();
+    unsubApps();
+    if (timer) clearInterval(timer);
+    panel.removeEventListener("kp-datatable-retry", apply);
+    unbind();
+    detach();
+  };
+}
+
+/** @type {(p: HTMLElement, params: Params) => () => void} */
+function checksTab(panel, params) {
+  const keys = sortKeys();
+  /** @param {number | null} unix */
+  const time = (unix) =>
+    unix == null ? "never" : keys.note("time", formatTime(unix), unix);
+  const ago = agoEl("read");
+  const err = h("div");
+  const t = tableBlock({
+    remember: "stack-checks",
+    caption: `Manual checks of ${params.name}`,
+    search: "Search checks",
+    state: "loading",
+    columns: [
+      { label: "App", sort: "text" },
+      {
+        label: "Answer",
+        sort: "text",
+        order: "not ok,open,accepted,ok",
+        filter: "choice",
+      },
+      { label: "Question", sort: "text", cls: "wide" },
+      { label: "Answered", sort: "time" },
+      { label: "Note", sort: "text" },
+    ],
+  });
+  panel.replaceChildren(err, t.wrap, h("p", null, ago));
+  const detach = attachDataTables(panel, { compare: keys.compare(compare) });
+  const table = dataTable(t.wrap);
+  const unbind = bindTableUrl(table, "checks");
+  const abort = new AbortController();
+  const load = async () => {
+    table?.state("loading");
+    const r = await fetchReport(
+      "/data/manual-checks",
+      "the manual checks",
+      abort.signal,
+    );
+    if (!r.ok) {
+      err.replaceChildren(errorBox(r.error));
+      table?.state("failed");
+      return;
+    }
+    err.replaceChildren();
+    const now = r.report?.now ?? Math.floor(Date.now() / 1000);
+    const rows = checkRows(
+      stackChecks(r.report?.checks ?? [], params.name),
+      now,
+    );
+    t.tbody.replaceChildren(
+      ...rows.map((x) =>
+        h(
+          "tr",
+          null,
+          td(x.app),
+          badgeCell(x.answer),
+          td(x.text),
+          td(time(x.answered)),
+          td(x.note),
+        ),
+      ),
+    );
+    table?.refresh();
+    table?.state("ready");
+    setAgo(ago, Date.now() / 1000);
+  };
+  const retry = () => void load().catch(() => {});
+  panel.addEventListener("kp-datatable-retry", retry);
+  retry();
+  return () => {
+    abort.abort();
+    panel.removeEventListener("kp-datatable-retry", retry);
+    unbind();
     detach();
   };
 }

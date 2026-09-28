@@ -1,0 +1,1180 @@
+//! milestone act: the dashboard acts. feat-stacks-4 (every action per
+//! stack), feat-stacks-5 (several stacks at once), feat-stacks-6 (roll
+//! back), feat-stacks-7 (copy as CLI command) and feat-ops-6 (step progress
+//! with the expected duration).
+//!
+//! A press becomes a job in ONE queue, run one at a time in the order they
+//! came, which is the order the host's own queue would run them in anyway
+//! (AR12). The route answers at once with the job id; what happens next goes
+//! over the live channel:
+//!
+//! * `action`: the job, whenever its state changes (queued, running, done,
+//!   failed, deferred, refused, unknown);
+//! * `action_log`: every host line of the job's request;
+//! * `action_progress`: "step n/m, expected x" (feat-ops-6);
+//! * `action_batch`: a batch's jobs and totals, after each of its jobs.
+//!
+//! The pieces that touch the world are traits ([`HostPort`], [`Publish`],
+//! [`StackFiles`]) so the act tests drive the real queue against a mock
+//! host, a recording channel and stack files in memory.
+
+use std::collections::{BTreeMap, VecDeque};
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::extract::rejection::JsonRejection;
+use axum::extract::{Path as UrlPath, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use homelab_core::ops::deployguard::{self, Ancestry};
+use homelab_proto::{Command, RpcResponse, ServerMsg};
+use serde::Serialize;
+use tokio::sync::{broadcast, mpsc, oneshot};
+
+use super::actions_notify::NotifyCenter;
+use super::host_link::{HostClient, Shared};
+use crate::core::actions::{
+    self, ActionArgs, ActionKind, ActionRequest, BatchRequest, Material, Needs, Refusal,
+};
+use crate::core::actions_cli::cli_line;
+use crate::core::actions_progress::{Progress, Tracker};
+use crate::core::notify::{Draft, Kind};
+
+type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// Unix seconds, injected so tests can hold time still.
+pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
+pub fn system_clock() -> Clock {
+    Arc::new(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    })
+}
+
+/// The live channel, as the actions see it.
+pub trait Publish: Send + Sync + 'static {
+    fn publish(&self, event: &str, data: serde_json::Value);
+}
+
+impl Publish for chassis::shell::live::Live {
+    fn publish(&self, event: &str, data: serde_json::Value) {
+        let _ = chassis::shell::live::Live::publish(self, event, &data);
+    }
+}
+
+/// The one line to the host, as the actions see it.
+pub trait HostPort: Send + Sync + 'static {
+    fn subscribe(&self) -> broadcast::Receiver<ServerMsg>;
+    fn ask_traced(
+        &self,
+        command: Command,
+        timeout: Duration,
+        sent: Option<oneshot::Sender<u64>>,
+    ) -> BoxFut<'_, Result<RpcResponse, String>>;
+}
+
+impl HostPort for HostClient {
+    fn subscribe(&self) -> broadcast::Receiver<ServerMsg> {
+        HostClient::subscribe(self)
+    }
+    fn ask_traced(
+        &self,
+        command: Command,
+        timeout: Duration,
+        sent: Option<oneshot::Sender<u64>>,
+    ) -> BoxFut<'_, Result<RpcResponse, String>> {
+        Box::pin(HostClient::ask_traced(self, command, timeout, sent))
+    }
+}
+
+/// One commit that touched a stack, for the roll-back list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CommitInfo {
+    pub commit: String,
+    /// Unix seconds of the commit.
+    pub at: i64,
+    pub subject: String,
+}
+
+/// The stack files, as the actions see them. Every method blocks (files,
+/// git, latch); the queue calls them off the async threads.
+pub trait StackFiles: Send + Sync + 'static {
+    /// What `needs` asks for, from the working copy, or from `commit` when
+    /// given (feat-stacks-6). A destroy of a stack whose directory is gone
+    /// answers `Material::None` (DestroyRecorded).
+    fn read(
+        &self,
+        stack: &str,
+        kind: ActionKind,
+        commit: Option<&str>,
+    ) -> Result<Material, Refusal>;
+    /// Where the host's commit stands against the working copy's HEAD.
+    fn ancestry(&self, commit: &str) -> Ancestry;
+    /// Newest first.
+    fn commits(&self, stack: &str, limit: usize) -> Result<Vec<CommitInfo>, Refusal>;
+    /// The native units the stack's files declare.
+    fn native_units(&self, stack: &str) -> Vec<String>;
+    /// Whether the working copy is there at all.
+    fn present(&self) -> bool;
+}
+
+/// The homelab working copy (arch-state: `…/repo`).
+pub struct RepoFiles {
+    pub repo: PathBuf,
+    /// Where a checkout of an earlier commit is made, and removed again.
+    pub scratch: PathBuf,
+}
+
+fn no_repo(repo: &Path, what: String) -> Refusal {
+    Refusal::new(
+        what,
+        format!(
+            "the dashboard has no working copy of the homelab repository at {}",
+            repo.display()
+        ),
+        "clone kennypassenier/homelab there (HOMELAB_ADMIN_REPO names another place); \
+         actions that need only the stack name work without it",
+    )
+}
+
+impl RepoFiles {
+    fn git(&self, args: &[&str]) -> Result<String, String> {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&self.repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_WORK_TREE")
+            .args(args)
+            .output()
+            .map_err(|e| format!("git did not run: {e}"))?;
+        if out.status.success() {
+            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        }
+    }
+
+    fn read_dir(
+        &self,
+        dir: &Path,
+        stack: &str,
+        kind: ActionKind,
+        what: &str,
+    ) -> Result<Material, Refusal> {
+        let failed = |why: String| {
+            Refusal::new(
+                what.to_string(),
+                why,
+                format!(
+                    "fix stacks/{stack} in the working copy; `homelab plan {stack}` says the same"
+                ),
+            )
+        };
+        match kind.needs() {
+            Needs::Nothing | Needs::Vmid => Ok(Material::None),
+            Needs::Manifest => {
+                if kind == ActionKind::Destroy && !dir.join("lxc-compose.yml").exists() {
+                    return Ok(Material::None);
+                }
+                homelab_client::spec::build_manifest(dir)
+                    .map(|m| Material::Manifest(Box::new(m)))
+                    .map_err(failed)
+            }
+            Needs::Spec => {
+                let spec = homelab_client::spec::build_spec(dir).map_err(failed)?;
+                homelab_core::manifest::validate(&spec)
+                    .map_err(|e| failed(format!("validation failed: {e}")))?;
+                Ok(Material::Spec(Box::new(spec)))
+            }
+            Needs::NativeManifest => {
+                let path = dir.join("service.yml");
+                let raw = std::fs::read_to_string(&path)
+                    .map_err(|e| failed(format!("cannot read {}: {e}", path.display())))?;
+                let m: homelab_proto::NativeServiceManifest = serde_yaml::from_str(&raw)
+                    .map_err(|e| failed(format!("service.yml parse: {e}")))?;
+                homelab_core::native::validate_native(&m)
+                    .map_err(|p| failed(format!("service.yml invalid: {}", p.join("; "))))?;
+                Ok(Material::Native(Box::new(m)))
+            }
+        }
+    }
+}
+
+impl StackFiles for RepoFiles {
+    fn present(&self) -> bool {
+        self.repo.join("stacks").is_dir()
+    }
+
+    fn read(
+        &self,
+        stack: &str,
+        kind: ActionKind,
+        commit: Option<&str>,
+    ) -> Result<Material, Refusal> {
+        let what = format!("{} {}", kind.slug(), stack);
+        if matches!(kind.needs(), Needs::Nothing | Needs::Vmid) {
+            return Ok(Material::None);
+        }
+        if !self.present() {
+            return Err(no_repo(&self.repo, what));
+        }
+        let Some(commit) = commit else {
+            return self.read_dir(&self.repo.join("stacks").join(stack), stack, kind, &what);
+        };
+        // feat-stacks-6: a checkout of that commit beside the working copy,
+        // read like the working copy, removed again whatever happened.
+        let _ = std::fs::create_dir_all(&self.scratch);
+        let tree = self
+            .scratch
+            .join(format!("rollback-{}-{}", std::process::id(), commit));
+        let tree_s = tree.display().to_string();
+        let _ = self.git(&["worktree", "remove", "--force", &tree_s]);
+        self.git(&["worktree", "add", "--detach", &tree_s, commit])
+            .map_err(|why| {
+                Refusal::new(
+                    what.clone(),
+                    format!("commit {commit} could not be checked out: {why}"),
+                    "pick a commit from the roll-back list; `git fetch` in the working copy first if it is new",
+                )
+            })?;
+        let dir = tree.join("stacks").join(stack);
+        let out = if dir.is_dir() {
+            self.read_dir(&dir, stack, kind, &what)
+        } else {
+            Err(Refusal::new(
+                what.clone(),
+                format!("stacks/{stack} does not exist at commit {commit}"),
+                "pick a commit that has the stack",
+            ))
+        };
+        let _ = self.git(&["worktree", "remove", "--force", &tree_s]);
+        out
+    }
+
+    fn ancestry(&self, commit: &str) -> Ancestry {
+        let object = format!("{commit}^{{commit}}");
+        if self.git(&["cat-file", "-e", &object]).is_err() {
+            Ancestry::Unknown
+        } else if self
+            .git(&["merge-base", "--is-ancestor", commit, "HEAD"])
+            .is_ok()
+        {
+            Ancestry::Contained
+        } else {
+            Ancestry::Diverged
+        }
+    }
+
+    fn commits(&self, stack: &str, limit: usize) -> Result<Vec<CommitInfo>, Refusal> {
+        if !self.present() {
+            return Err(no_repo(&self.repo, format!("roll-back list of {stack}")));
+        }
+        let n = format!("-n{}", limit.clamp(1, 200));
+        let path = format!("stacks/{stack}");
+        let out = self
+            .git(&["log", &n, "--format=%H%x09%ct%x09%s", "--", &path])
+            .map_err(|why| {
+                Refusal::new(
+                    format!("roll-back list of {stack}"),
+                    format!("git log failed: {why}"),
+                    "check the working copy",
+                )
+            })?;
+        Ok(out
+            .lines()
+            .filter_map(|l| {
+                let mut p = l.splitn(3, '\t');
+                Some(CommitInfo {
+                    commit: p.next()?.to_string(),
+                    at: p.next()?.parse().ok()?,
+                    subject: p.next().unwrap_or("").to_string(),
+                })
+            })
+            .collect())
+    }
+
+    fn native_units(&self, stack: &str) -> Vec<String> {
+        homelab_client::spec::native_services(&self.repo.join("stacks").join(stack))
+            .into_iter()
+            .map(|(m, _)| m.unit)
+            .collect()
+    }
+}
+
+/// Where a job came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "from", rename_all = "snake_case")]
+pub enum Origin {
+    Manual,
+    Batch { batch: u64 },
+    Schedule { schedule: String, slot: i64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobState {
+    Queued,
+    Running,
+    Done,
+    Failed,
+    /// The host stood aside on purpose; nothing changed.
+    Deferred,
+    /// The dashboard refused before anything reached the host.
+    Refused,
+    /// The line dropped before the answer; History tells what happened.
+    Unknown,
+}
+
+impl JobState {
+    pub fn finished(self) -> bool {
+        !matches!(self, JobState::Queued | JobState::Running)
+    }
+}
+
+/// One job as the page shows it (the `action` event, `GET …/jobs`).
+#[derive(Debug, Clone, Serialize)]
+pub struct JobView {
+    pub job: u64,
+    pub origin: Origin,
+    pub stack: String,
+    pub action: ActionKind,
+    pub args: ActionArgs,
+    pub state: JobState,
+    pub queued_at: i64,
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
+    /// The host's request ids, in the order they went out.
+    pub reqs: Vec<u64>,
+    /// The host's final message, or why the dashboard refused.
+    pub message: Option<String>,
+    /// feat-stacks-7: the same thing from a workstation.
+    pub cli: Option<String>,
+    pub progress: Option<Progress>,
+    /// arch-self: this job restarts the dashboard; its end is read back
+    /// after the restart.
+    pub restarts_dashboard: bool,
+}
+
+struct Job {
+    view: JobView,
+}
+
+/// Jobs kept for `GET /data/actions/jobs` and reloads.
+const KEEP_JOBS: usize = 200;
+/// History read for the expected durations.
+const HISTORY_WINDOW_S: i64 = 180 * 86_400;
+
+struct Inner {
+    host: Arc<dyn HostPort>,
+    publish: Arc<dyn Publish>,
+    files: Arc<dyn StackFiles>,
+    shared: Shared,
+    notify: Arc<NotifyCenter>,
+    clock: Clock,
+    timeout: Duration,
+    queue: mpsc::UnboundedSender<Job>,
+    jobs: std::sync::Mutex<VecDeque<JobView>>,
+    batches: std::sync::Mutex<BTreeMap<u64, Vec<u64>>>,
+    next_job: AtomicU64,
+}
+
+/// The action queue.
+#[derive(Clone)]
+pub struct Actions {
+    inner: Arc<Inner>,
+}
+
+pub struct ActionsDeps {
+    pub host: Arc<dyn HostPort>,
+    pub publish: Arc<dyn Publish>,
+    pub files: Arc<dyn StackFiles>,
+    pub shared: Shared,
+    pub notify: Arc<NotifyCenter>,
+    pub clock: Clock,
+    /// The longest one command is waited for.
+    pub timeout: Duration,
+}
+
+impl Actions {
+    /// The queue, with its worker running on the current runtime.
+    pub fn start(deps: ActionsDeps) -> Self {
+        let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
+        let first = ((deps.clock)().max(0) as u64) << 8;
+        let inner = Arc::new(Inner {
+            host: deps.host,
+            publish: deps.publish,
+            files: deps.files,
+            shared: deps.shared,
+            notify: deps.notify,
+            clock: deps.clock,
+            timeout: deps.timeout,
+            queue: tx,
+            jobs: std::sync::Mutex::new(VecDeque::new()),
+            batches: std::sync::Mutex::new(BTreeMap::new()),
+            // Job ids from the start time, so a restarted dashboard never
+            // reuses one a page still shows.
+            next_job: AtomicU64::new(first.max(1)),
+        });
+        let worker = Actions {
+            inner: inner.clone(),
+        };
+        tokio::spawn(async move {
+            while let Some(job) = rx.recv().await {
+                worker.run(job).await;
+            }
+        });
+        Actions { inner }
+    }
+
+    fn now(&self) -> i64 {
+        (self.inner.clock)()
+    }
+
+    fn store(&self, view: &JobView) {
+        if let Ok(mut jobs) = self.inner.jobs.lock() {
+            if let Some(slot) = jobs.iter_mut().find(|j| j.job == view.job) {
+                *slot = view.clone();
+            } else {
+                jobs.push_back(view.clone());
+                while jobs.len() > KEEP_JOBS {
+                    jobs.pop_front();
+                }
+            }
+        }
+        self.inner
+            .publish
+            .publish("action", serde_json::to_value(view).unwrap_or_default());
+    }
+
+    /// Every job kept, newest first.
+    pub fn jobs(&self) -> Vec<JobView> {
+        self.inner
+            .jobs
+            .lock()
+            .map(|j| j.iter().rev().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn job(&self, id: u64) -> Option<JobView> {
+        self.inner
+            .jobs
+            .lock()
+            .ok()
+            .and_then(|j| j.iter().find(|v| v.job == id).cloned())
+    }
+
+    /// Checks that need the fleet or the working copy, done at the press
+    /// for a quick answer and again when the job runs.
+    pub fn precheck(&self, req: &ActionRequest) -> Result<(), Refusal> {
+        let what = format!("{} {}", req.action.slug(), req.stack);
+        if matches!(
+            req.action.needs(),
+            Needs::Manifest | Needs::Spec | Needs::NativeManifest
+        ) && !self.inner.files.present()
+            && req.action != ActionKind::Destroy
+        {
+            return Err(Refusal::new(
+                what,
+                "the dashboard has no working copy of the homelab repository",
+                "clone kennypassenier/homelab to HOMELAB_ADMIN_REPO (default \
+                 /appdata/admin/admin-config/repo); actions that need only the stack name work \
+                 without it",
+            ));
+        }
+        if let Ok(jobs) = self.inner.jobs.lock() {
+            if let Some(j) = jobs.iter().find(|j| {
+                j.state == JobState::Queued && j.stack == req.stack && j.action == req.action
+            }) {
+                return Err(Refusal::new(
+                    what,
+                    format!("the same action is already queued as job {}", j.job),
+                    "wait for it; the queue runs one action at a time",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Queue a validated request; the job as it stands now.
+    pub fn submit(&self, req: ActionRequest, origin: Origin) -> JobView {
+        let job = self.inner.next_job.fetch_add(1, Ordering::Relaxed);
+        let view = JobView {
+            job,
+            origin,
+            restarts_dashboard: actions::restarts_dashboard(&req.stack, req.action),
+            stack: req.stack,
+            action: req.action,
+            args: req.args,
+            state: JobState::Queued,
+            queued_at: self.now(),
+            started_at: None,
+            finished_at: None,
+            reqs: Vec::new(),
+            message: None,
+            cli: None,
+            progress: None,
+        };
+        self.store(&view);
+        let _ = self.inner.queue.send(Job { view: view.clone() });
+        view
+    }
+
+    /// feat-stacks-5: every stack of a validated batch, in the order given.
+    pub fn submit_batch(&self, reqs: Vec<ActionRequest>) -> (u64, Vec<JobView>) {
+        let batch = self.inner.next_job.fetch_add(1, Ordering::Relaxed);
+        let jobs: Vec<JobView> = reqs
+            .into_iter()
+            .map(|r| self.submit(r, Origin::Batch { batch }))
+            .collect();
+        if let Ok(mut b) = self.inner.batches.lock() {
+            b.insert(batch, jobs.iter().map(|j| j.job).collect());
+        }
+        self.publish_batch(batch);
+        (batch, jobs)
+    }
+
+    fn publish_batch(&self, batch: u64) {
+        let ids = self
+            .inner
+            .batches
+            .lock()
+            .ok()
+            .and_then(|b| b.get(&batch).cloned())
+            .unwrap_or_default();
+        let jobs: Vec<serde_json::Value> = ids
+            .iter()
+            .filter_map(|id| self.job(*id))
+            .map(|j| {
+                serde_json::json!({
+                    "job": j.job, "stack": j.stack, "state": j.state, "message": j.message,
+                })
+            })
+            .collect();
+        let count = |s: JobState| {
+            ids.iter()
+                .filter_map(|id| self.job(*id))
+                .filter(|j| j.state == s)
+                .count()
+        };
+        let done = ids
+            .iter()
+            .filter_map(|id| self.job(*id))
+            .all(|j| j.state.finished());
+        self.inner.publish.publish(
+            "action_batch",
+            serde_json::json!({
+                "batch": batch,
+                "jobs": jobs,
+                "done": done,
+                "ok": count(JobState::Done),
+                "failed": count(JobState::Failed) + count(JobState::Refused) + count(JobState::Unknown),
+                "deferred": count(JobState::Deferred),
+            }),
+        );
+    }
+
+    fn fleet_stack(&self, stack: &str) -> Option<(u16, Option<String>)> {
+        let s = self.inner.shared.try_read().ok()?;
+        s.fleet
+            .as_ref()?
+            .stacks
+            .iter()
+            .find(|x| x.name == stack)
+            .map(|x| (x.vmid, x.applied_source.clone()))
+    }
+
+    /// arch-deploy-guard, with the working copy's history.
+    fn guard(&self, req: &ActionRequest) -> Result<(), Refusal> {
+        if !matches!(req.action, ActionKind::Deploy | ActionKind::DeployCommit) {
+            return Ok(());
+        }
+        let applied = self.fleet_stack(&req.stack).and_then(|(_, a)| a);
+        let ancestry = match applied.as_deref().and_then(deployguard::applied_commit) {
+            None => Ancestry::Contained,
+            Some(c) => self.inner.files.ancestry(c),
+        };
+        deployguard::decide(&req.stack, applied.as_deref(), ancestry, req.args.force).map_err(
+            |why| {
+                Refusal::new(
+                    format!("{} {}", req.action.slug(), req.stack),
+                    why,
+                    "pull the working copy, or send force: true if undoing that deploy is the point",
+                )
+            },
+        )
+    }
+
+    async fn material(&self, req: &ActionRequest) -> Result<Material, Refusal> {
+        if req.action.needs() == Needs::Vmid {
+            return match self.fleet_stack(&req.stack) {
+                Some((vmid, _)) => Ok(Material::Vmid(vmid)),
+                None => Err(Refusal::new(
+                    format!("{} {}", req.action.slug(), req.stack),
+                    "the host's fleet has no such stack (or the dashboard has not read it yet)",
+                    "wait for the fleet page to show the stack",
+                )),
+            };
+        }
+        let files = self.inner.files.clone();
+        let (stack, kind, commit) = (req.stack.clone(), req.action, req.args.commit.clone());
+        let guard_self = self.clone();
+        let req2 = req.clone();
+        tokio::task::spawn_blocking(move || {
+            guard_self.guard(&req2)?;
+            files.read(&stack, kind, commit.as_deref())
+        })
+        .await
+        .map_err(|e| Refusal::new("reading the stack files", e.to_string(), "report this"))?
+    }
+
+    async fn history(&self) -> Vec<homelab_core::history::HistoryEntry> {
+        let since = (self.now() - HISTORY_WINDOW_S).max(0) as u64;
+        let reply = self
+            .inner
+            .host
+            .ask_traced(
+                Command::History { since, limit: 5000 },
+                Duration::from_secs(30),
+                None,
+            )
+            .await;
+        reply
+            .ok()
+            .filter(|r| r.ok)
+            .and_then(|r| serde_json::from_str::<serde_json::Value>(&r.message).ok())
+            .and_then(|v| serde_json::from_value(v.get("entries")?.clone()).ok())
+            .unwrap_or_default()
+    }
+
+    fn finish(&self, view: &mut JobView, state: JobState, message: String) {
+        view.state = state;
+        view.message = Some(message);
+        view.finished_at = Some(self.now());
+        self.store(view);
+    }
+
+    async fn run(&self, job: Job) {
+        let mut view = job.view;
+        view.state = JobState::Running;
+        view.started_at = Some(self.now());
+        self.store(&view);
+        let req = ActionRequest {
+            stack: view.stack.clone(),
+            action: view.action,
+            args: view.args.clone(),
+        };
+        let outcome = self.execute(&req, &mut view).await;
+        let (state, message) = match outcome {
+            Ok(r) if r.ok => (JobState::Done, r.message),
+            Ok(r) if r.deferred.is_some() => (JobState::Deferred, r.message),
+            Ok(r) => (JobState::Failed, r.message),
+            Err(Stop::Refused(r)) => (
+                JobState::Refused,
+                format!("{}: {} ({})", r.what, r.why, r.fix),
+            ),
+            Err(Stop::Link(e)) => (
+                JobState::Unknown,
+                format!("{e}; the activity page shows what the host did"),
+            ),
+        };
+        self.finish(&mut view, state, message.clone());
+        let ran_s = view
+            .started_at
+            .zip(view.finished_at)
+            .map(|(s, f)| (f - s).max(0) as u64);
+        let kind = match state {
+            JobState::Done => Kind::ActionDone,
+            JobState::Deferred => Kind::ActionDeferred,
+            _ => Kind::ActionFailed,
+        };
+        let title = format!(
+            "{} {}: {}",
+            view.action.label(),
+            view.stack,
+            match state {
+                JobState::Done => "done",
+                JobState::Deferred => "stood aside",
+                JobState::Refused => "refused",
+                JobState::Unknown => "outcome unknown",
+                _ => "failed",
+            }
+        );
+        self.inner
+            .notify
+            .notify(Draft {
+                kind,
+                op: format!("{}-{}", view.action.slug(), view.stack),
+                stack: (view.stack != actions::HOST_TARGET).then(|| view.stack.clone()),
+                title,
+                body: message,
+                job: Some(view.job),
+                ran_s,
+            })
+            .await;
+        if let Origin::Batch { batch } = view.origin {
+            self.publish_batch(batch);
+        }
+    }
+
+    async fn execute(&self, req: &ActionRequest, view: &mut JobView) -> Result<RpcResponse, Stop> {
+        let material = self.material(req).await.map_err(Stop::Refused)?;
+        let commands = actions::commands(req, material).map_err(Stop::Refused)?;
+        let main = commands.last().cloned();
+        view.cli = main
+            .as_ref()
+            .and_then(|c| cli_line(c, req.args.force))
+            .map(|l| match &req.args.commit {
+                Some(c) if req.action == ActionKind::DeployCommit => {
+                    format!("git checkout {c} -- stacks/{} && {l}", req.stack)
+                }
+                _ => l,
+            });
+        self.store(view);
+        let history = self.history().await;
+        let mut tracker = Tracker::new(history);
+        let mut last = None;
+        for command in commands {
+            let r = self.follow(command, view, &mut tracker).await?;
+            let ok = r.ok;
+            last = Some(r);
+            if !ok {
+                break;
+            }
+        }
+        last.ok_or_else(|| Stop::Link("nothing was sent".into()))
+    }
+
+    /// Send one command and follow its lines until its reply.
+    async fn follow(
+        &self,
+        command: Command,
+        view: &mut JobView,
+        tracker: &mut Tracker,
+    ) -> Result<RpcResponse, Stop> {
+        let mut events = self.inner.host.subscribe();
+        let (sent_tx, mut sent_rx) = oneshot::channel();
+        let host = self.inner.host.clone();
+        let timeout = self.inner.timeout;
+        let ask = host.ask_traced(command, timeout, Some(sent_tx));
+        tokio::pin!(ask);
+        let mut req: Option<u64> = None;
+        let mut waiting_for_id = true;
+        let mut events_open = true;
+        let mut early: Vec<ServerMsg> = Vec::new();
+        let reply = loop {
+            // Biased: the id and the lines before the reply, so a reply that
+            // is ready at the same moment cannot overtake them.
+            tokio::select! {
+                biased;
+                id = &mut sent_rx, if waiting_for_id => {
+                    waiting_for_id = false;
+                    if let Ok(id) = id {
+                        req = Some(id);
+                        view.reqs.push(id);
+                        self.store(view);
+                        for m in std::mem::take(&mut early) {
+                            self.line(m, id, view, tracker);
+                        }
+                    }
+                }
+                ev = events.recv(), if events_open => match ev {
+                    Ok(m) => match req {
+                        Some(id) => self.line(m, id, view, tracker),
+                        None => early.push(m),
+                    },
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        self.inner.publish.publish("action_log", serde_json::json!({
+                            "job": view.job, "req": req, "level": "warn", "source": "ADMIN",
+                            "msg": format!("{n} line(s) of the host were missed here; the activity page has them all"),
+                            "ts": self.now(),
+                        }));
+                    }
+                    Err(broadcast::error::RecvError::Closed) => events_open = false,
+                },
+                r = &mut ask => break r,
+            }
+        };
+        // The id is sent before the reply, but both can be ready at once.
+        if waiting_for_id {
+            if let Ok(id) = sent_rx.try_recv() {
+                req = Some(id);
+                view.reqs.push(id);
+                self.store(view);
+                for m in std::mem::take(&mut early) {
+                    self.line(m, id, view, tracker);
+                }
+            }
+        }
+        // Lines that came before the reply may still wait in the channel.
+        if let Some(id) = req {
+            while let Ok(m) = events.try_recv() {
+                self.line(m, id, view, tracker);
+            }
+        }
+        reply.map_err(Stop::Link)
+    }
+
+    fn line(&self, m: ServerMsg, id: u64, view: &mut JobView, tracker: &mut Tracker) {
+        let ServerMsg::Log {
+            level,
+            source,
+            msg,
+            req: Some(r),
+            ts,
+            step,
+            ..
+        } = m
+        else {
+            return;
+        };
+        if r != id {
+            return;
+        }
+        let ts = ts.map(|t| t as i64).unwrap_or_else(|| self.now());
+        self.inner.publish.publish(
+            "action_log",
+            serde_json::json!({
+                "job": view.job, "req": id, "level": level, "source": source, "msg": msg, "ts": ts,
+            }),
+        );
+        if let Some(mark) = step {
+            let p = tracker.on_mark(&mark, ts.max(0) as u64);
+            view.progress = Some(p.clone());
+            self.inner.publish.publish(
+                "action_progress",
+                serde_json::json!({ "job": view.job, "req": id, "progress": p }),
+            );
+        }
+    }
+
+    /// feat-stacks-6: what a stack can go back to.
+    pub async fn rollback_options(&self, stack: String) -> Result<serde_json::Value, Refusal> {
+        if !actions::valid_stack_name(&stack) {
+            return Err(Refusal::new(
+                format!("roll-back list of {stack:?}"),
+                "not a stack name",
+                "use the name the fleet page shows",
+            ));
+        }
+        let applied = self.fleet_stack(&stack).and_then(|(_, a)| a);
+        let files = self.inner.files.clone();
+        let s = stack.clone();
+        let (commits, natives, present) = tokio::task::spawn_blocking(move || {
+            (
+                files.commits(&s, 30),
+                files.native_units(&s),
+                files.present(),
+            )
+        })
+        .await
+        .map_err(|e| Refusal::new("roll-back list", e.to_string(), "report this"))?;
+        let applied_commit = applied
+            .as_deref()
+            .and_then(deployguard::applied_commit)
+            .map(str::to_string);
+        let commits: Vec<serde_json::Value> = commits
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| {
+                let is_applied = applied_commit
+                    .as_deref()
+                    .is_some_and(|a| c.commit.starts_with(a));
+                serde_json::json!({
+                    "commit": c.commit, "at": c.at, "subject": c.subject, "applied": is_applied,
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({
+            "stack": stack,
+            "applied_source": applied,
+            "applied_commit": applied_commit,
+            "working_copy": present,
+            // deploy-commit: the stack's files as they were at that commit.
+            "commits": commits,
+            // rollback-native: the host keeps one previous binary per unit
+            // (fix-114); it does not say which version that is.
+            "native_units": natives,
+            "missing": [
+                "the host does not list whether a native unit has a kept previous binary, or which version it is",
+                "for compose apps the host keeps the previous image only during an update (automatic roll back on a failed health check); going back later means deploying an earlier commit",
+            ],
+        }))
+    }
+}
+
+enum Stop {
+    Refused(Refusal),
+    Link(String),
+}
+
+// ── routes ──────────────────────────────────────────────────────────────
+
+fn refusal(status: StatusCode, r: Refusal) -> Response {
+    (status, Json(r)).into_response()
+}
+
+fn body<T>(b: Result<Json<T>, JsonRejection>, what: &str) -> Result<T, Refusal> {
+    b.map(|Json(t)| t).map_err(|e| {
+        Refusal::new(
+            what,
+            format!("the request body does not read: {}", e.body_text()),
+            "send the JSON the catalog describes",
+        )
+    })
+}
+
+async fn catalog() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "actions": actions::catalog(),
+        "host_target": actions::HOST_TARGET,
+        "self_stack": actions::SELF_STACK,
+    }))
+}
+
+async fn jobs(State(a): State<Actions>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "jobs": a.jobs() }))
+}
+
+fn accepted(view: &JobView) -> Response {
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "job": view.job,
+            "stack": view.stack,
+            "action": view.action,
+            "state": view.state,
+            "restarts_dashboard": view.restarts_dashboard,
+        })),
+    )
+        .into_response()
+}
+
+async fn start(
+    State(a): State<Actions>,
+    UrlPath((stack, action)): UrlPath<(String, String)>,
+    b: Result<Json<ActionArgs>, JsonRejection>,
+) -> Response {
+    // An empty body is no arguments.
+    let args = match b {
+        Err(JsonRejection::MissingJsonContentType(_)) => ActionArgs::default(),
+        other => match body(other, &format!("{action} {stack}")) {
+            Ok(a) => a,
+            Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+        },
+    };
+    let req = match actions::validate(&stack, &action, args) {
+        Ok(r) => r,
+        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+    };
+    if let Err(r) = a.precheck(&req) {
+        return refusal(StatusCode::CONFLICT, r);
+    }
+    let a2 = a.clone();
+    let r2 = req.clone();
+    if let Ok(Err(r)) = tokio::task::spawn_blocking(move || a2.guard(&r2)).await {
+        return refusal(StatusCode::CONFLICT, r);
+    }
+    accepted(&a.submit(req, Origin::Manual))
+}
+
+async fn batch(State(a): State<Actions>, b: Result<Json<BatchRequest>, JsonRejection>) -> Response {
+    let b = match body(b, "batch") {
+        Ok(b) => b,
+        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+    };
+    let reqs = match actions::validate_batch(b) {
+        Ok(r) => r,
+        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+    };
+    for r in &reqs {
+        if let Err(r) = a.precheck(r) {
+            return refusal(StatusCode::CONFLICT, r);
+        }
+    }
+    let (batch, jobs) = a.submit_batch(reqs);
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "batch": batch,
+            "jobs": jobs.iter().map(|j| serde_json::json!({"job": j.job, "stack": j.stack})).collect::<Vec<_>>(),
+        })),
+    )
+        .into_response()
+}
+
+/// feat-stacks-7 before the press: the CLI line and what the press would
+/// do, read from the stack's manifest only (no secrets, no downloads).
+async fn preview(
+    State(a): State<Actions>,
+    UrlPath((stack, action)): UrlPath<(String, String)>,
+    b: Result<Json<ActionArgs>, JsonRejection>,
+) -> Response {
+    let args = match b {
+        Err(JsonRejection::MissingJsonContentType(_)) => ActionArgs::default(),
+        other => match body(other, &format!("{action} {stack}")) {
+            Ok(a) => a,
+            Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+        },
+    };
+    let req = match actions::validate(&stack, &action, args) {
+        Ok(r) => r,
+        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+    };
+    let a2 = a.clone();
+    let r2 = req.clone();
+    let (line, guard) = tokio::task::spawn_blocking(move || {
+        let guard = a2.guard(&r2);
+        (preview_line(&a2, &r2), guard)
+    })
+    .await
+    .unwrap_or((Err("internal".into()), Ok(())));
+    Json(serde_json::json!({
+        "stack": req.stack,
+        "action": req.action,
+        "entry": req.action.catalog_entry(),
+        "cli": line.as_ref().ok(),
+        "cli_unavailable": line.err(),
+        "guard": guard.err(),
+        "restarts_dashboard": actions::restarts_dashboard(&req.stack, req.action),
+    }))
+    .into_response()
+}
+
+fn preview_line(a: &Actions, req: &ActionRequest) -> Result<String, String> {
+    let material = match req.action.needs() {
+        Needs::Spec => {
+            // The line names the stack; a spec with the manifest alone says
+            // the same thing without reading secrets or releases.
+            let probe = ActionRequest {
+                action: ActionKind::Backup,
+                ..req.clone()
+            };
+            match a
+                .inner
+                .files
+                .read(&probe.stack, probe.action, None)
+                .map_err(|r| r.why)?
+            {
+                Material::Manifest(m) => Material::Spec(Box::new(homelab_proto::DeploySpec {
+                    manifest: *m,
+                    files: Vec::new(),
+                    env: BTreeMap::new(),
+                    gateway_route: None,
+                    extra_routes: Vec::new(),
+                    checks: BTreeMap::new(),
+                    native_binaries: BTreeMap::new(),
+                    native_manifests: BTreeMap::new(),
+                    source: None,
+                })),
+                _ => return Err("the stack files did not read".into()),
+            }
+        }
+        Needs::Vmid => Material::Vmid(
+            a.fleet_stack(&req.stack)
+                .map(|(v, _)| v)
+                .ok_or("the fleet has no such stack")?,
+        ),
+        _ => a
+            .inner
+            .files
+            .read(&req.stack, req.action, None)
+            .map_err(|r| r.why)?,
+    };
+    let commands = actions::commands(req, material).map_err(|r| r.why)?;
+    let main = commands.last().ok_or("no command")?;
+    let line = cli_line(main, req.args.force).ok_or("no CLI verb sends this")?;
+    Ok(match &req.args.commit {
+        Some(c) if req.action == ActionKind::DeployCommit => {
+            format!("git checkout {c} -- stacks/{} && {line}", req.stack)
+        }
+        _ => line,
+    })
+}
+
+async fn rollback_options(State(a): State<Actions>, UrlPath(stack): UrlPath<String>) -> Response {
+    match a.rollback_options(stack).await {
+        Ok(v) => Json(v).into_response(),
+        Err(r) => refusal(StatusCode::BAD_REQUEST, r),
+    }
+}
+
+/// Mounted with `dashboard_routes`: the login and both locks stand before
+/// every one of them.
+pub fn router(actions: Actions) -> Router {
+    Router::new()
+        .route("/data/actions/catalog", get(catalog))
+        .route("/data/actions/jobs", get(jobs))
+        .route("/data/actions/batch", post(batch))
+        .route(
+            "/data/actions/{stack}/rollback-options",
+            get(rollback_options),
+        )
+        .route("/data/actions/{stack}/{action}", post(start))
+        .route("/data/actions/{stack}/{action}/preview", post(preview))
+        .with_state(actions)
+}
+
+/// milestone act, wired into the app: the action queue, the notification
+/// center and the scheduler, their routes, and (on the serving path only)
+/// the scheduler's tick and the incident poll. Settings come from
+/// `HOMELAB_ADMIN_*` (`core::actions_config`).
+pub fn mount(
+    app: &mut chassis::App,
+    host: HostClient,
+    live: chassis::shell::live::Live,
+    shared: Shared,
+) -> Result<(), String> {
+    let cfg = crate::core::actions_config::from_env(&|k| std::env::var(k).ok())?;
+    let clock = system_clock();
+    let publish: Arc<dyn Publish> = Arc::new(live);
+    let host: Arc<dyn HostPort> = Arc::new(host);
+    let pusher: Arc<dyn super::actions_notify::Pusher> = match &cfg.notify_url {
+        Some(url) => Arc::new(super::actions_notify::KyuPusher::new(
+            url.clone(),
+            cfg.notify_token.clone(),
+        )),
+        None => Arc::new(super::actions_notify::NoPusher),
+    };
+    let notify = NotifyCenter::load(cfg.notify_file(), pusher, publish.clone(), clock.clone())
+        .map_err(|e| e.to_string())?;
+    let actions = Actions::start(ActionsDeps {
+        host: host.clone(),
+        publish: publish.clone(),
+        files: Arc::new(RepoFiles {
+            repo: cfg.repo.clone(),
+            scratch: cfg.data_dir.join("tmp"),
+        }),
+        shared,
+        notify: notify.clone(),
+        clock: clock.clone(),
+        timeout: cfg.action_timeout(),
+    });
+    let scheduler = super::scheduler::Scheduler::load(
+        cfg.schedules_file(),
+        actions.clone(),
+        notify.clone(),
+        publish,
+        clock,
+        cfg.schedule_grace_s,
+    )
+    .map_err(|e| e.to_string())?;
+    app.dashboard_routes(router(actions));
+    app.dashboard_routes(super::actions_notify::router(notify.clone()));
+    app.dashboard_routes(super::scheduler::router(scheduler.clone()));
+    let (tick, poll) = (cfg.tick(), Duration::from_secs(cfg.incidents_poll_s));
+    app.on_start(move || {
+        scheduler.spawn(tick);
+        super::actions_notify::spawn_incident_poll(host, notify, poll);
+    });
+    Ok(())
+}

@@ -25,6 +25,12 @@ pub struct HostSummary {
     pub ram_used_mb: u32,
     pub ram_total_mb: u32,
     pub disk_pct: u64,
+    /// feat-overview-2: the host page's extra facts, as the host reports
+    /// them in `HostView`.
+    pub ram_committed_mb: u32,
+    pub cores_total: u16,
+    /// 1-minute load average ×100 (250 = 2.50).
+    pub load1_x100: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -107,6 +113,9 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
             ram_used_mb: state.host.ram_used_mb,
             ram_total_mb: state.host.ram_total_mb,
             disk_pct: state.host.disk_pct,
+            ram_committed_mb: state.host.ram_committed_mb,
+            cores_total: state.host.cores_total,
+            load1_x100: state.host.load1_x100,
         },
         stacks,
         counts,

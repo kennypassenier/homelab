@@ -84,6 +84,17 @@ fn die(msg: &str) -> ! {
 /// declared external. The whole directory rather than the one stack: a
 /// duplicate hostname is a fact about two stacks, and the one being planned
 /// may be either of them.
+/// feat-stacks-7: the verbs that act on a stack take their arguments from
+/// `cli_args::parse`, the parser the dashboard's "copy as CLI command" is
+/// tested against.
+fn invocation(args: &[String]) -> homelab_client::cli_args::Invocation {
+    match homelab_client::cli_args::parse(args.get(1..).unwrap_or(&[])) {
+        Ok(Some(inv)) => inv,
+        Ok(None) => die("internal: this verb has no parsed form"),
+        Err(e) => die(&e),
+    }
+}
+
 fn check_fleet_routes(base: &Path) {
     match spec::fleet_route_problems(base) {
         Ok(problems) if problems.is_empty() => {}
@@ -285,10 +296,10 @@ async fn run(explicit_host: Option<String>) {
         // C7: adopt a hand-built native-service container, and drive an
         // adopted one. The stack file is stacks/<name>/service.yml.
         "adopt" => {
-            let dir = stack_dir(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab adopt stacks/<name>")),
-            );
+            let homelab_client::cli_args::Invocation::Adopt { stack } = invocation(&args) else {
+                die("internal: adopt parsed as another verb")
+            };
+            let dir = stack_dir(&stack);
             let path = dir.join("service.yml");
             let raw = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| die(&format!("cannot read {}: {}", path.display(), e)));
@@ -402,10 +413,9 @@ async fn run(explicit_host: Option<String>) {
         // G1: the runaway guards, for a container the orchestrator did not
         // build. They are what keeps a container able to run for years.
         "guards" => {
-            let vmid: u16 = args
-                .get(2)
-                .and_then(|v| v.parse().ok())
-                .unwrap_or_else(|| die("usage: homelab guards <vmid>"));
+            let homelab_client::cli_args::Invocation::Guards { vmid } = invocation(&args) else {
+                die("internal: guards parsed as another verb")
+            };
             println!(
                 "{}▶ guards :: CT {} — log caps, journald limits, logrotate, weekly prune{}",
                 C_CYAN, vmid, C_RESET
@@ -413,10 +423,10 @@ async fn run(explicit_host: Option<String>) {
             rpc(&host, &token, Command::ApplyGuards { vmid }).await;
         }
         "forget" => {
-            let stack = homelab_client::repo_config::stack_name(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab forget <stack>")),
-            );
+            let homelab_client::cli_args::Invocation::Forget { stack } = invocation(&args) else {
+                die("internal: forget parsed as another verb")
+            };
+            let stack = homelab_client::repo_config::stack_name(&stack);
             rpc(&host, &token, Command::ForgetStack { stack }).await;
         }
         "check" => {
@@ -565,33 +575,38 @@ async fn run(explicit_host: Option<String>) {
             std::process::exit(if today.needs_you() { 1 } else { 0 });
         }
         "backup-native" => {
-            let stack = homelab_client::repo_config::stack_name(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab backup-native <stack>")),
-            );
+            let homelab_client::cli_args::Invocation::BackupNative { stack } = invocation(&args)
+            else {
+                die("internal: backup-native parsed as another verb")
+            };
+            let stack = homelab_client::repo_config::stack_name(&stack);
             rpc(&host, &token, Command::BackupNative { stack }).await;
         }
         "update-native" => {
-            let stack = homelab_client::repo_config::stack_name(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab update-native <stack>")),
-            );
+            let homelab_client::cli_args::Invocation::UpdateNative { stack } = invocation(&args)
+            else {
+                die("internal: update-native parsed as another verb")
+            };
+            let stack = homelab_client::repo_config::stack_name(&stack);
             rpc(&host, &token, Command::UpdateNative { stack }).await;
         }
         // B1: the orchestrator's own release update of a native stack, now.
         "release-update-native" => {
-            let stack = homelab_client::repo_config::stack_name(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab release-update-native <stack>")),
-            );
+            let homelab_client::cli_args::Invocation::ReleaseUpdateNative { stack } =
+                invocation(&args)
+            else {
+                die("internal: release-update-native parsed as another verb")
+            };
+            let stack = homelab_client::repo_config::stack_name(&stack);
             rpc(&host, &token, Command::ReleaseUpdateNative { stack }).await;
         }
         // fix-114: back to a native unit's kept previous binary.
         "rollback-native" => {
-            let arg = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab rollback-native <stack>[/<unit>]"));
-            let (stack, unit) = homelab_client::stack_and_unit(arg);
+            let homelab_client::cli_args::Invocation::RollbackNative { stack, unit } =
+                invocation(&args)
+            else {
+                die("internal: rollback-native parsed as another verb")
+            };
             rpc(&host, &token, Command::RollbackNative { stack, unit }).await;
         }
         // Route A: ask every configured device for its own configuration now,
@@ -662,19 +677,12 @@ async fn run(explicit_host: Option<String>) {
         },
         // H8 (light): park / unpark a stack for the nightly scheduler.
         "enable" | "disable" => {
-            let stack = homelab_client::repo_config::stack_name(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab enable|disable <stack-name>")),
-            );
-            rpc(
-                &host,
-                &token,
-                Command::SetStackEnabled {
-                    stack,
-                    enabled: cmd == "enable",
-                },
-            )
-            .await;
+            let homelab_client::cli_args::Invocation::Enable { stack, enabled } = invocation(&args)
+            else {
+                die("internal: enable parsed as another verb")
+            };
+            let stack = homelab_client::repo_config::stack_name(&stack);
+            rpc(&host, &token, Command::SetStackEnabled { stack, enabled }).await;
         }
         "export" => {
             // D11: single-file bundle, never secrets.
@@ -724,10 +732,10 @@ async fn run(explicit_host: Option<String>) {
         }
         "resize" => {
             // C4: apply the manifest's resources to the live container.
-            let dir = &stack_dir(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab resize stacks/<name>")),
-            );
+            let homelab_client::cli_args::Invocation::Resize { stack } = invocation(&args) else {
+                die("internal: resize parsed as another verb")
+            };
+            let dir = &stack_dir(&stack);
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             println!(
                 "{}▶ resize {} :: {} MiB / {} cores / {}G{}",
@@ -950,10 +958,11 @@ async fn run(explicit_host: Option<String>) {
             }
         }
         "deploy" => {
-            let dir = &stack_dir(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab deploy stacks/<name>")),
-            );
+            let homelab_client::cli_args::Invocation::Deploy { stack, force } = invocation(&args)
+            else {
+                die("internal: deploy parsed as another verb")
+            };
+            let dir = &stack_dir(&stack);
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             // D10: fail fast client-side before opening a connection.
             if let Err(e) = homelab_core::manifest::validate(&spec) {
@@ -961,7 +970,6 @@ async fn run(explicit_host: Option<String>) {
             }
             check_fleet_routes(Path::new(dir).parent().unwrap_or(Path::new(".")));
             // arch-deploy-guard: not over a deploy this tree has not seen.
-            let force = args.iter().any(|a| a == "--force");
             if !force {
                 let (ok, fleet) = rpc_collect(&host, &token, Command::GetState).await;
                 if let (true, Some(fleet)) = (ok, fleet) {
@@ -1192,11 +1200,10 @@ async fn run(explicit_host: Option<String>) {
         // ask-9: delete what a retired stack, app or unit kept — never
         // automatic, always after the list and the typed name.
         "wipe" => {
-            let name = args
-                .get(2)
-                .filter(|a| !a.starts_with("--"))
-                .map(|a| homelab_client::repo_config::stack_name(a))
-                .unwrap_or_else(|| die("usage: homelab wipe <stack> | <stack>/<app>"));
+            let homelab_client::cli_args::Invocation::Wipe { name } = invocation(&args) else {
+                die("internal: wipe parsed as another verb")
+            };
+            let name = homelab_client::repo_config::stack_name(&name);
             let listed = rpc_with(
                 &host,
                 &token,
@@ -1227,10 +1234,10 @@ async fn run(explicit_host: Option<String>) {
             .await;
         }
         "backup" => {
-            let dir = &stack_dir(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab backup stacks/<name>")),
-            );
+            let homelab_client::cli_args::Invocation::Backup { stack } = invocation(&args) else {
+                die("internal: backup parsed as another verb")
+            };
+            let dir = &stack_dir(&stack);
             // F291: the manifest alone. A backup runs on the host against
             // /appdata paths and needs no file and no secret from here.
             let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
@@ -1239,14 +1246,16 @@ async fn run(explicit_host: Option<String>) {
         "restore" => {
             // fix-64: flags may stand anywhere; the rest is dir then snapshot.
             // fix-112: `--app <name>` restores one app of the stack.
-            let homelab_client::RestoreArgs {
+            let homelab_client::cli_args::Invocation::Restore(homelab_client::RestoreArgs {
                 dir,
                 snapshot,
                 app,
                 yes,
                 skip_safety_copy,
-            } = homelab_client::restore_args(args.get(2..).unwrap_or(&[]))
-                .unwrap_or_else(|e| die(&e));
+            }) = invocation(&args)
+            else {
+                die("internal: restore parsed as another verb")
+            };
             // fix-101: every spelling of a stack names the same directory.
             let dir = &stack_dir(&dir);
             // F294: the manifest alone, for the same reason as F291 above.
@@ -1296,11 +1305,11 @@ async fn run(explicit_host: Option<String>) {
             .await;
         }
         "update" => {
-            let dir = &stack_dir(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab update stacks/<name> [app]")),
-            );
-            let app = args.get(3).cloned();
+            let homelab_client::cli_args::Invocation::Update { stack, app } = invocation(&args)
+            else {
+                die("internal: update parsed as another verb")
+            };
+            let dir = &stack_dir(&stack);
             // F294: an update pulls an image and recreates a container on the
             // host; the files and secrets it used to build here were thrown
             // away one line later. Demanding them meant a machine without the
@@ -1493,10 +1502,11 @@ async fn run(explicit_host: Option<String>) {
             // no longer has; since ask-8 (2026-09-27) the deploy removes them
             // itself, so this is mostly a no-op kept for a container that has
             // not been deployed since. Same typed confirmation as before.
-            let dir = &stack_dir(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab prune-orphans stacks/<name>")),
-            );
+            let homelab_client::cli_args::Invocation::PruneOrphans { stack } = invocation(&args)
+            else {
+                die("internal: prune-orphans parsed as another verb")
+            };
+            let dir = &stack_dir(&stack);
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             let stack = spec.manifest.stack_name.clone();
             eprint!(
@@ -1524,11 +1534,12 @@ async fn run(explicit_host: Option<String>) {
             .await;
         }
         "destroy" => {
-            let dir = &stack_dir(
-                args.get(2)
-                    .unwrap_or_else(|| die("usage: homelab destroy stacks/<name>")),
-            );
-            let skip_backup = args.iter().any(|a| a == "--no-backup");
+            let homelab_client::cli_args::Invocation::Destroy { stack, skip_backup } =
+                invocation(&args)
+            else {
+                die("internal: destroy parsed as another verb")
+            };
+            let dir = &stack_dir(&stack);
             // ask-8: a stack whose directory is gone is destroyed from the
             // manifest the host recorded when it last applied it.
             if !Path::new(dir).join("lxc-compose.yml").exists() {

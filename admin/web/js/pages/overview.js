@@ -1,7 +1,8 @@
 // Overview (feat-overview-1): the host card and the fleet table, live.
 
-import { gb, hostCard, measuredAgo, stackState } from "../fleet.js";
-import { badgeCell, h, tableBlock, td } from "../dom.js";
+import { agoEl, setAgo } from "../ago.js";
+import { gb, hostCard, stackState } from "../fleet.js";
+import { badgeCell, bindTableUrl, h, tableBlock, td } from "../dom.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
@@ -15,7 +16,9 @@ import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
  */
 export function mount(root, ctx) {
   const card = h("dl", { class: "facts" });
-  const measured = h("p", { class: "measured", id: "measured" });
+  // feat-overview-4: the reading's age, ticking.
+  const ago = agoEl("measured", null, { live: true });
+  const measured = h("p", { class: "measured", id: "measured" }, ago);
   // Kenny, 2026-09-28: every table is the kp-themes datatable, no row
   // selection, every column sortable, Shift+click adds a sort key, and each
   // table remembers its own sort.
@@ -53,6 +56,7 @@ export function mount(root, ctx) {
   );
   const detach = attachDataTables(root);
   const table = dataTable(t.wrap);
+  const unbind = bindTableUrl(table, "fleet");
 
   // A click anywhere on a stack's row opens its page; the name is a real
   // link for the keyboard and for opening in a new tab.
@@ -62,11 +66,6 @@ export function mount(root, ctx) {
     const tr = target.closest("tr");
     if (tr?.dataset.stack) ctx.navigate(stackHref(tr.dataset.stack));
   });
-
-  const tick = () => {
-    const f = current().fleet;
-    if (f) measured.textContent = measuredAgo(f.measured_at, Date.now() / 1000);
-  };
 
   const render = () => {
     const f = current().fleet;
@@ -96,15 +95,14 @@ export function mount(root, ctx) {
     // The table sorts the rows it holds; new rows are read again and put
     // in the reader's order.
     table?.refresh();
-    tick();
+    setAgo(ago, f.measured_at);
   };
 
   const unsub = subscribe(render);
-  const timer = setInterval(tick, 1000);
   render();
   return () => {
     unsub();
-    clearInterval(timer);
+    unbind();
     detach();
   };
 }

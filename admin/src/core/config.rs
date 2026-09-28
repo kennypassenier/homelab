@@ -57,6 +57,19 @@ pub struct AdminConfig {
     /// every start; stacks/admin's config never sets it, and a test says so.
     #[serde(default)]
     pub dev_without_locks: bool,
+    /// feat-ops-4: Loki's HTTP API, e.g. `http://10.10.10.13:3100`. Only the
+    /// dashboard's server asks it, never the browser. Unset: the logs tab
+    /// says that no Loki is configured.
+    #[serde(default)]
+    pub loki_url: Option<String>,
+    /// Seconds one Loki query may take. Default 15.
+    #[serde(default = "d_loki_timeout")]
+    pub loki_timeout_s: u64,
+    /// feat-ops-2: how long the host waits for an answer to a question (its
+    /// own `ask_timeout_s`, default 120). Past it the dashboard refuses to
+    /// send an answer, because the host has stopped waiting.
+    #[serde(default = "d_ask_timeout")]
+    pub ask_timeout_s: u64,
 }
 
 fn d_poll() -> u64 {
@@ -76,6 +89,12 @@ fn d_leeway() -> u64 {
 }
 fn d_certs_refresh() -> u64 {
     3600
+}
+fn d_loki_timeout() -> u64 {
+    15
+}
+fn d_ask_timeout() -> u64 {
+    120
 }
 
 /// `${NAME}` in a value, replaced from `lookup`; an unset name is an error,
@@ -105,6 +124,9 @@ impl AdminConfig {
     pub fn expanded(mut self, lookup: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
         self.host = expand(&self.host, lookup)?;
         self.host_token = expand(&self.host_token, lookup)?;
+        if let Some(url) = &self.loki_url {
+            self.loki_url = Some(expand(url, lookup)?);
+        }
         Ok(self)
     }
 
@@ -154,11 +176,34 @@ impl AdminConfig {
         if self.access_certs_refresh_s < 60 {
             why.push("admin.access_certs_refresh_s must be at least 60".into());
         }
+        if let Some(url) = &self.loki_url {
+            let scheme_ok = url.starts_with("http://") || url.starts_with("https://");
+            if !scheme_ok || url.contains('?') || url.contains('#') {
+                why.push(format!(
+                    "admin.loki_url {:?} must be the base address, e.g. http://10.10.10.13:3100",
+                    url
+                ));
+            }
+        }
+        if self.loki_timeout_s == 0 {
+            why.push("admin.loki_timeout_s must be at least 1".into());
+        }
+        if self.ask_timeout_s == 0 {
+            why.push("admin.ask_timeout_s must be at least 1".into());
+        }
         if why.is_empty() {
             Ok(self)
         } else {
             Err(why.join("; "))
         }
+    }
+
+    /// Loki's base address without a trailing slash, when one is set.
+    pub fn loki_base(&self) -> Option<String> {
+        self.loki_url
+            .as_ref()
+            .map(|u| u.trim_end_matches('/').to_string())
+            .filter(|u| !u.is_empty())
     }
 
     pub fn poll(&self) -> Duration {
@@ -184,8 +229,16 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<AdminConfig, 
         "backoff_max_s",
         "access_leeway_s",
         "access_certs_refresh_s",
+        "loki_timeout_s",
+        "ask_timeout_s",
     ];
-    const STRINGS: &[&str] = &["host", "host_token", "access_team_domain", "access_aud"];
+    const STRINGS: &[&str] = &[
+        "host",
+        "host_token",
+        "access_team_domain",
+        "access_aud",
+        "loki_url",
+    ];
     let mut t = toml::Table::new();
     for key in STRINGS {
         if let Some(v) = lookup(&format!("HOMELAB_ADMIN_{}", key.to_ascii_uppercase())) {

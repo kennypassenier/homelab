@@ -1228,14 +1228,18 @@ dependencies = [
  "chassis",
  "futures-util",
  "homelab-client",
+ "homelab-core",
  "homelab-proto",
  "reqwest",
  "rustls",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite",
  "toml 0.8.23",
+ "tower",
  "tracing",
 ]
 

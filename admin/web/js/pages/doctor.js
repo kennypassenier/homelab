@@ -2,7 +2,16 @@
 // pve, so the page says so while it waits and offers a Refresh.
 
 import { doctorRows, doctorSummary, health } from "../doctor.js";
-import { badgeCell, errorBox, fetchReport, h, tableBlock, td } from "../dom.js";
+import { agoEl, setAgo } from "../ago.js";
+import {
+  badgeCell,
+  bindTableUrl,
+  errorBox,
+  fetchReport,
+  h,
+  tableBlock,
+  td,
+} from "../dom.js";
 import { formatTime, humanDuration } from "../format.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 
@@ -36,14 +45,17 @@ export function mount(root) {
   const overall = h("span", { class: "state" });
   const status = h("p", { class: "measured", role: "status" });
   const err = h("div");
+  const ago = agoEl("read");
   root.replaceChildren(
     h("div", { class: "title-row" }, h("h1", null, "Doctor"), overall, refresh),
     status,
     err,
     t.wrap,
+    h("p", null, ago),
   );
   const detach = attachDataTables(root);
   const table = dataTable(t.wrap);
+  const unbind = bindTableUrl(table, "doctor");
   /** @type {AbortController | null} */
   let abort = null;
   /** @type {ReturnType<typeof setInterval> | undefined} */
@@ -93,6 +105,7 @@ export function mount(root) {
       );
       table?.refresh();
       table?.state("ready");
+      setAgo(ago, Date.now() / 1000);
     } finally {
       if (abort === mine) {
         clearInterval(timer);
@@ -109,6 +122,7 @@ export function mount(root) {
     abort?.abort();
     clearInterval(timer);
     root.removeEventListener("kp-datatable-retry", retry);
+    unbind();
     detach();
   };
 }

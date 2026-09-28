@@ -98,3 +98,139 @@
   color: var(--muted-foreground);
   font-size: 0.9em;
 }
+/* feat-overview-4: live data that stopped renewing. */
+.measured[data-stale="true"] {
+  color: var(--warning-foreground, var(--destructive));
+  background: var(--warning);
+  padding-inline: 4px;
+  border-radius: 4px;
+}
+/* The bar's end: palette door, shortcut help, theme menu, link state. */
+.kp-nav .help-button {
+  min-inline-size: 2.25rem;
+}
+.kp-nav .theme-slot {
+  display: flex;
+  align-items: center;
+}
+/* feat-ops-2: the host's questions sit above every page. */
+.asks {
+  padding-block: 8px 0;
+}
+.ask {
+  display: grid;
+  gap: 6px;
+  margin-block: 8px;
+}
+.ask p {
+  margin: 0;
+}
+.ask-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ask[data-urgent="true"] .ask-left {
+  font-weight: 600;
+}
+/* feat-stacks-1: the tab row under the stack's title. */
+.kp-tabs__list {
+  margin-block: 12px 4px;
+}
+.kp-tabs__list a.kp-tab {
+  text-decoration: none;
+}
+/* feat-ops-4: the logs tab's controls wrap on a phone. */
+.logs-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 16px;
+  margin-block: 12px;
+}
+.logs-field {
+  min-inline-size: 10rem;
+}
+.logs-follow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-block-end: 8px;
+}
+.logline {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* feat-ops-7: the timeline's own SVG, coloured by the theme's tokens. */
+.timeline {
+  inline-size: 100%;
+  overflow-x: auto;
+  margin-block: 12px;
+}
+.timeline svg {
+  display: block;
+  max-inline-size: 100%;
+  height: auto;
+}
+.timeline .lane {
+  fill: var(--muted);
+  opacity: 0.5;
+}
+.timeline .lane-label,
+.timeline .tick-label {
+  fill: var(--muted-foreground);
+  font-size: 11px;
+}
+.timeline .tick {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.timeline .tick.major {
+  stroke: var(--muted-foreground);
+}
+.timeline .mark {
+  cursor: pointer;
+  outline: none;
+}
+.timeline .mark:focus-visible rect,
+.timeline .mark:focus-visible path,
+.timeline .mark:hover rect,
+.timeline .mark:hover path {
+  stroke: var(--foreground);
+  stroke-width: 2;
+}
+.timeline-detail {
+  min-block-size: 1.5em;
+}
+.timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.85em;
+}
+.timeline-legend .swatch {
+  display: inline-block;
+  inline-size: 12px;
+  block-size: 12px;
+  border-radius: 3px;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+}
+.swatch.ok {
+  background: var(--success);
+}
+.swatch.bad {
+  background: var(--destructive);
+}
+.swatch.warn {
+  background: var(--warning);
+}
+.swatch.info {
+  background: var(--chart-1, var(--primary));
+}
+#host-bars .kp-progress-group {
+  max-inline-size: 40rem;
+}

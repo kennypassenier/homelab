@@ -29,6 +29,26 @@ const FILES: &[(&str, &[u8])] = &[
     ("js/activity.js", include_bytes!("../web/js/activity.js")),
     ("js/checks.js", include_bytes!("../web/js/checks.js")),
     ("js/doctor.js", include_bytes!("../web/js/doctor.js")),
+    // The read milestone's modules (feat-overview-2/3/4/8, feat-stacks-1,
+    // feat-ops-2/4/7, feat-settings-2).
+    ("js/ago.js", include_bytes!("../web/js/ago.js")),
+    ("js/asks.js", include_bytes!("../web/js/asks.js")),
+    ("js/commands.js", include_bytes!("../web/js/commands.js")),
+    ("js/host.js", include_bytes!("../web/js/host.js")),
+    ("js/logs.js", include_bytes!("../web/js/logs.js")),
+    ("js/shortcuts.js", include_bytes!("../web/js/shortcuts.js")),
+    ("js/stacktabs.js", include_bytes!("../web/js/stacktabs.js")),
+    ("js/timeline.js", include_bytes!("../web/js/timeline.js")),
+    ("js/urlstate.js", include_bytes!("../web/js/urlstate.js")),
+    ("js/chrome.js", include_bytes!("../web/js/chrome.js")),
+    (
+        "js/pages/host.js",
+        include_bytes!("../web/js/pages/host.js"),
+    ),
+    (
+        "js/pages/timeline.js",
+        include_bytes!("../web/js/pages/timeline.js"),
+    ),
     (
         "js/pages/overview.js",
         include_bytes!("../web/js/pages/overview.js"),
@@ -59,7 +79,8 @@ The dashboard's own settings are the [admin] table of the config file:
   host_token = \"${HOMELAB_ADMIN_HOST_TOKEN}\"    # from the environment
   poll_s = 10  sse_buffer = 256  backoff_min_s = 1  backoff_max_s = 60
   access_team_domain = \"<team>.cloudflareaccess.com\"  access_aud = \"<64 hex>\"
-  access_leeway_s = 60  access_certs_refresh_s = 3600";
+  access_leeway_s = 60  access_certs_refresh_s = 3600
+  loki_url = \"http://10.10.10.13:3100\"  loki_timeout_s = 15  ask_timeout_s = 120";
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
@@ -118,6 +139,26 @@ async fn main() -> std::process::ExitCode {
     // Doctor reads for about a minute on pve (fix-68), so the pages wait up
     // to two for an answer.
     let (host_client, host_asks) = host_link::HostClient::new(std::time::Duration::from_secs(120));
+    // feat-overview-2, feat-ops-2, feat-ops-4: host facts, the host's
+    // questions and the logs from Loki.
+    app.dashboard_routes(routes::read_router(routes::ReadCtx {
+        shared: shared.clone(),
+        host: host_client.clone(),
+        live: live.clone(),
+        loki: homelab_admin::shell::loki::Loki::from_config(config.as_ref()),
+    }));
+    // milestone act: actions, schedules and notifications.
+    if config.is_some() {
+        if let Err(e) = homelab_admin::shell::actions::mount(
+            &mut app,
+            host_client.clone(),
+            live.clone(),
+            shared.clone(),
+        ) {
+            eprintln!("homelab-admin: {e}");
+            return std::process::ExitCode::FAILURE;
+        }
+    }
     app.dashboard_routes(routes::router(shared.clone(), host_client));
 
     if let Some(c) = &config {
@@ -156,6 +197,7 @@ async fn main() -> std::process::ExitCode {
                     poll: c.poll(),
                     backoff_min,
                     backoff_max,
+                    ask_timeout_s: c.ask_timeout_s,
                 },
                 shared,
                 live,

@@ -13,9 +13,23 @@ use std::collections::HashMap;
 /// hand-built a third variant. Three shapes for one contract is how a
 /// consumer ends up parsing the two it happens to have seen.
 pub fn op_payload(op: &str, label: &str, ok: bool, error: Option<&str>, version: &str) -> String {
+    op_payload_from("homelab-host", op, label, ok, error, version)
+}
+
+/// milestone act (homelab-admin, 2026-09-28): the same payload from another
+/// sender. The dashboard's pushes (feat-ops-8) say `homelab-admin`, so a
+/// consumer can tell them from the host's own and nothing else changes.
+pub fn op_payload_from(
+    source: &str,
+    op: &str,
+    label: &str,
+    ok: bool,
+    error: Option<&str>,
+    version: &str,
+) -> String {
     let error = error.map(notify_error_text);
     serde_json::json!({
-        "source": "homelab-host",
+        "source": source,
         "op": op,
         "label": label,
         "ok": ok,
@@ -106,6 +120,24 @@ mod tests {
                 "3.35.0"
             ),
             r#"{"error":"rclone: timeout","label":"scheduled-backup","ok":false,"op":"backup-media","source":"homelab-host","version":"3.35.0"}"#
+        );
+    }
+
+    #[test]
+    fn act_the_dashboard_payload_differs_only_in_source() {
+        let host = op_payload("deploy-media", "deploy", false, Some("x"), "3.62.2");
+        let admin = op_payload_from(
+            "homelab-admin",
+            "deploy-media",
+            "deploy",
+            false,
+            Some("x"),
+            "3.62.2",
+        );
+        assert_eq!(
+            admin,
+            host.replace("\"homelab-host\"", "\"homelab-admin\""),
+            "one shape for every sender"
         );
     }
 

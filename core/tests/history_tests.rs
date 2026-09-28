@@ -9,6 +9,7 @@ fn op(start: u64) -> HistoryEntry {
         label: "deploy".into(),
         subject: Some("deploy media".into()),
         req: Some(4),
+        by: None,
         ok: true,
         deferred: None,
         error: None,

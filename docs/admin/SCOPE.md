@@ -1,8 +1,8 @@
-# homelab-admin — scope (Phase 0, DRAFT)
+# homelab-admin — scope (Phase 0, APPROVED 2026-09-28)
 
-Status: Phase 0 in progress (2026-09-28). Goals and non-goals answered (part 1 + follow-up); success criteria and constraints (part 2) open. Route: **full**
+Status: **approved** 2026-09-28 by Kenny in four forms (Beheerdashboard richting, Dashboard basis, scope part 1 + follow-up, scope part 2: all success criteria and constraints "Klopt"). Route: **full**
 (Kenny, 2026-09-28, "Beheerdashboard richting": route = Volledig). Every
-statement below is one form item; nothing here is agreed until the form says so.
+statement below was one form item.
 
 Analysis this scope rests on: artifact "Homelab-beheerdashboard"
 (https://claude.ai/artifact/MFafAzdKMHDFM1jWM8h3wU), measured 2026-09-28.

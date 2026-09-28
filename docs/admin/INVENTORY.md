@@ -73,3 +73,20 @@ Key map: client/src/tui/keys.rs:74-304.
 - Open panel findings that bear on the dashboard: traefik-lan-host-header-bypass,
   pve-management-on-container-vlan, api-token-is-root (fix-120),
   small-sharp-edges ("make host settings declarative before any web UI").
+
+## 6. Ecosystem (dev-procedure ECOSYSTEM.md, read 2026-09-28)
+
+- **homelab** deploys, backs up and rebuilds the dashboard as `stacks/admin`
+  (scope G3); its restic regime covers the dashboard's `/appdata` for free.
+- **chassis-rs** is the base (scope, "Dashboard basis"); a chassis-rs service
+  meets adoption norms N1 (SIGTERM) and N2 (verifiable release) by
+  construction. N3 (config location, standing rule 28), N4 (runbook names
+  where the secret key lives) and N5 (LAN exposure is a decision) still have
+  to be answered for the dashboard.
+- **kp-themes** is the UI (framework-free modules, incl. kp-wizard).
+- **latch** holds every secret; the dashboard reads and writes it (scope G6),
+  which needs its own latch credential in CT 120.
+- **kyu** is the house message hub: the host already notifies through it
+  (`notify_webhook`); whether the dashboard publishes or subscribes to events
+  there is a Phase 2 ecosystem question.
+- almanac, HTTPSwitchboard, kyu-runner, docgen, BinaryPuzzleToolkit: no role.

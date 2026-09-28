@@ -33,3 +33,10 @@ Domains (at most eight, decided in this phase): platform, overview, stacks, fire
 | feat-ops-3 | Handmatige controles | Essential | — |
 | feat-ops-4 | Containerlogs uit Loki | Desired | — |
 | feat-ops-5 | TUI afbouwen | Essential | — |
+
+Note 2026-09-28 11:23 (relayed from the chassis-rs thread): feat-platform-5
+(`webapp`) and feat-platform-6 (`live`) are built on chassis-rs main
+(5d111f2), not released; release 2.3.0 waits on Kenny's form in that thread.
+Measured there: kyu-runner's release binary is 10,813,496 bytes before and
+after (the no-bloat success criterion holds). Until the release, the admin
+crate can build against a path dependency on ~/Projects/chassis-rs.

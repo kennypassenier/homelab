@@ -22,4 +22,12 @@ for f in */tests/*.rs; do
   case " $SLOW " in *" $name "*) continue ;; esac
   args+=(--test "$name")
 done
-exec cargo test "${args[@]}" "$@"
+cargo test "${args[@]}" "$@"
+# The skipped TUI suite also holds three cheap guards the commit must not
+# lose: the committed runbook and test plan match a fresh generation, and
+# every host operation is reachable from the TUI or written down as CLI-only.
+# Missing them let a stale runbook through to `make release` on 2026-09-28.
+exec cargo test -p homelab-client --test tui_snapshot_tests "$@" -- \
+  the_committed_runbook_matches_a_fresh_generation \
+  the_committed_test_plan_matches_a_fresh_generation \
+  every_host_operation_is_reachable_or_deliberately_not

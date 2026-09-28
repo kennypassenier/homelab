@@ -323,6 +323,18 @@ When a source and its target share no snapshot and the target already holds snap
 
 One section per directory under `stacks/`, read from its `lxc-compose.yml` and, for a native stack, each unit's `service.yml` and `.service` file. Repository names use the default base `rclone:gdrive:homelab-backups`.
 
+### admin (vmid 120)
+
+- Container: hostname `120-app-admin`, ip `10.10.10.20/24` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 8 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 60.
+- Runs no docker: native systemd services only.
+- Unit `homelab-admin`:
+  - program `/opt/homelab-admin/bin/homelab-admin`, from the GitHub release `kennypassenier/homelab` (asset `homelab-admin`); update policy manual.
+  - unit file `stacks/admin/homelab-admin/homelab-admin.service` in the repository; the container's copy is `/etc/systemd/system/homelab-admin.service`.
+  - data: repository `rclone:gdrive:homelab-backups/homelab-admin-config`, archive `/homelab-admin-data.tar` holding a tar of `/appdata/admin/admin-config`.
+  - vault copy of homelab-admin (`/appdata/admin/admin-config/admin.env`): `/var/lib/homelab/secrets/admin/admin-config/admin.env`.
+  - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/admin`. Adoption only records a service that is already active; it never starts one.
+- Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
+
 ### almanac (vmid 112)
 
 - Container: hostname `112-app-almanac`, ip `10.10.10.12/24` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 50.
@@ -489,4 +501,4 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 4. Put back the `homelab-host` program and its unit file, start it, and check the certificate fingerprint against the pin (Layer 1).
 5. Restore the guests this suite never touches (vmid 100, 101, 102, 103) from Proxmox's own backups: `qmrestore` for a VM, `pct restore` for a container.
 6. Rebuild the templates the stacks clone: `clone:995` (privileged), `clone:996` (unprivileged). `homelab template-build <vmid> <version>` builds an unprivileged one at that vmid, and `homelab template-build <vmid> <version> --privileged` a privileged one.
-7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), uptime (107), syncthing (108), kyu (109), almanac (112), metrics (113), productivity (111), paperwork (114), kp-soft (116), home (115), downloader (105), media (106), inbox (118). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.
+7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), uptime (107), syncthing (108), kyu (109), almanac (112), metrics (113), admin (120), productivity (111), paperwork (114), kp-soft (116), home (115), downloader (105), media (106), inbox (118). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.

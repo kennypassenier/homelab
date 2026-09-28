@@ -18,6 +18,7 @@ pub mod testplan;
 pub mod tls;
 #[cfg(feature = "tui")]
 pub mod tui;
+pub mod ui_cli;
 pub mod updatepolicy;
 pub mod version;
 

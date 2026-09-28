@@ -39,6 +39,9 @@ rustls = "0.23"
 # compiles in (no new C code).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 aws-lc-rs = "1"
+# feat-platform-10: a driven field is checked against the same pattern the
+# browser checks (formspec.json); already in the tree.
+regex = "1"
 
 [dev-dependencies]
 # milestone act: the action routes are called in-process (already in the tree

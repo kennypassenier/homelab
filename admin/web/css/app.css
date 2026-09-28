@@ -560,3 +560,51 @@ div.row-buttons {
   gap: 0.5rem;
   align-items: center;
 }
+
+/* Milestone follow (feat-platform-10): the toggle and the badge under the
+   bar, and the marks a driven step leaves. */
+.shell.follow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-block: 8px 0;
+}
+.follow-hint {
+  font-size: 0.85em;
+}
+.follow-badge {
+  margin-inline-start: auto;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.follow[data-driving="true"][data-following="true"] .follow-badge {
+  outline: 2px solid var(--ring, currentColor);
+  outline-offset: 2px;
+}
+.drive-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-block-end: 12px;
+}
+.drive-focus {
+  outline: 2px solid var(--ring, currentColor);
+  outline-offset: 4px;
+  border-radius: var(--radius, 6px);
+  transition: outline-color 0.2s;
+}
+.drive-press {
+  transform: scale(0.94);
+  box-shadow: 0 0 0 4px var(--ring, currentColor);
+  transition:
+    transform 0.12s,
+    box-shadow 0.12s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drive-press {
+    transform: none;
+  }
+}

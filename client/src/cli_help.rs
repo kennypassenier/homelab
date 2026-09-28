@@ -16,6 +16,7 @@ pub enum Group {
     Native,
     Host,
     Local,
+    Dashboard,
     Destructive,
 }
 
@@ -27,6 +28,9 @@ impl Group {
             Group::Native => "Native services (own programs as systemd units)",
             Group::Host => "Host and fleet",
             Group::Local => "Local, no host needed",
+            Group::Dashboard => {
+                "Drive the open dashboard (each step plays in every tab that follows)"
+            }
             Group::Destructive => "Rare and destructive (each asks you to type the name)",
         }
     }
@@ -104,6 +108,7 @@ pub const VERBS: &[Verb] = &[
     v(Local, "export", "stacks/<name> [out.yml]", "write the stack definition as one bundle; .env files are never in it", "homelab export almanac almanac-bundle.yml"),
     v(Local, "import", "<bundle.yml> <new-name> <vmid>", "write a bundle back as a new stack under stacks/, then validate it", "homelab import almanac-bundle.yml calendar 121"),
     v(Local, "help", "", "this list; `homelab <command> --help` for one command", "homelab help"),
+    v(Dashboard, "ui", "<step> [--json]", "one step in the dashboard: goto <path>, open <action> [stack], type <field> <text>, pick <field> <value>, check <field> on|off, press next|back|confirm, close, state, done; answers what is on screen, and the final press runs the action once on the dashboard's side", "homelab ui open deploy media"),
     v(Destructive, "destroy", "stacks/<name> [--no-backup]", "back up, then destroy the container; works from the host's record when the directory is gone", "homelab destroy drill"),
     v(Destructive, "forget", "<stack>", "for a container already gone: drop its record and registrations; touches no container", "homelab forget drill"),
     v(Destructive, "wipe", "<stack>[/<app>]", "delete what a retired stack or app kept: backups, /appdata, vault copies", "homelab wipe drill"),
@@ -131,7 +136,15 @@ pub fn usage() -> String {
          named almanac or stacks/almanac, from any directory.\n",
         env!("CARGO_PKG_VERSION")
     );
-    for group in [Daily, ChangeAStack, Native, Host, Local, Destructive] {
+    for group in [
+        Daily,
+        ChangeAStack,
+        Native,
+        Host,
+        Local,
+        Dashboard,
+        Destructive,
+    ] {
         out.push_str(&format!("\n{}\n", group.heading()));
         for verb in VERBS.iter().filter(|v| v.group == group) {
             out.push_str(&line(verb));

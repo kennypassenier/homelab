@@ -1230,6 +1230,7 @@ dependencies = [
  "homelab-client",
  "homelab-core",
  "homelab-proto",
+ "regex",
  "reqwest",
  "rustls",
  "serde",

@@ -7,6 +7,7 @@ pub mod actions_config;
 pub mod actions_progress;
 pub mod asks;
 pub mod config;
+pub mod drive;
 pub mod editplan;
 pub mod fleet;
 pub mod fwmatrix;

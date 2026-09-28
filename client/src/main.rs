@@ -289,6 +289,33 @@ async fn run(explicit_host: Option<String>) {
             }
         }
         "ping" => rpc(&host, &token, Command::Ping).await,
+        // feat-platform-10: one step of driving the open dashboard.
+        "ui" => {
+            let json = args.iter().any(|a| a == "--json");
+            let words: Vec<String> = args[2..]
+                .iter()
+                .filter(|a| a.as_str() != "--json")
+                .cloned()
+                .collect();
+            let step = homelab_client::ui_cli::parse(&words).unwrap_or_else(|e| die(&e));
+            let reply = rpc_reply(&host, &token, Command::Ui { step })
+                .await
+                .unwrap_or_else(|| die("the host closed the line before it answered"));
+            if json {
+                println!("{}", reply.message);
+                std::process::exit(if reply.ok { 0 } else { 1 });
+            }
+            match homelab_client::ui_cli::render(&reply.message) {
+                Ok(text) => {
+                    print!("{text}");
+                    std::process::exit(0);
+                }
+                Err(text) => {
+                    eprint!("{text}");
+                    std::process::exit(1);
+                }
+            }
+        }
         "patch" => rpc(&host, &token, Command::PatchFleet).await,
         "config" => rpc(&host, &token, Command::GetConfig).await,
         // E8: ZFS snapshots + replication of the declared jobs.
@@ -1918,6 +1945,8 @@ async fn rpc_exchange(
                     C_DIM, label, done, total_str, C_RESET
                 );
             }
+            // feat-platform-10: only the attached dashboard gets UI steps.
+            ServerMsg::Ui { .. } => {}
             ServerMsg::Config(view) => {
                 payload_seen = true;
                 // G8: plain-text dump for the CLI (`homelab config`).

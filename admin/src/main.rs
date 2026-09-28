@@ -47,6 +47,14 @@ const FILES: &[(&str, &[u8])] = &[
         "js/actionforms.js",
         include_bytes!("../web/js/actionforms.js"),
     ),
+    // Milestone follow (feat-platform-10): the form descriptions the server
+    // reads too, the driven replay and its pure half.
+    (
+        "js/formspec.json",
+        include_bytes!("../web/js/formspec.json"),
+    ),
+    ("js/drive.js", include_bytes!("../web/js/drive.js")),
+    ("js/driveview.js", include_bytes!("../web/js/driveview.js")),
     (
         "js/actiondialog.js",
         include_bytes!("../web/js/actiondialog.js"),
@@ -201,6 +209,9 @@ async fn main() -> std::process::ExitCode {
         live: live.clone(),
         loki: homelab_admin::shell::loki::Loki::from_config(config.as_ref()),
     }));
+    // feat-platform-10: a demo host inside this process instead of the real
+    // line, for the browser tests; nothing is sent anywhere.
+    let demo_host = std::env::var("HOMELAB_ADMIN_DEMO_HOST").is_ok_and(|v| v == "1");
     // milestone act: actions, schedules and notifications.
     if config.is_some() {
         if let Err(e) = homelab_admin::shell::actions::mount(
@@ -208,6 +219,7 @@ async fn main() -> std::process::ExitCode {
             host_client.clone(),
             live.clone(),
             shared.clone(),
+            demo_host,
         ) {
             eprintln!("homelab-admin: {e}");
             return std::process::ExitCode::FAILURE;
@@ -241,6 +253,20 @@ async fn main() -> std::process::ExitCode {
     if let Some(c) = config {
         // Started only on the serving path: --check never opens the line.
         app.on_start(move || {
+            if demo_host {
+                let repo =
+                    homelab_admin::core::actions_config::from_env(&|k| std::env::var(k).ok())
+                        .map(|a| a.repo)
+                        .unwrap_or_default();
+                let stacks = std::env::var("HOMELAB_ADMIN_DEMO_STACKS")
+                    .unwrap_or_else(|_| "media,home,drill,admin".into())
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                tokio::spawn(host_link::run_demo(shared, live, host_asks, repo, stacks));
+                return;
+            }
             let (backoff_min, backoff_max) = c.backoff();
             tokio::spawn(host_link::run(
                 HostTarget {

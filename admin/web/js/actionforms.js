@@ -7,6 +7,8 @@
 //
 // Pure: no DOM, no fetch, no clock.
 
+import SPEC from "./formspec.json" with { type: "json" };
+
 /**
  * The catalog row the server sends (GET /data/actions/catalog).
  * @typedef {"force" | "confirm" | "snapshot" | "app" | "unit" |
@@ -70,7 +72,25 @@ export const ROLLBACK_ACTIONS = /** @type {const} */ ([
   "rollback-native",
 ]);
 
-const WORD = "[A-Za-z0-9._:\\-]{1,128}";
+/**
+ * One field's description in formspec.json, the file the dashboard's
+ * server reads too (feat-platform-10): a step Claude sends is checked
+ * against the same words a click is.
+ * @typedef {{kind: Field["kind"], label: string, help: string,
+ *   required: boolean, pattern?: string, placeholder?: string,
+ *   source?: Field["source"], empty?: string, danger?: boolean,
+ *   when?: "guard", expect?: string,
+ *   list_only?: {label: string, help: string, required: boolean,
+ *     placeholder: string},
+ *   help_for?: Record<string, string>}} FieldDef
+ */
+
+/**
+ * @param {string} template
+ * @param {Record<string, string>} values
+ */
+export const fill = (template, values) =>
+  template.replace(/\{(\w+)\}/g, (m, k) => values[k] ?? m);
 
 /**
  * The field for one argument of one action.
@@ -80,112 +100,28 @@ const WORD = "[A-Za-z0-9._:\\-]{1,128}";
  * @returns {Field}
  */
 export function argField(arg, entry, stack) {
-  const id = `act-${arg.replace(/_/g, "-")}`;
-  switch (arg) {
-    case "force":
-      return {
-        name: arg,
-        id,
-        kind: "check",
-        label: "Deploy anyway (force)",
-        help: "The host last deployed a commit this working copy does not have; forcing replaces that deploy with these files.",
-        required: false,
-        when: "guard",
-        danger: true,
-      };
-    case "confirm":
-      return entry.confirm
-        ? {
-            name: arg,
-            id,
-            kind: "typed",
-            label: `Type ${stack} to confirm`,
-            help: "The name of the stack, exactly; this cannot be undone from the dashboard.",
-            required: true,
-            expect: stack,
-            placeholder: stack,
-          }
-        : {
-            name: arg,
-            id,
-            kind: "typed",
-            label: `Type ${stack} to delete for real`,
-            help: "Leave it empty and the wipe only lists what it would delete.",
-            required: false,
-            expect: stack,
-            placeholder: "empty: only list",
-          };
-    case "snapshot":
-      return {
-        name: arg,
-        id,
-        kind: "text",
-        label: "Snapshot",
-        help: "A restic snapshot id from the backup page; empty takes the latest.",
-        required: false,
-        pattern: WORD,
-        placeholder: "latest",
-      };
-    case "app":
-      return {
-        name: arg,
-        id,
-        kind: "choice",
-        label: "App",
-        help:
-          entry.action === "restore"
-            ? "Restore one app's data, or every app of the stack."
-            : "Update one app, or every app of the stack.",
-        required: false,
-        source: "apps",
-        empty: "Every app",
-      };
-    case "unit":
-      return {
-        name: arg,
-        id,
-        kind: "choice",
-        label: "Native unit",
-        help: "The service whose previous binary goes back; the stack's updates are parked after it.",
-        required: true,
-        source: "units",
-      };
-    case "skip_backup":
-      return {
-        name: arg,
-        id,
-        kind: "check",
-        label: "Skip the backup before destroying",
-        help: "Without it the container's data is backed up first.",
-        required: false,
-        danger: true,
-      };
-    case "skip_safety_copy":
-      return {
-        name: arg,
-        id,
-        kind: "check",
-        label: "Skip the safety copy of the current data",
-        help: "Without it the data as it is now is kept aside before the restore.",
-        required: false,
-        danger: true,
-      };
-    case "commit":
-      return {
-        name: arg,
-        id,
-        kind: "choice",
-        label: "Commit",
-        help: "The stack's files as they were at this commit are deployed.",
-        required: true,
-        source: "commits",
-        pattern: "[0-9a-fA-F]{7,40}",
-      };
-  }
+  const def = /** @type {FieldDef} */ (SPEC.fields[arg]);
+  const { list_only, help_for, pattern, ...base } = def;
+  /** @type {Record<string, unknown>} */
+  const merged = {
+    ...base,
+    ...(arg === "confirm" && !entry.confirm ? list_only : {}),
+  };
+  if (help_for && help_for[entry.action]) merged.help = help_for[entry.action];
+  if (pattern)
+    merged.pattern =
+      SPEC.patterns[/** @type {keyof typeof SPEC.patterns} */ (pattern)];
+  for (const [k, v] of Object.entries(merged))
+    if (typeof v === "string") merged[k] = fill(v, { stack });
+  return /** @type {Field} */ ({
+    name: arg,
+    id: `act-${arg.replace(/_/g, "-")}`,
+    ...merged,
+  });
 }
 
 /** Arguments asked on the review step, next to the preview. */
-const REVIEW_ARGS = new Set(["force", "confirm"]);
+const REVIEW_ARGS = new Set(SPEC.review_args);
 
 /**
  * The whole form of one action on one target.
@@ -203,8 +139,8 @@ export function actionForm(entry, ctx) {
   /** @type {Step[]} */
   const steps = [];
   if (options.length)
-    steps.push({ id: "options", label: "Options", fields: options });
-  steps.push({ id: REVIEW, label: "Review and run", fields: review });
+    steps.push({ id: "options", label: SPEC.steps.options, fields: options });
+  steps.push({ id: REVIEW, label: SPEC.steps.review, fields: review });
   const where = entry.target === "host" ? "the whole host" : stack;
   const refused =
     stack === ctx.selfStack && entry.refused_for_self
@@ -300,21 +236,25 @@ export function checkValues(form, values, step) {
     const v = values[f.name];
     const text = typeof v === "string" ? v.trim() : "";
     if (f.kind === "check") continue;
+    const words = {
+      expect: f.expect ?? "",
+      label: f.label.toLowerCase(),
+      text,
+    };
     if (f.required && text === "") {
-      errors[f.name] =
-        f.kind === "typed"
-          ? `Type ${f.expect} to confirm.`
-          : `Choose the ${f.label.toLowerCase()}.`;
+      errors[f.name] = fill(
+        f.kind === "typed" ? SPEC.messages.typed_missing : SPEC.messages.choose,
+        words,
+      );
       continue;
     }
     if (text === "") continue;
     if (f.kind === "typed" && text !== f.expect) {
-      errors[f.name] =
-        `That is not ${f.expect}; type the stack's name exactly.`;
+      errors[f.name] = fill(SPEC.messages.typed_wrong, words);
       continue;
     }
     if (f.pattern && !new RegExp(`^(?:${f.pattern})$`).test(text))
-      errors[f.name] = `"${text}" is not a valid ${f.label.toLowerCase()}.`;
+      errors[f.name] = fill(SPEC.messages.pattern, words);
   }
   return errors;
 }

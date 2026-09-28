@@ -11,7 +11,8 @@ import { formatTime, humanDuration } from "./format.js";
  *   expected_total_s: number | null, expected_remaining_s: number | null,
  *   elapsed_s: number, runs: number}} Progress
  * @typedef {{from: "manual"} | {from: "batch", batch: number} |
- *   {from: "schedule", schedule: string, slot: number}} Origin
+ *   {from: "schedule", schedule: string, slot: number} |
+ *   {from: "claude", by: string}} Origin
  * @typedef {"queued" | "running" | "done" | "failed" | "deferred" |
  *   "refused" | "unknown"} JobState
  * @typedef {{job: number, origin: Origin, stack: string, action: string,
@@ -111,6 +112,7 @@ export function addLog(logs, line, cap = KEEP_LINES) {
 export function originText(o) {
   if (o.from === "batch") return `batch ${o.batch}`;
   if (o.from === "schedule") return "schedule";
+  if (o.from === "claude") return `Claude (${o.by})`;
   return "by hand";
 }
 

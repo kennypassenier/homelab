@@ -1,0 +1,190 @@
+// Milestone follow (feat-platform-10): the driven replay's pure half, and
+// the one form description both sides read.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { actionForm, checkValues } from "../js/actionforms.js";
+import {
+  badgeText,
+  catchUp,
+  isActive,
+  letterDelay,
+  plan,
+  readFollow,
+} from "../js/driveview.js";
+import { NAV, OTHER_PAGES, STACK_TABS } from "../js/router.js";
+import SPEC from "../js/formspec.json" with { type: "json" };
+import CASES from "./formspec-cases.json" with { type: "json" };
+
+/** @typedef {import("../js/driveview.js").DriveState} DriveState */
+
+/** @param {Partial<DriveState>} [o] @returns {DriveState} */
+const state = (o = {}) => ({
+  active: true,
+  by: "wsl",
+  seq: 3,
+  page: "/app/stacks/media",
+  form: {
+    id: "action:deploy",
+    action: "deploy",
+    stack: "media",
+    title: "Deploy · media",
+    steps: ["review"],
+    step: "review",
+    step_index: 0,
+    values: { force: false },
+    errors: {},
+    run_error: null,
+    job: null,
+    fields: [
+      {
+        id: "act-force",
+        name: "force",
+        kind: "check",
+        value: false,
+        error: null,
+        shown: false,
+        step: "review",
+      },
+    ],
+    buttons: ["confirm", "close"],
+  },
+  last_at: 1000,
+  idle_s: 600,
+  ...o,
+});
+
+/** @param {number} seq @param {any} step @param {DriveState} s */
+const ev = (seq, step, s, applied = true) => ({
+  seq,
+  step,
+  applied,
+  refusal: applied ? null : { what: "ui type", why: "no field", fix: "x" },
+  state: s,
+});
+
+test("a tab that is off never changes: no operation for any event", () => {
+  const local = { seq: 2, page: "/app/jobs", form: null };
+  for (const step of [
+    { do: "goto", path: "/app/stacks/media" },
+    { do: "open", form: "deploy", target: "media" },
+    { do: "type", field: "act-confirm", text: "media" },
+    { do: "press", button: "confirm" },
+  ]) {
+    const p = plan(local, ev(3, step, state()), false);
+    assert.deepEqual(p.ops, []);
+    assert.equal(p.local, local, "the tab's own place is kept");
+  }
+  // Refused steps say nothing to a tab that does not follow either.
+  assert.deepEqual(
+    plan(local, ev(3, { do: "x" }, state(), false), false).ops,
+    [],
+  );
+  assert.equal(readFollow(null), false, "off by default");
+  assert.equal(readFollow({ getItem: () => "on" }), true);
+});
+
+test("a tab that follows animates the next step and catches up after a gap", () => {
+  const before = { seq: 2, page: "/app/jobs", form: null };
+  const opened = plan(
+    before,
+    ev(3, { do: "open", form: "deploy", target: "media" }, state()),
+    true,
+  );
+  assert.deepEqual(opened.ops, [
+    { op: "goto", path: "/app/stacks/media" },
+    { op: "open", action: "deploy", stack: "media" },
+    { op: "sync" },
+  ]);
+  assert.deepEqual(opened.local, {
+    seq: 3,
+    page: "/app/stacks/media",
+    form: { action: "deploy", stack: "media" },
+  });
+  const typed = plan(
+    opened.local,
+    ev(4, { do: "check", field: "act-force", on: true }, state({ seq: 4 })),
+    true,
+  );
+  assert.deepEqual(typed.ops, [{ op: "set", name: "force", value: true }]);
+  const pressed = plan(
+    typed.local,
+    ev(5, { do: "press", button: "confirm" }, state({ seq: 5 })),
+    true,
+  );
+  assert.deepEqual(pressed.ops, [
+    { op: "press", button: "confirm" },
+    { op: "sync" },
+  ]);
+  // A tab that turns on mid-drive (or missed an event) catches up at once.
+  const late = plan(
+    { seq: -1, page: "/app/", form: null },
+    ev(5, { do: "press", button: "confirm" }, state({ seq: 5 })),
+    true,
+  );
+  assert.deepEqual(late.ops, [
+    { op: "goto", path: "/app/stacks/media" },
+    { op: "open", action: "deploy", stack: "media" },
+    { op: "set", name: "force", value: false },
+    { op: "sync" },
+  ]);
+  // Another form open in the tab is closed first.
+  assert.equal(
+    catchUp(
+      {
+        seq: 0,
+        page: "/app/stacks/media",
+        form: { action: "backup", stack: "media" },
+      },
+      state(),
+    )[0].op,
+    "close",
+  );
+  const refused = plan(
+    typed.local,
+    ev(4, { do: "type" }, state({ seq: 4 }), false),
+    true,
+  );
+  assert.equal(refused.ops[0].op, "note");
+  assert.equal(refused.local, typed.local);
+});
+
+test("the badge names the stack and the action while Claude drives, and ends", () => {
+  assert.equal(badgeText(state(), 1010), "Claude is working on media: Deploy");
+  assert.equal(badgeText(state(), 1700), null, "a silent driver lets go");
+  assert.equal(badgeText(state({ active: false }), 1010), null);
+  assert.equal(isActive(null, 0), false);
+  assert.match(String(badgeText(state({ form: null }), 1010)), /dashboard/);
+  assert.ok(letterDelay("x") <= 70 && letterDelay("x".repeat(500)) >= 15);
+});
+
+test("the form description is one file: the browser's checks match the cases the server runs", () => {
+  for (const c of CASES.cases) {
+    const entry = /** @type {import("../js/actionforms.js").CatalogEntry} */ ({
+      action: c.action,
+      target: "stack",
+      label: c.action,
+      what: "",
+      scope: "operate",
+      needs: "nothing",
+      args: /** @type {any} */ (c.args),
+      confirm: c.confirm,
+      refused_for_self: false,
+    });
+    const form = actionForm(entry, { stack: c.stack, selfStack: "admin" });
+    const got = checkValues(
+      form,
+      /** @type {any} */ (c.values),
+      /** @type {any} */ ("step" in c ? c.step : undefined),
+    );
+    assert.deepEqual(got, c.errors, JSON.stringify(c));
+  }
+  // The pages a driven `goto` may name are the router's.
+  const pages = [...NAV, ...OTHER_PAGES]
+    .map((n) => n.href.replace(/^\/app\/?/, ""))
+    .sort();
+  assert.deepEqual([...SPEC.pages].sort(), pages);
+  assert.deepEqual(
+    SPEC.stack_tabs,
+    STACK_TABS.map((t) => t.tab),
+  );
+});

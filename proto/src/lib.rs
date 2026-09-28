@@ -371,6 +371,84 @@ pub enum Command {
         changes: std::collections::BTreeMap<String, serde_json::Value>,
         expect_sha256: String,
     },
+    /// feat-platform-10 (milestone follow): one step of driving the
+    /// dashboard's open tabs (`homelab ui <step>`). The host hands it to the
+    /// session that sent `UiAttach` and answers with that session's
+    /// `UiReply`: JSON `{ok, state, refusal?}` in the reply's message.
+    /// Refused at once when no dashboard is attached.
+    Ui {
+        step: UiStep,
+    },
+    /// feat-platform-10: this session is the dashboard; UI steps come here.
+    /// The newest attach wins; the session's end detaches it.
+    UiAttach,
+    /// feat-platform-10: the dashboard's answer to the UI step relayed as
+    /// `ServerMsg::Ui { relay, .. }`. Taken only from the attached session.
+    UiReply {
+        relay: u64,
+        ok: bool,
+        message: String,
+    },
+}
+
+/// feat-platform-10 (milestone follow): one step of Claude driving the
+/// dashboard, as `homelab ui <step>` sends it. The dashboard validates it
+/// against the form descriptions it draws its dialogs from, applies it to
+/// its one shared "Claude is driving" state and pushes it to every tab that
+/// follows. The final press runs on the dashboard's server, once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "do", rename_all = "snake_case")]
+pub enum UiStep {
+    /// Show a page: a path under /app/, e.g. `/app/stacks/media`.
+    Goto { path: String },
+    /// Open an action's dialog: `form` is the action (`deploy`), `target`
+    /// the stack; None for a host-wide action (`patch`).
+    Open {
+        form: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<String>,
+    },
+    /// Type text into a text field of the open form, by the field's id.
+    Type { field: String, text: String },
+    /// Choose a value of a choice field.
+    Pick { field: String, value: String },
+    /// Tick (`on`) or untick a check field.
+    Check { field: String, on: bool },
+    /// Press a button of the open form: `next`, `back` or `confirm`.
+    Press { button: String },
+    /// Close the open dialog.
+    Close,
+    /// Change nothing; answer what is on screen now.
+    State,
+    /// Stop driving: the tabs are the viewer's again.
+    Done,
+}
+
+impl UiStep {
+    /// Reading what is on screen needs only `Read`; every other step can
+    /// end in a press, which the dashboard checks again against the
+    /// action's own scope.
+    pub fn scope(&self) -> Scope {
+        match self {
+            UiStep::State => Scope::Read,
+            _ => Scope::Operate,
+        }
+    }
+
+    /// The verb as `homelab ui` spells it.
+    pub fn verb(&self) -> &'static str {
+        match self {
+            UiStep::Goto { .. } => "goto",
+            UiStep::Open { .. } => "open",
+            UiStep::Type { .. } => "type",
+            UiStep::Pick { .. } => "pick",
+            UiStep::Check { .. } => "check",
+            UiStep::Press { .. } => "press",
+            UiStep::Close => "close",
+            UiStep::State => "state",
+            UiStep::Done => "done",
+        }
+    }
 }
 
 fn history_limit_default() -> usize {
@@ -438,6 +516,7 @@ impl Command {
             | CurrentOp
             | History { .. }
             | GetHostConfig => Scope::Read,
+            Ui { step } => step.scope(),
             DeployStack(_)
             | StageNativeBinary { .. }
             | BackupStack(_)
@@ -458,7 +537,9 @@ impl Command {
             | ApplyGuards { .. }
             | SetStackEnabled { .. }
             | BackupDevices
-            | AnswerManualCheck { .. } => Scope::Operate,
+            | AnswerManualCheck { .. }
+            | UiAttach
+            | UiReply { .. } => Scope::Operate,
             DestroyStack { .. }
             | SelfUpdateHost { .. }
             | ExecIn { .. }
@@ -522,6 +603,9 @@ impl Command {
             History { .. } => "history",
             GetHostConfig => "get_host_config",
             SetHostConfig { .. } => "set_host_config",
+            Ui { .. } => "ui",
+            UiAttach => "ui_attach",
+            UiReply { .. } => "ui_reply",
         }
     }
 
@@ -774,6 +858,16 @@ pub enum ServerMsg {
     },
     /// Structured fleet snapshot (reply to GetState).
     State(Box<FleetState>),
+    /// feat-platform-10: a UI step for the attached dashboard session only
+    /// (never broadcast). `by` is the driving token's name, `scope` its
+    /// scope, so the dashboard refuses a press the driver may not make
+    /// itself. The dashboard answers with `Command::UiReply { relay, .. }`.
+    Ui {
+        relay: u64,
+        by: String,
+        scope: Scope,
+        step: UiStep,
+    },
     /// G8: host settings (reply to GetConfig).
     Config(Box<HostConfigView>),
     RpcDone(RpcResponse),
@@ -849,5 +943,75 @@ mod wire_tests {
                 assert!(frame.get(key).is_none(), "{key} in {frame}");
             }
         }
+    }
+
+    /// feat-platform-10: a UI step survives the envelope, reading is `Read`,
+    /// everything else `Operate`, and the relayed frame names its driver.
+    #[test]
+    fn follow_ui_steps_travel_in_the_envelope_with_their_scope() {
+        let steps = vec![
+            UiStep::Goto {
+                path: "/app/stacks/media".into(),
+            },
+            UiStep::Open {
+                form: "deploy".into(),
+                target: Some("media".into()),
+            },
+            UiStep::Type {
+                field: "act-snapshot".into(),
+                text: "latest".into(),
+            },
+            UiStep::Pick {
+                field: "act-app".into(),
+                value: "jellyfin".into(),
+            },
+            UiStep::Check {
+                field: "act-force".into(),
+                on: true,
+            },
+            UiStep::Press {
+                button: "confirm".into(),
+            },
+            UiStep::Close,
+            UiStep::State,
+            UiStep::Done,
+        ];
+        for step in steps {
+            let req = RpcRequest {
+                id: 9,
+                command: Command::Ui { step: step.clone() },
+            };
+            let json = serde_json::to_string(&req).unwrap();
+            let back: RpcRequest = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.id, 9);
+            let Command::Ui { step: got } = back.command else {
+                panic!("{json}")
+            };
+            assert_eq!(got, step);
+            let want = if step == UiStep::State {
+                Scope::Read
+            } else {
+                Scope::Operate
+            };
+            assert_eq!(Command::Ui { step }.scope(), want);
+        }
+        assert_eq!(Command::UiAttach.scope(), Scope::Operate);
+        let reply = Command::UiReply {
+            relay: 3,
+            ok: true,
+            message: "{}".into(),
+        };
+        assert_eq!(reply.scope(), Scope::Operate);
+        assert_eq!(reply.name(), "ui_reply");
+        let frame = serde_json::to_value(ServerMsg::Ui {
+            relay: 3,
+            by: "wsl".into(),
+            scope: Scope::Operate,
+            step: UiStep::Close,
+        })
+        .unwrap();
+        assert_eq!(frame["kind"], "ui");
+        assert_eq!(frame["step"]["do"], "close");
+        assert_eq!(frame["by"], "wsl");
     }
 }

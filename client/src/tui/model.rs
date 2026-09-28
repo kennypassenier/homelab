@@ -648,6 +648,9 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                     model.selected_stack = n - 1;
                 }
             }
+            // feat-platform-10: UI steps go to the attached dashboard only;
+            // the TUI never attaches, so it never sees one.
+            ServerMsg::Ui { .. } => {}
             ServerMsg::Config(view) => {
                 model.settings = Some(*view);
                 model.settings_dirty = false;

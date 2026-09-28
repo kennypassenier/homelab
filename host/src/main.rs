@@ -32,6 +32,7 @@ use homelab_core::sink::{PipelineEvent, Sink};
 use homelab_proto::{Command as Rpc, RpcRequest, RpcResponse, ServerMsg};
 
 mod tls;
+mod ui_relay;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// fix-141: the tree this binary was built from (see build.rs).
@@ -2365,6 +2366,129 @@ port = 5003
         assert_eq!(requested_by(), None);
     }
 
+    /// feat-platform-10 (milestone follow).
+    ///
+    /// Over real sockets: the dashboard's session attaches; a `homelab ui`
+    /// step from another token reaches it with that token's name and scope,
+    /// and the dashboard's answer is the CLI's reply. A read token may read
+    /// the state but not drive; a step never waits behind the queue.
+    #[tokio::test]
+    async fn follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let (state, _dir) = scoped_state("ui");
+        let addr = serve_state_on_loopback(state, naming_handler).await;
+        // The dashboard: attaches, then answers every step with what it saw.
+        let mut request = format!("ws://{}/ws", addr).into_client_request().unwrap();
+        request.headers_mut().insert(
+            "Authorization",
+            "Bearer all-token-cccccccccccccccccc".parse().unwrap(),
+        );
+        let (ws, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+        let (mut tx, mut rx) = ws.split();
+        let attach = RpcRequest {
+            id: 1,
+            command: Rpc::UiAttach,
+        };
+        tx.send(WsMsg::Text(serde_json::to_string(&attach).unwrap().into()))
+            .await
+            .unwrap();
+        let (attached_tx, attached_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut attached_tx = Some(attached_tx);
+            let mut next = 100;
+            while let Some(Ok(WsMsg::Text(t))) = rx.next().await {
+                match serde_json::from_str::<ServerMsg>(&t) {
+                    Ok(ServerMsg::RpcDone(r)) if r.id == 1 => {
+                        if let Some(a) = attached_tx.take() {
+                            let _ = a.send(());
+                        }
+                    }
+                    Ok(ServerMsg::Ui {
+                        relay,
+                        by,
+                        scope,
+                        step,
+                    }) => {
+                        next += 1;
+                        let reply = RpcRequest {
+                            id: next,
+                            command: Rpc::UiReply {
+                                relay,
+                                ok: true,
+                                message: format!("{} {:?} {}", by, scope, step.verb()),
+                            },
+                        };
+                        tx.send(WsMsg::Text(serde_json::to_string(&reply).unwrap().into()))
+                            .await
+                            .unwrap();
+                    }
+                    _ => {}
+                }
+            }
+        });
+        attached_rx.await.unwrap();
+        let replies = session_replies(
+            addr,
+            "operate-token-bbbbbbbbbbbbbb",
+            vec![
+                // A deploy-like command first: the step must not wait for it.
+                (1, Rpc::BackupDevices),
+                (
+                    2,
+                    Rpc::Ui {
+                        step: homelab_proto::UiStep::Close,
+                    },
+                ),
+            ],
+        )
+        .await;
+        assert_eq!(replies.first().map(|r| r.0), Some(2), "{:?}", replies);
+        assert_eq!(replies[0].2, "dash-operate Operate close");
+        let read = session_replies(
+            addr,
+            "read-token-aaaaaaaaaaaaaaaa",
+            vec![
+                (
+                    1,
+                    Rpc::Ui {
+                        step: homelab_proto::UiStep::State,
+                    },
+                ),
+                (
+                    2,
+                    Rpc::Ui {
+                        step: homelab_proto::UiStep::Close,
+                    },
+                ),
+            ],
+        )
+        .await;
+        let state = read.iter().find(|r| r.0 == 1).unwrap();
+        assert!(state.1 && state.2 == "dash-read Read state", "{:?}", read);
+        let close = read.iter().find(|r| r.0 == 2).unwrap();
+        assert!(
+            !close.1 && close.2.contains("needs scope Operate"),
+            "{:?}",
+            read
+        );
+        // A session that is not the dashboard cannot answer for it.
+        let forged = session_replies(
+            addr,
+            "operate-token-bbbbbbbbbbbbbb",
+            vec![(
+                1,
+                Rpc::UiReply {
+                    relay: 1,
+                    ok: true,
+                    message: "forged".into(),
+                },
+            )],
+        )
+        .await;
+        assert!(!forged[0].1, "{:?}", forged);
+    }
+
     /// milestone act: every line of an operation carries who asked for it.
     #[test]
     fn act_the_sink_stamps_the_token_name_on_every_line() {
@@ -3892,6 +4016,8 @@ struct AppState {
     /// this moment names this binary as the new one; one armed later was
     /// armed by this daemon for its successor.
     started_at: u64,
+    /// feat-platform-10: `homelab ui` steps, handed to the dashboard.
+    ui: Arc<ui_relay::UiRelay>,
 }
 
 impl AppState {
@@ -3908,6 +4034,7 @@ impl AppState {
             busy: Arc::new(std::sync::Mutex::new(None)),
             pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            ui: Arc::new(ui_relay::UiRelay::default()),
             damper: Arc::new(std::sync::Mutex::new(
                 homelab_core::notify::NotifyDamper::new(20 * 3600),
             )),
@@ -5689,6 +5816,9 @@ where
     Fut: std::future::Future<Output = RpcResponse> + Send + 'static,
 {
     let (mut tx, mut rx) = socket.split();
+    // feat-platform-10: which session this is, for the UI relay.
+    static SESSIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let session = SESSIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let hello = hello();
     let _ = tx
         .send(Message::Text(serde_json::to_string(&hello).unwrap().into()))
@@ -5830,6 +5960,57 @@ where
                 tracing::warn!("audit.log :: {}", e);
             }
         }
+        // feat-platform-10: the UI relay is the session's own business, like
+        // the session options: never queued behind a deploy.
+        match req.command {
+            Rpc::UiAttach => {
+                state.ui.attach(session, out_tx.clone());
+                info!(token = %who.name, "the dashboard attached for UI steps");
+                let resp = RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: "attached: UI steps come to this session".into(),
+                    deferred: None,
+                };
+                let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+                continue;
+            }
+            Rpc::UiReply {
+                relay,
+                ok,
+                ref message,
+            } => {
+                let (ok, message) = match state.ui.reply(session, relay, ok, message.clone()) {
+                    Ok(()) => (true, "delivered".to_string()),
+                    Err(e) => (false, e),
+                };
+                let resp = RpcResponse {
+                    id: req.id,
+                    ok,
+                    message,
+                    deferred: None,
+                };
+                let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+                continue;
+            }
+            Rpc::Ui { ref step } => {
+                info!(token = %who.name, step = step.verb(), "UI step relayed to the dashboard");
+                let (out_tx, ui, step) = (out_tx.clone(), state.ui.clone(), step.clone());
+                let (by, scope, id) = (who.name.clone(), who.scope, req.id);
+                tokio::spawn(async move {
+                    let (ok, message) = ui.relay(&by, scope, step, ui_relay::RELAY_WAIT).await;
+                    let resp = RpcResponse {
+                        id,
+                        ok,
+                        message,
+                        deferred: None,
+                    };
+                    let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+                });
+                continue;
+            }
+            _ => {}
+        }
         // arch-host-link: a session that matches replies by id asks for its
         // reads to skip the queue; the CLI and TUI never ask.
         if let homelab_proto::Command::SessionOptions { reads_beside_queue } = req.command {
@@ -5863,6 +6044,7 @@ where
     // as it did when the loop ran requests inline: a deploy is not abandoned
     // halfway because a laptop lid closed.
     drop(work_tx);
+    state.ui.detach(session);
     let _ = worker.await;
     forward.abort();
 }
@@ -6703,6 +6885,13 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             id: req.id,
             ok: true,
             message: "session options are set per session".into(),
+            deferred: None,
+        },
+        // feat-platform-10: answered by the session loop (`serve_ws`).
+        Rpc::Ui { .. } | Rpc::UiAttach | Rpc::UiReply { .. } => RpcResponse {
+            id: req.id,
+            ok: false,
+            message: "UI steps are relayed by the session, not run".into(),
             deferred: None,
         },
         Rpc::Ping => RpcResponse {

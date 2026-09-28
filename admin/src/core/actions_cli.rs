@@ -215,7 +215,10 @@ pub fn cli_line(command: &Command, force: bool) -> Option<String> {
         | CurrentOp
         | History { .. }
         | GetHostConfig
-        | SetHostConfig { .. } => return None,
+        | SetHostConfig { .. }
+        | Ui { .. }
+        | UiAttach
+        | UiReply { .. } => return None,
     }
     Some(parts.join(" "))
 }

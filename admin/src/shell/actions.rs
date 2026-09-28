@@ -329,8 +329,18 @@ impl StackFiles for RepoFiles {
 #[serde(tag = "from", rename_all = "snake_case")]
 pub enum Origin {
     Manual,
-    Batch { batch: u64 },
-    Schedule { schedule: String, slot: i64 },
+    Batch {
+        batch: u64,
+    },
+    Schedule {
+        schedule: String,
+        slot: i64,
+    },
+    /// feat-platform-10: the final press of a form Claude drove
+    /// (`homelab ui press confirm`), with the driving token's name.
+    Claude {
+        by: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -516,6 +526,37 @@ impl Actions {
             }
         }
         Ok(())
+    }
+
+    /// A validated request, pressed: the checks a press gets (the queue,
+    /// the working copy, the deploy guard), then the job. The route and the
+    /// driver (feat-platform-10) both go through here, so a driven press
+    /// is refused for exactly what a click is.
+    pub async fn press(&self, req: ActionRequest, origin: Origin) -> Result<JobView, Refusal> {
+        self.precheck(&req)?;
+        let a2 = self.clone();
+        let r2 = req.clone();
+        if let Ok(Err(r)) = tokio::task::spawn_blocking(move || a2.guard(&r2)).await {
+            return Err(r);
+        }
+        Ok(self.submit(req, origin))
+    }
+
+    /// feat-stacks-7 before the press: the CLI line (or why there is
+    /// none), the deploy guard's refusal, whether it restarts the dashboard.
+    pub async fn preview_of(
+        &self,
+        req: ActionRequest,
+    ) -> (Result<String, String>, Option<Refusal>, bool) {
+        let a2 = self.clone();
+        let restarts = actions::restarts_dashboard(&req.stack, req.action);
+        let (line, guard) = tokio::task::spawn_blocking(move || {
+            let guard = a2.guard(&req);
+            (preview_line(&a2, &req), guard)
+        })
+        .await
+        .unwrap_or((Err("internal".into()), Ok(())));
+        (line, guard.err(), restarts)
     }
 
     /// Queue a validated request; the job as it stands now.
@@ -989,15 +1030,10 @@ async fn start(
         Ok(r) => r,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
-    if let Err(r) = a.precheck(&req) {
-        return refusal(StatusCode::CONFLICT, r);
+    match a.press(req, Origin::Manual).await {
+        Ok(view) => accepted(&view),
+        Err(r) => refusal(StatusCode::CONFLICT, r),
     }
-    let a2 = a.clone();
-    let r2 = req.clone();
-    if let Ok(Err(r)) = tokio::task::spawn_blocking(move || a2.guard(&r2)).await {
-        return refusal(StatusCode::CONFLICT, r);
-    }
-    accepted(&a.submit(req, Origin::Manual))
 }
 
 async fn batch(State(a): State<Actions>, b: Result<Json<BatchRequest>, JsonRejection>) -> Response {
@@ -1043,22 +1079,16 @@ async fn preview(
         Ok(r) => r,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
-    let a2 = a.clone();
-    let r2 = req.clone();
-    let (line, guard) = tokio::task::spawn_blocking(move || {
-        let guard = a2.guard(&r2);
-        (preview_line(&a2, &r2), guard)
-    })
-    .await
-    .unwrap_or((Err("internal".into()), Ok(())));
+    let (stack, action) = (req.stack.clone(), req.action);
+    let (line, guard, restarts) = a.preview_of(req).await;
     Json(serde_json::json!({
-        "stack": req.stack,
-        "action": req.action,
-        "entry": req.action.catalog_entry(),
+        "stack": stack,
+        "action": action,
+        "entry": action.catalog_entry(),
         "cli": line.as_ref().ok(),
         "cli_unavailable": line.err(),
-        "guard": guard.err(),
-        "restarts_dashboard": actions::restarts_dashboard(&req.stack, req.action),
+        "guard": guard,
+        "restarts_dashboard": restarts,
     }))
     .into_response()
 }
@@ -1146,6 +1176,7 @@ pub fn mount(
     host: HostClient,
     live: chassis::shell::live::Live,
     shared: Shared,
+    demo_host: bool,
 ) -> Result<(), String> {
     let cfg = crate::core::actions_config::from_env(&|k| std::env::var(k).ok())?;
     let clock = system_clock();
@@ -1159,6 +1190,9 @@ pub fn mount(
         None => Arc::new(super::actions_notify::NoPusher),
     };
     let shared_for_edit = shared.clone();
+    let shared_for_drive = shared.clone();
+    let publish_for_drive = publish.clone();
+    let clock_for_drive = clock.clone();
     let publish_for_edit = publish.clone();
     let notify = NotifyCenter::load(cfg.notify_file(), pusher, publish.clone(), clock.clone())
         .map_err(|e| e.to_string())?;
@@ -1198,6 +1232,17 @@ pub fn mount(
         shared: shared_for_edit,
         publish: publish_for_edit,
     }));
+    // feat-platform-10: the driver, its catch-up route and its relay.
+    let driver = super::drive::Driver::new(
+        actions.clone(),
+        shared_for_drive,
+        publish_for_drive,
+        clock_for_drive,
+    );
+    app.dashboard_routes(super::drive::router(driver.clone()));
+    if demo_host {
+        app.dashboard_routes(super::drive::demo_router(driver.clone()));
+    }
     app.dashboard_routes(router(actions));
     app.dashboard_routes(super::actions_notify::router(notify.clone()));
     app.dashboard_routes(super::scheduler::router(scheduler.clone()));
@@ -1210,6 +1255,7 @@ pub fn mount(
             }
         });
         scheduler.spawn(tick);
+        driver.spawn_relay(host.clone());
         super::actions_notify::spawn_incident_poll(host, notify, poll);
     });
     Ok(())

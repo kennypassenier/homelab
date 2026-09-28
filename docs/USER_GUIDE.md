@@ -584,6 +584,71 @@ new one that happens to have the same number after the host restarted. The
 CLI and TUI send no stamp and behave as before. Test: `host/src/main.rs`
 (`arch_host_link_a_stale_answer_does_not_answer_a_new_question`).
 
+#### feat-platform-10 · `homelab ui`: driving the open dashboard
+
+**Status:** Built (homelab-admin milestone `follow`, 2026-09-28), tested
+against a mock host and the dashboard's demo host; not yet measured against
+the live host, which does not know the command until the next release.
+
+`homelab ui <step>` drives the admin dashboard one step at a time, with no
+browser on the sending side. The step goes to the host on this machine's own
+token; the host hands it to the dashboard's session (the one that sent
+`UiAttach`) and answers with what the dashboard says is on screen. There is
+no second way in: the steps travel on the same TLS line as every other verb.
+
+| Step | What it does |
+|---|---|
+| `homelab ui goto <path>` | shows a page: `/app/stacks/media`, `stacks/media/logs`, `/app/jobs` |
+| `homelab ui open <action> [stack]` | opens an action's dialog (`deploy media`; a host-wide action such as `patch` takes no stack) |
+| `homelab ui type <field> <text>` | types into a text field of the open dialog, by the field's id (`act-snapshot`, `act-confirm`) |
+| `homelab ui pick <field> <value>` | chooses one value of a choice field (`act-app`, `act-unit`, `act-commit`) |
+| `homelab ui check <field> on\|off` | ticks or unticks a check field (`act-force`, `act-skip-backup`) |
+| `homelab ui press next\|back\|confirm` | presses a button of the dialog; `confirm` is the final press and runs the action |
+| `homelab ui close` | closes the dialog |
+| `homelab ui state` | changes nothing; prints what is on screen |
+| `homelab ui done` | stops driving: every tab is its viewer's again |
+
+Every step is checked against the same form description the dashboard draws
+its dialogs from (`admin/web/js/formspec.json`): an unknown field id, a field
+of the wrong kind or on another step, a value that is not on the list, an
+unknown page, action or stack are refused with what, why and what to do, and
+change nothing. A press the form holds (a field in error, the deploy guard)
+is shown in the dialog and answered with its reason, exit code 1. `--json`
+prints the dashboard's answer as it came. Reading the state needs a token of
+scope `read`; every other step needs `operate`, and the final press also the
+action's own scope (a destroy needs `all`). The final press runs on the
+dashboard's server through the same action queue a click uses, exactly once,
+whether zero, one or two tabs are open; the job's origin reads "Claude
+(<token name>)". Nothing is driven while no dashboard is attached: the step
+is refused with that reason.
+
+In the dashboard, the switch **Watch Claude** at the top of every page says
+whether this tab plays Claude's steps. It is off by default and remembered
+per tab. Off, the tab never changes page, opens a dialog or loses what its
+viewer typed; it shows only the badge "Claude is working on <stack>:
+<action>" with a **Watch** button. On, the tab performs every step as it
+comes (the page changes, the dialog opens, the text appears letter by letter,
+the button shows its press, the next step of the wizard appears); a tab that
+turns on in the middle of a drive catches up to where Claude is. While Claude
+drives a tab that watches, that tab's own clicks and keys are refused with a
+note; the dialog carries a **Stop watching** button, since a modal dialog
+hides the switch. A driver who sends nothing for ten minutes lets go.
+
+An example session, a deploy of `media`:
+
+```
+homelab ui goto /app/stacks/media
+homelab ui open deploy media        # the review step: the CLI line, the deploy guard
+homelab ui press confirm            # the deploy runs once, on the dashboard's side
+homelab ui state                    # job 1790… running · step 2/3 … then done · complete
+homelab ui close
+homelab ui done
+```
+
+Tests: `admin/tests/follow_tests.rs`, `host/src/ui_relay.rs`, `host/src/main.rs`
+(`follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope`),
+`client/src/ui_cli.rs`, `proto/src/lib.rs`, `admin/web/test/follow.test.js`.
+
 #### A5 · Secrets vault on the host
 
 **Status:** Built.

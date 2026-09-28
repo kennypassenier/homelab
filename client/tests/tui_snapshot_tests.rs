@@ -1049,6 +1049,21 @@ const CLI_ONLY: &[(&str, &str)] = &[
         "housekeeping after a rename; rare and easy to do wrong — a later round",
     ),
     (
+        "Ui",
+        "feat-platform-10: Claude drives the dashboard from the command line, with no \
+         browser and no terminal interface; `homelab ui` is the whole point",
+    ),
+    (
+        "UiAttach",
+        "feat-platform-10: sent by the dashboard's own session only; the TUI is \
+         never the target of UI steps",
+    ),
+    (
+        "UiReply",
+        "feat-platform-10: the dashboard's answer to a relayed UI step; nobody \
+         else may send it",
+    ),
+    (
         "ReleaseUpdateNative",
         "the nightly round's own release update, run by hand only to prove it — \
          the TUI's update key is the supervised self-update (B1)",

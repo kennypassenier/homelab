@@ -92,6 +92,8 @@ export const ACT_EVENTS = /** @type {const} */ ([
   // Milestone edit: the working copy moved, host.toml was written.
   "repo",
   "host_settings",
+  // Milestone follow: Claude drove one step (feat-platform-10).
+  "drive",
 ]);
 
 /** @type {Map<string, Set<(data: any) => void>>} */

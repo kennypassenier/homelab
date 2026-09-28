@@ -7,6 +7,7 @@
 
 import { startAgoTicker } from "./ago.js";
 import { mountChrome } from "./chrome.js";
+import { mountFollow } from "./drive.js";
 import { h } from "./dom.js";
 import { navEntries, pageTitle, route } from "./router.js";
 import { current, start, subscribe } from "./store.js";
@@ -128,6 +129,10 @@ mountChrome(
   { nav: bar, asks },
   { navigate, route: () => route(location.pathname) },
 );
+// feat-platform-10: the "Watch Claude" toggle and badge, on every page.
+mountFollow(/** @type {HTMLElement} */ (document.getElementById("follow")), {
+  navigate,
+});
 startAgoTicker();
 start();
 render();

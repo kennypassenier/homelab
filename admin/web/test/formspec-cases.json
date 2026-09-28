@@ -1,0 +1,68 @@
+{
+  "about": "feat-platform-10: the same values checked by the browser (checkValues) and by the dashboard's server (core::drive::check_values) must give the same words. Both suites read this file; the Rust suite also holds args and confirm equal to the server's catalog.",
+  "cases": [
+    {
+      "action": "restore",
+      "args": ["confirm", "snapshot", "app", "skip_safety_copy"],
+      "confirm": true,
+      "stack": "media",
+      "values": {
+        "confirm": "",
+        "snapshot": "",
+        "app": "",
+        "skip_safety_copy": false
+      },
+      "step": "review",
+      "errors": { "confirm": "Type media to confirm." }
+    },
+    {
+      "action": "restore",
+      "args": ["confirm", "snapshot", "app", "skip_safety_copy"],
+      "confirm": true,
+      "stack": "media",
+      "values": {
+        "confirm": "medi",
+        "snapshot": "bad id!",
+        "app": "",
+        "skip_safety_copy": false
+      },
+      "errors": {
+        "confirm": "That is not media; type the stack's name exactly.",
+        "snapshot": "\"bad id!\" is not a valid snapshot."
+      }
+    },
+    {
+      "action": "rollback-native",
+      "args": ["unit"],
+      "confirm": false,
+      "stack": "kyu",
+      "values": { "unit": "" },
+      "errors": { "unit": "Choose the native unit." }
+    },
+    {
+      "action": "deploy-commit",
+      "args": ["commit", "force"],
+      "confirm": false,
+      "stack": "media",
+      "values": { "commit": "xyz", "force": false },
+      "step": "options",
+      "errors": { "commit": "\"xyz\" is not a valid commit." }
+    },
+    {
+      "action": "wipe",
+      "args": ["confirm"],
+      "confirm": false,
+      "stack": "drill",
+      "values": { "confirm": "" },
+      "errors": {}
+    },
+    {
+      "action": "destroy",
+      "args": ["confirm", "skip_backup"],
+      "confirm": true,
+      "stack": "drill",
+      "values": { "confirm": " drill ", "skip_backup": true },
+      "errors": {}
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "about": "feat-platform-10: the one description of every action form's fields, read by the browser (actionforms.js imports it) and by the dashboard's server (core::drive embeds it), so a step Claude sends and a click Kenny makes are checked against the same words. {stack}, {expect}, {label} and {text} are filled in by both sides the same way.",
+  "review_args": ["force", "confirm"],
+  "steps": { "options": "Options", "review": "Review and run" },
+  "patterns": {
+    "word": "[A-Za-z0-9._:\\-]{1,128}",
+    "commit": "[0-9a-fA-F]{7,40}"
+  },
+  "fields": {
+    "force": {
+      "kind": "check",
+      "label": "Deploy anyway (force)",
+      "help": "The host last deployed a commit this working copy does not have; forcing replaces that deploy with these files.",
+      "required": false,
+      "when": "guard",
+      "danger": true
+    },
+    "confirm": {
+      "kind": "typed",
+      "label": "Type {stack} to confirm",
+      "help": "The name of the stack, exactly; this cannot be undone from the dashboard.",
+      "required": true,
+      "expect": "{stack}",
+      "placeholder": "{stack}",
+      "list_only": {
+        "label": "Type {stack} to delete for real",
+        "help": "Leave it empty and the wipe only lists what it would delete.",
+        "required": false,
+        "placeholder": "empty: only list"
+      }
+    },
+    "snapshot": {
+      "kind": "text",
+      "label": "Snapshot",
+      "help": "A restic snapshot id from the backup page; empty takes the latest.",
+      "required": false,
+      "pattern": "word",
+      "placeholder": "latest"
+    },
+    "app": {
+      "kind": "choice",
+      "label": "App",
+      "help": "Update one app, or every app of the stack.",
+      "help_for": {
+        "restore": "Restore one app's data, or every app of the stack."
+      },
+      "required": false,
+      "source": "apps",
+      "empty": "Every app"
+    },
+    "unit": {
+      "kind": "choice",
+      "label": "Native unit",
+      "help": "The service whose previous binary goes back; the stack's updates are parked after it.",
+      "required": true,
+      "source": "units"
+    },
+    "skip_backup": {
+      "kind": "check",
+      "label": "Skip the backup before destroying",
+      "help": "Without it the container's data is backed up first.",
+      "required": false,
+      "danger": true
+    },
+    "skip_safety_copy": {
+      "kind": "check",
+      "label": "Skip the safety copy of the current data",
+      "help": "Without it the data as it is now is kept aside before the restore.",
+      "required": false,
+      "danger": true
+    },
+    "commit": {
+      "kind": "choice",
+      "label": "Commit",
+      "help": "The stack's files as they were at this commit are deployed.",
+      "required": true,
+      "source": "commits",
+      "pattern": "commit"
+    }
+  },
+  "messages": {
+    "typed_missing": "Type {expect} to confirm.",
+    "choose": "Choose the {label}.",
+    "typed_wrong": "That is not {expect}; type the stack's name exactly.",
+    "pattern": "\"{text}\" is not a valid {label}."
+  },
+  "pages": [
+    "",
+    "host",
+    "activity",
+    "timeline",
+    "checks",
+    "doctor",
+    "jobs",
+    "schedules",
+    "notifications",
+    "firewall",
+    "settings"
+  ],
+  "stack_tabs": [
+    "overview",
+    "apps",
+    "history",
+    "logs",
+    "checks",
+    "settings",
+    "firewall"
+  ]
+}

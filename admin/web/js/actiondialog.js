@@ -47,7 +47,17 @@ import {
  * @typedef {{apps?: string[], units?: string[],
  *   commits?: {commit: string, subject: string}[]}} Sources
  * @typedef {{preset?: import("./actionforms.js").Values, sources?: Sources,
- *   openRollback?: (stack: string) => void}} OpenOpts
+ *   openRollback?: (stack: string) => void, driven?: boolean}} OpenOpts
+ * @typedef {{form: import("./actionforms.js").ActionForm,
+ *   dialog: HTMLDialogElement, closed: Promise<void>, close: () => void,
+ *   input: (name: string) => HTMLInputElement | HTMLSelectElement | null,
+ *   set: (name: string, value: string | boolean) => void,
+ *   step: () => number, goTo: (index: number) => Promise<boolean>,
+ *   button: (name: string) => HTMLElement | null,
+ *   errors: (byName: Record<string, string>) => void,
+ *   runError: (e: import("./doctor.js").RouteError | null) => void,
+ *   showJob: (job: number) => void}} ActionController
+ *   feat-platform-10: what the driven replay (drive.js) does to a dialog.
  */
 
 /**
@@ -86,21 +96,24 @@ async function readSources(form, given) {
 
 /**
  * Open one action's dialog on one stack (or on the host target).
+ * `driven` (feat-platform-10): Claude drives it from the dashboard's
+ * server; the dialog shows each step and never sends the press itself.
  * @param {string} stack
  * @param {string} action
  * @param {OpenOpts} [opts]
+ * @returns {Promise<ActionController | null>}
  */
 export async function openAction(stack, action, opts = {}) {
   const catalog = await catalogReady();
   const entry = catalog?.actions.find((a) => a.action === action);
   if (!catalog || !entry) {
     notify(`The dashboard does not know the action "${action}".`, "error");
-    return;
+    return null;
   }
   // Deploying an earlier commit starts from the list of commits.
   if (action === "deploy-commit" && !opts.preset?.commit && opts.openRollback) {
     opts.openRollback(stack);
-    return;
+    return null;
   }
   const form = actionForm(entry, {
     stack,
@@ -109,11 +122,11 @@ export async function openAction(stack, action, opts = {}) {
   });
   if (form.refused) {
     await refusalAlarm({ what: form.title, why: form.refused, fix: "" }, 403);
-    return;
+    return null;
   }
   const sources = await readSources(form, opts.sources ?? {});
   const values = initialValues(form, opts.preset);
-  drawActionDialog(form, values, sources);
+  return drawActionDialog(form, values, sources, opts.driven === true);
 }
 
 /**
@@ -121,8 +134,10 @@ export async function openAction(stack, action, opts = {}) {
  * @param {import("./actionforms.js").ActionForm} form
  * @param {import("./actionforms.js").Values} values
  * @param {Sources} sources
+ * @param {boolean} driven
+ * @returns {ActionController}
  */
-function drawActionDialog(form, values, sources) {
+function drawActionDialog(form, values, sources, driven) {
   /** @type {Map<string, HTMLInputElement | HTMLSelectElement>} */
   const inputs = new Map();
   /** @type {Map<string, HTMLElement>} */
@@ -247,6 +262,7 @@ function drawActionDialog(form, values, sources) {
     id: "action-dialog",
   });
   d.dialog.dataset.form = form.id;
+  if (driven) d.dialog.dataset.driven = "";
   const detachWizard = attachWizards(d.dialog, { focusStep: false });
   const handle = wizard(wiz);
   /** @type {() => void} */
@@ -319,6 +335,8 @@ function drawActionDialog(form, values, sources) {
   };
 
   wiz.addEventListener(BEFORE_STEP_EVENT, (e) => {
+    // Driven: the dashboard's server checked the step already.
+    if (driven) return;
     const detail = /** @type {CustomEvent} */ (e).detail;
     const from = form.steps[detail.from]?.id;
     if (detail.direction === "forward" && from && !stepErrors(from))
@@ -331,8 +349,49 @@ function drawActionDialog(form, values, sources) {
   if (form.steps.length === 1) void preview();
 
   let running = false;
+  /** @param {number} job */
+  const showJob = (job) => {
+    if (body.dataset.job) return;
+    const panel = mountJobPanel(job, { compact: true });
+    stopPanel = panel.stop;
+    handle?.element.remove();
+    body.replaceChildren(
+      panel.element,
+      h(
+        "div",
+        { class: "kp-dialog__actions" },
+        h(
+          "a",
+          {
+            class: "kp-button",
+            href: `/app/jobs?job=${job}`,
+            "data-close-on-nav": "",
+          },
+          "Open in Jobs",
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "kp-button kp-button--primary",
+            "data-kp-dialog-close": "",
+          },
+          "Close",
+        ),
+      ),
+    );
+    body.dataset.job = String(job);
+    body
+      .querySelector("[data-close-on-nav]")
+      ?.addEventListener("click", () => d.close());
+    body
+      .querySelector("[data-kp-dialog-close]")
+      ?.addEventListener("click", () => d.close());
+  };
   wiz.addEventListener(FINISH_EVENT, async () => {
-    if (running) return;
+    // Driven: the press runs on the dashboard's server, once; this tab
+    // only shows the job it started (drive.js calls showJob).
+    if (driven || running) return;
     if (!stepErrors(REVIEW)) return;
     if (guard && values.force !== true) {
       runError.replaceChildren(
@@ -364,42 +423,53 @@ function drawActionDialog(form, values, sources) {
       await refusalAlarm(r.error, r.status);
       return;
     }
-    const job = /** @type {number} */ (r.body.job);
-    const panel = mountJobPanel(job, { compact: true });
-    stopPanel = panel.stop;
-    handle?.element.remove();
-    body.replaceChildren(
-      panel.element,
-      h(
-        "div",
-        { class: "kp-dialog__actions" },
-        h(
-          "a",
-          {
-            class: "kp-button",
-            href: `/app/jobs?job=${job}`,
-            "data-close-on-nav": "",
-          },
-          "Open in Jobs",
-        ),
-        h(
-          "button",
-          {
-            type: "button",
-            class: "kp-button kp-button--primary",
-            "data-kp-dialog-close": "",
-          },
-          "Close",
-        ),
-      ),
-    );
-    body
-      .querySelector("[data-close-on-nav]")
-      ?.addEventListener("click", () => d.close());
-    body
-      .querySelector("[data-kp-dialog-close]")
-      ?.addEventListener("click", () => d.close());
+    showJob(/** @type {number} */ (r.body.job));
   });
+
+  return {
+    form,
+    dialog: d.dialog,
+    closed: d.closed,
+    close: () => d.close(),
+    input: (name) => inputs.get(name) ?? null,
+    set: (name, value) => {
+      const x = inputs.get(name);
+      if (!x) return;
+      const check = x instanceof HTMLInputElement && x.type === "checkbox";
+      if (check) x.checked = value === true;
+      else x.value = String(value);
+      x.dispatchEvent(
+        new Event(
+          check || x instanceof HTMLSelectElement ? "change" : "input",
+          {
+            bubbles: true,
+          },
+        ),
+      );
+    },
+    step: () => handle?.step() ?? 0,
+    goTo: (i) => (handle ? handle.goTo(i) : Promise.resolve(false)),
+    button: (name) =>
+      name === "back"
+        ? back
+        : name === "close"
+          ? /** @type {HTMLElement | null} */ (
+              d.dialog.querySelector(".kp-dialog__close")
+            )
+          : next,
+    errors: (byName) => {
+      for (const [name, input] of inputs) {
+        if (byName[name]) showError(input, byName[name]);
+        else if (input.getAttribute("aria-invalid") === "true")
+          clearError(input);
+      }
+    },
+    runError: (e) =>
+      runError.replaceChildren(
+        ...(e ? [refusalCallout(e, "destructive")] : []),
+      ),
+    showJob,
+  };
 }
 
 /** @param {string} s */

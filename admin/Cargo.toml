@@ -15,7 +15,7 @@ homelab-proto = { path = "../proto" }
 # arch-crates: the client library (link, tls) without the terminal UI.
 homelab-client = { path = "../client", default-features = false }
 # tech-chassis-dep: a released chassis-rs only, never a rev or a path.
-chassis = { git = "https://github.com/kennypassenier/chassis-rs", tag = "v2.3.0", default-features = false, features = ["core", "webapp", "live", "passkeys"] }
+chassis = { git = "https://github.com/kennypassenier/chassis-rs", tag = "v2.4.0", default-features = false, features = ["core", "webapp", "live", "passkeys", "request-guard"] }
 axum = "0.8"
 tokio.workspace = true
 serde.workspace = true
@@ -29,6 +29,12 @@ base64.workspace = true
 # compiled in, rustls cannot pick one and panics on the first handshake.
 # main() installs the client's provider explicitly.
 rustls = "0.23"
+# arch-exposure, lock 1: the Access key set is fetched with the HTTP client
+# chassis already carries (same version and features, nothing new built),
+# and the RS256 signature checked with aws-lc-rs, which rustls already
+# compiles in (no new C code).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+aws-lc-rs = "1"
 
 [lints]
 workspace = true

@@ -101,3 +101,41 @@ fn arch_exposure_the_key_set_keeps_rsa_keys_only() {
     assert_eq!(keys[0].kid, "k1");
     assert_eq!(keys[0].e, vec![1, 0, 1]);
 }
+
+/// Lock 1's signature check against a real RS256 signature: the right key
+/// passes, a changed payload and a different key fail.
+#[test]
+fn arch_exposure_the_signature_is_checked_against_the_key() {
+    use aws_lc_rs::encoding::AsDer;
+    use aws_lc_rs::rsa::{KeyPair, KeySize};
+    use aws_lc_rs::signature::{KeyPair as _, RSA_PKCS1_SHA256};
+    use homelab_admin::core::access::{verify_rs256, RsaKey};
+
+    fn public(kp: &KeyPair) -> RsaKey {
+        // The SubjectPublicKeyInfo DER holds the modulus and exponent; the
+        // components are what a JWKS carries.
+        let pk = kp.public_key();
+        let _ = pk.as_der();
+        let comps = aws_lc_rs::rsa::PublicKeyComponents::<Vec<u8>>::from(pk);
+        RsaKey {
+            kid: "k1".into(),
+            n: comps.n,
+            e: comps.e,
+        }
+    }
+    let kp = KeyPair::generate(KeySize::Rsa2048).unwrap();
+    let other = KeyPair::generate(KeySize::Rsa2048).unwrap();
+    let signed = b"header.payload";
+    let rng = aws_lc_rs::rand::SystemRandom::new();
+    let mut sig = vec![0u8; kp.public_modulus_len()];
+    kp.sign(&RSA_PKCS1_SHA256, &rng, signed, &mut sig).unwrap();
+    assert_eq!(verify_rs256(&public(&kp), signed, &sig), Ok(()));
+    assert_eq!(
+        verify_rs256(&public(&kp), b"header.changed", &sig),
+        Err(Refusal::BadSignature)
+    );
+    assert_eq!(
+        verify_rs256(&public(&other), signed, &sig),
+        Err(Refusal::BadSignature)
+    );
+}

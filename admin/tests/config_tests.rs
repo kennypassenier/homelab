@@ -58,3 +58,23 @@ fn arch_config_a_secret_comes_from_the_environment_and_an_unset_one_is_an_error(
     assert!(expand("${MISSING}", &env).unwrap_err().contains("MISSING"));
     assert!(expand("${OPEN", &env).is_err());
 }
+
+/// The config CT 120 runs with reads, validates, and keeps both locks on.
+#[test]
+fn arch_exposure_the_stacks_config_keeps_the_locks_on() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../stacks/admin/rootfs/etc/homelab-admin/config.toml"
+    );
+    let text = std::fs::read_to_string(path).unwrap();
+    assert!(
+        !text.contains("dev_without_locks"),
+        "the stack's config may not name the switch at all"
+    );
+    let c = from_table(table(
+        &text.replace("${HOMELAB_ADMIN_HOST_TOKEN}", "0123456789abcdef0123"),
+    ))
+    .unwrap();
+    assert!(!c.dev_without_locks);
+    assert_eq!(c.access_team_domain, "mendax1.cloudflareaccess.com");
+}

@@ -13,6 +13,7 @@ use chassis::{App, AppSpec};
 use tokio::sync::RwLock;
 
 use homelab_admin::core::config;
+use homelab_admin::shell::guard::Guard;
 use homelab_admin::shell::host_link::{self, HostTarget, LinkConfig, Snapshot};
 use homelab_admin::shell::routes;
 
@@ -28,7 +29,9 @@ The dashboard's own settings are the [admin] table of the config file:
   [admin]
   host = \"10.10.10.250:8443\"                     # homelab-host
   host_token = \"${HOMELAB_ADMIN_HOST_TOKEN}\"    # from the environment
-  poll_s = 10  sse_buffer = 256  backoff_min_s = 1  backoff_max_s = 60";
+  poll_s = 10  sse_buffer = 256  backoff_min_s = 1  backoff_max_s = 60
+  access_team_domain = \"<team>.cloudflareaccess.com\"  access_aud = \"<64 hex>\"
+  access_leeway_s = 60  access_certs_refresh_s = 3600";
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
@@ -76,6 +79,25 @@ async fn main() -> std::process::ExitCode {
     app.nav_entry("Fleet", "/app/");
     app.dashboard_routes(live.router("/events"));
     app.dashboard_routes(routes::router(shared.clone()));
+
+    if let Some(c) = &config {
+        // arch-exposure: the two locks, before every route but /healthz.
+        if c.dev_without_locks {
+            tracing::warn!("dev_without_locks is set: no Access token or home address is checked");
+        } else {
+            let guard = Guard::new(c, shared.clone());
+            let g = guard.clone();
+            app.request_guard(move |r| {
+                let g = g.clone();
+                async move { g.access(&r).await }
+            });
+            let g = guard.clone();
+            app.request_guard(move |r| {
+                let g = g.clone();
+                async move { g.home(&r).await }
+            });
+        }
+    }
 
     if let Some(c) = config {
         // Started only on the serving path: --check never opens the line.

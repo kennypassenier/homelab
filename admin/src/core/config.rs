@@ -52,6 +52,11 @@ pub struct AdminConfig {
     /// unknown key id also fetches at once, at most once a minute.
     #[serde(default = "d_certs_refresh")]
     pub access_certs_refresh_s: u64,
+    /// For a developer's machine only: run without the two locks (no
+    /// Cloudflare in front of a loopback address). Logged as a warning at
+    /// every start; stacks/admin's config never sets it, and a test says so.
+    #[serde(default)]
+    pub dev_without_locks: bool,
 }
 
 fn d_poll() -> u64 {

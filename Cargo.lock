@@ -188,6 +188,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce2b2dcc879c3bae0d371e77c99f2238400ef24ec001394befa67b6e543add9e"
 dependencies = [
  "aws-lc-sys",
+ "untrusted 0.7.1",
  "zeroize",
 ]
 
@@ -456,8 +457,8 @@ dependencies = [
 
 [[package]]
 name = "chassis"
-version = "2.3.0"
-source = "git+https://github.com/kennypassenier/chassis-rs?tag=v2.3.0#ba7223ac5aeb3e2c5a91533f5990b485010040c2"
+version = "2.4.0"
+source = "git+https://github.com/kennypassenier/chassis-rs?tag=v2.4.0#1206d771beb47c69b7d0ee99082f56740902322c"
 dependencies = [
  "axum",
  "axum-extra",
@@ -1221,12 +1222,14 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 name = "homelab-admin"
 version = "3.61.4"
 dependencies = [
+ "aws-lc-rs",
  "axum",
  "base64 0.22.1",
  "chassis",
  "futures-util",
  "homelab-client",
  "homelab-proto",
+ "reqwest",
  "rustls",
  "serde",
  "serde_json",
@@ -2684,7 +2687,7 @@ dependencies = [
  "cfg-if",
  "getrandom 0.2.17",
  "libc",
- "untrusted",
+ "untrusted 0.9.0",
  "windows-sys 0.52.0",
 ]
 
@@ -2772,7 +2775,7 @@ dependencies = [
  "aws-lc-rs",
  "ring",
  "rustls-pki-types",
- "untrusted",
+ "untrusted 0.9.0",
 ]
 
 [[package]]
@@ -3739,6 +3742,12 @@ name = "unsafe-libyaml"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
+
+[[package]]
+name = "untrusted"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
 name = "untrusted"

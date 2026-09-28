@@ -197,3 +197,18 @@ pub fn from_home(client: Option<&str>, home: Option<&str>) -> Result<(), Refusal
         })
     }
 }
+
+/// The RS256 signature of `signed` under `key` (PKCS#1 v1.5, SHA-256,
+/// 2048-8192 bit keys). Pure: aws-lc-rs computes, nothing is fetched.
+pub fn verify_rs256(key: &RsaKey, signed: &[u8], signature: &[u8]) -> Result<(), Refusal> {
+    aws_lc_rs::signature::RsaPublicKeyComponents {
+        n: &key.n,
+        e: &key.e,
+    }
+    .verify(
+        &aws_lc_rs::signature::RSA_PKCS1_2048_8192_SHA256,
+        signed,
+        signature,
+    )
+    .map_err(|_| Refusal::BadSignature)
+}

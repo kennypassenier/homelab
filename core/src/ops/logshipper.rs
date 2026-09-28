@@ -362,12 +362,17 @@ pub fn single_file_mode_script() -> String {
 ///
 /// Idempotent by design: it is run by every deploy, and a deploy that
 /// reinstalled a package every time would be a deploy nobody dares repeat.
+///
+/// fix-152 (2026-09-28): the package lists are refreshed before the first
+/// install. CT 118's lists dated from the template build and apt asked for a
+/// libssh2 that deb.debian.org no longer had (404); Alloy was never installed.
 pub fn install_script() -> String {
     format!(
         "set -e; \
          if command -v alloy >/dev/null 2>&1; then echo already-installed; exit 0; fi; \
          export DEBIAN_FRONTEND=noninteractive; \
          mkdir -p /etc/apt/keyrings; \
+         apt-get update -qq; \
          apt-get install -y -qq gpg curl >/dev/null; \
          curl -fsSL {key} | gpg --dearmor -o /etc/apt/keyrings/grafana.gpg; \
          echo '{list}' > /etc/apt/sources.list.d/grafana.list; \

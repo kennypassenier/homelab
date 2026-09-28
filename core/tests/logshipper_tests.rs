@@ -101,6 +101,24 @@ fn installing_is_idempotent_and_says_so_without_doing_anything() {
     );
 }
 
+/// fix-152 (2026-09-28 06:09, the first deploy of inbox on CT 118): the script
+/// installed `gpg curl` BEFORE its first `apt-get update`, against package
+/// lists from the template build (2025-10-01), so apt asked deb.debian.org
+/// for a libssh2 version that had moved on and got 404. Alloy was not
+/// installed and the deploy said so in one warning line; the container
+/// shipped no logs. The lists are refreshed before the first install.
+#[test]
+fn fix_152_the_package_lists_are_refreshed_before_the_first_install() {
+    let s = install_script();
+    let first_install = s.find("apt-get install").expect("an install");
+    let first_update = s.find("apt-get update").expect("an update");
+    assert!(
+        first_update < first_install,
+        "apt-get update must run before the first apt-get install: {}",
+        s
+    );
+}
+
 /// The apt route is the point: it is what keeps the shipper patched, which is
 /// the whole reason for leaving promtail behind.
 #[test]

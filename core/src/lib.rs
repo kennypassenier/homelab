@@ -13,6 +13,7 @@ pub mod doctor;
 pub mod error;
 pub mod executor;
 pub mod firewall;
+pub mod history;
 pub mod hostunits;
 pub mod incidents;
 pub mod manifest;

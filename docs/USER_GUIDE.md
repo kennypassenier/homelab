@@ -546,6 +546,21 @@ lines in memory (host.toml, default 2000); `CurrentOp` (scope read) answers
 what holds the operation lock and those lines, for a client that connects in
 the middle of an operation. Tests: `host/src/main.rs` (`feat_platform_3_*`).
 
+#### arch-history · What the host did
+
+**Status:** Built (homelab-admin `host` milestone, 2026-09-28).
+
+The host appends one line to `/var/lib/homelab/history.jsonl` (0600) for
+every operation, asked for over the line or started by the nightly round:
+its label, what its steps were about, the request, the outcome and every
+step with its start and end time. Each nightly backup phase gets a line of
+its own. `history_days` (default 90) and `history_max_mib` (default 16) in
+host.toml bound the file; past the size the oldest entries go. A line torn by
+a power cut is skipped on read. `History { since, limit }` (scope read)
+answers the entries as JSON. The dashboard's duration trends, nightly
+timeline and activity timeline read it. Tests: `core/tests/history_tests.rs`,
+`host/src/main.rs` (`arch_history_*`).
+
 #### A5 · Secrets vault on the host
 
 **Status:** Built.

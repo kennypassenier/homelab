@@ -342,6 +342,18 @@ pub enum Command {
     /// feat-platform-3: what is running now and the newest lines, for a
     /// client that (re)connects mid-operation. Answered as `CurrentOpView`.
     CurrentOp,
+    /// arch-history: what the host did since `since` (unix seconds), newest
+    /// `limit` entries. Answered as JSON `{ "entries": [...] }`, each a
+    /// `homelab_core::history::HistoryEntry`.
+    History {
+        since: u64,
+        #[serde(default = "history_limit_default")]
+        limit: usize,
+    },
+}
+
+fn history_limit_default() -> usize {
+    2000
 }
 
 /// feat-platform-3: a step starting or ending, as structured data.
@@ -402,7 +414,8 @@ impl Command {
             | Today { .. }
             | ListManualChecks { .. }
             | SessionOptions { .. }
-            | CurrentOp => Scope::Read,
+            | CurrentOp
+            | History { .. } => Scope::Read,
             DeployStack(_)
             | StageNativeBinary { .. }
             | BackupStack(_)
@@ -483,6 +496,7 @@ impl Command {
             AnswerManualCheck { .. } => "answer_manual_check",
             SessionOptions { .. } => "session_options",
             CurrentOp => "current_op",
+            History { .. } => "history",
         }
     }
 

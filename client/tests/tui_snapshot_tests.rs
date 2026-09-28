@@ -937,6 +937,11 @@ fn the_runbook_warns_that_a_restore_revives_retired_almanac_profiles() {
 /// wrong; leaving the question unanswered is.
 const CLI_ONLY: &[(&str, &str)] = &[
     (
+        "History",
+        "arch-history (homelab-admin): the dashboard's charts and timeline read it; \
+         the TUI shows the live stream instead",
+    ),
+    (
         "SessionOptions",
         "arch-host-link (homelab-admin): how a session asks for its reads beside \
          the queue; only the admin dashboard sends it, the TUI matches replies by order",

@@ -254,6 +254,10 @@ struct FileConfig {
     /// feat-platform-3: how many of the newest operation lines the host
     /// keeps in memory for a client that connects mid-operation. Default 2000.
     recent_lines: Option<usize>,
+    /// arch-history: days of history.jsonl kept (default 90) and its size
+    /// ceiling in MiB (default 16); past the ceiling the oldest half goes.
+    history_days: Option<u64>,
+    history_max_mib: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -353,6 +357,9 @@ struct Config {
     status_interval_s: u64,
     /// feat-platform-3: how many of the newest lines `CurrentOp` returns.
     recent_lines: usize,
+    /// arch-history: how long and how large history.jsonl may grow.
+    history_max_age_s: u64,
+    history_max_bytes: usize,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
     /// host.toml as it was read; a settings save writes this back with only
@@ -578,6 +585,8 @@ fn load_config_from(path: String) -> Config {
             .unwrap_or(homelab_core::ops::secondcopy::DEFAULT_DATA_READ_INTERVAL_S),
         status_interval_s: file.status_interval_s.unwrap_or(60),
         recent_lines: file.recent_lines.unwrap_or(2000),
+        history_max_age_s: file.history_days.unwrap_or(90) * 86_400,
+        history_max_bytes: file.history_max_mib.unwrap_or(16) * 1024 * 1024,
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -1684,6 +1693,8 @@ port = 5003
             req: Some(7),
             recent: recent.clone(),
             recent_cap: 2,
+            timings: std::sync::Mutex::new(Vec::new()),
+            subject: std::sync::Mutex::new(None),
         };
         sink.emit(PipelineEvent::StepStarted {
             op: "deploy".into(),
@@ -1798,6 +1809,79 @@ port = 5003
         .await;
         let v: serde_json::Value = serde_json::from_str(&r.message).unwrap();
         assert!(v["checks"].is_array() && v["now"].is_u64(), "{}", r.message);
+    }
+
+    /// arch-history: the sink times each step and remembers the subject.
+    #[test]
+    fn arch_history_the_sink_times_steps_and_names_the_subject() {
+        use homelab_core::sink::PipelineEvent;
+        let (tx, _rx) = broadcast::channel(16);
+        let sink = BroadcastSink {
+            log_tx: tx,
+            req: None,
+            recent: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            recent_cap: 10,
+            timings: std::sync::Mutex::new(Vec::new()),
+            subject: std::sync::Mutex::new(None),
+        };
+        sink.emit(PipelineEvent::StepStarted {
+            op: "deploy media".into(),
+            step: "pull".into(),
+        });
+        sink.emit(PipelineEvent::StepFinished {
+            op: "deploy media".into(),
+            step: "pull".into(),
+            changed: true,
+        });
+        sink.emit(PipelineEvent::StepStarted {
+            op: "deploy media".into(),
+            step: "up".into(),
+        });
+        let t = sink.timings.lock().unwrap().clone();
+        assert_eq!(t.len(), 2);
+        assert!(t[0].end >= t[0].start && t[0].end > 0 && t[0].changed);
+        assert_eq!(t[1].end, 0, "a step still running has no end");
+        assert_eq!(
+            sink.subject.lock().unwrap().as_deref(),
+            Some("deploy media")
+        );
+    }
+
+    /// arch-history: History answers what history.jsonl holds since a moment.
+    #[tokio::test]
+    async fn arch_history_the_history_command_reads_since_a_moment() {
+        let dir = std::env::temp_dir().join(format!("homelab-hist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = test_state(config_from_text(&format!(
+            "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+            dir.display()
+        )));
+        for (start, name) in [(100u64, "old"), (200, "backup")] {
+            record_history(
+                &state,
+                &homelab_core::history::HistoryEntry::Phase {
+                    start,
+                    end: start + 5,
+                    name: name.into(),
+                    count: 3,
+                },
+            );
+        }
+        let r = handle_rpc(
+            &state,
+            RpcRequest {
+                id: 1,
+                command: Rpc::History {
+                    since: 150,
+                    limit: 10,
+                },
+            },
+        )
+        .await;
+        let v: serde_json::Value = serde_json::from_str(&r.message).unwrap();
+        assert_eq!(v["entries"].as_array().unwrap().len(), 1, "{}", r.message);
+        assert_eq!(v["entries"][0]["name"], "backup");
     }
 
     // ── arch-tokens and arch-host-link (homelab-admin, 2026-09-28) ──────
@@ -3179,10 +3263,38 @@ struct BroadcastSink {
     /// feat-platform-3: the newest lines, for `CurrentOp`.
     recent: Arc<std::sync::Mutex<std::collections::VecDeque<ServerMsg>>>,
     recent_cap: usize,
+    /// arch-history: this operation's steps with their times, and what its
+    /// first step said it was about.
+    timings: std::sync::Mutex<Vec<homelab_core::history::StepTiming>>,
+    subject: std::sync::Mutex<Option<String>>,
 }
 
 impl Sink for BroadcastSink {
     fn emit(&self, event: PipelineEvent) {
+        match &event {
+            PipelineEvent::StepStarted { op, step } => {
+                if let Ok(mut subject) = self.subject.lock() {
+                    subject.get_or_insert_with(|| op.clone());
+                }
+                if let Ok(mut t) = self.timings.lock() {
+                    t.push(homelab_core::history::StepTiming {
+                        step: step.clone(),
+                        start: unix_now(),
+                        end: 0,
+                        changed: false,
+                    });
+                }
+            }
+            PipelineEvent::StepFinished { step, changed, .. } => {
+                if let Ok(mut t) = self.timings.lock() {
+                    if let Some(open) = t.iter_mut().rev().find(|x| x.end == 0 && &x.step == step) {
+                        open.end = unix_now();
+                        open.changed = *changed;
+                    }
+                }
+            }
+            _ => {}
+        }
         let msg = match event {
             PipelineEvent::Line { level, source, msg } => {
                 // fix-122: at the line's own level, so `grep WARN` on the
@@ -4390,6 +4502,16 @@ async fn run_backup_batch(
             limit
         )
     );
+    let end = unix_now();
+    record_history(
+        state,
+        &homelab_core::history::HistoryEntry::Phase {
+            start: end.saturating_sub(phase_started.elapsed().as_secs()),
+            end,
+            name: "backup".into(),
+            count: stacks_in_phase,
+        },
+    );
     results.into_iter().collect()
 }
 
@@ -4403,6 +4525,35 @@ struct BackupJob {
 enum BackupWhat {
     Compose(Box<homelab_proto::StackManifest>),
     Native(Vec<homelab_core::native::NativeServiceManifest>),
+}
+
+/// arch-history: append one entry to `<state_dir>/history.jsonl` (0600, one
+/// write per line), and prune the file when it has grown past its size.
+/// Best effort: history must never fail the operation it describes.
+fn record_history(state: &AppState, entry: &homelab_core::history::HistoryEntry) {
+    let path = format!("{}/history.jsonl", state.config.state_dir);
+    if let Err(e) = append_audit(&path, &entry.to_line()) {
+        tracing::warn!("history.jsonl :: {}", e);
+        return;
+    }
+    let big = std::fs::metadata(&path)
+        .map(|m| m.len() as usize > state.config.history_max_bytes)
+        .unwrap_or(false);
+    if big {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Some(kept) = homelab_core::history::prune(
+                &text,
+                unix_now(),
+                state.config.history_max_age_s,
+                state.config.history_max_bytes / 2,
+            ) {
+                let tmp = format!("{}.tmp", path);
+                if std::fs::write(&tmp, kept).is_ok() {
+                    let _ = std::fs::rename(&tmp, &path);
+                }
+            }
+        }
+    }
 }
 
 /// feat-platform-2: one app's (running, restarts) from a reading. No
@@ -5758,6 +5909,8 @@ where
         req: (req_id != 0).then_some(req_id),
         recent: state.recent.clone(),
         recent_cap: state.config.recent_lines,
+        timings: std::sync::Mutex::new(Vec::new()),
+        subject: std::sync::Mutex::new(None),
     };
     let sink = homelab_core::incidents::RecordingSink::new(&broadcast);
     let journal = FileJournal {
@@ -5790,6 +5943,25 @@ where
         asker: &asker,
     };
     let report = op(&ctx).await;
+    // arch-history: one line for this operation, whatever its outcome.
+    record_history(
+        state,
+        &homelab_core::history::HistoryEntry::Op {
+            start: now,
+            end: unix_now(),
+            label: label.to_string(),
+            subject: broadcast.subject.lock().ok().and_then(|s| s.clone()),
+            req: (req_id != 0).then_some(req_id),
+            ok: report.ok,
+            deferred: report.deferred.clone(),
+            error: report.error.as_ref().map(|e| e.what.clone()),
+            steps: broadcast
+                .timings
+                .lock()
+                .map(|t| t.clone())
+                .unwrap_or_default(),
+        },
+    );
     notify(state, exec, label, &report).await; // F3, best-effort
     if report.ok {
         spawn_mirror_push(state); // D5, best-effort + detached
@@ -6030,6 +6202,19 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
     match req.command {
         // Answered by the session loop itself; reaching here means a caller
         // bypassed it (a test harness), which changes nothing.
+        // arch-history: what the host did since a moment.
+        Rpc::History { since, limit } => {
+            let text = std::fs::read_to_string(format!("{}/history.jsonl", state.config.state_dir))
+                .unwrap_or_default();
+            let entries =
+                homelab_core::history::select(homelab_core::history::parse(&text), since, limit);
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::json!({ "entries": entries }).to_string(),
+                deferred: None,
+            }
+        }
         // feat-platform-3: what runs now, and the newest lines.
         Rpc::CurrentOp => {
             let holder = state.busy.lock().ok().and_then(|b| b.clone());

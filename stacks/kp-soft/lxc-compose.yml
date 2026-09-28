@@ -52,7 +52,7 @@ resources:
   storage: local-lvm
 
 lxc:
-  template: clone:998
+  template: clone:996
   unprivileged: true
   features: nesting=1,keyctl=1
   protection: true
@@ -199,7 +199,7 @@ firewall:
       dport: "5000:5003"
     - dir: out
       action: ACCEPT
-      dest: 10.10.10.4
+      dest: 10.10.10.13
       proto: tcp
       dport: 3100
       note: Loki push (Alloy), added 2026-09-25

@@ -47,7 +47,7 @@ lxc:
   # 997 is the privileged golden template. This container is privileged today
   # and stays so: PUID 1000 inside must remain host uid 1000, which is what
   # owns the media tree.
-  template: clone:997
+  template: clone:995
   unprivileged: false
   features: nesting=1,keyctl=1
   protection: true
@@ -131,7 +131,7 @@ firewall:
     - comment: "the neighbours it uses"
       dir: out
       action: ACCEPT
-      dest: 10.10.10.4
+      dest: 10.10.10.13
       proto: tcp
       dport: "3100"
       note: Loki push (Alloy)

@@ -37,7 +37,7 @@ resources:
   disk_gb: 16
   storage: local-lvm
 lxc:
-  template: clone:998
+  template: clone:996
   unprivileged: true
   features: nesting=1,keyctl=1
   protection: true
@@ -118,7 +118,7 @@ firewall:
     - comment: "the neighbours it uses"
       dir: out
       action: ACCEPT
-      dest: 10.10.10.4
+      dest: 10.10.10.13
       proto: tcp
       dport: "3100"
       note: Loki push (Alloy)
@@ -165,10 +165,22 @@ firewall:
     - comment: "who may reach the container"
       dir: in
       action: ACCEPT
+      source: 10.10.10.0/24
+      proto: tcp
+      dport: "3100"
+      note: Loki push from every container's Alloy (the loki-push front; push only, fix-93)
+    - dir: in
+      action: ACCEPT
       source: 10.10.10.4
       proto: tcp
-      dport: "9090,9093"
-      note: Traefik routes prom and alerts, Grafana's datasource
+      dport: "3000,9090,9093"
+      note: Traefik routes grafana, prom and alerts
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.15
+      proto: tcp
+      dport: "3000"
+      note: Homepage's Grafana widget
     - dir: in
       action: ACCEPT
       source: 10.10.10.250
@@ -184,11 +196,11 @@ firewall:
       action: ACCEPT
       source: 10.10.10.7
       proto: tcp
-      dport: "9090,9093"
-      note: Uptime Kuma HTTP monitors
+      dport: "3000,3100,9090,9093"
+      note: Uptime Kuma HTTP monitors (grafana and loki since fix-90)
     - dir: in
       action: ACCEPT
       source: 10.10.10.10
       proto: tcp
-      dport: "22,9090,9093"
+      dport: "22,3000,9090,9093"
       note: Kenny's desktop (ssh and the web ports the homepage tiles link to)

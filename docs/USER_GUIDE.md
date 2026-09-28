@@ -724,7 +724,7 @@ unattended-upgrades baked in; a stack whose `lxc.template` is
 (`core/src/ops/deploy.rs:493-532`). The clone inherits the template's
 privilege level, so a mismatch is refused:
 `pct clone cannot change this, it always inherits the template`
-(`core/src/ops/deploy.rs:512-520`). New stacks get `clone:998` from the
+(`core/src/ops/deploy.rs:512-520`). New stacks get `clone:996` from the
 scaffold (`client/src/scaffold.rs:71`).
 
 ```text
@@ -820,7 +820,7 @@ resources:
   disk_gb: 4
   storage: local-lvm
 lxc:
-  template: "clone:998"
+  template: "clone:996"
   unprivileged: true
   features: "nesting=1,keyctl=1"
 boot:
@@ -1905,7 +1905,7 @@ preset or 8, swap by the formula (`client/src/main.rs:598-623`). It prints
 `✓ scaffolded <dir> — <n> file(s)`, the file list, and
 `next: read the compose files, then` followed by the plan command
 (`client/src/main.rs:629-644`). The stack file gets the address
-`10.10.10.<vmid - 100>`, `template: "clone:998"`, `protection: true`,
+`10.10.10.<vmid - 100>`, `template: "clone:996"`, `protection: true`,
 `order: 99`, and one storage entry per `/appdata` bind in the copied compose
 files (`client/src/scaffold.rs:368-369,57-86,470-500`). Run it from the
 repository root. The name `notes` and vmid 150 are examples.

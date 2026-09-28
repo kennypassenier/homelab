@@ -54,7 +54,7 @@ resources:
 
 lxc:
   # 997 is the privileged golden template; 998 is the unprivileged one.
-  template: clone:997
+  template: clone:995
   unprivileged: false
   features: nesting=1,keyctl=1
   protection: true
@@ -115,7 +115,7 @@ firewall:
     - comment: "the neighbours it uses"
       dir: out
       action: ACCEPT
-      dest: 10.10.10.4
+      dest: 10.10.10.13
       proto: tcp
       dport: "3100"
       note: Loki push (Alloy)

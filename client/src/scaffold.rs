@@ -68,7 +68,7 @@ impl Default for StackDefaults {
             // default nobody uses is a default nobody checks, and a stack
             // scaffolded from it would start two generations behind on the
             // guards, the log caps and unattended-upgrades that B8 bakes in.
-            template: "clone:998".into(),
+            template: "clone:996".into(),
             storage: "local-lvm".into(),
             features: "nesting=1,keyctl=1".into(),
             unprivileged: true,

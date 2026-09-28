@@ -43,7 +43,7 @@ resources:
   storage: local-lvm
 
 lxc:
-  template: clone:998
+  template: clone:996
   unprivileged: true
   features: nesting=1,keyctl=1
   protection: true
@@ -92,7 +92,7 @@ firewall:
     - comment: "the neighbours it uses"
       dir: out
       action: ACCEPT
-      dest: 10.10.10.4
+      dest: 10.10.10.13
       proto: tcp
       dport: "3100"
       note: Loki push (Alloy)
@@ -116,10 +116,10 @@ firewall:
       note: Paperless widget
     - dir: out
       action: ACCEPT
-      dest: 10.10.10.4
+      dest: 10.10.10.13
       proto: tcp
       dport: "3000"
-      note: Grafana widget
+      note: Grafana widget (Grafana on the metrics stack since fix-90)
     - dir: out
       action: ACCEPT
       dest: 10.10.5.250

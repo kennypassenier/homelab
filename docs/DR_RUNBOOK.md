@@ -325,7 +325,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### almanac (vmid 112)
 
-- Container: hostname `112-app-almanac`, ip `10.10.10.12/24` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 50.
+- Container: hostname `112-app-almanac`, ip `10.10.10.12/24` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 50.
 - Runs no docker: native systemd services only.
 - Unit `almanac`:
   - program `/opt/almanac/bin/almanac`, from the GitHub release `kennypassenier/almanac` (asset `almanac`); update policy self.
@@ -337,7 +337,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### downloader (vmid 105)
 
-- Container: hostname `105-app-downloader`, ip `10.10.10.5/24` on `vmbr0` VLAN 10, 2 core(s), 2048 MiB RAM, 0 MiB swap, 10 GiB disk on `local-lvm`, privileged, template `clone:997`, boot order 90.
+- Container: hostname `105-app-downloader`, ip `10.10.10.5/24` on `vmbr0` VLAN 10, 2 core(s), 2048 MiB RAM, 0 MiB swap, 10 GiB disk on `local-lvm`, privileged, template `clone:995`, boot order 90.
 - Apps (docker compose, started in this order): qbittorrent. Files in the container under `/opt/downloader/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/downloader`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
@@ -347,7 +347,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### gateway (vmid 104)
 
-- Container: hostname `104-app-gateway`, ip `10.10.10.4/24` on `vmbr0` VLAN 10, 4 core(s), 5120 MiB RAM, 0 MiB swap, 30 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 5.
+- Container: hostname `104-app-gateway`, ip `10.10.10.4/24` on `vmbr0` VLAN 10, 4 core(s), 5120 MiB RAM, 0 MiB swap, 30 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 5.
 - Apps (docker compose, started in this order): traefik, cloudflared, crowdsec, goaccess. Files in the container under `/opt/gateway/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/gateway`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
@@ -359,7 +359,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### home (vmid 115)
 
-- Container: hostname `115-app-home`, ip `10.10.10.15/24` on `vmbr0` VLAN 10, 2 core(s), 1024 MiB RAM, 0 MiB swap, 8 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 80.
+- Container: hostname `115-app-home`, ip `10.10.10.15/24` on `vmbr0` VLAN 10, 2 core(s), 1024 MiB RAM, 0 MiB swap, 8 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 80.
 - Apps (docker compose, started in this order): homepage. Files in the container under `/opt/home/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/home`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
@@ -379,7 +379,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### kp-soft (vmid 116)
 
-- Container: hostname `116-app-kp-soft`, ip `10.10.10.16/24` on `vmbr0` VLAN 10, 2 core(s), 2048 MiB RAM, 0 MiB swap, 16 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 75.
+- Container: hostname `116-app-kp-soft`, ip `10.10.10.16/24` on `vmbr0` VLAN 10, 2 core(s), 2048 MiB RAM, 0 MiB swap, 16 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 75.
 - Apps (docker compose, started in this order): kp-soft, jobtracker. Files in the container under `/opt/kp-soft/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/kp-soft`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
@@ -388,7 +388,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### kyu (vmid 109)
 
-- Container: hostname `109-app-kyu`, ip `10.10.10.9/24` on `vmbr0` VLAN 10, 1 core(s), 256 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 50.
+- Container: hostname `109-app-kyu`, ip `10.10.10.9/24` on `vmbr0` VLAN 10, 1 core(s), 256 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 50.
 - Runs no docker: native systemd services only.
 - Unit `http-switchboard`:
   - program `/opt/http-switchboard/bin/http-switchboard`, from the GitHub release `kennypassenier/http-switchboard` (asset `http-switchboard`); update policy manual.
@@ -412,7 +412,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### media (vmid 106)
 
-- Container: hostname `106-app-media`, ip `10.10.10.6/24` on `vmbr0` VLAN 10, 6 core(s), 8192 MiB RAM, 0 MiB swap, 80 GiB disk on `local-lvm`, privileged, template `clone:997`, boot order 95.
+- Container: hostname `106-app-media`, ip `10.10.10.6/24` on `vmbr0` VLAN 10, 6 core(s), 8192 MiB RAM, 0 MiB swap, 80 GiB disk on `local-lvm`, privileged, template `clone:995`, boot order 95.
 - Apps (docker compose, started in this order): jellyfin, sonarr, radarr, prowlarr, bazarr, seerr, flaresolverr, recyclarr. Files in the container under `/opt/media/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/media`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
@@ -428,7 +428,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### metrics (vmid 113)
 
-- Container: hostname `113-app-metrics`, ip `10.10.10.13/24` on `vmbr0` VLAN 10, 2 core(s), 2560 MiB RAM, 0 MiB swap, 16 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 60.
+- Container: hostname `113-app-metrics`, ip `10.10.10.13/24` on `vmbr0` VLAN 10, 2 core(s), 2560 MiB RAM, 0 MiB swap, 16 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 60.
 - Apps (docker compose, started in this order): prometheus, alertmanager, pve-exporter, loki, loki-push, grafana. Files in the container under `/opt/metrics/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/metrics`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
@@ -439,7 +439,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### paperwork (vmid 114)
 
-- Container: hostname `114-app-paperwork`, ip `10.10.10.14/24` on `vmbr0` VLAN 10, 4 core(s), 4096 MiB RAM, 0 MiB swap, 32 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 70.
+- Container: hostname `114-app-paperwork`, ip `10.10.10.14/24` on `vmbr0` VLAN 10, 4 core(s), 4096 MiB RAM, 0 MiB swap, 32 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 70.
 - Apps (docker compose, started in this order): actual, stirling, paperless-db, paperless. Files in the container under `/opt/paperwork/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/paperwork`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
@@ -450,7 +450,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### productivity (vmid 111)
 
-- Container: hostname `111-app-productivity`, ip `10.10.10.11/24` on `vmbr0` VLAN 10, 2 core(s), 2048 MiB RAM, 0 MiB swap, 8 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 70.
+- Container: hostname `111-app-productivity`, ip `10.10.10.11/24` on `vmbr0` VLAN 10, 2 core(s), 2048 MiB RAM, 0 MiB swap, 8 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 70.
 - Apps (docker compose, started in this order): supersync-db, supersync. Files in the container under `/opt/productivity/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/productivity`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
@@ -458,7 +458,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### registry (vmid 117)
 
-- Container: hostname `117-app-registry`, ip `10.10.10.17/24` on `vmbr0` VLAN 10, 2 core(s), 1024 MiB RAM, 0 MiB swap, 32 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 10.
+- Container: hostname `117-app-registry`, ip `10.10.10.17/24` on `vmbr0` VLAN 10, 2 core(s), 1024 MiB RAM, 0 MiB swap, 32 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 10.
 - Apps (docker compose, started in this order): registry. Files in the container under `/opt/registry/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/registry`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data: no backed-up paths, so nothing to restore.
@@ -466,7 +466,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### syncthing (vmid 108)
 
-- Container: hostname `108-app-syncthing`, ip `10.10.10.8/24` on `vmbr0` VLAN 10, 2 core(s), 1024 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 50.
+- Container: hostname `108-app-syncthing`, ip `10.10.10.8/24` on `vmbr0` VLAN 10, 2 core(s), 1024 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 50.
 - Apps (docker compose, started in this order): syncthing. Files in the container under `/opt/syncthing/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/syncthing`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
@@ -474,7 +474,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ### uptime (vmid 107)
 
-- Container: hostname `107-app-uptime`, ip `10.10.10.7/24` on `vmbr0` VLAN 10, 1 core(s), 1024 MiB RAM, 0 MiB swap, 8 GiB disk on `local-lvm`, unprivileged, template `clone:998`, boot order 20.
+- Container: hostname `107-app-uptime`, ip `10.10.10.7/24` on `vmbr0` VLAN 10, 1 core(s), 1024 MiB RAM, 0 MiB swap, 8 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 20.
 - Apps (docker compose, started in this order): uptime-kuma, kuma-seeder. Files in the container under `/opt/uptime/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/uptime`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
 - Data, one restic repository per owning app:
@@ -488,5 +488,5 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 3. Install `restic` and `rclone`, recreate the rclone remote `gdrive`, write `/var/lib/homelab/secrets/restic.pw` from the offline copy, and restore `host-meta-config` (Layer 3).
 4. Put back the `homelab-host` program and its unit file, start it, and check the certificate fingerprint against the pin (Layer 1).
 5. Restore the guests this suite never touches (vmid 100, 101, 102, 103) from Proxmox's own backups: `qmrestore` for a VM, `pct restore` for a container.
-6. Rebuild the templates the stacks clone: `clone:996` (unprivileged), `clone:997` (privileged), `clone:998` (unprivileged). `homelab template-build <vmid> <version>` builds an unprivileged one at that vmid, and `homelab template-build <vmid> <version> --privileged` a privileged one.
+6. Rebuild the templates the stacks clone: `clone:995` (privileged), `clone:996` (unprivileged). `homelab template-build <vmid> <version>` builds an unprivileged one at that vmid, and `homelab template-build <vmid> <version> --privileged` a privileged one.
 7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), uptime (107), syncthing (108), kyu (109), almanac (112), metrics (113), productivity (111), paperwork (114), kp-soft (116), home (115), downloader (105), media (106), inbox (118). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.

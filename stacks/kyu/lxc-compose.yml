@@ -68,7 +68,7 @@ resources:
 lxc:
   # 998 is the unprivileged golden template. It bakes docker in, which this
   # container does not need and will not be given — see native_only above.
-  template: clone:998
+  template: clone:996
   unprivileged: true
   # As it is today: nesting only, no keyctl. Not copied from the other
   # stacks, read from the container.
@@ -172,7 +172,7 @@ firewall:
     - comment: "the neighbours it uses"
       dir: out
       action: ACCEPT
-      dest: 10.10.10.4
+      dest: 10.10.10.13
       proto: tcp
       dport: "3100"
       note: Loki push (Alloy)

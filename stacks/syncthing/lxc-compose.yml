@@ -33,7 +33,7 @@ resources:
   storage: local-lvm
 
 lxc:
-  template: "clone:998"
+  template: clone:996
   unprivileged: true
   features: "nesting=1,keyctl=1"
 
@@ -106,7 +106,7 @@ firewall:
     - comment: "the neighbours it uses"
       dir: out
       action: ACCEPT
-      dest: 10.10.10.4
+      dest: 10.10.10.13
       proto: tcp
       dport: "3100"
       note: Loki push (Alloy)

@@ -53,10 +53,13 @@ fn ip_of(m: &StackManifest) -> Ipv4Addr {
 }
 
 /// CT 116's declaration renders to the file on pve (captured byte for byte on
-/// 2026-09-27) with exactly two differences: the provenance line on top, and
+/// 2026-09-27) with exactly three differences: the provenance line on top,
 /// the rule Kenny added that day letting Uptime Kuma's HTTP monitor in
 /// (form item kp-soft-kuma-firewall: "Kuma HTTP toelaten, firewall in de
-/// repo"). Its first deploy changes nothing else.
+/// repo"), and the Loki push going to the metrics stack (10.10.10.13) instead
+/// of the gateway, where Loki no longer runs since fix-90 (2026-09-28: without
+/// it CT 116's Alloy would push into a closed port). Its first deploy changes
+/// nothing else.
 /// covers: fix-89
 #[test]
 fn kp_soft_declares_its_live_firewall_plus_kennys_kuma_rule() {
@@ -64,6 +67,9 @@ fn kp_soft_declares_its_live_firewall_plus_kennys_kuma_rule() {
         std::fs::read_to_string(repo_root().join("captured/pve-host/firewall/116.fw")).unwrap();
     let icmp = "IN ACCEPT -source 10.10.10.7 -p icmp\n";
     assert!(live.contains(icmp));
+    let loki_old =
+        "OUT ACCEPT -dest 10.10.10.4 -p tcp -dport 3100 # Loki push (Alloy), added 2026-09-25\n";
+    assert!(live.contains(loki_old));
     let want = format!(
         "# Written by homelab from stacks/kp-soft/lxc-compose.yml (fix-88): edit that file, not this one\n{}",
         live.replace(
@@ -72,6 +78,10 @@ fn kp_soft_declares_its_live_firewall_plus_kennys_kuma_rule() {
                 "{}IN ACCEPT -source 10.10.10.7 -p tcp -dport 8080,8787 # Uptime Kuma HTTP monitors (Kenny, 2026-09-27)\n",
                 icmp
             )
+        )
+        .replace(
+            loki_old,
+            "OUT ACCEPT -dest 10.10.10.13 -p tcp -dport 3100 # Loki push (Alloy), added 2026-09-25\n"
         )
     );
     let all = stacks();
@@ -201,8 +211,10 @@ fn measured_flows() -> Vec<Flow> {
             "DNS at the router, tcp fallback",
         ));
         f.extend(tcp("10.10.10.10", s, &[22], "Kenny's desktop, ssh"));
-        if *s != "10.10.10.4" {
-            f.extend(tcp(s, "10.10.10.4", &[3100], "Loki push (Alloy)"));
+        // Loki moved to the metrics stack (fix-90/93, 2026-09-27): every
+        // Alloy pushes to the loki-push front on CT 113.
+        if *s != "10.10.10.13" {
+            f.extend(tcp(s, "10.10.10.13", &[3100], "Loki push (Alloy)"));
         }
         if *s != "10.10.10.7" {
             f.push(ping("10.10.10.7", s));
@@ -241,12 +253,8 @@ fn measured_flows() -> Vec<Flow> {
         &[8080],
         "Alertmanager webhook to kyu",
     ));
-    f.extend(tcp(
-        "10.10.10.250",
-        "10.10.10.4",
-        &[3100],
-        "homelab daemon's Loki queries",
-    ));
+    // The daemon's Loki queries run inside CT 113 since fix-93 (loki_vmid),
+    // so there is no flow from pve to port 3100 any more.
     f.extend(tcp(
         "10.10.10.250",
         "10.10.10.13",
@@ -291,7 +299,8 @@ fn measured_flows() -> Vec<Flow> {
     f.extend(tcp("10.10.10.4", "10.10.5.1", &[443], "route opn"));
     f.extend(tcp("10.10.10.4", "10.10.5.250", &[8006], "route prox"));
     // Uptime Kuma's HTTP monitors and its one notification.
-    f.extend(tcp("10.10.10.7", "10.10.10.4", &[3000, 3100], "monitor"));
+    f.extend(tcp("10.10.10.7", "10.10.10.13", &[3000, 3100], "monitor"));
+    f.extend(tcp("10.10.10.4", "10.10.10.13", &[3000], "route grafana"));
     f.extend(tcp("10.10.10.7", "10.10.10.5", &[8080], "monitor"));
     f.extend(tcp("10.10.10.7", "10.10.10.6", &MEDIA, "monitor"));
     f.extend(tcp("10.10.10.7", "10.10.10.8", &[8384], "monitor"));
@@ -321,7 +330,7 @@ fn measured_flows() -> Vec<Flow> {
     // The homepage's widgets.
     f.extend(tcp("10.10.10.15", "10.10.10.6", &MEDIA, "widget"));
     f.extend(tcp("10.10.10.15", "10.10.10.14", &[8000], "widget"));
-    f.extend(tcp("10.10.10.15", "10.10.10.4", &[3000], "widget"));
+    f.extend(tcp("10.10.10.15", "10.10.10.13", &[3000], "widget"));
     f.extend(tcp("10.10.10.15", "10.10.5.250", &[8006], "Proxmox widget"));
     // Between the services.
     f.extend(tcp(

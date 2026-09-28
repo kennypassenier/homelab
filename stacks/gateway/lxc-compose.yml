@@ -46,7 +46,7 @@ resources:
   storage: local-lvm
 
 lxc:
-  template: "clone:998"
+  template: clone:996
   unprivileged: true
   features: "nesting=1,keyctl=1"
   protection: false
@@ -237,7 +237,7 @@ firewall:
       action: ACCEPT
       dest: 10.10.10.13
       proto: tcp
-      dport: "9090,9093"
+      dport: "3000,3100,9090,9093"
       note: prom and alerts routes, Grafana's datasource
     - dir: out
       action: ACCEPT

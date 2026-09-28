@@ -1,0 +1,54 @@
+/* Layout only; colours and type come from kp-themes' tokens. */
+.shell {
+  max-width: 960px;
+  margin: 0 auto;
+  padding-inline: 16px;
+  padding-block: 16px 48px;
+}
+.bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.link[data-up="false"] {
+  color: var(--destructive);
+}
+.fleet {
+  width: 100%;
+  border-collapse: collapse;
+  margin-block: 12px;
+}
+.fleet th,
+.fleet td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+.state {
+  font-size: 0.85em;
+}
+.state span {
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.state.ok span {
+  background: var(--success);
+  color: var(--success-foreground);
+}
+.state.warn span {
+  background: var(--warning);
+  color: var(--warning-foreground);
+}
+.state.bad span {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+}
+.measured {
+  color: var(--muted-foreground);
+  font-size: 0.9em;
+}

@@ -53,13 +53,22 @@ cargo clippy --workspace --all-targets -- -D warnings
 # any test saw it (expert panel 2026-09-27, local-gate-skips-stack-tests).
 # The generated policy table in UPDATE_POLICY.md joined them on 2026-09-27
 # (fix-144, update-policy-doc-drift): a hand edit there is caught too.
+# Rule 7 as amended 2026-09-28: the commit runs the subset in
+# .githooks/test-subset.sh (every security suite included); `make gate` and
+# `make release` run the whole suite.
 gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
   'stacks/*' 'templates/*' 'presets/*' 'config/*' 'proto/*' 'core/assets/*' \
   'docs/DR_RUNBOOK.md' 'docs/deployment/TEST_PLAN.md' 'docs/deployment/UPDATE_POLICY.md' -- \
   env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
       -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
       -u HOMELAB_TOKEN -u HOMELAB_HOST -u HOMELAB_CONFIG -u HOMELAB_LISTEN \
-      cargo test --workspace
+      .githooks/test-subset.sh
+
+# tech-js-checks (homelab-admin, 2026-09-28): the dashboard's browser code
+# is plain ES modules; tsc checks its JSDoc types (checkJs, strict, no
+# emit), prettier its layout, node --test its pure view models.
+gate_glob admin-web 'admin/web/*' -- \
+  sh -c 'cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run --silent check'
 
 gate_cache_done
 

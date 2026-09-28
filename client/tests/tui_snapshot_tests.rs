@@ -1,3 +1,4 @@
+#![cfg(feature = "tui")]
 //! TUI snapshot tests (AR9/G1): render each screen from a fixed model against
 //! ratatui's TestBackend with effects off, and assert on stable structure.
 //! These run with no terminal and no network.

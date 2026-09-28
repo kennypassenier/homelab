@@ -45,8 +45,10 @@ jobs:
         # same commit that was green at 14:50 was red at 14:52. CI must test
         # the versions we actually ship, which is what Cargo.lock records.
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Tests
-        run: cargo test --workspace --locked
+      - name: Tests (commit subset)
+        # Rule 7 as amended 2026-09-28 (Kenny): the full suite runs locally
+        # before every release (`make release` runs `make gate`), not here.
+        run: .githooks/test-subset.sh --locked
 
   # Expert panel 2026-09-27, ci-hygiene-gaps: the three checks below ran
   # nowhere, or only locally. Each is its own job so a red one names itself.

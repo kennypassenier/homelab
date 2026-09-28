@@ -1,0 +1,15 @@
+{
+  "name": "homelab-admin-web",
+  "private": true,
+  "type": "module",
+  "description": "The admin dashboard's browser code: plain ES modules, no build step. These tools only check it (tech-js-checks).",
+  "scripts": {
+    "check": "tsc -p jsconfig.json && prettier --check . && node --test test/",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "prettier": "^3.4.2",
+    "typescript": "^7.0.2"
+  }
+}

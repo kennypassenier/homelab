@@ -1,3 +1,4 @@
+#![cfg(feature = "tui")]
 //! The TUI's real connection (`RemoteBackend`) against a fake host on a
 //! loopback port: real TLS, real WebSocket, a certificate made for the test.
 //!

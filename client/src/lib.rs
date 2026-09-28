@@ -15,6 +15,7 @@ pub mod scaffold;
 pub mod spec;
 pub mod testplan;
 pub mod tls;
+#[cfg(feature = "tui")]
 pub mod tui;
 pub mod updatepolicy;
 pub mod version;

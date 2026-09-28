@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "proto", "host", "client"]
+members = ["core", "proto", "host", "client", "admin"]
 # rust-code-hygiene (expert panel, 2026-09-27): the TUI mock-up has no tests
 # and its own dependency tree (rand, chrono); it stays in the repository,
 # outside the workspace, and builds on its own from its directory.
@@ -8,7 +8,7 @@ exclude = ["tui-preview"]
 
 [workspace.package]
 version = "3.61.4"
-rust-version = "1.88"
+rust-version = "1.97"
 license = "MIT OR Apache-2.0"
 edition = "2021"
 

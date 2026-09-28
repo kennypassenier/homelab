@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Homelab · Fleet</title>
+    <link rel="stylesheet" href="/static/kp/dist/kp-themes.css" />
+    <link rel="stylesheet" href="/app/css/app.css" />
+    <script type="module" src="/app/js/main.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="bar">
+        <h1>Fleet</h1>
+        <p id="link" class="link" aria-live="polite">connecting…</p>
+      </header>
+      <section id="host" class="host" aria-label="Host"></section>
+      <table class="fleet" aria-label="Stacks">
+        <thead>
+          <tr>
+            <th scope="col">vmid</th>
+            <th scope="col">Stack</th>
+            <th scope="col">State</th>
+            <th scope="col">Apps</th>
+          </tr>
+        </thead>
+        <tbody id="stacks"></tbody>
+      </table>
+      <p id="measured" class="measured"></p>
+    </main>
+  </body>
+</html>

@@ -1,3 +1,4 @@
+#![cfg(feature = "tui")]
 //! fix-69 · the drift badge may not run programs on the TUI's thread.
 //!
 //! These tests put a fake `gh` first on PATH that records every call, so

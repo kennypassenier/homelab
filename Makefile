@@ -9,7 +9,7 @@
 # TUI when the update badge appears.
 # ============================================================================
 
-.PHONY: help build test gate fmt clippy release host-binary hooks install diagrams
+.PHONY: help build test gate admin-full fmt clippy release host-binary hooks install diagrams
 
 help:
 	@echo "make build            debug build of the whole workspace"
@@ -46,7 +46,12 @@ clippy:
 diagrams:
 	scripts/check-diagrams.sh
 
-gate: fmt clippy test
+gate: fmt clippy test admin-full
+
+# The dashboard's browser checks (tsc, prettier, node tests); Playwright joins
+# with the `read` milestone.
+admin-full:
+	cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run --silent check
 
 # Cross-build the host binary against Debian 12 glibc, same as CI does.
 host-binary:

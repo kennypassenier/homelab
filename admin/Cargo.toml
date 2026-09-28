@@ -1,0 +1,32 @@
+[package]
+name = "homelab-admin"
+version.workspace = true
+rust-version.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Homelab admin dashboard: a browser front for the HOST daemon, on chassis-rs"
+
+[[bin]]
+name = "homelab-admin"
+path = "src/main.rs"
+
+[dependencies]
+homelab-proto = { path = "../proto" }
+# arch-crates: the client library (link, tls) without the terminal UI.
+homelab-client = { path = "../client", default-features = false }
+# tech-chassis-dep: a released chassis-rs only, never a rev or a path.
+chassis = { git = "https://github.com/kennypassenier/chassis-rs", tag = "v2.3.0", default-features = false, features = ["core", "webapp", "live"] }
+axum = "0.8"
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures-util.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+# chassis brings rustls with `ring`, the client with `aws-lc-rs`; with both
+# compiled in, rustls cannot pick one and panics on the first handshake.
+# main() installs the client's provider explicitly.
+rustls = "0.23"
+
+[lints]
+workspace = true

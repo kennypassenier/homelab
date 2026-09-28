@@ -248,6 +248,9 @@ struct FileConfig {
     /// fix-96: how often one repository's check also reads a slice of its
     /// data. Default 30 days (Kenny: monthly).
     integrity_data_read_interval_s: Option<u64>,
+    /// feat-platform-2 (homelab-admin, 2026-09-28): seconds between two
+    /// readings of every container's real status. Default 60; at least 10.
+    status_interval_s: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -343,6 +346,8 @@ struct Config {
     second_copy_dataset: Option<String>,
     /// fix-96: how often a repository's check reads data.
     integrity_data_read_interval_s: u64,
+    /// feat-platform-2: seconds between two status readings.
+    status_interval_s: u64,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
     /// host.toml as it was read; a settings save writes this back with only
@@ -461,6 +466,10 @@ fn load_config_from(path: String) -> Config {
         );
         std::process::exit(1);
     }
+    if file.status_interval_s.is_some_and(|s| s < 10) {
+        eprintln!("FATAL: {}: status_interval_s must be at least 10 (each reading runs one probe per container)", path);
+        std::process::exit(1);
+    }
     let tokens = file.tokens.clone().unwrap_or_default();
     if let Err(e) = validate_tokens(&tokens) {
         eprintln!("FATAL: {}: {}", path, e);
@@ -562,6 +571,7 @@ fn load_config_from(path: String) -> Config {
         integrity_data_read_interval_s: file
             .integrity_data_read_interval_s
             .unwrap_or(homelab_core::ops::secondcopy::DEFAULT_DATA_READ_INTERVAL_S),
+        status_interval_s: file.status_interval_s.unwrap_or(60),
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -1620,6 +1630,38 @@ port = 5003
         assert!(
             answered,
             "the request after a ping and a binary frame is answered"
+        );
+    }
+
+    /// feat-platform-2: an app's status from a reading, and what stands in
+    /// for it before the first reading.
+    #[test]
+    fn feat_platform_2_app_status_comes_from_the_reading() {
+        use homelab_core::ops::livestatus::{AppStatus, LiveStatus};
+        assert_eq!(
+            live_app(None, 106, "jellyfin"),
+            (true, 0),
+            "no reading: the old answer"
+        );
+        let mut r = LiveStatus::default();
+        r.apps.entry(106).or_default().insert(
+            "jellyfin".into(),
+            AppStatus {
+                running: false,
+                containers: 1,
+                restarts: 4,
+            },
+        );
+        assert_eq!(live_app(Some(&r), 106, "jellyfin"), (false, 4));
+        assert_eq!(
+            live_app(Some(&r), 106, "bazarr"),
+            (false, 0),
+            "probed and absent: not running"
+        );
+        assert_eq!(
+            live_app(Some(&r), 107, "kuma"),
+            (true, 0),
+            "guest not probed: unknown"
         );
     }
 
@@ -3105,6 +3147,8 @@ struct AppState {
     /// fix-120: connections refused for their token since this daemon
     /// started, for `homelab doctor`.
     auth_failures: Arc<AuthFailures>,
+    /// feat-platform-2: the newest reading of every container's real status.
+    live_status: Arc<std::sync::RwLock<Option<homelab_core::ops::livestatus::LiveStatus>>>,
     /// fix-121: when this daemon started. A self-update marker armed before
     /// this moment names this binary as the new one; one armed later was
     /// armed by this daemon for its successor.
@@ -3129,6 +3173,7 @@ impl AppState {
                 homelab_core::notify::NotifyDamper::new(20 * 3600),
             )),
             auth_failures: Arc::new(AuthFailures::default()),
+            live_status: Arc::new(std::sync::RwLock::new(None)),
         }
     }
 }
@@ -3565,6 +3610,13 @@ async fn main() {
             );
             notify_raw(&boot_state, &RealExecutor, payload).await;
         });
+    }
+
+    // feat-platform-2: read every container's real status on a timer, so
+    // GetState answers from the newest reading instead of fixed values.
+    {
+        let st = state.clone();
+        tokio::spawn(async move { status_loop(st).await });
     }
 
     // E4: nightly scheduler — backups for every managed stack + auto-policy
@@ -4177,6 +4229,50 @@ struct BackupJob {
 enum BackupWhat {
     Compose(Box<homelab_proto::StackManifest>),
     Native(Vec<homelab_core::native::NativeServiceManifest>),
+}
+
+/// feat-platform-2: one app's (running, restarts) from a reading. No
+/// reading yet, or its guest was not probed: the old answer (running, 0),
+/// said as such by `FleetState.status_measured_at` being None. Probed and
+/// absent: the app has no container at all, which is not running.
+fn live_app(
+    reading: Option<&homelab_core::ops::livestatus::LiveStatus>,
+    vmid: u16,
+    app: &str,
+) -> (bool, u32) {
+    let Some(apps) = reading.and_then(|r| r.apps.get(&vmid)) else {
+        return (true, 0);
+    };
+    match apps.get(app) {
+        Some(a) => (a.running, a.restarts),
+        None => (false, 0),
+    }
+}
+
+/// feat-platform-2: one reading every `status_interval_s`, the managed
+/// stacks taken from state.json each time so a new stack is read at once.
+async fn status_loop(state: AppState) {
+    let exec = RealExecutor;
+    loop {
+        let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+        let hs = store.load().await.unwrap_or_default();
+        let targets: Vec<homelab_core::ops::livestatus::Target> = hs
+            .stacks
+            .iter()
+            .map(|(name, s)| homelab_core::ops::livestatus::Target {
+                vmid: s.vmid,
+                stack: name.clone(),
+            })
+            .collect();
+        let reading = homelab_core::ops::livestatus::read(&exec, &targets, unix_now()).await;
+        for (vmid, why) in &reading.probe_errors {
+            tracing::debug!(vmid, "status reading :: {}", why);
+        }
+        if let Ok(mut slot) = state.live_status.write() {
+            *slot = Some(reading);
+        }
+        tokio::time::sleep(Duration::from_secs(state.config.status_interval_s)).await;
+    }
 }
 
 async fn scheduler_loop(state: AppState) {
@@ -6908,6 +7004,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     },
                     "unknown".into(),
                 ));
+            // feat-platform-2: the newest status reading, when there is one.
+            let reading = state.live_status.read().ok().and_then(|r| r.clone());
             let stacks = hs
                 .stacks
                 .values()
@@ -6923,24 +7021,47 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     apps: s
                         .apps
                         .iter()
-                        .map(|a| homelab_proto::AppView {
-                            name: a.clone(),
-                            running: true,
-                            restarts: 0,
+                        .map(|a| {
+                            let (running, restarts) = live_app(reading.as_ref(), s.vmid, a);
+                            homelab_proto::AppView {
+                                name: a.clone(),
+                                running,
+                                restarts,
+                            }
                         })
                         .collect(),
                     drift: false, // computed client-side from applied_hash
                     applied_hash: s.applied_hash.clone(),
                     env_sealed: true,
-                    online: true,
+                    online: reading
+                        .as_ref()
+                        .and_then(|r| r.guests.get(&s.vmid))
+                        .map(|g| g.running)
+                        .unwrap_or(true),
                     enabled: s.enabled,
+                    usage: reading
+                        .as_ref()
+                        .and_then(|r| r.guests.get(&s.vmid))
+                        .map(|g| homelab_proto::GuestUsage {
+                            cpu_permille: g.cpu_permille,
+                            ram_used_mb: g.mem_used_mb,
+                            ram_max_mb: g.mem_max_mb,
+                            uptime_s: g.uptime_s,
+                        }),
                 })
                 .collect();
             let fleet = homelab_proto::FleetState {
+                status_measured_at: reading.as_ref().map(|r| r.measured_at),
                 host: homelab_proto::HostView {
                     name: "pve-01".into(),
                     cpu_pct: 0,
-                    ram_pct: 0,
+                    // feat-platform-2: was a fixed 0; used over total, both
+                    // from `free -m` (C6).
+                    ram_pct: if cap.0 > 0 {
+                        u64::from(cap.1) * 100 / u64::from(cap.0)
+                    } else {
+                        0
+                    },
                     disk_pct: df,
                     tls_fingerprint: fingerprint,
                     ram_total_mb: cap.0,

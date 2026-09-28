@@ -3,7 +3,8 @@
 
 /**
  * @typedef {{name: string, vmid: number, online: boolean, enabled: boolean,
- *   apps_running: number, apps_total: number}} Stack
+ *   apps_running: number, apps_total: number, restarts?: number,
+ *   ram_used_mb?: number | null, ram_max_mb?: number | null}} Stack
  */
 
 /**
@@ -30,4 +31,15 @@ export function measuredAgo(measuredAt, now) {
   if (d < 60) return `measured ${d} s ago`;
   if (d < 3600) return `measured ${Math.floor(d / 60)} min ${d % 60} s ago`;
   return `measured ${Math.floor(d / 3600)} h ${Math.floor((d % 3600) / 60)} min ago`;
+}
+
+/**
+ * "1.9 / 5.0 GB", or an em dash before the host's first status reading.
+ * @param {Stack} s
+ * @returns {string}
+ */
+export function ramText(s) {
+  if (s.ram_used_mb == null || s.ram_max_mb == null) return "—";
+  const gb = (/** @type {number} */ mb) => (mb / 1024).toFixed(1);
+  return `${gb(s.ram_used_mb)} / ${gb(s.ram_max_mb)} GB`;
 }

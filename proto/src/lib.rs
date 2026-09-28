@@ -471,6 +471,20 @@ pub struct StackView {
     /// H8 (light): false = parked — nightly scheduler skips it, onboot off.
     #[serde(default = "enabled_default")]
     pub enabled: bool,
+    /// feat-platform-2: what Proxmox measured for this guest at the host's
+    /// last status reading. None before the first reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<GuestUsage>,
+}
+
+/// feat-platform-2: one guest's measured use.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct GuestUsage {
+    /// Share of one core ×1000.
+    pub cpu_permille: u32,
+    pub ram_used_mb: u32,
+    pub ram_max_mb: u32,
+    pub uptime_s: u64,
 }
 
 fn enabled_default() -> bool {
@@ -517,6 +531,11 @@ pub struct HostView {
 pub struct FleetState {
     pub host: HostView,
     pub stacks: Vec<StackView>,
+    /// feat-platform-2: unix seconds of the status reading `online`,
+    /// `running` and `restarts` come from. None = no reading yet, and those
+    /// fields are the old fixed values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_measured_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

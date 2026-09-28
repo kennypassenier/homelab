@@ -30,6 +30,7 @@ pub mod guards;
 pub mod hardware;
 pub mod homeaddress;
 pub mod homepage;
+pub mod livestatus;
 pub mod logshipper;
 pub mod manualchecks;
 pub mod mirror;

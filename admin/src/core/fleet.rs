@@ -10,7 +10,8 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FleetView {
-    /// Unix seconds at which the admin received this state from the host.
+    /// Unix seconds of the host's status reading when it has one
+    /// (feat-platform-2), otherwise when the admin received the state.
     pub measured_at: u64,
     pub host: HostSummary,
     pub stacks: Vec<StackSummary>,
@@ -34,6 +35,10 @@ pub struct StackSummary {
     pub enabled: bool,
     pub apps_running: usize,
     pub apps_total: usize,
+    /// Sum of the apps' container restarts (feat-platform-2).
+    pub restarts: u32,
+    pub ram_used_mb: Option<u32>,
+    pub ram_max_mb: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -56,6 +61,9 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
             enabled: s.enabled,
             apps_running: s.apps.iter().filter(|a| a.running).count(),
             apps_total: s.apps.len(),
+            restarts: s.apps.iter().map(|a| a.restarts).sum(),
+            ram_used_mb: s.usage.as_ref().map(|u| u.ram_used_mb),
+            ram_max_mb: s.usage.as_ref().map(|u| u.ram_max_mb),
         })
         .collect();
     stacks.sort_by(|a, b| a.vmid.cmp(&b.vmid).then_with(|| a.name.cmp(&b.name)));
@@ -65,7 +73,7 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
         parked: stacks.iter().filter(|s| !s.enabled).count(),
     };
     FleetView {
-        measured_at,
+        measured_at: state.status_measured_at.unwrap_or(measured_at),
         host: HostSummary {
             name: state.host.name.clone(),
             cpu_pct: state.host.cpu_pct,

@@ -503,6 +503,23 @@ it runs. The single `token` keeps working as scope `all` under the name
 digest that is not 64 lowercase hex characters) stops the host at start.
 Tests: `host/src/main.rs` (`arch_tokens_*`), `proto/tests/scope_tests.rs`.
 
+#### feat-platform-2 · Real status per container
+
+**Status:** Built (homelab-admin `host` milestone, 2026-09-28).
+
+`GetState` used to answer `running`, 0 restarts and `online` for every stack
+whatever the machine said. The host now takes a reading every
+`status_interval_s` seconds (host.toml, default 60, at least 10): one
+`pvesh get /cluster/resources --type vm` for every guest's status, cpu,
+memory and uptime, and one `pct exec <vmid>` per running managed container
+listing its docker containers (`core/src/ops/livestatus.rs`). `GetState`
+answers from the newest reading and says when it was taken
+(`status_measured_at`); before the first reading the old fixed values stand.
+An app counts as running only when every one of its containers runs, and its
+restarts are the sum of theirs. Tests: `core/tests/livestatus_tests.rs` (real
+pvesh and docker samples from pve), `host/src/main.rs`
+(`feat_platform_2_app_status_comes_from_the_reading`).
+
 #### A5 · Secrets vault on the host
 
 **Status:** Built.

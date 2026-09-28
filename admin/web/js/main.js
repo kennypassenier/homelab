@@ -1,7 +1,7 @@
 // The fleet page (skeleton): first paint from /data/fleet, then live over
 // SSE. A `resync` (the browser fell behind, or reconnected) refetches.
 
-import { measuredAgo, stackState } from "./fleet.js";
+import { measuredAgo, ramText, stackState } from "./fleet.js";
 
 /** @type {any} */
 let fleet = null;
@@ -43,6 +43,8 @@ function render() {
       cell("td", s.name),
       stateCell(st),
       cell("td", `${s.apps_running}/${s.apps_total}`, "num"),
+      cell("td", String(s.restarts ?? 0), "num"),
+      cell("td", ramText(s), "num"),
     );
     return tr;
   });

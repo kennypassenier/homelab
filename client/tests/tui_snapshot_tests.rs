@@ -11,6 +11,7 @@ use ratatui::Terminal;
 
 fn fleet() -> FleetState {
     FleetState {
+        status_measured_at: None,
         host: HostView {
             name: "pve-01".into(),
             cpu_pct: 18,
@@ -25,6 +26,7 @@ fn fleet() -> FleetState {
         },
         stacks: vec![
             StackView {
+                usage: None,
                 name: "syncthing".into(),
                 vmid: 110,
                 hostname: "110-app-syncthing".into(),
@@ -40,6 +42,7 @@ fn fleet() -> FleetState {
                 enabled: true,
             },
             StackView {
+                usage: None,
                 name: "media".into(),
                 vmid: 106,
                 hostname: "106-app-media".into(),
@@ -687,8 +690,10 @@ fn b4_drift_flag_computed_from_applied_hash() {
     m.local_stacks = vec![("driftcase".into(), tmp.join("driftcase"))];
     let mk_fleet = |hash: &str| {
         ServerMsg::State(Box::new(FleetState {
+            status_measured_at: None,
             host: fleet().host,
             stacks: vec![StackView {
+                usage: None,
                 name: "driftcase".into(),
                 vmid: 140,
                 hostname: "140-app-driftcase".into(),
@@ -2230,6 +2235,7 @@ fn a_native_stack_gets_the_native_operation_from_the_same_key() {
     let fleet = m.fleet.as_mut().unwrap();
     fleet.stacks.clear();
     fleet.stacks.push(StackView {
+        usage: None,
         name: "kyu".into(),
         vmid: 109,
         hostname: "109-app-kyu".into(),

@@ -23,6 +23,7 @@ fn host() -> HostView {
 #[test]
 fn feat_overview_1_stacks_come_sorted_by_vmid_with_counts() {
     let state = FleetState {
+        status_measured_at: None,
         host: host(),
         stacks: vec![
             stack("media", 106, true, true, &[true, true]),
@@ -46,6 +47,7 @@ fn feat_overview_1_stacks_come_sorted_by_vmid_with_counts() {
 fn feat_overview_1_an_empty_fleet_is_a_view_not_an_error() {
     let v = fleet_view(
         &FleetState {
+            status_measured_at: None,
             host: host(),
             stacks: vec![],
         },

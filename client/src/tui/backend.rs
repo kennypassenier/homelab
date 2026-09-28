@@ -306,6 +306,7 @@ fn demo_fleet() -> ServerMsg {
         restarts: 0,
     };
     ServerMsg::State(Box::new(FleetState {
+        status_measured_at: None,
         host: HostView {
             name: "pve-01".into(),
             cpu_pct: 18,
@@ -320,6 +321,7 @@ fn demo_fleet() -> ServerMsg {
         },
         stacks: vec![
             StackView {
+                usage: None,
                 name: "platform".into(),
                 vmid: 104,
                 hostname: "104-app-platform".into(),
@@ -336,6 +338,7 @@ fn demo_fleet() -> ServerMsg {
                 online: true,
             },
             StackView {
+                usage: None,
                 name: "media".into(),
                 vmid: 106,
                 hostname: "106-app-media".into(),
@@ -351,6 +354,7 @@ fn demo_fleet() -> ServerMsg {
                 online: true,
             },
             StackView {
+                usage: None,
                 name: "syncthing".into(),
                 vmid: 110,
                 hostname: "110-app-syncthing".into(),

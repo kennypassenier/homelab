@@ -25,7 +25,7 @@ working; the `tui` cargo feature stays on by default.
 |---|---|---|---|
 | skeleton | Het eerste levende pad | feat-platform-5, feat-platform-6 | **done 2026-09-28** (see note) |
 | host | De host leert vertellen | feat-platform-1, feat-platform-2, feat-platform-3, feat-platform-4 | **live 2026-09-28** (3.62.1 on pve, signed) |
-| assembly | Het dashboard draait als eigen stack (assemblage) | feat-platform-7, feat-platform-9 | **live 2026-09-28 15:32**, Kenny's login from home and the 4G refusal still to do |
+| assembly | Het dashboard draait als eigen stack (assemblage) | feat-platform-7, feat-platform-9 | **done 2026-09-28 16:15**: Kenny logged in from home with Access and a passkey; the 4G refusal is not yet seen |
 | read | Alles lezen | feat-overview-1, feat-overview-2, feat-overview-3, feat-overview-4, feat-overview-8, feat-stacks-1, feat-ops-1, feat-ops-2, feat-ops-3, feat-ops-4, feat-ops-7, feat-settings-2 | not started |
 | act | Alle acties | feat-stacks-4, feat-ops-6, feat-stacks-5, feat-stacks-6, feat-stacks-7, feat-stacks-8, feat-overview-5, feat-ops-8, feat-ops-9 | not started |
 | edit | Wijzigen in de browser | feat-stacks-2, feat-stacks-3, feat-firewall-1, feat-firewall-2, feat-settings-1 | not started |

@@ -57,6 +57,52 @@ fn default_watched_max_age_hours() -> u64 {
     26
 }
 
+/// arch-tokens: one `[[tokens]]` entry in host.toml.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+struct TokenEntry {
+    /// Who holds it, e.g. "admin" or "wsl"; named in every audit line.
+    name: String,
+    scope: homelab_proto::Scope,
+    /// Lowercase hex SHA-256 of the token itself.
+    sha256: String,
+}
+
+/// Who a session belongs to, decided once when it opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Identity {
+    name: String,
+    scope: homelab_proto::Scope,
+}
+
+/// arch-tokens: a token list the host can trust, or the reason it cannot.
+fn validate_tokens(tokens: &[TokenEntry]) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for t in tokens {
+        if t.name.trim().is_empty() {
+            return Err("a [[tokens]] entry has an empty name".into());
+        }
+        if t.name == "legacy" {
+            return Err(
+                "\"legacy\" is the name of the single `token` key; pick another name".into(),
+            );
+        }
+        if !seen.insert(t.name.as_str()) {
+            return Err(format!("two [[tokens]] entries are named {:?}", t.name));
+        }
+        let hex = t.sha256.len() == 64
+            && t.sha256
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !hex {
+            return Err(format!(
+                "[[tokens]] {:?}: sha256 must be 64 lowercase hex characters (sha256sum of the token)",
+                t.name
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// host.toml as written: the one serde representation of the file.
 ///
 /// config-four-representations (expert panel, 2026-09-27): the same struct is
@@ -69,6 +115,12 @@ fn default_watched_max_age_hours() -> u64 {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Default)]
 struct FileConfig {
     token: Option<String>,
+    /// arch-tokens (homelab-admin, 2026-09-28): one entry per machine, each
+    /// with a scope. Only the SHA-256 of a token is stored here; the token
+    /// itself lives with the client. `token` above keeps working as scope
+    /// `all` under the name "legacy" until it is removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tokens: Option<Vec<TokenEntry>>,
     listen: Option<String>,
     state_dir: Option<String>,
     backup_hour: Option<u8>,
@@ -201,6 +253,8 @@ struct FileConfig {
 #[derive(Clone)]
 struct Config {
     token: String,
+    /// arch-tokens: scoped tokens from `[[tokens]]`, validated at start.
+    tokens: Vec<TokenEntry>,
     listen: SocketAddr,
     state_dir: String,
     /// Path of the toml we loaded — SetConfig persists back to it.
@@ -407,6 +461,11 @@ fn load_config_from(path: String) -> Config {
         );
         std::process::exit(1);
     }
+    let tokens = file.tokens.clone().unwrap_or_default();
+    if let Err(e) = validate_tokens(&tokens) {
+        eprintln!("FATAL: {}: {}", path, e);
+        std::process::exit(1);
+    }
     let listen = std::env::var("HOMELAB_LISTEN")
         .ok()
         .or(file.listen)
@@ -419,6 +478,7 @@ fn load_config_from(path: String) -> Config {
         .unwrap_or_else(|| "/var/lib/homelab".into());
     let cfg = Config {
         token,
+        tokens,
         listen,
         state_dir,
         config_path: path,
@@ -1417,16 +1477,30 @@ port = 5003
         H: Fn(AppState, RpcRequest) -> Fut + Clone + Send + Sync + 'static,
         Fut: std::future::Future<Output = RpcResponse> + Send + 'static,
     {
-        let app = Router::new()
-            .route(
-                "/ws",
-                get(
-                    move |ws: WebSocketUpgrade, State(st): State<AppState>| async move {
-                        ws.on_upgrade(move |s| serve_ws(s, st, handler))
-                    },
-                ),
-            )
-            .with_state(state);
+        let app =
+            Router::new()
+                .route(
+                    "/ws",
+                    get(
+                        move |ws: WebSocketUpgrade,
+                              State(st): State<AppState>,
+                              headers: HeaderMap| async move {
+                            // The tests that predate arch-tokens send no header
+                            // and ran as the one token there was: scope all.
+                            let who = identify(
+                                headers.get("authorization").and_then(|v| v.to_str().ok()),
+                                &st.config.token,
+                                &st.config.tokens,
+                            )
+                            .unwrap_or(Identity {
+                                name: "legacy".into(),
+                                scope: homelab_proto::Scope::All,
+                            });
+                            ws.on_upgrade(move |s| serve_ws(s, st, who, handler))
+                        },
+                    ),
+                )
+                .with_state(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -1546,6 +1620,296 @@ port = 5003
         assert!(
             answered,
             "the request after a ping and a binary frame is answered"
+        );
+    }
+
+    // ── arch-tokens and arch-host-link (homelab-admin, 2026-09-28) ──────
+
+    fn sha_hex(t: &str) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(t.as_bytes())
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect()
+    }
+
+    /// A state with a legacy token and two scoped ones, its audit log in a
+    /// directory of its own.
+    fn scoped_state(tag: &str) -> (AppState, std::path::PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("homelab-scope-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let raw = format!(
+            "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n\
+             [[tokens]]\nname = \"dash-read\"\nscope = \"read\"\nsha256 = \"{}\"\n\
+             [[tokens]]\nname = \"dash-operate\"\nscope = \"operate\"\nsha256 = \"{}\"\n\
+             [[tokens]]\nname = \"dash-all\"\nscope = \"all\"\nsha256 = \"{}\"\n",
+            dir.display(),
+            sha_hex("read-token-aaaaaaaaaaaaaaaa"),
+            sha_hex("operate-token-bbbbbbbbbbbbbb"),
+            sha_hex("all-token-cccccccccccccccccc"),
+        );
+        (test_state(config_from_text(&raw)), dir)
+    }
+
+    /// Opens a session with `token`, sends `commands` in order and returns
+    /// the replies in the order they ARRIVED, as (id, ok, message).
+    async fn session_replies(
+        addr: SocketAddr,
+        token: &str,
+        commands: Vec<(u64, Rpc)>,
+    ) -> Vec<(u64, bool, String)> {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let mut request = format!("ws://{}/ws", addr).into_client_request().unwrap();
+        request.headers_mut().insert(
+            "Authorization",
+            format!("Bearer {}", token).parse().unwrap(),
+        );
+        let (ws, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("connect");
+        let (mut tx, mut rx) = ws.split();
+        let n = commands.len();
+        for (id, command) in commands {
+            let req = RpcRequest { id, command };
+            tx.send(WsMsg::Text(serde_json::to_string(&req).unwrap().into()))
+                .await
+                .unwrap();
+        }
+        let mut out = Vec::new();
+        let _ = tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(Ok(frame)) = rx.next().await {
+                if let WsMsg::Text(t) = frame {
+                    if let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t) {
+                        out.push((r.id, r.ok, r.message));
+                        if out.len() == n {
+                            return;
+                        }
+                    }
+                }
+            }
+        })
+        .await;
+        out
+    }
+
+    /// Answers every command with "ran <name>"; a non-read command takes a
+    /// moment, so a read sent after it can overtake it only beside the queue.
+    async fn naming_handler(_st: AppState, req: RpcRequest) -> RpcResponse {
+        if !req.command.is_read_only() {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        RpcResponse {
+            id: req.id,
+            ok: true,
+            message: format!("ran {}", req.command.name()),
+            deferred: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn arch_tokens_a_read_token_cannot_operate_and_the_refusal_is_audited() {
+        let (state, dir) = scoped_state("read");
+        let addr = serve_state_on_loopback(state, naming_handler).await;
+        let replies = session_replies(
+            addr,
+            "read-token-aaaaaaaaaaaaaaaa",
+            vec![(1, Rpc::GetState), (2, Rpc::ZfsReplicate)],
+        )
+        .await;
+        assert_eq!(replies.len(), 2, "{:?}", replies);
+        let read = replies.iter().find(|r| r.0 == 1).unwrap();
+        let op = replies.iter().find(|r| r.0 == 2).unwrap();
+        assert!(read.1 && read.2 == "ran get_state", "{:?}", read);
+        assert!(
+            !op.1,
+            "an operate command on a read token is refused: {:?}",
+            op
+        );
+        assert!(
+            op.2.contains("refused") && op.2.contains("dash-read"),
+            "{:?}",
+            op
+        );
+        let audit = std::fs::read_to_string(dir.join("audit.log")).unwrap();
+        assert!(
+            audit.contains("refused token=dash-read") && audit.contains("cmd=zfs_replicate"),
+            "{}",
+            audit
+        );
+    }
+
+    #[tokio::test]
+    async fn arch_tokens_an_operate_token_cannot_destroy_exec_or_update_the_host() {
+        let (state, _dir) = scoped_state("operate");
+        let addr = serve_state_on_loopback(state, naming_handler).await;
+        let replies = session_replies(
+            addr,
+            "operate-token-bbbbbbbbbbbbbb",
+            vec![
+                (1, Rpc::BackupDevices),
+                (
+                    2,
+                    Rpc::ExecIn {
+                        vmid: 106,
+                        command: "ls".into(),
+                    },
+                ),
+                (
+                    3,
+                    Rpc::DestroyRecorded {
+                        stack: "media".into(),
+                        confirm: "media".into(),
+                        skip_backup: false,
+                    },
+                ),
+                (
+                    4,
+                    Rpc::SelfUpdateHost {
+                        binary_b64: String::new(),
+                    },
+                ),
+            ],
+        )
+        .await;
+        let by_id = |id: u64| replies.iter().find(|r| r.0 == id).cloned().unwrap();
+        assert!(by_id(1).1, "operate may back up: {:?}", replies);
+        for id in [2, 3, 4] {
+            assert!(
+                !by_id(id).1 && by_id(id).2.contains("refused"),
+                "{:?}",
+                by_id(id)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn arch_tokens_a_scope_all_command_by_a_named_token_is_audited_before_it_runs() {
+        let (state, dir) = scoped_state("all");
+        let addr = serve_state_on_loopback(state, naming_handler).await;
+        let replies = session_replies(
+            addr,
+            "all-token-cccccccccccccccccc",
+            vec![(
+                1,
+                Rpc::ForgetStack {
+                    stack: "drill".into(),
+                },
+            )],
+        )
+        .await;
+        assert!(replies[0].1, "{:?}", replies);
+        let audit = std::fs::read_to_string(dir.join("audit.log")).unwrap();
+        assert!(
+            audit.contains("scope-all token=dash-all") && audit.contains("cmd=forget_stack"),
+            "{}",
+            audit
+        );
+    }
+
+    #[tokio::test]
+    async fn arch_tokens_an_unknown_token_opens_no_session() {
+        let (state, _dir) = scoped_state("unknown");
+        assert_eq!(
+            identify(
+                Some("Bearer not-a-token-at-all"),
+                &state.config.token,
+                &state.config.tokens
+            ),
+            None
+        );
+        assert_eq!(
+            identify(
+                Some("Bearer read-token-aaaaaaaaaaaaaaaa"),
+                &state.config.token,
+                &state.config.tokens
+            ),
+            Some(Identity {
+                name: "dash-read".into(),
+                scope: homelab_proto::Scope::Read
+            })
+        );
+        assert_eq!(
+            identify(
+                Some("Bearer 0123456789abcdef0123"),
+                &state.config.token,
+                &state.config.tokens
+            )
+            .map(|i| i.scope),
+            Some(homelab_proto::Scope::All)
+        );
+        assert_eq!(
+            identify(None, &state.config.token, &state.config.tokens),
+            None
+        );
+    }
+
+    #[test]
+    fn arch_tokens_a_bad_token_list_is_refused_at_start() {
+        let e = |name: &str, sha: &str| TokenEntry {
+            name: name.into(),
+            scope: homelab_proto::Scope::Read,
+            sha256: sha.into(),
+        };
+        let good = sha_hex("x");
+        assert!(validate_tokens(&[e("a", &good)]).is_ok());
+        assert!(
+            validate_tokens(&[e("a", &good), e("a", &good)]).is_err(),
+            "duplicate names"
+        );
+        assert!(
+            validate_tokens(&[e("legacy", &good)]).is_err(),
+            "reserved name"
+        );
+        assert!(validate_tokens(&[e("a", "abc")]).is_err(), "short digest");
+        assert!(
+            validate_tokens(&[e("a", &good.to_uppercase())]).is_err(),
+            "uppercase digest"
+        );
+        assert!(validate_tokens(&[e(" ", &good)]).is_err(), "empty name");
+    }
+
+    /// arch-host-link: without the option, replies keep the order of the
+    /// requests (the TUI depends on it); with it, a read overtakes a slow
+    /// command and is told apart by its id.
+    #[tokio::test]
+    async fn arch_host_link_reads_skip_the_queue_only_for_a_session_that_asks() {
+        let (state, _dir) = scoped_state("beside");
+        let addr = serve_state_on_loopback(state, naming_handler).await;
+        let plain = session_replies(
+            addr,
+            "all-token-cccccccccccccccccc",
+            vec![(1, Rpc::BackupDevices), (2, Rpc::GetState)],
+        )
+        .await;
+        assert_eq!(
+            plain.iter().map(|r| r.0).collect::<Vec<_>>(),
+            vec![1, 2],
+            "{:?}",
+            plain
+        );
+        let asked = session_replies(
+            addr,
+            "all-token-cccccccccccccccccc",
+            vec![
+                (
+                    1,
+                    Rpc::SessionOptions {
+                        reads_beside_queue: true,
+                    },
+                ),
+                (2, Rpc::BackupDevices),
+                (3, Rpc::GetState),
+            ],
+        )
+        .await;
+        assert_eq!(
+            asked.iter().map(|r| r.0).collect::<Vec<_>>(),
+            vec![1, 3, 2],
+            "{:?}",
+            asked
         );
     }
 
@@ -2885,10 +3249,14 @@ async fn version_endpoint(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> axum::response::Response {
-    if bearer_ok(
+    // arch-tokens: any known token may read the version, scope read included.
+    if identify(
         headers.get("authorization").and_then(|v| v.to_str().ok()),
         &state.config.token,
-    ) {
+        &state.config.tokens,
+    )
+    .is_some()
+    {
         VERSION.into_response()
     } else {
         log_refused(&state, peer, "/api/version");
@@ -3644,6 +4012,61 @@ fn bearer_ok(header: Option<&str>, token: &str) -> bool {
         == 0
 }
 
+/// arch-tokens: who is on the other end. The single legacy `token` is scope
+/// `all`; a `[[tokens]]` entry matches on the SHA-256 of the presented token,
+/// compared with every byte folded in (fix-120) and every entry tried, so
+/// neither which entry matched nor where a guess differed shows in the time.
+fn identify(header: Option<&str>, legacy: &str, tokens: &[TokenEntry]) -> Option<Identity> {
+    use sha2::{Digest, Sha256};
+    if bearer_ok(header, legacy) {
+        return Some(Identity {
+            name: "legacy".into(),
+            scope: homelab_proto::Scope::All,
+        });
+    }
+    let presented = header?.strip_prefix("Bearer ")?;
+    let digest: String = Sha256::digest(presented.as_bytes())
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
+    let mut found = None;
+    for t in tokens {
+        let same = t
+            .sha256
+            .bytes()
+            .zip(digest.bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
+            && t.sha256.len() == digest.len();
+        if same && found.is_none() {
+            found = Some(Identity {
+                name: t.name.clone(),
+                scope: t.scope,
+            });
+        }
+    }
+    found
+}
+
+/// arch-tokens: the audit line for a command refused for its scope, or run
+/// under scope `all`. The command's name only, never its payload.
+fn scope_audit_line(
+    ts: u64,
+    who: &Identity,
+    command: &homelab_proto::Command,
+    refused: bool,
+) -> String {
+    format!(
+        "{} {} token={} scope={:?} cmd={} needs={:?}\n",
+        ts,
+        if refused { "refused" } else { "scope-all" },
+        who.name,
+        who.scope,
+        command.name(),
+        command.scope()
+    )
+}
+
 /// fix-120: say that a connection was refused for its token, and from where.
 fn log_refused(state: &AppState, peer: SocketAddr, path: &str) {
     let now = std::time::SystemTime::now()
@@ -4309,14 +4732,14 @@ async fn ws_upgrade(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let authed = bearer_ok(
+    let Some(who) = identify(
         headers.get("authorization").and_then(|v| v.to_str().ok()),
         &state.config.token,
-    );
-    if !authed {
+        &state.config.tokens,
+    ) else {
         log_refused(&state, peer, "/api/ws");
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
-    }
+    };
     // H5 self-update ships the whole host binary in one message, and the
     // default frame ceiling is 16 MiB. The binary crossed it between v3.19.0
     // (16 729 464 bytes of base64) and v3.20.0 (16 861 920) — 132 KB over —
@@ -4329,7 +4752,7 @@ async fn ws_upgrade(
     // The client refuses to send more than this and says so in words.
     ws.max_frame_size(MAX_WS_FRAME)
         .max_message_size(MAX_WS_FRAME)
-        .on_upgrade(move |socket| ws_session(socket, state))
+        .on_upgrade(move |socket| ws_session(socket, state, who))
         .into_response()
 }
 
@@ -4365,8 +4788,8 @@ fn unparseable_frame_line(e: &serde_json::Error, text: &str) -> String {
     )
 }
 
-async fn ws_session(socket: WebSocket, state: AppState) {
-    serve_ws(socket, state, |st, req| async move {
+async fn ws_session(socket: WebSocket, state: AppState, who: Identity) {
+    serve_ws(socket, state, who, |st, req| async move {
         handle_rpc(&st, req).await
     })
     .await
@@ -4385,7 +4808,7 @@ fn hello() -> ServerMsg {
 /// answers out, and the loop that reads requests. The request handler is a
 /// parameter so a test can drive the real session over a real socket with a
 /// handler that asks a question (fix-66).
-async fn serve_ws<H, Fut>(socket: WebSocket, state: AppState, handler: H)
+async fn serve_ws<H, Fut>(socket: WebSocket, state: AppState, who: Identity, handler: H)
 where
     H: Fn(AppState, RpcRequest) -> Fut + Clone + Send + Sync + 'static,
     Fut: std::future::Future<Output = RpcResponse> + Send + 'static,
@@ -4461,6 +4884,7 @@ where
         })
     };
 
+    let mut reads_beside = false;
     while let Some(frame) = rx.next().await {
         // fix-127 (websocket-edge-cases, 2026-09-27): only Close and a read
         // error end the session. The loop matched Text alone, so the first
@@ -4493,7 +4917,55 @@ where
                 continue;
             }
         };
-        if runs_beside_the_queue(&req.command) {
+        // arch-tokens: a command above the token's scope is refused here,
+        // before it reaches the queue, and the refusal is audited.
+        if req.command.scope() > who.scope {
+            let audit = format!("{}/audit.log", state.config.state_dir);
+            if let Err(e) = append_audit(
+                &audit,
+                &scope_audit_line(unix_now(), &who, &req.command, true),
+            ) {
+                tracing::warn!("audit.log :: {}", e);
+            }
+            tracing::warn!(token = %who.name, cmd = req.command.name(), "refused: outside the token's scope");
+            let resp = RpcResponse {
+                id: req.id,
+                ok: false,
+                message: format!(
+                    "refused: {} needs scope {:?}; token \"{}\" has scope {:?}",
+                    req.command.name(),
+                    req.command.scope(),
+                    who.name,
+                    who.scope
+                ),
+                deferred: None,
+            };
+            let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+            continue;
+        }
+        if req.command.scope() == homelab_proto::Scope::All && who.name != "legacy" {
+            let audit = format!("{}/audit.log", state.config.state_dir);
+            if let Err(e) = append_audit(
+                &audit,
+                &scope_audit_line(unix_now(), &who, &req.command, false),
+            ) {
+                tracing::warn!("audit.log :: {}", e);
+            }
+        }
+        // arch-host-link: a session that matches replies by id asks for its
+        // reads to skip the queue; the CLI and TUI never ask.
+        if let homelab_proto::Command::SessionOptions { reads_beside_queue } = req.command {
+            reads_beside = reads_beside_queue;
+            let resp = RpcResponse {
+                id: req.id,
+                ok: true,
+                message: format!("reads beside the queue: {}", reads_beside),
+                deferred: None,
+            };
+            let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+            continue;
+        }
+        if runs_beside_the_queue(&req.command) || (reads_beside && req.command.is_read_only()) {
             let (out_tx, state, handler) = (out_tx.clone(), state.clone(), handler.clone());
             tokio::spawn(async move {
                 use tracing::Instrument as _;
@@ -5273,6 +5745,14 @@ fn staged_binaries_dir(state_dir: &str, stack: &str) -> String {
 async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
     let exec = RealExecutor;
     match req.command {
+        // Answered by the session loop itself; reaching here means a caller
+        // bypassed it (a test harness), which changes nothing.
+        Rpc::SessionOptions { .. } => RpcResponse {
+            id: req.id,
+            ok: true,
+            message: "session options are set per session".into(),
+            deferred: None,
+        },
         Rpc::Ping => RpcResponse {
             id: req.id,
             ok: true,

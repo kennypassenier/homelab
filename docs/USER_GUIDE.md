@@ -476,6 +476,33 @@ journal line `401 on <path> from <address>` and counts toward the `refused
 connections` line of `homelab doctor` (fix-120). Pinning is described in 0.1; test
 `client/tests/tls_pin_tests.rs:33`.
 
+#### feat-platform-4 · Tokens with a scope
+
+**Status:** Built (homelab-admin `host` milestone, 2026-09-28).
+
+Beside the single `token`, host.toml can list one token per machine, each
+with a scope. Only the SHA-256 of the token is stored on the host:
+
+```toml
+[[tokens]]
+name = "admin"      # named in every audit line
+scope = "all"       # read | operate | all
+sha256 = "…"        # printf %s "$TOKEN" | sha256sum
+```
+
+`read` may only look (fleet, findings, doctor, incidents, settings);
+`operate` may also deploy, back up, restore, update and answer questions;
+`all` may also destroy, wipe, forget, exec, change host settings and send a
+new host binary. The table is `Command::scope()` in `proto/src/lib.rs`: a new
+command does not compile without a row. A command above the token's scope is
+answered `refused: <command> needs scope …` and written to
+`/var/lib/homelab/audit.log` as `<unix-time> refused token=<name> …`; every
+scope-`all` command of a named token is written there as `scope-all` before
+it runs. The single `token` keeps working as scope `all` under the name
+`legacy`. A malformed list (duplicate or empty name, the name `legacy`, a
+digest that is not 64 lowercase hex characters) stops the host at start.
+Tests: `host/src/main.rs` (`arch_tokens_*`), `proto/tests/scope_tests.rs`.
+
 #### A5 · Secrets vault on the host
 
 **Status:** Built.

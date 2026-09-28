@@ -307,6 +307,138 @@ pub enum Command {
         #[serde(default)]
         accept_days: Option<u32>,
     },
+    /// arch-host-link (homelab-admin, 2026-09-28): what this session asks
+    /// of the host. `reads_beside_queue`: read-only commands run at once
+    /// instead of waiting behind a deploy; the session then tells replies
+    /// apart by `RpcResponse.id`. The CLI and TUI never send this, so their
+    /// replies keep arriving in the order they asked (the TUI matches them
+    /// by order and shape, not by id).
+    SessionOptions {
+        reads_beside_queue: bool,
+    },
+}
+
+/// arch-tokens (homelab-admin, 2026-09-28): what a token may do. Ordered:
+/// a token may run every command whose scope is at or below its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scope {
+    /// Look: fleet, findings, doctor, incidents, settings.
+    Read,
+    /// Act without destroying: deploy, back up, restore, update, answer.
+    Operate,
+    /// Everything, including destroy, wipe, exec, host settings and a new
+    /// host binary.
+    All,
+}
+
+impl Command {
+    /// The one table of which command needs which scope. The match has no
+    /// wildcard on purpose: a new command does not compile until it is
+    /// given a row here.
+    pub fn scope(&self) -> Scope {
+        use Command::*;
+        match self {
+            Ping
+            | Status
+            | Doctor
+            | Incidents
+            | IncidentShow { .. }
+            | GetState
+            | ListTemplates
+            | GetApplied { .. }
+            | GetConfig
+            | FleetCheck { .. }
+            | Today { .. }
+            | ListManualChecks
+            | SessionOptions { .. } => Scope::Read,
+            DeployStack(_)
+            | StageNativeBinary { .. }
+            | BackupStack(_)
+            | RestoreStack { .. }
+            | UpdateStack { .. }
+            | PatchFleet
+            | BuildTemplate { .. }
+            | ApplyResources(_)
+            | BackupHostMeta
+            | AdoptService(_)
+            | InstallNative { .. }
+            | BackupNative { .. }
+            | UpdateNative { .. }
+            | ReleaseUpdateNative { .. }
+            | RollbackNative { .. }
+            | Answer { .. }
+            | ZfsReplicate
+            | ApplyGuards { .. }
+            | SetStackEnabled { .. }
+            | BackupDevices
+            | AnswerManualCheck { .. } => Scope::Operate,
+            DestroyStack { .. }
+            | SelfUpdateHost { .. }
+            | ExecIn { .. }
+            | SetConfig(_)
+            | ForgetStack { .. }
+            | DestroyRecorded { .. }
+            | WipeRetired { .. }
+            | PruneOrphans { .. } => Scope::All,
+        }
+    }
+
+    /// The command's wire name (`deploy_stack`), for audit lines and logs
+    /// that must name the command without carrying its payload.
+    pub fn name(&self) -> &'static str {
+        use Command::*;
+        match self {
+            Ping => "ping",
+            Status => "status",
+            DeployStack(_) => "deploy_stack",
+            StageNativeBinary { .. } => "stage_native_binary",
+            Doctor => "doctor",
+            Incidents => "incidents",
+            IncidentShow { .. } => "incident_show",
+            GetState => "get_state",
+            DestroyStack { .. } => "destroy_stack",
+            BackupStack(_) => "backup_stack",
+            RestoreStack { .. } => "restore_stack",
+            UpdateStack { .. } => "update_stack",
+            SelfUpdateHost { .. } => "self_update_host",
+            PatchFleet => "patch_fleet",
+            ExecIn { .. } => "exec_in",
+            BuildTemplate { .. } => "build_template",
+            ApplyResources(_) => "apply_resources",
+            ListTemplates => "list_templates",
+            GetApplied { .. } => "get_applied",
+            GetConfig => "get_config",
+            SetConfig(_) => "set_config",
+            BackupHostMeta => "backup_host_meta",
+            AdoptService(_) => "adopt_service",
+            InstallNative { .. } => "install_native",
+            BackupNative { .. } => "backup_native",
+            UpdateNative { .. } => "update_native",
+            ReleaseUpdateNative { .. } => "release_update_native",
+            RollbackNative { .. } => "rollback_native",
+            Answer { .. } => "answer",
+            ZfsReplicate => "zfs_replicate",
+            ApplyGuards { .. } => "apply_guards",
+            ForgetStack { .. } => "forget_stack",
+            DestroyRecorded { .. } => "destroy_recorded",
+            WipeRetired { .. } => "wipe_retired",
+            PruneOrphans { .. } => "prune_orphans",
+            FleetCheck { .. } => "fleet_check",
+            Today { .. } => "today",
+            SetStackEnabled { .. } => "set_stack_enabled",
+            BackupDevices => "backup_devices",
+            ListManualChecks => "list_manual_checks",
+            AnswerManualCheck { .. } => "answer_manual_check",
+            SessionOptions { .. } => "session_options",
+        }
+    }
+
+    /// Read-only commands change nothing, so a session that matches replies
+    /// by id may run them beside the queue.
+    pub fn is_read_only(&self) -> bool {
+        self.scope() == Scope::Read
+    }
 }
 
 /// G8: the host settings the TUI may inspect and edit. Token/listen/state_dir

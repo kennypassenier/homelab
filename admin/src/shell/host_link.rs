@@ -96,6 +96,15 @@ async fn session(
                 match server_msg {
                     ServerMsg::Hello { version, .. } => {
                         greeted = true;
+                        // arch-host-link: this session tells replies apart
+                        // by id, so its reads need not wait behind a deploy.
+                        let opts = RpcRequest {
+                            id: next_id,
+                            command: Command::SessionOptions { reads_beside_queue: true },
+                        };
+                        next_id += 1;
+                        let text = serde_json::to_string(&opts).map_err(|e| e.to_string())?;
+                        tx.send(Message::Text(text.into())).await.map_err(|e| format!("send: {e}"))?;
                         let mut s = shared.write().await;
                         s.host_version = Some(version.clone());
                         s.link_error = None;

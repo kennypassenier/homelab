@@ -1,6 +1,6 @@
 # homelab-admin — features (Phase 2, DRAFT)
 
-Status: round 1 rated by Kenny 2026-09-28 11:33 (26 Essential, 1 Desired). Round 2 (Claude's proposals and the four mandatory items) out next.
+Status: rounds 1 and 2 rated; freeze pending. Round 1 rated by Kenny 2026-09-28 11:33 (26 Essential, 1 Desired). Round 2 (Claude's proposals and the four mandatory items) out next.
 
 Kenny's notes on round 1 (verbatim intent, recorded):
 - **feat-platform-8** Essential, and it is **a path in the TUI**: to work it needs only the TUI (client) and the HOST on the Proxmox host. The TUI therefore keeps this emergency path after its screens move to the dashboard.
@@ -38,6 +38,40 @@ Domains (at most eight, decided in this phase): platform, overview, stacks, fire
 | feat-ops-3 | Handmatige controles | Essential | **Essential** |
 | feat-ops-4 | Containerlogs uit Loki | Desired | **Essential** |
 | feat-ops-5 | TUI afbouwen | Essential | **Desired** |
+
+
+## Round 2 (Claude's proposals), rated 2026-09-28 11:42
+
+| ID | Feature | Proposed rating | Rating |
+|---|---|---|---|
+| feat-ops-6 | Voortgang per stap, met verwachte duur | — | **Essential** |
+| feat-overview-3 | Commandopalet (Ctrl K) | — | **Essential** |
+| feat-overview-4 | Alles live, met "gemeten x geleden" | — | **Essential** |
+| feat-overview-5 | Meldingen en een meldingencentrum | — | **Essential** |
+| feat-overview-6 | Grafiekjes per stack | — | **Essential** |
+| feat-overview-7 | Topologie: wie praat met wie | — | **Essential** |
+| feat-stacks-5 | Acties op meerdere stacks tegelijk | — | **Essential** |
+| feat-stacks-6 | Terugdraaien naar een vorige versie | — | **Essential** |
+| feat-stacks-7 | Kopieer als CLI-commando | — | **Essential** |
+| feat-stacks-8 | Acties inplannen | — | **Essential** |
+| feat-ops-7 | Tijdlijn van alles wat er gebeurde | — | **Essential** |
+| feat-overview-8 | Sneltoetsen en diepe links | — | **Essential** |
+| feat-overview-9 | Werkt ook op de telefoon | — | **Desired** |
+| feat-backup-3 | In een snapshot bladeren, één bestand terugzetten | — | **Desired** |
+| feat-settings-2 | Themakeuze | — | **Essential** |
+| feat-ops-8 | Pushmelding via kyu als een lange actie klaar is | — | **Desired** |
+| feat-ops-9 | Notification settings per stack and on one page, with a snooze for all notifications for a chosen time (Kenny's own answer on feat-ops-8) | — | **Desired** |
+
+Kenny's notes on round 2:
+- **feat-overview-7** (topology) Essential; "intuitive visualisations are very welcome", more use cases asked for (next form).
+- **feat-ops-8** Desired, with feat-ops-9: per-stack and global notification switches, and a snooze that silences every notification for a chosen time.
+
+## Mandatory items (round 2), answered 2026-09-28 11:42
+
+1. **Updates:** chassis-rs self-update is supported, **managed by homelab** the way kyu and almanac are today (signed release, homelab drives it); shipped with the homelab release.
+2. **Ecosystem:** homelab, latch, kp-themes, chassis-rs and kyu (notifications through kyu).
+3. **Backup:** the stack rides homelab's nightly restic regime, the working copy comes back from GitHub; **a real rebuild with restore is run before the first release** (queued measurement).
+4. **Data location:** the homelab pattern with one root: everything durable under `/appdata/admin/admin-config` (one configurable root), caches outside it.
 
 Note 2026-09-28 11:23 (relayed from the chassis-rs thread): feat-platform-5
 (`webapp`) and feat-platform-6 (`live`) are built on chassis-rs main

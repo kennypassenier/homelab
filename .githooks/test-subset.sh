@@ -7,13 +7,15 @@
 # (and so `make release`) still runs the whole suite.
 #
 # Rule 7i, measured 2026-09-28 at 12:58 on WSL: 80 test binaries, 966 tests,
-# about 49 s of run time. The three skipped binaries hold 82 tests (71 + 7 + 4)
-# and about 45 s of that: they render and drive the TUI and none of them
-# checks a secret, a token, TLS, the no-touch list or a stack file. Every
+# about 49 s of run time. Skipped: tui_snapshot_tests (71 tests, about 34 s)
+# and trace_line_tests (4, about 2 s), which render the TUI and read log
+# lines. remote_backend_tests (7, about 10 s) was skipped at first and is back
+# in: it drives the TUI's TLS handshake, and the full suite caught a rustls
+# panic there that this subset had let through (commit 464ac9e). Every
 # security suite (secrets, latch_secrets, argv_secret, secret_gate, tls_pin,
-# mock_executor) stays in.
+# mock_executor, remote_backend) runs.
 set -euo pipefail
-SLOW="tui_snapshot_tests remote_backend_tests trace_line_tests"
+SLOW="tui_snapshot_tests trace_line_tests"
 args=(--workspace --lib --bins)
 for f in */tests/*.rs; do
   name=$(basename "$f" .rs)

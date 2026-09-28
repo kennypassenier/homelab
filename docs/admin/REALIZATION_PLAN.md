@@ -124,6 +124,11 @@ Gesigneerde homelab-releases, self-update van het dashboard via homelab, een ech
   binaries (tui_snapshot_tests 71, remote_backend_tests 7, trace_line_tests
   4: 82 tests, about 45 s), all TUI rendering; every security suite stays
   in. The subset ran 884 tests in 12.4 s.
+- **Correction, same day:** the claim above was wrong for
+  remote_backend_tests: it drives the TUI's TLS handshake. The full suite
+  caught a rustls provider panic there that the subset let through (fixed in
+  464ac9e). It is back in the subset; only tui_snapshot_tests (71) and
+  trace_line_tests (4) are skipped.
 - **skeleton exit, 2026-09-28 13:05:** `homelab-admin` (debug build) on WSL
   against the live host v3.61.4: `/app/` without a session answers 303 to the
   login; after the token login, Chromium (Playwright) shows 14 stacks,

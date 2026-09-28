@@ -16,5 +16,10 @@
       "/static/kp/js/*": ["./types/kp/*"]
     }
   },
-  "include": ["js/**/*.js", "test/**/*.js", "types/**/*.d.ts"]
+  "include": [
+    "js/**/*.js",
+    "test/**/*.js",
+    "types/**/*.d.ts",
+    "refused/**/*.js"
+  ]
 }

@@ -39,7 +39,32 @@ pub struct Guard {
 
 fn refuse(r: Refusal) -> Response {
     tracing::info!(reason = ?r, "request refused before the login");
-    (StatusCode::FORBIDDEN, r.text()).into_response()
+    (
+        StatusCode::FORBIDDEN,
+        [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        access::refusal_page(&r),
+    )
+        .into_response()
+}
+
+/// The refusal page's module, answered before the locks: a refused visitor
+/// never reaches `/app` (behind the login), and the script is the same
+/// public kp-themes glue for everyone.
+// The Err is chassis' request-guard contract: the response to send instead.
+#[allow(clippy::result_large_err)]
+pub fn refusal_script(r: &GuardRequest) -> Result<(), Response> {
+    if r.path != access::REFUSAL_SCRIPT {
+        return Ok(());
+    }
+    Err((
+        StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/javascript; charset=utf-8",
+        )],
+        include_str!("../../web/refused/refused.js"),
+    )
+        .into_response())
 }
 
 impl Guard {

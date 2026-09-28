@@ -137,3 +137,19 @@ forwarded headers from 172.16.0.0/12).
 
 HYPOTHESIS still open: latch as a daemon subprocess in an unprivileged LXC,
 measured in a throwaway container before the secrets work starts.
+
+## feat-platform-10 · Claude's actions replayed in the open dashboard (decided 2026-09-28 16:29, mini-round)
+
+Claude runs the action through the host as today (CLI, its own scoped token);
+no second entry point past Cloudflare Access, no browser automation. The host
+announces every operation with the token name that started it and the
+command's values. The dashboard replays an operation started by another
+session as if a person drove the page: it navigates to the page, opens the
+wizard or dialog, types each field in, shows a visible click on the confirm
+button, then follows the live progress. Every wizard is described once as
+data (its page, fields and the `Command` it builds); the same description
+drives Kenny's own clicks and the replay, so the two cannot drift. An open tab
+follows on its own as soon as another session starts something, with a
+"Stop following" button; the replay never sends the command itself.
+Placed as milestone `follow`, after `edit`, because the wizards arrive in
+`act` and `edit`.

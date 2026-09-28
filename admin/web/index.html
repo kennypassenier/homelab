@@ -3,73 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Homelab · Fleet</title>
+    <title>Homelab</title>
     <link rel="stylesheet" href="/static/kp/dist/kp-themes.css" />
     <link rel="stylesheet" href="/app/css/app.css" />
     <script type="module" src="/app/js/main.js"></script>
   </head>
   <body>
-    <main class="shell">
-      <header class="bar">
-        <h1>Fleet</h1>
+    <div class="kp-nav-wrap">
+      <nav class="kp-nav" aria-label="Pages">
+        <a class="kp-nav__brand" href="/app/">Homelab</a>
+        <ul class="kp-nav__links" id="nav"></ul>
         <p id="link" class="link" aria-live="polite">connecting…</p>
-      </header>
-      <section id="host" class="host" aria-label="Host"></section>
-      <!-- Kenny, 2026-09-28: every table is the kp-themes datatable, no row
-           selection by default, every column sortable, Shift+click adds a
-           sort key, and each table remembers its own sort. -->
-      <div
-        class="kp-datatable"
-        data-kp-datatable
-        data-kp-sort-multi
-        data-kp-remember="fleet"
-        data-kp-page-sizes="none"
-      >
-        <div class="kp-datatable__bar">
-          <input
-            class="kp-datatable__search"
-            data-kp-datatable-search
-            type="search"
-            placeholder="Search stacks"
-            aria-label="Search stacks"
-          />
-        </div>
-        <div class="kp-table-wrap">
-          <table class="kp-table fleet">
-            <caption>
-              Stacks
-            </caption>
-            <thead>
-              <tr>
-                <th data-kp-sort="number">vmid</th>
-                <th data-kp-sort="text">Stack</th>
-                <th
-                  data-kp-sort="text"
-                  data-kp-sort-order="offline,degraded,parked,running"
-                  data-kp-filter="choice"
-                >
-                  State
-                </th>
-                <th data-kp-sort="number">Apps up</th>
-                <th data-kp-sort="number">Apps</th>
-                <th data-kp-sort="number">Restarts</th>
-                <th data-kp-sort="number">RAM used (GB)</th>
-                <th data-kp-sort="number">RAM limit (GB)</th>
-              </tr>
-            </thead>
-            <tbody id="stacks"></tbody>
-          </table>
-        </div>
-        <div class="kp-datatable__bar">
-          <p
-            class="kp-datatable__status"
-            data-kp-datatable-status
-            role="status"
-            aria-live="polite"
-          ></p>
-        </div>
-      </div>
-      <p id="measured" class="measured"></p>
-    </main>
+      </nav>
+    </div>
+    <main class="shell" id="page"></main>
   </body>
 </html>

@@ -39,6 +39,21 @@ pub struct StackSummary {
     pub restarts: u32,
     pub ram_used_mb: Option<u32>,
     pub ram_max_mb: Option<u32>,
+    /// feat-stacks-1: the stack page's detail, from the same snapshot.
+    pub hostname: String,
+    pub apps: Vec<AppSummary>,
+    /// Seconds since the guest started, at the host's last status reading.
+    pub uptime_s: Option<u64>,
+    /// arch-deploy-guard: where the last deploy came from, as the host
+    /// recorded it ("a1b2c3d4e5f6 + 1 uncommitted file(s)").
+    pub applied_source: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AppSummary {
+    pub name: String,
+    pub running: bool,
+    pub restarts: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -64,6 +79,18 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
             restarts: s.apps.iter().map(|a| a.restarts).sum(),
             ram_used_mb: s.usage.as_ref().map(|u| u.ram_used_mb),
             ram_max_mb: s.usage.as_ref().map(|u| u.ram_max_mb),
+            hostname: s.hostname.clone(),
+            apps: s
+                .apps
+                .iter()
+                .map(|a| AppSummary {
+                    name: a.name.clone(),
+                    running: a.running,
+                    restarts: a.restarts,
+                })
+                .collect(),
+            uptime_s: s.usage.as_ref().map(|u| u.uptime_s),
+            applied_source: s.applied_source.clone(),
         })
         .collect();
     stacks.sort_by(|a, b| a.vmid.cmp(&b.vmid).then_with(|| a.name.cmp(&b.name)));

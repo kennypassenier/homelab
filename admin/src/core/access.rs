@@ -32,6 +32,39 @@ pub enum Refusal {
 }
 
 impl Refusal {
+    /// The alarm's three lines (Kenny, 2026-09-28: the refusal is the
+    /// kp-themes Alarm, not a line of text): the small code line, the huge
+    /// word or two, and what happened with what to do.
+    pub fn alarm(&self) -> (&'static str, &'static str, String) {
+        match self {
+            Refusal::NotFromHome { from } => (
+                "homelab admin · lock 2 · home only",
+                "Not from home",
+                format!("This dashboard only answers from the house's own connection. This request came from {from}."),
+            ),
+            Refusal::HomeUnknown => (
+                "homelab admin · lock 2 · home only",
+                "Home unknown",
+                "The host has not read the house's public address yet. It asks at its start, after a gateway deploy and every night.".into(),
+            ),
+            Refusal::NoToken => (
+                "homelab admin · lock 1 · Cloudflare Access",
+                "No pass",
+                "Open the dashboard through https://admin.kp-soft.dev, which signs you in with Cloudflare Access first.".into(),
+            ),
+            Refusal::Expired => (
+                "homelab admin · lock 1 · Cloudflare Access",
+                "Pass expired",
+                "The Cloudflare Access sign-in has expired. Reload to sign in again.".into(),
+            ),
+            other => (
+                "homelab admin · lock 1 · Cloudflare Access",
+                "Access refused",
+                other.text(),
+            ),
+        }
+    }
+
     pub fn text(&self) -> String {
         match self {
             Refusal::NoToken => "refused: no Cloudflare Access token — open the dashboard through https://admin.kp-soft.dev".into(),
@@ -211,4 +244,36 @@ pub fn verify_rs256(key: &RsaKey, signed: &[u8], signature: &[u8]) -> Result<(),
         signature,
     )
     .map_err(|_| Refusal::BadSignature)
+}
+
+/// Text safe inside an HTML attribute or element.
+pub fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// The refusal page: kp-themes' stylesheet and the Alarm, raised by a
+/// module the guard itself serves at [`REFUSAL_SCRIPT`] (everything under
+/// `/app` sits behind the login a refused visitor never reaches), with the
+/// plain words in the page as well for a browser without scripts.
+/// Where the refusal page's module lives: answered by the guard, before any
+/// lock, because the page that loads it is shown to a refused visitor.
+pub const REFUSAL_SCRIPT: &str = "/refused.js";
+
+pub fn refusal_page(r: &Refusal) -> String {
+    let (code, title, detail) = r.alarm();
+    let (code, title, detail) = (html_escape(code), html_escape(title), html_escape(&detail));
+    format!(
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>{title} · homelab admin</title>\n\
+         <link rel=\"stylesheet\" href=\"/static/kp/dist/kp-themes.css\">\n\
+         <script type=\"module\" src=\"{REFUSAL_SCRIPT}\"></script>\n</head>\n\
+         <body>\n<main id=\"refusal\" data-code=\"{code}\" data-title=\"{title}\" data-detail=\"{detail}\" \
+         style=\"max-width:40rem;margin:4rem auto;padding-inline:16px\">\n\
+         <p>{code}</p>\n<h1>{title}</h1>\n<p>{detail}</p>\n</main>\n</body>\n</html>\n"
+    )
 }

@@ -13,7 +13,7 @@ use chassis::{App, AppSpec};
 use tokio::sync::RwLock;
 
 use homelab_admin::core::config;
-use homelab_admin::shell::guard::Guard;
+use homelab_admin::shell::guard::{self, Guard};
 use homelab_admin::shell::host_link::{self, HostTarget, LinkConfig, Snapshot};
 use homelab_admin::shell::routes;
 
@@ -21,6 +21,34 @@ const FILES: &[(&str, &[u8])] = &[
     ("index.html", include_bytes!("../web/index.html")),
     ("js/main.js", include_bytes!("../web/js/main.js")),
     ("js/fleet.js", include_bytes!("../web/js/fleet.js")),
+    ("js/format.js", include_bytes!("../web/js/format.js")),
+    ("js/sortkeys.js", include_bytes!("../web/js/sortkeys.js")),
+    ("js/router.js", include_bytes!("../web/js/router.js")),
+    ("js/store.js", include_bytes!("../web/js/store.js")),
+    ("js/dom.js", include_bytes!("../web/js/dom.js")),
+    ("js/activity.js", include_bytes!("../web/js/activity.js")),
+    ("js/checks.js", include_bytes!("../web/js/checks.js")),
+    ("js/doctor.js", include_bytes!("../web/js/doctor.js")),
+    (
+        "js/pages/overview.js",
+        include_bytes!("../web/js/pages/overview.js"),
+    ),
+    (
+        "js/pages/stack.js",
+        include_bytes!("../web/js/pages/stack.js"),
+    ),
+    (
+        "js/pages/activity.js",
+        include_bytes!("../web/js/pages/activity.js"),
+    ),
+    (
+        "js/pages/checks.js",
+        include_bytes!("../web/js/pages/checks.js"),
+    ),
+    (
+        "js/pages/doctor.js",
+        include_bytes!("../web/js/pages/doctor.js"),
+    ),
     ("css/app.css", include_bytes!("../web/css/app.css")),
 ];
 
@@ -97,6 +125,10 @@ async fn main() -> std::process::ExitCode {
         if c.dev_without_locks {
             tracing::warn!("dev_without_locks is set: no Access token or home address is checked");
         } else {
+            // The refusal page needs its module and kp-themes' files, which
+            // are public, before any lock can have passed.
+            app.request_guard(|r| async move { guard::refusal_script(&r) });
+            app.request_guard_exempt("/static");
             let guard = Guard::new(c, shared.clone());
             let g = guard.clone();
             app.request_guard(move |r| {

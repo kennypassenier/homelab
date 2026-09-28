@@ -25,10 +25,11 @@ working; the `tui` cargo feature stays on by default.
 |---|---|---|---|
 | skeleton | Het eerste levende pad | feat-platform-5, feat-platform-6 | **done 2026-09-28** (see note) |
 | host | De host leert vertellen | feat-platform-1, feat-platform-2, feat-platform-3, feat-platform-4 | **live 2026-09-28** (3.62.1 on pve, signed) |
-| assembly | Het dashboard draait als eigen stack (assemblage) | feat-platform-7, feat-platform-9 | **done 2026-09-28 16:15**: Kenny logged in from home with Access and a passkey; the 4G refusal is not yet seen |
-| read | Alles lezen | feat-overview-1, feat-overview-2, feat-overview-3, feat-overview-4, feat-overview-8, feat-stacks-1, feat-ops-1, feat-ops-2, feat-ops-3, feat-ops-4, feat-ops-7, feat-settings-2 | not started |
+| assembly | Het dashboard draait als eigen stack (assemblage) | feat-platform-7, feat-platform-9 | **done 2026-09-28 16:20**: Kenny logged in from home (pc and Android) with Access and a passkey; 4G is refused |
+| read | Alles lezen | feat-overview-1, feat-overview-2, feat-overview-3, feat-overview-4, feat-overview-8, feat-stacks-1, feat-ops-1, feat-ops-2, feat-ops-3, feat-ops-4, feat-ops-7, feat-settings-2 | **in progress**: overview, stack, activity, checks and doctor pages built 2026-09-28 |
 | act | Alle acties | feat-stacks-4, feat-ops-6, feat-stacks-5, feat-stacks-6, feat-stacks-7, feat-stacks-8, feat-overview-5, feat-ops-8, feat-ops-9 | not started |
 | edit | Wijzigen in de browser | feat-stacks-2, feat-stacks-3, feat-firewall-1, feat-firewall-2, feat-settings-1 | not started |
+| follow | Claude's actions play out in the open dashboard | feat-platform-10 | not started (added 2026-09-28 after the freeze) |
 | backup-secrets | Back-ups en geheimen | feat-backup-1, feat-backup-2, feat-backup-3, feat-secrets-1, feat-secrets-2 | not started |
 | visuals | De visualisaties | feat-overview-6, feat-overview-7, feat-overview-10, feat-overview-11, feat-overview-12, feat-ops-10, feat-ops-11, feat-stacks-9, feat-stacks-10, feat-firewall-3 | not started |
 | release | Release, updates en de TUI afbouwen | feat-platform-8, feat-ops-5, feat-overview-9 | not started |
@@ -90,6 +91,14 @@ De back-uppagina, restore met snapshotkeuze, bladeren in een snapshot (Gewenst),
 - Features: feat-backup-1 (Back-uppagina); feat-backup-2 (Restore met snapshotkeuze); feat-backup-3 (In een snapshot bladeren, één bestand terugzetten); feat-secrets-1 (Geheim tijdelijk tonen); feat-secrets-2 (Geheim wijzigen via latch)
 - Exit: Een restore van één stack naar een gekozen snapshot slaagt vanuit de browser; tonen laat een auditregel op de host na; wijzigen van één .env laat de andere bestanden in latch ongemoeid.
 - Why here: Geheimen wijzigen wacht op een latch-release; de rest van deze mijlpaal niet.
+
+### follow · Claude-acties zichtbaar in het open dashboard
+
+Toegevoegd na de bevriezing (mini-ronde 2026-09-28). De host meldt elke operatie met de tokennaam die ze startte en de waarden van het commando; het dashboard speelt een operatie van een andere sessie af alsof iemand de pagina bedient: navigeren, de wizard openen, velden letter per letter invullen, een zichtbare klik, daarna de live voortgang. Elke wizard is één keer als data beschreven en stuurt zowel Kenny's eigen klikken als het afspelen.
+
+- Features: feat-platform-10 (Claude-acties zichtbaar in het open dashboard)
+- Exit: Claude start via de CLI een deploy van een stack; een open tab op pc en Android toont zonder klik van Kenny elke stap, tot "deploy complete", en stuurt zelf geen commando; getest in Playwright.
+- Why here: De wizards ontstaan in act en edit; pas daarna is er iets om af te spelen.
 
 ### visuals · De visualisaties
 

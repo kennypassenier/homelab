@@ -139,3 +139,22 @@ fn arch_exposure_the_signature_is_checked_against_the_key() {
         Err(Refusal::BadSignature)
     );
 }
+
+/// Kenny, 2026-09-28: a refusal is the kp-themes Alarm. The page carries the
+/// alarm's words as data for the module and as plain text without it, all
+/// escaped.
+#[test]
+fn arch_exposure_a_refusal_is_an_alarm_page_with_escaped_words() {
+    use homelab_admin::core::access::refusal_page;
+    let page = refusal_page(&Refusal::NotFromHome {
+        from: "178.1.2.3<script>".into(),
+    });
+    assert!(page.contains("/static/kp/dist/kp-themes.css"));
+    assert!(page.contains("src=\"/refused.js\""));
+    assert!(page.contains("data-title=\"Not from home\""));
+    assert!(page.contains("178.1.2.3&lt;script&gt;") && !page.contains("<script>\""));
+    assert!(
+        !page.contains("178.1.2.3<script>"),
+        "the address is escaped"
+    );
+}

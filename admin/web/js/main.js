@@ -1,109 +1,94 @@
-// The fleet page (skeleton): first paint from /data/fleet, then live over
-// SSE. A `resync` (the browser fell behind, or reconnected) refetches.
+// The dashboard shell (arch-frontend): the navigation bar, the history-API
+// router and the one store. Each page is its own module with a `mount`
+// that returns its cleanup; chassis answers index.html for every
+// extensionless path under /app/, so a deep link lands here too.
 
-import { gb, humanMb, measuredAgo, stackState } from "./fleet.js";
-import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import { h } from "./dom.js";
+import { navEntries, pageTitle, route } from "./router.js";
+import { current, start, subscribe } from "./store.js";
+import { mount as activity } from "./pages/activity.js";
+import { mount as checks } from "./pages/checks.js";
+import { mount as doctor } from "./pages/doctor.js";
+import { mount as overview } from "./pages/overview.js";
+import { mount as stack } from "./pages/stack.js";
 
-/** @type {any} */
-let fleet = null;
+const page = /** @type {HTMLElement} */ (document.getElementById("page"));
+const nav = /** @type {HTMLElement} */ (document.getElementById("nav"));
+const link = /** @type {HTMLElement} */ (document.getElementById("link"));
 
-attachDataTables(document);
-/** @type {ReturnType<typeof dataTable>} */
-const table = dataTable(
-  /** @type {Element} */ (document.querySelector("[data-kp-datatable]")),
-);
+/** @type {() => void} */
+let cleanup = () => {};
 
-/** @param {string} id */
-const el = (id) => /** @type {HTMLElement} */ (document.getElementById(id));
-
-/**
- * @param {string} tag
- * @param {string} text
- * @param {string} [cls]
- */
-function cell(tag, text, cls) {
-  const c = document.createElement(tag);
-  c.textContent = text;
-  if (cls) c.className = cls;
-  return c;
-}
-
-/** @param {{label: string, tone: string}} st */
-function stateCell(st) {
-  const td = document.createElement("td");
-  td.className = `state ${st.tone}`;
-  td.append(cell("span", st.label));
-  return td;
+/** @param {string} href */
+function navigate(href) {
+  if (href === location.pathname) return;
+  history.pushState(null, "", href);
+  render();
 }
 
 function render() {
-  if (!fleet) return;
-  const h = fleet.host;
-  el("host").textContent =
-    `${h.name} · cpu ${h.cpu_pct}% · ram ${humanMb(h.ram_used_mb)} of ${humanMb(h.ram_total_mb)} · disk ${h.disk_pct}% · ` +
-    `${fleet.counts.online}/${fleet.counts.stacks} online, ${fleet.counts.parked} parked`;
-  const rows = fleet.stacks.map((/** @type {any} */ s) => {
-    const tr = document.createElement("tr");
-    const st = stackState(s);
-    tr.append(
-      cell("td", String(s.vmid), "num"),
-      cell("td", s.name),
-      stateCell(st),
-      cell("td", String(s.apps_running), "num"),
-      cell("td", String(s.apps_total), "num"),
-      cell("td", String(s.restarts ?? 0), "num"),
-      cell("td", gb(s.ram_used_mb), "num"),
-      cell("td", gb(s.ram_max_mb), "num"),
-    );
-    return tr;
-  });
-  el("stacks").replaceChildren(...rows);
-  // The table sorts the rows it holds; new rows are read again and put in
-  // the reader's order.
-  table?.refresh();
-  tickMeasured();
-}
-
-function tickMeasured() {
-  if (fleet)
-    el("measured").textContent = measuredAgo(
-      fleet.measured_at,
-      Date.now() / 1000,
-    );
-}
-
-/** @param {boolean} up @param {string} [text] */
-function setLink(up, text) {
-  const l = el("link");
-  l.textContent = text ?? (up ? "host link up" : "host link down");
-  l.dataset.up = String(up);
-}
-
-async function load() {
-  const r = await fetch("/data/fleet", {
-    headers: { accept: "application/json" },
-  });
-  if (!r.ok) {
-    setLink(false, `could not read the fleet (${r.status})`);
-    return;
+  cleanup();
+  cleanup = () => {};
+  const r = route(location.pathname);
+  document.title = pageTitle(r);
+  nav.replaceChildren(
+    ...navEntries(r).map((n) => {
+      /** @type {Record<string, string>} */
+      const a = { class: "kp-nav__link", href: n.href };
+      if (n.current) a["aria-current"] = "page";
+      return h("li", null, h("a", a, n.label));
+    }),
+  );
+  switch (r.page) {
+    case "overview":
+      cleanup = overview(page, { navigate });
+      break;
+    case "stack":
+      cleanup = stack(page, { name: r.name });
+      break;
+    case "activity":
+      cleanup = activity(page);
+      break;
+    case "checks":
+      cleanup = checks(page);
+      break;
+    case "doctor":
+      cleanup = doctor(page);
+      break;
+    default:
+      page.replaceChildren(
+        h("h1", null, "Not found"),
+        h(
+          "p",
+          null,
+          `There is no page at ${r.path}. `,
+          h("a", { href: "/app/" }, "Go to the overview"),
+        ),
+      );
   }
-  const body = await r.json();
-  fleet = body.fleet;
-  if (body.link_error) setLink(false, `host link down: ${body.link_error}`);
-  else if (body.host_version) setLink(true, `host ${body.host_version}`);
-  render();
+  window.scrollTo(0, 0);
 }
 
-const events = new EventSource("/events");
-events.addEventListener("fleet", (e) => {
-  fleet = JSON.parse(/** @type {MessageEvent} */ (e).data).fleet;
-  render();
+// Same-origin links under /app/ stay in the page; a modified click (new
+// tab, download) is the browser's.
+document.addEventListener("click", (e) => {
+  if (e.defaultPrevented || e.button !== 0) return;
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = /** @type {Element} */ (e.target).closest("a");
+  if (!a || a.target || a.hasAttribute("download")) return;
+  const url = new URL(a.href, location.href);
+  if (url.origin !== location.origin || !url.pathname.startsWith("/app/"))
+    return;
+  if (/\.[a-z0-9]+$/i.test(url.pathname)) return;
+  e.preventDefault();
+  navigate(url.pathname);
 });
-events.addEventListener("link", (e) => {
-  const d = JSON.parse(/** @type {MessageEvent} */ (e).data);
-  setLink(d.up, d.up ? `host ${d.host_version}` : `host link down: ${d.error}`);
-});
-events.addEventListener("resync", () => void load());
+window.addEventListener("popstate", render);
 
-setInterval(tickMeasured, 1000);
-void load();
+subscribe(() => {
+  const s = current();
+  link.textContent = s.link;
+  link.dataset.up = String(s.up);
+});
+start();
+render();

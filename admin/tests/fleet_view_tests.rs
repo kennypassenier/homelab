@@ -41,6 +41,13 @@ fn feat_overview_1_stacks_come_sorted_by_vmid_with_counts() {
     assert_eq!(v.stacks[0].apps_total, 2);
     assert_eq!(v.measured_at, 1_000);
     assert_eq!(v.host.ram_used_mb, 17000);
+    // feat-stacks-1: the stack page reads its apps from the same view.
+    let names: Vec<&str> = v.stacks[0].apps.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, vec!["a0", "a1"]);
+    assert!(!v.stacks[0].apps[1].running);
+    assert_eq!(v.stacks[0].hostname, "gateway");
+    assert_eq!(v.stacks[0].uptime_s, None);
+    assert_eq!(v.stacks[0].applied_source, None);
 }
 
 #[test]

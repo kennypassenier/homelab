@@ -1,0 +1,144 @@
+// Activity (feat-ops-1, feat-ops-7): the incident bundles and what the
+// host did in the last fourteen days.
+
+import { historyRows, incidentRows } from "../activity.js";
+import { badgeCell, errorBox, fetchReport, h, tableBlock, td } from "../dom.js";
+import { formatTime, humanDuration } from "../format.js";
+import { sortKeys } from "../sortkeys.js";
+import {
+  attachDataTables,
+  compare,
+  dataTable,
+} from "/static/kp/js/datatable.js";
+
+const DAYS = 14;
+
+/**
+ * @param {HTMLElement} root
+ * @returns {() => void}
+ */
+export function mount(root) {
+  const keys = sortKeys();
+  /** @param {number | null} unix */
+  const time = (unix) =>
+    unix == null ? "—" : keys.note("time", formatTime(unix), unix);
+  const inc = tableBlock({
+    remember: "incidents",
+    caption: "Incidents",
+    search: "Search incidents",
+    state: "loading",
+    columns: [
+      { label: "When", sort: "time" },
+      { label: "Operation", sort: "text" },
+      { label: "Bundle", sort: "text" },
+    ],
+  });
+  const hist = tableBlock({
+    remember: "history",
+    caption: `History, last ${DAYS} days`,
+    search: "Search history",
+    state: "loading",
+    columns: [
+      { label: "Started", sort: "time" },
+      { label: "What", sort: "text" },
+      { label: "Took", sort: "duration" },
+      {
+        label: "Outcome",
+        sort: "text",
+        order: "failed,running,deferred,ok,done",
+        filter: "choice",
+      },
+      { label: "By", sort: "text", filter: "choice" },
+      { label: "Detail", sort: "text" },
+    ],
+  });
+  const incErr = h("div");
+  const histErr = h("div");
+  root.replaceChildren(
+    h("h1", null, "Activity"),
+    h("h2", null, "Incidents"),
+    incErr,
+    inc.wrap,
+    h("h2", null, "History"),
+    histErr,
+    hist.wrap,
+  );
+  const detach = attachDataTables(root, { compare: keys.compare(compare) });
+  const incTable = dataTable(inc.wrap);
+  const histTable = dataTable(hist.wrap);
+  const abort = new AbortController();
+
+  const loadIncidents = async () => {
+    incTable?.state("loading");
+    const r = await fetchReport(
+      "/data/incidents",
+      "the incidents",
+      abort.signal,
+    );
+    if (!r.ok) {
+      incErr.replaceChildren(errorBox(r.error));
+      incTable?.state("failed");
+      return;
+    }
+    incErr.replaceChildren();
+    const names = /** @type {string[]} */ (r.report?.incidents ?? []);
+    inc.tbody.replaceChildren(
+      ...incidentRows(names).map((x) =>
+        h("tr", null, td(time(x.at)), td(x.op), td(x.name, "mono")),
+      ),
+    );
+    incTable?.refresh();
+    incTable?.state("ready");
+  };
+
+  const loadHistory = async () => {
+    histTable?.state("loading");
+    const since = Math.floor(Date.now() / 1000) - DAYS * 86400;
+    const r = await fetchReport(
+      `/data/history?since=${since}`,
+      "the history",
+      abort.signal,
+    );
+    if (!r.ok) {
+      histErr.replaceChildren(errorBox(r.error));
+      histTable?.state("failed");
+      return;
+    }
+    histErr.replaceChildren();
+    const entries = r.report?.entries ?? [];
+    hist.tbody.replaceChildren(
+      ...historyRows(entries).map((x) =>
+        h(
+          "tr",
+          null,
+          td(time(x.start)),
+          td(x.what),
+          td(
+            x.took == null
+              ? "—"
+              : keys.note("duration", humanDuration(x.took), x.took),
+            "num",
+          ),
+          badgeCell(x.outcome),
+          td(x.by),
+          td(x.detail),
+        ),
+      ),
+    );
+    histTable?.refresh();
+    histTable?.state("ready");
+  };
+
+  const retry = (/** @type {Event} */ e) => {
+    if (inc.wrap.contains(/** @type {Node} */ (e.target))) void loadIncidents();
+    else void loadHistory();
+  };
+  root.addEventListener("kp-datatable-retry", retry);
+  void loadIncidents().catch(() => {});
+  void loadHistory().catch(() => {});
+  return () => {
+    abort.abort();
+    root.removeEventListener("kp-datatable-retry", retry);
+    detach();
+  };
+}

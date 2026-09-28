@@ -1,33 +1,75 @@
 /* Layout only; colours and type come from kp-themes' tokens. */
 .shell {
-  max-width: 960px;
+  max-width: 1100px;
   margin: 0 auto;
   padding-inline: 16px;
   padding-block: 16px 48px;
 }
-.bar {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+.kp-nav .link {
+  margin: 0 0 0 auto;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
 }
 .link[data-up="false"] {
   color: var(--destructive);
 }
-.fleet {
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.title-row .kp-button {
+  margin-inline-start: auto;
+}
+.crumb {
+  margin: 0 0 4px;
+  font-size: 0.9em;
+}
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.facts dt {
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+}
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.kp-card {
+  margin-block: 12px;
+}
+.grid {
   width: 100%;
   border-collapse: collapse;
   margin-block: 12px;
 }
-.fleet th,
-.fleet td {
+.grid th,
+.grid td {
   text-align: left;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.grid .wide {
+  min-width: 18em;
+}
+.link-row {
+  cursor: pointer;
+}
+.link-row:hover td {
+  background: var(--muted);
 }
 .num {
   font-variant-numeric: tabular-nums;
+}
+.mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85em;
 }
 .state {
   font-size: 0.85em;
@@ -35,6 +77,7 @@
 .state span {
   padding: 2px 8px;
   border-radius: 999px;
+  white-space: nowrap;
 }
 .state.ok span {
   background: var(--success);
@@ -47,6 +90,9 @@
 .state.bad span {
   background: var(--destructive);
   color: var(--destructive-foreground);
+}
+.error p {
+  margin: 4px 0 0;
 }
 .measured {
   color: var(--muted-foreground);

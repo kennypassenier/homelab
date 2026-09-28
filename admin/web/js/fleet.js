@@ -1,10 +1,19 @@
 // Pure view-model functions for the fleet page (arch-frontend): no DOM, no
 // clock of their own, so `node --test` can drive them.
 
+import { humanDuration } from "./format.js";
+
 /**
+ * @typedef {{name: string, running: boolean, restarts: number}} App
  * @typedef {{name: string, vmid: number, online: boolean, enabled: boolean,
  *   apps_running: number, apps_total: number, restarts?: number,
- *   ram_used_mb?: number | null, ram_max_mb?: number | null}} Stack
+ *   ram_used_mb?: number | null, ram_max_mb?: number | null,
+ *   hostname?: string, apps?: App[], uptime_s?: number | null,
+ *   applied_source?: string | null}} Stack
+ * @typedef {{name: string, cpu_pct: number, ram_used_mb: number,
+ *   ram_total_mb: number, disk_pct: number}} Host
+ * @typedef {{measured_at: number, host: Host, stacks: Stack[],
+ *   counts: {stacks: number, online: number, parked: number}}} Fleet
  */
 
 /**
@@ -63,4 +72,64 @@ export function humanMb(mb) {
 export function gb(mb) {
   if (mb == null) return "—";
   return (mb / 1024).toFixed(1);
+}
+
+/**
+ * The host card on the overview: label and value pairs.
+ * @param {Fleet} fleet
+ * @returns {{label: string, value: string}[]}
+ */
+export function hostCard(fleet) {
+  const h = fleet.host;
+  const c = fleet.counts;
+  return [
+    { label: "Host", value: h.name },
+    { label: "CPU", value: `${h.cpu_pct}%` },
+    {
+      label: "RAM",
+      value: `${humanMb(h.ram_used_mb)} of ${humanMb(h.ram_total_mb)}`,
+    },
+    { label: "Disk", value: `${h.disk_pct}% used` },
+    { label: "Stacks online", value: `${c.online} of ${c.stacks}` },
+    { label: "Parked", value: String(c.parked) },
+  ];
+}
+
+/**
+ * One stack's page (feat-stacks-1, first cut), from the fleet snapshot.
+ * @param {Fleet | null} fleet
+ * @param {string} name
+ */
+export function stackDetail(fleet, name) {
+  const s = fleet?.stacks.find((x) => x.name === name);
+  if (!s) return null;
+  const ram =
+    s.ram_used_mb == null
+      ? "not measured yet"
+      : `${humanMb(s.ram_used_mb)} of ${humanMb(s.ram_max_mb)}`;
+  return {
+    name: s.name,
+    state: stackState(s),
+    facts: [
+      { label: "vmid", value: String(s.vmid) },
+      { label: "Hostname", value: s.hostname || "—" },
+      { label: "Apps running", value: `${s.apps_running} of ${s.apps_total}` },
+      { label: "RAM", value: ram },
+      {
+        label: "Up for",
+        value:
+          s.uptime_s == null ? "not measured yet" : humanDuration(s.uptime_s),
+      },
+      {
+        label: "Deployed from",
+        value: s.applied_source || "not recorded",
+      },
+    ],
+    apps: (s.apps ?? []).map((a) => ({
+      name: a.name,
+      running: a.running ? "running" : "stopped",
+      tone: a.running ? "ok" : "bad",
+      restarts: String(a.restarts),
+    })),
+  };
 }

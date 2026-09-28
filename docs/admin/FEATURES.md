@@ -95,3 +95,11 @@ Note 2026-09-28 11:23 (relayed from the chassis-rs thread): feat-platform-5
 Measured there: kyu-runner's release binary is 10,813,496 bytes before and
 after (the no-bloat success criterion holds). Until the release, the admin
 crate can build against a path dependency on ~/Projects/chassis-rs.
+
+## Added after the freeze (mini-round, 2026-09-28 16:29)
+
+| ID | Feature | Proposed rating | Rating |
+|---|---|---|---|
+| feat-platform-10 | Claude's actions play out in the open dashboard: navigation, wizards, fields typed in, every "click", then the live progress | — | **Essential** |
+
+Kenny's own answer: Claude does not literally click on the website, "maar ik wil wel alsof het zo lijkt. Als ik op de website ben en ik vraag aan claude om iets te doen in het project, dan moet ik elke stap kunnen volgen, tot het invullen van forms en alle zogenaamde kliks".

@@ -454,7 +454,7 @@ impl Model {
             self.reveal_start = self.tick;
             self.flicker = 4;
             if tab == Tab::Doctor {
-                self.outbox.push(Command::Doctor);
+                self.outbox.push(Command::Doctor { json: false });
             }
             if tab == Tab::Settings && self.settings.is_none() {
                 self.outbox.push(Command::GetConfig);
@@ -991,7 +991,7 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                     ok: false,
                     result: String::new(),
                 });
-                model.outbox.push(Command::Incidents);
+                model.outbox.push(Command::Incidents { json: false });
             }
             KeyCode::Char('e') => ask_park(model),
             KeyCode::Char('p') => open_plan(model),
@@ -1031,7 +1031,7 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         },
         Tab::Doctor => {
             if matches!(key.code, KeyCode::Char('r') | KeyCode::Enter) {
-                model.outbox.push(Command::Doctor);
+                model.outbox.push(Command::Doctor { json: false });
             }
         }
         Tab::Settings => settings_key(model, key),
@@ -1298,7 +1298,7 @@ fn run_action(model: &mut Model, id: &str) {
         }
         "doctor" => {
             model.switch_tab(Tab::Doctor);
-            model.outbox.push(Command::Doctor);
+            model.outbox.push(Command::Doctor { json: false });
         }
         "op.backup" => start_stack_op(model, StackOp::Backup),
         "op.update" => start_stack_op(model, StackOp::Update),
@@ -1335,7 +1335,7 @@ fn run_action(model: &mut Model, id: &str) {
                 ok: false,
                 result: String::new(),
             });
-            model.outbox.push(Command::Incidents);
+            model.outbox.push(Command::Incidents { json: false });
         }
         "fx" => model.fx = model.fx.cycle(),
         "help" => model.help_open = true,
@@ -1827,6 +1827,7 @@ fn start_fleet_check(model: &mut Model) {
     model.outbox.push(Command::FleetCheck {
         stack_files,
         digests: vec![],
+        json: false,
     });
 }
 

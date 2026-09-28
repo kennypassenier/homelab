@@ -503,6 +503,19 @@ it runs. The single `token` keeps working as scope `all` under the name
 digest that is not 64 lowercase hex characters) stops the host at start.
 Tests: `host/src/main.rs` (`arch_tokens_*`), `proto/tests/scope_tests.rs`.
 
+#### feat-platform-1 · Reports as JSON
+
+**Status:** Built (homelab-admin `host` milestone, 2026-09-28), for doctor,
+the fleet check, the incident list and the manual checks.
+
+`Doctor`, `FleetCheck`, `Incidents` and `ListManualChecks` take `json: true`
+and then answer JSON in `RpcResponse.message` instead of text: doctor
+`{overall, checks}`, the fleet check `{passes, findings}`, incidents
+`{incidents}`, manual checks `{now, checks: [{id, record}]}`. The CLI and TUI
+never send the flag, and `json: false` is never written, so their requests are
+exactly what an older host reads. Tests: `proto/tests/scope_tests.rs`,
+`host/src/main.rs` (`feat_platform_1_reports_answer_json_when_asked`).
+
 #### feat-platform-2 · Real status per container
 
 **Status:** Built (homelab-admin `host` milestone, 2026-09-28).

@@ -17,8 +17,8 @@ pub fn mutates(c: &Command) -> bool {
         c,
         Command::Ping
             | Command::Status
-            | Command::Doctor
-            | Command::Incidents
+            | Command::Doctor { .. }
+            | Command::Incidents { .. }
             | Command::GetState
             // The remedy the refusal names. Blocking it turns the guard into
             // a trap: the first live run of this check refused

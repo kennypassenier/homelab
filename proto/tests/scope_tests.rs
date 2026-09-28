@@ -59,3 +59,15 @@ fn arch_tokens_a_scope_reads_as_written_in_host_toml() {
     let s: Scope = serde_json::from_str("\"operate\"").unwrap();
     assert_eq!(s, Scope::Operate);
 }
+
+/// feat-platform-1: the CLI's requests stay byte-for-byte what an older host
+/// reads, because `json: false` is never written.
+#[test]
+fn feat_platform_1_a_text_request_carries_no_json_key() {
+    let v = serde_json::to_value(Command::Doctor { json: false }).unwrap();
+    assert_eq!(v, serde_json::json!({ "cmd": "doctor" }));
+    let v = serde_json::to_value(Command::Incidents { json: true }).unwrap();
+    assert_eq!(v, serde_json::json!({ "cmd": "incidents", "json": true }));
+    let old: Command = serde_json::from_str(r#"{"cmd":"list_manual_checks"}"#).unwrap();
+    assert!(matches!(old, Command::ListManualChecks { json: false }));
+}

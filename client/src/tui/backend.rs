@@ -242,7 +242,7 @@ impl Backend for DemoBackend {
                             Some(Command::GetState) => {
                                 let _ = evt_tx.send(BackendEvent::Server(demo_fleet())).await;
                             }
-                            Some(Command::Doctor) => {
+                            Some(Command::Doctor { .. }) => {
                                 let _ = evt_tx.send(BackendEvent::Server(ServerMsg::RpcDone(
                                     homelab_proto::RpcResponse {
                                         id: 0,

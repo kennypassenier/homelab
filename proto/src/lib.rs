@@ -45,9 +45,21 @@ pub enum Command {
         binary_b64: String,
     },
     /// F6: self-diagnosis checks.
-    Doctor,
+    Doctor {
+        /// feat-platform-1 (homelab-admin, 2026-09-28): answer JSON instead
+        /// of text. Never sent as false, so an older host reads the CLI's
+        /// request unchanged.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        json: bool,
+    },
     /// AR14: list captured incident bundles.
-    Incidents,
+    Incidents {
+        /// feat-platform-1 (homelab-admin, 2026-09-28): answer JSON instead
+        /// of text. Never sent as false, so an older host reads the CLI's
+        /// request unchanged.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        json: bool,
+    },
     /// fix-131: one bundle, readable from the workstation: the error, the
     /// versions and the end of the transcript. `name` is a directory name
     /// from `Incidents`.
@@ -266,6 +278,11 @@ pub enum Command {
         /// what the host last applied. Empty from an older client.
         #[serde(default)]
         digests: Vec<homelab_core::ops::fleetcheck::StackDigest>,
+        /// feat-platform-1 (homelab-admin, 2026-09-28): answer JSON instead
+        /// of text. Never sent as false, so an older host reads the CLI's
+        /// request unchanged.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        json: bool,
     },
     /// fix-68: doctor, the fleet check (with its manual checks) and the open
     /// incident bundles as one list and one verdict. The reply's message is
@@ -292,7 +309,13 @@ pub enum Command {
     BackupDevices,
     /// G17: the questions only a person can answer, as the host has them on
     /// record. Read-only; the deploy is what puts them there.
-    ListManualChecks,
+    ListManualChecks {
+        /// feat-platform-1 (homelab-admin, 2026-09-28): answer JSON instead
+        /// of text. Never sent as false, so an older host reads the CLI's
+        /// request unchanged.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        json: bool,
+    },
     /// G17: one person's answer to one of those questions.
     ///
     /// `check_id`, not `id`: `RpcRequest` flattens this enum into the same
@@ -368,8 +391,8 @@ impl Command {
         match self {
             Ping
             | Status
-            | Doctor
-            | Incidents
+            | Doctor { .. }
+            | Incidents { .. }
             | IncidentShow { .. }
             | GetState
             | ListTemplates
@@ -377,7 +400,7 @@ impl Command {
             | GetConfig
             | FleetCheck { .. }
             | Today { .. }
-            | ListManualChecks
+            | ListManualChecks { .. }
             | SessionOptions { .. }
             | CurrentOp => Scope::Read,
             DeployStack(_)
@@ -421,8 +444,8 @@ impl Command {
             Status => "status",
             DeployStack(_) => "deploy_stack",
             StageNativeBinary { .. } => "stage_native_binary",
-            Doctor => "doctor",
-            Incidents => "incidents",
+            Doctor { .. } => "doctor",
+            Incidents { .. } => "incidents",
             IncidentShow { .. } => "incident_show",
             GetState => "get_state",
             DestroyStack { .. } => "destroy_stack",
@@ -456,7 +479,7 @@ impl Command {
             Today { .. } => "today",
             SetStackEnabled { .. } => "set_stack_enabled",
             BackupDevices => "backup_devices",
-            ListManualChecks => "list_manual_checks",
+            ListManualChecks { .. } => "list_manual_checks",
             AnswerManualCheck { .. } => "answer_manual_check",
             SessionOptions { .. } => "session_options",
             CurrentOp => "current_op",
@@ -689,7 +712,7 @@ mod wire_tests {
                 note: String::new(),
                 accept_days: None,
             },
-            Command::ListManualChecks,
+            Command::ListManualChecks { json: false },
             Command::SetStackEnabled {
                 stack: "home".into(),
                 enabled: true,

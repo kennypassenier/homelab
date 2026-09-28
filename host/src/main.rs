@@ -1758,6 +1758,48 @@ port = 5003
         assert_eq!(view.lines.len(), 1);
     }
 
+    /// feat-platform-1: asked for JSON, the incident list and the manual
+    /// checks answer JSON; asked for text, the text stays as it was.
+    #[tokio::test]
+    async fn feat_platform_1_reports_answer_json_when_asked() {
+        let dir = std::env::temp_dir().join(format!("homelab-json-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("incidents/1800000000-deploy-media")).unwrap();
+        let state = test_state(config_from_text(&format!(
+            "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+            dir.display()
+        )));
+        let r = handle_rpc(
+            &state,
+            RpcRequest {
+                id: 1,
+                command: Rpc::Incidents { json: true },
+            },
+        )
+        .await;
+        let v: serde_json::Value = serde_json::from_str(&r.message).unwrap();
+        assert_eq!(v["incidents"][0], "1800000000-deploy-media");
+        let r = handle_rpc(
+            &state,
+            RpcRequest {
+                id: 2,
+                command: Rpc::Incidents { json: false },
+            },
+        )
+        .await;
+        assert!(r.message.starts_with("incidents:"), "{}", r.message);
+        let r = handle_rpc(
+            &state,
+            RpcRequest {
+                id: 3,
+                command: Rpc::ListManualChecks { json: true },
+            },
+        )
+        .await;
+        let v: serde_json::Value = serde_json::from_str(&r.message).unwrap();
+        assert!(v["checks"].is_array() && v["now"].is_u64(), "{}", r.message);
+    }
+
     // ── arch-tokens and arch-host-link (homelab-admin, 2026-09-28) ──────
 
     fn sha_hex(t: &str) -> String {
@@ -6648,6 +6690,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         Rpc::FleetCheck {
             stack_files,
             digests,
+            json,
         } => {
             let mut live = gather_live_facts(&exec, state, &stack_files).await;
             // fix-142: what the client's files say, for the repository comparison.
@@ -6680,7 +6723,15 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             RpcResponse {
                 id: req.id,
                 ok: homelab_core::ops::fleetcheck::check_passes(&findings),
-                message: render_findings(&findings),
+                message: if json {
+                    serde_json::json!({
+                        "passes": homelab_core::ops::fleetcheck::check_passes(&findings),
+                        "findings": findings,
+                    })
+                    .to_string()
+                } else {
+                    render_findings(&findings)
+                },
                 deferred: None,
             }
         }
@@ -6794,7 +6845,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
-        Rpc::ListManualChecks => {
+        Rpc::ListManualChecks { json } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let st = store.load().await.unwrap_or_default();
             let rows = homelab_core::ops::manualchecks::listing(&st);
@@ -6805,7 +6856,18 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             RpcResponse {
                 id: req.id,
                 ok: true,
-                message: homelab_core::ops::manualchecks::render_listing(&rows, now),
+                message: if json {
+                    serde_json::json!({
+                        "now": now,
+                        "checks": rows
+                            .iter()
+                            .map(|(id, rec)| serde_json::json!({ "id": id, "record": rec }))
+                            .collect::<Vec<_>>(),
+                    })
+                    .to_string()
+                } else {
+                    homelab_core::ops::manualchecks::render_listing(&rows, now)
+                },
                 deferred: None,
             }
         }
@@ -7097,7 +7159,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             })
             .await
         }
-        Rpc::Doctor => {
+        Rpc::Doctor { json } => {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -7114,6 +7176,15 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             gather_security_probes(&exec, &ProbeContext::of(&state.config), now, &mut probes).await;
             let checks = homelab_core::doctor::diagnose(&probes);
             let overall = homelab_core::doctor::overall(&checks);
+            if json {
+                return RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: serde_json::json!({ "overall": overall, "checks": checks })
+                        .to_string(),
+                    deferred: None,
+                };
+            }
             let mut msg = format!("doctor: {:?}\n", overall);
             for c in &checks {
                 msg.push_str(&format!("  [{:?}] {} — {}\n", c.health, c.name, c.detail));
@@ -7257,7 +7328,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
-        Rpc::Incidents => {
+        Rpc::Incidents { json } => {
             let dir = format!("{}/incidents", state.config.state_dir);
             let list = std::fs::read_dir(&dir)
                 .map(|rd| {
@@ -7272,7 +7343,9 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             RpcResponse {
                 id: req.id,
                 ok: true,
-                message: if list.is_empty() {
+                message: if json {
+                    serde_json::json!({ "incidents": list }).to_string()
+                } else if list.is_empty() {
                     "no incidents recorded".into()
                 } else {
                     format!("incidents:\n  {}", list.join("\n  "))

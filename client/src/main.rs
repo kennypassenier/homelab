@@ -455,6 +455,7 @@ async fn run(explicit_host: Option<String>) {
                 &host,
                 &token,
                 Command::FleetCheck {
+                    json: false,
                     stack_files,
                     digests,
                 },
@@ -603,7 +604,9 @@ async fn run(explicit_host: Option<String>) {
         // records one. They used to be printed at the end of a deploy and
         // stored nowhere, which is not asking anybody anything.
         "checks" => match args.get(2).map(|s| s.as_str()) {
-            None | Some("list") => rpc(&host, &token, Command::ListManualChecks).await,
+            None | Some("list") => {
+                rpc(&host, &token, Command::ListManualChecks { json: false }).await
+            }
             Some("answer") => {
                 let id = args
                     .get(3)
@@ -908,11 +911,11 @@ async fn run(explicit_host: Option<String>) {
             }
         }
         "status" => rpc(&host, &token, Command::Status).await,
-        "doctor" => rpc(&host, &token, Command::Doctor).await,
+        "doctor" => rpc(&host, &token, Command::Doctor { json: false }).await,
         // fix-131: `incidents show <name>` reads one bundle; it took a root
         // shell on pve before.
         "incidents" => match (args.get(2).map(String::as_str), args.get(3)) {
-            (None, _) => rpc(&host, &token, Command::Incidents).await,
+            (None, _) => rpc(&host, &token, Command::Incidents { json: false }).await,
             (Some("show"), Some(name)) => {
                 rpc(&host, &token, Command::IncidentShow { name: name.clone() }).await
             }

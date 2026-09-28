@@ -1596,7 +1596,7 @@ fn a_host_that_is_behind_is_recognised_as_behind() {
     // mismatch can be diagnosed.
     assert!(!mutates(&Command::Ping));
     assert!(!mutates(&Command::Status));
-    assert!(!mutates(&Command::Doctor));
+    assert!(!mutates(&Command::Doctor { json: false }));
     assert!(mutates(&Command::ForgetStack { stack: "x".into() }));
 
     // The remedy must never be blocked by the guard that names it. The first

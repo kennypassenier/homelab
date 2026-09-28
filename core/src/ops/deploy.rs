@@ -1197,6 +1197,29 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         })
     });
 
+    // fix-154 (2026-09-28 07:09, the Debian 13 rebuild of kp-soft): Proxmox
+    // drops a vmid's firewall file when it creates that vmid, so the file
+    // written above, before the container existed, was gone once `pct clone`
+    // had made it — CT 116 came up with `firewall=1` and no rules. A new
+    // container gets the file written again, now that it exists.
+    if !exists {
+        if let Some(fwspec) = m.firewall.as_ref().filter(|f| f.enabled) {
+            step!(runner, exec, ctx, m, "firewall after create", {
+                let path = crate::firewall::fw_path(m.vmid);
+                let body = crate::firewall::render(&m.stack_name, fwspec);
+                // Unconditionally: what pmxcfs reports for a vmid it has just
+                // created is not something to compare against.
+                exec.write_file(&path, &body, 0o640).await?;
+                log_info(format!(
+                    "[firewall] {} written again after the container was created (creating a \
+                     vmid removes its firewall file)",
+                    path
+                ));
+                Ok(StepOutcome::Changed)
+            });
+        }
+    }
+
     step!(runner, exec, ctx, m, "wait for systemd", {
         let mut ready = false;
         for _ in 0..30 {

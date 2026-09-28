@@ -526,6 +526,47 @@ async fn a_new_container_is_created_behind_its_firewall() {
     assert_eq!(writes_to(&exec, &fw_path(116)), 0);
 }
 
+/// fix-154 (2026-09-28 07:09, the Debian 13 rebuild of kp-soft): the file
+/// written before the container existed was gone once `pct clone` had made
+/// CT 116 — Proxmox drops a vmid's firewall file when it creates that vmid —
+/// so the one container strangers reach came up with `firewall=1` on its NIC
+/// and no rules at all. The file is written again after the container is
+/// created, and the transcript says so.
+/// covers: fix-154
+#[tokio::test]
+async fn fix_154_the_firewall_is_written_again_after_the_container_is_created() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.enqueue("pct config", CmdOutput::failed(2, "does not exist"));
+    exec.enqueue("pct status", CmdOutput::ok("status: stopped"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("ps --status running --services", CmdOutput::ok("kp-soft\n"));
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let report = deploy(
+        &ctx(&exec, &sink, &NullJournal),
+        &spec(116, "kp-soft", Some(fw(KP_SOFT_116))),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let calls = exec.calls();
+    let create = calls
+        .iter()
+        .position(|c| c.contains("pct create 116"))
+        .expect("the container is created");
+    let after = calls[create..]
+        .iter()
+        .any(|c| c.starts_with(&format!("write_file {} ", fw_path(116))));
+    assert!(after, "no firewall write after the create: {:?}", calls);
+    assert!(
+        lines(&sink)
+            .iter()
+            .any(|l| l.contains("[firewall]") && l.contains("after the container was created")),
+        "{:?}",
+        lines(&sink)
+    );
+}
+
 /// An existing container whose NIC has the flag off gets it switched on, with
 /// every other part of its net0 (the MAC address above all) kept as it was.
 /// covers: fix-88

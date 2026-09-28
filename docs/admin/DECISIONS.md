@@ -39,7 +39,7 @@ exist:
 - the login gate: nothing under `/app` or `/events` answers without a session;
 - LAN-only binding refuses a non-private peer.
 
-## Phase 4 — DRAFT v2 (after the architecture-critic pass; Kenny's form pending)
+## Phase 4 — FROZEN 2026-09-28 12:40 (form "Dashboard architectuur", freeze: Akkoord), except arch-exposure (follow-up round)
 
 Facts (measured 2026-09-28): deploys push content inline as `DeploySpec`
 (proto/src/lib.rs:32, core/src/manifest.rs:562), secrets in its `env`,
@@ -84,9 +84,20 @@ entries sampled 12:28 (e.g. .7 → .13:3100, Alloy to Loki).
 | arch-firewall | CT 120's firewall is `enabled: true` from the first deploy: inbound only from a configurable list of Kenny's client addresses; outbound to the host, CT 113 (Loki 3100, Prometheus 9090), GitHub and latch's remote. CT 120 is the one allowed exception to "never pve's rescue address from a container", for :8443 only. |
 | arch-tests | A mock host built from the real host session loop in-process (serial worker, broadcast, Ask ids); Playwright against the real binary. Commit subset: the five security tests + login-refusal + fmt/clippy/tsc. Full suite locally before a release. |
 
-### Open for Kenny (form "Dashboard architectuur")
+### Decided by Kenny on the form (2026-09-28 12:40)
 
-arch-exposure, arch-update, arch-secrets-edit, arch-schedule,
-arch-push-credential, arch-deploy-guard. HYPOTHESIS still open: latch as a
-daemon subprocess in an unprivileged LXC (kernel keyring, offline behaviour),
-measured in a throwaway container before the secrets work starts.
+| ID | Decision |
+|---|---|
+| arch-update | **Sign homelab releases** with the ecosystem's minisign key before the dashboard's first release; the dashboard then updates through chassis self-update driven by homelab, like kyu. Kenny gives the offline key's passphrase per release. |
+| arch-secrets-edit | **latch gets a single-file set operation** (mini-round asked of latch-rs); editing secrets in the dashboard waits for that latch release, revealing does not. |
+| arch-schedule | **Schedules live in the dashboard**: any action can be scheduled; runs while CT 120 is up; a missed slot is skipped and notified, never caught up. |
+| arch-push-credential | **Deploy key with write access** for CT 120; the dashboard commits only under `stacks/<stack>/`, guarded by a test. |
+| arch-deploy-guard | **CLI and dashboard both refuse** a deploy when the host's last `source.commit` is not in the local history; `--force` overrides. |
+| arch-host, arch-admin, arch-safety, arch-tests | Approved as listed above (Klopt). |
+
+### Open: arch-exposure
+
+Kenny's own answer: "kan het dan toch via de cloudflare tunnel en traefik? die
+infrastructuur bestaat al". Follow-up round (deep dive) with that route as an
+option. HYPOTHESIS still open: latch as a daemon subprocess in an unprivileged
+LXC, measured in a throwaway container before the secrets work starts.

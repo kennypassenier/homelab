@@ -190,4 +190,7 @@ Gesigneerde homelab-releases, self-update van het dashboard via homelab, een ech
 - Step 5: the admin.kp-soft.dev route came with the deploy. Measured:
   https://admin.kp-soft.dev answers 302 to the Access login; a forged Host
   header straight at Traefik on CT 104 gets the dashboard's 403 (lock 1).
-- Open from the deploy: "Alloy is DROPPING admin's logs, Loki refused them".
+- The deploy's "Alloy is DROPPING admin's logs, Loki refused them" was one
+  batch, once: journal entries the template carried from 2026-09-09, older
+  than Loki accepts (oldest acceptable 2026-09-21). Measured 15:35: that one
+  400 in Alloy's journal, none since; CT 120's own logs arrive.

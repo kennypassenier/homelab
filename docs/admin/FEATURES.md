@@ -1,6 +1,8 @@
 # homelab-admin — features (Phase 2, FROZEN 2026-09-28)
 
-Status: **frozen** 2026-09-28 11:59 (Kenny, freeze: Akkoord): 47 Essential, 5 Desired. Changes after this go through mini-rounds. Round 1 rated by Kenny 2026-09-28 11:33 (26 Essential, 1 Desired). Round 2 (Claude's proposals and the four mandatory items) out next.
+Status: **frozen** 2026-09-28 11:59 (Kenny, freeze: Akkoord): 47 Essential, 5 Desired. Changes after this go through mini-rounds.
+
+**Risk class: recoverable, local-first** (tech-risk-class in DECISIONS.md): a security subset at commit, the full suite locally before a release. Round 1 rated by Kenny 2026-09-28 11:33 (26 Essential, 1 Desired). Round 2 (Claude's proposals and the four mandatory items) out next.
 
 Kenny's notes on round 1 (verbatim intent, recorded):
 - **feat-platform-8** Essential, and it is **a path in the TUI**: to work it needs only the TUI (client) and the HOST on the Proxmox host. The TUI therefore keeps this emergency path after its screens move to the dashboard.

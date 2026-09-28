@@ -19,7 +19,8 @@ export const STACK_TABS = /** @type {const} */ ([
  * @typedef {{page: "overview"} | {page: "host"} |
  *   {page: "stack", name: string, tab: StackTab} |
  *   {page: "activity"} | {page: "timeline"} | {page: "checks"} |
- *   {page: "doctor"} | {page: "notfound", path: string}} Route
+ *   {page: "doctor"} | {page: "jobs"} | {page: "schedules"} |
+ *   {page: "notifications"} | {page: "notfound", path: string}} Route
  */
 
 /** The navigation bar, in order. */
@@ -30,6 +31,17 @@ export const NAV = /** @type {const} */ ([
   { page: "timeline", href: "/app/timeline", label: "Timeline" },
   { page: "checks", href: "/app/checks", label: "Checks" },
   { page: "doctor", href: "/app/doctor", label: "Doctor" },
+  { page: "jobs", href: "/app/jobs", label: "Jobs" },
+  { page: "schedules", href: "/app/schedules", label: "Schedules" },
+]);
+
+/** Pages with a fixed address that the bar does not list (the bell opens it). */
+export const OTHER_PAGES = /** @type {const} */ ([
+  {
+    page: "notifications",
+    href: "/app/notifications",
+    label: "Notifications",
+  },
 ]);
 
 /** @type {Record<string, Route>} */
@@ -40,6 +52,9 @@ const FIXED = {
   timeline: { page: "timeline" },
   checks: { page: "checks" },
   doctor: { page: "doctor" },
+  jobs: { page: "jobs" },
+  schedules: { page: "schedules" },
+  notifications: { page: "notifications" },
 };
 
 /**
@@ -108,6 +123,6 @@ export function pageTitle(r) {
       : `Homelab · ${r.name} · ${tab?.label}`;
   }
   if (r.page === "notfound") return "Homelab · Not found";
-  const n = NAV.find((x) => x.page === r.page);
+  const n = [...NAV, ...OTHER_PAGES].find((x) => x.page === r.page);
   return `Homelab · ${n?.label}`;
 }

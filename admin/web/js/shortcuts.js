@@ -3,7 +3,9 @@
 // that does nothing. Two-key shortcuts ("g o") wait `CHORD_MS` for the
 // second key.
 
-import { NAV, STACK_TABS, stackHref } from "./router.js";
+import { NAV, OTHER_PAGES, STACK_TABS, stackHref } from "./router.js";
+
+const PAGES = [...NAV, ...OTHER_PAGES];
 
 export const CHORD_MS = 1500;
 
@@ -22,6 +24,9 @@ const GO = {
   t: "timeline",
   c: "checks",
   d: "doctor",
+  j: "jobs",
+  s: "schedules",
+  n: "notifications",
 };
 
 /** @type {ShortcutGroup[]} */
@@ -34,7 +39,7 @@ export const SHORTCUTS = [
       { keys: "/", what: "Search the first table on the page" },
       ...Object.entries(GO).map(([k, page]) => ({
         keys: `g ${k}`,
-        what: `Go to ${NAV.find((n) => n.page === page)?.label}`,
+        what: `Go to ${PAGES.find((n) => n.page === page)?.label}`,
       })),
     ],
   },
@@ -65,7 +70,7 @@ export function keyAction(state, key, now, route) {
   const chord = state.prefix != null && now - state.at <= CHORD_MS;
   if (chord && state.prefix === "g") {
     const page = GO[key.toLowerCase()];
-    const n = NAV.find((x) => x.page === page);
+    const n = PAGES.find((x) => x.page === page);
     return { state: idle(), action: n ? { navigate: n.href } : null };
   }
   if (key === "g") return { state: { prefix: "g", at: now }, action: null };

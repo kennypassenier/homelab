@@ -2,6 +2,7 @@
 // logs and checks. The tab is in the path (/app/stacks/media/logs), what a
 // tab filters on is in the query string (feat-overview-8).
 
+import { mountActionsArea } from "../actionsarea.js";
 import { historyRows, incidentRows } from "../activity.js";
 import { agoEl, setAgo } from "../ago.js";
 import { checkRows } from "../checks.js";
@@ -123,10 +124,13 @@ function overviewTab(panel, params) {
   const facts = h("dl", { class: "facts" });
   const ago = agoEl("measured", null, { live: true });
   const counts = h("p", null);
+  // feat-stacks-4: every action on this stack, and its running jobs.
+  const actions = mountActionsArea({ stack: params.name });
   panel.replaceChildren(
     h("section", { class: "kp-card", "aria-label": "Stack" }, facts),
     counts,
     h("p", null, ago),
+    actions.element,
   );
   const render = () => {
     const f = current().fleet;
@@ -144,7 +148,10 @@ function overviewTab(panel, params) {
   };
   const unsub = subscribe(render);
   render();
-  return unsub;
+  return () => {
+    unsub();
+    actions.stop();
+  };
 }
 
 /** @type {(p: HTMLElement, params: Params) => () => void} */

@@ -26,8 +26,8 @@ working; the `tui` cargo feature stays on by default.
 | skeleton | Het eerste levende pad | feat-platform-5, feat-platform-6 | **done 2026-09-28** (see note) |
 | host | De host leert vertellen | feat-platform-1, feat-platform-2, feat-platform-3, feat-platform-4 | **live 2026-09-28** (3.62.1 on pve, signed) |
 | assembly | Het dashboard draait als eigen stack (assemblage) | feat-platform-7, feat-platform-9 | **done 2026-09-28 16:20**: Kenny logged in from home (pc and Android) with Access and a passkey; 4G is refused |
-| read | Alles lezen | feat-overview-1, feat-overview-2, feat-overview-3, feat-overview-4, feat-overview-8, feat-stacks-1, feat-ops-1, feat-ops-2, feat-ops-3, feat-ops-4, feat-ops-7, feat-settings-2 | **in progress**: overview, stack, activity, checks and doctor pages built 2026-09-28 |
-| act | Alle acties | feat-stacks-4, feat-ops-6, feat-stacks-5, feat-stacks-6, feat-stacks-7, feat-stacks-8, feat-overview-5, feat-ops-8, feat-ops-9 | not started |
+| read | Alles lezen | feat-overview-1, feat-overview-2, feat-overview-3, feat-overview-4, feat-overview-8, feat-stacks-1, feat-ops-1, feat-ops-2, feat-ops-3, feat-ops-4, feat-ops-7, feat-settings-2 | **built 2026-09-28**: every read page; open: Loki is not reachable from CT 120 (push-only 3100, fix-93) |
+| act | Alle acties | feat-stacks-4, feat-ops-6, feat-stacks-5, feat-stacks-6, feat-stacks-7, feat-stacks-8, feat-overview-5, feat-ops-8, feat-ops-9 | **built 2026-09-28, not yet measured live**: server and pages, writes tested against mocks only; manifest actions answer 409 until `edit` gives CT 120 a working copy |
 | edit | Wijzigen in de browser | feat-stacks-2, feat-stacks-3, feat-firewall-1, feat-firewall-2, feat-settings-1 | not started |
 | follow | Claude's actions play out in the open dashboard | feat-platform-10 | not started (added 2026-09-28 after the freeze) |
 | backup-secrets | Back-ups en geheimen | feat-backup-1, feat-backup-2, feat-backup-3, feat-secrets-1, feat-secrets-2 | not started |

@@ -41,6 +41,30 @@ const FILES: &[(&str, &[u8])] = &[
     ("js/timeline.js", include_bytes!("../web/js/timeline.js")),
     ("js/urlstate.js", include_bytes!("../web/js/urlstate.js")),
     ("js/chrome.js", include_bytes!("../web/js/chrome.js")),
+    // Milestone act (feat-stacks-4/5/6/7/8, feat-ops-6/8/9, feat-overview-5).
+    ("js/act.js", include_bytes!("../web/js/act.js")),
+    (
+        "js/actionforms.js",
+        include_bytes!("../web/js/actionforms.js"),
+    ),
+    (
+        "js/actiondialog.js",
+        include_bytes!("../web/js/actiondialog.js"),
+    ),
+    (
+        "js/actionsarea.js",
+        include_bytes!("../web/js/actionsarea.js"),
+    ),
+    ("js/actui.js", include_bytes!("../web/js/actui.js")),
+    ("js/jobpanel.js", include_bytes!("../web/js/jobpanel.js")),
+    ("js/jobs.js", include_bytes!("../web/js/jobs.js")),
+    ("js/notices.js", include_bytes!("../web/js/notices.js")),
+    ("js/rollback.js", include_bytes!("../web/js/rollback.js")),
+    (
+        "js/rollbackdialog.js",
+        include_bytes!("../web/js/rollbackdialog.js"),
+    ),
+    ("js/schedules.js", include_bytes!("../web/js/schedules.js")),
     (
         "js/pages/host.js",
         include_bytes!("../web/js/pages/host.js"),
@@ -68,6 +92,18 @@ const FILES: &[(&str, &[u8])] = &[
     (
         "js/pages/doctor.js",
         include_bytes!("../web/js/pages/doctor.js"),
+    ),
+    (
+        "js/pages/jobs.js",
+        include_bytes!("../web/js/pages/jobs.js"),
+    ),
+    (
+        "js/pages/schedules.js",
+        include_bytes!("../web/js/pages/schedules.js"),
+    ),
+    (
+        "js/pages/notifications.js",
+        include_bytes!("../web/js/pages/notifications.js"),
     ),
     ("css/app.css", include_bytes!("../web/css/app.css")),
 ];

@@ -48,17 +48,35 @@ export function badgeCell(st) {
 /**
  * The kp datatable block every table on the dashboard is (ui-tables):
  * sortable columns, Shift+click for a second key, its sort remembered
- * under its own name, no row selection.
+ * under its own name, no row selection (the one exception, the fleet's
+ * batch actions, passes `select`).
  * @param {{remember: string, caption: string, search: string,
  *   columns: Column[], state?: "loading", pageSize?: number,
- *   pageSizes?: string}} spec pageSize/pageSizes: page a long table
- *   (the logs) instead of showing every row
+ *   pageSizes?: string, select?: {label: string, actions: Node[]}}} spec
+ *   pageSize/pageSizes: page a long table (the logs) instead of showing
+ *   every row. select: a checkbox column first and an action bar that
+ *   shows while rows are ticked; each row brings its own
+ *   `selectCell(key)`.
  */
 export function tableBlock(spec) {
   const tbody = h("tbody");
   const head = h(
     "tr",
     null,
+    ...(spec.select
+      ? [
+          h(
+            "th",
+            { class: "select-col" },
+            h("input", {
+              class: "kp-field__check",
+              type: "checkbox",
+              "data-kp-select-all": "",
+              "aria-label": spec.select.label,
+            }),
+          ),
+        ]
+      : []),
     ...spec.columns.map((c) => {
       /** @type {Record<string, string>} */
       const a = { "data-kp-sort": c.sort };
@@ -92,6 +110,20 @@ export function tableBlock(spec) {
         "aria-label": spec.search,
       }),
     ),
+    ...(spec.select
+      ? [
+          h(
+            "div",
+            {
+              class: "kp-datatable__actions",
+              "data-kp-datatable-actions": "",
+              hidden: "",
+            },
+            h("span", { "data-kp-datatable-selected-count": "" }),
+            ...spec.select.actions,
+          ),
+        ]
+      : []),
     h(
       "div",
       { class: "kp-table-wrap" },
@@ -123,6 +155,25 @@ export function tableBlock(spec) {
     ),
   );
   return { wrap, tbody };
+}
+
+/**
+ * The checkbox cell of a selectable row (see `tableBlock`'s `select`).
+ * @param {string} key the row's key, also written on the row
+ * @param {string} label
+ */
+export function selectCell(key, label) {
+  return h(
+    "td",
+    { class: "select-col" },
+    h("input", {
+      class: "kp-field__check",
+      type: "checkbox",
+      "data-kp-select-row": "",
+      "aria-label": label,
+      value: key,
+    }),
+  );
 }
 
 /**

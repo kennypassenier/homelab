@@ -155,8 +155,14 @@ letter, the button shows its press. The final press runs on the dashboard's
 server side, through the same wizard definition a human click uses, so it
 happens once whether zero, one or two tabs are open, and never twice. Every
 wizard is described once as data, shared by the CLI and the dashboard, so a
-step Claude sends and a click Kenny makes cannot drift. A tab follows on its
-own while Claude drives, with a "Stop following" button; Kenny's own input
-while Claude drives is refused with a visible note rather than mixed in.
+step Claude sends and a click Kenny makes cannot drift. A toggle at the top of every page decides whether
+this tab follows (Kenny, 2026-09-28 17:33: "so if I'm actually using the site
+and you do something, you don't erase my progress"). Off by default: a tab
+that is off never changes page, opens a dialog or loses typed input because
+Claude is driving; it shows only a small "Claude is working on <stack>:
+<action>" badge with a button that turns following on. On: the tab performs
+every step, and Kenny's own input while Claude drives is refused with a
+visible note rather than mixed in. The toggle is per tab and remembered.
+Working name "Watch Claude"; the final name goes on Kenny's next form.
 Placed as milestone `follow`, after `edit`, because the wizards arrive in
 `act` and `edit`.

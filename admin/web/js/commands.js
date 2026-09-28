@@ -4,7 +4,7 @@
 // themes. Later milestones register their actions here (a deploy, a backup)
 // without the palette knowing them.
 
-import { NAV, STACK_TABS, stackHref } from "./router.js";
+import { NAV, OTHER_PAGES, STACK_TABS, stackHref } from "./router.js";
 
 /**
  * @typedef {{fleet: import("./fleet.js").Fleet | null,
@@ -78,11 +78,14 @@ const PAGE_KEYS = {
   timeline: "g t",
   checks: "g c",
   doctor: "g d",
+  jobs: "g j",
+  schedules: "g s",
+  notifications: "g n",
 };
 
 /** @type {Provider} */
 export const pageCommands = () =>
-  NAV.map((n) => ({
+  [...NAV, ...OTHER_PAGES].map((n) => ({
     id: `page:${n.page}`,
     group: "Pages",
     label: n.label,
@@ -119,3 +122,53 @@ export const themeCommands = (apply) => (ctx) =>
     hint: t.name === ctx.theme ? "current" : t.dark ? "dark" : "light",
     run: () => apply(t.name),
   }));
+
+/**
+ * feat-stacks-4: every action, as a command. The stack whose page is open
+ * comes first; then the host-wide actions; then every other stack's. An
+ * action the dashboard never does to its own stack (arch-self) is left out
+ * for that stack. `open` starts the action's dialog, so this module stays
+ * free of the DOM.
+ * @param {() => import("./actionforms.js").Catalog | null} catalog
+ * @param {() => string | null} currentStack the stack whose page is open
+ * @param {(stack: string, action: string) => void} open
+ * @returns {Provider}
+ */
+export const actionCommands = (catalog, currentStack, open) => (ctx) => {
+  const c = catalog();
+  if (!c) return [];
+  const names = (ctx.fleet?.stacks ?? []).map((s) => s.name);
+  const here = currentStack();
+  /** @param {string} s @param {string} group @param {boolean} hint @returns {Command[]} */
+  const forStack = (s, group, hint) =>
+    c.actions
+      .filter(
+        (a) =>
+          a.target === "stack" && !(s === c.self_stack && a.refused_for_self),
+      )
+      .map((a) => ({
+        id: `action:${s}:${a.action}`,
+        group,
+        label: `${a.label} · ${s}`,
+        hint: hint ? a.what : undefined,
+        run: () => open(s, a.action),
+      }));
+  /** @type {Command[]} */
+  const out = [];
+  if (here && names.includes(here))
+    out.push(...forStack(here, `Actions on ${here}`, true));
+  out.push(
+    ...c.actions
+      .filter((a) => a.target === "host")
+      .map((a) => ({
+        id: `action:${c.host_target}:${a.action}`,
+        group: "Host actions",
+        label: a.label,
+        hint: a.what,
+        run: () => open(c.host_target, a.action),
+      })),
+  );
+  for (const s of names)
+    if (s !== here) out.push(...forStack(s, "Stack actions", false));
+  return out;
+};

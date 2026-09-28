@@ -52,7 +52,7 @@ test("the navigation marks the current page, a stack page beside the overview", 
   assert.deepEqual(cur("/app/doctor"), ["Doctor"]);
   assert.deepEqual(cur("/app/host"), ["Host"]);
   const onStack = navEntries(route("/app/stacks/media/apps"));
-  assert.equal(onStack.length, 7);
+  assert.equal(onStack.length, 9);
   assert.deepEqual(onStack[1], {
     href: "/app/stacks/media",
     label: "Stack media",
@@ -66,4 +66,14 @@ test("the navigation marks the current page, a stack page beside the overview", 
   );
   assert.equal(pageTitle(route("/app/timeline")), "Homelab · Timeline");
   assert.equal(pageTitle(route("/app/x")), "Homelab · Not found");
+  // Milestone act's pages; the notification centre is not in the bar.
+  assert.deepEqual(route("/app/jobs?job=3"), { page: "jobs" });
+  assert.deepEqual(route("/app/schedules"), { page: "schedules" });
+  assert.deepEqual(route("/app/notifications"), { page: "notifications" });
+  assert.equal(
+    pageTitle(route("/app/notifications")),
+    "Homelab · Notifications",
+  );
+  assert.deepEqual(cur("/app/notifications"), []);
+  assert.deepEqual(cur("/app/jobs"), ["Jobs"]);
 });

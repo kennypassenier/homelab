@@ -1,0 +1,496 @@
+// feat-stacks-4, feat-stacks-5, feat-stacks-7, feat-stacks-8: every action's
+// form described once, as data. The dialog draws its wizard from this
+// description, the batch and schedule forms reuse its fields, and milestone
+// `follow` (feat-platform-10) can replay the same description step by step:
+// every field has a stable id, every step a name, and `buildArgs` is the one
+// place where the typed values become the request body the server takes.
+//
+// Pure: no DOM, no fetch, no clock.
+
+/**
+ * The catalog row the server sends (GET /data/actions/catalog).
+ * @typedef {"force" | "confirm" | "snapshot" | "app" | "unit" |
+ *   "skip_backup" | "skip_safety_copy" | "commit"} ArgName
+ * @typedef {{action: string, target: "stack" | "host", label: string,
+ *   what: string, scope: string, needs: string, args: ArgName[],
+ *   confirm: boolean, refused_for_self: boolean}} CatalogEntry
+ * @typedef {{actions: CatalogEntry[], host_target: string,
+ *   self_stack: string}} Catalog
+ */
+
+/**
+ * One field of a form. `source` names the list a choice is filled from
+ * (the stack's apps, its native units, its commits); `when` says the field
+ * only shows while the preview reports a deploy-guard refusal.
+ * @typedef {{name: ArgName, id: string, kind: "check" | "text" | "choice" | "typed",
+ *   label: string, help: string, required: boolean, pattern?: string,
+ *   placeholder?: string, source?: "apps" | "units" | "commits",
+ *   empty?: string, danger?: boolean, when?: "guard", expect?: string}} Field
+ * @typedef {{id: "options" | "review", label: string, fields: Field[]}} Step
+ * @typedef {{id: string, action: string, target: "stack" | "host",
+ *   stack: string, title: string, what: string, submit: string,
+ *   steps: Step[], confirmName: string | null, refused: string | null,
+ *   destructive: boolean, runPath: string, previewPath: string}} ActionForm
+ * @typedef {Record<string, string | boolean>} Values
+ * @typedef {{force?: boolean, confirm?: string, snapshot?: string,
+ *   app?: string, unit?: string, skip_backup?: boolean,
+ *   skip_safety_copy?: boolean, commit?: string}} ActionArgs
+ */
+
+/** The step every form ends on. */
+export const REVIEW = /** @type {const} */ ("review");
+
+/** How the stack page groups its buttons, in order. */
+export const GROUPS = /** @type {const} */ ([
+  {
+    group: "Deploy and update",
+    actions: ["deploy", "update", "resize", "guards"],
+  },
+  { group: "Backups", actions: ["backup", "restore"] },
+  { group: "Parking", actions: ["enable", "disable"] },
+  {
+    group: "Native services",
+    actions: [
+      "adopt",
+      "backup-native",
+      "update-native",
+      "release-update-native",
+      "rollback-native",
+    ],
+  },
+  {
+    group: "Retire",
+    actions: ["prune-orphans", "destroy", "forget", "wipe"],
+  },
+]);
+
+/** Actions the roll back dialog starts, with its own list to pick from. */
+export const ROLLBACK_ACTIONS = /** @type {const} */ ([
+  "deploy-commit",
+  "rollback-native",
+]);
+
+const WORD = "[A-Za-z0-9._:\\-]{1,128}";
+
+/**
+ * The field for one argument of one action.
+ * @param {ArgName} arg
+ * @param {CatalogEntry} entry
+ * @param {string} stack
+ * @returns {Field}
+ */
+export function argField(arg, entry, stack) {
+  const id = `act-${arg.replace(/_/g, "-")}`;
+  switch (arg) {
+    case "force":
+      return {
+        name: arg,
+        id,
+        kind: "check",
+        label: "Deploy anyway (force)",
+        help: "The host last deployed a commit this working copy does not have; forcing replaces that deploy with these files.",
+        required: false,
+        when: "guard",
+        danger: true,
+      };
+    case "confirm":
+      return entry.confirm
+        ? {
+            name: arg,
+            id,
+            kind: "typed",
+            label: `Type ${stack} to confirm`,
+            help: "The name of the stack, exactly; this cannot be undone from the dashboard.",
+            required: true,
+            expect: stack,
+            placeholder: stack,
+          }
+        : {
+            name: arg,
+            id,
+            kind: "typed",
+            label: `Type ${stack} to delete for real`,
+            help: "Leave it empty and the wipe only lists what it would delete.",
+            required: false,
+            expect: stack,
+            placeholder: "empty: only list",
+          };
+    case "snapshot":
+      return {
+        name: arg,
+        id,
+        kind: "text",
+        label: "Snapshot",
+        help: "A restic snapshot id from the backup page; empty takes the latest.",
+        required: false,
+        pattern: WORD,
+        placeholder: "latest",
+      };
+    case "app":
+      return {
+        name: arg,
+        id,
+        kind: "choice",
+        label: "App",
+        help:
+          entry.action === "restore"
+            ? "Restore one app's data, or every app of the stack."
+            : "Update one app, or every app of the stack.",
+        required: false,
+        source: "apps",
+        empty: "Every app",
+      };
+    case "unit":
+      return {
+        name: arg,
+        id,
+        kind: "choice",
+        label: "Native unit",
+        help: "The service whose previous binary goes back; the stack's updates are parked after it.",
+        required: true,
+        source: "units",
+      };
+    case "skip_backup":
+      return {
+        name: arg,
+        id,
+        kind: "check",
+        label: "Skip the backup before destroying",
+        help: "Without it the container's data is backed up first.",
+        required: false,
+        danger: true,
+      };
+    case "skip_safety_copy":
+      return {
+        name: arg,
+        id,
+        kind: "check",
+        label: "Skip the safety copy of the current data",
+        help: "Without it the data as it is now is kept aside before the restore.",
+        required: false,
+        danger: true,
+      };
+    case "commit":
+      return {
+        name: arg,
+        id,
+        kind: "choice",
+        label: "Commit",
+        help: "The stack's files as they were at this commit are deployed.",
+        required: true,
+        source: "commits",
+        pattern: "[0-9a-fA-F]{7,40}",
+      };
+  }
+}
+
+/** Arguments asked on the review step, next to the preview. */
+const REVIEW_ARGS = new Set(["force", "confirm"]);
+
+/**
+ * The whole form of one action on one target.
+ * @param {CatalogEntry} entry
+ * @param {{stack: string, selfStack: string, hostTarget?: string}} ctx
+ *   stack: the stack, or the host target for a host-wide action
+ * @returns {ActionForm}
+ */
+export function actionForm(entry, ctx) {
+  const stack =
+    entry.target === "host" ? (ctx.hostTarget ?? "_host") : ctx.stack;
+  const fields = entry.args.map((a) => argField(a, entry, stack));
+  const options = fields.filter((f) => !REVIEW_ARGS.has(f.name));
+  const review = fields.filter((f) => REVIEW_ARGS.has(f.name));
+  /** @type {Step[]} */
+  const steps = [];
+  if (options.length)
+    steps.push({ id: "options", label: "Options", fields: options });
+  steps.push({ id: REVIEW, label: "Review and run", fields: review });
+  const where = entry.target === "host" ? "the whole host" : stack;
+  const refused =
+    stack === ctx.selfStack && entry.refused_for_self
+      ? "The dashboard never does this to its own stack (arch-self); use the CLI from a workstation."
+      : null;
+  return {
+    id: `action:${entry.action}`,
+    action: entry.action,
+    target: entry.target,
+    stack,
+    title: `${entry.label} · ${where}`,
+    what: entry.what,
+    submit: entry.label,
+    steps,
+    confirmName: entry.confirm ? stack : null,
+    refused,
+    destructive: entry.scope === "all",
+    runPath: `/data/actions/${encodeURIComponent(stack)}/${entry.action}`,
+    previewPath: `/data/actions/${encodeURIComponent(stack)}/${entry.action}/preview`,
+  };
+}
+
+/**
+ * Every field of a form, in step order.
+ * @param {ActionForm} form
+ */
+export const formFields = (form) => form.steps.flatMap((s) => s.fields);
+
+/**
+ * The values a fresh form starts with, `preset` laid over them (the roll
+ * back dialog presets the commit or the unit).
+ * @param {ActionForm} form
+ * @param {Values} [preset]
+ * @returns {Values}
+ */
+export function initialValues(form, preset = {}) {
+  /** @type {Values} */
+  const v = {};
+  for (const f of formFields(form)) v[f.name] = f.kind === "check" ? false : "";
+  for (const [k, x] of Object.entries(preset)) if (k in v) v[k] = x;
+  return v;
+}
+
+/**
+ * The request body: only the arguments that are set (the server refuses a
+ * field the action does not take, and an empty one would be taken as set).
+ * @param {ActionForm} form
+ * @param {Values} values
+ * @returns {ActionArgs}
+ */
+export function buildArgs(form, values) {
+  /** @type {Record<string, string | boolean>} */
+  const out = {};
+  for (const f of formFields(form)) {
+    const v = values[f.name];
+    if (f.kind === "check") {
+      if (v === true) out[f.name] = true;
+    } else if (typeof v === "string" && v.trim() !== "") out[f.name] = v.trim();
+  }
+  return /** @type {ActionArgs} */ (out);
+}
+
+/**
+ * The body for the preview: the same as the run's, but a typed name the
+ * person has not typed yet is filled in, so the preview can show the CLI
+ * line before the name is typed. A wipe keeps its list-only meaning unless
+ * the name was typed right.
+ * @param {ActionForm} form
+ * @param {Values} values
+ * @returns {ActionArgs}
+ */
+export function previewArgs(form, values) {
+  const args = buildArgs(form, values);
+  if (form.confirmName) args.confirm = form.confirmName;
+  else if (args.confirm !== undefined && args.confirm !== form.stack)
+    delete args.confirm;
+  return args;
+}
+
+/**
+ * What is wrong with the values of one step (or of the whole form), by
+ * field name. A guard-only field is not checked here: it is a choice.
+ * @param {ActionForm} form
+ * @param {Values} values
+ * @param {"options" | "review"} [step]
+ * @returns {Record<string, string>}
+ */
+export function checkValues(form, values, step) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  const steps = step ? form.steps.filter((s) => s.id === step) : form.steps;
+  for (const f of steps.flatMap((s) => s.fields)) {
+    const v = values[f.name];
+    const text = typeof v === "string" ? v.trim() : "";
+    if (f.kind === "check") continue;
+    if (f.required && text === "") {
+      errors[f.name] =
+        f.kind === "typed"
+          ? `Type ${f.expect} to confirm.`
+          : `Choose the ${f.label.toLowerCase()}.`;
+      continue;
+    }
+    if (text === "") continue;
+    if (f.kind === "typed" && text !== f.expect) {
+      errors[f.name] =
+        `That is not ${f.expect}; type the stack's name exactly.`;
+      continue;
+    }
+    if (f.pattern && !new RegExp(`^(?:${f.pattern})$`).test(text))
+      errors[f.name] = `"${text}" is not a valid ${f.label.toLowerCase()}.`;
+  }
+  return errors;
+}
+
+/**
+ * The choices of a `choice` field, from the lists the page has read.
+ * @param {Field} field
+ * @param {{apps?: string[], units?: string[],
+ *   commits?: {commit: string, subject: string}[]}} sources
+ * @returns {{value: string, label: string}[]}
+ */
+export function fieldChoices(field, sources) {
+  /** @type {{value: string, label: string}[]} */
+  const out = [];
+  if (!field.required) out.push({ value: "", label: field.empty ?? "None" });
+  else out.push({ value: "", label: `Choose…` });
+  if (field.source === "apps")
+    for (const a of sources.apps ?? []) out.push({ value: a, label: a });
+  if (field.source === "units")
+    for (const u of sources.units ?? []) out.push({ value: u, label: u });
+  if (field.source === "commits")
+    for (const c of sources.commits ?? [])
+      out.push({
+        value: c.commit,
+        label: `${c.commit.slice(0, 10)} · ${c.subject}`,
+      });
+  return out;
+}
+
+/**
+ * The stack page's buttons: every stack action in its group, with the
+ * reason a button is off when it is.
+ * @param {Catalog} catalog
+ * @param {string} stack
+ * @returns {{group: string, actions: {entry: CatalogEntry, refused: string | null}[]}[]}
+ */
+export function stackActionGroups(catalog, stack) {
+  const by = new Map(catalog.actions.map((a) => [a.action, a]));
+  return GROUPS.map((g) => ({
+    group: g.group,
+    actions: g.actions.flatMap((name) => {
+      const entry = by.get(name);
+      if (!entry || entry.target !== "stack") return [];
+      const refused =
+        stack === catalog.self_stack && entry.refused_for_self
+          ? "never on the dashboard's own stack"
+          : null;
+      return [{ entry, refused }];
+    }),
+  })).filter((g) => g.actions.length > 0);
+}
+
+/**
+ * The host-wide actions, in catalog order.
+ * @param {Catalog} catalog
+ */
+export const hostActions = (catalog) =>
+  catalog.actions.filter((a) => a.target === "host");
+
+/**
+ * What several stacks can be given at once (feat-stacks-5): every stack
+ * action that needs nothing picked per stack. A typed name is asked per
+ * stack.
+ * @param {Catalog} catalog
+ */
+export const batchActions = (catalog) =>
+  catalog.actions.filter(
+    (a) =>
+      a.target === "stack" &&
+      !a.args.some((x) => x === "unit" || x === "commit"),
+  );
+
+/**
+ * The batch form: the action's own fields, minus the ones that differ per
+ * stack (an app), plus one typed name per stack when the action asks it.
+ * @param {CatalogEntry} entry
+ * @param {string[]} stacks
+ * @param {string} selfStack
+ */
+export function batchForm(entry, stacks, selfStack) {
+  const shared = entry.args
+    .filter((a) => a !== "app" && a !== "confirm")
+    .map((a) => argField(a, entry, "each stack"));
+  const confirms = entry.confirm
+    ? stacks.map((s) => ({
+        ...argField("confirm", entry, s),
+        id: `act-confirm-${s}`,
+        stack: s,
+      }))
+    : [];
+  const refused =
+    entry.refused_for_self && stacks.includes(selfStack)
+      ? `The dashboard never does this to its own stack (${selfStack}); leave it out of the selection.`
+      : null;
+  return {
+    id: `batch:${entry.action}`,
+    action: entry.action,
+    title: `${entry.label} · ${stacks.length} ${stacks.length === 1 ? "stack" : "stacks"}`,
+    what: entry.what,
+    submit: `${entry.label} ${stacks.length === 1 ? "1 stack" : `${stacks.length} stacks`}`,
+    stacks,
+    shared,
+    confirms,
+    refused,
+    restartsDashboard: stacks.includes(selfStack),
+  };
+}
+
+/**
+ * The batch request body.
+ * @param {ReturnType<typeof batchForm>} form
+ * @param {Values} values shared field values, and `confirm:<stack>` per stack
+ */
+export function batchBody(form, values) {
+  /** @type {Record<string, string | boolean>} */
+  const args = {};
+  for (const f of form.shared)
+    if (f.kind === "check" && values[f.name] === true) args[f.name] = true;
+    else if (
+      typeof values[f.name] === "string" &&
+      String(values[f.name]).trim()
+    )
+      args[f.name] = String(values[f.name]).trim();
+  /** @type {Record<string, string>} */
+  const confirms = {};
+  for (const c of form.confirms) {
+    const v = values[`confirm:${c.stack}`];
+    if (typeof v === "string" && v.trim()) confirms[c.stack] = v.trim();
+  }
+  return {
+    action: form.action,
+    stacks: form.stacks,
+    args,
+    ...(form.confirms.length ? { confirms } : {}),
+  };
+}
+
+/**
+ * Which typed names in a batch are missing or wrong.
+ * @param {ReturnType<typeof batchForm>} form
+ * @param {Values} values
+ * @returns {string[]} the stacks whose name is not typed right
+ */
+export function batchConfirmErrors(form, values) {
+  return form.confirms
+    .filter(
+      (c) => String(values[`confirm:${c.stack}`] ?? "").trim() !== c.stack,
+    )
+    .map((c) => c.stack);
+}
+
+/**
+ * What a schedule can run (arch-schedule): anything that needs no typed
+ * name and no pick from a live list; a wipe only lists without its name,
+ * so it is left out as well.
+ * @param {Catalog} catalog
+ */
+export const schedulableActions = (catalog) =>
+  catalog.actions.filter(
+    (a) =>
+      !a.confirm &&
+      a.action !== "wipe" &&
+      !a.args.some((x) => x === "unit" || x === "commit"),
+  );
+
+/**
+ * The fields a schedule asks for an action: its option fields (an app, a
+ * snapshot, a skip), never the review step's force or typed name.
+ * @param {CatalogEntry} entry
+ * @param {string} stack
+ * @returns {Field[]}
+ */
+export const scheduleArgFields = (entry, stack) =>
+  entry.args
+    .filter((a) => !REVIEW_ARGS.has(a))
+    .map((a) => ({
+      ...argField(a, entry, stack),
+      id: `sched-${a.replace(/_/g, "-")}`,
+    }));

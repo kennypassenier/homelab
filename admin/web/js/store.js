@@ -75,9 +75,55 @@ async function load() {
   emit();
 }
 
+/**
+ * The live events of milestone act, handed to their own listeners (act.js)
+ * rather than to every page: a log line must not redraw the fleet table.
+ */
+export const ACT_EVENTS = /** @type {const} */ ([
+  "action",
+  "action_log",
+  "action_progress",
+  "action_batch",
+  "notification",
+  "notifications_read",
+  "notify_settings",
+  "schedules",
+  "resync",
+]);
+
+/** @type {Map<string, Set<(data: any) => void>>} */
+const listeners = new Map();
+
+/**
+ * Hear one live event, its JSON parsed.
+ * @param {(typeof ACT_EVENTS)[number]} name
+ * @param {(data: any) => void} f
+ * @returns {() => void} stop
+ */
+export function listen(name, f) {
+  let set = listeners.get(name);
+  if (!set) {
+    set = new Set();
+    listeners.set(name, set);
+  }
+  set.add(f);
+  return () => set.delete(f);
+}
+
 /** Open the live channel and read the first snapshot. */
 export function start() {
   const events = new EventSource("/events");
+  for (const name of ACT_EVENTS)
+    events.addEventListener(name, (e) => {
+      /** @type {any} */
+      let data = null;
+      try {
+        data = JSON.parse(/** @type {MessageEvent} */ (e).data || "null");
+      } catch {
+        return;
+      }
+      listeners.get(name)?.forEach((f) => f(data));
+    });
   events.addEventListener("fleet", (e) => {
     state.fleet = JSON.parse(/** @type {MessageEvent} */ (e).data).fleet;
     emit();

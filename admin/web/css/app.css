@@ -234,3 +234,204 @@
 #host-bars .kp-progress-group {
   max-inline-size: 40rem;
 }
+/* Milestone act. */
+.state.info span {
+  background: var(--muted);
+  color: var(--foreground);
+}
+/* feat-stacks-4: the actions area, grouped buttons that wrap on a phone. */
+.actions-area h2 {
+  margin-block: 0 8px;
+}
+.actions-group__label {
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+  margin: 12px 0 6px;
+}
+.actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.actions-running:not(:empty) {
+  margin-block-start: 12px;
+}
+/* The action dialog and its wizard; full width on a phone. */
+.act-dialog {
+  inline-size: min(40rem, calc(100vw - 32px));
+  max-inline-size: calc(100vw - 32px);
+}
+.act-dialog--wide {
+  inline-size: min(60rem, calc(100vw - 32px));
+}
+.act-dialog .kp-field,
+.sched-form .kp-field {
+  margin-block: 10px;
+}
+.act-what {
+  margin-block: 0 8px;
+}
+.act-preview,
+.act-guard,
+.act-restarts,
+.act-run-error {
+  margin-block: 8px;
+}
+.field-danger .kp-field__label {
+  color: var(--destructive);
+}
+.refusal .kp-alert__body {
+  display: grid;
+  gap: 2px;
+}
+/* feat-stacks-7: a CLI line wraps rather than widening the page. */
+.cli-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  max-inline-size: 100%;
+}
+.cli-line .kp-copyable__value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-inline-size: 0;
+}
+/* feat-ops-6: the running-job panel. */
+.job-panel .title-row h3 {
+  margin: 0;
+}
+.job-origin {
+  margin: 4px 0 8px;
+}
+.job-step-name {
+  margin: 4px 0 8px;
+}
+.job-remaining[data-late="true"] {
+  color: var(--destructive);
+}
+.job-outcome:not(:empty),
+.job-cli:not(:empty) {
+  margin-block: 8px;
+}
+.job-log {
+  max-block-size: 18rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.job-log-wrap summary {
+  cursor: pointer;
+  margin-block: 8px 4px;
+}
+.job-log-empty {
+  margin: 4px 0;
+}
+.job-progress {
+  max-inline-size: 40rem;
+}
+/* feat-stacks-5: the batch bar and progress. */
+.select-col {
+  inline-size: 2.5rem;
+}
+.kp-datatable__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-block: 8px;
+}
+.batch-action {
+  inline-size: auto;
+  min-inline-size: 12rem;
+}
+.batch-preview,
+.batch-jobs {
+  display: grid;
+  gap: 6px;
+  padding-inline-start: 1.2em;
+}
+.batch-preview li,
+.batch-jobs li {
+  overflow-wrap: anywhere;
+}
+/* feat-overview-5: the bell and its count. */
+.kp-nav .bell {
+  position: relative;
+  min-inline-size: 2.25rem;
+}
+.kp-nav .bell[data-snoozed="true"] {
+  opacity: 0.6;
+}
+.bell-count {
+  position: absolute;
+  inset-block-start: -2px;
+  inset-inline-end: -4px;
+  font-size: 0.7em;
+  padding: 0 5px;
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+}
+.notify-settings .kp-switch {
+  margin-block: 4px;
+}
+.inline-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 12px;
+}
+.inline-fields .kp-field {
+  min-inline-size: 12rem;
+}
+.inline-fields > .kp-button {
+  margin-block-end: 10px;
+}
+.snooze-state[data-on="true"] {
+  font-weight: 600;
+}
+tr.unread td {
+  font-weight: 600;
+}
+.row-buttons {
+  white-space: nowrap;
+}
+.row-buttons .kp-button + .kp-button {
+  margin-inline-start: 6px;
+}
+/* feat-stacks-8: the schedule form's weekdays. */
+.sched-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  border: 0;
+  padding: 0;
+  margin-block: 10px;
+}
+.sched-days legend {
+  font-size: 0.9em;
+  margin-block-end: 4px;
+}
+.day-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rollback .missing ul {
+  margin: 4px 0 0;
+  padding-inline-start: 1.2em;
+}
+.job-times {
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin-block: 8px 0;
+}
+.job-times dt {
+  align-self: baseline;
+}
+/* On a phone a log line's message gets a row of its own. */
+@media (max-width: 520px) {
+  .job-log .kp-log__message {
+    grid-column: 1 / -1;
+    padding-inline-start: 1em;
+  }
+}

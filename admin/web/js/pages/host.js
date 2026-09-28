@@ -2,6 +2,7 @@
 // reading; the containers `pct list` reports; and, on request, the doctor's
 // host-level checks (the disk among them), which take about a minute.
 
+import { mountActionsArea } from "../actionsarea.js";
 import { agoEl, setAgo } from "../ago.js";
 import { doctorRows } from "../doctor.js";
 import {
@@ -53,6 +54,8 @@ export function mount(root, ctx) {
       { label: "Stack", sort: "text" },
     ],
   });
+  // feat-stacks-4: the four host-wide actions.
+  const actions = mountActionsArea({ host: true });
   const checksErr = h("div");
   const checksAgo = agoEl("read");
   const checksBtn = h(
@@ -90,6 +93,7 @@ export function mount(root, ctx) {
       h("p", null, liveAgo),
     ),
     h("section", { class: "kp-card", "aria-label": "Facts" }, facts),
+    actions.element,
     h("h2", null, "Containers"),
     guestErr,
     guests.wrap,
@@ -210,6 +214,7 @@ export function mount(root, ctx) {
   void ctx;
   return () => {
     abort.abort();
+    actions.stop();
     clearInterval(timer);
     unsub();
     unbindG();

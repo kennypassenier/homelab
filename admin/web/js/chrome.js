@@ -4,8 +4,12 @@
 // questions (feat-ops-2). All kp-themes components; this module only fills
 // them and wires them to the router and the store.
 
+import { act, onAct, startAct } from "./act.js";
+import { openAction } from "./actiondialog.js";
+import { notify } from "./actui.js";
 import { answerBody, askView, openAsks } from "./asks.js";
 import {
+  actionCommands,
   allCommands,
   grouped,
   pageCommands,
@@ -14,8 +18,10 @@ import {
   themeCommands,
 } from "./commands.js";
 import { h } from "./dom.js";
+import { bell, snoozeState, toastOf } from "./notices.js";
+import { openRollback } from "./rollbackdialog.js";
 import { SHORTCUTS, idle, keyAction } from "./shortcuts.js";
-import { current, setAsks, subscribe } from "./store.js";
+import { current, listen, setAsks, subscribe } from "./store.js";
 import {
   OPEN_EVENT,
   RUN_EVENT,
@@ -73,8 +79,8 @@ function paletteDialog() {
       class: "kp-palette__input",
       type: "text",
       role: "combobox",
-      "aria-label": "Go to a page, a stack or a theme",
-      placeholder: "Go to a page, a stack or a theme…",
+      "aria-label": "Go to a page, a stack, an action or a theme",
+      placeholder: "Go to a page, a stack, an action or a theme…",
       "aria-expanded": "true",
       "aria-controls": "commands-list",
       autocomplete: "off",
@@ -294,6 +300,80 @@ function mountAsks(region) {
 }
 
 /**
+ * The bell (feat-overview-5): the unread count in the bar, a link to the
+ * notification centre, and a kp toast for every notice that pops up.
+ * @param {(href: string) => void} navigate
+ */
+function mountBell(navigate) {
+  const count = h("span", {
+    class: "kp-badge bell-count",
+    "aria-hidden": "true",
+  });
+  const link = h(
+    "a",
+    {
+      class: "kp-button kp-button--ghost bell",
+      href: "/app/notifications",
+      id: "bell",
+    },
+    bellIcon(),
+    count,
+  );
+  const paint = () => {
+    const snap = act.notices;
+    const b = bell(snap?.unread ?? 0);
+    count.textContent = b.count;
+    count.hidden = b.count === "";
+    const sn = snoozeState(snap?.settings, Date.now() / 1000);
+    link.setAttribute("aria-label", sn.on ? `${b.label}; ${sn.text}` : b.label);
+    link.title = sn.on ? sn.text : b.label;
+    link.dataset.snoozed = String(sn.on);
+  };
+  onAct("notices", paint);
+  paint();
+  listen("notification", (ev) => {
+    if (!ev?.pop_up || !ev.notice) return;
+    const t = toastOf(ev.notice);
+    const job = ev.notice.job;
+    notify(
+      t.text,
+      /** @type {"success" | "warning" | "info" | "error"} */ (t.tone),
+      job
+        ? {
+            label: "Open the job",
+            onClick: () => navigate(`/app/jobs?job=${job}`),
+          }
+        : { label: "Open", onClick: () => navigate("/app/notifications") },
+    );
+  });
+  return link;
+}
+
+/** A bell, drawn in the text colour. */
+function bellIcon() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  for (const d of [
+    "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9",
+    "M10.3 21a1.94 1.94 0 0 0 3.4 0",
+  ]) {
+    const p = document.createElementNS(ns, "path");
+    p.setAttribute("d", d);
+    svg.append(p);
+  }
+  return svg;
+}
+
+/**
  * Put the palette, the sheet, the theme menu and the questions in place.
  * @param {{nav: HTMLElement, asks: HTMLElement}} where
  * @param {ChromeCtx} ctx
@@ -331,7 +411,21 @@ export function mountChrome(where, ctx) {
     id: "theme-menu",
     label: "Choose a theme",
   });
-  where.nav.append(trigger, help, themes);
+  // Milestone act: the catalog, the jobs, the notices and the schedules,
+  // and every action as a palette command (feat-stacks-4).
+  startAct();
+  registerCommands(
+    "actions",
+    actionCommands(
+      () => act.catalog,
+      () => {
+        const r = ctx.route();
+        return r.page === "stack" ? r.name : null;
+      },
+      (stack, action) => void openAction(stack, action, { openRollback }),
+    ),
+  );
+  where.nav.append(trigger, mountBell(ctx.navigate), help, themes);
   document.body.append(dialog, sheet);
   attachThemePickers(themes);
   attachPalettes(document, { hotkey: "k", sheetKey: "?" });

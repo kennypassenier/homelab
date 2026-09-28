@@ -9,7 +9,7 @@
 # TUI when the update badge appears.
 # ============================================================================
 
-.PHONY: help build test gate admin-full fmt clippy release host-binary hooks install diagrams
+.PHONY: help build test gate admin-full release-binaries fmt clippy release host-binary hooks install diagrams
 
 help:
 	@echo "make build            debug build of the whole workspace"
@@ -152,12 +152,38 @@ else
 		git commit -m "release: v$(VERSION) [meta]"; \
 	fi
 	git tag -a "v$(VERSION)" -m "homelab v$(VERSION)"
+	$(MAKE) release-binaries
 	git push origin HEAD --follow-tags
+	gh release create "v$(VERSION)" --verify-tag --title "homelab v$(VERSION)" --generate-notes \
+		dist/homelab-host dist/homelab dist/homelab-admin dist/SHA256SUMS
 	@echo ""
-	@echo "✓ v$(VERSION) tagged and pushed — CI is building the release."
-	@echo "  watch:    gh run watch"
-	@echo "  roll out: homelab release-update   (after the release appears)"
+	@echo "✓ v$(VERSION) built here, tagged, pushed and published."
+	@echo "  sign:     ~/Projects/workstation/bin/sign-releases homelab:v$(VERSION)"
+	@echo "  roll out: homelab release-update   (after it is signed)"
 endif
+
+# release-build (Kenny, 2026-09-28: "Lokaal bouwen en uploaden"): the release
+# binaries are built on this machine, in the same Debian image the GitHub
+# release job used, from the tagged tree (`make release` refuses a dirty
+# one). homelab-admin is built on its own: with chassis-rs in the same build,
+# rustls would carry two crypto providers into the host and the client. The
+# registry and git caches are this machine's, mounted, so a build does not
+# download the world; the target directory is separate from the debug one.
+DEBIAN_IMAGE := rust:1-bookworm
+DOCKER_CARGO := docker run --rm --user $$(id -u):$$(id -g) \
+	-v $(CURDIR):/src -w /src \
+	-v $(HOME)/.cargo/registry:/usr/local/cargo/registry \
+	-v $(HOME)/.cargo/git:/usr/local/cargo/git \
+	-e CARGO_HOME=/usr/local/cargo -e HOME=/tmp \
+	$(DEBIAN_IMAGE) cargo
+release-binaries:
+	$(DOCKER_CARGO) build --release --locked -p homelab-host -p homelab-client --target-dir target-debian
+	$(DOCKER_CARGO) build --release --locked -p homelab-admin --target-dir target-debian-admin
+	rm -rf dist && mkdir -p dist
+	cp target-debian/release/homelab-host dist/homelab-host
+	cp target-debian/release/homelab dist/homelab
+	cp target-debian-admin/release/homelab-admin dist/homelab-admin
+	cd dist && sha256sum homelab-host homelab homelab-admin > SHA256SUMS
 
 # Kenny, 2026-09-02: `homelab` was never installed anywhere. Every document in
 # this repository writes commands as `homelab <verb>`, and none of them worked

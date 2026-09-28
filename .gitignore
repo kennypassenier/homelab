@@ -21,3 +21,5 @@ browser_scripts/
 __pycache__/
 *.pyc
 .claude/worktrees/
+dist/
+target-debian-admin/

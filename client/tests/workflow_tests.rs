@@ -3,6 +3,11 @@
 //! rather than trusted to review (expert panel 2026-09-27,
 //! host-release-unsigned). The files are parsed, not grepped, so a property
 //! moved to another key or job is still found.
+//!
+//! Since 2026-09-28 (Kenny: "Lokaal bouwen en uploaden") the release is built
+//! on the release machine by `make release`, not by a GitHub job; the tests
+//! for that job went with it and the Makefile's release path is asserted
+//! below instead.
 
 use serde_yaml::{Mapping, Value};
 use std::path::{Path, PathBuf};
@@ -22,21 +27,11 @@ fn workflow(name: &str) -> Value {
     serde_yaml::from_str(&workflow_text(name)).unwrap()
 }
 
-fn job<'a>(wf: &'a Value, name: &str) -> &'a Value {
-    wf.get("jobs")
-        .and_then(|j| j.get(name))
-        .unwrap_or_else(|| panic!("job `{name}` missing"))
-}
-
 fn steps(job: &Value) -> Vec<&Value> {
     job.get("steps")
         .and_then(Value::as_sequence)
         .map(|s| s.iter().collect())
         .unwrap_or_default()
-}
-
-fn step_uses(step: &Value) -> Option<&str> {
-    step.get("uses").and_then(Value::as_str)
 }
 
 fn run_text(job: &Value) -> String {
@@ -73,125 +68,6 @@ fn grants_write(perms: &[(String, String)]) -> bool {
     perms
         .iter()
         .any(|(_, level)| level == "write" || level == "write-all" || level == "<default>")
-}
-
-#[test]
-fn fix_139_the_release_build_runs_without_a_write_token() {
-    let wf = workflow("release.yml");
-    // Nothing at workflow level: a job that forgets to ask gets no rights,
-    // instead of inheriting the publish job's write token.
-    let top = permissions(wf.get("permissions"));
-    assert!(
-        !grants_write(&top),
-        "release.yml grants {top:?} at workflow level; every job must ask for its own"
-    );
-
-    let build = job(&wf, "build");
-    let perms = permissions(build.get("permissions"));
-    assert_eq!(
-        perms,
-        vec![("contents".to_string(), "read".to_string())],
-        "the build job runs every dependency's build.rs and must hold contents: read only"
-    );
-    let checkouts: Vec<_> = steps(build)
-        .into_iter()
-        .filter(|s| step_uses(s).is_some_and(|u| u.starts_with("actions/checkout@")))
-        .collect();
-    assert!(!checkouts.is_empty(), "the build job checks the code out");
-    for c in checkouts {
-        assert_eq!(
-            c.get("with").and_then(|w| w.get("persist-credentials")),
-            Some(&Value::Bool(false)),
-            "checkout must not leave the token in .git/config for the build to read"
-        );
-    }
-    let run = run_text(build);
-    // The tests run as .githooks/test-subset.sh, which is `cargo test` with
-    // the commit subset's targets (dev-procedure rule 7 as amended
-    // 2026-09-28); --locked is passed through to it.
-    for cmd in ["cargo clippy", "test-subset.sh", "cargo build"] {
-        let lines: Vec<_> = run.lines().filter(|l| l.contains(cmd)).collect();
-        assert!(!lines.is_empty(), "the build job runs `{cmd}`");
-        for l in lines {
-            assert!(
-                l.contains("--locked"),
-                "`{}` must build what Cargo.lock pins (F235)",
-                l.trim()
-            );
-        }
-    }
-}
-
-#[test]
-fn fix_139_only_the_publish_job_writes_and_it_builds_nothing() {
-    let wf = workflow("release.yml");
-    let publish = job(&wf, "publish");
-    assert_eq!(
-        publish.get("needs").and_then(Value::as_str),
-        Some("build"),
-        "publish runs after the build and only on its result"
-    );
-    let perms = permissions(publish.get("permissions"));
-    assert_eq!(
-        perms,
-        vec![("contents".to_string(), "write".to_string())],
-        "publish holds exactly the write token a release needs"
-    );
-    assert!(
-        steps(publish)
-            .iter()
-            .all(|s| !step_uses(s).is_some_and(|u| u.starts_with("actions/checkout@"))),
-        "publish must not check out code: no build step runs next to the write token"
-    );
-    assert!(
-        !run_text(publish).contains("cargo "),
-        "publish must not compile anything"
-    );
-    // Any other job in the file must not hold a write token either.
-    for (name, j) in wf.get("jobs").and_then(Value::as_mapping).unwrap() {
-        let name = name.as_str().unwrap();
-        if name != "publish" {
-            let p = permissions(j.get("permissions"));
-            assert!(!grants_write(&p), "job `{name}` holds {p:?}");
-        }
-    }
-}
-
-#[test]
-fn fix_139_a_release_refuses_a_tag_off_main_or_unequal_to_the_version() {
-    let wf = workflow("release.yml");
-    let build = job(&wf, "build");
-    let run = run_text(build);
-    assert!(
-        run.contains("GITHUB_REF_NAME") && run.contains("Cargo.toml"),
-        "the build compares the tag with the workspace version"
-    );
-    assert!(
-        run.contains("merge-base --is-ancestor") && run.contains("origin/main"),
-        "the build refuses a tagged commit that is not on main"
-    );
-    // The ancestry check needs main's history in the checkout.
-    let checkout = steps(build)
-        .into_iter()
-        .find(|s| step_uses(s).is_some_and(|u| u.starts_with("actions/checkout@")))
-        .unwrap();
-    assert_eq!(
-        checkout.get("with").and_then(|w| w.get("fetch-depth")),
-        Some(&Value::Number(0.into())),
-        "fetch-depth 0, or origin/main is not there to compare against"
-    );
-    // The check comes before anything is compiled.
-    let pos = |needle: &str| {
-        steps(build).iter().position(|s| {
-            s.get("run")
-                .and_then(Value::as_str)
-                .is_some_and(|r| r.contains(needle))
-        })
-    };
-    assert!(
-        pos("merge-base --is-ancestor").unwrap() < pos("cargo").unwrap(),
-        "refuse the tag before building"
-    );
 }
 
 #[test]
@@ -303,25 +179,6 @@ fn fix_140_ci_checks_advisories_secrets_and_the_msrv_on_every_push() {
 }
 
 #[test]
-fn fix_140_the_release_build_restores_a_cache_and_never_writes_one() {
-    let wf = workflow("release.yml");
-    let build = job(&wf, "build");
-    let uses: Vec<_> = steps(build).into_iter().filter_map(step_uses).collect();
-    assert!(
-        uses.iter().any(|u| u.starts_with("actions/cache/restore@")),
-        "the release build restores CI's cargo cache: {uses:?}"
-    );
-    // A tag's own cache scope is new every release, so saving is wasted;
-    // and a release job that writes no cache cannot poison one.
-    assert!(
-        !uses
-            .iter()
-            .any(|u| u.starts_with("actions/cache@") || u.starts_with("actions/cache/save@")),
-        "the release build must not save a cache: {uses:?}"
-    );
-}
-
-#[test]
 fn fix_140_dependabot_commits_carry_a_bracketed_id() {
     let text = std::fs::read_to_string(root().join(".github/dependabot.yml")).unwrap();
     let v: Value = serde_yaml::from_str(&text).unwrap();
@@ -340,4 +197,42 @@ fn fix_140_dependabot_commits_carry_a_bracketed_id() {
             "{eco}: Dependabot's prefix `{prefix}` carries no bracketed ID"
         );
     }
+}
+
+/// release-build (Kenny, 2026-09-28): the release binaries are built locally,
+/// in the Debian image the GitHub job used, from what Cargo.lock pins, the
+/// dashboard in a build of its own, all three in SHA256SUMS, and published
+/// only after the tag is pushed.
+#[test]
+fn release_build_is_local_in_the_debian_image_and_locked() {
+    let mk = std::fs::read_to_string(root().join("Makefile")).unwrap();
+    assert!(
+        mk.contains("DEBIAN_IMAGE := rust:1-bookworm"),
+        "the same image as before"
+    );
+    let builds: Vec<&str> = mk
+        .lines()
+        .filter(|l| l.contains("$(DOCKER_CARGO) build"))
+        .collect();
+    assert_eq!(
+        builds.len(),
+        2,
+        "host+client, then the dashboard alone: {builds:?}"
+    );
+    assert!(builds
+        .iter()
+        .all(|l| l.contains("--locked") && l.contains("--release")));
+    assert!(builds[1].contains("-p homelab-admin") && !builds[0].contains("homelab-admin"));
+    assert!(mk.contains("sha256sum homelab-host homelab homelab-admin > SHA256SUMS"));
+    let push = mk.find("git push origin HEAD --follow-tags").unwrap();
+    let publish = mk.find("gh release create").unwrap();
+    let build = mk.find("$(MAKE) release-binaries").unwrap();
+    assert!(
+        build < push && push < publish,
+        "build, then push, then publish"
+    );
+    assert!(
+        !root().join(".github/workflows/release.yml").exists(),
+        "no second builder"
+    );
 }

@@ -54,7 +54,9 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
-ReadWritePaths=/appdata/admin/admin-config /appdata/admin/admin-config-pre-update /opt/homelab-admin/bin
+# "-": the pre-update copy exists only after a first self-update; systemd
+# refuses to start (226/NAMESPACE) on a path that is not there (2026-09-28).
+ReadWritePaths=/appdata/admin/admin-config -/appdata/admin/admin-config-pre-update /opt/homelab-admin/bin
 # S2: the swap needs write access to the binary's OWN directory only; a
 # code-execution bug can then replace this service's binary, not latch or
 # its neighbours. The rest is systemd's free hardening for a network daemon.

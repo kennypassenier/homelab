@@ -36,10 +36,12 @@ boot:
 storage:
   - host_path: /appdata/admin/admin-config
     mount_point: /appdata/admin/admin-config
-    # The first `useradd --system` in a container cloned from template 996
-    # gets uid 999 (measured on CT 118 2026-09-28: inbox 999, alloy 997
-    # after it); 100999 is that uid mapped out of an unprivileged LXC.
-    host_owner_uid: 100999
+    # The service user `admin` is uid 997 inside (measured on CT 120
+    # 2026-09-28): the deploy installs Alloy (999, and 998) before it
+    # creates the native's user. 100997 is that uid mapped out of an
+    # unprivileged LXC. Guessing 100999 from CT 118 left the state
+    # directory unwritable on the first start.
+    host_owner_uid: 100997
     app: admin
 
 apps: []

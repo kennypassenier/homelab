@@ -94,10 +94,10 @@ De back-uppagina, restore met snapshotkeuze, bladeren in een snapshot (Gewenst),
 
 ### follow · Claude-acties zichtbaar in het open dashboard
 
-Toegevoegd na de bevriezing (mini-ronde 2026-09-28). De host meldt elke operatie met de tokennaam die ze startte en de waarden van het commando; het dashboard speelt een operatie van een andere sessie af alsof iemand de pagina bedient: navigeren, de wizard openen, velden letter per letter invullen, een zichtbare klik, daarna de live voortgang. Elke wizard is één keer als data beschreven en stuurt zowel Kenny's eigen klikken als het afspelen.
+Toegevoegd na de bevriezing (mini-ronde 2026-09-28, Kenny's eigen antwoord). Claude stuurt stap voor stap UI-commando's over de bestaande hostlijn (`homelab ui <stap>`): naar een pagina, een wizard of dialoog openen, in een veld typen, een knop indrukken. Elke open tab voert elke stap live en zichtbaar uit; de laatste druk loopt aan de serverkant via dezelfde wizardbeschrijving, dus één keer, ook zonder open tab. Claude heeft geen browser nodig.
 
 - Features: feat-platform-10 (Claude-acties zichtbaar in het open dashboard)
-- Exit: Claude start via de CLI een deploy van een stack; een open tab op pc en Android toont zonder klik van Kenny elke stap, tot "deploy complete", en stuurt zelf geen commando; getest in Playwright.
+- Exit: Claude stuurt met `homelab ui` de stappen van een deploy; een open tab op pc en Android voert elke stap live uit tot "deploy complete", de deploy loopt precies één keer, ook met twee tabs of geen; getest in Playwright.
 - Why here: De wizards ontstaan in act en edit; pas daarna is er iets om af te spelen.
 
 ### visuals · De visualisaties

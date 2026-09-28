@@ -100,6 +100,8 @@ crate can build against a path dependency on ~/Projects/chassis-rs.
 
 | ID | Feature | Proposed rating | Rating |
 |---|---|---|---|
-| feat-platform-10 | Claude's actions play out in the open dashboard: navigation, wizards, fields typed in, every "click", then the live progress | — | **Essential** |
+| feat-platform-10 | Claude drives the open dashboard step by step through commands: navigation, wizards, dialogs, fields typed in, every press, live in Kenny's browser | — | **Essential** |
 
 Kenny's own answer: Claude does not literally click on the website, "maar ik wil wel alsof het zo lijkt. Als ik op de website ben en ik vraag aan claude om iets te doen in het project, dan moet ik elke stap kunnen volgen, tot het invullen van forms en alle zogenaamde kliks".
+Second answer (16:34): "Jij gebruikt geen browser, maar jij bestuurt mijn browser zogezegd met api commando's. Mijn browser reageert live op wat jij ingeeft, stap voor stap."
+And (16:34): "en al zeker geen cloudflare access of dergelijke, want jij werkt met lokale ip adressen". Claude's steps go over the host line on 10.10.10.250:8443, the LAN path the CLI already uses.

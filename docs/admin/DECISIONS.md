@@ -138,18 +138,25 @@ forwarded headers from 172.16.0.0/12).
 HYPOTHESIS still open: latch as a daemon subprocess in an unprivileged LXC,
 measured in a throwaway container before the secrets work starts.
 
-## feat-platform-10 · Claude's actions replayed in the open dashboard (decided 2026-09-28 16:29, mini-round)
+## feat-platform-10 · Claude drives Kenny's open dashboard step by step (decided 2026-09-28 16:34, mini-round, Kenny's own answer on the second form)
 
-Claude runs the action through the host as today (CLI, its own scoped token);
-no second entry point past Cloudflare Access, no browser automation. The host
-announces every operation with the token name that started it and the
-command's values. The dashboard replays an operation started by another
-session as if a person drove the page: it navigates to the page, opens the
-wizard or dialog, types each field in, shows a visible click on the confirm
-button, then follows the live progress. Every wizard is described once as
-data (its page, fields and the `Command` it builds); the same description
-drives Kenny's own clicks and the replay, so the two cannot drift. An open tab
-follows on its own as soon as another session starts something, with a
-"Stop following" button; the replay never sends the command itself.
+Kenny: "Jij gebruikt geen browser, maar jij bestuurt mijn browser zogezegd met
+api commando's. Mijn browser reageert live op wat jij ingeeft, stap voor stap.
+Dus hetzelfde effect, maar jij hebt zelf helemaal geen browser nodig."
+
+Claude sends UI steps, one by one: go to a page, open a wizard or dialog,
+type into a field, press a button, close a dialog. The steps travel over the
+existing host line (`homelab ui <step>` with Claude's own scoped token), so
+there is no second entry point past Cloudflare Access; the host hands them to
+the dashboard's session, and the dashboard keeps one shared "Claude is
+driving" state and pushes each step over SSE. Every open tab performs the step
+live, visibly: the page changes, the dialog opens, the text appears letter by
+letter, the button shows its press. The final press runs on the dashboard's
+server side, through the same wizard definition a human click uses, so it
+happens once whether zero, one or two tabs are open, and never twice. Every
+wizard is described once as data, shared by the CLI and the dashboard, so a
+step Claude sends and a click Kenny makes cannot drift. A tab follows on its
+own while Claude drives, with a "Stop following" button; Kenny's own input
+while Claude drives is refused with a visible note rather than mixed in.
 Placed as milestone `follow`, after `edit`, because the wizards arrive in
 `act` and `edit`.

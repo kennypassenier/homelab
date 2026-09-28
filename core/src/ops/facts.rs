@@ -612,6 +612,34 @@ pub async fn gather_live_facts_with(
         });
     }
 
+    // fix-150: the patch state, asked inside each running container. One
+    // probe, three lines: the upgradable count, the reboot-required mtime or
+    // `-`, the unattended-upgrades stamp mtime or `-`. A container that does
+    // not answer yields no fact, and no finding.
+    progress("asking each container about pending updates…");
+    for (vmid, hostname) in &managed {
+        let vs = vmid.to_string();
+        let Ok(out) = exec
+            .run(&Cmd::new(
+                "pct",
+                &["exec", &vs, "--", "sh", "-c", PATCH_PROBE],
+                60,
+            ))
+            .await
+        else {
+            continue;
+        };
+        if !out.success() {
+            continue;
+        }
+        facts.patch.push(parse_patch_probe(
+            *vmid,
+            hostname,
+            &out.stdout,
+            inp.now_unix,
+        ));
+    }
+
     // Is each stack's safety net actually attached? Both questions are
     // skipped when their address is not configured: an unasked question must
     // never become a finding.
@@ -732,6 +760,40 @@ pub async fn gather_live_facts_with(
 /// "no files" would make every file of the stack look new. Names are the
 /// client's directory names, so anything but a plain stack name is skipped
 /// before it can become a path.
+/// fix-150: what runs inside a container to report its patch state.
+pub const PATCH_PROBE: &str =
+    "apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep -c '^Inst'; \
+     stat -c %Y /var/run/reboot-required 2>/dev/null || echo -; \
+     stat -c %Y /var/lib/apt/periodic/upgrade-stamp 2>/dev/null || echo -";
+
+/// fix-150: the probe's three lines into a fact. Anything that is not three
+/// parseable lines is an unknown (`upgradable: None`), never a finding.
+pub fn parse_patch_probe(
+    vmid: u16,
+    hostname: &str,
+    stdout: &str,
+    now_unix: u64,
+) -> crate::ops::fleetcheck::PatchFact {
+    let mut fact = crate::ops::fleetcheck::PatchFact {
+        vmid,
+        hostname: hostname.to_string(),
+        ..Default::default()
+    };
+    let lines: Vec<&str> = stdout.lines().map(str::trim).collect();
+    let (Some(count), Some(reboot), Some(stamp)) = (lines.first(), lines.get(1), lines.get(2))
+    else {
+        return fact;
+    };
+    let Ok(upgradable) = count.parse::<u32>() else {
+        return fact;
+    };
+    let age = |s: &str| s.parse::<u64>().ok().map(|t| now_unix.saturating_sub(t));
+    fact.upgradable = Some(upgradable);
+    fact.reboot_required_age_s = age(reboot);
+    fact.unattended_stamp_age_s = age(stamp);
+    fact
+}
+
 pub async fn intent_files(
     exec: &dyn Executor,
     state_dir: &str,

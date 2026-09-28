@@ -1,6 +1,6 @@
-# homelab-admin — features (Phase 2, DRAFT)
+# homelab-admin — features (Phase 2, FROZEN 2026-09-28)
 
-Status: rounds 1 and 2 rated; freeze pending. Round 1 rated by Kenny 2026-09-28 11:33 (26 Essential, 1 Desired). Round 2 (Claude's proposals and the four mandatory items) out next.
+Status: **frozen** 2026-09-28 11:59 (Kenny, freeze: Akkoord): 47 Essential, 5 Desired. Changes after this go through mini-rounds. Round 1 rated by Kenny 2026-09-28 11:33 (26 Essential, 1 Desired). Round 2 (Claude's proposals and the four mandatory items) out next.
 
 Kenny's notes on round 1 (verbatim intent, recorded):
 - **feat-platform-8** Essential, and it is **a path in the TUI**: to work it needs only the TUI (client) and the HOST on the Proxmox host. The TUI therefore keeps this emergency path after its screens move to the dashboard.
@@ -65,6 +65,20 @@ Domains (at most eight, decided in this phase): platform, overview, stacks, fire
 Kenny's notes on round 2:
 - **feat-overview-7** (topology) Essential; "intuitive visualisations are very welcome", more use cases asked for (next form).
 - **feat-ops-8** Desired, with feat-ops-9: per-stack and global notification switches, and a snooze that silences every notification for a chosen time.
+
+
+## Round 3 (visualisations), rated 2026-09-28 11:59
+
+| ID | Feature | Proposed rating | Rating |
+|---|---|---|---|
+| feat-overview-10 | Back-upkalender | — | **Essential** |
+| feat-overview-11 | Capaciteitskaart van pve | — | **Essential** |
+| feat-overview-12 | Schijfgroei met voorspelling | — | **Essential** |
+| feat-ops-10 | Tijdlijn van de nachtronde | — | **Essential** |
+| feat-ops-11 | Deployduur door de tijd | — | **Essential** |
+| feat-stacks-9 | Afhankelijkheden tussen stacks | — | **Essential** |
+| feat-firewall-3 | Gemeten verkeer op de topologie | — | **Essential** |
+| feat-stacks-10 | Overzicht van achterstallige images | — | **Essential** |
 
 ## Mandatory items (round 2), answered 2026-09-28 11:42
 

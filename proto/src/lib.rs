@@ -316,6 +316,33 @@ pub enum Command {
     SessionOptions {
         reads_beside_queue: bool,
     },
+    /// feat-platform-3: what is running now and the newest lines, for a
+    /// client that (re)connects mid-operation. Answered as `CurrentOpView`.
+    CurrentOp,
+}
+
+/// feat-platform-3: a step starting or ending, as structured data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StepMark {
+    pub op: String,
+    pub step: String,
+    /// false = started, true = finished.
+    pub finished: bool,
+    /// On a finished step: whether it changed anything.
+    #[serde(default)]
+    pub changed: bool,
+}
+
+/// feat-platform-3: what `CurrentOp` answers (JSON in `RpcResponse.message`):
+/// what holds the operation lock, and the newest lines the host kept, so a
+/// client that connects mid-operation can catch up.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CurrentOpView {
+    /// What holds the lock, e.g. "deploy media"; None when idle.
+    pub holder: Option<String>,
+    pub started_unix: Option<u64>,
+    /// Oldest first; only `Log` lines.
+    pub lines: Vec<ServerMsg>,
 }
 
 /// arch-tokens (homelab-admin, 2026-09-28): what a token may do. Ordered:
@@ -351,7 +378,8 @@ impl Command {
             | FleetCheck { .. }
             | Today { .. }
             | ListManualChecks
-            | SessionOptions { .. } => Scope::Read,
+            | SessionOptions { .. }
+            | CurrentOp => Scope::Read,
             DeployStack(_)
             | StageNativeBinary { .. }
             | BackupStack(_)
@@ -431,6 +459,7 @@ impl Command {
             ListManualChecks => "list_manual_checks",
             AnswerManualCheck { .. } => "answer_manual_check",
             SessionOptions { .. } => "session_options",
+            CurrentOp => "current_op",
         }
     }
 
@@ -597,6 +626,18 @@ pub enum ServerMsg {
         level: LogLevel,
         source: String,
         msg: String,
+        /// feat-platform-3 (homelab-admin, 2026-09-28): the request whose
+        /// operation printed this line; None for the nightly round and other
+        /// work nobody asked for over the line.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        req: Option<u64>,
+        /// Unix seconds the host printed it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ts: Option<u64>,
+        /// Set on a step's start and end, so a client can count steps
+        /// without parsing `msg` (feat-ops-6, "step 3/35").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step: Option<StepMark>,
     },
     /// T69: an operation has stopped and is waiting for a person.
     ///

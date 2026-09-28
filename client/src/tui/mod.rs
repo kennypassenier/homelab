@@ -115,6 +115,9 @@ pub async fn run(
                 let log = |m: &str| {
                     Msg::Backend(backend::BackendEvent::Server(
                         homelab_proto::ServerMsg::Log {
+                            req: None,
+                            step: None,
+                            ts: None,
                             level: homelab_proto::LogLevel::Info,
                             source: "LOCAL".into(),
                             msg: m.to_string(),
@@ -166,6 +169,9 @@ pub async fn run(
                 let log = |m: String| {
                     Msg::Backend(backend::BackendEvent::Server(
                         homelab_proto::ServerMsg::Log {
+                            req: None,
+                            step: None,
+                            ts: None,
                             level: homelab_proto::LogLevel::Info,
                             source: "LOCAL".into(),
                             msg: m,

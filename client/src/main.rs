@@ -1864,7 +1864,9 @@ async fn rpc_exchange(
                     sent = true;
                 }
             }
-            ServerMsg::Log { level, source, msg } => {
+            ServerMsg::Log {
+                level, source, msg, ..
+            } => {
                 let color = match level {
                     LogLevel::Debug => C_DIM,
                     LogLevel::Info => C_CYAN,

@@ -565,7 +565,9 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 model.host_version = version;
                 model.conn = Conn::Up;
             }
-            ServerMsg::Log { level, source, msg } => {
+            ServerMsg::Log {
+                level, source, msg, ..
+            } => {
                 if let Some(focus) = model.focus.as_mut() {
                     if !focus.done {
                         focus.feed.push(LogRow {

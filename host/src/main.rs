@@ -251,6 +251,9 @@ struct FileConfig {
     /// feat-platform-2 (homelab-admin, 2026-09-28): seconds between two
     /// readings of every container's real status. Default 60; at least 10.
     status_interval_s: Option<u64>,
+    /// feat-platform-3: how many of the newest operation lines the host
+    /// keeps in memory for a client that connects mid-operation. Default 2000.
+    recent_lines: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -348,6 +351,8 @@ struct Config {
     integrity_data_read_interval_s: u64,
     /// feat-platform-2: seconds between two status readings.
     status_interval_s: u64,
+    /// feat-platform-3: how many of the newest lines `CurrentOp` returns.
+    recent_lines: usize,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
     /// host.toml as it was read; a settings save writes this back with only
@@ -572,6 +577,7 @@ fn load_config_from(path: String) -> Config {
             .integrity_data_read_interval_s
             .unwrap_or(homelab_core::ops::secondcopy::DEFAULT_DATA_READ_INTERVAL_S),
         status_interval_s: file.status_interval_s.unwrap_or(60),
+        recent_lines: file.recent_lines.unwrap_or(2000),
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -1665,6 +1671,93 @@ port = 5003
         );
     }
 
+    /// feat-platform-3: every line an operation prints carries its request
+    /// and the time; step starts and ends carry a structured mark; the ring
+    /// keeps only the newest lines.
+    #[test]
+    fn feat_platform_3_lines_carry_request_time_and_step_and_the_ring_is_capped() {
+        use homelab_core::sink::{Level, PipelineEvent};
+        let (tx, mut rx) = broadcast::channel(16);
+        let recent = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        let sink = BroadcastSink {
+            log_tx: tx,
+            req: Some(7),
+            recent: recent.clone(),
+            recent_cap: 2,
+        };
+        sink.emit(PipelineEvent::StepStarted {
+            op: "deploy".into(),
+            step: "pull".into(),
+        });
+        sink.emit(PipelineEvent::Line {
+            level: Level::Info,
+            source: "HOST".into(),
+            msg: "pulling".into(),
+        });
+        sink.emit(PipelineEvent::StepFinished {
+            op: "deploy".into(),
+            step: "pull".into(),
+            changed: true,
+        });
+        let first = rx.try_recv().unwrap();
+        match first {
+            ServerMsg::Log {
+                req,
+                ts,
+                step: Some(mark),
+                ..
+            } => {
+                assert_eq!(req, Some(7));
+                assert!(ts.unwrap_or(0) > 1_700_000_000);
+                assert_eq!((mark.step.as_str(), mark.finished), ("pull", false));
+            }
+            other => panic!("{:?}", other),
+        }
+        match rx.try_recv().unwrap() {
+            ServerMsg::Log { req, step, msg, .. } => {
+                assert_eq!((req, step, msg.as_str()), (Some(7), None, "pulling"));
+            }
+            other => panic!("{:?}", other),
+        }
+        let ring = recent.lock().unwrap();
+        assert_eq!(ring.len(), 2, "capped at recent_cap");
+        assert!(
+            matches!(&ring[1], ServerMsg::Log { step: Some(m), .. } if m.finished && m.changed)
+        );
+    }
+
+    /// feat-platform-3: CurrentOp answers the holder and the kept lines.
+    #[tokio::test]
+    async fn feat_platform_3_current_op_answers_the_holder_and_the_newest_lines() {
+        let state = test_state(config_from_text("token = \"0123456789abcdef0123\"\n"));
+        *state.busy.lock().unwrap() = Some(homelab_core::oplock::Holder {
+            what: "deploy media".into(),
+            started_unix: 1_800_000_000,
+            done: 0,
+            total: 0,
+        });
+        state.recent.lock().unwrap().push_back(ServerMsg::Log {
+            level: homelab_proto::LogLevel::Info,
+            source: "HOST".into(),
+            msg: "step 3".into(),
+            req: Some(9),
+            ts: Some(1_800_000_010),
+            step: None,
+        });
+        let resp = handle_rpc(
+            &state,
+            RpcRequest {
+                id: 1,
+                command: Rpc::CurrentOp,
+            },
+        )
+        .await;
+        assert!(resp.ok);
+        let view: homelab_proto::CurrentOpView = serde_json::from_str(&resp.message).unwrap();
+        assert_eq!(view.holder.as_deref(), Some("deploy media"));
+        assert_eq!(view.lines.len(), 1);
+    }
+
     // ── arch-tokens and arch-host-link (homelab-admin, 2026-09-28) ──────
 
     fn sha_hex(t: &str) -> String {
@@ -1968,6 +2061,9 @@ port = 5003
         tokio::spawn(async move {
             for i in 0..500 {
                 let _ = flood.send(ServerMsg::Log {
+                    req: None,
+                    step: None,
+                    ts: None,
                     level: homelab_proto::LogLevel::Debug,
                     source: "HOST".into(),
                     msg: format!("noise {}", i),
@@ -3035,6 +3131,12 @@ impl Executor for RealExecutor {
 
 struct BroadcastSink {
     log_tx: broadcast::Sender<ServerMsg>,
+    /// feat-platform-3: the request this operation runs for, stamped on
+    /// every line; None for work nobody asked for over the line.
+    req: Option<u64>,
+    /// feat-platform-3: the newest lines, for `CurrentOp`.
+    recent: Arc<std::sync::Mutex<std::collections::VecDeque<ServerMsg>>>,
+    recent_cap: usize,
 }
 
 impl Sink for BroadcastSink {
@@ -3054,6 +3156,9 @@ impl Sink for BroadcastSink {
                     level: level.into(),
                     source,
                     msg,
+                    req: self.req,
+                    ts: Some(unix_now()),
+                    step: None,
                 }
             }
             // fix-122: step starts and ends reach the journal too; they went
@@ -3066,6 +3171,14 @@ impl Sink for BroadcastSink {
                     level: homelab_proto::LogLevel::Info,
                     source: "HOST".into(),
                     msg,
+                    req: self.req,
+                    ts: Some(unix_now()),
+                    step: Some(homelab_proto::StepMark {
+                        op: op.clone(),
+                        step: step.clone(),
+                        finished: false,
+                        changed: false,
+                    }),
                 }
             }
             PipelineEvent::StepFinished { op, step, changed } => {
@@ -3080,6 +3193,14 @@ impl Sink for BroadcastSink {
                     level: homelab_proto::LogLevel::Info,
                     source: "HOST".into(),
                     msg,
+                    req: self.req,
+                    ts: Some(unix_now()),
+                    step: Some(homelab_proto::StepMark {
+                        op: op.clone(),
+                        step: step.clone(),
+                        finished: true,
+                        changed,
+                    }),
                 }
             }
             PipelineEvent::Bytes {
@@ -3094,6 +3215,14 @@ impl Sink for BroadcastSink {
                 total,
             },
         };
+        if matches!(msg, ServerMsg::Log { .. }) {
+            if let Ok(mut ring) = self.recent.lock() {
+                ring.push_back(msg.clone());
+                while ring.len() > self.recent_cap {
+                    ring.pop_front();
+                }
+            }
+        }
         let _ = self.log_tx.send(msg);
     }
 }
@@ -3149,6 +3278,8 @@ struct AppState {
     auth_failures: Arc<AuthFailures>,
     /// feat-platform-2: the newest reading of every container's real status.
     live_status: Arc<std::sync::RwLock<Option<homelab_core::ops::livestatus::LiveStatus>>>,
+    /// feat-platform-3: the newest operation lines, for `CurrentOp`.
+    recent: Arc<std::sync::Mutex<std::collections::VecDeque<ServerMsg>>>,
     /// fix-121: when this daemon started. A self-update marker armed before
     /// this moment names this binary as the new one; one armed later was
     /// armed by this daemon for its successor.
@@ -3174,6 +3305,7 @@ impl AppState {
             )),
             auth_failures: Arc::new(AuthFailures::default()),
             live_status: Arc::new(std::sync::RwLock::new(None)),
+            recent: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
         }
     }
 }
@@ -5090,6 +5222,9 @@ fn lag_catch_up(
     asks: &std::sync::Mutex<std::collections::HashMap<u64, PendingAsk>>,
 ) -> Vec<ServerMsg> {
     let mut out = vec![ServerMsg::Log {
+        req: None,
+        step: None,
+        ts: None,
         level: homelab_proto::LogLevel::Warn,
         source: "HOST".into(),
         msg: format!(
@@ -5473,6 +5608,9 @@ async fn lock_ops(state: &AppState) -> tokio::sync::MutexGuard<'_, ()> {
     let msg = homelab_core::oplock::waiting_message(holder.as_ref(), unix_now());
     info!("{}", msg);
     let _ = state.log_tx.send(ServerMsg::Log {
+        req: None,
+        step: None,
+        ts: None,
         level: homelab_proto::LogLevel::Warn,
         source: "HOST".into(),
         msg,
@@ -5484,6 +5622,9 @@ async fn lock_ops(state: &AppState) -> tokio::sync::MutexGuard<'_, ()> {
 /// whoever is watching. Nobody connected, nothing sent.
 fn progress_line(state: &AppState, line: &str) {
     let _ = state.log_tx.send(ServerMsg::Log {
+        req: None,
+        step: None,
+        ts: None,
         level: homelab_proto::LogLevel::Info,
         source: "CHECK".into(),
         msg: line.to_string(),
@@ -5571,6 +5712,10 @@ where
 {
     let broadcast = BroadcastSink {
         log_tx: state.log_tx.clone(),
+        // Work the host starts itself runs with id 0: no request asked.
+        req: (req_id != 0).then_some(req_id),
+        recent: state.recent.clone(),
+        recent_cap: state.config.recent_lines,
     };
     let sink = homelab_core::incidents::RecordingSink::new(&broadcast);
     let journal = FileJournal {
@@ -5843,6 +5988,25 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
     match req.command {
         // Answered by the session loop itself; reaching here means a caller
         // bypassed it (a test harness), which changes nothing.
+        // feat-platform-3: what runs now, and the newest lines.
+        Rpc::CurrentOp => {
+            let holder = state.busy.lock().ok().and_then(|b| b.clone());
+            let view = homelab_proto::CurrentOpView {
+                holder: holder.as_ref().map(|h| h.what.clone()),
+                started_unix: holder.as_ref().map(|h| h.started_unix),
+                lines: state
+                    .recent
+                    .lock()
+                    .map(|r| r.iter().cloned().collect())
+                    .unwrap_or_default(),
+            };
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::to_string(&view).unwrap_or_default(),
+                deferred: None,
+            }
+        }
         Rpc::SessionOptions { .. } => RpcResponse {
             id: req.id,
             ok: true,

@@ -79,10 +79,18 @@ pub async fn connect(
     let mut pinned = None;
     let first_connect = decision.pin.is_none();
     let verifier = crate::tls::PinnedVerifier::new(decision.pin);
-    let tls_config = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(verifier.clone())
-        .with_no_client_auth();
+    // The provider is named, not taken from the process default: in a build
+    // that also compiles chassis-rs (the admin dashboard), rustls carries
+    // both `ring` and `aws-lc-rs` and cannot pick a default, and the first
+    // handshake panicked (measured 2026-09-28, remote_backend_tests).
+    let tls_config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::aws_lc_rs::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|e| format!("tls setup: {}", e))?
+    .dangerous()
+    .with_custom_certificate_verifier(verifier.clone())
+    .with_no_client_auth();
     let connector = Connector::Rustls(Arc::new(tls_config));
 
     let (ws, _) = tokio_tungstenite::connect_async_tls_with_config(

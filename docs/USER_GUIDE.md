@@ -520,6 +520,19 @@ restarts are the sum of theirs. Tests: `core/tests/livestatus_tests.rs` (real
 pvesh and docker samples from pve), `host/src/main.rs`
 (`feat_platform_2_app_status_comes_from_the_reading`).
 
+#### feat-platform-3 · Request id, time and steps on log lines; CurrentOp
+
+**Status:** Built (homelab-admin `host` milestone, 2026-09-28).
+
+Every line an operation prints over the line now carries the request it runs
+for (`req`), the unix time it was printed (`ts`), and on a step's start and end
+a structured `step` mark (`op`, `step`, `finished`, `changed`), so a client can
+show "step 3/35" without parsing text. All three fields are optional on the
+wire: an older client ignores them. The host keeps the newest `recent_lines`
+lines in memory (host.toml, default 2000); `CurrentOp` (scope read) answers
+what holds the operation lock and those lines, for a client that connects in
+the middle of an operation. Tests: `host/src/main.rs` (`feat_platform_3_*`).
+
 #### A5 · Secrets vault on the host
 
 **Status:** Built.

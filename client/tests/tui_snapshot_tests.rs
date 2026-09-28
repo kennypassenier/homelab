@@ -937,6 +937,16 @@ fn the_runbook_warns_that_a_restore_revives_retired_almanac_profiles() {
 /// wrong; leaving the question unanswered is.
 const CLI_ONLY: &[(&str, &str)] = &[
     (
+        "SessionOptions",
+        "arch-host-link (homelab-admin): how a session asks for its reads beside \
+         the queue; only the admin dashboard sends it, the TUI matches replies by order",
+    ),
+    (
+        "CurrentOp",
+        "feat-platform-3 (homelab-admin): catch-up for a client that connects \
+         mid-operation; the dashboard asks it, the TUI streams live lines instead",
+    ),
+    (
         "RollbackNative",
         "fix-114: replaces a running program and parks the stack's updates, done \
          when a release misbehaves after its health window — deliberately a typed \

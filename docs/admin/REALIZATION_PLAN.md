@@ -194,3 +194,14 @@ Gesigneerde homelab-releases, self-update van het dashboard via homelab, een ech
   batch, once: journal entries the template carried from 2026-09-09, older
   than Loki accepts (oldest acceptable 2026-09-21). Measured 15:35: that one
   400 in Alloy's journal, none since; CT 120's own logs arrive.
+
+### fix-156 correction follow-up: the other "Not measured" register rows
+
+Kenny approved the correction (2026-09-28 15:49). Each row gets a real
+measurement or is closed by what replaced it:
+
+| Row | What was left unmeasured | State |
+|---|---|---|
+| fix-139 | the release workflow had not run on GitHub | obsolete: the GitHub release job is gone (local release build, 2026-09-28) |
+| gap-35 | the host reported every stack online and every app running | replaced by feat-platform-2 (real status); to measure on the dashboard once Kenny is in |
+| fix-44, fix-74, fix-113, fix-122, fix-123, fix-130, fix-92 | see each row | to measure one by one, read-only first |

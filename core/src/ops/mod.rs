@@ -37,6 +37,7 @@ pub mod monitors;
 pub mod native;
 pub mod night;
 pub mod patch;
+pub mod pinexists;
 pub mod pins;
 pub mod reconcile;
 pub mod registry_cache;

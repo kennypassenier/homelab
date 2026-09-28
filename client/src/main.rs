@@ -491,7 +491,29 @@ async fn run(explicit_host: Option<String>) {
                     homelab_core::ops::fleetcheck::check_passes(&findings)
                 }
             };
-            std::process::exit(if fleet_ok && edge_ok { 0 } else { 1 });
+            // gap-37 (2026-09-28, Kenny: "eerst checken of de image bestaat"):
+            // every pinned digest in the stack files, asked of its registry.
+            let pin_findings = homelab_client::pinexists::check_pins(Path::new(&base));
+            let broken_pins: Vec<_> = pin_findings
+                .iter()
+                .filter(|f| f.severity == homelab_core::ops::fleetcheck::Severity::Broken)
+                .collect();
+            if broken_pins.is_empty() {
+                println!(
+                    "pins: every pinned image digest still exists ({} not asked)",
+                    pin_findings.len()
+                );
+            } else {
+                println!("pins: {} missing upstream", broken_pins.len());
+                for f in &broken_pins {
+                    println!(
+                        "  [broken] {} — {}\n      remedy: {}",
+                        f.subject, f.what, f.remedy
+                    );
+                }
+            }
+            let pins_ok = homelab_core::ops::fleetcheck::check_passes(&pin_findings);
+            std::process::exit(if fleet_ok && edge_ok && pins_ok { 0 } else { 1 });
         }
         // fix-68 (four-answers-to-is-anything-wrong, 2026-09-27): the morning
         // question in one verb. `check`, `doctor`, `incidents` and `checks`

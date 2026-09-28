@@ -7,6 +7,7 @@ pub mod cli_help;
 pub mod edge;
 pub mod link;
 pub mod output;
+pub mod pinexists;
 pub mod release;
 pub mod repo_config;
 pub mod routes;

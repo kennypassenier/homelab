@@ -38,6 +38,8 @@ Environment=HOMELAB_ADMIN_CONFIG=/etc/homelab-admin/config.toml
 Environment=HOMELAB_ADMIN_LISTEN=10.10.10.20:8090
 # Traefik on CT 104: the only proxy whose forwarded headers are believed.
 Environment=HOMELAB_ADMIN_TRUSTED_PROXIES=10.10.10.4
+# Passkeys need the name the browser sees (arch-exposure: OpenSSL accepted).
+Environment=HOMELAB_ADMIN_PUBLIC_URL=https://admin.kp-soft.dev
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

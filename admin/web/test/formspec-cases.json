@@ -79,6 +79,38 @@
         "skip_backup": true
       },
       "errors": {}
+    },
+    {
+      "action": "exec",
+      "args": ["vmid", "command"],
+      "confirm": false,
+      "stack": "_host",
+      "values": {
+        "vmid": "10",
+        "command": ""
+      },
+      "step": "review",
+      "errors": {
+        "command": "Choose the command.",
+        "vmid": "\"10\" is not a valid container number."
+      }
+    },
+    {
+      "action": "answer-check",
+      "args": ["check", "verdict", "days", "note"],
+      "confirm": false,
+      "stack": "_host",
+      "values": {
+        "check": "",
+        "verdict": "ok",
+        "days": "x",
+        "note": ""
+      },
+      "step": "options",
+      "errors": {
+        "check": "Choose the check.",
+        "days": "\"x\" is not a valid accepted for (days)."
+      }
     }
   ],
   "edit_cases": [

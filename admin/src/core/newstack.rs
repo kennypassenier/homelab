@@ -60,34 +60,47 @@ pub fn suggest_vmid(taken: &Taken) -> Option<u16> {
 /// Every reason the request cannot be scaffolded, in the order the wizard
 /// asks: name, container number, preset, size.
 pub fn problems(req: &NewStack, taken: &Taken, presets: &[String]) -> Vec<(String, String)> {
+    let mut out = identity_problems(&req.name, req.vmid, taken);
+    let mut say = |field: &str, why: String| out.push((field.to_string(), why));
+    if !presets.contains(&req.preset) {
+        say(
+            "preset",
+            format!("there is no preset called {}", req.preset),
+        );
+    }
+    size_problems(req, &mut say);
+    out
+}
+
+/// The new stack's name and container number, as the wizard and an import
+/// (TUI parity, `homelab import`) check them: a free, valid name; a free
+/// vmid off the no-touch list whose address exists.
+pub fn identity_problems(name: &str, vmid: u16, taken: &Taken) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     let mut say = |field: &str, why: String| out.push((field.to_string(), why));
-    if !valid_stack_name(&req.name) || req.name.len() > 32 {
+    if !valid_stack_name(name) || name.len() > 32 {
         say(
             "name",
             "a stack name is 1 to 32 lowercase letters, digits and dashes, not starting with a dash"
                 .into(),
         );
-    } else if taken.names.contains(&req.name) {
-        say(
-            "name",
-            format!("there is a stack called {} already", req.name),
-        );
-    } else if req.name == "_host" || req.name == "new" {
-        say("name", format!("{} is reserved", req.name));
+    } else if taken.names.contains(name) {
+        say("name", format!("there is a stack called {} already", name));
+    } else if name == "_host" || name == "new" {
+        say("name", format!("{} is reserved", name));
     }
-    if homelab_core::safety::DEFAULT_NO_TOUCH.contains(&req.vmid) {
+    if homelab_core::safety::DEFAULT_NO_TOUCH.contains(&vmid) {
         say(
             "vmid",
             format!(
                 "{} is on the no-touch list (OPNsense, Home Assistant, 102, 103)",
-                req.vmid
+                vmid
             ),
         );
-    } else if taken.vmids.contains(&req.vmid) {
-        say("vmid", format!("CT {} exists already", req.vmid));
+    } else if taken.vmids.contains(&vmid) {
+        say("vmid", format!("CT {} exists already", vmid));
     } else {
-        match ip_for(req.vmid) {
+        match ip_for(vmid) {
             None => say(
                 "vmid",
                 "the container number must be 102 to 354, so its address 10.10.10.<number − 100> exists"
@@ -99,12 +112,10 @@ pub fn problems(req: &NewStack, taken: &Taken, presets: &[String]) -> Vec<(Strin
             Some(_) => {}
         }
     }
-    if !presets.contains(&req.preset) {
-        say(
-            "preset",
-            format!("there is no preset called {}", req.preset),
-        );
-    }
+    out
+}
+
+fn size_problems(req: &NewStack, say: &mut impl FnMut(&str, String)) {
     if !(128..=262_144).contains(&req.ram_mb) {
         say("ram_mb", "memory must be from 128 MB to 256 GB".into());
     }
@@ -125,5 +136,4 @@ pub fn problems(req: &NewStack, taken: &Taken, presets: &[String]) -> Vec<(Strin
             );
         }
     }
-    out
 }

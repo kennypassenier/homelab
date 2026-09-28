@@ -1583,6 +1583,95 @@ async fn b1_a_newer_release_is_verified_on_the_host_and_installed_through_the_sa
     );
 }
 
+/// TUI parity round (dash-install-native): the dashboard's install of a
+/// chosen release asks GitHub for that tag, downloads and verifies on the
+/// host, and installs with the unit file the dashboard sent from the
+/// repository (the container's own is not read).
+///
+/// covers: fix-29
+#[tokio::test]
+async fn parity_install_release_fetches_the_named_tag_and_uses_the_repository_unit() {
+    use homelab_core::ops::native::install_release;
+    let exec = MockExecutor::new();
+    release_mocks(&exec, "abcd");
+    exec.respond_always("releases/tags/v3.3.0", CmdOutput::ok(RELEASE_JSON));
+    exec.respond_always(
+        "sha256sum '/var/lib/homelab/staged/kyu/kyu.release'",
+        CmdOutput::ok(&format!("{}\n", SIGNED_KYU_SHA)),
+    );
+    exec.respond_always("base64 -w0", CmdOutput::ok("YmluYXJ5\n"));
+    exec.respond_always("test -f", CmdOutput::ok("yes\n"));
+    exec.respond_always("base64 -d", CmdOutput::ok(""));
+    glibc_ok(&exec);
+    exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
+    exec.respond_always("systemctl stop", CmdOutput::ok(""));
+    exec.respond_always("cat /var/lib/homelab/state.json", CmdOutput::failed(1, ""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = install_release(
+        &ctx(&exec, &sink, &j),
+        &install_manifest(),
+        "v3.3.0",
+        UNIT_FILE,
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(!exec.calls_containing("releases/tags/v3.3.0").is_empty());
+    assert!(exec.calls_containing("releases/latest").is_empty());
+    assert!(
+        exec.calls_containing("cat /etc/systemd/system/kyu.service")
+            .is_empty(),
+        "the unit file comes from the repository: {:?}",
+        exec.calls()
+    );
+    assert!(!exec.calls_containing("mv -f").is_empty());
+}
+
+/// An unsigned release a person asked for is refused (the nightly update
+/// only skips it), and a tag that is not one never reaches a URL.
+///
+/// covers: fix-29
+#[tokio::test]
+async fn parity_install_release_refuses_an_unsigned_release_and_a_bad_tag() {
+    use homelab_core::ops::native::install_release;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let unsigned = RELEASE_JSON.replace(
+        ",\n  {\"name\":\"SHA256SUMS.minisig\",\"browser_download_url\":\"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/SHA256SUMS.minisig\"}",
+        "",
+    );
+    assert!(!unsigned.contains("minisig"));
+    exec.respond_always("releases/tags/v3.3.0", CmdOutput::ok(&unsigned));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = install_release(
+        &ctx(&exec, &sink, &j),
+        &install_manifest(),
+        "v3.3.0",
+        UNIT_FILE,
+    )
+    .await;
+    assert!(!report.ok);
+    assert!(
+        format!("{:?}", report.error).contains("not signed"),
+        "{:?}",
+        report.error
+    );
+    assert!(exec.calls_containing("curl -sSL -m 600 -o").is_empty());
+
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let report = install_release(
+        &ctx(&exec, &sink, &j),
+        &install_manifest(),
+        "v1;rm -rf /",
+        UNIT_FILE,
+    )
+    .await;
+    assert!(!report.ok);
+    assert!(exec.calls_containing("api.github.com").is_empty());
+}
+
 /// A download whose sum is not the listed one installs nothing.
 #[tokio::test]
 async fn b1_a_checksum_mismatch_installs_nothing() {
@@ -1679,6 +1768,36 @@ fn fix_29_the_real_kyu_release_signature_verifies() {
     assert!(
         homelab_core::release_sig::verify_sums(&SIGNED_SUMS.replace('a', "b"), SIGNED_SIG).is_err()
     );
+}
+
+/// TUI parity round (item 2): homelab's own releases are signed, so
+/// `release-update`, `self-install` and the dashboard's "Update host" verify
+/// a release asset the way fix-29 verifies a native one. A release without a
+/// signature, with a signature that does not parse, or with a checksum list
+/// changed after signing is refused; a signed list that does not carry the
+/// download is a checksum mismatch.
+///
+/// covers: fix-29
+#[test]
+fn parity_a_release_asset_is_installed_only_with_a_good_signature() {
+    use homelab_core::release_sig::verify_release;
+    let binary = b"not the kyu binary";
+    // No signature at all.
+    let why = verify_release("kyu", binary, SIGNED_SUMS, None).unwrap_err();
+    assert!(why.contains("not signed"), "{why}");
+    let why = verify_release("kyu", binary, SIGNED_SUMS, Some("  \n")).unwrap_err();
+    assert!(why.contains("not signed"), "{why}");
+    // A signature file that is not a minisign signature.
+    let why = verify_release("kyu", binary, SIGNED_SUMS, Some("garbage")).unwrap_err();
+    assert!(why.contains("not a minisign signature"), "{why}");
+    // The checksum list changed after signing.
+    let tampered = SIGNED_SUMS.replace("a0fc", "b0fc");
+    let why = verify_release("kyu", binary, &tampered, Some(SIGNED_SIG)).unwrap_err();
+    assert!(why.contains("ecosystem signature"), "{why}");
+    // A good signature over a list that does not carry this download.
+    let why = verify_release("kyu", binary, SIGNED_SUMS, Some(SIGNED_SIG)).unwrap_err();
+    assert!(why.contains("CHECKSUM MISMATCH"), "{why}");
+    assert!(SIGNED_SUMS.contains(SIGNED_KYU_SHA));
 }
 
 /// fix-63 (native-rebuild-starts-empty, 2026-09-27): after a rebuild a native

@@ -429,3 +429,141 @@ async fn follow_every_step_is_pushed_to_the_tabs_with_the_whole_state() {
     assert!(text.contains("not driving"), "{text}");
     let _ = actions::HOST_TARGET;
 }
+
+/// TUI parity round: the new forms are drivable like every action form, and
+/// the press still needs the action's own scope. exec (all scope) is one
+/// step, no typed name: an operate token cannot press it, an all token can,
+/// once; the copied line is the CLI's.
+#[tokio::test]
+async fn parity_exec_is_drivable_and_keeps_its_scope() {
+    let w = world("exec", MemFiles::default(), None);
+    let (_, why, _) = refused(&step(&w, open("exec", None)).await);
+    assert!(why.contains("needs scope All"), "{why}");
+    let all = |s: UiStep| {
+        let d = w.driver.clone();
+        async move { d.step("claude", Scope::All, s).await }
+    };
+    let opened = all(open("exec", None)).await;
+    assert_eq!(opened["ok"], true, "{opened}");
+    assert_eq!(opened["state"]["form"]["step"], "review");
+    assert_eq!(opened["state"]["page"], "/app/host");
+    assert_eq!(all(typed("act-vmid", "106")).await["ok"], true);
+    let t = all(typed("act-command", "df -h")).await;
+    assert_eq!(t["ok"], true, "{t}");
+    assert_eq!(t["state"]["form"]["cli"], "homelab exec 106 'df -h'");
+    let pressed = all(press("confirm")).await;
+    assert_eq!(pressed["ok"], true, "{pressed}");
+    let d = w.driver.clone();
+    until("the exec ran", || {
+        d.snapshot()
+            .form
+            .and_then(|f| f.job)
+            .is_some_and(|j| j.state == "done")
+    })
+    .await;
+    let ran: Vec<String> = w.host.ran().into_iter().map(|(_, n, _)| n).collect();
+    assert_eq!(ran.iter().filter(|n| *n == "exec_in").count(), 1, "{ran:?}");
+}
+
+/// cli-yes: a driven restore's line carries --yes once the typed name
+/// matches, and not before.
+#[tokio::test]
+async fn parity_the_driven_line_carries_yes_once_the_name_is_typed() {
+    let w = world("yes", MemFiles::default(), None);
+    assert_eq!(step(&w, open("restore", Some("media"))).await["ok"], true);
+    let review = step(&w, press("next")).await;
+    let cli = review["state"]["form"]["cli"].as_str().unwrap().to_string();
+    assert!(cli.starts_with("homelab restore media latest"), "{cli}");
+    assert!(!cli.contains("--yes"), "{cli}");
+    let t = step(&w, typed("act-confirm", "medi")).await;
+    assert!(!t["state"]["form"]["cli"]
+        .as_str()
+        .unwrap()
+        .contains("--yes"));
+    let t = step(&w, typed("act-confirm", "media")).await;
+    assert_eq!(
+        t["state"]["form"]["cli"], "homelab restore media latest --yes",
+        "{t}"
+    );
+}
+
+/// The answer form's checks come from the host's list; the press sends the
+/// CLI's AnswerManualCheck.
+#[tokio::test]
+async fn parity_a_check_answer_is_drivable() {
+    let clock = TestClock::at(1_790_000_000);
+    let host = MockHost::start(
+        clock.clone(),
+        Arc::new(|c: &homelab_proto::Command| {
+            match c {
+            homelab_proto::Command::ListManualChecks { .. } => Script {
+                message: serde_json::json!({"checks": [
+                    {"id": "c4bca102", "record": {"stack": "media", "app": "jellyfin", "text": "posters?", "registered_at": 1}}
+                ]})
+                .to_string(),
+                ..Script::ok(&[])
+            },
+            _ => Script::ok(&[("answer", 1)]),
+        }
+        }),
+        history("x", &[]),
+        Arc::new(std::sync::Mutex::new(Vec::new())),
+    );
+    let live = Arc::new(Recorder::default());
+    let dir = temp_dir("follow-answer");
+    let notify = NotifyCenter::load(
+        dir.join("notifications.json"),
+        Arc::new(act_support::RecPusher::default()),
+        live.clone(),
+        clock.clock(),
+    )
+    .unwrap();
+    let shared = shared(&[("media", 106, None)]);
+    let actions = Actions::start(ActionsDeps {
+        host: host.clone(),
+        publish: live.clone(),
+        files: Arc::new(MemFiles::default()),
+        shared: shared.clone(),
+        notify,
+        clock: clock.clock(),
+        timeout: Duration::from_secs(5),
+    });
+    let driver = Driver::new(actions, shared, live.clone(), clock.clock());
+    let s = |x: UiStep| {
+        let d = driver.clone();
+        async move { d.step("wsl", Scope::Operate, x).await }
+    };
+    let opened = s(open("answer-check", None)).await;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let fields = opened["state"]["form"]["fields"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let check = fields.iter().find(|f| f["id"] == "act-check").unwrap();
+    assert_eq!(check["choices"], serde_json::json!(["c4bca102"]));
+    let pick = |f: &str, v: &str| UiStep::Pick {
+        field: f.into(),
+        value: v.into(),
+    };
+    assert_eq!(s(pick("act-check", "c4bca102")).await["ok"], true);
+    assert_eq!(s(pick("act-verdict", "accept")).await["ok"], true);
+    // accept without days: held by the server's check at the press.
+    assert_eq!(s(press("next")).await["ok"], true);
+    let held = s(press("confirm")).await;
+    assert_eq!(held["ok"], false, "{held}");
+    s(press("back")).await;
+    assert_eq!(s(typed("act-days", "30")).await["ok"], true);
+    assert_eq!(
+        s(typed("act-note", "known, fixed next month")).await["ok"],
+        true
+    );
+    s(press("next")).await;
+    let pressed = s(press("confirm")).await;
+    assert_eq!(pressed["ok"], true, "{pressed}");
+    until("the answer was sent", || {
+        host.ran()
+            .iter()
+            .any(|(_, n, _)| n == "answer_manual_check")
+    })
+    .await;
+}

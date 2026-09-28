@@ -12,7 +12,9 @@ import SPEC from "./formspec.json" with { type: "json" };
 /**
  * The catalog row the server sends (GET /data/actions/catalog).
  * @typedef {"force" | "confirm" | "snapshot" | "app" | "unit" |
- *   "skip_backup" | "skip_safety_copy" | "commit"} ArgName
+ *   "skip_backup" | "skip_safety_copy" | "commit" | "vmid" | "command" |
+ *   "tag" | "version" | "privileged" | "base" | "check" | "verdict" |
+ *   "days" | "note" | "destroy"} ArgName
  * @typedef {{action: string, target: "stack" | "host", label: string,
  *   what: string, scope: string, needs: string, args: ArgName[],
  *   confirm: boolean, refused_for_self: boolean}} CatalogEntry
@@ -26,8 +28,10 @@ import SPEC from "./formspec.json" with { type: "json" };
  * only shows while the preview reports a deploy-guard refusal.
  * @typedef {{name: ArgName, id: string, kind: "check" | "text" | "choice" | "typed",
  *   label: string, help: string, required: boolean, pattern?: string,
- *   placeholder?: string, source?: "apps" | "units" | "commits",
- *   empty?: string, danger?: boolean, when?: "guard", expect?: string}} Field
+ *   placeholder?: string,
+ *   source?: "apps" | "units" | "commits" | "checks" | "templates",
+ *   empty?: string, danger?: boolean, when?: "guard", expect?: string,
+ *   choices?: {value: string, label: string}[]}} Field
  * @typedef {{id: "options" | "review", label: string, fields: Field[]}} Step
  * @typedef {{id: string, action: string, target: "stack" | "host",
  *   stack: string, title: string, what: string, submit: string,
@@ -36,7 +40,10 @@ import SPEC from "./formspec.json" with { type: "json" };
  * @typedef {Record<string, string | boolean>} Values
  * @typedef {{force?: boolean, confirm?: string, snapshot?: string,
  *   app?: string, unit?: string, skip_backup?: boolean,
- *   skip_safety_copy?: boolean, commit?: string}} ActionArgs
+ *   skip_safety_copy?: boolean, commit?: string, vmid?: string,
+ *   command?: string, tag?: string, version?: string, privileged?: boolean,
+ *   base?: string, check?: string, verdict?: string, days?: string,
+ *   note?: string, destroy?: string}} ActionArgs
  */
 
 /** The step every form ends on. */
@@ -57,6 +64,7 @@ export const GROUPS = /** @type {const} */ ([
       "backup-native",
       "update-native",
       "release-update-native",
+      "install-native",
       "rollback-native",
     ],
   },
@@ -82,7 +90,10 @@ export const ROLLBACK_ACTIONS = /** @type {const} */ ([
  *   when?: "guard", expect?: string,
  *   list_only?: {label: string, help: string, required: boolean,
  *     placeholder: string},
- *   help_for?: Record<string, string>}} FieldDef
+ *   help_for?: Record<string, string>,
+ *   label_for?: Record<string, string>,
+ *   required_for?: Record<string, boolean>,
+ *   choices?: {value: string, label: string}[]}} FieldDef
  */
 
 /**
@@ -101,13 +112,18 @@ export const fill = (template, values) =>
  */
 export function argField(arg, entry, stack) {
   const def = /** @type {FieldDef} */ (SPEC.fields[arg]);
-  const { list_only, help_for, pattern, ...base } = def;
+  const { list_only, help_for, label_for, required_for, pattern, ...base } =
+    def;
   /** @type {Record<string, unknown>} */
   const merged = {
     ...base,
     ...(arg === "confirm" && !entry.confirm ? list_only : {}),
   };
   if (help_for && help_for[entry.action]) merged.help = help_for[entry.action];
+  if (label_for && label_for[entry.action])
+    merged.label = label_for[entry.action];
+  if (required_for && entry.action in required_for)
+    merged.required = required_for[entry.action];
   if (pattern)
     merged.pattern =
       SPEC.patterns[/** @type {keyof typeof SPEC.patterns} */ (pattern)];
@@ -124,6 +140,19 @@ export function argField(arg, entry, stack) {
 const REVIEW_ARGS = new Set(SPEC.review_args);
 
 /**
+ * Whether an action asks this argument on its review step: the typed name
+ * and force always, and per action the ones a one-line form asks there
+ * (exec's container and command).
+ * @param {string} action
+ * @param {string} arg
+ */
+export const onReview = (action, arg) =>
+  REVIEW_ARGS.has(arg) || (REVIEW_FOR[action] ?? []).includes(arg);
+
+/** Per action, the further arguments its review step asks. */
+const REVIEW_FOR = /** @type {Record<string, string[]>} */ (SPEC.review_for);
+
+/**
  * The whole form of one action on one target.
  * @param {CatalogEntry} entry
  * @param {{stack: string, selfStack: string, hostTarget?: string}} ctx
@@ -134,8 +163,8 @@ export function actionForm(entry, ctx) {
   const stack =
     entry.target === "host" ? (ctx.hostTarget ?? "_host") : ctx.stack;
   const fields = entry.args.map((a) => argField(a, entry, stack));
-  const options = fields.filter((f) => !REVIEW_ARGS.has(f.name));
-  const review = fields.filter((f) => REVIEW_ARGS.has(f.name));
+  const options = fields.filter((f) => !onReview(entry.action, f.name));
+  const review = fields.filter((f) => onReview(entry.action, f.name));
   /** @type {Step[]} */
   const steps = [];
   if (options.length)
@@ -204,21 +233,30 @@ export function buildArgs(form, values) {
 }
 
 /**
- * The body for the preview: the same as the run's, but a typed name the
- * person has not typed yet is filled in, so the preview can show the CLI
- * line before the name is typed. A wipe keeps its list-only meaning unless
- * the name was typed right.
+ * The body for the preview: the same as the run's, but a typed name that is
+ * not (yet) right is left out; the server fills it in for the preview, so
+ * the CLI line shows before the name is typed, and carries `--yes` only once
+ * it is (cli-yes). A wipe keeps its list-only meaning unless the name was
+ * typed right.
  * @param {ActionForm} form
  * @param {Values} values
  * @returns {ActionArgs}
  */
 export function previewArgs(form, values) {
   const args = buildArgs(form, values);
-  if (form.confirmName) args.confirm = form.confirmName;
-  else if (args.confirm !== undefined && args.confirm !== form.stack)
+  if (args.confirm !== undefined && args.confirm !== form.stack)
     delete args.confirm;
   return args;
 }
+
+/**
+ * Whether the typed name matches (the preview's CLI line then carries
+ * `--yes`), so the dialog knows when to read the preview again.
+ * @param {ActionForm} form
+ * @param {Values} values
+ */
+export const nameTyped = (form, values) =>
+  typeof values.confirm === "string" && values.confirm.trim() === form.stack;
 
 /**
  * What is wrong with the values of one step (or of the whole form), by
@@ -260,10 +298,12 @@ export function checkValues(form, values, step) {
 }
 
 /**
- * The choices of a `choice` field, from the lists the page has read.
+ * The choices of a `choice` field, from its own list or the lists the page
+ * has read.
  * @param {Field} field
  * @param {{apps?: string[], units?: string[],
- *   commits?: {commit: string, subject: string}[]}} sources
+ *   commits?: {commit: string, subject: string}[],
+ *   checks?: {id: string, label: string}[], templates?: string[]}} sources
  * @returns {{value: string, label: string}[]}
  */
 export function fieldChoices(field, sources) {
@@ -271,6 +311,12 @@ export function fieldChoices(field, sources) {
   const out = [];
   if (!field.required) out.push({ value: "", label: field.empty ?? "None" });
   else out.push({ value: "", label: `Choose…` });
+  if (field.choices) out.push(...field.choices);
+  if (field.source === "checks")
+    for (const c of sources.checks ?? [])
+      out.push({ value: c.id, label: c.label });
+  if (field.source === "templates")
+    for (const t of sources.templates ?? []) out.push({ value: t, label: t });
   if (field.source === "apps")
     for (const a of sources.apps ?? []) out.push({ value: a, label: a });
   if (field.source === "units")
@@ -324,8 +370,22 @@ export const batchActions = (catalog) =>
   catalog.actions.filter(
     (a) =>
       a.target === "stack" &&
-      !a.args.some((x) => x === "unit" || x === "commit"),
+      !a.args.some((x) => x === "unit" || x === "commit" || x === "tag"),
   );
+
+/** Arguments a schedule cannot know in advance: a pick from a live list, a
+ * container number, a command, an answer, the names apply destroys. */
+const PER_RUN = new Set([
+  "unit",
+  "commit",
+  "vmid",
+  "command",
+  "check",
+  "verdict",
+  "days",
+  "note",
+  "destroy",
+]);
 
 /**
  * The batch form: the action's own fields, minus the ones that differ per
@@ -423,9 +483,7 @@ export function batchConfirmErrors(form, values) {
 export const schedulableActions = (catalog) =>
   catalog.actions.filter(
     (a) =>
-      !a.confirm &&
-      a.action !== "wipe" &&
-      !a.args.some((x) => x === "unit" || x === "commit"),
+      !a.confirm && a.action !== "wipe" && !a.args.some((x) => PER_RUN.has(x)),
   );
 
 /**
@@ -437,7 +495,7 @@ export const schedulableActions = (catalog) =>
  */
 export const scheduleArgFields = (entry, stack) =>
   entry.args
-    .filter((a) => !REVIEW_ARGS.has(a))
+    .filter((a) => !onReview(entry.action, a) || a === "tag")
     .map((a) => ({
       ...argField(a, entry, stack),
       id: `sched-${a.replace(/_/g, "-")}`,

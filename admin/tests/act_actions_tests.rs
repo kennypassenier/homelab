@@ -30,6 +30,24 @@ fn material_for(kind: ActionKind, stack: &str) -> Material {
             n.stack_name = stack.into();
             Material::Native(Box::new(n))
         }
+        Needs::HostRelease => Material::HostRelease {
+            tag: "v3.63.0".into(),
+            binary_b64: "QUJD".into(),
+        },
+        Needs::NativeRelease => {
+            let mut n = native("admin");
+            n.stack_name = stack.into();
+            Material::NativeRelease {
+                manifest: Box::new(n),
+                unit_file: "[Service]\n".into(),
+                tag: "v1.2.3".into(),
+                dir: format!("stacks/{stack}"),
+            }
+        }
+        Needs::Apply => Material::Apply {
+            deploy: vec![spec("home")],
+            destroy: vec!["gone".into()],
+        },
     }
 }
 
@@ -40,6 +58,19 @@ fn args_for(kind: ActionKind, stack: &str) -> ActionArgs {
     }
     if kind == ActionKind::DeployCommit {
         a.commit = Some("a1b2c3d4e5f6".into());
+    }
+    if kind.args().contains(&actions::Arg::Vmid) {
+        a.vmid = Some("994".into());
+    }
+    match kind {
+        ActionKind::Exec => a.command = Some("df -h".into()),
+        ActionKind::TemplateBuild => a.version = Some("5".into()),
+        ActionKind::AnswerCheck => {
+            a.check = Some("c4bca102".into());
+            a.verdict = Some("ok".into());
+        }
+        ActionKind::Apply => a.destroy = Some("gone".into()),
+        _ => {}
     }
     a
 }
@@ -301,4 +332,235 @@ fn feat_stacks_4_arguments_travel_as_documented_json() {
             .unwrap();
     assert_eq!(a.snapshot.as_deref(), Some("abc123"));
     assert!(serde_json::from_str::<ActionArgs>(r#"{"forse":true}"#).is_err());
+}
+
+/// TUI parity round: the new actions send exactly the commands the CLI
+/// verbs send (exec, guards on any vmid, template-build, checks answer,
+/// release-update, install-native, apply).
+#[test]
+fn parity_the_new_actions_send_the_cli_commands() {
+    let host = |action: &str, args: ActionArgs| {
+        let req = validate(HOST_TARGET, action, args).unwrap_or_else(|r| panic!("{action}: {r}"));
+        commands(&req, Material::None).unwrap_or_else(|r| panic!("{action}: {r}"))
+    };
+    assert!(matches!(
+        host("exec", ActionArgs { vmid: Some("105".into()), command: Some(" df -h ".into()), ..Default::default() }).as_slice(),
+        [Command::ExecIn { vmid: 105, command }] if command == "df -h"
+    ));
+    assert!(matches!(
+        host(
+            "guards-ct",
+            ActionArgs {
+                vmid: Some("111".into()),
+                ..Default::default()
+            }
+        )
+        .as_slice(),
+        [Command::ApplyGuards { vmid: 111 }]
+    ));
+    assert!(matches!(
+        host("template-build", ActionArgs {
+            vmid: Some("994".into()), version: Some("5".into()), privileged: true,
+            base: Some("local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst".into()),
+            ..Default::default()
+        }).as_slice(),
+        [Command::BuildTemplate { temp_vmid: 994, version: 5, unprivileged: false, base_template: Some(b) }]
+            if b.starts_with("local:vztmpl/debian-13")
+    ));
+    assert!(matches!(
+        host("answer-check", ActionArgs {
+            check: Some("c4bca102".into()), verdict: Some("accept".into()),
+            days: Some("30".into()), note: Some("known, fixed next month".into()),
+            ..Default::default()
+        }).as_slice(),
+        [Command::AnswerManualCheck { ok: false, accept_days: Some(30), note, .. }] if note.starts_with("known")
+    ));
+    assert!(matches!(
+        host(
+            "answer-check",
+            ActionArgs {
+                check: Some("c4bca102".into()),
+                verdict: Some("ok".into()),
+                ..Default::default()
+            }
+        )
+        .as_slice(),
+        [Command::AnswerManualCheck {
+            ok: true,
+            accept_days: None,
+            ..
+        }]
+    ));
+    // The host update ships the verified binary; the CLI line names the tag.
+    let req = validate(HOST_TARGET, "update-host", ActionArgs::default()).unwrap();
+    let m = material_for(ActionKind::UpdateHost, HOST_TARGET);
+    assert_eq!(
+        actions::cli_override(&req, &m).as_deref(),
+        Some("homelab release-update v3.63.0")
+    );
+    assert!(matches!(
+        commands(&req, m).unwrap().as_slice(),
+        [Command::SelfUpdateHost { binary_b64 }] if binary_b64 == "QUJD"
+    ));
+    // install-native: the host downloads; the CLI line is the verb's own.
+    let req = validate(
+        "admin",
+        "install-native",
+        ActionArgs {
+            tag: Some("v1.2.3".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let m = material_for(ActionKind::InstallNative, "admin");
+    assert_eq!(
+        actions::cli_override(&req, &m).as_deref(),
+        Some("homelab install-native stacks/admin v1.2.3")
+    );
+    assert!(matches!(
+        commands(&req, m).unwrap().as_slice(),
+        [Command::InstallNativeRelease { tag, .. }] if tag == "v1.2.3"
+    ));
+    assert!(restarts_dashboard("admin", ActionKind::InstallNative));
+}
+
+/// Security (dash-exec): exec needs the all scope and no typed name; the
+/// host still refuses unless exec_enabled. A command is one line.
+#[test]
+fn parity_exec_is_all_scope_one_line_and_no_confirmation() {
+    let e = ActionKind::from_slug("exec").unwrap();
+    assert_eq!(e.scope(), homelab_proto::Scope::All);
+    assert!(!e.confirm(), "Kenny: no confirmation");
+    assert!(e.host_wide());
+    for (vmid, cmd, why) in [
+        (None, Some("ls"), "container's number"),
+        (Some("abc"), Some("ls"), "not a container number"),
+        (Some("99"), Some("ls"), "not a container number"),
+        (Some("105"), None, "needs a command"),
+        (Some("105"), Some("   "), "needs a command"),
+        (Some("105"), Some("ls\nrm -rf /"), "one line"),
+    ] {
+        let r = validate(
+            HOST_TARGET,
+            "exec",
+            ActionArgs {
+                vmid: vmid.map(str::to_string),
+                command: cmd.map(str::to_string),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(r.why.contains(why), "{vmid:?} {cmd:?}: {r}");
+    }
+    // Only as a host-wide action, never on a stack.
+    assert!(validate("home", "exec", ActionArgs::default()).is_err());
+}
+
+/// Security (dash-apply): destroying a gone stack needs its typed name,
+/// never admin's, never twice, never a name that is not gone.
+#[test]
+fn parity_apply_destroys_only_typed_gone_stacks() {
+    use homelab_admin::core::applyview::{chosen_destroys, plan};
+    let ok = |h: &str| Ok::<String, String>(h.into());
+    let view = plan(
+        &[
+            ("home".into(), ok("h1")),
+            ("media".into(), ok("m2")),
+            ("broken".into(), Err("latch failed".into())),
+        ],
+        &["home".into(), "media".into(), "broken".into()],
+        &[
+            ("home".into(), "h1".into()),
+            ("media".into(), "m1".into()),
+            ("drill".into(), "d1".into()),
+            ("old".into(), "o1".into()),
+        ],
+        &[],
+    );
+    assert_eq!(view.deploy, vec!["media"]);
+    assert_eq!(view.unchanged, vec!["home"]);
+    assert_eq!(view.destroy, vec!["drill", "old"]);
+    assert_eq!(view.broken.len(), 1);
+    // Nothing typed: nothing destroyed.
+    assert!(chosen_destroys(&view, &[]).unwrap().is_empty());
+    // One typed: that one only.
+    assert_eq!(
+        chosen_destroys(&view, &["old".into()]).unwrap(),
+        vec!["old"]
+    );
+    // A stack the files still declare is never destroyed by apply.
+    assert!(chosen_destroys(&view, &["media".into()]).is_err());
+    // The form refuses admin and a name typed twice before anything runs.
+    for (typed, why) in [
+        ("admin", "arch-self"),
+        ("drill, drill", "twice"),
+        ("Drill", "not a stack name"),
+    ] {
+        let r = validate(
+            HOST_TARGET,
+            "apply",
+            ActionArgs {
+                destroy: Some(typed.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(r.why.contains(why), "{typed}: {r}");
+    }
+    let req = validate(
+        HOST_TARGET,
+        "apply",
+        ActionArgs {
+            destroy: Some("drill".into()),
+            skip_backup: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let cmds = commands(
+        &req,
+        Material::Apply {
+            deploy: vec![spec("home")],
+            destroy: vec!["drill".into()],
+        },
+    )
+    .unwrap();
+    assert!(matches!(cmds.first(), Some(Command::DeployStack(_))));
+    assert!(matches!(
+        cmds.last(),
+        Some(Command::DestroyRecorded { stack, confirm, skip_backup: true }) if stack == "drill" && confirm == "drill"
+    ));
+    assert_eq!(
+        actions::cli_override(&req, &Material::None).as_deref(),
+        Some("homelab apply --yes --no-backup")
+    );
+}
+
+/// The answer's rules are the CLI's: accept needs days and a reason.
+#[test]
+fn parity_a_check_answer_follows_the_cli_rules() {
+    let a = |verdict: &str, days: Option<&str>, note: Option<&str>| ActionArgs {
+        check: Some("c4bca102".into()),
+        verdict: Some(verdict.into()),
+        days: days.map(str::to_string),
+        note: note.map(str::to_string),
+        ..Default::default()
+    };
+    assert!(validate(HOST_TARGET, "answer-check", a("ok", None, None)).is_ok());
+    assert!(validate(
+        HOST_TARGET,
+        "answer-check",
+        a("nok", None, Some("broken again"))
+    )
+    .is_ok());
+    for (args, why) in [
+        (a("maybe", None, None), "ok, nok or accept"),
+        (a("accept", None, Some("reason")), "number of days"),
+        (a("accept", Some("0"), Some("reason")), "number of days"),
+        (a("accept", Some("30"), None), "reason"),
+        (a("ok", Some("3"), None), "days go with accept"),
+    ] {
+        let r = validate(HOST_TARGET, "answer-check", args).unwrap_err();
+        assert!(r.why.contains(why), "{r}");
+    }
 }

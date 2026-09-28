@@ -16,8 +16,9 @@
 //! | `HOMELAB_ADMIN_ACTION_TIMEOUT_S` | 21600 | the longest one action is waited for |
 //! | `HOMELAB_ADMIN_GIT_REMOTE` | `git@github.com:kennypassenier/homelab.git` | where the working copy is cloned from and pushed to (arch-edit-txn); a local path works too (tests) |
 //! | `HOMELAB_ADMIN_GIT_BRANCH` | `main` | the branch it follows and pushes |
-//! | `HOMELAB_ADMIN_GIT_KEY` | `<data dir>/deploy_key` | the deploy key's private half (arch-push-credential); provisioned from latch, never created here |
-//! | `HOMELAB_ADMIN_GIT_KNOWN_HOSTS` | `<data dir>/known_hosts` | the remote's ssh host keys; ssh refuses a host not in it |
+//! | `HOMELAB_ADMIN_GIT_KEY` | `<data dir>/deploy_key` | the deploy key's private half (arch-push-credential); written at start from `HOMELAB_ADMIN_DEPLOY_KEY_B64` when missing |
+//! | `HOMELAB_ADMIN_DEPLOY_KEY_B64` | none | the deploy key file, base64, from latch (a secret: admin.env); written to `HOMELAB_ADMIN_GIT_KEY` with mode 0600 when that file is missing, never logged |
+//! | `HOMELAB_ADMIN_GIT_KNOWN_HOSTS` | `<data dir>/known_hosts` | the remote's ssh host keys; ssh refuses a host not in it; GitHub's pinned keys are written there when it is missing |
 //! | `HOMELAB_ADMIN_GIT_AUTHOR` | `homelab-admin <homelab-admin@users.noreply.github.com>` | the author and committer of the dashboard's commits |
 
 use std::path::PathBuf;

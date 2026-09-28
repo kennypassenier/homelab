@@ -14,22 +14,62 @@ use crate::RestoreArgs;
 /// One parsed command line. A stack is kept as typed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Invocation {
-    Deploy { stack: String, force: bool },
-    Backup { stack: String },
+    Deploy {
+        stack: String,
+        force: bool,
+    },
+    Backup {
+        stack: String,
+    },
     Restore(RestoreArgs),
-    Update { stack: String, app: Option<String> },
-    Resize { stack: String },
-    Enable { stack: String, enabled: bool },
-    Adopt { stack: String },
-    BackupNative { stack: String },
-    UpdateNative { stack: String },
-    ReleaseUpdateNative { stack: String },
-    RollbackNative { stack: String, unit: Option<String> },
-    Guards { vmid: u16 },
-    Forget { stack: String },
-    Destroy { stack: String, skip_backup: bool },
-    Wipe { name: String },
-    PruneOrphans { stack: String },
+    Update {
+        stack: String,
+        app: Option<String>,
+    },
+    Resize {
+        stack: String,
+    },
+    Enable {
+        stack: String,
+        enabled: bool,
+    },
+    Adopt {
+        stack: String,
+    },
+    BackupNative {
+        stack: String,
+    },
+    UpdateNative {
+        stack: String,
+    },
+    ReleaseUpdateNative {
+        stack: String,
+    },
+    RollbackNative {
+        stack: String,
+        unit: Option<String>,
+    },
+    Guards {
+        vmid: u16,
+    },
+    Forget {
+        stack: String,
+    },
+    /// `yes`: the name was typed where the line came from (the dashboard's
+    /// form, decision cli-yes); the CLI then does not ask for it again.
+    Destroy {
+        stack: String,
+        skip_backup: bool,
+        yes: bool,
+    },
+    Wipe {
+        name: String,
+        yes: bool,
+    },
+    PruneOrphans {
+        stack: String,
+        yes: bool,
+    },
     Patch,
     ZfsReplicate,
     BackupHostMeta,
@@ -65,15 +105,17 @@ pub fn parse(args: &[String]) -> Result<Option<Invocation>, String> {
     };
     let verb = verb.as_str();
     let has = |flag: &str| args.iter().any(|a| a == flag);
-    // The word after the verb, exactly as the verbs always read it.
-    let first = || args.get(1).cloned().ok_or_else(|| usage(verb));
-    // `wipe` never took a flag in that place.
-    let first_word = || {
-        args.get(1)
-            .filter(|a| !a.starts_with("--"))
-            .cloned()
+    // The words after the verb that are not flags: flags may stand anywhere,
+    // so `deploy --force stacks/x` names the stack `stacks/x`, not
+    // `--force` (it did, until the TUI parity round).
+    let words: Vec<&String> = args[1..].iter().filter(|a| !a.starts_with("--")).collect();
+    let first = || {
+        words
+            .first()
+            .map(|w| w.to_string())
             .ok_or_else(|| usage(verb))
     };
+    let first_word = first;
     Ok(Some(match verb {
         "deploy" => Invocation::Deploy {
             stack: first()?,
@@ -83,7 +125,7 @@ pub fn parse(args: &[String]) -> Result<Option<Invocation>, String> {
         "restore" => Invocation::Restore(crate::restore_args(args.get(1..).unwrap_or(&[]))?),
         "update" => Invocation::Update {
             stack: first()?,
-            app: args.get(2).cloned(),
+            app: words.get(1).map(|w| w.to_string()),
         },
         "resize" => Invocation::Resize { stack: first()? },
         "enable" | "disable" => Invocation::Enable {
@@ -99,8 +141,8 @@ pub fn parse(args: &[String]) -> Result<Option<Invocation>, String> {
             Invocation::RollbackNative { stack, unit }
         }
         "guards" => Invocation::Guards {
-            vmid: args
-                .get(1)
+            vmid: words
+                .first()
                 .and_then(|v| v.parse().ok())
                 .ok_or_else(|| usage(verb))?,
         },
@@ -108,11 +150,16 @@ pub fn parse(args: &[String]) -> Result<Option<Invocation>, String> {
         "destroy" => Invocation::Destroy {
             stack: first()?,
             skip_backup: has("--no-backup"),
+            yes: has("--yes"),
         },
         "wipe" => Invocation::Wipe {
             name: first_word()?,
+            yes: has("--yes"),
         },
-        "prune-orphans" => Invocation::PruneOrphans { stack: first()? },
+        "prune-orphans" => Invocation::PruneOrphans {
+            stack: first()?,
+            yes: has("--yes"),
+        },
         "patch" => Invocation::Patch,
         "zfs-replicate" => Invocation::ZfsReplicate,
         "backup-host-meta" => Invocation::BackupHostMeta,

@@ -174,9 +174,10 @@ host, the same set of commands is refused with
 `... — run 'homelab self-install' first`, and the ones let through print
 `this client is v<x> and the host is v<y> — 'homelab self-install' updates it`
 first. `homelab self-install [tag]` downloads the release's `homelab`
-(newest when no tag is given), checks it against the release's
-`SHA256SUMS` and puts it where the running client lives; it needs `gh`, not
-the token. The TUI header shows `client v<x> · host v<y>`, yellow when the
+(newest when no tag is given), checks the release's minisign signature over
+`SHA256SUMS` (`SHA256SUMS.minisig`, the ecosystem key 1C88AB06D43C0B16) and
+the binary against that list, and puts it where the running client lives; an
+unsigned release is refused. It needs `gh`, not the token. The TUI header shows `client v<x> · host v<y>`, yellow when the
 client is the older one.
 
 ### 0.4 Reading an answer
@@ -600,7 +601,7 @@ no second way in: the steps travel on the same TLS line as every other verb.
 |---|---|
 | `homelab ui goto <path>` | shows a page: `/app/stacks/media`, `stacks/media/logs`, `/app/jobs` |
 | `homelab ui open <action> [stack]` | opens an action's dialog (`deploy media`; a host-wide action such as `patch` takes no stack) |
-| `homelab ui open <edit form> …` | opens an edit form (below): `settings <stack>`, `raw <stack>`, `add-app <stack>`, `firewall <stack>`, `new-stack`, `host-settings`, `batch <action> <stack>,<stack>`, `rollback <stack>` |
+| `homelab ui open <edit form> …` | opens an edit form (below): `settings <stack>`, `raw <stack>`, `add-app <stack>`, `firewall <stack>`, `new-stack`, `host-settings`, `batch <action> <stack>,<stack>`, `rollback <stack>`, `import` |
 | `homelab ui type <field> <text>` | types into a text or number field of the open form, by the field's id (`act-snapshot`, `act-confirm`, `edit-memory-mb`, `rule-peer`) |
 | `homelab ui pick <field> <value>` | chooses one value of a choice field (`act-app`, `act-unit`, `act-commit`, `rule-proto`, `edit-follow`) |
 | `homelab ui check <field> on\|off` | ticks or unticks a check field (`act-force`, `act-skip-backup`, `fw-enabled`) |
@@ -655,6 +656,7 @@ repository and the host, on the same pages and dialogs a click uses:
 | `host-settings` | the Settings page's host.toml | `keys` (`row edit <key>`, then `key-<key>` and, for a key that asks it, `key-<key>-confirm`; `press save`) → `review`; `confirm` writes host.toml. Needs a token of scope `all` |
 | `batch <action> <s1>,<s2>` | the fleet page's batch dialog | `review` (the action's shared fields, and `act-confirm-<stack>` per stack when it asks a typed name); `confirm` queues the batch |
 | `rollback <stack>` | the Roll back dialog | `choose` (`rollback-commit` or `rollback-unit`); `next` opens the deploy-commit or rollback-native dialog with it picked, as the row's button does |
+| `import` | the Import dialog (TUI parity) | `bundle` (`import-bundle`, `import-name`, `import-vmid`) → `plan` → `commit`; `confirm` commits and pushes the new stack |
 
 Each final press runs on the dashboard's server through the same function
 the button's route runs (one commit and push through the working copy's
@@ -698,6 +700,102 @@ Tests: `admin/tests/follow_tests.rs`, `admin/tests/follow_edit_tests.rs`
 `host/src/main.rs` (`follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope`),
 `client/src/ui_cli.rs`, `proto/src/lib.rs`, `admin/web/test/follow.test.js`
 (the replay, and the edit checks against the shared cases file).
+
+#### TUI parity · The dashboard does what the TUI and the CLI do
+
+**Status:** Built (TUI parity round, 2026-09-28), tested against a mock host
+and the demo host; the host side (`InstallNativeRelease`) and every page that
+reads host.toml need the next release, 3.63.0.
+
+Kenny's standing rule (2026-09-28): "Wat nu in de TUI kan, moet nog altijd
+kunnen in ons systeem." Every screen and key of the TUI and every verb of the
+CLI that a browser can sensibly do is in the dashboard, and every new form is
+described in `admin/web/js/formspec.json`, so `homelab ui` drives it and its
+final press runs once, on the dashboard's server. Left to a workstation on
+purpose: `self-update` and `self-install` (they replace binaries on the
+workstation), `testplan` and `update-policy` (repository documents), and
+`install-native --file` (the file lives on the workstation).
+
+| TUI / CLI | In the dashboard | `homelab ui` |
+|---|---|---|
+| `homelab today` | **Today** page: the verdict first, then every item with its remedy | `goto /app/today` |
+| `homelab check`, TUI `c` | **Today** page, "Run the fleet check": every finding with its remedy (the Cloudflare edge and the registries' pins stay on a workstation: they need its token) | `goto /app/today` |
+| `homelab checks answer <id> ok\|nok\|accept <days> <reason>` | an **Answer…** button on each manual check (Checks page, a stack's Checks tab); the form `answer-check` | `open answer-check`, `pick act-check <id>`, `pick act-verdict ok\|nok\|accept`, `type act-days 30`, `type act-note <reason>` |
+| `homelab incidents show <name>` | a **Show** button on each incident (Activity page, a stack's History tab): the bundle's text, secrets masked | — (a read) |
+| `homelab exec <vmid> <cmd>`, TUI SHELL | the form `exec` (one step, no typed name: Kenny, "we hebben genoeg security"; the host still refuses unless `exec_enabled = true`), and the **Shell** page, one line at a time, Up recalls | `open exec`, `type act-vmid 105`, `type act-command df -h`, `press confirm` (a token of scope `all`) |
+| `homelab templates` | **Host** page, "Read the templates" | — |
+| `homelab template-build` | the form `template-build`: vmid, version, privileged, base OS (from the host's list) | `open template-build`, `type act-vmid 994`, `type act-version 5`, `check act-privileged on`, `pick act-base <vztmpl>` |
+| `homelab release-update [tag]`, TUI `u` | **Update the host** (the form `update-host`); a banner on every page when a newer release is out | `open update-host`, `type act-tag v3.63.0` |
+| `homelab install-native stacks/<s>[/<unit>] [tag]` | the form `install-native` on a stack (Native services) | `open install-native kyu`, `pick act-unit kyu-runner`, `type act-tag v1.0.2` |
+| `homelab apply` | **Apply** page (the plan per stack, each diff on request) and the form `apply` | `open apply`, `type act-destroy drill` |
+| `homelab runbook`, `export`, `dashboard` | downloads: the runbook on the Host page, a stack's export bundle and Grafana dashboard JSON on its overview | — |
+| `homelab import <bundle.yml> <new-name> <vmid>` | **Import…** on the Overview and Presets pages: a bundle pasted or uploaded becomes a new stack through the plan and the commit every edit ends in (a bundle carrying a `.env` is refused) | `open import`, `edit import-bundle <file>`, `type import-name uptime2`, `type import-vmid 197`, `press next` (the plan), `press next`, `type edit-subject …`, `press confirm` |
+| `homelab presets` | **Presets** page | `goto /app/presets` |
+| `homelab guards <vmid>` | the form `guards-ct`: any container by its number (a stack's Apply guards still uses its own) | `open guards-ct`, `type act-vmid 104` |
+| `homelab ping` | **Host** page, "The line to the host": the round trip, the address and where it was set, the pinned certificate, the host's TLS fingerprint | — |
+| TUI `[CHANGED]` `[NOENV]` `[OFF]` | the Flags column of the fleet table and the badges beside a stack's state; drift and env on its overview. `[CHANGED]` needs **Compare with the files** (it runs latch once per stack for the secrets the host's hash covers, so it runs when asked, and a reading is reused for five minutes); until then drift says "not compared yet" | — |
+| TUI LOG_STREAM, DATA_TRANSFERS | **Live log** page: every line of every operation, whoever started it (this dashboard, a CLI or TUI session, the nightly round), filtered per stack, level and text; follow the tail or scroll back; the transfers' byte counters on top | `goto /app/log` |
+
+**Update the host.** The dashboard downloads the release's `homelab-host`,
+`SHA256SUMS` and `SHA256SUMS.minisig` from GitHub itself (the repository is
+public; CT 120 has no `gh`), checks the signature and the checksum exactly as
+`homelab release-update` does, and sends the binary with `SelfUpdateHost`. An
+unsigned or altered release is refused before anything is sent. The job then
+waits (at most five minutes) for the line to drop and the host to say Hello
+as the version it shipped; only then is it done. When the old version comes
+back, its rollback ran, and the job says so. The copied line is
+`homelab release-update <tag>`.
+
+**install-native.** The host downloads and verifies the named release
+itself (`InstallNativeRelease`, new in 3.63.0; refused for an unsigned
+release, unlike the nightly update, which skips it), with the service file
+and the unit file from the dashboard's working copy, as the CLI sends them.
+Without a tag the dashboard asks GitHub for the service's latest one. A host
+older than 3.63.0 is not sent the command (it would drop it without a word);
+the form says to update the host first.
+
+**Apply.** The plan is `homelab apply --plan`'s: every stack whose intent
+hash differs from what the host applied is deployed (in name order), a stack
+whose directory is gone is listed and destroyed only when its name is typed
+into "Destroy these gone stacks" (comma-separated; a name that is not gone,
+`admin`, or a name typed twice is refused before anything runs). A stack that
+does not build stops the whole apply, as on the command line. Every planned
+stack passes the deploy guard before the first is sent, unless forced. The
+copied line is `homelab apply --yes` (with `--no-backup`, `--force`).
+
+**The plan in the Deploy review.** A plain deploy's review now shows the
+per-file plan: every file that is new, changes or goes, with its diff,
+against what the host last applied (`GetApplied`). Secrets are never part of
+it.
+
+**The copied CLI line (cli-yes).** Once the form's typed name matches, the
+copied line of a restore, destroy, wipe or prune-orphans carries `--yes`, so
+it runs without asking the name a second time; before that it leaves the
+question to the CLI. `destroy`, `wipe` and `prune-orphans` take `--yes` for
+this.
+
+**Flags anywhere.** `homelab deploy --force stacks/media` deploys
+`stacks/media` (it used to read `--force` as the stack's name); flags may
+stand before or after the stack in every verb the dashboard copies.
+
+**The deploy key on CT 120.** latch hands the deploy key over as
+`HOMELAB_ADMIN_DEPLOY_KEY_B64` in admin.env (the private key file, base64).
+At start, when `HOMELAB_ADMIN_GIT_KEY` (default
+`/appdata/admin/admin-config/deploy_key`) is missing, the dashboard writes it
+there with mode 0600; it never overwrites an existing file and never logs the
+key. GitHub's published ssh host keys are pinned in the dashboard and written
+to `HOMELAB_ADMIN_GIT_KNOWN_HOSTS` when that file is missing (they are never
+fetched with `ssh-keyscan`).
+
+**The demo host.** The simulated host the browser tests use
+(`HOMELAB_ADMIN_DEMO_HOST=1`) exists only in a build with
+`--features demo-host`; `make release` builds without it, and a release
+build started with the variable refuses to start rather than open the line
+to the real host.
+
+Tests: `admin/tests/parity_tests.rs`, `admin/tests/act_actions_tests.rs`
+(`parity_*`), `admin/tests/follow_tests.rs` (`parity_*`),
+`core/tests/native_tests.rs` (`parity_*`), `admin/web/test/parity.test.js`.
 
 #### A5 · Secrets vault on the host
 
@@ -2378,7 +2476,7 @@ TUI key or palette action.
 At start the TUI asks GitHub for the newest release of `kennypassenier/homelab`
 (`client/src/tui/mod.rs:50-55`, `client/src/release.rs:10-27`). When it is
 newer than the connected host, the ticker says
-`⬆ HOST UPDATE <tag> available — press u (checksum-verified, auto-rollback armed)`
+`⬆ HOST UPDATE <tag> available — press u (signature and checksum verified, auto-rollback armed)`
 (`client/src/tui/view/mod.rs:601-604`), and `u` opens a window titled
 `UPDATE HOST → <tag>` (`client/src/tui/model.rs:780-792`). A malformed or
 equal version never counts as newer (`client/src/release.rs:30-43`).
@@ -2388,13 +2486,19 @@ homelab release-update           # newest release
 homelab release-update v3.58.2   # a named tag
 ```
 
-Both download the `homelab-host` asset and `SHA256SUMS` with `gh`, refuse on
-a checksum mismatch (`CHECKSUM MISMATCH for ...`), print
-`✓ checksum verified — shipping over the line` and hand the binary to the H5
-steps (`client/src/main.rs:808-834`, `client/src/release.rs:57-61,166`). The
-host release is checked against `SHA256SUMS` only; there is no signature check
-for it (see C7). The tag above is an example. Tests:
-`client/tests/tui_snapshot_tests.rs:1463,2579`.
+Both download the `homelab-host` asset, `SHA256SUMS` and
+`SHA256SUMS.minisig` with `gh`. Since the TUI parity round (homelab releases
+are signed since 3.62.0) the signature over `SHA256SUMS` is checked with the
+ecosystem key first, as fix-29 checks a native release: a release without it,
+or with a checksum list changed after signing, is refused before anything is
+sent. Then a checksum mismatch is refused (`CHECKSUM MISMATCH for ...`); on
+success the client prints `✓ signature and checksum verified — shipping over
+the line` and hands the binary to the H5 steps (`client/src/release.rs`,
+`core/src/release_sig.rs` `verify_release`). The dashboard's **Update the
+host** does the same without `gh` (below). The tag above is an example.
+Tests: `client/tests/tui_snapshot_tests.rs:1463,2579`,
+`core/tests/native_tests.rs`
+(`parity_a_release_asset_is_installed_only_with_a_good_signature`).
 
 #### H8 · Per-stack enabled flag (park / unpark)
 

@@ -29,6 +29,11 @@ const GO = {
   n: "notifications",
   f: "firewall",
   e: "settings",
+  // TUI parity round.
+  y: "today",
+  l: "log",
+  p: "apply",
+  x: "shell",
 };
 
 /** @type {ShortcutGroup[]} */

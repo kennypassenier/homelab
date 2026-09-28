@@ -99,7 +99,7 @@ pub const VERBS: &[Verb] = &[
     v(Host, "template-build", "[vmid] [version] [--privileged] [--base <vztmpl>]", "build a golden template on a scratch vmid (999 and version 1 when not given)", "homelab template-build 999 5 --base debian-13-standard_13.1-2_amd64.tar.zst"),
     v(Host, "release-update", "[tag]", "download the host daemon's release (newest when no tag), verify it, ship it to the host", "homelab release-update v3.60.0"),
     v(Host, "self-update", "<path-to-homelab-host>", "ship a locally built host daemon to the host; it rolls back on a failed selfcheck", "homelab self-update target/release/homelab-host"),
-    v(Host, "self-install", "[tag]", "replace this client with a release's (newest when no tag), checksum-verified", "homelab self-install"),
+    v(Host, "self-install", "[tag]", "replace this client with a release's (newest when no tag), signature- and checksum-verified", "homelab self-install"),
     v(Local, "presets", "", "list the preset catalog", "homelab presets"),
     v(Local, "runbook", "[out.md]", "write the disaster-recovery runbook from the stacks (docs/DR_RUNBOOK.md by default)", "homelab runbook"),
     v(Local, "testplan", "[out.md]", "regenerate docs/deployment/TEST_PLAN.md from the test suites", "homelab testplan"),
@@ -109,10 +109,10 @@ pub const VERBS: &[Verb] = &[
     v(Local, "import", "<bundle.yml> <new-name> <vmid>", "write a bundle back as a new stack under stacks/, then validate it", "homelab import almanac-bundle.yml calendar 121"),
     v(Local, "help", "", "this list; `homelab <command> --help` for one command", "homelab help"),
     v(Dashboard, "ui", "<step> [--json]", "one step in the dashboard: goto <path>, open <action> [stack], type <field> <text>, pick <field> <value>, check <field> on|off, press next|back|confirm, close, state, done; answers what is on screen, and the final press runs the action once on the dashboard's side", "homelab ui open deploy media"),
-    v(Destructive, "destroy", "stacks/<name> [--no-backup]", "back up, then destroy the container; works from the host's record when the directory is gone", "homelab destroy drill"),
+    v(Destructive, "destroy", "stacks/<name> [--no-backup] [--yes]", "back up, then destroy the container; works from the host's record when the directory is gone; --yes skips typing the name (the dashboard's copied line carries it once the name was typed there)", "homelab destroy drill"),
     v(Destructive, "forget", "<stack>", "for a container already gone: drop its record and registrations; touches no container", "homelab forget drill"),
-    v(Destructive, "wipe", "<stack>[/<app>]", "delete what a retired stack or app kept: backups, /appdata, vault copies", "homelab wipe drill"),
-    v(Destructive, "prune-orphans", "stacks/<name>", "remove files the repository dropped, without a deploy (a deploy does this itself)", "homelab prune-orphans media"),
+    v(Destructive, "wipe", "<stack>[/<app>] [--yes]", "delete what a retired stack or app kept: backups, /appdata, vault copies; --yes skips typing the name", "homelab wipe drill"),
+    v(Destructive, "prune-orphans", "stacks/<name> [--yes]", "remove files the repository dropped, without a deploy (a deploy does this itself); --yes skips typing the name", "homelab prune-orphans media"),
 ];
 
 fn line(verb: &Verb) -> String {

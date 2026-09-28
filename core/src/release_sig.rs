@@ -38,3 +38,49 @@ pub fn verify_sums_with(pubkey: &str, sums: &str, sig: &str) -> Result<(), Strin
         )
     })
 }
+
+/// fix-29, for any release asset: the signature over `SHA256SUMS` first,
+/// then the asset against that list. `sig` is the text of
+/// `SHA256SUMS.minisig`, None when the release carries none, which is
+/// refused: an unsigned release is never installed. Used by the client
+/// (`release-update`, `self-install`, `install-native`) and by the dashboard
+/// ("Update host"), so both refuse the same things with the same words.
+pub fn verify_release(
+    asset: &str,
+    binary: &[u8],
+    sums: &str,
+    sig: Option<&str>,
+) -> Result<(), String> {
+    verify_release_with(RELEASE_PUBKEY, asset, binary, sums, sig)
+}
+
+/// Same, with an explicit key — for tests.
+pub fn verify_release_with(
+    pubkey: &str,
+    asset: &str,
+    binary: &[u8],
+    sums: &str,
+    sig: Option<&str>,
+) -> Result<(), String> {
+    let Some(sig) = sig.filter(|s| !s.trim().is_empty()) else {
+        return Err(format!(
+            "the release is not signed (no {SIG_ASSET}) — not installing {asset}; sign it \
+             (sign-releases), or wait for the author to"
+        ));
+    };
+    verify_sums_with(pubkey, sums, sig)?;
+    let actual = crate::manifest::sha256_hex(binary);
+    let listed = sums.lines().any(|l| {
+        let mut parts = l.split_whitespace();
+        matches!((parts.next(), parts.next()),
+            (Some(h), Some(f)) if h.eq_ignore_ascii_case(&actual)
+                && f.trim_start_matches('*') == asset)
+    });
+    if !listed {
+        return Err(format!(
+            "CHECKSUM MISMATCH for {asset}: the signed SHA256SUMS does not list this download \
+             — corrupted or tampered; not installing it"
+        ));
+    }
+    Ok(())
+}

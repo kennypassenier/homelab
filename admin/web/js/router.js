@@ -24,18 +24,25 @@ export const STACK_TABS = /** @type {const} */ ([
  *   {page: "activity"} | {page: "timeline"} | {page: "checks"} |
  *   {page: "doctor"} | {page: "jobs"} | {page: "schedules"} |
  *   {page: "notifications"} | {page: "firewall"} | {page: "settings"} |
- *   {page: "notfound", path: string}} Route
+ *   {page: "today"} | {page: "log"} | {page: "shell"} | {page: "apply"} |
+ *   {page: "presets"} | {page: "notfound", path: string}} Route
  */
 
 /** The navigation bar, in order. */
 export const NAV = /** @type {const} */ ([
   { page: "overview", href: "/app/", label: "Overview" },
+  // TUI parity: `homelab today`, the morning question in one answer.
+  { page: "today", href: "/app/today", label: "Today" },
   { page: "host", href: "/app/host", label: "Host" },
+  // TUI parity: LOG_STREAM, every host operation whoever started it.
+  { page: "log", href: "/app/log", label: "Live log" },
   { page: "activity", href: "/app/activity", label: "Activity" },
   { page: "timeline", href: "/app/timeline", label: "Timeline" },
   { page: "checks", href: "/app/checks", label: "Checks" },
   { page: "doctor", href: "/app/doctor", label: "Doctor" },
   { page: "jobs", href: "/app/jobs", label: "Jobs" },
+  // TUI parity: `homelab apply`, plan first.
+  { page: "apply", href: "/app/apply", label: "Apply" },
   { page: "schedules", href: "/app/schedules", label: "Schedules" },
   { page: "firewall", href: "/app/firewall", label: "Firewall" },
   { page: "settings", href: "/app/settings", label: "Settings" },
@@ -48,6 +55,10 @@ export const OTHER_PAGES = /** @type {const} */ ([
     href: "/app/notifications",
     label: "Notifications",
   },
+  // TUI parity: the SHELL tab (the host page and a stack page link it) and
+  // the preset catalogue (`homelab presets`; the new-stack wizard links it).
+  { page: "shell", href: "/app/shell", label: "Shell" },
+  { page: "presets", href: "/app/presets", label: "Presets" },
 ]);
 
 /** @type {Record<string, Route>} */
@@ -63,6 +74,11 @@ const FIXED = {
   notifications: { page: "notifications" },
   firewall: { page: "firewall" },
   settings: { page: "settings" },
+  today: { page: "today" },
+  log: { page: "log" },
+  shell: { page: "shell" },
+  apply: { page: "apply" },
+  presets: { page: "presets" },
 };
 
 /**

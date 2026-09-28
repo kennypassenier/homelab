@@ -94,6 +94,11 @@ export const ACT_EVENTS = /** @type {const} */ ([
   "host_settings",
   // Milestone follow: Claude drove one step (feat-platform-10).
   "drive",
+  // TUI parity: every host line, the byte counters, the newest release.
+  "host_log",
+  "transfer",
+  "release",
+  "link",
 ]);
 
 /** @type {Map<string, Set<(data: any) => void>>} */

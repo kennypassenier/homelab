@@ -174,7 +174,7 @@ async fn world(tag: &str) -> World {
         ("admin", 120, None),
         ("gateway", 104, None),
     ]);
-    shared.write().await.host_version = Some("3.62.3".into());
+    shared.write().await.host_version = Some("3.63.0".into());
     let files = MemFiles {
         commits: vec![CommitInfo {
             commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678".into(),
@@ -701,5 +701,50 @@ fn follow_every_browser_module_is_embedded() {
     assert!(
         missing.is_empty(),
         "not embedded in src/main.rs: {missing:?}"
+    );
+}
+
+/// TUI parity (`homelab import`): the import form, driven. The bundle is
+/// one multi-line field (`homelab ui edit import-bundle <file>`), the name
+/// and the number are held in the new-stack wizard's words, then the plan
+/// and the commit, once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn parity_the_import_form_commits_once() {
+    let w = world("import").await;
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/uptime");
+    let (bundle, _) = homelab_client::spec::bundle_text(&src).unwrap();
+    let opened = ok(&w, open("import", None)).await;
+    assert_eq!(opened["state"]["form"]["step"], "bundle");
+    ok(
+        &w,
+        UiStep::Edit {
+            field: "import-bundle".into(),
+            text: bundle,
+        },
+    )
+    .await;
+    ok(&w, typed("import-name", "kp-soft")).await;
+    ok(&w, typed("import-vmid", "197")).await;
+    let (why, _) = refused(&step(&w, press("next")).await);
+    assert!(
+        why.contains("There is a stack called kp-soft already."),
+        "{why}"
+    );
+    ok(&w, typed("import-name", "uptime2")).await;
+    let plan = ok(&w, press("next")).await;
+    let p = &plan["state"]["form"];
+    assert_eq!(p["step"], "plan");
+    assert_eq!(p["edit"]["plan"]["valid"], true, "{p}");
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "uptime2 from a bundle")).await;
+    ok(&w, pick("edit-follow", "none")).await;
+    ok(&w, press("confirm")).await;
+    let (why, _) = refused(&step(&w, press("confirm")).await);
+    assert!(why.contains("one press runs once"), "{why}");
+    assert_eq!(commits(&w), 2);
+    let files = git(&w.bare, &["show", "--name-only", "--format=", "main"]);
+    assert!(
+        files.lines().all(|l| l.starts_with("stacks/uptime2/")),
+        "{files}"
     );
 }

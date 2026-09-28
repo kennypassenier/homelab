@@ -7,6 +7,8 @@ import { firewallTab, settingsTab } from "../editpanels.js";
 import { historyRows, incidentRows } from "../activity.js";
 import { agoEl, setAgo } from "../ago.js";
 import { checkRows } from "../checks.js";
+import { answerButton } from "../answer.js";
+import { showButton } from "../incident.js";
 import {
   badgeCell,
   bindTableUrl,
@@ -20,6 +22,8 @@ import {
   td,
 } from "../dom.js";
 import { stackDetail } from "../fleet.js";
+import { badge } from "../actui.js";
+import { driftFact, stackFlags } from "../parity.js";
 import { formatTime, humanDuration } from "../format.js";
 import {
   JOURNAL,
@@ -58,6 +62,10 @@ const HISTORY_DAYS = 30;
 export function mount(root, params) {
   const title = h("h1", null, `Stack ${params.name}`);
   const state = h("span", { class: "state" });
+  // TUI parity: [OFF] [CHANGED] [NOENV], as the TUI flags a stack.
+  const flags = h("span", { class: "stack-flags", id: "stack-flags" });
+  /** @type {any} */
+  let drift = null;
   const missing = h("p", { class: "kp-alert kp-alert--warning", hidden: "" });
   const panel = h("div", {
     class: "kp-tabs__panel",
@@ -75,7 +83,7 @@ export function mount(root, params) {
   );
   root.replaceChildren(
     h("p", { class: "crumb" }, h("a", { href: "/app/" }, "← Overview")),
-    h("div", { class: "title-row" }, title, state),
+    h("div", { class: "title-row" }, title, h("span", null, state, flags)),
     missing,
     tabs,
     panel,
@@ -95,9 +103,35 @@ export function mount(root, params) {
     }
     state.className = `state ${d.state.tone}`;
     state.replaceChildren(h("span", null, d.state.label));
+    const s = f.stacks.find((x) => x.name === params.name);
+    flags.replaceChildren(
+      ...(s ? stackFlags(s, drift?.state) : []).map((x) => {
+        const b = badge({ label: `[${x.label}]`, tone: x.tone });
+        b.title = x.title;
+        return b;
+      }),
+    );
   };
   const unsub = subscribe(header);
   header();
+  // Drift runs latch per stack on the dashboard: the newest reading is
+  // shown, and a new one is made only when asked ("Compare with the files").
+  const driftAbort = new AbortController();
+  /** @param {boolean} fresh */
+  const readDrift = async (fresh) => {
+    const r = await fetchJson(
+      `/data/drift${fresh ? "?fresh=1" : ""}`,
+      "drift",
+      driftAbort.signal,
+    );
+    if (!r.ok) return;
+    drift = r.body.stacks?.[params.name] ?? null;
+    header();
+    document.dispatchEvent(new CustomEvent("stack-drift", { detail: drift }));
+  };
+  const onCompare = () => void readDrift(true).catch(() => {});
+  document.addEventListener("stack-drift-compare", onCompare);
+  void readDrift(false).catch(() => {});
   // A row wider than a phone scrolls, the open tab kept in view (kp-themes).
   const stopOverflow = watchTabOverflow(
     tabs,
@@ -116,6 +150,8 @@ export function mount(root, params) {
   };
   const stop = panels[params.tab](panel, params);
   return () => {
+    driftAbort.abort();
+    document.removeEventListener("stack-drift-compare", onCompare);
     unsub();
     stopOverflow();
     stop();
@@ -129,17 +165,75 @@ function overviewTab(panel, params) {
   const counts = h("p", null);
   // feat-stacks-4: every action on this stack, and its running jobs.
   const actions = mountActionsArea({ stack: params.name });
+  const enc = encodeURIComponent(params.name);
+  const links = h(
+    "p",
+    { class: "actions-row stack-links" },
+    h(
+      "a",
+      {
+        class: "kp-button",
+        href: `/data/download/export/${enc}`,
+        download: `${params.name}-bundle.yml`,
+      },
+      "Export bundle",
+    ),
+    h(
+      "a",
+      {
+        class: "kp-button",
+        href: `/data/download/dashboard/${enc}`,
+        download: `${params.name}-dashboard.json`,
+      },
+      "Grafana dashboard JSON",
+    ),
+  );
+  const shellLink = h(
+    "a",
+    { class: "kp-button", href: "/app/shell" },
+    "Open the shell",
+  );
+  links.append(shellLink);
+  const compareBtn = h(
+    "button",
+    { type: "button", class: "kp-button", id: "drift-compare" },
+    "Compare with the files",
+  );
+  compareBtn.addEventListener("click", () =>
+    document.dispatchEvent(new CustomEvent("stack-drift-compare")),
+  );
+  links.append(compareBtn);
   panel.replaceChildren(
     h("section", { class: "kp-card", "aria-label": "Stack" }, facts),
     counts,
     h("p", null, ago),
+    links,
     actions.element,
   );
+  /** @type {any} */
+  let drift = null;
+  const onDrift = (/** @type {Event} */ e) => {
+    drift = /** @type {CustomEvent} */ (e).detail;
+    render();
+  };
+  document.addEventListener("stack-drift", onDrift);
   const render = () => {
     const f = current().fleet;
     const d = stackDetail(f, params.name);
     if (!f || !d) return;
-    fillFacts(facts, d.facts);
+    const s = f.stacks.find((x) => x.name === params.name);
+    shellLink.setAttribute("href", `/app/shell?vmid=${s?.vmid ?? ""}`);
+    fillFacts(facts, [
+      ...d.facts,
+      {
+        label: "Env",
+        value:
+          s?.env_sealed === false
+            ? "[NOENV] the host holds no sealed env: a deploy fails closed"
+            : "sealed on the host",
+      },
+      { label: "Drift", value: driftFact(drift ?? undefined).label },
+    ]);
     const down = d.apps.filter((a) => a.running !== "running").length;
     counts.replaceChildren(
       `${d.apps.length} apps, ${down} not running. `,
@@ -153,6 +247,7 @@ function overviewTab(panel, params) {
   render();
   return () => {
     unsub();
+    document.removeEventListener("stack-drift", onDrift);
     actions.stop();
   };
 }
@@ -253,6 +348,7 @@ function historyTab(panel, params) {
       { label: "When", sort: "time" },
       { label: "Operation", sort: "text" },
       { label: "Bundle", sort: "text" },
+      { label: "Read", sort: "text" },
     ],
   });
   panel.replaceChildren(err, hist.wrap, inc.wrap, h("p", null, ago));
@@ -303,7 +399,14 @@ function historyTab(panel, params) {
       const names = stackIncidents(ir.report?.incidents ?? [], params.name);
       inc.tbody.replaceChildren(
         ...incidentRows(names).map((x) =>
-          h("tr", null, td(time(x.at)), td(x.op), td(x.name, "mono")),
+          h(
+            "tr",
+            null,
+            td(time(x.at)),
+            td(x.op),
+            td(x.name, "mono"),
+            showButton(x.name),
+          ),
         ),
       );
       incTable?.refresh();
@@ -530,6 +633,7 @@ function checksTab(panel, params) {
       { label: "Question", sort: "text", cls: "wide" },
       { label: "Answered", sort: "time" },
       { label: "Note", sort: "text" },
+      { label: "Answer", sort: "text" },
     ],
   });
   panel.replaceChildren(err, t.wrap, h("p", null, ago));
@@ -565,6 +669,7 @@ function checksTab(panel, params) {
           td(x.text),
           td(time(x.answered)),
           td(x.note),
+          answerButton(x.id, () => void load().catch(() => {})),
         ),
       ),
     );

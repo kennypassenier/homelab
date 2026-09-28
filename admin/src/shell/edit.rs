@@ -42,8 +42,8 @@ use crate::core::stackedit::{self, AddAppFiles, FileChange, StackEdit, StackText
 
 /// The host release that answers `GetHostConfig` (feat-settings-1). An
 /// older host drops a request it cannot parse without a word, so the page
-/// asks only a host at least this new.
-pub const HOST_SETTINGS_SINCE: (u64, u64, u64) = (3, 62, 3);
+/// asks only a host at least this new: the next release, 3.63.0.
+pub const HOST_SETTINGS_SINCE: (u64, u64, u64) = crate::core::hostversion::NEXT_RELEASE;
 
 #[derive(Clone)]
 pub struct EditCtx {
@@ -988,6 +988,200 @@ pub async fn commit_new(
     }
 }
 
+// ── TUI parity: import a bundle as a new stack ─────────────────────────
+
+/// `homelab import <bundle.yml> <new-name> <vmid>` in the browser: the
+/// bundle's text (an export, never with secrets), the new stack's name and
+/// container number.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportReq {
+    pub bundle: String,
+    pub name: String,
+    pub vmid: u16,
+}
+
+/// The largest bundle the page sends (the whole repository's stacks are a
+/// few hundred KiB).
+pub const IMPORT_MAX: usize = 2 * 1024 * 1024;
+
+fn prepare_import(wc: &WorkingCopy, req: &ImportReq, taken: &Taken) -> Result<Planned, Refusal> {
+    let sync_error = wc.sync().err().map(|r| r.why);
+    let what = format!("the import of {}", req.name);
+    let problems = newstack::identity_problems(&req.name, req.vmid, taken);
+    if !problems.is_empty() {
+        return Err(Refusal::new(
+            what,
+            problems
+                .iter()
+                .map(|(_, w)| w.as_str())
+                .collect::<Vec<_>>()
+                .join("; "),
+            "correct the name or the container number",
+        ));
+    }
+    if req.bundle.len() > IMPORT_MAX {
+        return Err(Refusal::new(
+            what,
+            format!("the bundle is larger than {} MiB", IMPORT_MAX / 1024 / 1024),
+            "export one stack at a time",
+        ));
+    }
+    let files =
+        homelab_client::spec::imported_files(&req.bundle, &req.name, req.vmid).map_err(|why| {
+            Refusal::new(
+                what.clone(),
+                why,
+                "paste or upload the YAML an export wrote (Export bundle, or homelab export)",
+            )
+        })?;
+    // A bundle never carries secrets; one that names a .env is refused
+    // rather than committed.
+    if let Some((p, _)) = files.iter().find(|(p, _)| {
+        p.rsplit('/')
+            .next()
+            .is_some_and(|n| n == ".env" || n.ends_with(".env"))
+    }) {
+        return Err(Refusal::new(
+            what,
+            format!("the bundle carries {p}, a secrets file"),
+            "secrets go through latch, never into the repository",
+        ));
+    }
+    let changes: Vec<FileChange> = files
+        .into_iter()
+        .map(|(rel, text)| FileChange {
+            path: format!("stacks/{}/{rel}", req.name),
+            old: None,
+            new: Some(text),
+        })
+        .collect();
+    let others = others(wc, &req.name);
+    let name = req.name.clone();
+    let checked = wc.with_staged(&req.name, &changes, |dir| check_dir(dir, &name, &others))?;
+    Ok(Planned {
+        changes,
+        checked,
+        old: None,
+        head: wc.status().head.map(|h| h.commit),
+        sync_error,
+        summary: format!(
+            "import a bundle as the new stack {} (CT {})",
+            req.name, req.vmid
+        ),
+    })
+}
+
+/// The import's plan, for the route and a driven import form.
+pub async fn plan_import(
+    c: &EditCtx,
+    req: ImportReq,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    let t = taken(c).await;
+    let wc = c.wc.clone();
+    let r2 = req.clone();
+    let planned = blocking(move || prepare_import(&wc, &r2, &t))
+        .await
+        .and_then(|r| r)
+        .map_err(|r| (StatusCode::CONFLICT, r))?;
+    let (json, _, _) = plan_json(
+        &req.name,
+        "import",
+        "feat-stacks-3",
+        &planned,
+        serde_json::json!({ "never": true, "changes": [] }),
+    );
+    Ok(json)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportCommitBody {
+    edit: ImportReq,
+    #[serde(default)]
+    subject: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    follow: Option<String>,
+}
+
+/// The import's commit and push, then its first deploy when asked; for the
+/// route and a driven import's final press.
+pub async fn commit_import(
+    c: &EditCtx,
+    b: ImportCommitBody,
+    origin: Origin,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    let t = taken(c).await;
+    let wc = c.wc.clone();
+    let req = b.edit.clone();
+    let (subject_in, note) = (b.subject.clone(), b.note.clone().unwrap_or_default());
+    let done = blocking(move || {
+        let planned = prepare_import(&wc, &req, &t)?;
+        if !planned.checked.problems.is_empty() {
+            return Err(Refusal::new(
+                format!("the import of {}", req.name),
+                planned.checked.problems.join("; "),
+                "correct the bundle, the name or the number; nothing was written",
+            ));
+        }
+        let (_, effects, diffs) = plan_json(
+            &req.name,
+            "import",
+            "feat-stacks-3",
+            &planned,
+            serde_json::Value::Null,
+        );
+        let default = editplan::commit_subject(&req.name, &planned.summary, "feat-stacks-3");
+        let subject = subject_with_id(subject_in.as_deref(), &default, "feat-stacks-3");
+        let message = editplan::commit_message(&subject, &note, &effects, &diffs);
+        let others = others(&wc, &req.name);
+        let name = req.name.clone();
+        wc.transact(&req.name, &planned.changes, &message, move |dir| {
+            check_dir(dir, &name, &others).problems
+        })
+    })
+    .await
+    .and_then(|r| r);
+    publish_repo(c).await;
+    match done {
+        Ok(committed) => {
+            let follow = follow_up(
+                c,
+                &b.edit.name,
+                b.follow.as_deref(),
+                &committed.commit,
+                origin,
+            );
+            Ok(serde_json::json!({ "committed": committed, "follow": follow }))
+        }
+        Err(r) => Err((StatusCode::CONFLICT, r)),
+    }
+}
+
+async fn import_plan(
+    State(c): State<EditCtx>,
+    b: Result<Json<ImportReq>, JsonRejection>,
+) -> Response {
+    let req = match body(b, "the import") {
+        Ok(b) => b,
+        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+    };
+    answer(plan_import(&c, req).await)
+}
+
+async fn import_commit(
+    State(c): State<EditCtx>,
+    b: Result<Json<ImportCommitBody>, JsonRejection>,
+) -> Response {
+    let b = match body(b, "the import") {
+        Ok(b) => b,
+        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+    };
+    answer(commit_import(&c, b, Origin::Manual).await)
+}
+
 // ── feat-firewall-2 ─────────────────────────────────────────────────────
 
 async fn firewall(State(c): State<EditCtx>) -> Response {
@@ -1045,12 +1239,7 @@ async fn firewall(State(c): State<EditCtx>) -> Response {
 // ── feat-settings-1 ─────────────────────────────────────────────────────
 
 /// `3.62.2` or `v3.62.2-4-gabc` as numbers.
-pub fn version_triple(v: &str) -> Option<(u64, u64, u64)> {
-    let v = v.trim().trim_start_matches('v');
-    let core = v.split(['-', '+', ' ']).next()?;
-    let mut p = core.split('.').map(|x| x.parse::<u64>().ok());
-    Some((p.next()??, p.next()??, p.next()??))
-}
+pub use crate::core::hostversion::version_triple;
 
 async fn host_new_enough(c: &EditCtx) -> Result<(), Refusal> {
     let v = c.shared.read().await.host_version.clone();
@@ -1194,6 +1383,8 @@ pub fn router(ctx: EditCtx) -> Router {
         .route("/data/stacks-new/appdata", post(new_appdata))
         .route("/data/stacks-new/plan", post(new_plan))
         .route("/data/stacks-new/commit", post(new_commit))
+        .route("/data/stacks-import/plan", post(import_plan))
+        .route("/data/stacks-import/commit", post(import_commit))
         .route("/data/firewall", get(firewall))
         .route(
             "/data/host-settings",

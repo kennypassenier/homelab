@@ -1,13 +1,24 @@
 {
   "about": "feat-platform-10: the one description of every action form's fields, read by the browser (actionforms.js imports it) and by the dashboard's server (core::drive embeds it), so a step Claude sends and a click Kenny makes are checked against the same words. {stack}, {expect}, {label} and {text} are filled in by both sides the same way.",
   "review_args": ["force", "confirm"],
+  "review_for": {
+    "exec": ["vmid", "command"],
+    "guards-ct": ["vmid"],
+    "update-host": ["tag"],
+    "apply": ["skip_backup", "destroy"]
+  },
   "steps": {
     "options": "Options",
     "review": "Review and run"
   },
   "patterns": {
     "word": "[A-Za-z0-9._:\\-]{1,128}",
-    "commit": "[0-9a-fA-F]{7,40}"
+    "commit": "[0-9a-fA-F]{7,40}",
+    "vmid": "\\d{3,5}",
+    "tag": "[A-Za-z0-9._+\\-]{1,64}",
+    "version": "\\d{1,3}",
+    "days": "\\d{1,4}",
+    "stack_list": "[a-z0-9][a-z0-9\\-]*( *, *[a-z0-9][a-z0-9\\-]*)*"
   },
   "fields": {
     "force": {
@@ -56,14 +67,20 @@
       "label": "Native unit",
       "help": "The service whose previous binary goes back; the stack's updates are parked after it.",
       "required": true,
-      "source": "units"
+      "source": "units",
+      "help_for": {
+        "install-native": "The service to install; a stack with one service has only that one."
+      }
     },
     "skip_backup": {
       "kind": "check",
       "label": "Skip the backup before destroying",
       "help": "Without it the container's data is backed up first.",
       "required": false,
-      "danger": true
+      "danger": true,
+      "help_for": {
+        "apply": "Without it each stack destroyed here is backed up first."
+      }
     },
     "skip_safety_copy": {
       "kind": "check",
@@ -79,6 +96,110 @@
       "required": true,
       "source": "commits",
       "pattern": "commit"
+    },
+    "vmid": {
+      "kind": "text",
+      "label": "Container number",
+      "label_for": {
+        "template-build": "Temporary container number"
+      },
+      "help": "The container's vmid, e.g. 105; the host refuses the ones on its no-touch list.",
+      "help_for": {
+        "template-build": "A free vmid the build uses and then turns into the template, e.g. 994."
+      },
+      "required": true,
+      "pattern": "vmid",
+      "placeholder": "105"
+    },
+    "command": {
+      "kind": "text",
+      "label": "Command",
+      "help": "One line, run as root inside the container; the host writes it to its audit log (secrets in it are masked by shape only).",
+      "required": true,
+      "placeholder": "df -h"
+    },
+    "tag": {
+      "kind": "text",
+      "label": "Release tag",
+      "help": "A homelab release such as v3.63.0; empty: the latest release.",
+      "help_for": {
+        "install-native": "The service's release to install, e.g. v4.0.1; empty: its latest release."
+      },
+      "required": false,
+      "pattern": "tag",
+      "placeholder": "latest"
+    },
+    "version": {
+      "kind": "text",
+      "label": "Template version",
+      "help": "The number after -homelab-v in the template's name: the next one, e.g. 5 when v4 is the newest.",
+      "required": true,
+      "pattern": "version",
+      "placeholder": "5"
+    },
+    "privileged": {
+      "kind": "check",
+      "label": "Privileged template",
+      "help": "The second template, for the stacks that must stay privileged (CT 105 and 106); a clone cannot change it.",
+      "required": false
+    },
+    "base": {
+      "kind": "choice",
+      "label": "Base OS",
+      "help": "The OS template to bake, from the host's list; empty: the host's default.",
+      "required": false,
+      "source": "templates",
+      "empty": "The host's default"
+    },
+    "check": {
+      "kind": "choice",
+      "label": "Check",
+      "help": "The manual check to answer, from the checks page.",
+      "required": true,
+      "source": "checks"
+    },
+    "verdict": {
+      "kind": "choice",
+      "label": "Answer",
+      "help": "ok, not ok, or a not ok accepted for some days (the reason goes in the note).",
+      "required": true,
+      "choices": [
+        {
+          "value": "ok",
+          "label": "ok"
+        },
+        {
+          "value": "nok",
+          "label": "not ok"
+        },
+        {
+          "value": "accept",
+          "label": "not ok, accepted for some days"
+        }
+      ]
+    },
+    "days": {
+      "kind": "text",
+      "label": "Accepted for (days)",
+      "help": "Only with accept: how many days the not ok counts as noted rather than broken.",
+      "required": false,
+      "pattern": "days",
+      "placeholder": "30"
+    },
+    "note": {
+      "kind": "text",
+      "label": "Note",
+      "help": "One line; optional for ok and not ok, the reason for accept.",
+      "required": false
+    },
+    "destroy": {
+      "kind": "text",
+      "label": "Destroy these gone stacks",
+      "help": "The plan lists the stacks whose directory is gone. Type the name of each one to destroy, comma-separated; empty: nothing is destroyed.",
+      "required": false,
+      "pattern": "stack_list",
+      "danger": true,
+      "placeholder": "empty: destroy nothing"
     }
   },
   "messages": {
@@ -89,16 +210,21 @@
   },
   "pages": [
     "",
+    "today",
     "host",
+    "log",
     "activity",
     "timeline",
     "checks",
     "doctor",
     "jobs",
+    "apply",
     "schedules",
     "notifications",
     "firewall",
-    "settings"
+    "settings",
+    "shell",
+    "presets"
   ],
   "stack_tabs": [
     "overview",
@@ -577,6 +703,36 @@
         "kind": "choice",
         "label": "Native unit",
         "help": "The service whose previous binary goes back (the button of its row)."
+      }
+    ],
+    "import": [
+      {
+        "name": "bundle",
+        "id": "import-bundle",
+        "kind": "textarea",
+        "label": "Bundle",
+        "help": "The YAML an export wrote (Export bundle on a stack's page, or homelab export); it never carries secrets. homelab ui edit import-bundle <file> sets it.",
+        "required": true
+      },
+      {
+        "name": "name",
+        "id": "import-name",
+        "kind": "text",
+        "label": "New stack name",
+        "help": "Lowercase letters, digits and dashes; the bundle's own name, vmid, address and /appdata paths are replaced by the new ones.",
+        "required": true,
+        "pattern": "[a-z0-9][a-z0-9\\-]{0,31}",
+        "placeholder": "recipes2"
+      },
+      {
+        "name": "vmid",
+        "id": "import-vmid",
+        "kind": "number",
+        "label": "Container number",
+        "help": "The new vmid; its address becomes 10.10.10.<number − 100>.",
+        "required": true,
+        "min": 102,
+        "max": 354
       }
     ]
   }

@@ -437,13 +437,15 @@ async fn feat_stacks_3_a_new_stack_is_scaffolded_committed_and_only_its_director
 async fn feat_settings_1_read_and_write_with_the_session_commands_only() {
     let w = world("settings").await;
     // A host older than the commands is not asked (it would drop them).
-    w.shared.write().await.host_version = Some("3.62.2".into());
+    // The gate is the next release, 3.63.0: 3.62.3 is refused too.
+    w.shared.write().await.host_version = Some("3.62.3".into());
     let (st, v) = call(&w.app, "GET", "/data/host-settings", None).await;
     assert_eq!(st, StatusCode::SERVICE_UNAVAILABLE);
-    assert!(v["why"].as_str().unwrap().contains("3.62.2"));
+    assert!(v["why"].as_str().unwrap().contains("3.62.3"));
+    assert!(v["why"].as_str().unwrap().contains("3.63.0"), "{v}");
     assert!(w.sent.lock().unwrap().is_empty());
 
-    w.shared.write().await.host_version = Some("3.62.3".into());
+    w.shared.write().await.host_version = Some("3.63.0".into());
     let (st, v) = call(&w.app, "GET", "/data/host-settings", None).await;
     assert_eq!(st, StatusCode::OK, "{v}");
     let fields = v["page"]["fields"].as_array().unwrap();
@@ -490,4 +492,80 @@ async fn feat_settings_1_read_and_write_with_the_session_commands_only() {
         other => panic!("{other:?}"),
     }
     assert_eq!(w.live.events("host_settings").len(), 1);
+}
+
+/// TUI parity (`homelab import`): a stack's export bundle becomes a new
+/// stack through the plan and the commit every edit ends in; its identity
+/// is the new one, a taken name or a bundle that is not one is refused
+/// before anything is written, and a bundle carrying a .env is refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn parity_an_export_bundle_imports_as_a_new_stack() {
+    let w = world("import").await;
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/uptime");
+    let (bundle, n) = homelab_client::spec::bundle_text(&src).unwrap();
+    assert!(n > 0);
+    let req = serde_json::json!({ "bundle": bundle, "name": "uptime2", "vmid": 197 });
+    let (st, plan) = call(
+        &w.app,
+        "POST",
+        "/data/stacks-import/plan",
+        Some(req.clone()),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{plan}");
+    assert_eq!(plan["valid"], true, "{plan}");
+    assert!(plan["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|f| f["path"].as_str().unwrap().starts_with("stacks/uptime2/")));
+    assert_eq!(plan["follow_ups"], serde_json::json!(["deploy"]), "{plan}");
+    assert_eq!(git(&w.bare, &["rev-list", "--count", "main"]).trim(), "1");
+
+    // Refusals change nothing.
+    for (body, why) in [
+        (
+            serde_json::json!({ "bundle": bundle, "name": "uptime", "vmid": 197 }),
+            "already",
+        ),
+        (
+            serde_json::json!({ "bundle": bundle, "name": "uptime2", "vmid": 101 }),
+            "no-touch",
+        ),
+        (
+            serde_json::json!({ "bundle": "not: a bundle", "name": "uptime2", "vmid": 197 }),
+            "bundle",
+        ),
+        (
+            serde_json::json!({
+                "bundle": bundle.replacen("files:\n", "files:\n- path: uptime/.env\n  content: SECRET=1\n", 1),
+                "name": "uptime2", "vmid": 197
+            }),
+            "secrets file",
+        ),
+    ] {
+        let (st, v) = call(&w.app, "POST", "/data/stacks-import/plan", Some(body)).await;
+        assert_eq!(st, StatusCode::CONFLICT, "{v}");
+        assert!(v["why"].as_str().unwrap().contains(why), "{why}: {v}");
+    }
+    assert_eq!(git(&w.bare, &["rev-list", "--count", "main"]).trim(), "1");
+
+    let (st, v) = call(
+        &w.app,
+        "POST",
+        "/data/stacks-import/commit",
+        Some(serde_json::json!({ "edit": req, "subject": "uptime2 from the uptime bundle" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let commit = v["committed"]["commit"].as_str().unwrap().to_string();
+    assert_eq!(git(&w.bare, &["rev-parse", "main"]).trim(), commit);
+    let manifest = git(&w.bare, &["show", "main:stacks/uptime2/lxc-compose.yml"]);
+    assert!(manifest.contains("stack_name: uptime2"), "{manifest}");
+    assert!(manifest.contains("vmid: 197"), "{manifest}");
+    let changed = git(&w.bare, &["show", "--name-only", "--format=", "main"]);
+    assert!(
+        changed.lines().all(|l| l.starts_with("stacks/uptime2/")),
+        "{changed}"
+    );
 }

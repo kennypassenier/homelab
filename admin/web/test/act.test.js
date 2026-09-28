@@ -13,6 +13,7 @@ import {
   fieldChoices,
   formFields,
   initialValues,
+  nameTyped,
   previewArgs,
   schedulableActions,
   scheduleArgFields,
@@ -154,13 +155,20 @@ test("arch-self: destroy and wipe are refused on the dashboard's own stack", () 
   );
 });
 
-test("the body carries only what is set; the preview fills the typed name in", () => {
+test("the body carries only what is set; the preview sends a typed name only once it is right", () => {
   const f = actionForm(find("restore"), ctx);
   const v = initialValues(f, { app: "sonarr", nonsense: "x" });
   assert.equal(v.app, "sonarr");
   assert.ok(!("nonsense" in v));
   assert.deepEqual(buildArgs(f, v), { app: "sonarr" });
-  assert.deepEqual(previewArgs(f, v), { app: "sonarr", confirm: "media" });
+  // cli-yes: the server fills the name in for the preview; the line
+  // carries --yes only once the name typed here is right.
+  assert.deepEqual(previewArgs(f, v), { app: "sonarr" });
+  assert.equal(nameTyped(f, v), false);
+  assert.deepEqual(previewArgs(f, { ...v, confirm: "medi" }), {
+    app: "sonarr",
+  });
+  assert.equal(nameTyped(f, { ...v, confirm: "media" }), true);
   v.skip_safety_copy = true;
   v.snapshot = "  ab12cd  ";
   v.confirm = "media";

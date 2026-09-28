@@ -10,6 +10,13 @@ description = "Homelab admin dashboard: a browser front for the HOST daemon, on 
 name = "homelab-admin"
 path = "src/main.rs"
 
+[features]
+# demo-host (Kenny, 2026-09-28, "Only in test builds"): a simulated host
+# inside the process (HOMELAB_ADMIN_DEMO_HOST=1) for the browser tests and
+# the smoke run. `make release` builds without it, so a released dashboard
+# cannot be started against a fake host.
+demo-host = []
+
 [dependencies]
 homelab-proto = { path = "../proto" }
 # milestone act: the deploy guard and the history types, shared with the CLI.

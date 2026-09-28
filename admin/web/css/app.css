@@ -608,3 +608,126 @@ div.row-buttons {
     transform: none;
   }
 }
+/* TUI parity round: the version warnings under the bar. */
+.shell.versions {
+  display: grid;
+  gap: 6px;
+  padding-block: 8px 0;
+}
+.versions-update {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+/* [OFF] [CHANGED] [NOENV] beside a stack's state. */
+.stack-flags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-inline-start: 8px;
+}
+td.stack-flags {
+  display: table-cell;
+  white-space: nowrap;
+}
+.stack-links,
+.host-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block: 8px;
+}
+/* Today: the verdict first. */
+.today-verdict {
+  font-size: 1.1em;
+  margin-block: 8px;
+}
+.today-unread {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+/* The live log: tall, wrapping, scrollable back. */
+.host-log {
+  min-block-size: 8rem;
+  max-block-size: min(70vh, 40rem);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  align-content: start;
+}
+.host-log__who {
+  font-size: 0.85em;
+}
+.transfers {
+  margin-block: 8px;
+}
+.transfers h2 {
+  margin-block: 0 8px;
+  font-size: 1em;
+}
+/* The shell: a transcript, then the prompt. */
+.shell-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: end;
+}
+.shell-out {
+  border: 1px solid var(--kp-color-border, var(--border, currentColor));
+  border-radius: var(--radius, 6px);
+  padding: 8px;
+  margin-block: 12px 8px;
+  min-block-size: 12rem;
+  max-block-size: 60vh;
+  overflow: auto;
+}
+.shell-entry {
+  margin-block-end: 10px;
+}
+.shell-cmd {
+  margin: 0 0 4px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.shell-output,
+.incident-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.9em;
+}
+.shell-output--failed {
+  border-inline-start: 3px solid var(--destructive, currentColor);
+  padding-inline-start: 6px;
+}
+.shell-input {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.shell-input input {
+  flex: 1;
+  min-inline-size: 0;
+}
+.incident-text {
+  max-block-size: 70vh;
+  overflow: auto;
+}
+/* The plan in the Deploy review and on the Apply page. */
+.act-plan {
+  margin-block: 8px;
+}
+.act-plan summary {
+  cursor: pointer;
+}
+.apply-stack summary a {
+  font-weight: 600;
+}
+/* The import dialog's bundle: a YAML file, pasted or uploaded. */
+#import-bundle {
+  min-block-size: 12rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+}

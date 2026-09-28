@@ -77,6 +77,15 @@ pub struct FieldDef {
     pub list_only: Option<ListOnly>,
     #[serde(default)]
     pub help_for: BTreeMap<String, String>,
+    /// A choice whose values are part of the description (the verdict).
+    #[serde(default)]
+    pub choices: Option<Vec<Choice>>,
+    /// Per action: the label when it differs (a template's temporary vmid).
+    #[serde(default)]
+    pub label_for: BTreeMap<String, String>,
+    /// Per action: whether the field must be filled when it differs.
+    #[serde(default)]
+    pub required_for: BTreeMap<String, bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -97,6 +106,10 @@ pub struct Messages {
 #[derive(Debug, Clone, Deserialize)]
 pub struct FormSpec {
     pub review_args: Vec<String>,
+    /// Per action, the further arguments asked on the review step (a
+    /// one-line form such as exec has no options step).
+    #[serde(default)]
+    pub review_for: BTreeMap<String, Vec<String>>,
     pub steps: StepLabels,
     pub patterns: BTreeMap<String, String>,
     pub fields: BTreeMap<String, FieldDef>,
@@ -133,6 +146,17 @@ pub fn arg_name(a: Arg) -> &'static str {
         Arg::SkipBackup => "skip_backup",
         Arg::SkipSafetyCopy => "skip_safety_copy",
         Arg::Commit => "commit",
+        Arg::Vmid => "vmid",
+        Arg::Command => "command",
+        Arg::Tag => "tag",
+        Arg::Version => "version",
+        Arg::Privileged => "privileged",
+        Arg::Base => "base",
+        Arg::Check => "check",
+        Arg::Verdict => "verdict",
+        Arg::Days => "days",
+        Arg::Note => "note",
+        Arg::Destroy => "destroy",
     }
 }
 
@@ -182,13 +206,23 @@ pub fn arg_field(arg: Arg, action: ActionKind, stack: &str) -> Field {
         .get(action.slug())
         .cloned()
         .unwrap_or_else(|| list_only.map_or(def.help.clone(), |l| l.help.clone()));
+    let label = def
+        .label_for
+        .get(action.slug())
+        .cloned()
+        .unwrap_or_else(|| list_only.map_or(def.label.clone(), |l| l.label.clone()));
+    let required = def
+        .required_for
+        .get(action.slug())
+        .copied()
+        .unwrap_or_else(|| list_only.map_or(def.required, |l| l.required));
     Field {
         name: name.to_string(),
         id: format!("act-{}", name.replace('_', "-")),
         kind: def.kind,
-        label: f(list_only.map_or(&def.label, |l| &l.label)),
+        label: f(&label),
         help: f(&help),
-        required: list_only.map_or(def.required, |l| l.required),
+        required,
         pattern: def
             .pattern
             .as_ref()
@@ -204,7 +238,7 @@ pub fn arg_field(arg: Arg, action: ActionKind, stack: &str) -> Field {
         expect: def.expect.as_deref().map(f),
         min: None,
         max: None,
-        choices: None,
+        choices: def.choices.clone(),
         current: None,
     }
 }
@@ -243,9 +277,10 @@ pub fn action_form(action: ActionKind, stack: &str) -> ActionForm {
         .iter()
         .map(|a| arg_field(*a, action, stack))
         .collect();
-    let (review, options): (Vec<Field>, Vec<Field>) = fields
-        .into_iter()
-        .partition(|f| spec().review_args.contains(&f.name));
+    let also = spec().review_for.get(action.slug());
+    let (review, options): (Vec<Field>, Vec<Field>) = fields.into_iter().partition(|f| {
+        spec().review_args.contains(&f.name) || also.is_some_and(|a| a.contains(&f.name))
+    });
     let mut steps = Vec::new();
     if !options.is_empty() {
         steps.push(FormStep {
@@ -392,6 +427,17 @@ pub fn build_args_of<'a>(fields: impl Iterator<Item = &'a Field>, values: &Value
             "app" => args.app = text,
             "unit" => args.unit = text,
             "commit" => args.commit = text,
+            "vmid" => args.vmid = text,
+            "command" => args.command = text,
+            "tag" => args.tag = text,
+            "version" => args.version = text,
+            "privileged" => args.privileged = on,
+            "base" => args.base = text,
+            "check" => args.check = text,
+            "verdict" => args.verdict = text,
+            "days" => args.days = text,
+            "note" => args.note = text,
+            "destroy" => args.destroy = text,
             _ => {}
         }
     }
@@ -512,6 +558,10 @@ pub struct Sources {
     pub apps: Vec<String>,
     pub units: Vec<String>,
     pub commits: Vec<String>,
+    /// The manual checks' ids (answer-check).
+    pub checks: Vec<String>,
+    /// The host's OS templates (template-build's base).
+    pub templates: Vec<String>,
     /// What an edit form's `open` reads first (the stack's files, the
     /// presets, host.toml, the roll-back list, the batch's previews).
     pub edit: Value,
@@ -534,7 +584,7 @@ pub enum Effect {
     /// the CLI line.
     Preview,
     /// The final press: run the action with these arguments, once.
-    Run(ActionArgs),
+    Run(Box<ActionArgs>),
     /// An edit form needs the dashboard's server: a plan, the data
     /// folders, or its final press (the commit, host.toml, the batch).
     Edit(EditCall),
@@ -565,6 +615,8 @@ impl OpenForm {
                 Some("apps") => sources.apps.clone(),
                 Some("units") => sources.units.clone(),
                 Some("commits") => sources.commits.clone(),
+                Some("checks") => sources.checks.clone(),
+                Some("templates") => sources.templates.clone(),
                 _ => Vec::new(),
             };
             choices.insert(f.name.clone(), list);
@@ -1079,7 +1131,18 @@ impl DriveState {
                 ];
                 let (name, sub) = form.set(step, field, &kinds, Value::String(text.clone()))?;
                 crate::core::driveedit::after_set(form, &name, sub);
-                plain
+                // cli-yes: the typed name decides whether the CLI line
+                // carries --yes, and a field typed on the review step (exec's
+                // command) changes the line, so the review reads it again.
+                let action = matches!(form.desc.family, Family::Action(_));
+                Applied {
+                    effect: if action && form.step == REVIEW && !sub {
+                        Effect::Preview
+                    } else {
+                        Effect::None
+                    },
+                    held: None,
+                }
             }
             UiStep::Edit { field, text } => {
                 let form = self.open_form(step)?;
@@ -1274,7 +1337,7 @@ impl DriveState {
                 }
                 form.run_error = None;
                 Ok(Applied {
-                    effect: Effect::Run(build_args_of(form.desc.fields(), &form.values)),
+                    effect: Effect::Run(Box::new(build_args_of(form.desc.fields(), &form.values))),
                     held: None,
                 })
             }

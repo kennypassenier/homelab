@@ -9,10 +9,11 @@ import { agoText, humanDuration } from "./format.js";
  *   apps_running: number, apps_total: number, restarts?: number,
  *   ram_used_mb?: number | null, ram_max_mb?: number | null,
  *   hostname?: string, apps?: App[], uptime_s?: number | null,
- *   applied_source?: string | null}} Stack
+ *   applied_source?: string | null, env_sealed?: boolean}} Stack
  * @typedef {{name: string, cpu_pct: number, ram_used_mb: number,
  *   ram_total_mb: number, disk_pct: number, ram_committed_mb?: number,
- *   cores_total?: number, load1_x100?: number}} Host
+ *   cores_total?: number, load1_x100?: number,
+ *   tls_fingerprint?: string}} Host
  * @typedef {{measured_at: number, host: Host, stacks: Stack[],
  *   counts: {stacks: number, online: number, parked: number}}} Fleet
  */

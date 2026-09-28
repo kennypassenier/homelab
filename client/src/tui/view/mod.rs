@@ -652,7 +652,7 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
     }
     if let Some(tag) = model.host_update_available() {
         attn.push(format!(
-            "⬆ HOST UPDATE {} available — press u (checksum-verified, auto-rollback armed)",
+            "⬆ HOST UPDATE {} available — press u (signature and checksum verified, auto-rollback armed)",
             tag
         ));
     }

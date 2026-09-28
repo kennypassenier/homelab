@@ -3,9 +3,11 @@
 //! itself so the two cannot drift; tested against the CLI's own parser
 //! (`homelab_client::cli_args::parse`).
 //!
-//! Lines deliberately leave the interactive confirmations to the CLI: a
-//! restore, destroy, wipe or prune-orphans line asks for the typed name when
-//! it is run, as the CLI always does, instead of carrying `--yes`.
+//! cli-yes (Kenny, 2026-09-28, "With --yes once the name was typed"): a
+//! restore, destroy, wipe or prune-orphans line carries `--yes` once the
+//! form's typed name matches ([`cli_line_typed`]); before that, the line
+//! leaves the confirmation to the CLI, which asks for the name when it is
+//! run.
 
 use homelab_proto::Command;
 
@@ -31,6 +33,41 @@ fn word(w: &str) -> Option<String> {
 /// `force` is the deploy guard's override, which is a flag of the verb and
 /// not part of the command.
 pub fn cli_line(command: &Command, force: bool) -> Option<String> {
+    cli_line_typed(command, force, false)
+}
+
+/// Whether the command carries the typed confirmation its verb would ask
+/// for again (restore, destroy, a real wipe, prune-orphans).
+fn carries_confirmation(command: &Command) -> bool {
+    use Command::*;
+    match command {
+        RestoreStack {
+            manifest, confirm, ..
+        } => confirm.as_deref() == Some(manifest.stack_name.as_str()),
+        DestroyStack {
+            manifest, confirm, ..
+        } => confirm == &manifest.stack_name,
+        DestroyRecorded { stack, confirm, .. } => confirm == stack,
+        WipeRetired { name, confirm } => confirm.as_deref() == Some(name.as_str()),
+        PruneOrphans {
+            manifest, confirm, ..
+        } => confirm == &manifest.stack_name,
+        _ => false,
+    }
+}
+
+/// `cli_line`, with `--yes` added when `typed` (the form's typed name
+/// matched) and the command carries that confirmation (cli-yes).
+pub fn cli_line_typed(command: &Command, force: bool, typed: bool) -> Option<String> {
+    let line = cli_line_bare(command, force)?;
+    Some(if typed && carries_confirmation(command) {
+        format!("{line} --yes")
+    } else {
+        line
+    })
+}
+
+fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
     use Command::*;
     let mut parts: Vec<String> = vec!["homelab".into()];
     let mut push = |w: &str| -> Option<()> {
@@ -206,6 +243,10 @@ pub fn cli_line(command: &Command, force: bool) -> Option<String> {
         // and replies only the TUI or the dashboard use.
         StageNativeBinary { .. }
         | InstallNative { .. }
+        // The dashboard builds this line itself: the CLI's argument is the
+        // directory of the unit's service.yml, which the command does not
+        // carry (`actions::cli_override`).
+        | InstallNativeRelease { .. }
         | SelfUpdateHost { .. }
         | GetState
         | GetApplied { .. }

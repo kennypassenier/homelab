@@ -189,7 +189,19 @@ export function planBlock(plan) {
         : []),
     );
   if (v.files.length) out.append(h("h3", null, "The diff"));
-  for (const f of v.files) {
+  out.append(...diffBlocks(v.files));
+  return out;
+}
+
+/**
+ * The files' diffs, one open `details` each.
+ * @param {ReturnType<typeof import("./plan.js").fileViews>} files
+ * @returns {HTMLElement[]}
+ */
+export function diffBlocks(files) {
+  /** @type {HTMLElement[]} */
+  const out = [];
+  for (const f of files) {
     const table = h("div", {
       class: "diff mono",
       role: "table",
@@ -208,7 +220,7 @@ export function planBlock(plan) {
           ),
         );
     }
-    out.append(
+    out.push(
       h(
         "details",
         { class: "plan-file", open: "" },

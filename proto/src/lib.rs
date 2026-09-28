@@ -172,6 +172,18 @@ pub enum Command {
         /// The systemd unit file, straight from the repository.
         unit_file: String,
     },
+    /// TUI parity round (dash-install-native, Kenny 2026-09-28): install
+    /// the release `tag` of a native service, downloaded and verified by the
+    /// HOST (the dashboard on CT 120 has no `gh`): the minisign signature
+    /// over SHA256SUMS, then the binary against it; an unsigned release is
+    /// refused. The manifest and the unit file come from the repository, as
+    /// with `InstallNative`. Sent by the dashboard only, to a host of 3.63.0
+    /// or later; the CLI keeps `InstallNative` (it downloads with `gh`).
+    InstallNativeRelease {
+        manifest: Box<NativeServiceManifest>,
+        unit_file: String,
+        tag: String,
+    },
     /// C7: on-demand backup of a native stack (pct-exec tar into restic).
     /// The stack must be adopted; the host reads the manifest from state.
     BackupNative {
@@ -542,6 +554,7 @@ impl Command {
             | BackupHostMeta
             | AdoptService(_)
             | InstallNative { .. }
+            | InstallNativeRelease { .. }
             | BackupNative { .. }
             | UpdateNative { .. }
             | ReleaseUpdateNative { .. }
@@ -595,6 +608,7 @@ impl Command {
             BackupHostMeta => "backup_host_meta",
             AdoptService(_) => "adopt_service",
             InstallNative { .. } => "install_native",
+            InstallNativeRelease { .. } => "install_native_release",
             BackupNative { .. } => "backup_native",
             UpdateNative { .. } => "update_native",
             ReleaseUpdateNative { .. } => "release_update_native",

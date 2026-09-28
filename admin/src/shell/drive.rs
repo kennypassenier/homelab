@@ -16,8 +16,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use axum::extract::State;
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
 use homelab_proto::{Command, Scope, ServerMsg, UiStep};
 use serde_json::{json, Value};
@@ -120,6 +119,24 @@ impl Driver {
                 };
             }
         }
+        // TUI parity: the host-wide forms whose choices come from the host.
+        if let UiStep::Open { form, .. } = step {
+            match form.as_str() {
+                "answer-check" => {
+                    return Sources {
+                        checks: self.check_ids().await,
+                        ..Sources::default()
+                    }
+                }
+                "template-build" => {
+                    return Sources {
+                        templates: self.os_templates().await,
+                        ..Sources::default()
+                    }
+                }
+                _ => {}
+            }
+        }
         let UiStep::Open {
             form,
             target: Some(stack),
@@ -156,6 +173,35 @@ impl Driver {
         out
     }
 
+    /// The manual checks' ids, as the checks page lists them.
+    async fn check_ids(&self) -> Vec<String> {
+        let r = self
+            .inner
+            .actions
+            .ask(
+                Command::ListManualChecks { json: true },
+                Duration::from_secs(60),
+            )
+            .await;
+        r.ok()
+            .and_then(|r| serde_json::from_str::<Value>(&r.message).ok())
+            .map(|v| strings(&v["checks"], Some("id")))
+            .unwrap_or_default()
+    }
+
+    /// The host's OS templates, for template-build's base.
+    async fn os_templates(&self) -> Vec<String> {
+        let r = self
+            .inner
+            .actions
+            .ask(Command::ListTemplates, Duration::from_secs(90))
+            .await;
+        r.ok()
+            .filter(|r| r.ok)
+            .map(|r| crate::core::templates::parse(&r.message).os)
+            .unwrap_or_default()
+    }
+
     /// What an edit form's `open` reads first, through the editor's own
     /// reads; `{"error": refusal}` when it could not be read.
     async fn edit_read(&self, kind: EditKind, form: &str, target: Option<&str>) -> Value {
@@ -176,7 +222,9 @@ impl Driver {
                     _ => Value::Null,
                 }
             }
-            EditKind::NewStack => ed::read_presets(c).await,
+            // The taken names and numbers, and whether there is a working
+            // copy, as the new-stack wizard reads them.
+            EditKind::NewStack | EditKind::Import => ed::read_presets(c).await,
             EditKind::HostSettings => ed::read_host_settings(c)
                 .await
                 .unwrap_or_else(|(_, r)| err(r)),
@@ -206,7 +254,7 @@ impl Driver {
                         ..Default::default()
                     };
                     if let Ok(req) = act::validate(s, action, args) {
-                        if self.inner.actions.preview_of(req).await.1.is_some() {
+                        if self.inner.actions.preview_of(req, false).await.1.is_some() {
                             guarded += 1;
                         }
                     }
@@ -269,6 +317,14 @@ impl Driver {
                 Ok(b) => self.inner.actions.run_batch(b).map_err(|(_, r)| r),
                 Err(_) => parse("the batch", body),
             },
+            EditCall::ImportPlan { body } => match serde_json::from_value(body.clone()) {
+                Ok(b) => ed::plan_import(&c, b).await.map_err(|(_, r)| r),
+                Err(_) => parse("the import", body),
+            },
+            EditCall::ImportCommit { body } => match serde_json::from_value(body.clone()) {
+                Ok(b) => ed::commit_import(&c, b, origin()).await.map_err(|(_, r)| r),
+                Err(_) => parse("the import", body),
+            },
         };
         if call.final_press() {
             match &outcome {
@@ -327,7 +383,7 @@ impl Driver {
                     self.preview().await;
                     held
                 }
-                Effect::Run(args) => self.run(by, args).await,
+                Effect::Run(args) => self.run(by, *args).await,
                 Effect::Edit(call) => self.edit_call(by, call).await.or(held),
             },
         };
@@ -366,17 +422,19 @@ impl Driver {
         }) else {
             return;
         };
-        // As `previewArgs`: a typed name not typed yet is filled in, and a
-        // wipe keeps its list-only meaning unless the name was typed right.
+        // As the preview route: a typed name not typed yet is filled in
+        // (the line then leaves the name to the CLI), and a wipe keeps its
+        // list-only meaning unless the name was typed right.
+        let typed = args.confirm.as_deref() == Some(stack.as_str());
         if confirm {
             args.confirm = Some(stack.clone());
-        } else if args.confirm.as_deref().is_some_and(|c| c != stack) {
+        } else if !typed {
             args.confirm = None;
         }
         let Ok(req) = act::validate(&stack, &action, args) else {
             return;
         };
-        let (line, guard, restarts) = self.inner.actions.preview_of(req).await;
+        let (line, guard, restarts) = self.inner.actions.preview_of(req, typed).await;
         let mut st = self.lock();
         if let Some(f) = st.form.as_mut() {
             f.cli = line.ok();
@@ -507,14 +565,17 @@ pub fn router(driver: Driver) -> Router {
         .with_state(driver)
 }
 
-/// The demo host only (`HOMELAB_ADMIN_DEMO_HOST`): a step as if the host had
-/// relayed it, for the browser tests. Never mounted beside a real host.
-async fn demo_step(State(d): State<Driver>, Json(step): Json<UiStep>) -> Response {
-    Json(d.step("demo", Scope::Operate, step).await).into_response()
+/// The demo host only (`HOMELAB_ADMIN_DEMO_HOST`, in a `demo-host` build): a
+/// step as if the host had relayed it, for the browser tests. Never mounted
+/// beside a real host.
+#[cfg(feature = "demo-host")]
+async fn demo_step(State(d): State<Driver>, Json(step): Json<UiStep>) -> Json<Value> {
+    Json(d.step("demo", Scope::Operate, step).await)
 }
 
+#[cfg(feature = "demo-host")]
 pub fn demo_router(driver: Driver) -> Router {
     Router::new()
-        .route("/data/drive/demo-step", post(demo_step))
+        .route("/data/drive/demo-step", axum::routing::post(demo_step))
         .with_state(driver)
 }

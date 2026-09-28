@@ -1260,7 +1260,45 @@ async fn latest_listed_sha(
 /// itself: it is the one systemd is running, and a rebuild put it there
 /// from the repository.
 pub async fn release_update(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
-    let op = format!("release-update-{}", m.unit);
+    release_install(ctx, m, None, None).await
+}
+
+/// TUI parity round (dash-install-native): `install-native` of a chosen
+/// release from the dashboard, which has no `gh`. The host downloads the
+/// release named `tag` itself, as [`release_update`] downloads the latest:
+/// the signature over SHA256SUMS (refused, not skipped, when the release is
+/// unsigned: a person asked for this one), the binary against it, and the
+/// unit file from the repository (`unit_file`, sent by the dashboard from
+/// its working copy, as the CLI sends it). Installed through
+/// [`install_native`], staged beside, glibc-checked, rollback armed.
+pub async fn install_release(
+    ctx: &OpCtx<'_>,
+    m: &NativeServiceManifest,
+    tag: &str,
+    unit_file: &str,
+) -> OperationReport {
+    release_install(ctx, m, Some(tag), Some(unit_file)).await
+}
+
+/// A release tag as a URL path segment may carry it.
+pub fn valid_tag(tag: &str) -> bool {
+    !tag.is_empty()
+        && tag.len() <= 64
+        && tag
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'+'))
+}
+
+async fn release_install(
+    ctx: &OpCtx<'_>,
+    m: &NativeServiceManifest,
+    pinned: Option<&str>,
+    unit_from_repo: Option<&str>,
+) -> OperationReport {
+    let op = match pinned {
+        None => format!("release-update-{}", m.unit),
+        Some(_) => format!("install-native-{}", m.unit),
+    };
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
@@ -1281,9 +1319,26 @@ pub async fn release_update(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Opera
         Ok(StepOutcome::Unchanged)
     });
 
+    if let Some(tag) = pinned {
+        if !valid_tag(tag) {
+            return runner.finish_err(
+                "check the tag",
+                &CoreError::Other(format!(
+                    "{tag:?} is not a release tag (letters, digits, dots and dashes)"
+                )),
+            );
+        }
+    }
     let mut refs: Option<ReleaseRefs> = None;
-    step!(runner, "ask GitHub for the latest release", {
-        let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    let asked = match pinned {
+        None => "ask GitHub for the latest release".to_string(),
+        Some(t) => format!("ask GitHub for release {t}"),
+    };
+    step!(runner, asked.as_str(), {
+        let url = match pinned {
+            None => format!("https://api.github.com/repos/{}/releases/latest", repo),
+            Some(t) => format!("https://api.github.com/repos/{}/releases/tags/{}", repo, t),
+        };
         let out = exec
             .run(&Cmd::new(
                 "curl",
@@ -1313,6 +1368,16 @@ pub async fn release_update(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Opera
     // fix-29: an unsigned release is not installed. Not an error: the author
     // signs after uploading, and the next night tries again.
     let Some(sig_url) = refs.sig_url.clone() else {
+        if pinned.is_some() {
+            return runner.finish_err(
+                "read the checksum list",
+                &CoreError::SafetyAbort(format!(
+                    "{} {} of {} is not signed (no SHA256SUMS.minisig) — not installing it; \
+                     sign it first",
+                    m.unit, refs.tag, repo
+                )),
+            );
+        }
         runner.log(
             Level::Info,
             format!(
@@ -1427,25 +1492,27 @@ pub async fn release_update(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Opera
         Ok(StepOutcome::Changed)
     });
 
-    let mut unit_file = String::new();
-    step!(runner, "read the unit file from the container", {
-        let out = util_pct_sh(
-            exec,
-            m.vmid,
-            &format!("cat /etc/systemd/system/{}.service", m.unit),
-            30,
-        )
-        .await?;
-        if !out.success() || out.stdout.trim().is_empty() {
-            return Err(CoreError::Other(format!(
-                "{}.service is not on {} — a service without its unit is not one this \
+    let mut unit_file = unit_from_repo.map(str::to_string).unwrap_or_default();
+    if unit_from_repo.is_none() {
+        step!(runner, "read the unit file from the container", {
+            let out = util_pct_sh(
+                exec,
+                m.vmid,
+                &format!("cat /etc/systemd/system/{}.service", m.unit),
+                30,
+            )
+            .await?;
+            if !out.success() || out.stdout.trim().is_empty() {
+                return Err(CoreError::Other(format!(
+                    "{}.service is not on {} — a service without its unit is not one this \
                  orchestrator installs; adopt or deploy it first",
-                m.unit, m.hostname
-            )));
-        }
-        unit_file = out.stdout;
-        Ok(StepOutcome::Unchanged)
-    });
+                    m.unit, m.hostname
+                )));
+            }
+            unit_file = out.stdout;
+            Ok(StepOutcome::Unchanged)
+        });
+    }
 
     let report = install_native(ctx, m, &b64, &unit_file).await;
     if !report.ok {

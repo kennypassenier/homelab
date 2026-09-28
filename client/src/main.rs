@@ -1227,7 +1227,7 @@ async fn run(explicit_host: Option<String>) {
         // ask-9: delete what a retired stack, app or unit kept — never
         // automatic, always after the list and the typed name.
         "wipe" => {
-            let homelab_client::cli_args::Invocation::Wipe { name } = invocation(&args) else {
+            let homelab_client::cli_args::Invocation::Wipe { name, yes } = invocation(&args) else {
                 die("internal: wipe parsed as another verb")
             };
             let name = homelab_client::repo_config::stack_name(&name);
@@ -1243,10 +1243,16 @@ async fn run(explicit_host: Option<String>) {
             if !listed {
                 std::process::exit(1);
             }
-            let typed = read_typed(&format!(
-                "Type '{}' to delete all of the above, permanently: ",
-                name
-            ));
+            // cli-yes: a line copied from the dashboard's form, where the
+            // name was already typed, carries --yes.
+            let typed = if yes {
+                name.clone()
+            } else {
+                read_typed(&format!(
+                    "Type '{}' to delete all of the above, permanently: ",
+                    name
+                ))
+            };
             if typed != name {
                 die("name mismatch — nothing deleted");
             }
@@ -1380,7 +1386,7 @@ async fn run(explicit_host: Option<String>) {
                         die(&why);
                     }
                     println!(
-                        "{}✓ checksum verified — shipping over the line{}",
+                        "{}✓ signature and checksum verified — shipping over the line{}",
                         C_GREEN, C_RESET
                     );
                     // fix-121: done means the shipped version answered, not
@@ -1414,7 +1420,7 @@ async fn run(explicit_host: Option<String>) {
                 C_RESET
             );
             let bytes = homelab_client::release::stage_client(&tag).unwrap_or_else(|e| die(&e));
-            println!("{}✓ checksum verified{}", C_GREEN, C_RESET);
+            println!("{}✓ signature and checksum verified{}", C_GREEN, C_RESET);
             homelab_client::release::install_binary(&bytes, &target).unwrap_or_else(|e| die(&e));
             println!(
                 "{}✓ client {} installed{} — the next command runs it",
@@ -1529,23 +1535,28 @@ async fn run(explicit_host: Option<String>) {
             // no longer has; since ask-8 (2026-09-27) the deploy removes them
             // itself, so this is mostly a no-op kept for a container that has
             // not been deployed since. Same typed confirmation as before.
-            let homelab_client::cli_args::Invocation::PruneOrphans { stack } = invocation(&args)
+            let homelab_client::cli_args::Invocation::PruneOrphans { stack, yes } =
+                invocation(&args)
             else {
                 die("internal: prune-orphans parsed as another verb")
             };
             let dir = &stack_dir(&stack);
             let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
             let stack = spec.manifest.stack_name.clone();
-            eprint!(
-                "{}Type the stack name '{}' to remove the files the repository no longer \
-                 has (the deploy log lists them): {}",
-                C_RED, stack, C_RESET
-            );
-            use std::io::Write as _;
-            std::io::stderr().flush().ok();
-            let mut typed = String::new();
-            std::io::stdin().read_line(&mut typed).ok();
-            let confirm = typed.trim().to_string();
+            let confirm = if yes {
+                stack.clone()
+            } else {
+                eprint!(
+                    "{}Type the stack name '{}' to remove the files the repository no longer \
+                     has (the deploy log lists them): {}",
+                    C_RED, stack, C_RESET
+                );
+                use std::io::Write as _;
+                std::io::stderr().flush().ok();
+                let mut typed = String::new();
+                std::io::stdin().read_line(&mut typed).ok();
+                typed.trim().to_string()
+            };
             if confirm != stack {
                 die("name mismatch — nothing removed");
             }
@@ -1561,8 +1572,11 @@ async fn run(explicit_host: Option<String>) {
             .await;
         }
         "destroy" => {
-            let homelab_client::cli_args::Invocation::Destroy { stack, skip_backup } =
-                invocation(&args)
+            let homelab_client::cli_args::Invocation::Destroy {
+                stack,
+                skip_backup,
+                yes,
+            } = invocation(&args)
             else {
                 die("internal: destroy parsed as another verb")
             };
@@ -1582,10 +1596,14 @@ async fn run(explicit_host: Option<String>) {
                     stack,
                     C_RESET
                 );
-                let confirm = read_typed(&format!(
-                    "Type the stack name '{}' to confirm destroy: ",
-                    stack
-                ));
+                let confirm = if yes {
+                    stack.clone()
+                } else {
+                    read_typed(&format!(
+                        "Type the stack name '{}' to confirm destroy: ",
+                        stack
+                    ))
+                };
                 if confirm != stack {
                     die("name mismatch — aborted");
                 }
@@ -1611,16 +1629,22 @@ async fn run(explicit_host: Option<String>) {
                     C_YELLOW, C_RESET
                 );
             }
-            // C2: typed-name confirmation, exactly like the TUI.
-            eprint!(
-                "{}Type the stack name '{}' to confirm destroy: {}",
-                C_RED, stack, C_RESET
-            );
-            use std::io::Write as _;
-            std::io::stderr().flush().ok();
-            let mut typed = String::new();
-            std::io::stdin().read_line(&mut typed).ok();
-            let confirm = typed.trim().to_string();
+            // C2: typed-name confirmation, exactly like the TUI; cli-yes:
+            // a line copied from the dashboard's form, where the name was
+            // typed already, carries --yes.
+            let confirm = if yes {
+                stack.clone()
+            } else {
+                eprint!(
+                    "{}Type the stack name '{}' to confirm destroy: {}",
+                    C_RED, stack, C_RESET
+                );
+                use std::io::Write as _;
+                std::io::stderr().flush().ok();
+                let mut typed = String::new();
+                std::io::stdin().read_line(&mut typed).ok();
+                typed.trim().to_string()
+            };
             if &confirm != stack {
                 die("name mismatch — aborted");
             }

@@ -23,6 +23,12 @@ import { mount as settings } from "./pages/settings.js";
 import { mount as overview } from "./pages/overview.js";
 import { mount as stack } from "./pages/stack.js";
 import { mount as timeline } from "./pages/timeline.js";
+import { mount as today } from "./pages/today.js";
+import { mount as hostLog } from "./pages/log.js";
+import { mount as shell } from "./pages/shell.js";
+import { mount as apply } from "./pages/apply.js";
+import { mount as presets } from "./pages/presets.js";
+import { mountVersions } from "./versions.js";
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
 const nav = /** @type {HTMLElement} */ (document.getElementById("nav"));
@@ -90,6 +96,21 @@ function render() {
     case "settings":
       cleanup = settings(page);
       break;
+    case "today":
+      cleanup = today(page);
+      break;
+    case "log":
+      cleanup = hostLog(page);
+      break;
+    case "shell":
+      cleanup = shell(page);
+      break;
+    case "apply":
+      cleanup = apply(page);
+      break;
+    case "presets":
+      cleanup = presets(page, { navigate });
+      break;
     default:
       page.replaceChildren(
         h("h1", null, "Not found"),
@@ -133,6 +154,8 @@ mountChrome(
 mountFollow(/** @type {HTMLElement} */ (document.getElementById("follow")), {
   navigate,
 });
+// TUI parity: a newer host release, a dashboard older than its host.
+mountVersions(/** @type {HTMLElement} */ (document.getElementById("versions")));
 startAgoTicker();
 start();
 render();

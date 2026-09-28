@@ -68,6 +68,24 @@ pub enum ActionKind {
     ZfsReplicate,
     BackupHostMeta,
     BackupDevices,
+    // TUI parity round (Kenny, 2026-09-28: "Wat nu in de TUI kan, moet nog
+    // altijd kunnen in ons systeem").
+    /// Host-wide: one shell command in a container (A6, the TUI's SHELL tab).
+    Exec,
+    /// Host-wide: the runaway guards on any container by its number.
+    GuardsCt,
+    /// Host-wide: bake the golden template (B8, dash-template).
+    TemplateBuild,
+    /// Host-wide: release-update of the host (dash-host-update).
+    UpdateHost,
+    /// Host-wide: a person's answer to a manual check (G17).
+    AnswerCheck,
+    /// A chosen release of a native service, downloaded by the host
+    /// (dash-install-native).
+    InstallNative,
+    /// Host-wide: the whole stacks directory against the host (ask-8,
+    /// dash-apply): deploy what changed, destroy only what was typed.
+    Apply,
 }
 
 /// What the shell has to read before the command can be built.
@@ -84,6 +102,14 @@ pub enum Needs {
     NativeManifest,
     /// The stack's vmid, from the host's fleet.
     Vmid,
+    /// The host's release, downloaded from GitHub and verified (the
+    /// dashboard's "Update host").
+    HostRelease,
+    /// A native unit's service.yml and unit file from the working copy, and
+    /// the release tag (the latest one when none is named).
+    NativeRelease,
+    /// Every stack's spec and the plan against the host (apply).
+    Apply,
 }
 
 /// Which argument fields an action reads.
@@ -98,6 +124,28 @@ pub enum Arg {
     SkipBackup,
     SkipSafetyCopy,
     Commit,
+    /// A container number (exec, guards on any container, template build).
+    Vmid,
+    /// One shell command line (exec).
+    Command,
+    /// A release tag, e.g. v3.63.0; empty: the latest.
+    Tag,
+    /// The template's version number.
+    Version,
+    /// Build the privileged template.
+    Privileged,
+    /// The base OS template (a vztmpl path); empty: the host's default.
+    Base,
+    /// A manual check's id.
+    Check,
+    /// ok, nok or accept.
+    Verdict,
+    /// For accept: how many days.
+    Days,
+    /// The answer's note (the reason, for accept).
+    Note,
+    /// apply: the gone stacks to destroy, each name typed, comma-separated.
+    Destroy,
 }
 
 /// One row of the catalog the page draws its buttons from.
@@ -142,6 +190,13 @@ impl ActionKind {
         ActionKind::ZfsReplicate,
         ActionKind::BackupHostMeta,
         ActionKind::BackupDevices,
+        ActionKind::Exec,
+        ActionKind::GuardsCt,
+        ActionKind::TemplateBuild,
+        ActionKind::UpdateHost,
+        ActionKind::AnswerCheck,
+        ActionKind::InstallNative,
+        ActionKind::Apply,
     ];
 
     /// The name in a URL: `deploy`, `backup-native`, ...
@@ -170,6 +225,13 @@ impl ActionKind {
             ZfsReplicate => "zfs-replicate",
             BackupHostMeta => "backup-host-meta",
             BackupDevices => "backup-devices",
+            Exec => "exec",
+            GuardsCt => "guards-ct",
+            TemplateBuild => "template-build",
+            UpdateHost => "update-host",
+            AnswerCheck => "answer-check",
+            InstallNative => "install-native",
+            Apply => "apply",
         }
     }
 
@@ -179,7 +241,19 @@ impl ActionKind {
 
     pub fn host_wide(self) -> bool {
         use ActionKind::*;
-        matches!(self, Patch | ZfsReplicate | BackupHostMeta | BackupDevices)
+        matches!(
+            self,
+            Patch
+                | ZfsReplicate
+                | BackupHostMeta
+                | BackupDevices
+                | Exec
+                | GuardsCt
+                | TemplateBuild
+                | UpdateHost
+                | AnswerCheck
+                | Apply
+        )
     }
 
     pub fn needs(self) -> Needs {
@@ -192,6 +266,9 @@ impl ActionKind {
             Destroy => Needs::Manifest,
             Adopt => Needs::NativeManifest,
             Guards => Needs::Vmid,
+            UpdateHost => Needs::HostRelease,
+            InstallNative => Needs::NativeRelease,
+            Apply => Needs::Apply,
             _ => Needs::Nothing,
         }
     }
@@ -208,6 +285,13 @@ impl ActionKind {
             Destroy => &[Arg::Confirm, Arg::SkipBackup],
             // Without `confirm` a wipe only lists what it would delete.
             Wipe => &[Arg::Confirm],
+            Exec => &[Arg::Vmid, Arg::Command],
+            GuardsCt => &[Arg::Vmid],
+            TemplateBuild => &[Arg::Vmid, Arg::Version, Arg::Privileged, Arg::Base],
+            UpdateHost => &[Arg::Tag],
+            AnswerCheck => &[Arg::Check, Arg::Verdict, Arg::Days, Arg::Note],
+            InstallNative => &[Arg::Unit, Arg::Tag],
+            Apply => &[Arg::SkipBackup, Arg::Destroy, Arg::Force],
             _ => &[],
         }
     }
@@ -249,6 +333,13 @@ impl ActionKind {
             ZfsReplicate => "ZFS replicate",
             BackupHostMeta => "Back up the host's own state",
             BackupDevices => "Back up devices",
+            Exec => "Run a command",
+            GuardsCt => "Apply guards to a container",
+            TemplateBuild => "Build a golden template",
+            UpdateHost => "Update the host",
+            AnswerCheck => "Answer a manual check",
+            InstallNative => "Install a release",
+            Apply => "Apply the repository",
         }
     }
 
@@ -278,6 +369,13 @@ impl ActionKind {
             ZfsReplicate => "run the ZFS snapshot and replication jobs now",
             BackupHostMeta => "snapshot the daemon's own state now: vault, state, TLS, intent repository",
             BackupDevices => "fetch each configured device's own configuration now",
+            Exec => "run one shell command in a container (pct exec), audit-logged on the host; the host refuses unless exec_enabled = true in host.toml",
+            GuardsCt => "apply the runaway guards to any container by its number: log caps, journald limits, logrotate, a weekly prune",
+            TemplateBuild => "bake the golden template (docker and the guards) on a temporary container, then turn it into a Proxmox template",
+            UpdateHost => "install a signed homelab release on the host: the dashboard downloads it and checks its signature and checksum, the host installs it with an armed rollback and restarts, and the dashboard reconnects",
+            AnswerCheck => "record the answer to a manual check: ok, not ok, or a not ok accepted for some days with its reason",
+            InstallNative => "install a chosen release of a native service: the host downloads it, checks its signature and checksum, and installs it with an armed rollback (the latest release when no tag is named)",
+            Apply => "deploy every stack whose files differ from what the host applied; a stack whose directory is gone is destroyed only when its name is typed",
         }
     }
 
@@ -285,7 +383,7 @@ impl ActionKind {
     pub fn scope(self) -> Scope {
         use ActionKind::*;
         match self {
-            PruneOrphans | Destroy | Forget | Wipe => Scope::All,
+            PruneOrphans | Destroy | Forget | Wipe | Exec | UpdateHost | Apply => Scope::All,
             _ => Scope::Operate,
         }
     }
@@ -332,6 +430,30 @@ pub struct ActionArgs {
     pub skip_safety_copy: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
+    /// A container number, as typed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vmid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub privileged: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub days: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// apply: the names typed, comma-separated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destroy: Option<String>,
 }
 
 impl ActionArgs {
@@ -362,7 +484,38 @@ impl ActionArgs {
         if self.commit.is_some() {
             v.push(Arg::Commit);
         }
+        let opt = [
+            (self.vmid.is_some(), Arg::Vmid),
+            (self.command.is_some(), Arg::Command),
+            (self.tag.is_some(), Arg::Tag),
+            (self.version.is_some(), Arg::Version),
+            (self.privileged, Arg::Privileged),
+            (self.base.is_some(), Arg::Base),
+            (self.check.is_some(), Arg::Check),
+            (self.verdict.is_some(), Arg::Verdict),
+            (self.days.is_some(), Arg::Days),
+            (self.note.is_some(), Arg::Note),
+            (self.destroy.is_some(), Arg::Destroy),
+        ];
+        v.extend(opt.into_iter().filter(|(on, _)| *on).map(|(_, a)| a));
         v
+    }
+
+    /// The container number, parsed.
+    pub fn vmid_number(&self) -> Option<u16> {
+        self.vmid.as_deref().and_then(|v| v.trim().parse().ok())
+    }
+
+    /// apply: the typed names, in the order given.
+    pub fn destroy_names(&self) -> Vec<String> {
+        self.destroy
+            .as_deref()
+            .unwrap_or("")
+            .split(',')
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 }
 
@@ -489,11 +642,182 @@ pub fn validate(stack: &str, action: &str, args: ActionArgs) -> Result<ActionReq
             }
         }
     }
+    validate_parity(kind, &what, &args)?;
     Ok(ActionRequest {
         stack: stack.to_string(),
         action: kind,
         args,
     })
+}
+
+/// A release tag as the dashboard passes it on (`v3.63.0`).
+pub fn valid_tag(s: &str) -> bool {
+    homelab_core::ops::native::valid_tag(s)
+}
+
+/// A base OS template as `pveam` names it
+/// (`local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst`).
+fn valid_base(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 200
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':' | b'/'))
+        && !s.contains("..")
+}
+
+/// The longest command line the exec form takes.
+pub const EXEC_MAX: usize = 4096;
+/// The longest note an answer takes.
+pub const NOTE_MAX: usize = 500;
+
+/// The TUI parity round's arguments (exec, guards on any container, the
+/// template build, the host update, a check's answer, install-native,
+/// apply), checked before anything is read.
+fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<(), Refusal> {
+    use ActionKind::*;
+    let refuse = |why: String, fix: &str| Err(Refusal::new(what, why, fix));
+    if kind.args().contains(&Arg::Vmid) {
+        match args.vmid.as_deref().map(str::trim) {
+            None | Some("") => {
+                return refuse(
+                    format!("{} needs the container's number", kind.slug()),
+                    "type the vmid, e.g. 105",
+                )
+            }
+            Some(v) => match v.parse::<u16>() {
+                Ok(n) if n >= 100 => {}
+                _ => {
+                    return refuse(
+                        format!("{v:?} is not a container number (100 or more)"),
+                        "type the vmid the host page lists, e.g. 105",
+                    )
+                }
+            },
+        }
+    }
+    if kind == Exec {
+        let c = args.command.as_deref().unwrap_or("").trim();
+        if c.is_empty() {
+            return refuse(
+                "exec needs a command".into(),
+                "type the command line to run, e.g. df -h",
+            );
+        }
+        if c.len() > EXEC_MAX || c.contains(['\n', '\r', '\0']) {
+            return refuse(
+                format!("a command is one line of at most {EXEC_MAX} characters"),
+                "send one line at a time; the shell page runs them one after the other",
+            );
+        }
+    }
+    if let Some(t) = args.tag.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        if !valid_tag(t) {
+            return refuse(
+                format!("{t:?} is not a release tag"),
+                "type a tag such as v3.63.0, or leave it empty for the latest release",
+            );
+        }
+    }
+    if kind == TemplateBuild {
+        match args
+            .version
+            .as_deref()
+            .map(str::trim)
+            .map(str::parse::<u32>)
+        {
+            Some(Ok(v)) if (1..=999).contains(&v) => {}
+            _ => {
+                return refuse(
+                    "the template's version is a whole number from 1 to 999".into(),
+                    "type the next version, e.g. 5 when debian-13-homelab-v4 is the newest",
+                )
+            }
+        }
+        if let Some(b) = args
+            .base
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+        {
+            if !valid_base(b) {
+                return refuse(
+                    format!("{b:?} is not an OS template"),
+                    "pick one from the templates list, or leave it empty for the host's default",
+                );
+            }
+        }
+    }
+    if kind == AnswerCheck {
+        let id = args.check.as_deref().unwrap_or("").trim();
+        if !valid_word(id) {
+            return refuse(
+                "the answer needs the check's id".into(),
+                "pick the check on the checks page",
+            );
+        }
+        let note = args.note.as_deref().unwrap_or("").trim();
+        if note.len() > NOTE_MAX || note.contains(['\n', '\r']) {
+            return refuse(
+                format!("a note is one line of at most {NOTE_MAX} characters"),
+                "shorten the note",
+            );
+        }
+        match args.verdict.as_deref().map(str::trim) {
+            Some("ok") | Some("nok") => {
+                if args.days.as_deref().is_some_and(|d| !d.trim().is_empty()) {
+                    return refuse(
+                        "days go with accept only".into(),
+                        "leave the days empty, or answer accept",
+                    );
+                }
+            }
+            Some("accept") => {
+                match args.days.as_deref().map(str::trim).map(str::parse::<u32>) {
+                    Some(Ok(d)) if (1..=3650).contains(&d) => {}
+                    _ => {
+                        return refuse(
+                            "accept needs the number of days (1 to 3650)".into(),
+                            "type for how many days the not ok is accepted",
+                        )
+                    }
+                }
+                if note.is_empty() {
+                    return refuse(
+                        "accept needs the reason in the note".into(),
+                        "say in the note why the not ok is accepted",
+                    );
+                }
+            }
+            _ => {
+                return refuse(
+                    "the answer is ok, nok or accept".into(),
+                    "pick one of the three",
+                )
+            }
+        }
+    }
+    if kind == Apply {
+        let names = args.destroy_names();
+        let mut seen = std::collections::BTreeSet::new();
+        for n in &names {
+            if !valid_stack_name(n) {
+                return refuse(
+                    format!("{n:?} is not a stack name"),
+                    "type the names the plan lists under 'gone from the files', comma-separated",
+                );
+            }
+            if n == SELF_STACK {
+                return refuse(
+                    "the dashboard does not destroy its own stack (arch-self)".into(),
+                    "leave admin out; `homelab destroy admin` from a workstation",
+                );
+            }
+            if !seen.insert(n.clone()) {
+                return refuse(format!("{n} is typed twice"), "type each name once");
+            }
+        }
+    }
+    Ok(())
 }
 
 /// What the shell read for the command.
@@ -504,6 +828,25 @@ pub enum Material {
     Spec(Box<DeploySpec>),
     Native(Box<NativeServiceManifest>),
     Vmid(u16),
+    /// The host binary of release `tag`, verified, base64.
+    HostRelease {
+        tag: String,
+        binary_b64: String,
+    },
+    /// install-native: the unit's manifest and unit file from the working
+    /// copy, the tag to install, and the directory the CLI names
+    /// (`stacks/kyu` or `stacks/kyu/kyu-runner`).
+    NativeRelease {
+        manifest: Box<NativeServiceManifest>,
+        unit_file: String,
+        tag: String,
+        dir: String,
+    },
+    /// apply: the specs to deploy, in order, and the gone stacks to destroy.
+    Apply {
+        deploy: Vec<DeploySpec>,
+        destroy: Vec<String>,
+    },
 }
 
 fn wrong_material(req: &ActionRequest) -> Refusal {
@@ -603,6 +946,74 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
             name: stack,
             confirm: a.confirm.clone(),
         }],
+        (Exec, _) => vec![Command::ExecIn {
+            vmid: a.vmid_number().ok_or_else(|| wrong_material(req))?,
+            command: a.command.clone().unwrap_or_default().trim().to_string(),
+        }],
+        (GuardsCt, _) => vec![Command::ApplyGuards {
+            vmid: a.vmid_number().ok_or_else(|| wrong_material(req))?,
+        }],
+        (TemplateBuild, _) => vec![Command::BuildTemplate {
+            temp_vmid: a.vmid_number().ok_or_else(|| wrong_material(req))?,
+            version: a
+                .version
+                .as_deref()
+                .and_then(|v| v.trim().parse().ok())
+                .ok_or_else(|| wrong_material(req))?,
+            unprivileged: !a.privileged,
+            base_template: a
+                .base
+                .as_deref()
+                .map(str::trim)
+                .filter(|b| !b.is_empty())
+                .map(str::to_string),
+        }],
+        (AnswerCheck, _) => {
+            let verdict = a.verdict.as_deref().unwrap_or("").trim();
+            vec![Command::AnswerManualCheck {
+                check_id: a.check.clone().unwrap_or_default().trim().to_string(),
+                ok: verdict == "ok",
+                note: a.note.clone().unwrap_or_default().trim().to_string(),
+                accept_days: (verdict == "accept")
+                    .then(|| a.days.as_deref().and_then(|d| d.trim().parse().ok()))
+                    .flatten(),
+            }]
+        }
+        (UpdateHost, Material::HostRelease { binary_b64, .. }) => {
+            vec![Command::SelfUpdateHost { binary_b64 }]
+        }
+        (
+            InstallNative,
+            Material::NativeRelease {
+                manifest,
+                unit_file,
+                tag,
+                ..
+            },
+        ) => {
+            if manifest.stack_name != req.stack {
+                return Err(name_mismatch(req, &manifest.stack_name));
+            }
+            vec![Command::InstallNativeRelease {
+                manifest,
+                unit_file,
+                tag,
+            }]
+        }
+        (Apply, Material::Apply { deploy, destroy }) => {
+            let mut out = Vec::new();
+            for spec in deploy {
+                out.extend(deploy_commands(spec));
+            }
+            for name in destroy {
+                out.push(Command::DestroyRecorded {
+                    confirm: name.clone(),
+                    stack: name,
+                    skip_backup: a.skip_backup,
+                });
+            }
+            out
+        }
         (Patch, _) => vec![Command::PatchFleet],
         (ZfsReplicate, _) => vec![Command::ZfsReplicate],
         (BackupHostMeta, _) => vec![Command::BackupHostMeta],
@@ -632,6 +1043,32 @@ pub fn deploy_commands(mut spec: DeploySpec) -> Vec<Command> {
     out
 }
 
+/// The CLI line for the actions whose command does not say everything the
+/// verb takes (feat-stacks-7): the host update names its tag, install-native
+/// the directory of the unit's service.yml, apply its flags. None: the line
+/// comes from the command (`actions_cli`).
+pub fn cli_override(req: &ActionRequest, material: &Material) -> Option<String> {
+    match (req.action, material) {
+        (ActionKind::UpdateHost, Material::HostRelease { tag, .. }) => {
+            Some(format!("homelab release-update {tag}"))
+        }
+        (ActionKind::InstallNative, Material::NativeRelease { tag, dir, .. }) => {
+            Some(format!("homelab install-native {dir} {tag}"))
+        }
+        (ActionKind::Apply, _) => {
+            let mut line = "homelab apply --yes".to_string();
+            if req.args.skip_backup {
+                line.push_str(" --no-backup");
+            }
+            if req.args.force {
+                line.push_str(" --force");
+            }
+            Some(line)
+        }
+        _ => None,
+    }
+}
+
 /// arch-self: actions on the dashboard's own stack that restart it. The
 /// page says so before the press; the outcome is read back after the
 /// restart (the reply cannot arrive on a line that went away).
@@ -648,6 +1085,7 @@ pub fn restarts_dashboard(stack: &str, kind: ActionKind) -> bool {
                 | UpdateNative
                 | ReleaseUpdateNative
                 | RollbackNative
+                | InstallNative
         )
 }
 

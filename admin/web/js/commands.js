@@ -83,6 +83,10 @@ const PAGE_KEYS = {
   notifications: "g n",
   firewall: "g f",
   settings: "g e",
+  today: "g y",
+  log: "g l",
+  apply: "g p",
+  shell: "g x",
 };
 
 /** @type {Provider} */
@@ -181,39 +185,52 @@ export const actionCommands = (catalog, currentStack, open) => (ctx) => {
  * DOM.
  * @param {() => string | null} currentStack the stack whose page is open
  * @param {() => void} openNew
+ * @param {() => void} [openImportBundle] TUI parity: `homelab import`
  * @returns {Provider}
  */
-export const editCommands = (currentStack, openNew) => (ctx) => {
-  const here = currentStack();
-  const names = (ctx.fleet?.stacks ?? []).map((s) => s.name);
-  const order =
-    here && names.includes(here)
-      ? [here, ...names.filter((n) => n !== here)]
-      : names;
-  /** @type {Command[]} */
-  const out = [
-    {
-      id: "edit:new-stack",
-      group: "Change",
-      label: "New stack…",
-      hint: "from a preset, with the wizard",
-      run: openNew,
-    },
-  ];
-  for (const s of order)
-    out.push(
+export const editCommands =
+  (currentStack, openNew, openImportBundle) => (ctx) => {
+    const here = currentStack();
+    const names = (ctx.fleet?.stacks ?? []).map((s) => s.name);
+    const order =
+      here && names.includes(here)
+        ? [here, ...names.filter((n) => n !== here)]
+        : names;
+    /** @type {Command[]} */
+    const out = [
       {
-        id: `edit:settings:${s}`,
+        id: "edit:new-stack",
         group: "Change",
-        label: `Edit settings · ${s}`,
-        href: stackHref(s, "settings"),
+        label: "New stack…",
+        hint: "from a preset, with the wizard",
+        run: openNew,
       },
-      {
-        id: `edit:firewall:${s}`,
-        group: "Change",
-        label: `Edit firewall · ${s}`,
-        href: stackHref(s, "firewall"),
-      },
-    );
-  return out;
-};
+      ...(openImportBundle
+        ? [
+            {
+              id: "edit:import",
+              group: "Change",
+              label: "Import a stack…",
+              hint: "from an export bundle",
+              run: openImportBundle,
+            },
+          ]
+        : []),
+    ];
+    for (const s of order)
+      out.push(
+        {
+          id: `edit:settings:${s}`,
+          group: "Change",
+          label: `Edit settings · ${s}`,
+          href: stackHref(s, "settings"),
+        },
+        {
+          id: `edit:firewall:${s}`,
+          group: "Change",
+          label: `Edit firewall · ${s}`,
+          href: stackHref(s, "firewall"),
+        },
+      );
+    return out;
+  };

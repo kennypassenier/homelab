@@ -21,10 +21,12 @@
  */
 
 /**
- * @param {Plan} p
+ * Each file's diff as the page draws it (the edit plan, the Deploy review
+ * and the Apply page share it).
+ * @param {FileDiff[]} list
  */
-export function planView(p) {
-  const files = p.files.map((f) => ({
+export function fileViews(list) {
+  return list.map((f) => ({
     path: f.path,
     title: `${f.path} · ${f.status} · +${f.added} −${f.removed}`,
     badge: {
@@ -43,6 +45,13 @@ export function planView(p) {
       })),
     })),
   }));
+}
+
+/**
+ * @param {Plan} p
+ */
+export function planView(p) {
+  const files = fileViews(p.files);
   const effects = p.effects.map((e) => ({
     tone: e.tone,
     what: capital(e.what),

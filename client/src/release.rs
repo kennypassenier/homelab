@@ -55,18 +55,20 @@ pub fn sha_listed(sums: &str, filename: &str, actual_hex: &str) -> bool {
 /// Download `homelab-host` + SHA256SUMS for `tag`, verify, return the binary
 /// base64-encoded ready for SelfUpdateHost. Every failure is a clear string.
 pub fn stage_release(tag: &str) -> Result<String, String> {
-    // The orchestrator's own releases carry no minisign signature yet (its
-    // CI publishes checksums only), so H7 keeps the checksum check alone.
-    // Recorded as the remaining gap in fix-29.
-    stage_asset_checked(REPO, tag, "homelab-host", false)
+    // fix-29's remaining gap, closed in the TUI parity round: homelab's own
+    // releases are signed since the dashboard release (3.62.0, Kenny), so
+    // the host binary is verified like every native release: the minisign
+    // signature over SHA256SUMS, then the binary against it. An unsigned
+    // release is refused.
+    stage_asset_checked(REPO, tag, "homelab-host", true)
 }
 
 /// fix-105 (older-client-no-warning, 2026-09-27): the release's own client,
-/// `homelab`, verified against the release's SHA256SUMS like the host binary
-/// (checksum only, the same stated gap as H7). The raw bytes.
+/// `homelab`, verified like the host binary: signature, then checksum. The
+/// raw bytes.
 pub fn stage_client(tag: &str) -> Result<Vec<u8>, String> {
     use base64::Engine as _;
-    let b64 = stage_asset_checked(REPO, tag, "homelab", false)?;
+    let b64 = stage_asset_checked(REPO, tag, "homelab", true)?;
     base64::engine::general_purpose::STANDARD
         .decode(b64)
         .map_err(|e| e.to_string())
@@ -173,19 +175,10 @@ pub fn stage_asset_checked(
                 "--clobber",
             ])
             .output();
-        let sig = std::fs::read_to_string(dir.join(homelab_core::release_sig::SIG_ASSET)).map_err(
-            |_| {
-                let _ = std::fs::remove_dir_all(&dir);
-                format!(
-                    "release {} of {} is not signed (no {}) — not shipping it; sign it, or wait \
-                     for the author to",
-                    tag,
-                    repo,
-                    homelab_core::release_sig::SIG_ASSET
-                )
-            },
-        )?;
-        if let Err(e) = homelab_core::release_sig::verify_sums(&sums, &sig) {
+        let sig = std::fs::read_to_string(dir.join(homelab_core::release_sig::SIG_ASSET)).ok();
+        let verdict =
+            homelab_core::release_sig::verify_release(asset, &binary, &sums, sig.as_deref());
+        if let Err(e) = verdict {
             let _ = std::fs::remove_dir_all(&dir);
             return Err(format!("{} {} of {}: {}", asset, tag, repo, e));
         }

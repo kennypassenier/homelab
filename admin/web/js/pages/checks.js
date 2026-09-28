@@ -1,6 +1,7 @@
 // Manual checks (feat-ops-3): the questions deploys left for a person,
-// open ones first. Answering comes with the actions milestone.
+// open ones first, each with its Answer button (TUI parity: checks answer).
 
+import { answerButton } from "../answer.js";
 import { checkRows } from "../checks.js";
 import { agoEl, setAgo } from "../ago.js";
 import {
@@ -48,6 +49,7 @@ export function mount(root) {
       { label: "Registered", sort: "time" },
       { label: "Note", sort: "text" },
       { label: "More", sort: "text" },
+      { label: "Answer", sort: "text" },
     ],
   });
   const err = h("div");
@@ -95,6 +97,7 @@ export function mount(root) {
           td(time(x.registered)),
           td(x.note),
           td(x.extras, "mono"),
+          answerButton(x.id, () => void load().catch(() => {})),
         ),
       ),
     );

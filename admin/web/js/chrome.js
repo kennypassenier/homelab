@@ -20,6 +20,7 @@ import {
 } from "./commands.js";
 import { h } from "./dom.js";
 import { bell, snoozeState, toastOf } from "./notices.js";
+import { openImport } from "./importstack.js";
 import { openNewStack } from "./newstack.js";
 import { openRollback } from "./rollbackdialog.js";
 import { SHORTCUTS, idle, keyAction } from "./shortcuts.js";
@@ -436,6 +437,7 @@ export function mountChrome(where, ctx) {
         return r.page === "stack" ? r.name : null;
       },
       () => void openNewStack(ctx.navigate),
+      () => void openImport(ctx.navigate),
     ),
   );
   where.nav.append(trigger, mountBell(ctx.navigate), help, themes);

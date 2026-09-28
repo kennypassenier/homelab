@@ -2,6 +2,7 @@
 // host did in the last fourteen days.
 
 import { historyRows, incidentRows } from "../activity.js";
+import { showButton } from "../incident.js";
 import { agoEl, setAgo } from "../ago.js";
 import {
   badgeCell,
@@ -40,6 +41,7 @@ export function mount(root) {
       { label: "When", sort: "time" },
       { label: "Operation", sort: "text" },
       { label: "Bundle", sort: "text" },
+      { label: "Read", sort: "text" },
     ],
   });
   const hist = tableBlock({
@@ -108,7 +110,14 @@ export function mount(root) {
     const names = /** @type {string[]} */ (r.report?.incidents ?? []);
     inc.tbody.replaceChildren(
       ...incidentRows(names).map((x) =>
-        h("tr", null, td(time(x.at)), td(x.op), td(x.name, "mono")),
+        h(
+          "tr",
+          null,
+          td(time(x.at)),
+          td(x.op),
+          td(x.name, "mono"),
+          showButton(x.name),
+        ),
       ),
     );
     incTable?.refresh();

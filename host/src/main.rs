@@ -4300,9 +4300,9 @@ fn rpc_stack(command: &Rpc) -> Option<String> {
         | Rpc::DestroyRecorded { stack, .. }
         | Rpc::SetStackEnabled { stack, .. }
         | Rpc::GetApplied { stack } => Some(stack.clone()),
-        Rpc::InstallNative { manifest, .. } | Rpc::AdoptService(manifest) => {
-            Some(manifest.stack_name.clone())
-        }
+        Rpc::InstallNative { manifest, .. }
+        | Rpc::InstallNativeRelease { manifest, .. }
+        | Rpc::AdoptService(manifest) => Some(manifest.stack_name.clone()),
         _ => None,
     }
 }
@@ -7157,6 +7157,41 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         &unit_file,
                     )
                     .await
+                })
+            })
+            .await
+        }
+        // TUI parity round: the dashboard's install-native; the host fetches
+        // and verifies the release itself (CT 120 has no gh).
+        Rpc::InstallNativeRelease {
+            manifest,
+            unit_file,
+            tag,
+        } => {
+            if let Err(problems) = homelab_core::native::validate_native(&manifest) {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("service.yml invalid: {}", problems.join("; ")),
+                    deferred: None,
+                };
+            }
+            if manifest.release_repo.is_none() {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!(
+                        "{} declares no release_repo — there is no release to install; add \
+                         release_repo to its service.yml",
+                        manifest.unit
+                    ),
+                    deferred: None,
+                };
+            }
+            run_mutating_op(state, &exec, req.id, "install-native", |ctx| {
+                Box::pin(async move {
+                    homelab_core::ops::native::install_release(ctx, &manifest, &tag, &unit_file)
+                        .await
                 })
             })
             .await

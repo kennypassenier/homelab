@@ -1064,6 +1064,12 @@ const CLI_ONLY: &[(&str, &str)] = &[
          else may send it",
     ),
     (
+        "InstallNativeRelease",
+        "TUI parity round: the dashboard's install-native, where the host downloads \
+         the release because CT 120 has no gh; the TUI and CLI download it themselves \
+         and send InstallNative",
+    ),
+    (
         "ReleaseUpdateNative",
         "the nightly round's own release update, run by hand only to prove it — \
          the TUI's update key is the supervised self-update (B1)",

@@ -4,6 +4,7 @@
 
 import { agoEl, setAgo } from "../ago.js";
 import { gb, hostCard, stackState } from "../fleet.js";
+import { stackFlags } from "../parity.js";
 import { catalogReady } from "../act.js";
 import { openBatch } from "../actiondialog.js";
 import { batchActions } from "../actionforms.js";
@@ -11,10 +12,12 @@ import {
   badgeCell,
   bindTableUrl,
   h,
+  fetchJson,
   selectCell,
   tableBlock,
   td,
 } from "../dom.js";
+import { openImport } from "../importstack.js";
 import { openNewStack } from "../newstack.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
@@ -71,8 +74,12 @@ export function mount(root, ctx) {
       { label: "Restarts", sort: "number" },
       { label: "RAM used (GB)", sort: "number" },
       { label: "RAM limit (GB)", sort: "number" },
+      // TUI parity: [OFF] [CHANGED] [NOENV].
+      { label: "Flags", sort: "text", filter: "choice" },
     ],
   });
+  /** @type {Record<string, {state: import("../parity.js").DriftState}>} */
+  let drift = {};
   t.tbody.id = "stacks";
   t.wrap.querySelector("table")?.classList.add("fleet");
   // feat-stacks-3: a new stack from a preset.
@@ -82,8 +89,27 @@ export function mount(root, ctx) {
     "New stack…",
   );
   newStack.addEventListener("click", () => void openNewStack(ctx.navigate));
+  // TUI parity: `homelab import`, a bundle as a new stack.
+  const importBtn = h(
+    "button",
+    { type: "button", class: "kp-button", id: "import-stack" },
+    "Import…",
+  );
+  importBtn.addEventListener("click", () => void openImport(ctx.navigate));
+  // TUI parity ([CHANGED]): comparing runs latch once per stack on the
+  // dashboard, so it runs when asked, not on every visit.
+  const compareBtn = h(
+    "button",
+    { type: "button", class: "kp-button", id: "drift-compare" },
+    "Compare with the files",
+  );
   root.replaceChildren(
-    h("div", { class: "title-row" }, h("h1", null, "Overview"), newStack),
+    h(
+      "div",
+      { class: "title-row" },
+      h("h1", null, "Overview"),
+      h("span", { class: "actions-row" }, compareBtn, importBtn, newStack),
+    ),
     h(
       "section",
       { class: "kp-card host", "aria-label": "Host", id: "host" },
@@ -133,6 +159,12 @@ export function mount(root, ctx) {
         td(String(s.restarts ?? 0), "num"),
         td(gb(s.ram_used_mb), "num"),
         td(gb(s.ram_max_mb), "num"),
+        td(
+          stackFlags(s, drift[s.name]?.state)
+            .map((f) => `[${f.label}]`)
+            .join(" ") || "—",
+          "stack-flags",
+        ),
       );
       return tr;
     });
@@ -161,7 +193,27 @@ export function mount(root, ctx) {
 
   const unsub = subscribe(render);
   render();
+  const abort = new AbortController();
+  /** @param {boolean} fresh */
+  const readDrift = async (fresh) => {
+    compareBtn.disabled = true;
+    const r = await fetchJson(
+      `/data/drift${fresh ? "?fresh=1" : ""}`,
+      "drift",
+      abort.signal,
+    );
+    compareBtn.disabled = false;
+    if (!r.ok) return;
+    drift = r.body.stacks ?? {};
+    render();
+  };
+  compareBtn.addEventListener(
+    "click",
+    () => void readDrift(true).catch(() => {}),
+  );
+  void readDrift(false).catch(() => {});
   return () => {
+    abort.abort();
     unsub();
     unbind();
     detach();

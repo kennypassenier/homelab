@@ -183,6 +183,8 @@ impl StackFiles for MemFiles {
                 Material::Spec(Box::new(s))
             }
             Needs::NativeManifest => Material::Native(Box::new(native("admin"))),
+            // Read elsewhere (releases, the whole stacks directory).
+            Needs::HostRelease | Needs::NativeRelease | Needs::Apply => Material::None,
         })
     }
     fn ancestry(&self, _commit: &str) -> Ancestry {

@@ -136,6 +136,33 @@ const FILES: &[(&str, &[u8])] = &[
         "js/pages/settings.js",
         include_bytes!("../web/js/pages/settings.js"),
     ),
+    // The TUI parity round: today, the live log, the shell, apply, the
+    // presets, the version warnings, incident bundles and check answers.
+    ("js/parity.js", include_bytes!("../web/js/parity.js")),
+    ("js/versions.js", include_bytes!("../web/js/versions.js")),
+    ("js/incident.js", include_bytes!("../web/js/incident.js")),
+    ("js/answer.js", include_bytes!("../web/js/answer.js")),
+    (
+        "js/importstack.js",
+        include_bytes!("../web/js/importstack.js"),
+    ),
+    (
+        "js/pages/today.js",
+        include_bytes!("../web/js/pages/today.js"),
+    ),
+    ("js/pages/log.js", include_bytes!("../web/js/pages/log.js")),
+    (
+        "js/pages/shell.js",
+        include_bytes!("../web/js/pages/shell.js"),
+    ),
+    (
+        "js/pages/apply.js",
+        include_bytes!("../web/js/pages/apply.js"),
+    ),
+    (
+        "js/pages/presets.js",
+        include_bytes!("../web/js/pages/presets.js"),
+    ),
     ("css/app.css", include_bytes!("../web/css/app.css")),
 ];
 
@@ -181,6 +208,11 @@ async fn main() -> std::process::ExitCode {
             .project_table()
             .map(|t| t.contains_key("admin"))
             .unwrap_or(false);
+        let source = if has_file {
+            "the [admin] table of the config file (host)"
+        } else {
+            "the environment (HOMELAB_ADMIN_HOST)"
+        };
         let loaded = if has_file {
             app.project_config::<config::File>()
                 .map_err(|e| e.to_string())
@@ -190,7 +222,14 @@ async fn main() -> std::process::ExitCode {
             config::from_env(&|k| std::env::var(k).ok())
         };
         match loaded {
-            Ok(c) => Some(c),
+            Ok(c) => {
+                // TUI parity (ping): the address and where it was set.
+                let mut s = shared.write().await;
+                s.host_addr = Some(c.host.clone());
+                s.host_addr_source = Some(source.to_string());
+                drop(s);
+                Some(c)
+            }
             Err(e) => {
                 eprintln!("homelab-admin: {e}");
                 return std::process::ExitCode::FAILURE;
@@ -215,8 +254,15 @@ async fn main() -> std::process::ExitCode {
         loki: homelab_admin::shell::loki::Loki::from_config(config.as_ref()),
     }));
     // feat-platform-10: a demo host inside this process instead of the real
-    // line, for the browser tests; nothing is sent anywhere.
-    let demo_host = std::env::var("HOMELAB_ADMIN_DEMO_HOST").is_ok_and(|v| v == "1");
+    // line, for the browser tests; nothing is sent anywhere. Only a build
+    // with the `demo-host` feature has one (Kenny: "Only in test builds").
+    let demo_host = match demo_requested() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("homelab-admin: {e}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
     // milestone act: actions, schedules and notifications.
     if config.is_some() {
         if let Err(e) = homelab_admin::shell::actions::mount(
@@ -258,6 +304,7 @@ async fn main() -> std::process::ExitCode {
     if let Some(c) = config {
         // Started only on the serving path: --check never opens the line.
         app.on_start(move || {
+            #[cfg(feature = "demo-host")]
             if demo_host {
                 let repo =
                     homelab_admin::core::actions_config::from_env(&|k| std::env::var(k).ok())
@@ -269,9 +316,12 @@ async fn main() -> std::process::ExitCode {
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                tokio::spawn(host_link::run_demo(shared, live, host_asks, repo, stacks));
+                tokio::spawn(homelab_admin::shell::demo::run_demo(
+                    shared, live, host_asks, repo, stacks,
+                ));
                 return;
             }
+            let _ = demo_host;
             let (backoff_min, backoff_max) = c.backoff();
             tokio::spawn(host_link::run(
                 HostTarget {
@@ -291,4 +341,19 @@ async fn main() -> std::process::ExitCode {
         });
     }
     app.run().await
+}
+
+/// `HOMELAB_ADMIN_DEMO_HOST=1`: the demo host, in a build that has one. A
+/// release build (without the `demo-host` feature) refuses to start rather
+/// than quietly open the line to the real host someone meant to avoid.
+fn demo_requested() -> Result<bool, String> {
+    let asked = std::env::var("HOMELAB_ADMIN_DEMO_HOST").is_ok_and(|v| v == "1");
+    if asked && !cfg!(feature = "demo-host") {
+        return Err(
+            "HOMELAB_ADMIN_DEMO_HOST=1, but this build has no demo host (it is built only with \
+             `--features demo-host`, never by make release); unset it to use the real host"
+                .into(),
+        );
+    }
+    Ok(asked)
 }

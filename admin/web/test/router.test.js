@@ -17,6 +17,11 @@ test("paths under /app/ name their page", () => {
   assert.deepEqual(route("/app/timeline?days=3"), { page: "timeline" });
   assert.deepEqual(route("/app/checks/"), { page: "checks" });
   assert.deepEqual(route("/app/doctor"), { page: "doctor" });
+  assert.deepEqual(route("/app/today"), { page: "today" });
+  assert.deepEqual(route("/app/log?source=media"), { page: "log" });
+  assert.deepEqual(route("/app/shell"), { page: "shell" });
+  assert.deepEqual(route("/app/apply"), { page: "apply" });
+  assert.deepEqual(route("/app/presets"), { page: "presets" });
   assert.deepEqual(route("/app/stacks/media"), {
     page: "stack",
     name: "media",
@@ -52,8 +57,9 @@ test("the navigation marks the current page, a stack page beside the overview", 
   assert.deepEqual(cur("/app/doctor"), ["Doctor"]);
   assert.deepEqual(cur("/app/host"), ["Host"]);
   const onStack = navEntries(route("/app/stacks/media/apps"));
-  // Eight pages, milestone edit's Firewall and Settings, and the stack.
-  assert.equal(onStack.length, 11);
+  // Eight pages, milestone edit's Firewall and Settings, the parity
+  // round's Today, Live log and Apply, and the stack.
+  assert.equal(onStack.length, 14);
   assert.deepEqual(onStack[1], {
     href: "/app/stacks/media",
     label: "Stack media",

@@ -19,6 +19,7 @@ import {
   fieldChoices,
   formFields,
   initialValues,
+  nameTyped,
   previewArgs,
 } from "./actionforms.js";
 import {
@@ -30,7 +31,10 @@ import {
   refusalAlarm,
   refusalCallout,
 } from "./actui.js";
-import { fetchJson, h } from "./dom.js";
+import { fetchJson, fetchReport, h } from "./dom.js";
+import { diffBlocks } from "./editui.js";
+import { applySummary, checkChoices } from "./parity.js";
+import { fileViews } from "./plan.js";
 import { driven, register } from "./drivehooks.js";
 import { stackDetail } from "./fleet.js";
 import { batchView, jobBadge } from "./jobs.js";
@@ -47,7 +51,8 @@ import {
 
 /**
  * @typedef {{apps?: string[], units?: string[],
- *   commits?: {commit: string, subject: string}[]}} Sources
+ *   commits?: {commit: string, subject: string}[],
+ *   checks?: {id: string, label: string}[], templates?: string[]}} Sources
  * @typedef {{preset?: import("./actionforms.js").Values, sources?: Sources,
  *   openRollback?: (stack: string) => void, driven?: boolean}} OpenOpts
  * @typedef {{form: import("./actionforms.js").ActionForm,
@@ -80,6 +85,15 @@ async function readSources(form, given) {
       (f.source === "units" && !out.units) ||
       (f.source === "commits" && !out.commits),
   );
+  // TUI parity: the manual checks and the host's OS templates.
+  if (!out.checks && fields.some((f) => f.source === "checks")) {
+    const r = await fetchReport("/data/manual-checks", "the manual checks");
+    out.checks = r.ok ? checkChoices(r.report?.checks ?? []) : [];
+  }
+  if (!out.templates && fields.some((f) => f.source === "templates")) {
+    const r = await fetchJson("/data/templates", "the templates");
+    out.templates = r.ok ? (r.body.templates?.os ?? []) : [];
+  }
   if (wantsRepo) {
     const r = await fetchJson(
       `/data/actions/${encodeURIComponent(form.stack)}/rollback-options`,
@@ -311,6 +325,50 @@ function drawActionDialog(form, values, sources, driven) {
             `No CLI line: ${p.cli_unavailable ?? "the dashboard could not build it"}.`,
           ),
     );
+    // TUI parity: what the press changes, before it is pressed (the Deploy
+    // plan with its diff, the Apply plan).
+    if (p.plan) {
+      const files = fileViews(p.plan.files ?? []);
+      previewBox.append(
+        h(
+          "details",
+          { class: "act-plan", open: "" },
+          h(
+            "summary",
+            null,
+            p.plan.new_stack
+              ? "The plan: a new container, every file sent"
+              : files.length
+                ? `The plan: ${files.length} ${files.length === 1 ? "file changes" : "files change"}`
+                : "The plan: no file changes",
+          ),
+          h("p", { class: "measured" }, p.plan.note),
+          ...diffBlocks(files),
+        ),
+      );
+    } else if (p.apply) {
+      const s = applySummary(p.apply);
+      previewBox.append(
+        h(
+          "div",
+          { class: "act-plan", "data-apply": "" },
+          h("p", null, s.headline),
+          h("ul", null, ...s.lines.map((l) => h("li", null, l))),
+          ...(s.blocked
+            ? [
+                h(
+                  "p",
+                  { class: "kp-alert kp-alert--destructive", role: "alert" },
+                  s.blocked,
+                ),
+              ]
+            : []),
+        ),
+      );
+    } else if (p.plan_unavailable)
+      previewBox.append(
+        h("p", { class: "measured" }, `No plan: ${p.plan_unavailable}.`),
+      );
     restartsBox.hidden = !p.restarts_dashboard;
     guard = p.guard ?? null;
     guardBox.replaceChildren(
@@ -323,6 +381,19 @@ function drawActionDialog(form, values, sources, driven) {
     if (forceWrap) forceWrap.hidden = !guard && values.force !== true;
   };
   inputs.get("force")?.addEventListener("change", () => void preview());
+  // A field asked on the review step (exec's command) changes the line.
+  for (const f of otherReview)
+    if (f.name !== "confirm")
+      inputs.get(f.name)?.addEventListener("change", () => void preview());
+  // cli-yes: the line carries --yes once the name is typed right.
+  let typedBefore = nameTyped(form, values);
+  inputs.get("confirm")?.addEventListener("input", () => {
+    const now = nameTyped(form, values);
+    if (now !== typedBefore) {
+      typedBefore = now;
+      void preview();
+    }
+  });
 
   /** @param {"options" | "review"} step */
   const stepErrors = (step) => {
@@ -627,7 +698,7 @@ export async function openBatch(action, stacks) {
       const r = await send(
         "POST",
         `/data/actions/${encodeURIComponent(s)}/${action}/preview`,
-        entry.confirm ? { confirm: s } : {},
+        {},
         `the preview of ${entry.label} on ${s}`,
       );
       const li = list.querySelector(`[data-stack="${CSS.escape(s)}"]`);

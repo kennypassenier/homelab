@@ -42,7 +42,7 @@ use super::host_link::{HostClient, Shared};
 use crate::core::actions::{
     self, ActionArgs, ActionKind, ActionRequest, BatchRequest, Material, Needs, Refusal,
 };
-use crate::core::actions_cli::cli_line;
+use crate::core::actions_cli::cli_line_typed;
 use crate::core::actions_progress::{Progress, Tracker};
 use crate::core::notify::{Draft, Kind};
 
@@ -125,6 +125,53 @@ pub trait StackFiles: Send + Sync + 'static {
     fn native_units(&self, stack: &str) -> Vec<String>;
     /// Whether the working copy is there at all.
     fn present(&self) -> bool;
+    /// install-native: the unit's manifest, its unit file and the directory
+    /// the CLI names (`stacks/kyu/kyu-runner`), from the working copy.
+    fn native_release(
+        &self,
+        stack: &str,
+        unit: Option<&str>,
+    ) -> Result<(homelab_proto::NativeServiceManifest, String, String), Refusal> {
+        let _ = unit;
+        Err(Refusal::new(
+            format!("install-native {stack}"),
+            "these stack files cannot say which native services a stack holds",
+            "use the dashboard with its working copy",
+        ))
+    }
+    /// apply and drift: every declared stack of the working copy, with its
+    /// intent hash (latch runs for the secrets the hash covers) and, when
+    /// `with_specs`, the spec a deploy sends (programs included).
+    fn local_stacks(&self, with_specs: bool) -> Result<LocalStacks, Refusal> {
+        let _ = with_specs;
+        Err(Refusal::new(
+            "the stacks directory",
+            "these stack files cannot be listed",
+            "use the dashboard with its working copy",
+        ))
+    }
+    /// The Deploy review's plan: a stack's files without secrets.
+    fn stack_files(&self, stack: &str) -> Result<Vec<homelab_proto::FileBlob>, Refusal> {
+        Err(Refusal::new(
+            format!("the files of {stack}"),
+            "these stack files cannot be read one by one",
+            "use the dashboard with its working copy",
+        ))
+    }
+}
+
+/// What the working copy's stacks directory holds, for apply and drift.
+#[derive(Debug, Clone, Default)]
+pub struct LocalStacks {
+    /// Every declared (not ephemeral) stack with its intent hash, or why it
+    /// could not be built.
+    pub hashes: Vec<(String, Result<String, String>)>,
+    /// The name of every directory under stacks/, deployable or not.
+    pub dirs: Vec<String>,
+    /// Stacks deployed by name only, never by apply.
+    pub ephemeral: Vec<String>,
+    /// The specs, when asked for.
+    pub specs: BTreeMap<String, homelab_proto::DeploySpec>,
 }
 
 /// The homelab working copy (arch-state: `…/repo`).
@@ -186,7 +233,11 @@ impl RepoFiles {
             )
         };
         match kind.needs() {
-            Needs::Nothing | Needs::Vmid => Ok(Material::None),
+            Needs::Nothing
+            | Needs::Vmid
+            | Needs::HostRelease
+            | Needs::NativeRelease
+            | Needs::Apply => Ok(Material::None),
             Needs::Manifest => {
                 if kind == ActionKind::Destroy && !dir.join("lxc-compose.yml").exists() {
                     return Ok(Material::None);
@@ -227,7 +278,10 @@ impl StackFiles for RepoFiles {
         commit: Option<&str>,
     ) -> Result<Material, Refusal> {
         let what = format!("{} {}", kind.slug(), stack);
-        if matches!(kind.needs(), Needs::Nothing | Needs::Vmid) {
+        if matches!(
+            kind.needs(),
+            Needs::Nothing | Needs::Vmid | Needs::HostRelease | Needs::NativeRelease | Needs::Apply
+        ) {
             return Ok(Material::None);
         }
         if let Some(wc) = &self.wc {
@@ -322,6 +376,150 @@ impl StackFiles for RepoFiles {
             .map(|(m, _)| m.unit)
             .collect()
     }
+
+    fn native_release(
+        &self,
+        stack: &str,
+        unit: Option<&str>,
+    ) -> Result<(homelab_proto::NativeServiceManifest, String, String), Refusal> {
+        let what = format!("install-native {stack}");
+        if let Some(wc) = &self.wc {
+            if let Err(r) = wc.sync() {
+                tracing::warn!(why = %r.why, "the working copy was not brought up to date before {what}");
+            }
+        }
+        let _held = self.wc.as_ref().map(|wc| wc.hold());
+        if !self.present() {
+            return Err(no_repo(&self.repo, what));
+        }
+        let dir = self.repo.join("stacks").join(stack);
+        let services = homelab_client::spec::native_services(&dir);
+        let pick = match unit {
+            Some(u) => services.into_iter().find(|(m, _)| m.unit == u),
+            None if services.len() == 1 => services.into_iter().next(),
+            None => {
+                return Err(Refusal::new(
+                    what,
+                    format!(
+                        "stacks/{stack} holds {} native services; name the one to install",
+                        services.len()
+                    ),
+                    "pick the unit in the form",
+                ))
+            }
+        };
+        let Some((m, unit_file)) = pick else {
+            return Err(Refusal::new(
+                what,
+                format!(
+                    "stacks/{stack} has no native service {}",
+                    unit.unwrap_or("(none at all)")
+                ),
+                "pick a unit the stack's service.yml files name",
+            ));
+        };
+        homelab_core::native::validate_native(&m).map_err(|p| {
+            Refusal::new(
+                what.clone(),
+                format!("service.yml invalid: {}", p.join("; ")),
+                format!("fix stacks/{stack}"),
+            )
+        })?;
+        if m.release_repo.is_none() {
+            return Err(Refusal::new(
+                what,
+                format!(
+                    "{} declares no release_repo: there is no release to install",
+                    m.unit
+                ),
+                "add release_repo to its service.yml",
+            ));
+        }
+        let Some(unit_file) = unit_file else {
+            return Err(Refusal::new(
+                what,
+                format!(
+                    "no {}.service beside its service.yml: a rebuilt container would have the \
+                     binary and nothing to run it",
+                    m.unit
+                ),
+                "commit the unit file next to the service.yml",
+            ));
+        };
+        // The directory the CLI's install-native names: the one whose
+        // service.yml describes this unit.
+        let rel = if dir.join(&m.unit).join("service.yml").is_file() {
+            format!("stacks/{stack}/{}", m.unit)
+        } else {
+            format!("stacks/{stack}")
+        };
+        Ok((m, unit_file, rel))
+    }
+
+    fn local_stacks(&self, with_specs: bool) -> Result<LocalStacks, Refusal> {
+        if let Some(wc) = &self.wc {
+            if let Err(r) = wc.sync() {
+                tracing::warn!(why = %r.why, "the working copy was not brought up to date before reading the stacks");
+            }
+        }
+        let _held = self.wc.as_ref().map(|wc| wc.hold());
+        if !self.present() {
+            return Err(no_repo(&self.repo, "the stacks directory".into()));
+        }
+        let base = self.repo.join("stacks");
+        let declared = homelab_client::spec::declared_stacks(&base);
+        let mut out = LocalStacks {
+            ephemeral: homelab_client::spec::scan_local_stacks(&base)
+                .into_iter()
+                .map(|(n, _)| n)
+                .filter(|n| !declared.iter().any(|(d, _)| d == n))
+                .collect(),
+            dirs: std::fs::read_dir(&base)
+                .map(|rd| {
+                    rd.flatten()
+                        .filter(|e| e.path().is_dir())
+                        .map(|e| e.file_name().to_string_lossy().to_string())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            ..LocalStacks::default()
+        };
+        out.dirs.sort();
+        for (name, dir) in declared {
+            if with_specs {
+                let built = homelab_client::spec::build_spec(&dir).and_then(|sp| {
+                    homelab_core::manifest::validate(&sp).map_err(|e| e.to_string())?;
+                    Ok(sp)
+                });
+                match built {
+                    Ok(sp) => {
+                        out.hashes
+                            .push((name.clone(), Ok(homelab_core::manifest::intent_hash(&sp))));
+                        out.specs.insert(name, sp);
+                    }
+                    Err(e) => out.hashes.push((name, Err(e))),
+                }
+            } else {
+                let h = homelab_client::spec::local_intent_hash(&dir).map(|(h, _)| h);
+                out.hashes.push((name, h));
+            }
+        }
+        Ok(out)
+    }
+
+    fn stack_files(&self, stack: &str) -> Result<Vec<homelab_proto::FileBlob>, Refusal> {
+        let _held = self.wc.as_ref().map(|wc| wc.hold());
+        if !self.present() {
+            return Err(no_repo(&self.repo, format!("the files of {stack}")));
+        }
+        homelab_client::spec::stack_files(&self.repo.join("stacks").join(stack)).map_err(|why| {
+            Refusal::new(
+                format!("the files of {stack}"),
+                why,
+                format!("fix stacks/{stack} in the working copy"),
+            )
+        })
+    }
 }
 
 /// Where a job came from.
@@ -409,6 +607,10 @@ struct Inner {
     jobs: std::sync::Mutex<VecDeque<JobView>>,
     batches: std::sync::Mutex<BTreeMap<u64, Vec<u64>>>,
     next_job: AtomicU64,
+    /// TUI parity: where "Update host" and install-native read releases.
+    releases: std::sync::OnceLock<Arc<dyn super::releases::Releases>>,
+    /// How long "Update host" waits for the host to come back.
+    reconnect_wait: std::sync::OnceLock<Duration>,
 }
 
 /// The action queue.
@@ -447,6 +649,8 @@ impl Actions {
             // Job ids from the start time, so a restarted dashboard never
             // reuses one a page still shows.
             next_job: AtomicU64::new(first.max(1)),
+            releases: std::sync::OnceLock::new(),
+            reconnect_wait: std::sync::OnceLock::new(),
         });
         let worker = Actions {
             inner: inner.clone(),
@@ -461,6 +665,34 @@ impl Actions {
 
     fn now(&self) -> i64 {
         (self.inner.clock)()
+    }
+
+    /// TUI parity: where releases are read (GitHub in the app, a fake in a
+    /// test). Set once.
+    pub fn set_releases(&self, r: Arc<dyn super::releases::Releases>) {
+        let _ = self.inner.releases.set(r);
+    }
+
+    /// How long "Update host" waits for the host to come back (a test
+    /// shortens it). Set once; five minutes otherwise.
+    pub fn set_reconnect_wait(&self, d: Duration) {
+        let _ = self.inner.reconnect_wait.set(d);
+    }
+
+    /// A read on the host line, for the lists a form's choices come from
+    /// (the manual checks, the templates).
+    pub async fn ask(&self, command: Command, timeout: Duration) -> Result<RpcResponse, String> {
+        self.inner.host.ask_traced(command, timeout, None).await
+    }
+
+    fn releases(&self) -> Result<Arc<dyn super::releases::Releases>, Refusal> {
+        self.inner.releases.get().cloned().ok_or_else(|| {
+            Refusal::new(
+                "the releases",
+                "this dashboard reads no releases",
+                "report this with the dashboard's log",
+            )
+        })
     }
 
     fn store(&self, view: &JobView) {
@@ -514,6 +746,22 @@ impl Actions {
                  need only the stack name work without it",
             ));
         }
+        // An older host drops a command it does not know without a word.
+        if req.action == ActionKind::InstallNative {
+            let v = self
+                .inner
+                .shared
+                .try_read()
+                .ok()
+                .and_then(|s| s.host_version.clone());
+            crate::core::hostversion::at_least(
+                &what,
+                v.as_deref(),
+                crate::core::hostversion::NEXT_RELEASE,
+                "update the host first (Update the host on the host page), or install from a \
+                 workstation: homelab install-native stacks/<stack> <tag>",
+            )?;
+        }
         if let Ok(jobs) = self.inner.jobs.lock() {
             if let Some(j) = jobs.iter().find(|j| {
                 j.state == JobState::Queued && j.stack == req.stack && j.action == req.action
@@ -544,15 +792,18 @@ impl Actions {
 
     /// feat-stacks-7 before the press: the CLI line (or why there is
     /// none), the deploy guard's refusal, whether it restarts the dashboard.
+    /// `typed`: the form's typed name matched (cli-yes: the line then
+    /// carries `--yes`).
     pub async fn preview_of(
         &self,
         req: ActionRequest,
+        typed: bool,
     ) -> (Result<String, String>, Option<Refusal>, bool) {
         let a2 = self.clone();
         let restarts = actions::restarts_dashboard(&req.stack, req.action);
         let (line, guard) = tokio::task::spawn_blocking(move || {
             let guard = a2.guard(&req);
-            (preview_line(&a2, &req), guard)
+            (preview_line(&a2, &req, typed), guard)
         })
         .await
         .unwrap_or((Err("internal".into()), Ok(())));
@@ -687,6 +938,67 @@ impl Actions {
     }
 
     async fn material(&self, req: &ActionRequest) -> Result<Material, Refusal> {
+        let what = format!("{} {}", req.action.slug(), req.stack);
+        match req.action.needs() {
+            Needs::HostRelease => {
+                let releases = self.releases()?;
+                let tag = match req
+                    .args
+                    .tag
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                {
+                    Some(t) => t.to_string(),
+                    None => releases
+                        .latest_tag(super::releases::HOMELAB_REPO)
+                        .await
+                        .map_err(|why| {
+                            Refusal::new(what.clone(), why, "name the tag, or try again later")
+                        })?,
+                };
+                let binary_b64 = releases.host_binary(&tag).await.map_err(|why| {
+                    Refusal::new(
+                        what.clone(),
+                        why,
+                        "nothing was sent to the host; sign the release, or pick a signed one",
+                    )
+                })?;
+                return Ok(Material::HostRelease { tag, binary_b64 });
+            }
+            Needs::NativeRelease => {
+                let files = self.inner.files.clone();
+                let (stack, unit) = (req.stack.clone(), req.args.unit.clone());
+                let (m, unit_file, dir) = tokio::task::spawn_blocking(move || {
+                    files.native_release(&stack, unit.as_deref())
+                })
+                .await
+                .map_err(|e| Refusal::new(what.clone(), e.to_string(), "report this"))??;
+                let tag = match req
+                    .args
+                    .tag
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                {
+                    Some(t) => t.to_string(),
+                    None => {
+                        let repo = m.release_repo.clone().unwrap_or_default();
+                        self.releases()?.latest_tag(&repo).await.map_err(|why| {
+                            Refusal::new(what.clone(), why, "name the tag, or try again later")
+                        })?
+                    }
+                };
+                return Ok(Material::NativeRelease {
+                    manifest: Box::new(m),
+                    unit_file,
+                    tag,
+                    dir,
+                });
+            }
+            Needs::Apply => return self.apply_material(req).await,
+            _ => {}
+        }
         if req.action.needs() == Needs::Vmid {
             return match self.fleet_stack(&req.stack) {
                 Some((vmid, _)) => Ok(Material::Vmid(vmid)),
@@ -707,6 +1019,175 @@ impl Actions {
         })
         .await
         .map_err(|e| Refusal::new("reading the stack files", e.to_string(), "report this"))?
+    }
+
+    /// The host's applied hashes, from the newest fleet reading.
+    fn host_pairs(&self) -> Option<Vec<(String, String)>> {
+        let s = self.inner.shared.try_read().ok()?;
+        Some(
+            s.fleet
+                .as_ref()?
+                .stacks
+                .iter()
+                .map(|x| (x.name.clone(), x.applied_hash.clone()))
+                .collect(),
+        )
+    }
+
+    /// TUI parity (the plan in the plain Deploy review, fix-100): what a
+    /// deploy of `stack` changes, file by file, against the files the host
+    /// applied last (`GetApplied`), with each file's diff. Secrets are never
+    /// part of it: neither side carries them.
+    pub async fn deploy_diff(&self, stack: &str) -> Result<serde_json::Value, Refusal> {
+        use crate::core::stackedit::FileChange;
+        let files = self.inner.files.clone();
+        let s2 = stack.to_string();
+        let local = tokio::task::spawn_blocking(move || files.stack_files(&s2))
+            .await
+            .map_err(|e| Refusal::new("the plan", e.to_string(), "report this"))??;
+        let known = self
+            .inner
+            .shared
+            .try_read()
+            .ok()
+            .and_then(|s| {
+                s.fleet.as_ref().map(|f| {
+                    f.stacks
+                        .iter()
+                        .any(|x| x.name == stack && !x.applied_hash.is_empty())
+                })
+            })
+            .unwrap_or(false);
+        let applied: Vec<homelab_proto::FileBlob> = if known {
+            let r = self
+                .inner
+                .host
+                .ask_traced(
+                    Command::GetApplied {
+                        stack: stack.to_string(),
+                    },
+                    Duration::from_secs(30),
+                    None,
+                )
+                .await
+                .map_err(|e| Refusal::new("the plan", e, "check that the host answers"))?;
+            if !r.ok {
+                return Err(Refusal::new(
+                    "the plan",
+                    r.message,
+                    "look at the host's intent repository",
+                ));
+            }
+            serde_json::from_str(&r.message).map_err(|e| {
+                Refusal::new(
+                    "the plan",
+                    format!("the host's applied files do not read: {e}"),
+                    "update the host and the dashboard to the same release",
+                )
+            })?
+        } else {
+            Vec::new()
+        };
+        let mut changes: Vec<FileChange> = Vec::new();
+        for f in &local {
+            match applied.iter().find(|x| x.path == f.path) {
+                None => changes.push(FileChange {
+                    path: f.path.clone(),
+                    old: None,
+                    new: Some(f.content.clone()),
+                }),
+                Some(x) if x.content != f.content || x.mode != f.mode => changes.push(FileChange {
+                    path: f.path.clone(),
+                    old: Some(x.content.clone()),
+                    new: Some(f.content.clone()),
+                }),
+                Some(_) => {}
+            }
+        }
+        for x in &applied {
+            if !local.iter().any(|f| f.path == x.path) {
+                changes.push(FileChange {
+                    path: x.path.clone(),
+                    old: Some(x.content.clone()),
+                    new: None,
+                });
+            }
+        }
+        changes.sort_by(|a, b| a.path.cmp(&b.path));
+        let summary = homelab_client::apply::file_changes(&local, &applied);
+        Ok(serde_json::json!({
+            "new_stack": !known,
+            "files": crate::core::editplan::file_diffs(&changes),
+            "summary": summary,
+            "note": if changes.is_empty() {
+                "the files are as the host applied them; secrets or settings may still differ"
+            } else {
+                "the files as they change; secrets are not shown (neither side carries them here)"
+            },
+        }))
+    }
+
+    /// dash-apply: the plan against the host, as `homelab apply --plan`
+    /// prints it; `with_specs` builds what a deploy sends (for the run).
+    pub async fn apply_plan(
+        &self,
+        with_specs: bool,
+    ) -> Result<(crate::core::applyview::ApplyView, LocalStacks), Refusal> {
+        let files = self.inner.files.clone();
+        let local = tokio::task::spawn_blocking(move || files.local_stacks(with_specs))
+            .await
+            .map_err(|e| Refusal::new("the plan", e.to_string(), "report this"))??;
+        let host = self.host_pairs().ok_or_else(|| {
+            Refusal::new(
+                "the plan",
+                "the dashboard has not read the host's fleet yet",
+                "wait for the fleet page to show the stacks",
+            )
+        })?;
+        let view =
+            crate::core::applyview::plan(&local.hashes, &local.dirs, &host, &local.ephemeral);
+        Ok((view, local))
+    }
+
+    async fn apply_material(&self, req: &ActionRequest) -> Result<Material, Refusal> {
+        let what = "apply".to_string();
+        let (view, mut local) = self.apply_plan(true).await?;
+        if let Some((name, why)) = view.broken.first() {
+            return Err(Refusal::new(
+                what,
+                format!("{name} does not build: {why} — nothing applied"),
+                format!("fix stacks/{name}; the Apply page lists every stack that does not build"),
+            ));
+        }
+        let typed = crate::core::applyview::chosen_destroys(&view, &req.args.destroy_names())
+            .map_err(|why| {
+                Refusal::new(
+                    what.clone(),
+                    why,
+                    "type only names the plan lists under 'gone from the files'",
+                )
+            })?;
+        // arch-deploy-guard: every planned stack is checked before the
+        // first one is sent, so a refusal leaves nothing half-applied.
+        if !req.args.force {
+            for name in &view.deploy {
+                let r = ActionRequest {
+                    stack: name.clone(),
+                    action: ActionKind::Deploy,
+                    args: ActionArgs::default(),
+                };
+                self.guard(&r)?;
+            }
+        }
+        let deploy = view
+            .deploy
+            .iter()
+            .filter_map(|n| local.specs.remove(n))
+            .collect();
+        Ok(Material::Apply {
+            deploy,
+            destroy: typed,
+        })
     }
 
     async fn history(&self) -> Vec<homelab_core::history::HistoryEntry> {
@@ -759,6 +1240,9 @@ impl Actions {
                 format!("{e}; the activity page shows what the host did"),
             ),
         };
+        // arch-secrets-read: what the host printed (an exec's output above
+        // all) is masked by shape before it goes over the live channel.
+        let message = homelab_core::executor::mask_secrets(&message);
         self.finish(&mut view, state, message.clone());
         let ran_s = view
             .started_at
@@ -769,10 +1253,15 @@ impl Actions {
             JobState::Deferred => Kind::ActionDeferred,
             _ => Kind::ActionFailed,
         };
+        let place = if view.stack == actions::HOST_TARGET {
+            String::new()
+        } else {
+            format!(" {}", view.stack)
+        };
         let title = format!(
-            "{} {}: {}",
+            "{}{}: {}",
             view.action.label(),
-            view.stack,
+            place,
             match state {
                 JobState::Done => "done",
                 JobState::Deferred => "stood aside",
@@ -800,17 +1289,26 @@ impl Actions {
 
     async fn execute(&self, req: &ActionRequest, view: &mut JobView) -> Result<RpcResponse, Stop> {
         let material = self.material(req).await.map_err(Stop::Refused)?;
+        let over = actions::cli_override(req, &material);
+        let expected = match &material {
+            Material::HostRelease { tag, .. } => {
+                homelab_client::release::expected_host_version(tag)
+            }
+            _ => None,
+        };
         let commands = actions::commands(req, material).map_err(Stop::Refused)?;
         let main = commands.last().cloned();
-        view.cli = main
-            .as_ref()
-            .and_then(|c| cli_line(c, req.args.force))
-            .map(|l| match &req.args.commit {
-                Some(c) if req.action == ActionKind::DeployCommit => {
-                    format!("git checkout {c} -- stacks/{} && {l}", req.stack)
-                }
-                _ => l,
-            });
+        // The name was typed and checked before the job ran (cli-yes).
+        view.cli = over.or_else(|| {
+            main.as_ref()
+                .and_then(|c| cli_line_typed(c, req.args.force, true))
+                .map(|l| match &req.args.commit {
+                    Some(c) if req.action == ActionKind::DeployCommit => {
+                        format!("git checkout {c} -- stacks/{} && {l}", req.stack)
+                    }
+                    _ => l,
+                })
+        });
         self.store(view);
         let history = self.history().await;
         let mut tracker = Tracker::new(history);
@@ -823,7 +1321,93 @@ impl Actions {
                 break;
             }
         }
-        last.ok_or_else(|| Stop::Link("nothing was sent".into()))
+        let last = last.ok_or_else(|| Stop::Link("nothing was sent".into()))?;
+        if req.action == ActionKind::UpdateHost && last.ok {
+            return Ok(self.await_updated_host(view, expected, last).await);
+        }
+        Ok(last)
+    }
+
+    /// dash-host-update, fix-121: done means the shipped version answered
+    /// after the restart, not that a restart was scheduled. The line drops
+    /// and comes back on its own (arch-host-link); this watches the Hello.
+    async fn await_updated_host(
+        &self,
+        view: &JobView,
+        expected: Option<String>,
+        sent: RpcResponse,
+    ) -> RpcResponse {
+        use homelab_client::release::{after_update, AfterUpdate};
+        let wait = self
+            .inner
+            .reconnect_wait
+            .get()
+            .copied()
+            .unwrap_or(Duration::from_secs(300));
+        let say = |msg: String| {
+            self.inner.publish.publish(
+                "action_log",
+                serde_json::json!({
+                    "job": view.job, "req": null, "level": "info", "source": "ADMIN",
+                    "msg": msg, "ts": self.now(),
+                }),
+            );
+        };
+        say(format!(
+            "the host restarts into {}; the dashboard reconnects and waits for it (at most {} s)",
+            expected.as_deref().unwrap_or("the new binary"),
+            wait.as_secs()
+        ));
+        let end = tokio::time::Instant::now() + wait;
+        let mut seen_down = false;
+        loop {
+            let (up, version) = {
+                let s = self.inner.shared.read().await;
+                (s.link_error.is_none(), s.host_version.clone())
+            };
+            if !up {
+                seen_down = true;
+            }
+            let answered = if up { version.as_deref() } else { None };
+            match after_update(expected.as_deref(), seen_down, answered) {
+                AfterUpdate::Answered => {
+                    let v = version.unwrap_or_default();
+                    say(format!("the host answers as {v}: the update is accepted"));
+                    return RpcResponse {
+                        message: format!(
+                            "{}\nthe host came back as {v} and answers; the update is accepted",
+                            sent.message
+                        ),
+                        ..sent
+                    };
+                }
+                AfterUpdate::RolledBack(v) => {
+                    return RpcResponse {
+                        ok: false,
+                        message: format!(
+                            "the host came back as {v}, not {}: its rollback ran; the journal on \
+                             pve (journalctl -u homelab-host) says why",
+                            expected.as_deref().unwrap_or("the new version")
+                        ),
+                        ..sent
+                    };
+                }
+                AfterUpdate::Wait => {}
+            }
+            if tokio::time::Instant::now() >= end {
+                return RpcResponse {
+                    ok: false,
+                    message: format!(
+                        "the host did not come back as {} within {} s; the host page shows what \
+                         answers now",
+                        expected.as_deref().unwrap_or("the new version"),
+                        wait.as_secs()
+                    ),
+                    ..sent
+                };
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
     }
 
     /// Send one command and follow its lines until its reply.
@@ -916,7 +1500,8 @@ impl Actions {
         self.inner.publish.publish(
             "action_log",
             serde_json::json!({
-                "job": view.job, "req": id, "level": level, "source": source, "msg": msg, "ts": ts,
+                "job": view.job, "req": id, "level": level, "source": source,
+                "msg": homelab_core::executor::mask_secrets(&msg), "ts": ts,
             }),
         );
         if let Some(mark) = step {
@@ -1072,20 +1657,26 @@ async fn preview(
     UrlPath((stack, action)): UrlPath<(String, String)>,
     b: Result<Json<ActionArgs>, JsonRejection>,
 ) -> Response {
-    let args = match b {
+    let mut args = match b {
         Err(JsonRejection::MissingJsonContentType(_)) => ActionArgs::default(),
         other => match body(other, &format!("{action} {stack}")) {
             Ok(a) => a,
             Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
         },
     };
+    // cli-yes: the preview may come before the name is typed; the line
+    // carries --yes only once it is.
+    let typed = args.confirm.as_deref() == Some(stack.as_str());
+    if ActionKind::from_slug(&action).is_some_and(|k| k.confirm()) && !typed {
+        args.confirm = Some(stack.clone());
+    }
     let req = match actions::validate(&stack, &action, args) {
         Ok(r) => r,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
     let (stack, action) = (req.stack.clone(), req.action);
-    let (line, guard, restarts) = a.preview_of(req).await;
-    Json(serde_json::json!({
+    let (line, guard, restarts) = a.preview_of(req, typed).await;
+    let mut out = serde_json::json!({
         "stack": stack,
         "action": action,
         "entry": action.catalog_entry(),
@@ -1093,11 +1684,55 @@ async fn preview(
         "cli_unavailable": line.err(),
         "guard": guard,
         "restarts_dashboard": restarts,
-    }))
-    .into_response()
+    });
+    // TUI parity: what the press would change, before it is pressed.
+    match action {
+        ActionKind::Deploy => match a.deploy_diff(&stack).await {
+            Ok(d) => out["plan"] = d,
+            Err(r) => out["plan_unavailable"] = serde_json::json!(r.why),
+        },
+        ActionKind::Apply => match a.apply_plan(false).await {
+            Ok((view, _)) => out["apply"] = serde_json::json!(view),
+            Err(r) => out["plan_unavailable"] = serde_json::json!(r.why),
+        },
+        _ => {}
+    }
+    Json(out).into_response()
 }
 
-fn preview_line(a: &Actions, req: &ActionRequest) -> Result<String, String> {
+fn preview_line(a: &Actions, req: &ActionRequest, typed: bool) -> Result<String, String> {
+    // The lines that name more than the command carries, without a
+    // download: the tag as typed ("latest" when empty), apply's flags.
+    let tag = || {
+        req.args
+            .tag
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .unwrap_or("")
+            .to_string()
+    };
+    match req.action.needs() {
+        Needs::HostRelease => {
+            return Ok(format!("homelab release-update {}", tag())
+                .trim_end()
+                .to_string())
+        }
+        Needs::NativeRelease => {
+            let (_, _, dir) = a
+                .inner
+                .files
+                .native_release(&req.stack, req.args.unit.as_deref())
+                .map_err(|r| r.why)?;
+            return Ok(format!("homelab install-native {dir} {}", tag())
+                .trim_end()
+                .to_string());
+        }
+        Needs::Apply => {
+            return actions::cli_override(req, &Material::None).ok_or_else(|| "internal".into())
+        }
+        _ => {}
+    }
     let material = match req.action.needs() {
         Needs::Spec => {
             // The line names the stack; a spec with the manifest alone says
@@ -1139,7 +1774,7 @@ fn preview_line(a: &Actions, req: &ActionRequest) -> Result<String, String> {
     };
     let commands = actions::commands(req, material).map_err(|r| r.why)?;
     let main = commands.last().ok_or("no command")?;
-    let line = cli_line(main, req.args.force).ok_or("no CLI verb sends this")?;
+    let line = cli_line_typed(main, req.args.force, typed).ok_or("no CLI verb sends this")?;
     Ok(match &req.args.commit {
         Some(c) if req.action == ActionKind::DeployCommit => {
             format!("git checkout {c} -- stacks/{} && {line}", req.stack)
@@ -1184,6 +1819,7 @@ pub fn mount(
 ) -> Result<(), String> {
     let cfg = crate::core::actions_config::from_env(&|k| std::env::var(k).ok())?;
     let clock = system_clock();
+    let live_for_parity = live.clone();
     let publish: Arc<dyn Publish> = Arc::new(live);
     let host: Arc<dyn HostPort> = Arc::new(host);
     let pusher: Arc<dyn super::actions_notify::Pusher> = match &cfg.notify_url {
@@ -1207,14 +1843,16 @@ pub fn mount(
         cfg.scratch_dir(),
         clock.clone(),
     ));
+    let files: Arc<dyn StackFiles> = Arc::new(RepoFiles {
+        repo: cfg.repo.clone(),
+        scratch: cfg.scratch_dir(),
+        wc: Some(wc.clone()),
+    });
+    let shared_for_parity = shared.clone();
     let actions = Actions::start(ActionsDeps {
         host: host.clone(),
         publish: publish.clone(),
-        files: Arc::new(RepoFiles {
-            repo: cfg.repo.clone(),
-            scratch: cfg.scratch_dir(),
-            wc: Some(wc.clone()),
-        }),
+        files: files.clone(),
         shared,
         notify: notify.clone(),
         clock: clock.clone(),
@@ -1224,8 +1862,8 @@ pub fn mount(
         cfg.schedules_file(),
         actions.clone(),
         notify.clone(),
-        publish,
-        clock,
+        publish.clone(),
+        clock.clone(),
         cfg.schedule_grace_s,
     )
     .map_err(|e| e.to_string())?;
@@ -1247,22 +1885,62 @@ pub fn mount(
         Some(edit_ctx),
     );
     app.dashboard_routes(super::drive::router(driver.clone()));
+    #[cfg(feature = "demo-host")]
     if demo_host {
         app.dashboard_routes(super::drive::demo_router(driver.clone()));
     }
+    let _ = demo_host;
+    // TUI parity: releases (Update host, install-native, the badge), the
+    // host's log stream, and the read routes the TUI and CLI had alone.
+    let releases: Arc<dyn super::releases::Releases> = Arc::new(super::releases::GitHub::new());
+    actions.set_releases(releases.clone());
+    let hostlog = super::hostlog::HostLog::new(publish.clone(), clock.clone());
+    app.dashboard_routes(super::hostlog::router(hostlog.clone()));
+    app.dashboard_routes(super::parity::router(super::parity::ParityCtx::new(
+        host.clone(),
+        shared_for_parity.clone(),
+        actions.clone(),
+        files,
+        cfg.repo.clone(),
+        cfg.scratch_dir(),
+    )));
     app.dashboard_routes(router(actions));
     app.dashboard_routes(super::actions_notify::router(notify.clone()));
     app.dashboard_routes(super::scheduler::router(scheduler.clone()));
     let (tick, poll) = (cfg.tick(), Duration::from_secs(cfg.incidents_poll_s));
+    let git = cfg.git.clone();
     app.on_start(move || {
         // Clone or bring the working copy up to date, off the async threads.
         tokio::task::spawn_blocking(move || {
+            // CT 120: the deploy key arrives from latch as an environment
+            // variable; ssh wants a file (and GitHub's host keys).
+            let key = std::env::var(crate::core::credentials::DEPLOY_KEY_ENV).ok();
+            let p = super::workcopy::provision_credentials(&git, key.as_deref());
+            if p.key_written {
+                tracing::info!(path = %git.key.display(), "the deploy key file was written from the environment (mode 0600)");
+            }
+            if p.known_hosts_written {
+                tracing::info!(path = %git.known_hosts.display(), "GitHub's pinned host keys were written");
+            }
+            for why in &p.problems {
+                tracing::warn!(why = %why, "the working copy's credentials");
+            }
             if let Err(r) = wc.sync() {
                 tracing::warn!(why = %r.why, fix = %r.fix, "the working copy is not ready");
             }
         });
         scheduler.spawn(tick);
         driver.spawn_relay(host.clone());
+        hostlog.spawn(host.clone());
+        // The demo host answers without the internet; the badge would not.
+        if !demo_host {
+            super::releases::spawn_watch(
+                releases,
+                shared_for_parity,
+                live_for_parity,
+                super::releases::WATCH_EVERY,
+            );
+        }
         super::actions_notify::spawn_incident_poll(host, notify, poll);
     });
     Ok(())

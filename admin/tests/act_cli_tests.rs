@@ -188,6 +188,7 @@ fn feat_stacks_7_every_stack_action_round_trips_through_the_cli_parser() {
             Invocation::Destroy {
                 stack: "drill".into(),
                 skip_backup: true,
+                yes: false,
             },
         ),
         (
@@ -200,6 +201,7 @@ fn feat_stacks_7_every_stack_action_round_trips_through_the_cli_parser() {
             Invocation::Destroy {
                 stack: "drill".into(),
                 skip_backup: false,
+                yes: false,
             },
         ),
         (
@@ -210,6 +212,7 @@ fn feat_stacks_7_every_stack_action_round_trips_through_the_cli_parser() {
             false,
             Invocation::Wipe {
                 name: "drill".into(),
+                yes: false,
             },
         ),
         (
@@ -221,6 +224,7 @@ fn feat_stacks_7_every_stack_action_round_trips_through_the_cli_parser() {
             false,
             Invocation::PruneOrphans {
                 stack: "media".into(),
+                yes: false,
             },
         ),
         (Command::PatchFleet, false, Invocation::Patch),
@@ -325,21 +329,48 @@ fn feat_stacks_7_commands_no_verb_sends_have_no_line() {
 fn feat_stacks_7_the_cli_parser_keeps_the_verbs_old_rules() {
     let p = |s: &str| parse(&split(s)).unwrap().unwrap();
     // Flags anywhere, a path or a name.
+    // TUI parity round: a flag before the stack no longer becomes the
+    // stack (`deploy --force stacks/x` read --force as the stack's name).
     assert_eq!(
         p("deploy --force stacks/media"),
         Invocation::Deploy {
-            stack: "--force".into(),
+            stack: "stacks/media".into(),
             force: true
         },
-        "the word after the verb is the stack, as it always was"
+    );
+    assert_eq!(
+        p("deploy stacks/media --force"),
+        Invocation::Deploy {
+            stack: "stacks/media".into(),
+            force: true
+        },
     );
     assert_eq!(
         p("destroy stacks/drill --no-backup"),
         Invocation::Destroy {
             stack: "stacks/drill".into(),
-            skip_backup: true
+            skip_backup: true,
+            yes: false,
         }
     );
+    assert_eq!(
+        p("destroy --yes --no-backup drill"),
+        Invocation::Destroy {
+            stack: "drill".into(),
+            skip_backup: true,
+            yes: true,
+        }
+    );
+    assert_eq!(
+        p("update --force stacks/media sonarr"),
+        Invocation::Update {
+            stack: "stacks/media".into(),
+            app: Some("sonarr".into()),
+        }
+    );
+    assert!(parse(&split("deploy --force"))
+        .unwrap_err()
+        .contains("usage"));
     assert!(parse(&split("guards abc")).is_err());
     assert!(parse(&split("wipe --yes")).is_err());
     assert!(parse(&split("backup")).unwrap_err().contains("usage"));

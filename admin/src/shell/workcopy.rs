@@ -12,8 +12,9 @@
 //!
 //! arch-push-credential: the remote is ssh with the deploy key
 //! (`GIT_SSH_COMMAND`), so no token ever sits in a remote URL or in an error
-//! body. The key is provisioned from latch; nothing here creates or reads it
-//! beyond handing its path to ssh.
+//! body. The key is provisioned from latch (`HOMELAB_ADMIN_DEPLOY_KEY_B64`,
+//! written to its file once at start by [`provision_credentials`]); the
+//! transaction only hands its path to ssh.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -228,7 +229,7 @@ impl WorkingCopy {
             return Err(refusal(
                 WHAT,
                 format!("there is no deploy key at {}", self.git.key.display()),
-                "provision the deploy key from latch to that path (mode 0600), with GitHub's host keys in HOMELAB_ADMIN_GIT_KNOWN_HOSTS",
+                "set HOMELAB_ADMIN_DEPLOY_KEY_B64 (the key file, base64) in admin.env through latch and restart the dashboard: it writes the key there (mode 0600) and GitHub's host keys to HOMELAB_ADMIN_GIT_KNOWN_HOSTS",
             ));
         }
         if self.present() {
@@ -847,4 +848,81 @@ fn write_changes(base: &Path, changes: &[FileChange]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// What [`provision_credentials`] did, for the log. Never a secret: paths
+/// and verbs only.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Provisioned {
+    /// The key file was written from the environment.
+    pub key_written: bool,
+    /// The known-hosts file was written with GitHub's pinned host keys.
+    pub known_hosts_written: bool,
+    /// What could not be done, and why (no secret in it).
+    pub problems: Vec<String>,
+}
+
+/// arch-push-credential on CT 120: latch hands the deploy key over as
+/// `HOMELAB_ADMIN_DEPLOY_KEY_B64`; ssh wants a file. At start, write the key
+/// (mode 0600, created new, never over an existing file) and GitHub's pinned
+/// host keys, each only when its file is missing. `key_b64` is the
+/// variable's value, None when it is not set. Nothing here logs or returns
+/// any part of the key.
+pub fn provision_credentials(git: &GitConfig, key_b64: Option<&str>) -> Provisioned {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let mut out = Provisioned::default();
+    if !is_ssh(&git.remote) {
+        return out;
+    }
+    if !git.key.exists() {
+        if let Some(b64) = key_b64.filter(|v| !v.trim().is_empty()) {
+            match crate::core::credentials::decode_deploy_key(b64) {
+                Ok(bytes) => {
+                    if let Some(parent) = git.key.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let written = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(&git.key)
+                        .and_then(|mut f| {
+                            f.write_all(&bytes)?;
+                            f.sync_all()
+                        });
+                    match written {
+                        Ok(()) => out.key_written = true,
+                        Err(e) => {
+                            let _ = std::fs::remove_file(&git.key);
+                            out.problems.push(format!(
+                                "the deploy key could not be written to {}: {e}",
+                                git.key.display()
+                            ));
+                        }
+                    }
+                }
+                Err(why) => out.problems.push(why),
+            }
+        }
+    }
+    if !git.known_hosts.exists() && crate::core::credentials::is_github_ssh(&git.remote) {
+        if let Some(parent) = git.known_hosts.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let written = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o644)
+            .open(&git.known_hosts)
+            .and_then(|mut f| f.write_all(crate::core::credentials::GITHUB_KNOWN_HOSTS.as_bytes()));
+        match written {
+            Ok(()) => out.known_hosts_written = true,
+            Err(e) => out.problems.push(format!(
+                "GitHub's host keys could not be written to {}: {e}",
+                git.known_hosts.display()
+            )),
+        }
+    }
+    out
 }

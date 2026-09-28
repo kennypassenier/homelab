@@ -31,6 +31,9 @@ pub struct HostSummary {
     pub cores_total: u16,
     /// 1-minute load average ×100 (250 = 2.50).
     pub load1_x100: u32,
+    /// TUI parity: the host's TLS certificate fingerprint, as it reports it
+    /// (the one the pin is compared with); empty when it does not say.
+    pub tls_fingerprint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -53,6 +56,13 @@ pub struct StackSummary {
     /// arch-deploy-guard: where the last deploy came from, as the host
     /// recorded it ("a1b2c3d4e5f6 + 1 uncommitted file(s)").
     pub applied_source: Option<String>,
+    /// TUI parity ([NOENV]): whether the host holds the stack's sealed env;
+    /// without it a deploy fails closed.
+    pub env_sealed: bool,
+    /// B4: the intent hash the host recorded at the last deploy. Kept on the
+    /// server (drift, apply); the browser gets the verdict, not the hash.
+    #[serde(skip)]
+    pub applied_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -97,6 +107,8 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
                 .collect(),
             uptime_s: s.usage.as_ref().map(|u| u.uptime_s),
             applied_source: s.applied_source.clone(),
+            env_sealed: s.env_sealed,
+            applied_hash: s.applied_hash.clone(),
         })
         .collect();
     stacks.sort_by(|a, b| a.vmid.cmp(&b.vmid).then_with(|| a.name.cmp(&b.name)));
@@ -116,6 +128,7 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
             ram_committed_mb: state.host.ram_committed_mb,
             cores_total: state.host.cores_total,
             load1_x100: state.host.load1_x100,
+            tls_fingerprint: state.host.tls_fingerprint.clone(),
         },
         stacks,
         counts,

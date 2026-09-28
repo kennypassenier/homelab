@@ -1,0 +1,122 @@
+// Presets (TUI parity, `homelab presets`): the repository's preset
+// catalogue, each preset's size and apps; a new stack starts from one.
+
+import { agoEl, setAgo } from "../ago.js";
+import { humanMb } from "../fleet.js";
+import {
+  bindTableUrl,
+  errorBox,
+  fetchJson,
+  h,
+  tableBlock,
+  td,
+} from "../dom.js";
+import { openImport } from "../importstack.js";
+import { openNewStack } from "../newstack.js";
+import { sortKeys } from "../sortkeys.js";
+import {
+  attachDataTables,
+  compare,
+  dataTable,
+} from "/static/kp/js/datatable.js";
+
+/**
+ * @param {HTMLElement} root
+ * @param {{navigate: (href: string) => void}} ctx
+ * @returns {() => void}
+ */
+export function mount(root, ctx) {
+  const keys = sortKeys();
+  const err = h("div");
+  const note = h("p", { class: "measured", role: "status" });
+  const ago = agoEl("read");
+  const t = tableBlock({
+    remember: "presets",
+    caption: "Presets",
+    search: "Search presets",
+    state: "loading",
+    columns: [
+      { label: "Preset", sort: "text" },
+      { label: "Memory", sort: "size" },
+      { label: "Cores", sort: "number" },
+      { label: "Disk (GB)", sort: "number" },
+      { label: "Apps", sort: "text" },
+      { label: "What it is", sort: "text", cls: "wide" },
+    ],
+  });
+  const newStack = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button kp-button--primary",
+      id: "presets-new",
+    },
+    "New stack from a preset…",
+  );
+  newStack.addEventListener("click", () => void openNewStack(ctx.navigate));
+  const importBtn = h(
+    "button",
+    { type: "button", class: "kp-button", id: "presets-import" },
+    "Import a bundle…",
+  );
+  importBtn.addEventListener("click", () => void openImport(ctx.navigate));
+  root.replaceChildren(
+    h(
+      "div",
+      { class: "title-row" },
+      h("h1", null, "Presets"),
+      h("span", { class: "actions-row" }, importBtn, newStack),
+    ),
+    note,
+    err,
+    t.wrap,
+    h("p", null, ago),
+  );
+  const detach = attachDataTables(root, { compare: keys.compare(compare) });
+  const table = dataTable(t.wrap);
+  const unbind = bindTableUrl(table, "presets");
+  const abort = new AbortController();
+  const load = async () => {
+    table?.state("loading");
+    const r = await fetchJson("/data/presets", "the presets", abort.signal);
+    if (!r.ok) {
+      err.replaceChildren(errorBox(r.error));
+      table?.state("failed");
+      return;
+    }
+    err.replaceChildren();
+    const list = r.body.presets ?? [];
+    note.textContent = r.body.working_copy
+      ? `${list.length} preset(s) in the repository's presets/ directory.`
+      : "The dashboard has no working copy yet, so it lists no presets.";
+    t.tbody.replaceChildren(
+      ...list.map((/** @type {any} */ p) => {
+        return h(
+          "tr",
+          { "data-preset": p.name },
+          td(p.name),
+          // The memory column sorts by the number behind the words.
+          td(keys.note("size", humanMb(p.ram_mb), p.ram_mb), "num"),
+          td(String(p.cores), "num"),
+          td(String(p.disk_gb), "num"),
+          td((p.apps ?? []).join(", ") || "no apps"),
+          td(
+            `${p.description}${p.gpu ? " · GPU" : ""}${p.vpn ? " · VPN" : ""}`,
+          ),
+        );
+      }),
+    );
+    table?.refresh();
+    table?.state("ready");
+    setAgo(ago, Date.now() / 1000);
+  };
+  const retry = () => void load().catch(() => {});
+  root.addEventListener("kp-datatable-retry", retry);
+  retry();
+  return () => {
+    abort.abort();
+    root.removeEventListener("kp-datatable-retry", retry);
+    unbind();
+    detach();
+  };
+}

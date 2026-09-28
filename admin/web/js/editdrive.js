@@ -11,6 +11,7 @@
 
 import { openBatch } from "./actiondialog.js";
 import { handle, waitFor, waitHandle } from "./drivehooks.js";
+import { openImport } from "./importstack.js";
 import { openNewStack } from "./newstack.js";
 import { openRollback } from "./rollbackdialog.js";
 import { clearError, showError } from "/static/kp/js/forms.js";
@@ -257,6 +258,65 @@ async function newStack(navigate) {
 }
 
 /**
+ * TUI parity: the import dialog, then the plan dialog every edit ends in.
+ * @param {(href: string) => void} navigate
+ * @returns {Promise<DrivenControl>}
+ */
+async function importEdit(navigate) {
+  const { closed, done } = base();
+  void openImport(navigate);
+  const first = await waitHandle("import", 5000);
+  first?.closed.then(done);
+  /** @type {DriveForm | null} */
+  let current = null;
+  const top = () => handle("plan")?.dialog ?? handle("import")?.dialog ?? null;
+  return {
+    get dialog() {
+      return top();
+    },
+    closed,
+    close: () => {
+      handle("plan")?.close();
+      handle("import")?.close();
+    },
+    input: (_n, id) => byId(id),
+    set: (_n, v, id) => {
+      const el = byId(id);
+      if (el) setInput(el, v);
+    },
+    button: (name) => {
+      if (name === "close") return closeOf(top());
+      if (!current || current.step_index === 0)
+        return handle("import")?.review() ?? null;
+      const p = handle("plan");
+      return name === "back" ? (p?.back() ?? null) : (p?.next() ?? null);
+    },
+    row: () => null,
+    sync: async (f) => {
+      current = f;
+      fill(f, (x) => x.step === "bundle");
+      if (f.step_index === 0) handle("plan")?.close();
+      else {
+        let p = handle("plan");
+        if (!p) {
+          handle("import")?.review().click();
+          p = await waitHandle("plan", 3000);
+        }
+        if (p) {
+          await p.ready;
+          const want = f.step === "commit" ? 1 : 0;
+          if (p.step() !== want) await p.goTo(want);
+          fill(f, (x) => x.step === "commit");
+          p.runError(f.run_error);
+          if (f.edit?.result) p.showCommitted(f.edit.result);
+        }
+      }
+      mark(f);
+    },
+  };
+}
+
+/**
  * The host settings page with its key and review dialogs.
  * @returns {DrivenControl}
  */
@@ -421,6 +481,8 @@ export async function openDriven(f, ctx) {
       return batch(f);
     case "rollback":
       return rollback(f);
+    case "import":
+      return importEdit(ctx.navigate);
     default:
       return stackEdit(f);
   }

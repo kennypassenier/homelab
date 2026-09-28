@@ -386,6 +386,22 @@ pub fn local_intent_hash(dir: &Path) -> Result<(String, Vec<String>), String> {
     Ok((homelab_core::manifest::intent_hash(&spec), notes))
 }
 
+/// TUI parity round: a stack's files as a deploy sends them, without its
+/// secrets and programs (no latch, no download), for the dashboard's plan:
+/// the Deploy review and the Apply page diff these against what the host
+/// applied (`GetApplied`), as `homelab apply` does.
+pub fn stack_files(dir: &Path) -> Result<Vec<FileBlob>, String> {
+    let mut files: Vec<FileBlob> = Vec::new();
+    let mut env: BTreeMap<String, String> = BTreeMap::new();
+    let mut checks: BTreeMap<String, homelab_core::checks::ServiceChecks> = BTreeMap::new();
+    if !dir.join("lxc-compose.yml").is_file() {
+        return Err(format!("{} has no lxc-compose.yml", dir.display()));
+    }
+    collect(dir, dir, &mut files, &mut env, &mut checks)?;
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
+}
+
 /// Everything of the deploy spec but the native programs.
 fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySpec, String> {
     let manifest_path = dir.join("lxc-compose.yml");
@@ -1748,16 +1764,37 @@ pub fn import_bundle(
     new_vmid: u16,
 ) -> Result<PathBuf, String> {
     let raw = std::fs::read_to_string(bundle_path).map_err(|e| e.to_string())?;
-    let bundle: Bundle = serde_yaml::from_str(&raw).map_err(|e| format!("bundle parse: {}", e))?;
+    let dest = stacks_dir.join(new_name);
+    if dest.exists() {
+        return Err(format!("stacks/{} already exists", new_name));
+    }
+    let files = imported_files(&raw, new_name, new_vmid)?;
+    std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+    for (rel, content) in files {
+        let path = dest.join(&rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    }
+    Ok(dest)
+}
+
+/// TUI parity round: [`import_bundle`] without the disk, so the dashboard
+/// can commit the new stack through its edit transaction instead of
+/// writing into its working copy. Every file of the new stack (relative to
+/// `stacks/<new_name>/`, `lxc-compose.yml` first) with its content.
+pub fn imported_files(
+    raw: &str,
+    new_name: &str,
+    new_vmid: u16,
+) -> Result<Vec<(String, String)>, String> {
+    let bundle: Bundle = serde_yaml::from_str(raw).map_err(|e| format!("bundle parse: {}", e))?;
     if bundle.bundle_version != 1 {
         return Err(format!(
             "unsupported bundle version {}",
             bundle.bundle_version
         ));
-    }
-    let dest = stacks_dir.join(new_name);
-    if dest.exists() {
-        return Err(format!("stacks/{} already exists", new_name));
     }
     let old = &bundle.exported_from;
     let old_vmid = bundle.manifest.vmid;
@@ -1783,12 +1820,17 @@ pub fn import_bundle(
         );
     }
     let manifest_yaml = serde_yaml::to_string(&m).map_err(|e| format!("manifest render: {}", e))?;
-    std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-    std::fs::write(dest.join("lxc-compose.yml"), manifest_yaml).map_err(|e| e.to_string())?;
+    let mut out = vec![("lxc-compose.yml".to_string(), manifest_yaml)];
 
     // Files: same substitutions inside content (D7 mechanics).
     let old_host = format!("{}-app-{}", old_vmid, old);
     for f in &bundle.files {
+        if f.path.split('/').any(|p| p == ".." || p.is_empty()) || f.path.starts_with('/') {
+            return Err(format!(
+                "the bundle names a path outside the stack: {}",
+                f.path
+            ));
+        }
         let content = f
             .content
             .replace(&format!("{}_net", old), &format!("{}_net", new_name))
@@ -1797,13 +1839,25 @@ pub fn import_bundle(
                 &format!("/appdata/{}/", new_name),
             )
             .replace(&old_host, &m.hostname);
-        let path = dest.join(&f.path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        std::fs::write(&path, content).map_err(|e| e.to_string())?;
+        out.push((f.path.clone(), content));
     }
-    Ok(dest)
+    Ok(out)
+}
+
+/// TUI parity round: the export bundle's text, from the stack's files alone
+/// (no latch, no download: a bundle never carries secrets or programs), and
+/// how many files it holds. The dashboard offers it as a download.
+pub fn bundle_text(dir: &Path) -> Result<(String, usize), String> {
+    let manifest = build_manifest(dir)?;
+    let files = stack_files(dir)?;
+    let bundle = Bundle {
+        bundle_version: 1,
+        exported_from: manifest.stack_name.clone(),
+        manifest,
+        files,
+    };
+    let raw = serde_yaml::to_string(&bundle).map_err(|e| e.to_string())?;
+    Ok((raw, bundle.files.len()))
 }
 
 /// Y4: every stack directory in the repository with the vmid it claims. Only

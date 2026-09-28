@@ -664,3 +664,37 @@ export function hostSettingsBody(sha256, staged, confirmed) {
     confirms: [...confirmed].filter((k) => staged.has(k)),
   };
 }
+
+// ── TUI parity: import a bundle as a new stack ──────────────────────────
+
+/** The import form's first step, from the one form description. */
+export const IMPORT_FIELDS = /** @type {EditField[]} */ (E.import);
+
+/**
+ * The plan request: the bundle as typed, the name trimmed, the number as a
+ * number (the server's `ImportReq`).
+ * @param {Values} v
+ */
+export const importBody = (v) => ({
+  bundle: String(v.bundle ?? ""),
+  name: String(v.name ?? "").trim(),
+  vmid: Number(String(v.vmid ?? "").trim() || 0),
+});
+
+/**
+ * What is wrong with the first step, in the new-stack wizard's words (the
+ * server holds a driven step to the same).
+ * @param {Values} v
+ * @param {{names: string[], vmids: number[]}} taken
+ */
+export const importErrors = (v, taken) =>
+  checkNewStep(
+    {
+      id: "import",
+      title: "Import a stack",
+      steps: [{ id: "identity", label: "Bundle", fields: IMPORT_FIELDS }],
+    },
+    "identity",
+    v,
+    taken,
+  );

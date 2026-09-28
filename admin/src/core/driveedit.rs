@@ -123,6 +123,9 @@ pub struct EditSpec {
     pub nodata: EditFieldDef,
     pub host_key: HostKeyIds,
     pub rollback: Vec<EditFieldDef>,
+    /// TUI parity: the import form's first step (the bundle, the name, the
+    /// container number).
+    pub import: Vec<EditFieldDef>,
 }
 
 fn es() -> &'static EditSpec {
@@ -151,10 +154,12 @@ pub enum EditKind {
     HostSettings,
     Batch,
     Rollback,
+    /// TUI parity (`homelab import`): a bundle as a new stack.
+    Import,
 }
 
 impl EditKind {
-    pub const ALL: [EditKind; 8] = [
+    pub const ALL: [EditKind; 9] = [
         EditKind::Settings,
         EditKind::Raw,
         EditKind::AddApp,
@@ -163,6 +168,7 @@ impl EditKind {
         EditKind::HostSettings,
         EditKind::Batch,
         EditKind::Rollback,
+        EditKind::Import,
     ];
 
     pub fn slug(self) -> &'static str {
@@ -175,6 +181,7 @@ impl EditKind {
             EditKind::HostSettings => "host-settings",
             EditKind::Batch => "batch",
             EditKind::Rollback => "rollback",
+            EditKind::Import => "import",
         }
     }
 
@@ -189,6 +196,7 @@ impl EditKind {
             EditKind::HostSettings => "host-settings",
             EditKind::Batch => "batch <action> <stack>,<stack>",
             EditKind::Rollback => "rollback <stack>",
+            EditKind::Import => "import",
         }
     }
 
@@ -309,6 +317,10 @@ pub enum EditCall {
     HostWrite { body: Value },
     /// `POST /data/actions/batch`: the final press.
     Batch { body: Value },
+    /// `POST /data/stacks-import/plan`.
+    ImportPlan { body: Value },
+    /// `POST /data/stacks-import/commit`: the final press.
+    ImportCommit { body: Value },
 }
 
 impl EditCall {
@@ -320,6 +332,7 @@ impl EditCall {
                 | EditCall::NewCommit { .. }
                 | EditCall::HostWrite { .. }
                 | EditCall::Batch { .. }
+                | EditCall::ImportCommit { .. }
         )
     }
 }
@@ -1462,6 +1475,40 @@ pub fn open(
                 "/app/".to_string(),
             )
         }
+        EditKind::Import => {
+            no_target(target)?;
+            unreadable("the taken names and numbers")?;
+            if data["working_copy"] == json!(false) {
+                return Err(refused(
+                    step,
+                    "the dashboard has no working copy to commit the new stack to",
+                    "the settings page shows the working copy's state",
+                ));
+            }
+            (
+                "import".to_string(),
+                String::new(),
+                "Import a stack".to_string(),
+                vec![
+                    FormStep {
+                        id: "bundle".into(),
+                        label: "Bundle".into(),
+                        fields: es().import.iter().map(EditFieldDef::field).collect(),
+                    },
+                    FormStep {
+                        id: "plan".into(),
+                        label: "Plan".into(),
+                        fields: Vec::new(),
+                    },
+                    FormStep {
+                        id: "commit".into(),
+                        label: "Commit".into(),
+                        fields: Vec::new(),
+                    },
+                ],
+                st.page.clone(),
+            )
+        }
         EditKind::Rollback => {
             let stack = stack_named(target)?;
             unreadable("the roll-back options")?;
@@ -1581,7 +1628,7 @@ pub fn refresh(form: &mut OpenForm) {
             b.push("back");
         }
         match kind {
-            _ if kind.stack_edit() => match step.as_str() {
+            _ if kind.stack_edit() || kind == EditKind::Import => match step.as_str() {
                 "plan" => {
                     if valid {
                         b.push("next");
@@ -2041,6 +2088,56 @@ pub fn press(
         })
     };
     match (kind, step_id.as_str(), button) {
+        (EditKind::Import, "plan", "next") => {
+            form.step_index += 1;
+            Ok(plain())
+        }
+        (EditKind::Import, "commit", "confirm") => {
+            if text_of(form.values.get("subject")).trim().is_empty() {
+                let fields: Vec<Field> = form.desc.steps[2].fields.clone();
+                let mut errors = check_fields(&fields, &form.values);
+                errors.insert("subject".into(), say("subject", &[]));
+                return hold(form, "confirm", errors);
+            }
+            let edit_body = edit(form).body.clone().unwrap_or(Value::Null);
+            let body = commit_body(&edit_body, &form.values);
+            form.run_error = None;
+            Ok(Applied {
+                effect: Effect::Edit(EditCall::ImportCommit { body }),
+                held: None,
+            })
+        }
+        (EditKind::Import, "bundle", "next") => {
+            let mut at = form.desc.steps[0].clone();
+            // The name and the number are checked as the new-stack wizard
+            // checks its identity step.
+            at.id = "identity".into();
+            let names = strings(&edit(form).data["taken"]["names"]);
+            let vmids: Vec<i64> = edit(form).data["taken"]["vmids"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_i64)
+                .collect();
+            let errors = check_new_step(&at, &form.values, &names, &vmids);
+            if !errors.is_empty() {
+                return hold(form, "next", errors);
+            }
+            let body = json!({
+                "bundle": text_of(form.values.get("bundle")),
+                "name": text_of(form.values.get("name")).trim(),
+                "vmid": js_number(&text_of(form.values.get("vmid"))),
+            });
+            form.errors.clear();
+            form.step_index = 1;
+            let e = edit(form);
+            e.body = Some(body.clone());
+            e.plan = None;
+            Ok(Applied {
+                effect: Effect::Edit(EditCall::ImportPlan { body }),
+                held: None,
+            })
+        }
         (k, "plan", "next") if k.stack_edit() => {
             form.step_index += 1;
             Ok(plain())
@@ -2318,10 +2415,13 @@ pub fn plan_summary(p: &Value) -> Value {
 /// What the shell's call answered, into the form.
 pub fn done(form: &mut OpenForm, call: &EditCall, outcome: Result<Value, Refusal>) {
     match (call, outcome) {
-        (EditCall::Plan { .. } | EditCall::NewPlan { .. }, Ok(plan)) => {
+        (
+            EditCall::Plan { .. } | EditCall::NewPlan { .. } | EditCall::ImportPlan { .. },
+            Ok(plan),
+        ) => {
             let follow_ups = strings(&plan["follow_ups"]);
             let fields = commit_fields(&follow_ups, plan["subject"].as_str().unwrap_or(""));
-            let at = if matches!(call, EditCall::Plan { .. }) {
+            let at = if matches!(call, EditCall::Plan { .. } | EditCall::ImportPlan { .. }) {
                 "commit"
             } else {
                 "plan"
@@ -2335,7 +2435,10 @@ pub fn done(form: &mut OpenForm, call: &EditCall, outcome: Result<Value, Refusal
             form.run_error = None;
             edit(form).plan = Some(plan_summary(&plan));
         }
-        (EditCall::Plan { .. } | EditCall::NewPlan { .. }, Err(r)) => {
+        (
+            EditCall::Plan { .. } | EditCall::NewPlan { .. } | EditCall::ImportPlan { .. },
+            Err(r),
+        ) => {
             edit(form).plan = None;
             form.run_error = Some(r);
         }

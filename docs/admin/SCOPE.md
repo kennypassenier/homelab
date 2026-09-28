@@ -24,7 +24,9 @@ Decisions already taken (2026-09-28, two forms):
   everything the CLI and TUI can read (fleet, per-stack detail, findings,
   doctor, backups and second copies, restore drills, manual checks,
   incidents, images and pins, patch state, host settings) and can start every
-  non-destructive operation the TUI can. The TUI stays for running things.
+  operation the TUI can. New stacks and apps are created with kp-themes'
+  wizard component (Kenny, 2026-09-28: "we hebben een wizard component in
+  kp-themes"), replacing `homelab new` and the TUI's new-stack wizard.
 - **G2 · Settings and firewall editable in the browser.** Per-stack settings
   that live in stack files (firewall rules first, then resources, mounts,
   routes, image versions) are edited in forms, validated with the same

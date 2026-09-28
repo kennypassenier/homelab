@@ -651,7 +651,10 @@ manual:
   - "Kijk of de startpagina de diensten toont die je verwacht. ..."
 ```
 
-`expect` is `never_decreases`, `must_match` or `must_be_present`; `layer` is
+`expect` is `never_decreases`, `must_match` or `must_be_present` (a check whose
+reading before the work is empty, because the app did not exist on that
+container yet, takes its first reading as the baseline and asks nothing, fix-151);
+`layer` is
 `network`, `process`, `application` or `user_visible`
 (`core/src/checks.rs:29-105`). A reading that went down stops the deploy and
 asks you (see 1.5); in the TUI, `a` accepts the new value as normal and `s`

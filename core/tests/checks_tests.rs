@@ -73,6 +73,30 @@ fn must_match_catches_a_changed_setting() {
     }
 }
 
+/// fix-151 (2026-09-28, the metrics deploy that moved Loki and Grafana onto
+/// CT 113): a `must_match` check whose BEFORE reading is empty — the app did
+/// not exist on this container yet — has nothing to match against. It read
+/// '' → 'ready' and asked the operator, which from the CLI is a 120 s wait
+/// and "unattended", and the stack was recorded as incomplete; uptime's
+/// "stopped at service checks" of the night before was the same shape. The
+/// first reading is the baseline, as it already was for `never_decreases`.
+#[test]
+fn fix_151_a_must_match_check_with_no_reading_before_takes_its_first_reading_as_the_baseline() {
+    assert_eq!(
+        judge(&r("loki is klaar", "", "ready", Expect::MustMatch)),
+        Verdict::Ok
+    );
+    assert_eq!(
+        judge(&r("loki is klaar", "  \n", "ready", Expect::MustMatch)),
+        Verdict::Ok
+    );
+    // A real change still regresses.
+    match judge(&r("loki is klaar", "ready", "not ready", Expect::MustMatch)) {
+        Verdict::Regressed(_) => {}
+        other => panic!("a changed reading must regress, got {:?}", other),
+    }
+}
+
 /// A command that will not run says nothing about the data. Reporting that as
 /// a regression is how a check earns a reputation for crying wolf — and a
 /// check nobody believes is a check nobody keeps.

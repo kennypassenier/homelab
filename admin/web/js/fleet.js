@@ -34,6 +34,27 @@ export function measuredAgo(measuredAt, now) {
 }
 
 /**
+ * An amount of megabytes in the unit a person reads best (Kenny,
+ * 2026-09-28: "values presented to a human should always be human readable
+ * as much as possible"): MB below 1 GB, GB below 1 TB, TB above; one decimal
+ * under 100, none above.
+ * @param {number | null | undefined} mb
+ * @returns {string}
+ */
+export function humanMb(mb) {
+  if (mb == null) return "—";
+  const units = ["MB", "GB", "TB"];
+  let v = mb;
+  let u = 0;
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024;
+    u += 1;
+  }
+  const digits = u === 0 || v >= 100 ? 0 : 1;
+  return `${v.toFixed(digits)} ${units[u]}`;
+}
+
+/**
  * Megabytes as gigabytes with one decimal, or an em dash before the host's
  * first status reading. A number on its own, so the column sorts as one.
  * @param {number | null | undefined} mb

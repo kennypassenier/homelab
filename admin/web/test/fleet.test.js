@@ -1,7 +1,7 @@
 // feat-overview-4 and the state column, driven without a browser.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { gb, measuredAgo, stackState } from "../js/fleet.js";
+import { gb, humanMb, measuredAgo, stackState } from "../js/fleet.js";
 
 const base = { name: "media", vmid: 106, apps_running: 2, apps_total: 2 };
 
@@ -30,4 +30,12 @@ test("ram reads in GB as a bare number, and a dash before the first reading", ()
   assert.equal(gb(1946), "1.9");
   assert.equal(gb(5120), "5.0");
   assert.equal(gb(null), "—");
+});
+
+test("amounts read in the unit a person reads best", () => {
+  assert.equal(humanMb(512), "512 MB");
+  assert.equal(humanMb(16346), "16.0 GB");
+  assert.equal(humanMb(31811), "31.1 GB");
+  assert.equal(humanMb(4 * 1024 * 1024), "4.0 TB");
+  assert.equal(humanMb(null), "—");
 });

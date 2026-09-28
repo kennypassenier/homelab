@@ -109,6 +109,14 @@ name (`data-kp-remember`). A number column holds a bare number so it sorts as
 one. Measured on the fleet page 2026-09-28: a descending sort and a second key
 survive a live update and a reload.
 
+### ui-units (Kenny, 2026-09-28 16:15, after the first real login)
+
+"values presented to a human should always be human readable as much as
+possible. In this case, MB doesn't make as much sense as GB so it should be
+GB". Every size, duration and count the dashboard shows is scaled to the unit
+a person reads: MB below 1 GB, GB below 1 TB, TB above (`humanMb`); seconds,
+minutes and hours the same way (`measuredAgo`).
+
 ### arch-exposure (decided 2026-09-28 12:44, follow-up form "Dashboard bereikbaarheid")
 
 **Via the Cloudflare tunnel and Traefik, from home only.** `admin.kp-soft.dev`

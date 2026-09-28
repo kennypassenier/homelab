@@ -1,7 +1,7 @@
 // The fleet page (skeleton): first paint from /data/fleet, then live over
 // SSE. A `resync` (the browser fell behind, or reconnected) refetches.
 
-import { gb, measuredAgo, stackState } from "./fleet.js";
+import { gb, humanMb, measuredAgo, stackState } from "./fleet.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 
 /** @type {any} */
@@ -40,7 +40,7 @@ function render() {
   if (!fleet) return;
   const h = fleet.host;
   el("host").textContent =
-    `${h.name} · cpu ${h.cpu_pct}% · ram ${h.ram_used_mb}/${h.ram_total_mb} MB · disk ${h.disk_pct}% · ` +
+    `${h.name} · cpu ${h.cpu_pct}% · ram ${humanMb(h.ram_used_mb)} of ${humanMb(h.ram_total_mb)} · disk ${h.disk_pct}% · ` +
     `${fleet.counts.online}/${fleet.counts.stacks} online, ${fleet.counts.parked} parked`;
   const rows = fleet.stacks.map((/** @type {any} */ s) => {
     const tr = document.createElement("tr");

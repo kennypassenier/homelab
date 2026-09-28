@@ -149,3 +149,18 @@ Gesigneerde homelab-releases, self-update van het dashboard via homelab, een ech
   met in the suite (every CLI/TUI request is byte-identical, tested);
   measuring it against the live host waits for the release (Kenny's go for
   the push and the signing).
+
+### Rollout decisions (Kenny, form "Dashboard uitrol", 2026-09-28 13:54)
+
+- **release-host: together with assembly.** The host milestone stays local
+  until the dashboard also runs as a stack; one release then carries both.
+- **sign: from the dashboard release.** That release is the first signed
+  homelab release (sign-releases, Kenny's passphrase); before signing, the
+  coordinator is told so Kenny can sign everything pending in one go.
+- **assembly-go: go, in one go.** When assembly is ready offline, Claude runs
+  the five steps without asking again, reporting each and stopping at the
+  first failure: CT 120 via `homelab deploy stacks/admin`; the `[[tokens]]`
+  entry for "admin" in pve's host.toml plus a host restart; a write deploy
+  key on kennypassenier/homelab via `gh`; the latch environment `admin`
+  filled by Claude; the admin.kp-soft.dev route in the gateway stack and its
+  deploy.

@@ -58,7 +58,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 # `make release` run the whole suite.
 gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
   'stacks/*' 'templates/*' 'presets/*' 'config/*' 'proto/*' 'core/assets/*' \
-  'docs/DR_RUNBOOK.md' 'docs/deployment/TEST_PLAN.md' 'docs/deployment/UPDATE_POLICY.md' -- \
+  'docs/DR_RUNBOOK.md' 'docs/deployment/TEST_PLAN.md' 'docs/deployment/UPDATE_POLICY.md' \
+  '.github/*' '.githooks/*' 'Makefile' -- \
   env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
       -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
       -u HOMELAB_TOKEN -u HOMELAB_HOST -u HOMELAB_CONFIG -u HOMELAB_LISTEN \

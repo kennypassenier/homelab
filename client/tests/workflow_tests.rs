@@ -106,7 +106,10 @@ fn fix_139_the_release_build_runs_without_a_write_token() {
         );
     }
     let run = run_text(build);
-    for cmd in ["cargo clippy", "cargo test", "cargo build"] {
+    // The tests run as .githooks/test-subset.sh, which is `cargo test` with
+    // the commit subset's targets (dev-procedure rule 7 as amended
+    // 2026-09-28); --locked is passed through to it.
+    for cmd in ["cargo clippy", "test-subset.sh", "cargo build"] {
         let lines: Vec<_> = run.lines().filter(|l| l.contains(cmd)).collect();
         assert!(!lines.is_empty(), "the build job runs `{cmd}`");
         for l in lines {

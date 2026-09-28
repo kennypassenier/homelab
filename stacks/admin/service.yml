@@ -1,0 +1,17 @@
+stack_name: admin
+vmid: 120
+hostname: 120-app-admin
+unit: homelab-admin
+binary: /opt/homelab-admin/bin/homelab-admin
+# Filled by latch (environment `admin`): HOMELAB_ADMIN_TOKEN,
+# HOMELAB_ADMIN_SECRET_KEY and HOMELAB_ADMIN_HOST_TOKEN.
+env_file: /appdata/admin/admin-config/admin.env
+data_dirs:
+  - /appdata/admin/admin-config
+# The homelab release carries homelab-admin beside the host and the client;
+# from the dashboard release on it is signed (Kenny, 2026-09-28).
+release_repo: kennypassenier/homelab
+release_asset: homelab-admin
+# Updates are homelab's to drive; automatic ones wait for the `release`
+# milestone (signed releases, the chassis self-update path).
+update_policy: manual

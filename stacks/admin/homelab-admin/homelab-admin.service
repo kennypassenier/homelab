@@ -1,0 +1,68 @@
+# homelab-admin — the golden chassis-rs unit (as in stacks/inbox/).
+#
+# homelab installs it: the unit file, the system user (uid 999 in a fresh
+# container, which is why stacks/admin/lxc-compose.yml maps 100999), the
+# signed binary from the homelab release, and admin.env from latch. The
+# settings are /etc/homelab-admin/config.toml (from rootfs/), the state and
+# the working copy live under /appdata/admin/admin-config.
+#
+# StartLimitIntervalSec/Burst belong in [Unit]; Type=notify makes the unit
+# active only once the service bound its socket; ReadWritePaths covers the
+# binary's own directory so a later self-update can swap it.
+
+[Unit]
+Description=homelab-admin — the browser dashboard for the homelab host
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+StartLimitBurst=0
+
+[Service]
+Type=notify
+User=homelab-admin
+Group=homelab-admin
+EnvironmentFile=/appdata/admin/admin-config/admin.env
+WorkingDirectory=/appdata/admin/admin-config
+ExecStartPre=/opt/homelab-admin/bin/homelab-admin --check
+ExecStart=/opt/homelab-admin/bin/homelab-admin
+Restart=always
+RestartSec=5s
+KillSignal=SIGTERM
+# Above the service's shutdown_timeout_ms (default 10 s), so N1's bound
+# is the one that decides, not systemd's.
+TimeoutStopSec=60
+# Mirrored so `--check` can warn when the shutdown timeout would outlive it (critic #20).
+Environment=HOMELAB_ADMIN_TIMEOUT_STOP_SECS=60
+Environment=HOMELAB_ADMIN_STATE_DIR=/appdata/admin/admin-config
+Environment=HOMELAB_ADMIN_CONFIG=/etc/homelab-admin/config.toml
+Environment=HOMELAB_ADMIN_LISTEN=10.10.10.20:8090
+# Traefik on CT 104: the only proxy whose forwarded headers are believed.
+Environment=HOMELAB_ADMIN_TRUSTED_PROXIES=10.10.10.4
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/appdata/admin/admin-config /appdata/admin/admin-config-pre-update /opt/homelab-admin/bin
+# S2: the swap needs write access to the binary's OWN directory only; a
+# code-execution bug can then replace this service's binary, not latch or
+# its neighbours. The rest is systemd's free hardening for a network daemon.
+UMask=0077
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+PrivateDevices=yes
+ProtectProc=invisible
+
+[Install]
+WantedBy=multi-user.target

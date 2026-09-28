@@ -1,0 +1,101 @@
+# homelab-admin — the browser dashboard for the homelab host (docs/admin/).
+# One native chassis-rs service, reached only through the Cloudflare tunnel
+# and Traefik (arch-exposure, Kenny 2026-09-28): CT 104 is the only neighbour
+# allowed in on 8090; the service itself checks the Access token and the
+# house's address before its own login.
+stack_name: admin
+vmid: 120
+hostname: 120-app-admin
+native_only: true
+
+network:
+  ip: 10.10.10.20/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+# Measured on WSL 2026-09-28: the debug build serves the fleet page with
+# 14 stacks in well under 100 MB; 512 MB leaves room for git and latch.
+resources:
+  cores: 1
+  memory_mb: 512
+  swap_mb: 0
+  disk_gb: 8
+  storage: local-lvm
+
+lxc:
+  template: clone:996
+  unprivileged: true
+  features: nesting=1
+  protection: true
+
+boot:
+  onboot: true
+  order: 60
+
+storage:
+  - host_path: /appdata/admin/admin-config
+    mount_point: /appdata/admin/admin-config
+    # The first `useradd --system` in a container cloned from template 996
+    # gets uid 999 (measured on CT 118 2026-09-28: inbox 999, alloy 997
+    # after it); 100999 is that uid mapped out of an unprivileged LXC.
+    host_owner_uid: 100999
+    app: homelab-admin
+
+apps: []
+
+natives: [homelab-admin]
+
+extra_routes:
+  - filename: manual-admin.yml
+
+firewall:
+  enabled: true
+  comment: |-
+    CT 120 (admin), the dashboard. In force from its first deploy
+    (arch-firewall, 2026-09-28). In: Traefik on CT 104 (the tunnel's only
+    way in) and Uptime Kuma on CT 107. Out: the host's API on
+    10.10.10.250:8443 (the one exception to "never pve's rescue address from
+    a container"), Loki and Prometheus on CT 113, DNS on the router, and the
+    internet for GitHub (working copy, latch) and Cloudflare (Access keys).
+  policy_in: DROP
+  policy_out: ACCEPT
+  rules:
+    - comment: "the host's API, and nothing else of pve's"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.250
+      proto: tcp
+      dport: "8443"
+    - dir: out
+      action: DROP
+      dest: 10.10.10.250
+    - comment: "the neighbours it uses"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.13
+      proto: tcp
+      dport: "3100,9090"
+      note: Loki (logs panel, Alloy push) and Prometheus (capacity, disk growth)
+    - comment: "every other neighbour in VLAN 10 stays out of reach"
+      dir: out
+      action: DROP
+      dest: 10.10.10.0/24
+    - comment: "who may reach the container"
+      dir: in
+      action: ACCEPT
+      source: 10.10.10.4
+      proto: tcp
+      dport: "8090"
+      note: Traefik, the only way in from the tunnel
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: icmp
+      note: Uptime Kuma ping
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.7
+      proto: tcp
+      dport: "8090"
+      note: Uptime Kuma HTTP monitor (/healthz)

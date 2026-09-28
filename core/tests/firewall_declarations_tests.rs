@@ -91,9 +91,10 @@ fn kp_soft_declares_its_live_firewall_plus_kennys_kuma_rule() {
     assert_eq!(render("kp-soft", fw), want);
 }
 
-/// Every compose stack declares a firewall, and in this change only kp-soft's
-/// is switched on. Turning another one on is a one-word change in its stack
-/// file, made on purpose, one stack at a time.
+/// Every compose stack declares a firewall, and only kp-soft's and admin's
+/// are switched on. Turning another one on is a one-word change in its stack
+/// file, made on purpose, one stack at a time. admin's is on from its first
+/// deploy (arch-firewall, Kenny approved it with arch-safety on 2026-09-28).
 /// covers: fix-89
 #[test]
 fn every_stack_declares_a_firewall_and_only_kp_soft_enables_it() {
@@ -102,13 +103,8 @@ fn every_stack_declares_a_firewall_and_only_kp_soft_enables_it() {
             .firewall
             .as_ref()
             .unwrap_or_else(|| panic!("stacks/{} declares no firewall", name));
-        assert_eq!(
-            fw.enabled,
-            name == "kp-soft",
-            "stacks/{}: enabled must be {} in this change",
-            name,
-            name == "kp-soft"
-        );
+        let on = name == "kp-soft" || name == "admin";
+        assert_eq!(fw.enabled, on, "stacks/{}: enabled must be {}", name, on);
         assert!(
             firewall::problems(fw).is_empty(),
             "stacks/{}: {:?}",

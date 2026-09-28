@@ -1,0 +1,11 @@
+checks:
+  - name: "het dashboard is gezond"
+    command: "curl -s -m 10 http://10.10.10.20:8090/healthz"
+    expect: must_match
+    layer: application
+    blind_spot: >-
+      The dashboard answering about itself. Whether it reaches the host and
+      whether the two locks hold is in the manual list.
+
+manual:
+  - "Open https://admin.kp-soft.dev thuis en log in; open het daarna vanaf 4G: het moet weigeren."

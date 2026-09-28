@@ -1,0 +1,15 @@
+# admin.kp-soft.dev → the dashboard on CT 120 (arch-exposure, 2026-09-28).
+# Behind the wildcard Cloudflare Access policy like every kp-soft.dev name;
+# the dashboard itself also checks the Access token and the house's address.
+http:
+  routers:
+    admin:
+      rule: "Host(`admin.kp-soft.dev`)"
+      entryPoints: [web]
+      service: admin
+
+  services:
+    admin:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.20:8090"

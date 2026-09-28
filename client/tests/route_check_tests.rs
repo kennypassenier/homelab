@@ -13,7 +13,8 @@ fn stacks() -> PathBuf {
 
 /// The repository as it stands passes, and it now accounts for all 25
 /// public hostnames measured on the gateway on 2026-09-27 (Traefik's API:
-/// 26 file routers, 25 hostnames).
+/// 26 file routers, 25 hostnames), plus admin.kp-soft.dev for the dashboard on
+/// CT 120 (stacks/admin, 2026-09-28): 26 hostnames.
 /// covers: fix-92
 #[test]
 fn the_routes_in_the_repository_pass_and_cover_every_public_hostname() {
@@ -26,8 +27,9 @@ fn the_routes_in_the_repository_pass_and_cover_every_public_hostname() {
         .collect();
     hosts.sort();
     hosts.dedup();
-    assert_eq!(hosts.len(), 25, "{:?}", hosts);
+    assert_eq!(hosts.len(), 26, "{:?}", hosts);
     for h in [
+        "admin.kp-soft.dev",
         "almanac.kp-soft.dev",
         "kyu.kp-soft.dev",
         "ha.kp-soft.dev",

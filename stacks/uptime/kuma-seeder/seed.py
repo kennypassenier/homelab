@@ -88,6 +88,7 @@ APPLICATION_MONITORS = [
     # The hub itself. Made by hand in Uptime Kuma before the seeder existed;
     # declared here on 2026-09-27 under the same name, so its history stays
     # (Kenny: even a hand-made monitor is declared in a file).
+    ("admin", "http://10.10.10.20:8090/healthz", OK),
     ("kyu", "http://10.10.10.9:8080/healthz", OK),
     ("kyu · runner", "http://10.10.10.9:8082/healthz", OK),
     # The STRICT health deliberately: it answers 503 when the switchboard

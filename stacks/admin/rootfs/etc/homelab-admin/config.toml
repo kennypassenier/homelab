@@ -1,0 +1,6 @@
+# homelab-admin's own settings (arch-config). The kit's knobs come from the
+# unit's environment; secrets are ${VAR} from admin.env, which latch fills.
+[admin]
+host = "10.10.10.250:8443"
+host_token = "${HOMELAB_ADMIN_HOST_TOKEN}"
+poll_s = 10

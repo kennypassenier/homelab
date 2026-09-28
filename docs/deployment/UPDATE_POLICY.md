@@ -90,6 +90,7 @@ fails while this section is stale.
 
 | Stack | Unit | Policy | The nightly round | Release |
 |---|---|---|---|---|
+| admin | homelab-admin | `manual` | nothing; updated on request | `kennypassenier/homelab` |
 | almanac | almanac | `self` | runs its own update verb | `kennypassenier/almanac` |
 | drill | drillsvc | `manual` | nothing; updated on request | none |
 | inbox | inbox | `manual` | nothing; updated on request | `kennypassenier/chassis-rs` |

@@ -435,3 +435,128 @@ tr.unread td {
     padding-inline-start: 1em;
   }
 }
+
+/* Milestone edit: the plan, the diff, the edit forms, the matrix. */
+.edit-card h2 {
+  margin-top: 0;
+}
+.edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0 1rem;
+}
+.edit-grid .kp-field,
+.edit-card .kp-field {
+  margin-block: 0.5rem;
+}
+.edit-head {
+  margin-block: 0.25rem 0.75rem;
+}
+.raw-text {
+  width: 100%;
+  min-height: 18rem;
+  font-size: 0.85rem;
+}
+.plan h3 {
+  margin-block: 1rem 0.5rem;
+}
+.plan-effects {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.plan-effect {
+  border-inline-start: 3px solid var(--kp-color-info, currentColor);
+  padding: 0.25rem 0.75rem;
+  margin-block: 0.5rem;
+}
+.plan-effect--warning {
+  border-inline-start-color: var(--kp-color-warning, currentColor);
+}
+.plan-detail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0;
+}
+.plan-file summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.diff {
+  font-size: 0.8rem;
+  overflow-x: auto;
+  border: 1px solid var(--kp-color-border, currentColor);
+  border-radius: 0.25rem;
+  margin-block: 0.5rem;
+}
+.diff-hunk {
+  padding: 0.125rem 0.5rem;
+  opacity: 0.75;
+}
+.diff-line {
+  display: grid;
+  grid-template-columns: 3.5em 1.5em 1fr;
+  white-space: pre;
+}
+.diff-no {
+  text-align: end;
+  padding-inline-end: 0.5em;
+  opacity: 0.6;
+  user-select: none;
+}
+.diff-mark {
+  text-align: center;
+  user-select: none;
+}
+.diff-add {
+  background: color-mix(
+    in srgb,
+    var(--kp-color-success, green) 18%,
+    transparent
+  );
+}
+.diff-del {
+  background: color-mix(in srgb, var(--kp-color-danger, red) 18%, transparent);
+}
+tr.rule-new td {
+  font-style: italic;
+}
+.fw-matrix td.cell {
+  white-space: normal;
+  font-size: 0.85rem;
+}
+.fw-matrix td.cell.ok {
+  background: color-mix(
+    in srgb,
+    var(--kp-color-success, green) 14%,
+    transparent
+  );
+}
+.fw-matrix td.cell.warn {
+  background: color-mix(
+    in srgb,
+    var(--kp-color-warning, orange) 16%,
+    transparent
+  );
+}
+.staged:not(:empty) {
+  margin-block: 0.75rem;
+}
+.new-data .kp-field {
+  margin-block: 0.5rem;
+}
+@media (max-width: 40rem) {
+  .diff-line {
+    grid-template-columns: 2.5em 1.2em 1fr;
+  }
+  .edit-grid {
+    grid-template-columns: 1fr;
+  }
+}
+div.row-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}

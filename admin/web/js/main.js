@@ -13,10 +13,12 @@ import { current, start, subscribe } from "./store.js";
 import { mount as activity } from "./pages/activity.js";
 import { mount as checks } from "./pages/checks.js";
 import { mount as doctor } from "./pages/doctor.js";
+import { mount as firewall } from "./pages/firewall.js";
 import { mount as host } from "./pages/host.js";
 import { mount as jobs } from "./pages/jobs.js";
 import { mount as notifications } from "./pages/notifications.js";
 import { mount as schedules } from "./pages/schedules.js";
+import { mount as settings } from "./pages/settings.js";
 import { mount as overview } from "./pages/overview.js";
 import { mount as stack } from "./pages/stack.js";
 import { mount as timeline } from "./pages/timeline.js";
@@ -80,6 +82,12 @@ function render() {
       break;
     case "notifications":
       cleanup = notifications(page);
+      break;
+    case "firewall":
+      cleanup = firewall(page);
+      break;
+    case "settings":
+      cleanup = settings(page);
       break;
     default:
       page.replaceChildren(

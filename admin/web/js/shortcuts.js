@@ -27,6 +27,8 @@ const GO = {
   j: "jobs",
   s: "schedules",
   n: "notifications",
+  f: "firewall",
+  e: "settings",
 };
 
 /** @type {ShortcutGroup[]} */

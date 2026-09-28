@@ -81,6 +81,8 @@ const PAGE_KEYS = {
   jobs: "g j",
   schedules: "g s",
   notifications: "g n",
+  firewall: "g f",
+  settings: "g e",
 };
 
 /** @type {Provider} */
@@ -170,5 +172,48 @@ export const actionCommands = (catalog, currentStack, open) => (ctx) => {
   );
   for (const s of names)
     if (s !== here) out.push(...forStack(s, "Stack actions", false));
+  return out;
+};
+
+/**
+ * Milestone edit: a new stack, and each stack's two edit tabs, as
+ * commands. `openNew` starts the wizard, so this module stays free of the
+ * DOM.
+ * @param {() => string | null} currentStack the stack whose page is open
+ * @param {() => void} openNew
+ * @returns {Provider}
+ */
+export const editCommands = (currentStack, openNew) => (ctx) => {
+  const here = currentStack();
+  const names = (ctx.fleet?.stacks ?? []).map((s) => s.name);
+  const order =
+    here && names.includes(here)
+      ? [here, ...names.filter((n) => n !== here)]
+      : names;
+  /** @type {Command[]} */
+  const out = [
+    {
+      id: "edit:new-stack",
+      group: "Change",
+      label: "New stack…",
+      hint: "from a preset, with the wizard",
+      run: openNew,
+    },
+  ];
+  for (const s of order)
+    out.push(
+      {
+        id: `edit:settings:${s}`,
+        group: "Change",
+        label: `Edit settings · ${s}`,
+        href: stackHref(s, "settings"),
+      },
+      {
+        id: `edit:firewall:${s}`,
+        group: "Change",
+        label: `Edit firewall · ${s}`,
+        href: stackHref(s, "firewall"),
+      },
+    );
   return out;
 };

@@ -11,6 +11,7 @@ import { answerBody, askView, openAsks } from "./asks.js";
 import {
   actionCommands,
   allCommands,
+  editCommands,
   grouped,
   pageCommands,
   registerCommands,
@@ -19,6 +20,7 @@ import {
 } from "./commands.js";
 import { h } from "./dom.js";
 import { bell, snoozeState, toastOf } from "./notices.js";
+import { openNewStack } from "./newstack.js";
 import { openRollback } from "./rollbackdialog.js";
 import { SHORTCUTS, idle, keyAction } from "./shortcuts.js";
 import { current, listen, setAsks, subscribe } from "./store.js";
@@ -423,6 +425,17 @@ export function mountChrome(where, ctx) {
         return r.page === "stack" ? r.name : null;
       },
       (stack, action) => void openAction(stack, action, { openRollback }),
+    ),
+  );
+  // Milestone edit: a new stack and each stack's edit tabs.
+  registerCommands(
+    "edit",
+    editCommands(
+      () => {
+        const r = ctx.route();
+        return r.page === "stack" ? r.name : null;
+      },
+      () => void openNewStack(ctx.navigate),
     ),
   );
   where.nav.append(trigger, mountBell(ctx.navigate), help, themes);

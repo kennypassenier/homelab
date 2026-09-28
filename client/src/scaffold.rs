@@ -305,7 +305,7 @@ pub fn preview_appdata_paths(
 }
 
 /// Substitute the scaffold placeholders in a template file.
-fn substitute(template: &str, name: &str, vmid: u16, ip: &str) -> String {
+pub fn substitute(template: &str, name: &str, vmid: u16, ip: &str) -> String {
     template
         .replace("__STACK__", name)
         .replace("__VMID__", &vmid.to_string())
@@ -524,7 +524,7 @@ fn appdata_mounts(files: &[String]) -> Vec<String> {
 /// The host side of every `/appdata/...` bind in one compose file. Shared by
 /// the scaffold and the wizard's preview so the two cannot disagree about
 /// which paths a stack is going to have.
-fn appdata_paths_in(raw: &str) -> Vec<String> {
+pub fn appdata_paths_in(raw: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in raw.lines() {
         let t = line

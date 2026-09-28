@@ -15,6 +15,7 @@ import {
   tableBlock,
   td,
 } from "../dom.js";
+import { openNewStack } from "../newstack.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
@@ -74,8 +75,15 @@ export function mount(root, ctx) {
   });
   t.tbody.id = "stacks";
   t.wrap.querySelector("table")?.classList.add("fleet");
+  // feat-stacks-3: a new stack from a preset.
+  const newStack = h(
+    "button",
+    { type: "button", class: "kp-button", id: "new-stack" },
+    "New stack…",
+  );
+  newStack.addEventListener("click", () => void openNewStack(ctx.navigate));
   root.replaceChildren(
-    h("h1", null, "Overview"),
+    h("div", { class: "title-row" }, h("h1", null, "Overview"), newStack),
     h(
       "section",
       { class: "kp-card host", "aria-label": "Host", id: "host" },

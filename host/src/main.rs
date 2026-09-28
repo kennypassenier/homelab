@@ -640,7 +640,11 @@ fn render_settings_toml(
     config: &Config,
     settings: &homelab_proto::HostConfigView,
 ) -> Result<String, String> {
-    let mut file = config.file.clone();
+    // feat-settings-1: the file as it is on disk now, so a key the dashboard
+    // changed since the host started (`SetHostConfig`) is not written back
+    // to its start-up value by a TUI settings save. The file as read at start
+    // when it cannot be read now.
+    let mut file = current_file_config(&config.config_path).unwrap_or_else(|| config.file.clone());
     file.backup_hour = settings.backup_hour;
     file.notify_webhook = settings.notify_webhook.clone();
     file.retention = Some(settings.retention.clone());
@@ -699,7 +703,191 @@ fn persist_settings(
     settings: &homelab_proto::HostConfigView,
 ) -> Result<(), String> {
     let raw = render_settings_toml(config, settings)?;
-    let tmp = format!("{}.tmp", config.config_path);
+    write_config_file(&config.config_path, &raw)
+}
+
+/// host.toml as it is on disk now, when it reads.
+fn current_file_config(path: &str) -> Option<FileConfig> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    toml::from_str::<FileConfig>(&raw).ok()
+}
+
+/// feat-settings-1: the start-up validation's refusals for a file, without
+/// the process exit, so a settings change is held to the same checks
+/// before it is written. `load_config_from` exits on the same list.
+fn startup_problems(file: &FileConfig) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(t) = &file.token {
+        if t.len() < 16 {
+            out.push("token must be at least 16 characters".into());
+        }
+    }
+    if file.status_interval_s.is_some_and(|s| s < 10) {
+        out.push(
+            "status_interval_s must be at least 10 (each reading runs one probe per container)"
+                .into(),
+        );
+    }
+    if let Err(e) = validate_tokens(file.tokens.as_deref().unwrap_or_default()) {
+        out.push(e);
+    }
+    if let Some(l) = &file.listen {
+        if l.parse::<SocketAddr>().is_err() {
+            out.push(format!("listen {:?} must be host:port", l));
+        }
+    }
+    if file.backup_hour.is_some_and(|h| h > 23) {
+        out.push("backup_hour must be 0-23".into());
+    }
+    if file.retention.as_ref().is_some_and(|r| r.is_empty()) {
+        out.push("retention needs at least one tier".into());
+    }
+    for job in file.zfs_jobs.iter().flatten() {
+        if let Some(p) = homelab_core::ops::zfs::job_problems(job) {
+            out.push(format!("zfs_jobs {} → {}: {}", job.source, job.target, p));
+        }
+    }
+    out
+}
+
+/// JSON as a TOML value; null has no TOML form.
+fn json_to_toml(v: &serde_json::Value) -> Result<toml::Value, String> {
+    Ok(match v {
+        serde_json::Value::Null => return Err("null inside a value has no TOML form".into()),
+        serde_json::Value::Bool(b) => toml::Value::Boolean(*b),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => toml::Value::Integer(i),
+            None => toml::Value::Float(n.as_f64().ok_or("not a number")?),
+        },
+        serde_json::Value::String(s) => toml::Value::String(s.clone()),
+        serde_json::Value::Array(a) => {
+            toml::Value::Array(a.iter().map(json_to_toml).collect::<Result<_, _>>()?)
+        }
+        serde_json::Value::Object(o) => {
+            let mut t = toml::Table::new();
+            for (k, x) in o {
+                if !x.is_null() {
+                    t.insert(k.clone(), json_to_toml(x)?);
+                }
+            }
+            toml::Value::Table(t)
+        }
+    })
+}
+
+/// feat-settings-1: host.toml as `GetHostConfig` answers it, from the file's
+/// text (pure: the caller reads the file).
+fn host_config_view(path: &str, raw: &str) -> Result<homelab_proto::HostConfigFile, String> {
+    let table: toml::Table = if raw.trim().is_empty() {
+        toml::Table::new()
+    } else {
+        toml::from_str(raw).map_err(|e| format!("{} does not parse as TOML: {}", path, e))?
+    };
+    let mut values = std::collections::BTreeMap::new();
+    let mut secrets_set = Vec::new();
+    for (key, v) in &table {
+        if homelab_core::hostconfig::is_secret(key) {
+            secrets_set.push(key.clone());
+            continue;
+        }
+        let json = serde_json::to_value(v).map_err(|e| e.to_string())?;
+        values.insert(key.clone(), homelab_core::hostconfig::redact(key, &json));
+    }
+    Ok(homelab_proto::HostConfigFile {
+        path: path.to_string(),
+        sha256: homelab_core::manifest::sha256_hex(raw.as_bytes()),
+        values,
+        secrets_set,
+        unknown: unknown_keys(&table),
+    })
+}
+
+/// feat-settings-1: the new text of host.toml with `changes` applied, or
+/// every reason it is refused. Pure. Refused: a file that moved since it was
+/// read (`expect_sha256`), a key the dashboard may not change
+/// (`homelab_core::hostconfig`), a value of the wrong shape, a key or
+/// sub-key the host does not read, and anything the start-up validation
+/// would stop the host for.
+fn apply_host_config_changes(
+    raw: &str,
+    changes: &std::collections::BTreeMap<String, serde_json::Value>,
+    expect_sha256: &str,
+) -> Result<(String, homelab_proto::HostConfigSaved), String> {
+    let now = homelab_core::manifest::sha256_hex(raw.as_bytes());
+    if now != expect_sha256 {
+        return Err(
+            "host.toml changed since the dashboard read it (over ssh, or a TUI settings save); \
+             read it again and redo the change"
+                .into(),
+        );
+    }
+    if changes.is_empty() {
+        return Err("no change was sent".into());
+    }
+    let mut why = Vec::new();
+    for (key, value) in changes {
+        if let Err(e) = homelab_core::hostconfig::check_value(key, value) {
+            why.push(e);
+        }
+    }
+    if !why.is_empty() {
+        return Err(why.join("; "));
+    }
+    let mut table: toml::Table = if raw.trim().is_empty() {
+        toml::Table::new()
+    } else {
+        toml::from_str(raw).map_err(|e| format!("host.toml does not parse as TOML: {}", e))?
+    };
+    let before_unknown = unknown_keys(&table);
+    for (key, value) in changes {
+        if value.is_null() {
+            table.remove(key);
+        } else {
+            let v = json_to_toml(value).map_err(|e| format!("{}: {}", key, e))?;
+            table.insert(key.clone(), v);
+        }
+    }
+    let file: FileConfig = table
+        .clone()
+        .try_into()
+        .map_err(|e| format!("the new host.toml is not a valid host config: {}", e))?;
+    // A misspelt sub-key would be dropped in silence (F186).
+    let stray: Vec<String> = unknown_keys(&table)
+        .into_iter()
+        .filter(|k| !before_unknown.contains(k))
+        .collect();
+    if !stray.is_empty() {
+        why.push(format!(
+            "the host does not read {} — check the spelling",
+            stray.join(", ")
+        ));
+    }
+    why.extend(startup_problems(&file));
+    if !why.is_empty() {
+        return Err(why.join("; "));
+    }
+    let text = toml::to_string_pretty(&table).map_err(|e| e.to_string())?;
+    let (mut live, mut restart) = (Vec::new(), Vec::new());
+    for key in changes.keys() {
+        match homelab_core::hostconfig::key_info(key).map(|k| k.apply) {
+            Some(homelab_core::hostconfig::Apply::Live) => live.push(key.clone()),
+            _ => restart.push(key.clone()),
+        }
+    }
+    Ok((
+        text.clone(),
+        homelab_proto::HostConfigSaved {
+            sha256: homelab_core::manifest::sha256_hex(text.as_bytes()),
+            live,
+            restart,
+        },
+    ))
+}
+
+/// Replace host.toml whole: a temp file with mode 0600 from the first byte
+/// (it carries the bearer token, H21), then a rename.
+fn write_config_file(path: &str, raw: &str) -> Result<(), String> {
+    let tmp = format!("{}.tmp", path);
     // 0600 from the first byte — the file carries the bearer token (H21).
     {
         use std::io::Write as _;
@@ -713,7 +901,7 @@ fn persist_settings(
             .map_err(|e| e.to_string())?;
         f.write_all(raw.as_bytes()).map_err(|e| e.to_string())?;
     }
-    std::fs::rename(&tmp, &config.config_path).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1235,6 +1423,120 @@ port = 5003
         want.insert("backup_hour".into(), toml::Value::Integer(5));
         let got: toml::Table = toml::from_str(&rendered).unwrap();
         assert_eq!(got, want, "rendered:\n{rendered}");
+    }
+
+    /// The dashboard's key table and the file the host reads cannot drift:
+    /// every field of `FileConfig` has a row (a new field without one fails
+    /// here), and every row names a field.
+    #[test]
+    fn feat_settings_1_every_host_toml_key_is_described_once() {
+        let json = serde_json::to_value(FileConfig::default()).unwrap();
+        let mut fields: Vec<String> = json.as_object().unwrap().keys().cloned().collect();
+        // Skipped when absent, so it is not in the default's JSON.
+        fields.push("tokens".into());
+        fields.sort();
+        let mut rows: Vec<String> = homelab_core::hostconfig::KEYS
+            .iter()
+            .map(|k| k.key.to_string())
+            .collect();
+        rows.sort();
+        assert_eq!(fields, rows);
+    }
+
+    /// GetHostConfig: every key the file sets, a secret only as "set", a
+    /// scoped token without its hash, the keys the host does not read, and
+    /// the file's hash for the write that follows.
+    #[test]
+    fn feat_settings_1_the_view_hides_secrets_and_hashes() {
+        let raw = "token = \"0123456789abcdef0123\"\nbackup_hour = 4\nnotify_auth_bearer = \"s3cret-bearer\"\n\
+                   loki_url = \"http://10.10.10.13:3100\"\nbogus_key = 1\n\
+                   [[tokens]]\nname = \"admin\"\nscope = \"all\"\nsha256 = \"{h}\"\n"
+            .replace("{h}", &"a".repeat(64));
+        let v = host_config_view("/etc/homelab/host.toml", &raw).unwrap();
+        let json = serde_json::to_string(&v).unwrap();
+        assert!(!json.contains("0123456789abcdef0123"), "{json}");
+        assert!(!json.contains("s3cret-bearer"), "{json}");
+        assert!(!json.contains(&"a".repeat(64)), "{json}");
+        assert_eq!(v.values["backup_hour"], 4);
+        assert_eq!(v.values["tokens"][0]["name"], "admin");
+        assert_eq!(v.secrets_set, vec!["notify_auth_bearer", "token"]);
+        assert_eq!(v.unknown, vec!["bogus_key"]);
+        assert_eq!(v.sha256, homelab_core::manifest::sha256_hex(raw.as_bytes()));
+    }
+
+    /// SetHostConfig: a change lands with every other key kept; a file that
+    /// moved meanwhile, a locked or ssh-only key, a secret, a stray sub-key
+    /// and a value the start-up validation refuses are each refused before
+    /// anything is written.
+    #[test]
+    fn feat_settings_1_a_change_is_checked_like_a_start() {
+        use std::collections::BTreeMap;
+        let raw = "token = \"0123456789abcdef0123\"\nbackup_hour = 4\nexec_enabled = false\n";
+        let sha = homelab_core::manifest::sha256_hex(raw.as_bytes());
+        let one = |k: &str, v: serde_json::Value| BTreeMap::from([(k.to_string(), v)]);
+
+        let (text, saved) = apply_host_config_changes(
+            raw,
+            &BTreeMap::from([
+                ("backup_hour".to_string(), serde_json::json!(5)),
+                ("status_interval_s".to_string(), serde_json::json!(30)),
+            ]),
+            &sha,
+        )
+        .unwrap();
+        let t: toml::Table = toml::from_str(&text).unwrap();
+        assert_eq!(t["backup_hour"].as_integer(), Some(5));
+        assert_eq!(t["status_interval_s"].as_integer(), Some(30));
+        assert_eq!(t["token"].as_str(), Some("0123456789abcdef0123"));
+        assert_eq!(saved.live, vec!["backup_hour"]);
+        assert_eq!(saved.restart, vec!["status_interval_s"]);
+        assert_eq!(
+            saved.sha256,
+            homelab_core::manifest::sha256_hex(text.as_bytes())
+        );
+
+        // null removes the key: the host takes its default.
+        let (text, _) =
+            apply_host_config_changes(raw, &one("backup_hour", serde_json::Value::Null), &sha)
+                .unwrap();
+        assert!(!text.contains("backup_hour"), "{text}");
+
+        let refused = |changes: BTreeMap<String, serde_json::Value>, expect: &str| {
+            apply_host_config_changes(raw, &changes, expect).unwrap_err()
+        };
+        assert!(
+            refused(one("backup_hour", serde_json::json!(5)), "stale").contains("changed since")
+        );
+        for key in [
+            "listen",
+            "state_dir",
+            "tokens",
+            "token",
+            "exec_enabled",
+            "no_touch",
+        ] {
+            let e = refused(one(key, serde_json::json!("x")), &sha);
+            assert!(e.contains("ssh"), "{key}: {e}");
+        }
+        assert!(refused(one("backup_hour", serde_json::json!(24)), &sha).contains("0 to 23"));
+        assert!(refused(one("status_interval_s", serde_json::json!(5)), &sha).contains("10"));
+        let e = refused(
+            one(
+                "registry_cache",
+                serde_json::json!({"host": "10.10.10.17", "upstreams": [], "hots": 1}),
+            ),
+            &sha,
+        );
+        assert!(e.contains("registry_cache.hots"), "{e}");
+        let e = refused(
+            one(
+                "zfs_jobs",
+                serde_json::json!([{"source": "HDD2TB", "target": "HDD2TB"}]),
+            ),
+            &sha,
+        );
+        assert!(e.contains("zfs_jobs"), "{e}");
+        assert!(refused(one("nonsense", serde_json::json!(1)), &sha).contains("not a setting"));
     }
 
     use super::*;
@@ -7476,6 +7778,69 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     id: req.id,
                     ok: false,
                     message: format!("persist settings: {}", e),
+                    deferred: None,
+                },
+            }
+        }
+        // feat-settings-1: read and write host.toml for the dashboard. The
+        // answers go to the asking session only; nothing is broadcast, so a
+        // TUI's settings screen keeps its unsaved edits.
+        Rpc::GetHostConfig => {
+            let path = &state.config.config_path;
+            let raw = std::fs::read_to_string(path).unwrap_or_default();
+            match host_config_view(path, &raw) {
+                Ok(view) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: serde_json::to_string(&view).unwrap_or_default(),
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+            }
+        }
+        Rpc::SetHostConfig {
+            changes,
+            expect_sha256,
+        } => {
+            let path = state.config.config_path.clone();
+            let raw = std::fs::read_to_string(&path).unwrap_or_default();
+            let outcome = apply_host_config_changes(&raw, &changes, &expect_sha256)
+                .and_then(|(text, saved)| write_config_file(&path, &text).map(|()| (text, saved)));
+            match outcome {
+                Ok((text, saved)) => {
+                    // The G8 keys are live: the scheduler hour, the webhook
+                    // and the retention read the settings, not the file.
+                    if let Ok(file) = toml::from_str::<FileConfig>(&text) {
+                        let mut live = state
+                            .settings
+                            .write()
+                            .unwrap_or_else(PoisonError::into_inner);
+                        live.backup_hour = file.backup_hour;
+                        live.notify_webhook = file.notify_webhook;
+                        live.retention = file
+                            .retention
+                            .unwrap_or_else(homelab_core::retention::default_tiers);
+                    }
+                    info!(
+                        "host.toml changed via the dashboard: {}",
+                        changes.keys().cloned().collect::<Vec<_>>().join(", ")
+                    );
+                    RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: serde_json::to_string(&saved).unwrap_or_default(),
+                        deferred: None,
+                    }
+                }
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
                     deferred: None,
                 },
             }

@@ -89,6 +89,9 @@ export const ACT_EVENTS = /** @type {const} */ ([
   "notify_settings",
   "schedules",
   "resync",
+  // Milestone edit: the working copy moved, host.toml was written.
+  "repo",
+  "host_settings",
 ]);
 
 /** @type {Map<string, Set<(data: any) => void>>} */

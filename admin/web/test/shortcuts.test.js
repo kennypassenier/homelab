@@ -38,9 +38,12 @@ test("/ searches; digits and brackets move between a stack's tabs", () => {
     navigate: "/app/stacks/media/checks",
   });
   assert.equal(keyAction(idle(), "4", 0, logs).action, null); // already there
+  assert.deepEqual(keyAction(idle(), "7", 0, logs).action, {
+    navigate: "/app/stacks/media/firewall",
+  });
   assert.equal(keyAction(idle(), "9", 0, logs).action, null);
   assert.equal(
-    keyAction(idle(), "]", 0, route("/app/stacks/media/checks")).action,
+    keyAction(idle(), "]", 0, route("/app/stacks/media/firewall")).action,
     null,
   );
   // Digits mean nothing off a stack's page.
@@ -49,7 +52,7 @@ test("/ searches; digits and brackets move between a stack's tabs", () => {
 
 test("the sheet lists every go-to key the handler knows", () => {
   const listed = SHORTCUTS.flatMap((g) => g.shortcuts.map((s) => s.keys));
-  for (const k of ["o", "h", "a", "t", "c", "d"]) {
+  for (const k of ["o", "h", "a", "t", "c", "d", "f", "e"]) {
     assert.ok(listed.includes(`g ${k}`), k);
     const r = keyAction(keyAction(idle(), "g", 0, home).state, k, 1, home);
     assert.ok(r.action && "navigate" in r.action, k);

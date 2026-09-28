@@ -11,6 +11,9 @@ export const STACK_TABS = /** @type {const} */ ([
   { tab: "history", label: "History" },
   { tab: "logs", label: "Logs" },
   { tab: "checks", label: "Checks" },
+  // Milestone edit (feat-stacks-2, feat-firewall-1).
+  { tab: "settings", label: "Settings" },
+  { tab: "firewall", label: "Firewall" },
 ]);
 
 /** @typedef {(typeof STACK_TABS)[number]["tab"]} StackTab */
@@ -20,7 +23,8 @@ export const STACK_TABS = /** @type {const} */ ([
  *   {page: "stack", name: string, tab: StackTab} |
  *   {page: "activity"} | {page: "timeline"} | {page: "checks"} |
  *   {page: "doctor"} | {page: "jobs"} | {page: "schedules"} |
- *   {page: "notifications"} | {page: "notfound", path: string}} Route
+ *   {page: "notifications"} | {page: "firewall"} | {page: "settings"} |
+ *   {page: "notfound", path: string}} Route
  */
 
 /** The navigation bar, in order. */
@@ -33,6 +37,8 @@ export const NAV = /** @type {const} */ ([
   { page: "doctor", href: "/app/doctor", label: "Doctor" },
   { page: "jobs", href: "/app/jobs", label: "Jobs" },
   { page: "schedules", href: "/app/schedules", label: "Schedules" },
+  { page: "firewall", href: "/app/firewall", label: "Firewall" },
+  { page: "settings", href: "/app/settings", label: "Settings" },
 ]);
 
 /** Pages with a fixed address that the bar does not list (the bell opens it). */
@@ -55,6 +61,8 @@ const FIXED = {
   jobs: { page: "jobs" },
   schedules: { page: "schedules" },
   notifications: { page: "notifications" },
+  firewall: { page: "firewall" },
+  settings: { page: "settings" },
 };
 
 /**

@@ -956,6 +956,16 @@ const CLI_ONLY: &[(&str, &str)] = &[
          mid-operation; the dashboard asks it, the TUI streams live lines instead",
     ),
     (
+        "GetHostConfig",
+        "feat-settings-1 (homelab-admin): every host.toml key for the dashboard's \
+         settings page, answered to that session only; the TUI keeps GetConfig",
+    ),
+    (
+        "SetHostConfig",
+        "feat-settings-1 (homelab-admin): the dashboard's settings page writes \
+         host.toml with the start-up checks; the TUI keeps SetConfig",
+    ),
+    (
         "RollbackNative",
         "fix-114: replaces a running program and parks the stack's updates, done \
          when a release misbehaves after its health window — deliberately a typed \

@@ -3,6 +3,7 @@
 // tab filters on is in the query string (feat-overview-8).
 
 import { mountActionsArea } from "../actionsarea.js";
+import { firewallTab, settingsTab } from "../editpanels.js";
 import { historyRows, incidentRows } from "../activity.js";
 import { agoEl, setAgo } from "../ago.js";
 import { checkRows } from "../checks.js";
@@ -88,7 +89,7 @@ export function mount(root, params) {
     const d = stackDetail(f, params.name);
     missing.hidden = d != null;
     if (!d) {
-      missing.textContent = `The host's fleet has no stack called "${params.name}".`;
+      missing.textContent = `The host's fleet has no stack called "${params.name}" (a stack committed but not deployed yet has only its Settings and Firewall tabs).`;
       state.replaceChildren();
       return;
     }
@@ -110,6 +111,8 @@ export function mount(root, params) {
     history: historyTab,
     logs: logsTab,
     checks: checksTab,
+    settings: settingsTab,
+    firewall: firewallTab,
   };
   const stop = panels[params.tab](panel, params);
   return () => {

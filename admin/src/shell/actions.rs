@@ -132,6 +132,10 @@ pub struct RepoFiles {
     pub repo: PathBuf,
     /// Where a checkout of an earlier commit is made, and removed again.
     pub scratch: PathBuf,
+    /// milestone edit: the working copy the dashboard keeps itself. A read
+    /// first takes the remote's newest commits (best effort) and holds the
+    /// copy still, so a deploy never reads a stack an edit is writing.
+    pub wc: Option<Arc<super::workcopy::WorkingCopy>>,
 }
 
 fn no_repo(repo: &Path, what: String) -> Refusal {
@@ -141,8 +145,9 @@ fn no_repo(repo: &Path, what: String) -> Refusal {
             "the dashboard has no working copy of the homelab repository at {}",
             repo.display()
         ),
-        "clone kennypassenier/homelab there (HOMELAB_ADMIN_REPO names another place); \
-         actions that need only the stack name work without it",
+        "the dashboard clones it there itself once the deploy key is provisioned (the \
+         working copy panel says what is missing); actions that need only the stack name work \
+         without it",
     )
 }
 
@@ -225,6 +230,14 @@ impl StackFiles for RepoFiles {
         if matches!(kind.needs(), Needs::Nothing | Needs::Vmid) {
             return Ok(Material::None);
         }
+        if let Some(wc) = &self.wc {
+            if commit.is_none() {
+                if let Err(r) = wc.sync() {
+                    tracing::warn!(why = %r.why, "the working copy was not brought up to date before {what}");
+                }
+            }
+        }
+        let _held = self.wc.as_ref().map(|wc| wc.hold());
         if !self.present() {
             return Err(no_repo(&self.repo, what));
         }
@@ -486,9 +499,9 @@ impl Actions {
             return Err(Refusal::new(
                 what,
                 "the dashboard has no working copy of the homelab repository",
-                "clone kennypassenier/homelab to HOMELAB_ADMIN_REPO (default \
-                 /appdata/admin/admin-config/repo); actions that need only the stack name work \
-                 without it",
+                "the dashboard clones it at start once the deploy key is provisioned (the \
+                 working copy panel on the settings page says what is missing); actions that \
+                 need only the stack name work without it",
             ));
         }
         if let Ok(jobs) = self.inner.jobs.lock() {
@@ -1145,14 +1158,24 @@ pub fn mount(
         )),
         None => Arc::new(super::actions_notify::NoPusher),
     };
+    let shared_for_edit = shared.clone();
+    let publish_for_edit = publish.clone();
     let notify = NotifyCenter::load(cfg.notify_file(), pusher, publish.clone(), clock.clone())
         .map_err(|e| e.to_string())?;
+    // milestone edit (arch-edit-txn): the working copy, cloned at start.
+    let wc = Arc::new(super::workcopy::WorkingCopy::new(
+        cfg.repo.clone(),
+        cfg.git.clone(),
+        cfg.scratch_dir(),
+        clock.clone(),
+    ));
     let actions = Actions::start(ActionsDeps {
         host: host.clone(),
         publish: publish.clone(),
         files: Arc::new(RepoFiles {
             repo: cfg.repo.clone(),
-            scratch: cfg.data_dir.join("tmp"),
+            scratch: cfg.scratch_dir(),
+            wc: Some(wc.clone()),
         }),
         shared,
         notify: notify.clone(),
@@ -1168,11 +1191,24 @@ pub fn mount(
         cfg.schedule_grace_s,
     )
     .map_err(|e| e.to_string())?;
+    app.dashboard_routes(super::edit::router(super::edit::EditCtx {
+        wc: wc.clone(),
+        actions: actions.clone(),
+        host: host.clone(),
+        shared: shared_for_edit,
+        publish: publish_for_edit,
+    }));
     app.dashboard_routes(router(actions));
     app.dashboard_routes(super::actions_notify::router(notify.clone()));
     app.dashboard_routes(super::scheduler::router(scheduler.clone()));
     let (tick, poll) = (cfg.tick(), Duration::from_secs(cfg.incidents_poll_s));
     app.on_start(move || {
+        // Clone or bring the working copy up to date, off the async threads.
+        tokio::task::spawn_blocking(move || {
+            if let Err(r) = wc.sync() {
+                tracing::warn!(why = %r.why, fix = %r.fix, "the working copy is not ready");
+            }
+        });
         scheduler.spawn(tick);
         super::actions_notify::spawn_incident_poll(host, notify, poll);
     });

@@ -354,6 +354,23 @@ pub enum Command {
         #[serde(default = "history_limit_default")]
         limit: usize,
     },
+    /// feat-settings-1 (homelab-admin, 2026-09-28): every key of host.toml
+    /// with its value, as JSON [`HostConfigFile`] in the reply's message;
+    /// a secret only as "set". Answered to the asking session alone: unlike
+    /// `GetConfig`, whose `Config` frame goes to every session and makes the
+    /// TUI's settings screen drop its unsaved edits, nothing is broadcast.
+    GetHostConfig,
+    /// feat-settings-1: change keys of host.toml, checked with the start-up
+    /// validation before anything is written. `changes` maps a key to its new
+    /// value, or to null to remove it (the host then uses its default).
+    /// `expect_sha256` is the file as `GetHostConfig` read it: an edit made
+    /// meanwhile (over ssh, or by the TUI) is refused, never overwritten.
+    /// Keys `homelab_core::hostconfig` marks as secret, locked or ssh-only are
+    /// refused. Answered as JSON [`HostConfigSaved`]; nothing is broadcast.
+    SetHostConfig {
+        changes: std::collections::BTreeMap<String, serde_json::Value>,
+        expect_sha256: String,
+    },
 }
 
 fn history_limit_default() -> usize {
@@ -419,7 +436,8 @@ impl Command {
             | ListManualChecks { .. }
             | SessionOptions { .. }
             | CurrentOp
-            | History { .. } => Scope::Read,
+            | History { .. }
+            | GetHostConfig => Scope::Read,
             DeployStack(_)
             | StageNativeBinary { .. }
             | BackupStack(_)
@@ -448,7 +466,8 @@ impl Command {
             | ForgetStack { .. }
             | DestroyRecorded { .. }
             | WipeRetired { .. }
-            | PruneOrphans { .. } => Scope::All,
+            | PruneOrphans { .. }
+            | SetHostConfig { .. } => Scope::All,
         }
     }
 
@@ -501,6 +520,8 @@ impl Command {
             SessionOptions { .. } => "session_options",
             CurrentOp => "current_op",
             History { .. } => "history",
+            GetHostConfig => "get_host_config",
+            SetHostConfig { .. } => "set_host_config",
         }
     }
 
@@ -521,6 +542,36 @@ pub struct HostConfigView {
     pub notify_webhook: Option<String>,
     /// Tiered snapshot retention.
     pub retention: Vec<RetentionTier>,
+}
+
+/// feat-settings-1: host.toml as `GetHostConfig` answers it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct HostConfigFile {
+    /// Where the host read it, e.g. `/etc/homelab/host.toml`.
+    pub path: String,
+    /// SHA-256 of the file's bytes ("" hashed when there is no file); sent
+    /// back with `SetHostConfig` so a change made meanwhile is refused.
+    pub sha256: String,
+    /// Every key the file sets, as JSON, secrets left out and scoped tokens
+    /// without their hashes (`homelab_core::hostconfig::redact`).
+    pub values: std::collections::BTreeMap<String, serde_json::Value>,
+    /// The secret keys the file sets.
+    #[serde(default)]
+    pub secrets_set: Vec<String>,
+    /// Dotted paths the file sets that the host does not read (F186).
+    #[serde(default)]
+    pub unknown: Vec<String>,
+}
+
+/// feat-settings-1: what `SetHostConfig` answers when it wrote the file.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostConfigSaved {
+    /// The file's new SHA-256.
+    pub sha256: String,
+    /// Changed keys already in force.
+    pub live: Vec<String>,
+    /// Changed keys that take effect at the host's next start.
+    pub restart: Vec<String>,
 }
 
 /// A stack as the TUI sees it — structured, not free text.

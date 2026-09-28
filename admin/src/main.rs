@@ -105,6 +105,24 @@ const FILES: &[(&str, &[u8])] = &[
         "js/pages/notifications.js",
         include_bytes!("../web/js/pages/notifications.js"),
     ),
+    // Milestone edit (feat-stacks-2/3, feat-firewall-1/2, feat-settings-1).
+    ("js/editforms.js", include_bytes!("../web/js/editforms.js")),
+    ("js/editui.js", include_bytes!("../web/js/editui.js")),
+    (
+        "js/editpanels.js",
+        include_bytes!("../web/js/editpanels.js"),
+    ),
+    ("js/fwview.js", include_bytes!("../web/js/fwview.js")),
+    ("js/newstack.js", include_bytes!("../web/js/newstack.js")),
+    ("js/plan.js", include_bytes!("../web/js/plan.js")),
+    (
+        "js/pages/firewall.js",
+        include_bytes!("../web/js/pages/firewall.js"),
+    ),
+    (
+        "js/pages/settings.js",
+        include_bytes!("../web/js/pages/settings.js"),
+    ),
     ("css/app.css", include_bytes!("../web/css/app.css")),
 ];
 

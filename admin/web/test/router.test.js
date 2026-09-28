@@ -52,7 +52,8 @@ test("the navigation marks the current page, a stack page beside the overview", 
   assert.deepEqual(cur("/app/doctor"), ["Doctor"]);
   assert.deepEqual(cur("/app/host"), ["Host"]);
   const onStack = navEntries(route("/app/stacks/media/apps"));
-  assert.equal(onStack.length, 9);
+  // Eight pages, milestone edit's Firewall and Settings, and the stack.
+  assert.equal(onStack.length, 11);
   assert.deepEqual(onStack[1], {
     href: "/app/stacks/media",
     label: "Stack media",
@@ -76,4 +77,16 @@ test("the navigation marks the current page, a stack page beside the overview", 
   );
   assert.deepEqual(cur("/app/notifications"), []);
   assert.deepEqual(cur("/app/jobs"), ["Jobs"]);
+  // Milestone edit's pages and tabs.
+  assert.deepEqual(route("/app/firewall"), { page: "firewall" });
+  assert.deepEqual(route("/app/settings"), { page: "settings" });
+  assert.deepEqual(route("/app/stacks/kp-soft/firewall"), {
+    page: "stack",
+    name: "kp-soft",
+    tab: "firewall",
+  });
+  assert.equal(
+    pageTitle(route("/app/stacks/kp-soft/settings")),
+    "Homelab · kp-soft · Settings",
+  );
 });

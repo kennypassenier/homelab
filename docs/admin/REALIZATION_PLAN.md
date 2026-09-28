@@ -24,7 +24,7 @@ working; the `tui` cargo feature stays on by default.
 | Milestone | Title | Features | Status |
 |---|---|---|---|
 | skeleton | Het eerste levende pad | feat-platform-5, feat-platform-6 | **done 2026-09-28** (see note) |
-| host | De host leert vertellen | feat-platform-1, feat-platform-2, feat-platform-3, feat-platform-4 | not started |
+| host | De host leert vertellen | feat-platform-1, feat-platform-2, feat-platform-3, feat-platform-4 | **built 2026-09-28**, not yet released or live (see note) |
 | assembly | Het dashboard draait als eigen stack (assemblage) | feat-platform-7, feat-platform-9 | not started |
 | read | Alles lezen | feat-overview-1, feat-overview-2, feat-overview-3, feat-overview-4, feat-overview-8, feat-stacks-1, feat-ops-1, feat-ops-2, feat-ops-3, feat-ops-4, feat-ops-7, feat-settings-2 | not started |
 | act | Alle acties | feat-stacks-4, feat-ops-6, feat-stacks-5, feat-stacks-6, feat-stacks-7, feat-stacks-8, feat-overview-5, feat-ops-8, feat-ops-9 | not started |
@@ -139,3 +139,13 @@ Gesigneerde homelab-releases, self-update van het dashboard via homelab, een ech
   (feat-platform-2, milestone `host`). Found on the first run: two rustls
   crypto providers in one binary panic the first handshake; `main` installs
   aws-lc-rs explicitly.
+- **host, built 2026-09-28 (commits a7b50d7 … this one):** scoped tokens
+  with audit and reads beside the queue on request; real status per
+  container (pvesh + docker, every 60 s); request id, time and step marks on
+  log lines, CurrentOp; JSON replies for doctor, fleet check, incidents and
+  manual checks; history.jsonl with History; the deploy guard in `homelab
+  deploy`/`apply`; answers bound to the host's start. Full suite 994 passed,
+  0 failed. Exit criterion "the CLI works unchanged against the new host" is
+  met in the suite (every CLI/TUI request is byte-identical, tested);
+  measuring it against the live host waits for the release (Kenny's go for
+  the push and the signing).

@@ -82,6 +82,7 @@ fn fleet(applied_hash: &str) -> ServerMsg {
             load1_x100: 0,
         },
         stacks: vec![StackView {
+            applied_source: None,
             usage: None,
             name: "almanac".into(),
             vmid: 112,

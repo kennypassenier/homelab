@@ -26,6 +26,7 @@ fn fleet() -> FleetState {
         },
         stacks: vec![
             StackView {
+                applied_source: None,
                 usage: None,
                 name: "syncthing".into(),
                 vmid: 110,
@@ -42,6 +43,7 @@ fn fleet() -> FleetState {
                 enabled: true,
             },
             StackView {
+                applied_source: None,
                 usage: None,
                 name: "media".into(),
                 vmid: 106,
@@ -693,6 +695,7 @@ fn b4_drift_flag_computed_from_applied_hash() {
             status_measured_at: None,
             host: fleet().host,
             stacks: vec![StackView {
+                applied_source: None,
                 usage: None,
                 name: "driftcase".into(),
                 vmid: 140,
@@ -2250,6 +2253,7 @@ fn a_native_stack_gets_the_native_operation_from_the_same_key() {
     let fleet = m.fleet.as_mut().unwrap();
     fleet.stacks.clear();
     fleet.stacks.push(StackView {
+        applied_source: None,
         usage: None,
         name: "kyu".into(),
         vmid: 109,
@@ -2405,7 +2409,11 @@ fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
     assert!(
         matches!(
             m.outbox.first(),
-            Some(Command::Answer { id: 7, allow: true })
+            Some(Command::Answer {
+                id: 7,
+                allow: true,
+                ..
+            })
         ),
         "{:?}",
         m.outbox.first()
@@ -2431,7 +2439,8 @@ fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
             m.outbox.first(),
             Some(Command::Answer {
                 id: 8,
-                allow: false
+                allow: false,
+                ..
             })
         ),
         "{:?}",

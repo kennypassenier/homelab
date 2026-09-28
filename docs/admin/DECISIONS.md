@@ -89,7 +89,7 @@ entries sampled 12:28 (e.g. .7 → .13:3100, Alloy to Loki).
 | ID | Decision |
 |---|---|
 | arch-update | **Sign homelab releases** with the ecosystem's minisign key before the dashboard's first release; the dashboard then updates through chassis self-update driven by homelab, like kyu. Kenny gives the offline key's passphrase per release. |
-| arch-secrets-edit | **latch gets a single-file set operation** (mini-round asked of latch-rs); editing secrets in the dashboard waits for that latch release, revealing does not. |
+| arch-secrets-edit | **latch gets a single-file set operation** (mini-round asked of latch-rs); editing secrets in the dashboard waits for that latch release, revealing does not. **Delivered 2026-09-28: latch 2.6.0**, signed by Kenny and installed on WSL the same day: `printf '%s' "$new" \| latch put <file> --env <env> --project <name> [--expect <sha256>\|absent]` replaces exactly one file (stdout: sha256 of the stored plaintext), refuses when the file moved since it was read, on unpushed clone work, a never-minted key or group members; a rejected push leaves the clone as the remote is. Reading without a linked dir: `latch cat <file> --env <env> --project <name>`. |
 | arch-schedule | **Schedules live in the dashboard**: any action can be scheduled; runs while CT 120 is up; a missed slot is skipped and notified, never caught up. |
 | arch-push-credential | **Deploy key with write access** for CT 120; the dashboard commits only under `stacks/<stack>/`, guarded by a test. |
 | arch-deploy-guard | **CLI and dashboard both refuse** a deploy when the host's last `source.commit` is not in the local history; `--force` overrides. |

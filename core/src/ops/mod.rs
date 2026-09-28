@@ -18,6 +18,7 @@ pub mod backup;
 pub mod busy;
 pub mod dashboard;
 pub mod deploy;
+pub mod deployguard;
 pub mod destroy;
 pub mod devicebackup;
 pub mod discovery;

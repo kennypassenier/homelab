@@ -589,6 +589,7 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 what,
                 if_allowed,
                 if_stopped,
+                ..
             } => {
                 model.pending_ask = Some(PendingAsk {
                     id,
@@ -1712,7 +1713,11 @@ fn answer_ask(model: &mut Model, allow: bool) {
     let Some(ask) = model.pending_ask.take() else {
         return;
     };
-    model.outbox.push(Command::Answer { id: ask.id, allow });
+    model.outbox.push(Command::Answer {
+        boot: None,
+        id: ask.id,
+        allow,
+    });
     model.status_line = if allow {
         format!("allowed: {} :: {}", ask.step, ask.if_allowed)
     } else {

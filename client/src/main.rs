@@ -960,6 +960,18 @@ async fn run(explicit_host: Option<String>) {
                 die(&format!("validation failed: {}", e));
             }
             check_fleet_routes(Path::new(dir).parent().unwrap_or(Path::new(".")));
+            // arch-deploy-guard: not over a deploy this tree has not seen.
+            let force = args.iter().any(|a| a == "--force");
+            if !force {
+                let (ok, fleet) = rpc_collect(&host, &token, Command::GetState).await;
+                if let (true, Some(fleet)) = (ok, fleet) {
+                    if let Err(e) =
+                        deploy_guard(Path::new(dir), &spec.manifest.stack_name, &fleet, false)
+                    {
+                        die(&e);
+                    }
+                }
+            }
             let ok = deploy_spec(&host, &token, spec).await;
             std::process::exit(if ok { 0 } else { 1 });
         }
@@ -1119,6 +1131,14 @@ async fn run(explicit_host: Option<String>) {
                     die("not confirmed — nothing deployed, nothing destroyed")
                 }
                 homelab_client::apply::Decision::Deploy => {}
+            }
+            // arch-deploy-guard: every planned stack is checked before the
+            // first one is sent, so a refusal leaves nothing half-applied.
+            let force = args.iter().any(|a| a == "--force");
+            for name in &plan.deploy {
+                if let Err(e) = deploy_guard(&base_path.join(name), name, &fleet, force) {
+                    die(&e);
+                }
             }
             for name in &plan.deploy {
                 let Some(sp) = specs.remove(name) else {
@@ -1998,6 +2018,48 @@ fn stack_digests(stack_files: &[(String, u16)]) -> Vec<homelab_core::ops::fleetc
         }
     }
     out
+}
+
+/// arch-deploy-guard: may this tree deploy `stack` over what the host runs?
+/// The decision is `homelab_core::ops::deployguard::decide`; this only asks
+/// git whether the host's commit is behind HEAD.
+fn deploy_guard(
+    dir: &Path,
+    stack: &str,
+    fleet: &homelab_proto::FleetState,
+    force: bool,
+) -> Result<(), String> {
+    use homelab_core::ops::deployguard::{applied_commit, decide, Ancestry};
+    let applied = fleet
+        .stacks
+        .iter()
+        .find(|s| s.name == stack)
+        .and_then(|s| s.applied_source.clone());
+    let ancestry = match applied.as_deref().and_then(applied_commit) {
+        None => Ancestry::Contained,
+        Some(commit) => {
+            let git = |args: &[&str]| {
+                std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(dir)
+                    .args(args)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map(|st| st.success())
+                    .unwrap_or(false)
+            };
+            let object = format!("{}^{{commit}}", commit);
+            if !git(&["cat-file", "-e", &object]) {
+                Ancestry::Unknown
+            } else if git(&["merge-base", "--is-ancestor", commit, "HEAD"]) {
+                Ancestry::Contained
+            } else {
+                Ancestry::Diverged
+            }
+        }
+    };
+    decide(stack, applied.as_deref(), ancestry, force)
 }
 
 async fn deploy_spec(host: &str, token: &str, mut spec: homelab_proto::DeploySpec) -> bool {

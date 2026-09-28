@@ -321,6 +321,7 @@ fn demo_fleet() -> ServerMsg {
         },
         stacks: vec![
             StackView {
+                applied_source: None,
                 usage: None,
                 name: "platform".into(),
                 vmid: 104,
@@ -338,6 +339,7 @@ fn demo_fleet() -> ServerMsg {
                 online: true,
             },
             StackView {
+                applied_source: None,
                 usage: None,
                 name: "media".into(),
                 vmid: 106,
@@ -354,6 +356,7 @@ fn demo_fleet() -> ServerMsg {
                 online: true,
             },
             StackView {
+                applied_source: None,
                 usage: None,
                 name: "syncthing".into(),
                 vmid: 110,

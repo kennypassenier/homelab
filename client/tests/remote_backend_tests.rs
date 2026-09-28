@@ -160,7 +160,11 @@ async fn fix_66_the_reply_to_an_answer_is_a_log_line_not_the_end_of_the_operatio
     let _ = drain(&mut evt_rx, Duration::from_millis(500)).await;
 
     cmd_tx
-        .send(Command::Answer { id: 7, allow: true })
+        .send(Command::Answer {
+            id: 7,
+            allow: true,
+            boot: None,
+        })
         .await
         .unwrap();
     let frame = tokio::time::timeout(Duration::from_secs(5), host.received.recv())
@@ -170,7 +174,11 @@ async fn fix_66_the_reply_to_an_answer_is_a_log_line_not_the_end_of_the_operatio
     let req: RpcRequest = serde_json::from_str(&frame).expect("the host must be able to parse it");
     assert!(matches!(
         req.command,
-        Command::Answer { id: 7, allow: true }
+        Command::Answer {
+            id: 7,
+            allow: true,
+            ..
+        }
     ));
     host.push
         .send(

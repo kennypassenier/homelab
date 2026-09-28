@@ -561,6 +561,29 @@ answers the entries as JSON. The dashboard's duration trends, nightly
 timeline and activity timeline read it. Tests: `core/tests/history_tests.rs`,
 `host/src/main.rs` (`arch_history_*`).
 
+#### arch-deploy-guard · A deploy may not undo another deploy
+
+**Status:** Built (homelab-admin `host` milestone, 2026-09-28).
+
+The host records which commit each deploy came from, and `GetState` now
+shows it per stack (`applied_source`). `homelab deploy` and `homelab apply`
+refuse when the host runs a stack from a commit this tree does not contain,
+because deploying would silently undo it (a firewall rule added from the
+dashboard, deployed from a WSL tree that never pulled it). The message names
+the commit and the way out: `git pull`, or `--force` when undoing it is the
+point. `apply` checks every planned stack before it sends the first one. The
+TUI does not check (it is being replaced; nothing is taken out of it before
+the dashboard covers it). Tests: `core/tests/deployguard_tests.rs`.
+
+#### arch-host-link · Answers carry the host's start
+
+Every question the host asks carries `boot`, which changes on every start of
+the host, and an answer may carry it back. An answer stamped with an earlier
+start is refused, so an old question left open on a phone cannot answer a
+new one that happens to have the same number after the host restarted. The
+CLI and TUI send no stamp and behave as before. Test: `host/src/main.rs`
+(`arch_host_link_a_stale_answer_does_not_answer_a_new_question`).
+
 #### A5 · Secrets vault on the host
 
 **Status:** Built.

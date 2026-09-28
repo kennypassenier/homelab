@@ -208,6 +208,10 @@ pub enum Command {
         #[serde(rename = "question")]
         id: u64,
         allow: bool,
+        /// arch-host-link: the `boot` of the question being answered. None
+        /// from the CLI and TUI, which answer on the session that asked.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        boot: Option<String>,
     },
     /// E8: run the configured ZFS snapshot + replication jobs now.
     ZfsReplicate,
@@ -541,6 +545,10 @@ pub struct StackView {
     /// last status reading. None before the first reading.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<GuestUsage>,
+    /// arch-deploy-guard: where the last deploy came from, as the host
+    /// recorded it ("a1b2c3d4e5f6 + 1 uncommitted file(s)").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_source: Option<String>,
 }
 
 /// feat-platform-2: one guest's measured use.
@@ -689,6 +697,11 @@ pub enum ServerMsg {
         what: String,
         if_allowed: String,
         if_stopped: String,
+        /// arch-host-link (homelab-admin, 2026-09-28): which start of the
+        /// host asked. Question ids restart at 1 on every start, so an
+        /// answer carries this back and a stale one is refused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        boot: Option<String>,
     },
     /// Real byte counters for transfer visuals (G6).
     Transfer {

@@ -1589,7 +1589,11 @@ port = 5003
                     ServerMsg::Ask { id, .. } => {
                         tx.send(frame(RpcRequest {
                             id: 2,
-                            command: Rpc::Answer { id, allow: true },
+                            command: Rpc::Answer {
+                                boot: None,
+                                id,
+                                allow: true,
+                            },
                         }))
                         .await
                         .unwrap();
@@ -1882,6 +1886,81 @@ port = 5003
         let v: serde_json::Value = serde_json::from_str(&r.message).unwrap();
         assert_eq!(v["entries"].as_array().unwrap().len(), 1, "{}", r.message);
         assert_eq!(v["entries"][0]["name"], "backup");
+    }
+
+    /// arch-host-link: an answer stamped with an earlier start of the host
+    /// is refused; one stamped with this start, or unstamped (CLI, TUI), is
+    /// delivered.
+    #[tokio::test]
+    async fn arch_host_link_a_stale_answer_does_not_answer_a_new_question() {
+        let state = test_state(config_from_text("token = \"0123456789abcdef0123\"\n"));
+        let pending = |state: &AppState| {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            state.pending_asks.lock().unwrap().insert(
+                1,
+                PendingAsk {
+                    reply: tx,
+                    ask: ServerMsg::Log {
+                        level: homelab_proto::LogLevel::Info,
+                        source: "HOST".into(),
+                        msg: "question".into(),
+                        req: None,
+                        ts: None,
+                        step: None,
+                    },
+                },
+            );
+            rx
+        };
+        let _rx = pending(&state);
+        let stale = handle_rpc(
+            &state,
+            RpcRequest {
+                id: 1,
+                command: Rpc::Answer {
+                    id: 1,
+                    allow: true,
+                    boot: Some("0-1".into()),
+                },
+            },
+        )
+        .await;
+        assert!(
+            !stale.ok && stale.message.contains("earlier start"),
+            "{}",
+            stale.message
+        );
+        assert!(
+            state.pending_asks.lock().unwrap().contains_key(&1),
+            "the question still waits"
+        );
+        let now = handle_rpc(
+            &state,
+            RpcRequest {
+                id: 2,
+                command: Rpc::Answer {
+                    id: 1,
+                    allow: true,
+                    boot: Some(state.boot_id.clone()),
+                },
+            },
+        )
+        .await;
+        assert!(now.ok, "{}", now.message);
+        let _rx = pending(&state);
+        let plain = handle_rpc(
+            &state,
+            RpcRequest {
+                id: 3,
+                command: Rpc::Answer {
+                    id: 1,
+                    allow: false,
+                    boot: None,
+                },
+            },
+        )
+        .await;
+        assert!(plain.ok, "{}", plain.message);
     }
 
     // ── arch-tokens and arch-host-link (homelab-admin, 2026-09-28) ──────
@@ -2227,7 +2306,11 @@ port = 5003
                     ServerMsg::Ask { id, .. } => {
                         tx.send(frame(RpcRequest {
                             id: 2,
-                            command: Rpc::Answer { id, allow: true },
+                            command: Rpc::Answer {
+                                boot: None,
+                                id,
+                                allow: true,
+                            },
                         }))
                         .await
                         .unwrap();
@@ -3434,6 +3517,8 @@ struct AppState {
     live_status: Arc<std::sync::RwLock<Option<homelab_core::ops::livestatus::LiveStatus>>>,
     /// feat-platform-3: the newest operation lines, for `CurrentOp`.
     recent: Arc<std::sync::Mutex<std::collections::VecDeque<ServerMsg>>>,
+    /// arch-host-link: this start of the host, stamped on every question.
+    boot_id: String,
     /// fix-121: when this daemon started. A self-update marker armed before
     /// this moment names this binary as the new one; one armed later was
     /// armed by this daemon for its successor.
@@ -3460,6 +3545,14 @@ impl AppState {
             auth_failures: Arc::new(AuthFailures::default()),
             live_status: Arc::new(std::sync::RwLock::new(None)),
             recent: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            boot_id: format!(
+                "{}-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0),
+                std::process::id()
+            ),
         }
     }
 }
@@ -3621,6 +3714,7 @@ impl homelab_core::ask::Asker for LiveAsker<'_> {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = tokio::sync::oneshot::channel();
         let ask = ServerMsg::Ask {
+            boot: Some(self.state.boot_id.clone()),
             id,
             op: q.op.clone(),
             step: q.step.clone(),
@@ -6939,7 +7033,20 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         // T69: the operator answered a suspended step. Delivering it is all
         // that happens here — the step itself is parked on a channel inside
         // the operation, not on this task.
-        Rpc::Answer { id, allow } => {
+        Rpc::Answer { id, allow, boot } => {
+            // arch-host-link: an answer to a question from an earlier start of
+            // this host must not answer today's question with the same id.
+            if boot.as_ref().is_some_and(|b| *b != state.boot_id) {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!(
+                        "question {} was asked by an earlier start of the host — not delivered",
+                        id
+                    ),
+                    deferred: None,
+                };
+            }
             let delivered = state
                 .pending_asks
                 .lock()
@@ -7430,6 +7537,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .stacks
                 .values()
                 .map(|s| homelab_proto::StackView {
+                    applied_source: s.applied_source.clone(),
                     name: s
                         .hostname
                         .rsplit("-app-")

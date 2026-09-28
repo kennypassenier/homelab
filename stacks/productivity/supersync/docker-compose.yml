@@ -25,7 +25,12 @@
 
 services:
   supersync:
-    image: ghcr.io/super-productivity/supersync@sha256:fcffea4b0ca478d7dc9977bf3935647c6ce4afea9f4e83f63c535e633c3797a3
+    # fix-153 (2026-09-28 06:53): the digest pinned at M8 (fcffea4b…) no longer
+    # exists on ghcr.io (404 on the manifest), so the first pull after the
+    # Debian 13 rebuild failed and supersync was down until this repin. This
+    # is the digest of `latest` = `master-8861a63`, read from the registry
+    # on 2026-09-28 06:56; upstream publishes no version tags.
+    image: ghcr.io/super-productivity/supersync@sha256:d12077be6c00545e71b50ba01831ec48af1e60458111888af699a2b76234ccde
     container_name: supersync
     restart: unless-stopped
     env_file:

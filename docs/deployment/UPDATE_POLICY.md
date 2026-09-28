@@ -76,7 +76,7 @@ fails while this section is stale.
 | paperwork | paperless-db | paperless-db | `manual` | `postgres:17.11-alpine@sha256:18cfe3ef5e68…` | mixed: the update reads one label for the whole app, the first container's |
 | paperwork | paperless-db | paperless-redis | `auto` | `redis:7-alpine` | mixed: the update reads one label for the whole app, the first container's |
 | paperwork | stirling | stirling | `auto` | `stirlingtools/stirling-pdf:2.14.3` |  |
-| productivity | supersync | supersync | `manual` | `ghcr.io/super-productivity/supersync@sha256:fcffea4b0ca4…` |  |
+| productivity | supersync | supersync | `manual` | `ghcr.io/super-productivity/supersync@sha256:d12077be6c00…` |  |
 | productivity | supersync-db | supersync-db | `manual` | `postgres:16.15-alpine@sha256:cf78e76683b9…` |  |
 | registry | registry | cache-dockerhub | `manual` | `registry:2.8.3@sha256:a3d8aaa63ed8…` |  |
 | registry | registry | cache-ghcr | `manual` | `registry:2.8.3@sha256:a3d8aaa63ed8…` |  |

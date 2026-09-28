@@ -161,6 +161,9 @@ pub struct PatchFact {
     /// (`/var/lib/apt/periodic/upgrade-stamp`); None = never on this
     /// container.
     pub unattended_stamp_age_s: Option<u64>,
+    /// How old the container is (`/etc/hostname`, written by Proxmox when it
+    /// creates the container); None = unknown, judged as old.
+    pub age_s: Option<u64>,
 }
 
 /// fix-150: updates that stand still. Two things count, both against
@@ -205,6 +208,10 @@ pub fn evaluate_patch_state(facts: &[PatchFact]) -> Vec<Finding> {
                 remedy: "inside the container: `systemctl status apt-daily-upgrade.timer` and                          `unattended-upgrade -d`; the golden template carries the working                          configuration"
                     .into(),
             }),
+            // A container younger than the threshold has not had its week
+            // yet (the first check after the 2026-09-28 rebuilds flagged
+            // seven containers built that morning).
+            None if f.age_s.is_some_and(|a| a <= PATCH_THRESHOLD_S) => {}
             None => out.push(Finding {
                 severity: Severity::Drift,
                 subject,

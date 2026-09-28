@@ -65,9 +65,12 @@ storage:
     app: actual
   - host_path: /appdata/paperwork/stirling-config
     mount_point: /appdata/paperwork/stirling-config
-    # Stirling-PDF runs as root inside the container; 100000 is root mapped
-    # out of an unprivileged LXC.
-    host_owner_uid: 100000
+    # Stirling-PDF's process starts as root, but its entrypoint hands the
+    # data directory to its own user (uid 1000 inside, 101000 out of the
+    # unprivileged LXC): measured 2026-09-28 07:53 after the Debian 13
+    # rebuild, every file 101000:101000. Declaring root made each deploy
+    # chown it back and the fleet check report drift until the next start.
+    host_owner_uid: 101000
     app: stirling
   # paperless keeps its documents, its consume drop-box and its search index
   # here: they grow without bound by design, so the directory is a ZFS

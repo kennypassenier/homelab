@@ -20,6 +20,7 @@ fn fact(vmid: u16, upgradable: u32, reboot_age: Option<u64>, stamp_age: Option<u
         upgradable: Some(upgradable),
         reboot_required_age_s: reboot_age,
         unattended_stamp_age_s: stamp_age,
+        age_s: None,
     }
 }
 
@@ -73,6 +74,21 @@ fn fix_150_a_container_without_any_unattended_run_is_drift() {
     let f = evaluate_patch_state(&[fact(118, 3, None, None)]);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert!(f[0].what.contains("never"), "{:?}", f[0]);
+}
+
+/// fix-150 refinement (2026-09-28 07:52): the first fleet check after the
+/// Debian 13 rebuilds reported "never completed" on seven containers built
+/// that morning. A container younger than the threshold has not had its week
+/// yet; its age comes from the apt lists' own directory (created with the
+/// container), so "never" waits for the threshold like the other two.
+#[test]
+fn fix_150_a_container_younger_than_the_threshold_is_not_judged_for_never() {
+    let mut young = fact(104, 45, None, None);
+    young.age_s = Some(3_600);
+    assert!(evaluate_patch_state(&[young]).is_empty());
+    let mut old = fact(104, 45, None, None);
+    old.age_s = Some(8 * DAY);
+    assert_eq!(evaluate_patch_state(&[old]).len(), 1);
 }
 
 /// The probe prints three lines: upgradable count, reboot-required mtime or

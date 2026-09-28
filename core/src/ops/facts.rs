@@ -764,7 +764,8 @@ pub async fn gather_live_facts_with(
 pub const PATCH_PROBE: &str =
     "apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep -c '^Inst'; \
      stat -c %Y /var/run/reboot-required 2>/dev/null || echo -; \
-     stat -c %Y /var/lib/apt/periodic/upgrade-stamp 2>/dev/null || echo -";
+     stat -c %Y /var/lib/apt/periodic/upgrade-stamp 2>/dev/null || echo -; \
+     stat -c %Y /etc/hostname 2>/dev/null || echo -";
 
 /// fix-150: the probe's three lines into a fact. Anything that is not three
 /// parseable lines is an unknown (`upgradable: None`), never a finding.
@@ -791,6 +792,8 @@ pub fn parse_patch_probe(
     fact.upgradable = Some(upgradable);
     fact.reboot_required_age_s = age(reboot);
     fact.unattended_stamp_age_s = age(stamp);
+    // The fourth line (container age) is optional: an older probe had three.
+    fact.age_s = lines.get(3).and_then(|l| age(l));
     fact
 }
 

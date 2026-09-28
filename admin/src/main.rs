@@ -59,12 +59,21 @@ async fn main() -> std::process::ExitCode {
     // arch-config: read and check the [admin] table only when this run needs
     // it (a start or --check); --help and --version work without a file.
     let config = if app.needs_project_config() {
-        match app
-            .project_config::<config::File>()
-            .map_err(|e| e.to_string())
-            .and_then(|f| f.admin.expanded(&|k| std::env::var(k).ok()))
-            .and_then(|c| c.validate())
-        {
+        // A developer's file ([admin] table) wins; CT 120 has none and
+        // takes every setting from the environment (HOMELAB_ADMIN_*).
+        let has_file = app
+            .project_table()
+            .map(|t| t.contains_key("admin"))
+            .unwrap_or(false);
+        let loaded = if has_file {
+            app.project_config::<config::File>()
+                .map_err(|e| e.to_string())
+                .and_then(|f| f.admin.expanded(&|k| std::env::var(k).ok()))
+                .and_then(|c| c.validate())
+        } else {
+            config::from_env(&|k| std::env::var(k).ok())
+        };
+        match loaded {
             Ok(c) => Some(c),
             Err(e) => {
                 eprintln!("homelab-admin: {e}");

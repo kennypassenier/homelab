@@ -172,6 +172,44 @@ impl AdminConfig {
     }
 }
 
+/// The settings from the environment, `HOMELAB_ADMIN_<KEY>` per key (CT 120:
+/// the unit's `Environment=` lines for the plain values, admin.env for the
+/// secrets). `dev_without_locks` is file-only on purpose: no environment
+/// variable can switch the locks off.
+pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<AdminConfig, String> {
+    const NUMBERS: &[&str] = &[
+        "poll_s",
+        "sse_buffer",
+        "backoff_min_s",
+        "backoff_max_s",
+        "access_leeway_s",
+        "access_certs_refresh_s",
+    ];
+    const STRINGS: &[&str] = &["host", "host_token", "access_team_domain", "access_aud"];
+    let mut t = toml::Table::new();
+    for key in STRINGS {
+        if let Some(v) = lookup(&format!("HOMELAB_ADMIN_{}", key.to_ascii_uppercase())) {
+            t.insert((*key).into(), toml::Value::String(v));
+        }
+    }
+    for key in NUMBERS {
+        if let Some(v) = lookup(&format!("HOMELAB_ADMIN_{}", key.to_ascii_uppercase())) {
+            let n: i64 = v.trim().parse().map_err(|_| {
+                format!(
+                    "HOMELAB_ADMIN_{} = {:?} is not a whole number",
+                    key.to_ascii_uppercase(),
+                    v
+                )
+            })?;
+            t.insert((*key).into(), toml::Value::Integer(n));
+        }
+    }
+    let admin: AdminConfig = toml::Value::Table(t)
+        .try_into()
+        .map_err(|e| format!("the HOMELAB_ADMIN_* settings do not read: {}", e))?;
+    admin.validate()
+}
+
 /// From the TOML table chassis returns for the project.
 pub fn from_table(table: toml::Table) -> Result<AdminConfig, String> {
     let file: File = toml::Value::Table(table)

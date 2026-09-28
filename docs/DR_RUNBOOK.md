@@ -327,11 +327,11 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 - Container: hostname `120-app-admin`, ip `10.10.10.20/24` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 8 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 60.
 - Runs no docker: native systemd services only.
-- Unit `homelab-admin`:
+- Unit `admin`:
   - program `/opt/homelab-admin/bin/homelab-admin`, from the GitHub release `kennypassenier/homelab` (asset `homelab-admin`); update policy manual.
-  - unit file `stacks/admin/homelab-admin/homelab-admin.service` in the repository; the container's copy is `/etc/systemd/system/homelab-admin.service`.
-  - data: repository `rclone:gdrive:homelab-backups/homelab-admin-config`, archive `/homelab-admin-data.tar` holding a tar of `/appdata/admin/admin-config`.
-  - vault copy of homelab-admin (`/appdata/admin/admin-config/admin.env`): `/var/lib/homelab/secrets/admin/admin-config/admin.env`.
+  - unit file `stacks/admin/admin/admin.service` in the repository; the container's copy is `/etc/systemd/system/admin.service`.
+  - data: repository `rclone:gdrive:homelab-backups/admin-config`, archive `/admin-data.tar` holding a tar of `/appdata/admin/admin-config`.
+  - vault copy of admin (`/appdata/admin/admin-config/admin.env`): `/var/lib/homelab/secrets/admin/admin-config/admin.env`.
   - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/admin`. Adoption only records a service that is already active; it never starts one.
 - Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
 

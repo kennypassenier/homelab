@@ -531,7 +531,7 @@ Findings these tests pin:
 Tests:
 
 - `kp_soft_declares_its_live_firewall_plus_kennys_kuma_rule`: CT 116's declaration renders to the file on pve (captured byte for byte on 2026-09-27) with exactly three differences: the provenance line on top, the rule Kenny added that day letting Uptime Kuma's HTTP monitor in (form item kp-soft-kuma-firewall: "Kuma HTTP toelaten, firewall in de repo"), and the Loki push going to the metrics stack (10.10.10.13) instead of the gateway, where Loki no longer runs since fix-90 (2026-09-28: without it CT 116's Alloy would push into a closed port). *(pins fix-89)*
-- `every_stack_declares_a_firewall_and_only_kp_soft_enables_it`: Every compose stack declares a firewall, and in this change only kp-soft's is switched on. *(pins fix-89)*
+- `every_stack_declares_a_firewall_and_only_kp_soft_enables_it`: Every compose stack declares a firewall, and only kp-soft's and admin's are switched on. *(pins fix-89)*
 - `the_gateway_declaration_opens_port_80_to_nobody`: traefik-lan-host-header-bypass: the gateway's declaration opens port 80 to nobody, so switching it on closes the Host-header route to the Proxmox and OPNsense logins. *(pins fix-89)*
 - `every_measured_flow_passes_the_declared_firewalls_at_both_ends`: Every measured flow passes the declared firewall at both ends, read the way Proxmox reads it — including the declarations not yet enabled, which is the point: they are switched on later, one at a time, and must not break a real connection on that day. *(pins fix-89)*
 - `the_logins_stay_out_of_reach_from_the_neighbours`: And what the findings are about stays shut once a stack is switched on: no neighbour reaches Traefik's port 80 (the Host-header route to the logins), and no container but the ones that declare it reaches pve's or OPNsense's GUI. *(pins fix-89)*
@@ -1767,7 +1767,7 @@ Findings these tests pin:
 
 Tests:
 
-- `the_routes_in_the_repository_pass_and_cover_every_public_hostname`: The repository as it stands passes, and it now accounts for all 25 public hostnames measured on the gateway on 2026-09-27 (Traefik's API: 26 file routers, 25 hostnames). *(pins fix-92)*
+- `the_routes_in_the_repository_pass_and_cover_every_public_hostname`: The repository as it stands passes, and it now accounts for all 25 public hostnames measured on the gateway on 2026-09-27 (Traefik's API: 26 file routers, 25 hostnames), plus admin.kp-soft.dev for the dashboard on CT 120 (stacks/admin, 2026-09-28): 26 hostnames. *(pins fix-92)*
 - `plan_refuses_a_hostname_another_stack_already_routes`: `homelab plan` refuses a stack whose hostname another stack already routes, and names both files — before anything reaches the host. *(pins fix-92)*
 - `a_route_file_that_does_not_parse_is_refused`: A route file that is not YAML is a problem, not a silent pass: a file the check cannot read is one whose hostnames it never compared. *(pins fix-92)*
 - `hostnames_are_read_from_every_router_rule`: Hostnames come from every router rule: a second router on the same host (almanac's `/metrics` block) repeats it, both names of the older `Host(a, b)` form count, and `HostSNI` is not a hostname. *(pins fix-92)*

@@ -1,10 +1,10 @@
-# homelab-admin — the golden chassis-rs unit (as in stacks/inbox/).
+# admin — homelab-admin, the golden chassis-rs unit (as in stacks/inbox/).
 #
 # homelab installs it: the unit file, the system user (uid 999 in a fresh
 # container, which is why stacks/admin/lxc-compose.yml maps 100999), the
-# signed binary from the homelab release, and admin.env from latch. The
-# settings are /etc/homelab-admin/config.toml (from rootfs/), the state and
-# the working copy live under /appdata/admin/admin-config.
+# signed binary from the homelab release, and admin.env (the secrets). The
+# plain settings are the Environment= lines below; state and the working
+# copy live under /appdata/admin/admin-config.
 #
 # StartLimitIntervalSec/Burst belong in [Unit]; Type=notify makes the unit
 # active only once the service bound its socket; ReadWritePaths covers the
@@ -19,8 +19,8 @@ StartLimitBurst=0
 
 [Service]
 Type=notify
-User=homelab-admin
-Group=homelab-admin
+User=admin
+Group=admin
 EnvironmentFile=/appdata/admin/admin-config/admin.env
 WorkingDirectory=/appdata/admin/admin-config
 ExecStartPre=/opt/homelab-admin/bin/homelab-admin --check
@@ -34,12 +34,19 @@ TimeoutStopSec=60
 # Mirrored so `--check` can warn when the shutdown timeout would outlive it (critic #20).
 Environment=HOMELAB_ADMIN_TIMEOUT_STOP_SECS=60
 Environment=HOMELAB_ADMIN_STATE_DIR=/appdata/admin/admin-config
-Environment=HOMELAB_ADMIN_CONFIG=/etc/homelab-admin/config.toml
 Environment=HOMELAB_ADMIN_LISTEN=10.10.10.20:8090
 # Traefik on CT 104: the only proxy whose forwarded headers are believed.
 Environment=HOMELAB_ADMIN_TRUSTED_PROXIES=10.10.10.4
 # Passkeys need the name the browser sees (arch-exposure: OpenSSL accepted).
 Environment=HOMELAB_ADMIN_PUBLIC_URL=https://admin.kp-soft.dev
+# The dashboard's own settings (arch-config); secrets come from admin.env.
+Environment=HOMELAB_ADMIN_HOST=10.10.10.250:8443
+Environment=HOMELAB_ADMIN_POLL_S=10
+# arch-exposure: the Access application every kp-soft.dev name sits behind
+# ("*.kp-soft.dev", read from the Access API 2026-09-28); not secrets, both
+# are in every token Access issues.
+Environment=HOMELAB_ADMIN_ACCESS_TEAM_DOMAIN=mendax1.cloudflareaccess.com
+Environment=HOMELAB_ADMIN_ACCESS_AUD=e76eb55877d9f58d4f7194e5248419251ac0528a1c9082f090799de91b22221b
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

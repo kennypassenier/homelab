@@ -40,11 +40,11 @@ storage:
     # gets uid 999 (measured on CT 118 2026-09-28: inbox 999, alloy 997
     # after it); 100999 is that uid mapped out of an unprivileged LXC.
     host_owner_uid: 100999
-    app: homelab-admin
+    app: admin
 
 apps: []
 
-natives: [homelab-admin]
+natives: [admin]
 
 extra_routes:
   - filename: manual-admin.yml

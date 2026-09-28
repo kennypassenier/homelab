@@ -59,22 +59,29 @@ fn arch_config_a_secret_comes_from_the_environment_and_an_unset_one_is_an_error(
     assert!(expand("${OPEN", &env).is_err());
 }
 
-/// The config CT 120 runs with reads, validates, and keeps both locks on.
+/// The settings CT 120 runs with (the unit's Environment= lines plus the
+/// secret from admin.env) read, validate, and cannot switch the locks off.
 #[test]
-fn arch_exposure_the_stacks_config_keeps_the_locks_on() {
+fn arch_exposure_the_stacks_settings_keep_the_locks_on() {
+    use homelab_admin::core::config::from_env;
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../stacks/admin/rootfs/etc/homelab-admin/config.toml"
+        "/../stacks/admin/admin/admin.service"
     );
-    let text = std::fs::read_to_string(path).unwrap();
-    assert!(
-        !text.contains("dev_without_locks"),
-        "the stack's config may not name the switch at all"
+    let unit = std::fs::read_to_string(path).unwrap();
+    assert!(!unit.contains("LOCKS"), "no variable may name the locks");
+    let mut env: std::collections::BTreeMap<String, String> = unit
+        .lines()
+        .filter_map(|l| l.strip_prefix("Environment="))
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    env.insert(
+        "HOMELAB_ADMIN_HOST_TOKEN".into(),
+        "0123456789abcdef0123".into(),
     );
-    let c = from_table(table(
-        &text.replace("${HOMELAB_ADMIN_HOST_TOKEN}", "0123456789abcdef0123"),
-    ))
-    .unwrap();
+    let c = from_env(&|k| env.get(k).cloned()).unwrap();
     assert!(!c.dev_without_locks);
+    assert_eq!(c.host, "10.10.10.250:8443");
     assert_eq!(c.access_team_domain, "mendax1.cloudflareaccess.com");
 }

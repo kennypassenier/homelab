@@ -1,7 +1,7 @@
 stack_name: admin
 vmid: 120
 hostname: 120-app-admin
-unit: homelab-admin
+unit: admin
 binary: /opt/homelab-admin/bin/homelab-admin
 # Filled by latch (environment `admin`): HOMELAB_ADMIN_TOKEN,
 # HOMELAB_ADMIN_SECRET_KEY and HOMELAB_ADMIN_HOST_TOKEN.

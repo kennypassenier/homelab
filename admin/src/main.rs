@@ -87,7 +87,10 @@ async fn main() -> std::process::ExitCode {
     app.webapp(WebApp::embedded(FILES));
     app.nav_entry("Fleet", "/app/");
     app.dashboard_routes(live.router("/events"));
-    app.dashboard_routes(routes::router(shared.clone()));
+    // Doctor reads for about a minute on pve (fix-68), so the pages wait up
+    // to two for an answer.
+    let (host_client, host_asks) = host_link::HostClient::new(std::time::Duration::from_secs(120));
+    app.dashboard_routes(routes::router(shared.clone(), host_client));
 
     if let Some(c) = &config {
         // arch-exposure: the two locks, before every route but /healthz.
@@ -124,6 +127,7 @@ async fn main() -> std::process::ExitCode {
                 },
                 shared,
                 live,
+                host_asks,
             ));
         });
     }

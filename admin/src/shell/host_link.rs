@@ -4,15 +4,21 @@
 //! host for the fleet every `poll` interval, keeps the newest snapshot for
 //! pages that load later, and republishes every change over the chassis
 //! `live` channel. A dropped line is reopened with a capped backoff; nothing
-//! mutating is ever resent on reconnect (the skeleton sends only reads).
+//! mutating is ever resent on reconnect.
+//!
+//! Pages ask the host through a [`HostClient`]: a command goes out on the one
+//! session with its own id, and the reply with that id comes back to the
+//! caller. A request still open when the line drops is answered "outcome
+//! unknown", never sent again (arch-host-link).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chassis::shell::live::Live;
 use futures_util::{SinkExt, StreamExt};
-use homelab_proto::{Command, RpcRequest, ServerMsg};
-use tokio::sync::RwLock;
+use homelab_proto::{Command, RpcRequest, RpcResponse, ServerMsg};
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::core::fleet::{fleet_view, FleetView};
@@ -40,6 +46,40 @@ pub struct Snapshot {
 
 pub type Shared = Arc<RwLock<Snapshot>>;
 
+type Reply = oneshot::Sender<Result<RpcResponse, String>>;
+
+/// The pages' way to ask the host something.
+#[derive(Clone)]
+pub struct HostClient {
+    tx: mpsc::Sender<(Command, Reply)>,
+    timeout: Duration,
+}
+
+impl HostClient {
+    /// A client and the receiving end the link task drains.
+    pub fn new(timeout: Duration) -> (Self, mpsc::Receiver<(Command, Reply)>) {
+        let (tx, rx) = mpsc::channel(64);
+        (HostClient { tx, timeout }, rx)
+    }
+
+    /// Send one command and wait for its reply, at most `timeout`.
+    pub async fn ask(&self, command: Command) -> Result<RpcResponse, String> {
+        let (reply, wait) = oneshot::channel();
+        self.tx
+            .send((command, reply))
+            .await
+            .map_err(|_| "the host link is not running".to_string())?;
+        match tokio::time::timeout(self.timeout, wait).await {
+            Ok(Ok(answer)) => answer,
+            Ok(Err(_)) => Err("the host link stopped before the answer came".into()),
+            Err(_) => Err(format!(
+                "no answer from the host within {} s",
+                self.timeout.as_secs()
+            )),
+        }
+    }
+}
+
 pub struct LinkConfig {
     pub poll: Duration,
     pub backoff_min: Duration,
@@ -54,10 +94,16 @@ fn now_s() -> u64 {
 }
 
 /// Runs until the process ends.
-pub async fn run(target: HostTarget, cfg: LinkConfig, shared: Shared, live: Live) {
+pub async fn run(
+    target: HostTarget,
+    cfg: LinkConfig,
+    shared: Shared,
+    live: Live,
+    mut asks: mpsc::Receiver<(Command, Reply)>,
+) {
     let mut backoff = cfg.backoff_min;
     loop {
-        match session(&target, &cfg, &shared, &live).await {
+        match session(&target, &cfg, &shared, &live, &mut asks).await {
             Ok(()) => backoff = cfg.backoff_min,
             Err(e) => {
                 tracing::warn!(error = %e, "host link down");
@@ -75,6 +121,26 @@ async fn session(
     cfg: &LinkConfig,
     shared: &Shared,
     live: &Live,
+    asks: &mut mpsc::Receiver<(Command, Reply)>,
+) -> Result<(), String> {
+    let mut pending: HashMap<u64, Reply> = HashMap::new();
+    let result = session_loop(target, cfg, shared, live, asks, &mut pending).await;
+    // arch-host-link: whatever was asked and not answered is not sent again.
+    for (_, reply) in pending.drain() {
+        let _ = reply.send(Err(
+            "the line to the host dropped before the answer; the outcome is unknown".into(),
+        ));
+    }
+    result
+}
+
+async fn session_loop(
+    target: &HostTarget,
+    cfg: &LinkConfig,
+    shared: &Shared,
+    live: &Live,
+    asks: &mut mpsc::Receiver<(Command, Reply)>,
+    pending: &mut HashMap<u64, Reply>,
 ) -> Result<(), String> {
     let built_in = homelab_client::repo_config::built_in_pin();
     let link = homelab_client::link::connect(&target.addr, &target.token, None, built_in).await?;
@@ -85,6 +151,14 @@ async fn session(
 
     loop {
         tokio::select! {
+            Some((command, reply)) = asks.recv(), if greeted => {
+                let id = next_id;
+                next_id += 1;
+                let req = RpcRequest { id, command };
+                let text = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+                pending.insert(id, reply);
+                tx.send(Message::Text(text.into())).await.map_err(|e| format!("send: {e}"))?;
+            }
             _ = tick.tick(), if greeted => {
                 let req = RpcRequest { id: next_id, command: Command::GetState };
                 next_id += 1;
@@ -130,6 +204,11 @@ async fn session(
                         // "measured x ago" stays honest, and `changed` lets
                         // the page flash only what moved.
                         let _ = live.publish("fleet", &serde_json::json!({ "changed": changed, "fleet": view }));
+                    }
+                    ServerMsg::RpcDone(resp) => {
+                        if let Some(reply) = pending.remove(&resp.id) {
+                            let _ = reply.send(Ok(resp));
+                        }
                     }
                     _ => {}
                 }

@@ -1119,6 +1119,7 @@ name = "homelab-admin"
 version = "3.61.4"
 dependencies = [
  "axum",
+ "base64",
  "chassis",
  "futures-util",
  "homelab-client",

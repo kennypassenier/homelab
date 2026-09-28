@@ -64,22 +64,31 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-${{ runner.os }}-
-      - name: Test gate (AR9 — releases are never exempt)
+      - name: Test gate (commit subset; the full suite ran locally)
         # --locked everywhere: the release must be built from what Cargo.lock
         # pins, which is what CI tested (F235).
+        # dev-procedure rule 7 as amended 2026-09-28 (Kenny): the full suite
+        # runs on the release machine (`make release` runs `make gate`), not
+        # here; this job keeps the cheap checks and the commit subset.
         run: |
           rustup component add rustfmt clippy
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
-          cargo test --workspace --locked
+          .githooks/test-subset.sh --locked
       - name: Build release binaries
-        run: cargo build --release --locked -p homelab-host -p homelab-client
+        # homelab-admin (the dashboard) is built on its own: with chassis-rs in
+        # the same build, rustls would carry two crypto providers into the
+        # host and the client (measured 2026-09-28).
+        run: |
+          cargo build --release --locked -p homelab-host -p homelab-client
+          cargo build --release --locked -p homelab-admin
       - name: Package
         run: |
           mkdir -p dist
           cp target/release/homelab-host dist/homelab-host
           cp target/release/homelab dist/homelab
-          cd dist && sha256sum homelab-host homelab > SHA256SUMS
+          cp target/release/homelab-admin dist/homelab-admin
+          cd dist && sha256sum homelab-host homelab homelab-admin > SHA256SUMS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-binaries
@@ -105,5 +114,6 @@ jobs:
           files: |
             dist/homelab-host
             dist/homelab
+            dist/homelab-admin
             dist/SHA256SUMS
           generate_release_notes: true

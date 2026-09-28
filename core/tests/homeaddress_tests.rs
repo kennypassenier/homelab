@@ -6,11 +6,10 @@
 //! traffic can never ban the house.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::ops::devicebackup::DeviceBackup;
 use homelab_core::ops::fleetcheck::{alarming, Severity};
 use homelab_core::ops::homeaddress::{
-    evaluate_home_address, router, sync_home_address, wan_address, whitelist_yaml,
-    whitelisted_address, WHITELIST_FILE,
+    evaluate_home_address, parse_public, sync_home_address, whitelist_yaml, whitelisted_address,
+    WHITELIST_FILE,
 };
 use homelab_core::ops::util::staging_path;
 use homelab_core::ops::OpCtx;
@@ -40,31 +39,6 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
     }
 }
 
-/// The device-backup entry host.toml carries on pve today (read 2026-09-27):
-/// its credential and pin are what the address read reuses.
-fn opnsense() -> DeviceBackup {
-    DeviceBackup {
-        name: "opnsense".into(),
-        url: "https://10.10.10.1/api/core/backup/download/this".into(),
-        cred_file: "/var/lib/homelab/secrets/opnsense-backup.conf".into(),
-        filename: "config.xml".into(),
-        pin: Some("sha256//oZKgUOWR56fT3HYG68aGVn7s1saleArMf75StP1KaUE=".into()),
-        ca_file: None,
-    }
-}
-
-/// The shape `GET /api/interfaces/overview/interfacesInfo` returned on
-/// 2026-09-27, cut down to the fields that matter.
-fn interfaces(wan: &str) -> String {
-    format!(
-        r#"{{"total":3,"rowCount":3,"current":1,"rows":[
-{{"identifier":"lan","description":"LAN","device":"vtnet0","ipv4":[{{"ipaddr":"10.10.5.1/24"}}],"addr4":"10.10.5.1/24","addr6":""}},
-{{"identifier":"wan","description":"WAN","device":"vtnet1","ipv4":[{{"ipaddr":"{wan}"}}],"addr4":"{wan}","addr6":""}},
-{{"identifier":"","description":"Unassigned Interface","device":"enc0","ipv4":[],"addr4":null,"addr6":null}}
-]}}"#
-    )
-}
-
 fn home(addr: &str) -> std::net::Ipv4Addr {
     addr.parse().unwrap()
 }
@@ -76,40 +50,6 @@ fn saved_state(exec: &MockExecutor) -> HostState {
             .expect("state was not saved"),
     )
     .unwrap()
-}
-
-/// covers: fix-94
-///
-/// The router's own view of its WAN interface is the address the house
-/// appears as on the internet. Anything else is refused rather than
-/// whitelisted: a private or carrier-grade address there means a modem in
-/// front of the router holds the public one, and whitelisting the private
-/// one would exempt nobody.
-#[test]
-fn the_wan_address_is_read_from_the_routers_interface_list() {
-    assert_eq!(
-        wan_address(&interfaces("62.235.8.143/21")),
-        Ok(home("62.235.8.143"))
-    );
-
-    for private in ["192.168.1.2/24", "100.64.3.9/10", "10.0.0.2/8"] {
-        let err = wan_address(&interfaces(private)).unwrap_err();
-        assert!(err.contains("not a public address"), "{}: {}", private, err);
-    }
-
-    let no_wan = r#"{"rows":[{"identifier":"lan","addr4":"10.10.5.1/24"}]}"#;
-    assert!(wan_address(no_wan)
-        .unwrap_err()
-        .contains("no WAN interface"));
-
-    let no_address = r#"{"rows":[{"identifier":"wan","addr4":null,"ipv4":[]}]}"#;
-    assert!(wan_address(no_address)
-        .unwrap_err()
-        .contains("has no IPv4 address"));
-
-    assert!(wan_address("<html>login</html>")
-        .unwrap_err()
-        .contains("not JSON"));
 }
 
 /// covers: fix-94
@@ -132,21 +72,6 @@ fn the_whitelist_names_the_address_and_reads_it_back() {
 
 /// covers: fix-94
 ///
-/// The router is the device-backup entry named `opnsense`: the address read
-/// reuses its credential rather than bringing a new secret.
-#[test]
-fn the_router_is_the_opnsense_device_backup() {
-    let other = DeviceBackup {
-        name: "switch".into(),
-        ..opnsense()
-    };
-    assert_eq!(router(&[other.clone(), opnsense()]), Some(&opnsense()));
-    assert_eq!(router(&[other]), None);
-    assert_eq!(router(&[]), None);
-}
-
-/// covers: fix-94
-///
 /// A new address rewrites the file and reloads CrowdSec, and the log says
 /// from what to what. The read reuses the device backup's credential file and
 /// pin, keeps the credential out of argv, and keeps the router's interface
@@ -159,36 +84,28 @@ async fn a_changed_address_rewrites_the_whitelist_and_reloads_crowdsec() {
         CmdOutput::ok(&whitelist_yaml(home("62.235.8.100"))),
     );
     exec.respond_always(
-        "interfacesInfo",
-        CmdOutput::ok(&interfaces("62.235.8.143/21")),
+        "cdn-cgi/trace",
+        CmdOutput::ok("fl=1\nh=cloudflare.com\nip=62.235.8.143\nts=1\n"),
     );
     let sink = VecSink::new();
     let j = NullJournal;
 
-    let report = sync_home_address(&ctx(&exec, &sink, &j), &opnsense()).await;
+    let report = sync_home_address(&ctx(&exec, &sink, &j)).await;
     assert!(report.ok, "{:?}", report.error);
 
     let calls = exec.calls();
-    let curl = calls
-        .iter()
-        .find(|c| c.contains("interfacesInfo"))
-        .expect("the router was never asked");
     assert!(
-        curl.contains("-K /var/lib/homelab/secrets/opnsense-backup.conf"),
-        "{}",
-        curl
+        calls
+            .iter()
+            .any(|c| c.contains("https://cloudflare.com/cdn-cgi/trace")),
+        "cloudflare was never asked: {:#?}",
+        calls
     );
     assert!(
-        curl.contains("--pinnedpubkey sha256//oZKgUOWR56fT3HYG68aGVn7s1saleArMf75StP1KaUE="),
-        "{}",
-        curl
+        !calls.iter().any(|c| c.contains("10.10.10.1")),
+        "the router is not asked any more: {:#?}",
+        calls
     );
-    assert!(
-        curl.ends_with("https://10.10.10.1/api/interfaces/overview/interfacesInfo"),
-        "{}",
-        curl
-    );
-    assert!(!curl.contains(" -u "), "{}", curl);
 
     assert!(
         calls
@@ -237,13 +154,13 @@ async fn an_unchanged_address_touches_nothing() {
         CmdOutput::ok(&whitelist_yaml(home("62.235.8.143"))),
     );
     exec.respond_always(
-        "interfacesInfo",
-        CmdOutput::ok(&interfaces("62.235.8.143/21")),
+        "cdn-cgi/trace",
+        CmdOutput::ok("fl=1\nh=cloudflare.com\nip=62.235.8.143\nts=1\n"),
     );
     let sink = VecSink::new();
     let j = NullJournal;
 
-    let report = sync_home_address(&ctx(&exec, &sink, &j), &opnsense()).await;
+    let report = sync_home_address(&ctx(&exec, &sink, &j)).await;
     assert!(report.ok, "{:?}", report.error);
 
     let calls = exec.calls();
@@ -268,13 +185,13 @@ async fn an_unchanged_address_touches_nothing() {
 async fn the_first_run_writes_the_whitelist() {
     let exec = MockExecutor::new();
     exec.respond_always(
-        "interfacesInfo",
-        CmdOutput::ok(&interfaces("62.235.8.143/21")),
+        "cdn-cgi/trace",
+        CmdOutput::ok("fl=1\nh=cloudflare.com\nip=62.235.8.143\nts=1\n"),
     );
     let sink = VecSink::new();
     let j = NullJournal;
 
-    let report = sync_home_address(&ctx(&exec, &sink, &j), &opnsense()).await;
+    let report = sync_home_address(&ctx(&exec, &sink, &j)).await;
     assert!(report.ok, "{:?}", report.error);
     assert!(exec.calls().iter().any(|c| c.contains("HUP")));
     assert!(sink
@@ -296,18 +213,20 @@ async fn an_unreadable_address_keeps_the_last_known_one() {
         &format!("cat '{}'", WHITELIST_FILE),
         CmdOutput::ok(&whitelist_yaml(home("62.235.8.143"))),
     );
-    exec.respond_always(
-        "interfacesInfo",
-        CmdOutput {
-            stdout: r#"{"status":403,"message":"Forbidden"}"#.into(),
-            stderr: "curl: (22) The requested URL returned error: 403".into(),
-            code: 22,
-        },
-    );
+    for source in ["cdn-cgi/trace", "api.ipify.org"] {
+        exec.respond_always(
+            source,
+            CmdOutput {
+                stdout: String::new(),
+                stderr: "curl: (22) The requested URL returned error: 403".into(),
+                code: 22,
+            },
+        );
+    }
     let sink = VecSink::new();
     let j = NullJournal;
 
-    let report = sync_home_address(&ctx(&exec, &sink, &j), &opnsense()).await;
+    let report = sync_home_address(&ctx(&exec, &sink, &j)).await;
     assert!(report.ok, "{:?}", report.error);
 
     let calls = exec.calls();
@@ -349,8 +268,8 @@ async fn a_whitelist_crowdsec_refuses_is_put_back() {
     let before = whitelist_yaml(home("62.235.8.100"));
     exec.respond_always(&format!("cat '{}'", WHITELIST_FILE), CmdOutput::ok(&before));
     exec.respond_always(
-        "interfacesInfo",
-        CmdOutput::ok(&interfaces("62.235.8.143/21")),
+        "cdn-cgi/trace",
+        CmdOutput::ok("fl=1\nh=cloudflare.com\nip=62.235.8.143\nts=1\n"),
     );
     exec.respond_always(
         "crowdsec -c /etc/crowdsec/config.yaml -t",
@@ -359,7 +278,7 @@ async fn a_whitelist_crowdsec_refuses_is_put_back() {
     let sink = VecSink::new();
     let j = NullJournal;
 
-    let report = sync_home_address(&ctx(&exec, &sink, &j), &opnsense()).await;
+    let report = sync_home_address(&ctx(&exec, &sink, &j)).await;
     assert!(!report.ok);
 
     let calls = exec.calls();
@@ -389,4 +308,67 @@ fn a_readable_address_is_no_finding() {
     };
     assert!(evaluate_home_address(&st).is_empty());
     assert!(evaluate_home_address(&HostState::default()).is_empty());
+}
+
+/// fix-156: Cloudflare's trace and ipify's bare answer both read; a private
+/// or garbled answer is refused, never whitelisted.
+/// covers: fix-156
+#[test]
+fn fix_156_a_public_service_answer_is_read_and_checked() {
+    assert_eq!(
+        parse_public("fl=1\nh=cloudflare.com\nip=62.235.8.143\nts=1\n").unwrap(),
+        home("62.235.8.143")
+    );
+    assert_eq!(
+        parse_public("62.235.8.143\n").unwrap(),
+        home("62.235.8.143")
+    );
+    assert!(parse_public("ip=192.168.1.10")
+        .unwrap_err()
+        .contains("not a public"));
+    assert!(parse_public("<html>blocked</html>").is_err());
+}
+
+/// fix-156: when Cloudflare does not answer, ipify does.
+/// covers: fix-156
+#[tokio::test]
+async fn fix_156_ipify_answers_when_cloudflare_does_not() {
+    let exec = MockExecutor::new();
+    exec.respond_always(&format!("cat '{}'", WHITELIST_FILE), CmdOutput::ok(""));
+    exec.respond_always(
+        "cdn-cgi/trace",
+        CmdOutput {
+            stdout: String::new(),
+            stderr: "timeout".into(),
+            code: 28,
+        },
+    );
+    exec.respond_always("api.ipify.org", CmdOutput::ok("62.235.8.143"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = sync_home_address(&ctx(&exec, &sink, &j)).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        saved_state(&exec).home_address.as_deref(),
+        Some("62.235.8.143")
+    );
+}
+
+/// fix-156: no address at all is broken (the house can be banned and the
+/// dashboard refuses it); a last known one is only noted.
+/// covers: fix-156
+#[test]
+fn fix_156_no_address_is_broken_a_last_known_one_is_noted() {
+    use homelab_core::ops::fleetcheck::Severity;
+    let none = HostState {
+        home_address_error: Some("timeout".into()),
+        home_address_checked: NOW,
+        ..Default::default()
+    };
+    assert_eq!(evaluate_home_address(&none)[0].severity, Severity::Broken);
+    let kept = HostState {
+        home_address: Some("62.235.8.143".into()),
+        ..none
+    };
+    assert_eq!(evaluate_home_address(&kept)[0].severity, Severity::Noted);
 }

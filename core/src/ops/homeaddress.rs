@@ -24,7 +24,6 @@ use std::net::Ipv4Addr;
 
 use crate::error::CoreError;
 use crate::executor::{pct_sh, Cmd, Executor};
-use crate::ops::devicebackup::{tls_args, DeviceBackup};
 use crate::ops::fleetcheck::{Finding, Severity};
 use crate::ops::util::{push_content, shq};
 use crate::ops::OpCtx;
@@ -51,88 +50,12 @@ pub const ROUTER_DEVICE: &str = "opnsense";
 pub const WHITELIST_FILE: &str =
     "/appdata/gateway/crowdsec-config/parsers/s02-enrich/homelab-home-address.yaml";
 
-/// OPNsense's interface overview: every interface with its addresses. The
-/// WAN row carries the public address when the router holds it itself, which
-/// it does here (measured 2026-09-27: `wan` on vtnet1, 62.235.8.143/21).
-const INTERFACES_PATH: &str = "/api/interfaces/overview/interfacesInfo";
-
 /// The same pair CrowdSec's own systemd unit runs for `reload`: test the
 /// configuration, then HUP the running process. The test matters because
 /// CrowdSec exits on a reload it cannot load, and the bouncer fails closed —
 /// a bad whitelist would turn into 403 for every name in the house.
 const CONFIG_TEST: &str = "docker exec crowdsec crowdsec -c /etc/crowdsec/config.yaml -t -error";
 const RELOAD: &str = "docker kill --signal=HUP crowdsec";
-
-/// The router among the configured device backups, if there is one. None =
-/// the feature is off: there is nothing to ask and nothing to report.
-pub fn router(devices: &[DeviceBackup]) -> Option<&DeviceBackup> {
-    devices.iter().find(|d| d.name == ROUTER_DEVICE)
-}
-
-/// `https://10.10.10.1/api/core/backup/download/this` → the interface list
-/// on the same host.
-fn interfaces_url(device_url: &str) -> Option<String> {
-    let scheme_end = device_url.find("://")? + 3;
-    let host_end = device_url[scheme_end..]
-        .find('/')
-        .map(|i| scheme_end + i)
-        .unwrap_or(device_url.len());
-    Some(format!("{}{}", &device_url[..host_end], INTERFACES_PATH))
-}
-
-/// The router's WAN address from its interface list, if it is one the
-/// internet can see the house as.
-///
-/// A private or carrier-grade address on the WAN means a modem or the ISP
-/// holds the public one in front of the router. Whitelisting what the router
-/// has would then exempt nobody while the log said it had, so it is refused.
-/// IPv4 only: the WAN has no IPv6 address (measured 2026-09-27).
-pub fn wan_address(json: &str) -> Result<Ipv4Addr, String> {
-    let v: serde_json::Value = serde_json::from_str(json).map_err(|_| {
-        "the answer is not JSON (a login page or an error page is a plausible 200)".to_string()
-    })?;
-    let rows = v.get("rows").and_then(|r| r.as_array()).ok_or_else(|| {
-        "the answer has no interface list (`rows`) — has the API changed?".to_string()
-    })?;
-    let wan = rows
-        .iter()
-        .find(|r| r.get("identifier").and_then(|i| i.as_str()) == Some("wan"))
-        .ok_or_else(|| "the router reports no WAN interface".to_string())?;
-    let with_prefix = wan
-        .get("addr4")
-        .and_then(|a| a.as_str())
-        .filter(|a| !a.is_empty())
-        .or_else(|| {
-            wan.get("ipv4")
-                .and_then(|l| l.as_array())
-                .and_then(|l| l.first())
-                .and_then(|a| a.get("ipaddr"))
-                .and_then(|a| a.as_str())
-        })
-        .ok_or_else(|| "the WAN interface has no IPv4 address (link down?)".to_string())?;
-    let bare = with_prefix.split('/').next().unwrap_or(with_prefix);
-    let addr: Ipv4Addr = bare
-        .parse()
-        .map_err(|_| format!("the WAN address `{}` does not parse", with_prefix))?;
-    let o = addr.octets();
-    let carrier_grade = o[0] == 100 && (o[1] & 0xc0) == 64;
-    if addr.is_private()
-        || carrier_grade
-        || addr.is_loopback()
-        || addr.is_link_local()
-        || addr.is_unspecified()
-        || addr.is_broadcast()
-        || addr.is_documentation()
-        || addr.is_multicast()
-    {
-        return Err(format!(
-            "the WAN address {} is not a public address — the house's public one sits on \
-             a device in front of the router, which this cannot read",
-            addr
-        ));
-    }
-    Ok(addr)
-}
 
 /// The whitelist, as CrowdSec reads it. No timestamp in it on purpose: the
 /// content changes only when the address does, so an unchanged address
@@ -171,31 +94,62 @@ pub fn whitelisted_address(yaml: &str) -> Option<Ipv4Addr> {
     None
 }
 
-/// Ask the router for its WAN address, with the device backup's credential.
-async fn read_wan(exec: &dyn Executor, router: &DeviceBackup) -> Result<Ipv4Addr, String> {
-    let url = interfaces_url(&router.url)
-        .ok_or_else(|| format!("no router address in `{}`", router.url))?;
-    let mut args: Vec<String> = vec![
-        "-sS".into(),
-        "--fail-with-body".into(),
-        "--max-time".into(),
-        "20".into(),
-    ];
-    args.extend(tls_args(router));
-    // `-K`: the credential reaches curl through its config file, never argv
-    // (rule 10, the same reason as the device backup).
-    args.extend(["-K".to_string(), router.cred_file.clone(), url]);
-    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-    // Quiet: the answer lists every interface, address and MAC in the house,
-    // and the transcript needs only the one address this takes from it.
-    let out = exec
-        .run(&Cmd::new("curl", &argv, 30).quiet())
-        .await
-        .map_err(|e| e.to_string())?;
-    if !out.success() {
-        return Err(format!("curl exit {}: {}", out.code, out.stderr.trim()));
+/// fix-156 (Kenny, 2026-09-28: "why would we ask the router? there are a
+/// lot of free services that give you your public IP"): the house's address
+/// is what a public service sees this host come from. The router read of
+/// fix-94 never worked on pve (the backup key may not read the interfaces,
+/// 403), so the whitelist and the dashboard's second lock had no address.
+/// Measured 2026-09-28 15:43: pve, CT 120 and WSL leave from one address.
+pub const PUBLIC_SOURCES: &[(&str, &str)] = &[
+    ("cloudflare", "https://cloudflare.com/cdn-cgi/trace"),
+    ("ipify", "https://api.ipify.org"),
+];
+
+/// Cloudflare's trace (`key=value` lines, `ip=` among them) or a bare
+/// address (ipify); a public IPv4 address, or why not.
+pub fn parse_public(body: &str) -> Result<Ipv4Addr, String> {
+    let raw = body
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("ip="))
+        .unwrap_or(body.trim());
+    let addr: Ipv4Addr = raw.trim().parse().map_err(|_| {
+        format!(
+            "the answer is not an IPv4 address: {:?}",
+            raw.chars().take(60).collect::<String>()
+        )
+    })?;
+    if addr.is_private() || addr.is_loopback() || addr.is_link_local() || addr.is_unspecified() {
+        return Err(format!("{} is not a public address", addr));
     }
-    wan_address(&out.stdout)
+    Ok(addr)
+}
+
+/// Ask the public sources in order; the first public address wins.
+async fn read_public(exec: &dyn Executor) -> Result<Ipv4Addr, String> {
+    let mut why = Vec::new();
+    for (name, url) in PUBLIC_SOURCES {
+        let out = exec
+            .run(&Cmd::new(
+                "curl",
+                &["-sS", "--fail", "--max-time", "10", url],
+                20,
+            ))
+            .await;
+        match out {
+            Ok(o) if o.success() => match parse_public(&o.stdout) {
+                Ok(a) => return Ok(a),
+                Err(e) => why.push(format!("{}: {}", name, e)),
+            },
+            Ok(o) => why.push(format!(
+                "{}: curl exit {}: {}",
+                name,
+                o.code,
+                o.stderr.trim()
+            )),
+            Err(e) => why.push(format!("{}: {}", name, e)),
+        }
+    }
+    Err(why.join("; "))
 }
 
 /// Write the new whitelist, have CrowdSec test it, and reload. A whitelist
@@ -269,7 +223,7 @@ async fn record(ctx: &OpCtx<'_>, runner: &Runner<'_>, kept: Option<Ipv4Addr>, er
 /// address is dynamic). An address that cannot be read is not a failed
 /// operation: a failed operation notifies, and the whitelist still holds the
 /// last known address. It is a noted finding instead.
-pub async fn sync_home_address(ctx: &OpCtx<'_>, router: &DeviceBackup) -> OperationReport {
+pub async fn sync_home_address(ctx: &OpCtx<'_>) -> OperationReport {
     let mut runner = Runner::new("crowdsec-home-address", ctx.sink, ctx.journal);
     let exec = ctx.exec;
     let gw = ctx.safety.gateway_vmid;
@@ -296,13 +250,13 @@ pub async fn sync_home_address(ctx: &OpCtx<'_>, router: &DeviceBackup) -> Operat
     };
     let kept = whitelisted_address(&before);
 
-    let addr = match read_wan(exec, router).await {
+    let addr = match read_public(exec).await {
         Ok(a) => a,
         Err(why) => {
             runner.log(
                 Level::Warn,
                 format!(
-                    "[crowdsec] could not read the router's WAN address ({}) — the whitelist \
+                    "[crowdsec] could not read the house's public address ({}) — the whitelist \
                      {}; nothing was removed",
                     why,
                     match kept {
@@ -371,14 +325,19 @@ pub async fn sync_home_address(ctx: &OpCtx<'_>, router: &DeviceBackup) -> Operat
     }
 }
 
-/// The fleet check's view: a whitelist running on a last known address is
-/// worth seeing, not worth waking anyone for (Noted, Kenny's triage).
+/// The fleet check's view. A whitelist running on a last known address is
+/// worth seeing (Noted); no address at all is Broken since fix-156: the
+/// dashboard's second lock then refuses the house, and CrowdSec can ban it.
 pub fn evaluate_home_address(state: &HostState) -> Vec<Finding> {
     let Some(why) = &state.home_address_error else {
         return Vec::new();
     };
     vec![Finding {
-        severity: Severity::Noted,
+        severity: if state.home_address.is_some() {
+            Severity::Noted
+        } else {
+            Severity::Broken
+        },
         subject: "crowdsec home address".into(),
         what: format!(
             "the last check ({}) could not keep the house's address current ({}); the \
@@ -387,14 +346,14 @@ pub fn evaluate_home_address(state: &HostState) -> Vec<Finding> {
             why,
             match &state.home_address {
                 Some(a) => format!("keeps {}, the last known address", a),
-                None => "holds no home address, so CrowdSec can ban the house".to_string(),
+                None => "holds no home address, so CrowdSec can ban the house and the admin \
+                         dashboard refuses it"
+                    .to_string(),
             }
         ),
-        remedy: format!(
-            "nothing is removed while this stands, and the next gateway deploy or nightly \
-             round tries again. If the house's address changed meanwhile, check that the \
-             `{}` device_backups credential may read `{}`",
-            ROUTER_DEVICE, INTERFACES_PATH
-        ),
+        remedy: "nothing is removed while this stands; the host asks again after the next \
+                 gateway deploy, every night and at its own start. Check that pve reaches \
+                 https://cloudflare.com/cdn-cgi/trace or https://api.ipify.org"
+            .to_string(),
     }]
 }

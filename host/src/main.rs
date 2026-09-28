@@ -733,46 +733,17 @@ mod tests {
         }
     }
 
-    /// covers: fix-94
+    /// covers: fix-94, fix-156
     ///
-    /// The home address is kept current after every gateway deploy that
-    /// finished, and once in every nightly round that asks the router for its
-    /// configuration — the same router, credential and night. Another
-    /// stack's deploy, a failed gateway deploy and a host without the router
-    /// entry leave it alone.
+    /// The home address is read again after every gateway deploy that
+    /// finished; another stack's deploy and a failed gateway deploy leave it
+    /// alone. (Every night and at the host's start it is read regardless.)
     #[test]
-    fn fix_94_the_home_address_follows_gateway_deploys_and_the_nightly_round() {
-        use super::{home_address_after_deploy, home_address_tonight, NightlyTask};
-        use homelab_core::ops::devicebackup::DeviceBackup;
-        let opnsense = DeviceBackup {
-            name: "opnsense".into(),
-            url: "https://10.10.10.1/api/core/backup/download/this".into(),
-            cred_file: "/var/lib/homelab/secrets/opnsense-backup.conf".into(),
-            filename: "config.xml".into(),
-            pin: None,
-            ca_file: None,
-        };
-        let devices = vec![opnsense.clone()];
-
-        assert_eq!(
-            home_address_after_deploy(104, true, 104, &devices),
-            Some(&opnsense)
-        );
-        assert_eq!(home_address_after_deploy(104, false, 104, &devices), None);
-        assert_eq!(home_address_after_deploy(115, true, 104, &devices), None);
-        assert_eq!(home_address_after_deploy(104, true, 104, &[]), None);
-
-        assert_eq!(
-            home_address_tonight(
-                &[NightlyTask::HostMeta, NightlyTask::DeviceConfig],
-                &devices
-            ),
-            Some(&opnsense)
-        );
-        assert_eq!(
-            home_address_tonight(&[NightlyTask::HostMeta], &devices),
-            None
-        );
+    fn fix_94_the_home_address_follows_gateway_deploys() {
+        use super::home_address_after_deploy;
+        assert!(home_address_after_deploy(104, true, 104));
+        assert!(!home_address_after_deploy(104, false, 104));
+        assert!(!home_address_after_deploy(115, true, 104));
     }
 
     /// fix-51 (expert panel, state-writes-race, 2026-09-27): two writers of
@@ -3998,6 +3969,21 @@ async fn main() {
         let st = state.clone();
         tokio::spawn(async move { status_loop(st).await });
     }
+    // fix-156: read the house's address once at start, so a restart (a
+    // release, a power cut) does not leave the dashboard's second lock and
+    // CrowdSec's whitelist without it until the night.
+    {
+        let st = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(20)).await;
+            run_mutating_op(&st, &RealExecutor, 0, "crowdsec-home-address", |ctx| {
+                Box::pin(
+                    async move { homelab_core::ops::homeaddress::sync_home_address(ctx).await },
+                )
+            })
+            .await;
+        });
+    }
 
     // E4: nightly scheduler — backups for every managed stack + auto-policy
     // updates, driven from state.json manifests (no client needed). Reads the
@@ -4198,33 +4184,12 @@ enum NightlyTask {
     IntegrityCheck,
 }
 
-/// fix-94 (crowdsec-home-ip, 2026-09-27): after a gateway deploy, the router
-/// to ask for the house's address. Only a deploy that finished: a failed one
-/// may have left CrowdSec half-started, and reloading it then helps nobody.
-fn home_address_after_deploy(
-    vmid: u16,
-    ok: bool,
-    gateway_vmid: u16,
-    devices: &[homelab_core::ops::devicebackup::DeviceBackup],
-) -> Option<&homelab_core::ops::devicebackup::DeviceBackup> {
-    if !ok || vmid != gateway_vmid {
-        return None;
-    }
-    homelab_core::ops::homeaddress::router(devices)
-}
-
-/// fix-94: the nightly half. The address is dynamic, so it is read once a
-/// night — in the slot that already asks the same router for its
-/// configuration, with the same credential. A night that does not ask the
-/// router does not ask it this either.
-fn home_address_tonight<'a>(
-    plan: &[NightlyTask],
-    devices: &'a [homelab_core::ops::devicebackup::DeviceBackup],
-) -> Option<&'a homelab_core::ops::devicebackup::DeviceBackup> {
-    if !plan.contains(&NightlyTask::DeviceConfig) {
-        return None;
-    }
-    homelab_core::ops::homeaddress::router(devices)
+/// fix-94, fix-156: after a gateway deploy, whether to read the house's
+/// address again. Only a deploy that finished: a failed one may have left
+/// CrowdSec half-started, and reloading it then helps nobody. The address
+/// comes from a public service (fix-156), not the router.
+fn home_address_after_deploy(vmid: u16, ok: bool, gateway_vmid: u16) -> bool {
+    ok && vmid == gateway_vmid
 }
 
 /// H12 pattern: the whole nightly decision as a pure function, so "does the
@@ -5004,14 +4969,11 @@ async fn scheduler_loop(state: AppState) {
         // fix-94: the house's public address is dynamic; keep CrowdSec's
         // whitelist on the gateway equal to it. Cheap when nothing changed:
         // one read of the file, one GET against the router, no write.
-        if let Some(router) = home_address_tonight(&plan, &state.config.device_backups).cloned() {
-            run_mutating_op(&state, &exec, 0, "crowdsec-home-address", |ctx| {
-                Box::pin(async move {
-                    homelab_core::ops::homeaddress::sync_home_address(ctx, &router).await
-                })
-            })
-            .await;
-        }
+        // fix-156: every night, whatever else the night does.
+        run_mutating_op(&state, &exec, 0, "crowdsec-home-address", |ctx| {
+            Box::pin(async move { homelab_core::ops::homeaddress::sync_home_address(ctx).await })
+        })
+        .await;
 
         // fix-96 (single-offsite-copy-no-integrity-check, 2026-09-27): every
         // repository copied into the second repository set, after all of
@@ -6438,18 +6400,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             // its lines reach the client before this deploy's answer does,
             // and a failure there is reported as itself rather than as a
             // failed deploy.
-            if let Some(router) = home_address_after_deploy(
-                vmid,
-                resp.ok,
-                state.config.safety.gateway_vmid,
-                &state.config.device_backups,
-            )
-            .cloned()
-            {
+            if home_address_after_deploy(vmid, resp.ok, state.config.safety.gateway_vmid) {
                 run_mutating_op(state, &exec, req.id, "crowdsec-home-address", |ctx| {
-                    Box::pin(async move {
-                        homelab_core::ops::homeaddress::sync_home_address(ctx, &router).await
-                    })
+                    Box::pin(
+                        async move { homelab_core::ops::homeaddress::sync_home_address(ctx).await },
+                    )
                 })
                 .await;
             }

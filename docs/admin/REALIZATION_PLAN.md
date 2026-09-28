@@ -24,8 +24,8 @@ working; the `tui` cargo feature stays on by default.
 | Milestone | Title | Features | Status |
 |---|---|---|---|
 | skeleton | Het eerste levende pad | feat-platform-5, feat-platform-6 | **done 2026-09-28** (see note) |
-| host | De host leert vertellen | feat-platform-1, feat-platform-2, feat-platform-3, feat-platform-4 | **built 2026-09-28**, not yet released or live (see note) |
-| assembly | Het dashboard draait als eigen stack (assemblage) | feat-platform-7, feat-platform-9 | not started |
+| host | De host leert vertellen | feat-platform-1, feat-platform-2, feat-platform-3, feat-platform-4 | **live 2026-09-28** (3.62.1 on pve, signed) |
+| assembly | Het dashboard draait als eigen stack (assemblage) | feat-platform-7, feat-platform-9 | **live 2026-09-28 15:32**, Kenny's login from home and the 4G refusal still to do |
 | read | Alles lezen | feat-overview-1, feat-overview-2, feat-overview-3, feat-overview-4, feat-overview-8, feat-stacks-1, feat-ops-1, feat-ops-2, feat-ops-3, feat-ops-4, feat-ops-7, feat-settings-2 | not started |
 | act | Alle acties | feat-stacks-4, feat-ops-6, feat-stacks-5, feat-stacks-6, feat-stacks-7, feat-stacks-8, feat-overview-5, feat-ops-8, feat-ops-9 | not started |
 | edit | Wijzigen in de browser | feat-stacks-2, feat-stacks-3, feat-firewall-1, feat-firewall-2, feat-settings-1 | not started |
@@ -164,3 +164,30 @@ Gesigneerde homelab-releases, self-update van het dashboard via homelab, een ech
   key on kennypassenier/homelab via `gh`; the latch environment `admin`
   filled by Claude; the admin.kp-soft.dev route in the gateway stack and its
   deploy.
+
+### assembly, rolled out 2026-09-28 15:08-15:32 (Kenny's go of 13:54)
+
+- Releases 3.62.0 and 3.62.1 signed by Kenny, verified (minisign + SHA256SUMS),
+  host on pve and client on WSL on 3.62.1. 3.62.1 because the dashboard binary
+  of 3.62.0 still expected a config file CT 120 does not have.
+- Step 1, CT 120: `homelab deploy stacks/admin` after three stack-file faults
+  the client refused (nothing reached pve) and two found at the first start
+  (a ReadWritePaths entry that only exists after a self-update; the service
+  user is uid 997, not 999). All fixed in the stack files, applied by deploy.
+  Measured in the container: admin.service active, /healthz 200, every other
+  route 403 without an Access token.
+- **Manual step (a gap in the system):** a new native's env file had to be
+  seeded into the host vault by hand (`/var/lib/homelab/secrets/admin/
+  admin-config/admin.env`, 0600) because a deploy takes native secrets only
+  from the vault, never from the stack's local .env. Registered as a gap to
+  close in homelab (seed the vault from the deploy spec on a first install).
+- Step 2: `[[tokens]] name = "admin", scope = "all"` in pve's host.toml
+  (backup host.toml.pre-admin-token), host restarted; CT 120 holds an
+  established session to 10.10.10.250:8443, no 401 since.
+- Step 3: deploy key id 164699822 (write) on kennypassenier/homelab; the
+  private key is in latch only, for the `edit` milestone.
+- Step 4: `latch put admin/admin/.env --env prod`: the four secrets.
+- Step 5: the admin.kp-soft.dev route came with the deploy. Measured:
+  https://admin.kp-soft.dev answers 302 to the Access login; a forged Host
+  header straight at Traefik on CT 104 gets the dashboard's 403 (lock 1).
+- Open from the deploy: "Alloy is DROPPING admin's logs, Loki refused them".

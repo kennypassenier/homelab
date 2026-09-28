@@ -11,7 +11,10 @@
     "noImplicitReturns": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "/static/kp/js/*": ["./types/kp/*"]
+    }
   },
-  "include": ["js/**/*.js", "test/**/*.js"]
+  "include": ["js/**/*.js", "test/**/*.js", "types/**/*.d.ts"]
 }

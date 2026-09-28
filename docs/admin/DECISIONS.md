@@ -95,6 +95,20 @@ entries sampled 12:28 (e.g. .7 → .13:3100, Alloy to Loki).
 | arch-deploy-guard | **CLI and dashboard both refuse** a deploy when the host's last `source.commit` is not in the local history; `--force` overrides. |
 | arch-host, arch-admin, arch-safety, arch-tests | Approved as listed above (Klopt). |
 
+### ui-tables (Kenny, 2026-09-28 13:12, on the skeleton's fleet page)
+
+"onthoudt wel dat we fancy gui willen uiteindelijk, dus een tabel moet mss een
+datatable zijn (standaard zonder select/multiselect per row) en kolommen moeten
+aanklikbaar zijn om te sorteren (zelfs verschillende tabellen krijgen een
+sorteervolgorde)". Every table in the dashboard is the kp-themes datatable:
+no row selection unless a page needs it, every column sortable by click with
+a declared kind (number, text, date, or a named order such as
+offline,degraded,parked,running), Shift+click adds a numbered sort key
+(`data-kp-sort-multi`), and each table remembers its own sort under its own
+name (`data-kp-remember`). A number column holds a bare number so it sorts as
+one. Measured on the fleet page 2026-09-28: a descending sort and a second key
+survive a live update and a reload.
+
 ### arch-exposure (decided 2026-09-28 12:44, follow-up form "Dashboard bereikbaarheid")
 
 **Via the Cloudflare tunnel and Traefik, from home only.** `admin.kp-soft.dev`

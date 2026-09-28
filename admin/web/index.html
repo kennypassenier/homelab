@@ -15,19 +15,60 @@
         <p id="link" class="link" aria-live="polite">connecting…</p>
       </header>
       <section id="host" class="host" aria-label="Host"></section>
-      <table class="fleet" aria-label="Stacks">
-        <thead>
-          <tr>
-            <th scope="col">vmid</th>
-            <th scope="col">Stack</th>
-            <th scope="col">State</th>
-            <th scope="col">Apps</th>
-            <th scope="col">Restarts</th>
-            <th scope="col">RAM</th>
-          </tr>
-        </thead>
-        <tbody id="stacks"></tbody>
-      </table>
+      <!-- Kenny, 2026-09-28: every table is the kp-themes datatable, no row
+           selection by default, every column sortable, Shift+click adds a
+           sort key, and each table remembers its own sort. -->
+      <div
+        class="kp-datatable"
+        data-kp-datatable
+        data-kp-sort-multi
+        data-kp-remember="fleet"
+        data-kp-page-sizes="none"
+      >
+        <div class="kp-datatable__bar">
+          <input
+            class="kp-datatable__search"
+            data-kp-datatable-search
+            type="search"
+            placeholder="Search stacks"
+            aria-label="Search stacks"
+          />
+        </div>
+        <div class="kp-table-wrap">
+          <table class="kp-table fleet">
+            <caption>
+              Stacks
+            </caption>
+            <thead>
+              <tr>
+                <th data-kp-sort="number">vmid</th>
+                <th data-kp-sort="text">Stack</th>
+                <th
+                  data-kp-sort="text"
+                  data-kp-sort-order="offline,degraded,parked,running"
+                  data-kp-filter="choice"
+                >
+                  State
+                </th>
+                <th data-kp-sort="number">Apps up</th>
+                <th data-kp-sort="number">Apps</th>
+                <th data-kp-sort="number">Restarts</th>
+                <th data-kp-sort="number">RAM used (GB)</th>
+                <th data-kp-sort="number">RAM limit (GB)</th>
+              </tr>
+            </thead>
+            <tbody id="stacks"></tbody>
+          </table>
+        </div>
+        <div class="kp-datatable__bar">
+          <p
+            class="kp-datatable__status"
+            data-kp-datatable-status
+            role="status"
+            aria-live="polite"
+          ></p>
+        </div>
+      </div>
       <p id="measured" class="measured"></p>
     </main>
   </body>

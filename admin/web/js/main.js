@@ -1,10 +1,17 @@
 // The fleet page (skeleton): first paint from /data/fleet, then live over
 // SSE. A `resync` (the browser fell behind, or reconnected) refetches.
 
-import { measuredAgo, ramText, stackState } from "./fleet.js";
+import { gb, measuredAgo, stackState } from "./fleet.js";
+import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 
 /** @type {any} */
 let fleet = null;
+
+attachDataTables(document);
+/** @type {ReturnType<typeof dataTable>} */
+const table = dataTable(
+  /** @type {Element} */ (document.querySelector("[data-kp-datatable]")),
+);
 
 /** @param {string} id */
 const el = (id) => /** @type {HTMLElement} */ (document.getElementById(id));
@@ -42,13 +49,18 @@ function render() {
       cell("td", String(s.vmid), "num"),
       cell("td", s.name),
       stateCell(st),
-      cell("td", `${s.apps_running}/${s.apps_total}`, "num"),
+      cell("td", String(s.apps_running), "num"),
+      cell("td", String(s.apps_total), "num"),
       cell("td", String(s.restarts ?? 0), "num"),
-      cell("td", ramText(s), "num"),
+      cell("td", gb(s.ram_used_mb), "num"),
+      cell("td", gb(s.ram_max_mb), "num"),
     );
     return tr;
   });
   el("stacks").replaceChildren(...rows);
+  // The table sorts the rows it holds; new rows are read again and put in
+  // the reader's order.
+  table?.refresh();
   tickMeasured();
 }
 

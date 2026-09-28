@@ -34,12 +34,12 @@ export function measuredAgo(measuredAt, now) {
 }
 
 /**
- * "1.9 / 5.0 GB", or an em dash before the host's first status reading.
- * @param {Stack} s
+ * Megabytes as gigabytes with one decimal, or an em dash before the host's
+ * first status reading. A number on its own, so the column sorts as one.
+ * @param {number | null | undefined} mb
  * @returns {string}
  */
-export function ramText(s) {
-  if (s.ram_used_mb == null || s.ram_max_mb == null) return "—";
-  const gb = (/** @type {number} */ mb) => (mb / 1024).toFixed(1);
-  return `${gb(s.ram_used_mb)} / ${gb(s.ram_max_mb)} GB`;
+export function gb(mb) {
+  if (mb == null) return "—";
+  return (mb / 1024).toFixed(1);
 }

@@ -1,7 +1,7 @@
 // feat-overview-4 and the state column, driven without a browser.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { measuredAgo, ramText, stackState } from "../js/fleet.js";
+import { gb, measuredAgo, stackState } from "../js/fleet.js";
 
 const base = { name: "media", vmid: 106, apps_running: 2, apps_total: 2 };
 
@@ -26,25 +26,8 @@ test("measured ago uses seconds, then minutes, then hours", () => {
   assert.equal(measuredAgo(200, 100), "measured 0 s ago");
 });
 
-test("ram reads in GB, and a dash before the first reading", () => {
-  assert.equal(
-    ramText({
-      ...base,
-      online: true,
-      enabled: true,
-      ram_used_mb: 1946,
-      ram_max_mb: 5120,
-    }),
-    "1.9 / 5.0 GB",
-  );
-  assert.equal(
-    ramText({
-      ...base,
-      online: true,
-      enabled: true,
-      ram_used_mb: null,
-      ram_max_mb: null,
-    }),
-    "—",
-  );
+test("ram reads in GB as a bare number, and a dash before the first reading", () => {
+  assert.equal(gb(1946), "1.9");
+  assert.equal(gb(5120), "5.0");
+  assert.equal(gb(null), "—");
 });

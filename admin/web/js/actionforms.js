@@ -393,6 +393,14 @@ export function batchBody(form, values) {
 }
 
 /**
+ * What a batch's typed name says when it is missing or wrong (the same
+ * words the dashboard's server holds a driven batch with).
+ * @param {string} stack
+ */
+export const batchConfirmText = (stack) =>
+  fill(SPEC.edit.messages.batch_confirm, { stack });
+
+/**
  * Which typed names in a batch are missing or wrong.
  * @param {ReturnType<typeof batchForm>} form
  * @param {Values} values

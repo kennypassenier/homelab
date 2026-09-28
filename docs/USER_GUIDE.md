@@ -600,16 +600,22 @@ no second way in: the steps travel on the same TLS line as every other verb.
 |---|---|
 | `homelab ui goto <path>` | shows a page: `/app/stacks/media`, `stacks/media/logs`, `/app/jobs` |
 | `homelab ui open <action> [stack]` | opens an action's dialog (`deploy media`; a host-wide action such as `patch` takes no stack) |
-| `homelab ui type <field> <text>` | types into a text field of the open dialog, by the field's id (`act-snapshot`, `act-confirm`) |
-| `homelab ui pick <field> <value>` | chooses one value of a choice field (`act-app`, `act-unit`, `act-commit`) |
-| `homelab ui check <field> on\|off` | ticks or unticks a check field (`act-force`, `act-skip-backup`) |
-| `homelab ui press next\|back\|confirm` | presses a button of the dialog; `confirm` is the final press and runs the action |
+| `homelab ui open <edit form> …` | opens an edit form (below): `settings <stack>`, `raw <stack>`, `add-app <stack>`, `firewall <stack>`, `new-stack`, `host-settings`, `batch <action> <stack>,<stack>`, `rollback <stack>` |
+| `homelab ui type <field> <text>` | types into a text or number field of the open form, by the field's id (`act-snapshot`, `act-confirm`, `edit-memory-mb`, `rule-peer`) |
+| `homelab ui pick <field> <value>` | chooses one value of a choice field (`act-app`, `act-unit`, `act-commit`, `rule-proto`, `edit-follow`) |
+| `homelab ui check <field> on\|off` | ticks or unticks a check field (`act-force`, `act-skip-backup`, `fw-enabled`) |
+| `homelab ui edit <field> <file\|->` | sets the whole text of a multi-line field at once, read from a file or from stdin (`raw-text`, `edit-note`) |
+| `homelab ui row add` / `row edit\|up\|down\|delete <n>` | the firewall's rules by their number from 1, top to bottom: `add` and `edit` open the rule dialog |
+| `homelab ui row edit <key>` | opens a host.toml key's dialog on the host settings page (`row edit backup_hour`) |
+| `homelab ui press next\|back\|confirm` | presses a button of the form; `confirm` is the final press and runs the action, the commit, the write or the batch |
+| `homelab ui press save\|cancel\|default` | the buttons of a dialog on top of a form: the rule dialog (`save`, `cancel`), a host.toml key (`save`, `default`, `cancel`) |
 | `homelab ui close` | closes the dialog |
 | `homelab ui state` | changes nothing; prints what is on screen |
 | `homelab ui done` | stops driving: every tab is its viewer's again |
 
 Every step is checked against the same form description the dashboard draws
-its dialogs from (`admin/web/js/formspec.json`): an unknown field id, a field
+its dialogs and edit forms from (`admin/web/js/formspec.json`, its `edit`
+section for the edit forms): an unknown field id, a field
 of the wrong kind or on another step, a value that is not on the list, an
 unknown page, action or stack are refused with what, why and what to do, and
 change nothing. A press the form holds (a field in error, the deploy guard)
@@ -622,17 +628,59 @@ whether zero, one or two tabs are open; the job's origin reads "Claude
 (<token name>)". Nothing is driven while no dashboard is attached: the step
 is refused with that reason.
 
-In the dashboard, the switch **Watch Claude** at the top of every page says
-whether this tab plays Claude's steps. It is off by default and remembered
-per tab. Off, the tab never changes page, opens a dialog or loses what its
+In the dashboard, the switch **Live view** at the top of every page says
+whether this tab plays Claude's steps (Kenny's name for it, 2026-09-28; the
+working name was "Watch Claude"). It is off by default and remembered per
+tab. Off, the tab never changes page, opens a dialog or loses what its
 viewer typed; it shows only the badge "Claude is working on <stack>:
-<action>" with a **Watch** button. On, the tab performs every step as it
-comes (the page changes, the dialog opens, the text appears letter by letter,
-the button shows its press, the next step of the wizard appears); a tab that
-turns on in the middle of a drive catches up to where Claude is. While Claude
-drives a tab that watches, that tab's own clicks and keys are refused with a
-note; the dialog carries a **Stop watching** button, since a modal dialog
-hides the switch. A driver who sends nothing for ten minutes lets go.
+<action>" with a **Live view** button. On, the tab performs every step as
+it comes (the page changes, the dialog opens, the text appears letter by
+letter, the button shows its press, the next step of the wizard appears); a
+tab that turns on in the middle of a drive catches up to where Claude is.
+While Claude drives a tab in Live view, that tab's own clicks and keys are
+refused with a note; the dialog carries a **Leave live view** button, since
+a modal dialog hides the switch. A driver who sends nothing for ten minutes
+lets go.
+
+**The edit forms.** The same steps drive the forms that change the
+repository and the host, on the same pages and dialogs a click uses:
+
+| `open` | What it is | Its steps, and the final press |
+|---|---|---|
+| `settings <stack>` | the Settings tab's form | `settings` (`edit-cores`, `edit-memory-mb`, …, `edit-image-<app>-<service>`) → `plan` → `commit` (`edit-subject`, `edit-note`, `edit-follow`); `confirm` commits and pushes, then queues the follow-up |
+| `raw <stack>` | the Settings tab's raw editor | `file` (`raw-file`, and `raw-text` with `edit`) → `plan` → `commit` |
+| `add-app <stack>` | "Add an app" | `app` (`add-app-preset`) → `plan` → `commit` |
+| `firewall <stack>` | the Firewall tab | `rules` (`fw-enabled`, `fw-policy-in`, `fw-policy-out`, `fw-management-open`, `fw-comment`, and `row …` with the rule dialog's `rule-dir`, `rule-action`, `rule-peer`, `rule-proto`, `rule-dport`, `rule-note`, `rule-comment`) → `plan` → `commit` |
+| `new-stack` | the new-stack wizard | `preset` → `identity` (`new-name`, `new-vmid`) → `size` → `data` (`new-nodata-<n>`) → `plan` (the commit's fields); `confirm` commits and pushes |
+| `host-settings` | the Settings page's host.toml | `keys` (`row edit <key>`, then `key-<key>` and, for a key that asks it, `key-<key>-confirm`; `press save`) → `review`; `confirm` writes host.toml. Needs a token of scope `all` |
+| `batch <action> <s1>,<s2>` | the fleet page's batch dialog | `review` (the action's shared fields, and `act-confirm-<stack>` per stack when it asks a typed name); `confirm` queues the batch |
+| `rollback <stack>` | the Roll back dialog | `choose` (`rollback-commit` or `rollback-unit`); `next` opens the deploy-commit or rollback-native dialog with it picked, as the row's button does |
+
+Each final press runs on the dashboard's server through the same function
+the button's route runs (one commit and push through the working copy's
+transaction, one `SetHostConfig`, one batch), exactly once whether zero,
+one or two tabs are in Live view; a second `confirm` is refused. A deploy
+or resize that follows a commit is a job whose origin reads "Claude (<token
+name>)". A tab in Live view plays each step on the page's own form and
+dialogs (the Review button opens its own plan dialog; the rule dialog is
+the one Add opens) and shows the answer; it never sends the press itself.
+
+An example, one firewall rule on `admin`:
+
+```
+homelab ui open firewall admin
+homelab ui row add
+homelab ui type rule-peer 10.10.10.4
+homelab ui type rule-dport 9999
+homelab ui type rule-note drive test
+homelab ui press save               # the rule is in the table, not written yet
+homelab ui press next               # the plan: the diff, what homelab would change
+homelab ui press next               # the commit step
+homelab ui type edit-subject admin: 10.10.10.4 may reach 9999
+homelab ui pick edit-follow none
+homelab ui press confirm            # one commit, pushed; its hash in homelab ui state
+homelab ui close
+```
 
 An example session, a deploy of `media`:
 
@@ -645,9 +693,11 @@ homelab ui close
 homelab ui done
 ```
 
-Tests: `admin/tests/follow_tests.rs`, `host/src/ui_relay.rs`, `host/src/main.rs`
-(`follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope`),
-`client/src/ui_cli.rs`, `proto/src/lib.rs`, `admin/web/test/follow.test.js`.
+Tests: `admin/tests/follow_tests.rs`, `admin/tests/follow_edit_tests.rs`
+(the edit forms, each final press once), `host/src/ui_relay.rs`,
+`host/src/main.rs` (`follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope`),
+`client/src/ui_cli.rs`, `proto/src/lib.rs`, `admin/web/test/follow.test.js`
+(the replay, and the edit checks against the shared cases file).
 
 #### A5 · Secrets vault on the host
 

@@ -12,6 +12,7 @@ import {
   actionForm,
   batchBody,
   batchConfirmErrors,
+  batchConfirmText,
   batchForm,
   buildArgs,
   checkValues,
@@ -30,6 +31,7 @@ import {
   refusalCallout,
 } from "./actui.js";
 import { fetchJson, h } from "./dom.js";
+import { driven, register } from "./drivehooks.js";
 import { stackDetail } from "./fleet.js";
 import { batchView, jobBadge } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
@@ -50,8 +52,8 @@ import {
  *   openRollback?: (stack: string) => void, driven?: boolean}} OpenOpts
  * @typedef {{form: import("./actionforms.js").ActionForm,
  *   dialog: HTMLDialogElement, closed: Promise<void>, close: () => void,
- *   input: (name: string) => HTMLInputElement | HTMLSelectElement | null,
- *   set: (name: string, value: string | boolean) => void,
+ *   input: (name: string, id?: string) => HTMLInputElement | HTMLSelectElement | null,
+ *   set: (name: string, value: string | boolean, id?: string) => void,
  *   step: () => number, goTo: (index: number) => Promise<boolean>,
  *   button: (name: string) => HTMLElement | null,
  *   errors: (byName: Record<string, string>) => void,
@@ -573,9 +575,50 @@ export async function openBatch(action, stacks) {
     id: "batch-dialog",
     wide: true,
   });
+  d.dialog.dataset.form = form.id;
   /** @type {() => void} */
   let stop = () => {};
-  d.closed.then(() => stop());
+  /** The batch runs: its progress in the dialog's place.
+   * @param {{batch: number, jobs?: {job: number, stack: string}[]}} answer */
+  const showBatch = (answer) => {
+    if (body.dataset.batch) return;
+    body.dataset.batch = String(answer.batch);
+    const panel = mountBatchPanel(answer.batch, answer.jobs ?? []);
+    stop = panel.stop;
+    body.replaceChildren(
+      panel.element,
+      h(
+        "div",
+        { class: "kp-dialog__actions" },
+        h(
+          "button",
+          {
+            type: "button",
+            class: "kp-button kp-button--primary",
+            "data-kp-dialog-close": "",
+          },
+          "Close",
+        ),
+      ),
+    );
+    body
+      .querySelector("[data-kp-dialog-close]")
+      ?.addEventListener("click", () => d.close());
+  };
+  // feat-platform-10: the Live view replay works this very dialog.
+  const unregister = register("batch", {
+    dialog: d.dialog,
+    closed: d.closed,
+    run: () => run,
+    runError: (/** @type {import("./doctor.js").RouteError | null} */ e) =>
+      runError.replaceChildren(...(e ? [refusalCallout(e)] : [])),
+    showBatch,
+    close: () => d.close(),
+  });
+  d.closed.then(() => {
+    unregister();
+    stop();
+  });
 
   // Each stack's own preview: its CLI line and whether its guard refuses.
   let guarded = 0;
@@ -621,12 +664,13 @@ export async function openBatch(action, stacks) {
       guarded === 0;
 
   run.addEventListener("click", async () => {
+    // Live view: the batch runs on the dashboard's server, once.
+    if (driven()) return;
     const wrong = batchConfirmErrors(form, values);
     for (const c of form.confirms) {
       const input = inputs.get(`confirm:${c.stack}`);
       if (!input) continue;
-      if (wrong.includes(c.stack))
-        showError(input, `Type ${c.stack} to confirm.`);
+      if (wrong.includes(c.stack)) showError(input, batchConfirmText(c.stack));
       else clearError(input);
     }
     if (wrong.length) {
@@ -646,30 +690,7 @@ export async function openBatch(action, stacks) {
       await refusalAlarm(r.error, r.status);
       return;
     }
-    const batch = /** @type {number} */ (r.body.batch);
-    /** @type {{job: number, stack: string}[]} */
-    const jobs = r.body.jobs ?? [];
-    const panel = mountBatchPanel(batch, jobs);
-    stop = panel.stop;
-    body.replaceChildren(
-      panel.element,
-      h(
-        "div",
-        { class: "kp-dialog__actions" },
-        h(
-          "button",
-          {
-            type: "button",
-            class: "kp-button kp-button--primary",
-            "data-kp-dialog-close": "",
-          },
-          "Close",
-        ),
-      ),
-    );
-    body
-      .querySelector("[data-kp-dialog-close]")
-      ?.addEventListener("click", () => d.close());
+    showBatch(r.body);
   });
 }
 

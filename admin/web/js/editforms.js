@@ -5,9 +5,23 @@
 // field has a stable id and each step a name, so milestone `follow`
 // (feat-platform-10) can replay a wizard step by step; the `*Body`
 // functions are the one place typed values become the request the server
-// takes.
+// takes. The fields' words live in formspec.json's `edit` section, which
+// the dashboard's server reads too (core::driveedit): a driven step and a
+// click are checked against the same description.
 //
 // Pure: no DOM, no fetch, no clock.
+
+import SPEC from "./formspec.json" with { type: "json" };
+import { fill } from "./actionforms.js";
+
+/** The edit section of the one form description. */
+const E = SPEC.edit;
+/** @param {string} key @param {Record<string, string | number>} w */
+const say = (key, w = {}) =>
+  fill(
+    /** @type {Record<string, string>} */ (E.messages)[key],
+    Object.fromEntries(Object.entries(w).map(([k, v]) => [k, String(v)])),
+  );
 
 /**
  * @typedef {"number" | "check" | "text" | "textarea" | "choice" | "typed"} FieldKind
@@ -41,11 +55,7 @@
 export const PLAN = /** @type {const} */ ("plan");
 
 /** What can follow a commit, in the order the plan offers it. */
-export const FOLLOW = /** @type {const} */ ({
-  none: "Commit only",
-  deploy: "Commit, then deploy exactly this commit",
-  resize: "Commit, then resize the running container",
-});
+export const FOLLOW = E.follow;
 
 /**
  * The plan step's fields: the commit subject, a note, what follows.
@@ -55,29 +65,12 @@ export const FOLLOW = /** @type {const} */ ({
  */
 export function commitFields(followUps, subject) {
   const offered = ["none", ...followUps.filter((f) => f in FOLLOW)];
+  const [s, note, follow] = /** @type {EditField[]} */ (E.commit);
   return [
+    { ...s, current: subject },
+    { ...note },
     {
-      name: "subject",
-      id: "edit-subject",
-      kind: "text",
-      label: "Commit subject",
-      help: "The first line of the commit; a feature id in brackets is added when it names none.",
-      required: true,
-      current: subject,
-    },
-    {
-      name: "note",
-      id: "edit-note",
-      kind: "textarea",
-      label: "Why (optional)",
-      help: "A sentence for the commit body: why this changes.",
-    },
-    {
-      name: "follow",
-      id: "edit-follow",
-      kind: "choice",
-      label: "After the commit",
-      help: "A deploy goes through the Jobs queue with its progress; it deploys this very commit.",
+      ...follow,
       choices: offered.map((f) => ({
         value: f,
         label: FOLLOW[/** @type {keyof typeof FOLLOW} */ (f)],
@@ -95,81 +88,23 @@ export function commitFields(followUps, subject) {
  * @returns {{id: string, stack: string, title: string, steps: EditStep[]}}
  */
 export function settingsForm(stack, m, images) {
+  /** @type {Record<string, string | boolean>} */
+  const now = {
+    cores: String(m.resources.cores),
+    memory_mb: String(m.resources.memory_mb),
+    swap_mb: String(m.resources.swap_mb),
+    disk_gb: String(m.resources.disk_gb),
+    onboot: m.boot.onboot,
+    order: String(m.boot.order ?? ""),
+    protection: m.protection,
+  };
   /** @type {EditField[]} */
-  const fields = [
-    num(
-      "cores",
-      "Cores",
-      "CPU cores the container may use.",
-      1,
-      64,
-      "",
-      m.resources.cores,
-    ),
-    num(
-      "memory_mb",
-      "Memory",
-      "Memory limit; raising it takes a Resize, lowering it a rebuild.",
-      128,
-      262144,
-      "MB",
-      m.resources.memory_mb,
-    ),
-    num(
-      "swap_mb",
-      "Swap",
-      "Swap limit; 0 is valid.",
-      0,
-      65536,
-      "MB",
-      m.resources.swap_mb,
-    ),
-    num(
-      "disk_gb",
-      "Disk",
-      "Root disk size; Proxmox can grow a disk, never shrink it.",
-      2,
-      4096,
-      "GB",
-      m.resources.disk_gb,
-    ),
-    {
-      name: "onboot",
-      id: "edit-onboot",
-      kind: "check",
-      label: "Start on boot",
-      help: "Whether the container starts when pve starts (the deploy puts it back, W3).",
-      current: m.boot.onboot,
-    },
-    num(
-      "order",
-      "Boot order",
-      "Lower starts earlier; everything behind the edge waits for Traefik.",
-      0,
-      9999,
-      "",
-      m.boot.order ?? "",
-    ),
-    {
-      name: "protection",
-      id: "edit-protection",
-      kind: "check",
-      label: "Proxmox protection",
-      help: "Refuses a destroy at the hypervisor; a rebuild applies a change.",
-      current: m.protection,
-    },
-  ];
+  const fields = /** @type {EditField[]} */ (E.settings).map((f) => ({
+    ...f,
+    current: now[f.name],
+  }));
   for (const [key, image] of Object.entries(images).sort())
-    fields.push({
-      name: `image:${key}`,
-      id: `edit-image-${key.replace(/[^a-z0-9]+/gi, "-")}`,
-      kind: "text",
-      label: `Image of ${key}`,
-      help: "The image reference in the app's compose file, e.g. name:1.2.3.",
-      required: true,
-      pattern: "[A-Za-z0-9._/:@\\-]{1,255}",
-      current: image,
-    });
+    fields.push(imageField(key, image));
   return {
     id: `edit:settings:${stack}`,
     stack,
@@ -179,24 +114,18 @@ export function settingsForm(stack, m, images) {
 }
 
 /**
- * @param {string} name @param {string} label @param {string} help
- * @param {number} min @param {number} max @param {string} unit
- * @param {number | string} current
+ * The field of one app's image, `<app>/<service>` = `key`.
+ * @param {string} key
+ * @param {string} image
  * @returns {EditField}
  */
-function num(name, label, help, min, max, unit, current) {
-  return {
-    name,
-    id: `edit-${name.replace(/_/g, "-")}`,
-    kind: "number",
-    label: unit ? `${label} (${unit})` : label,
-    help,
-    min,
-    max,
-    unit,
-    required: name !== "order",
-    current: String(current),
-  };
+export function imageField(key, image) {
+  const w = { key, slug: key.replace(/[^a-z0-9]+/gi, "-") };
+  /** @type {Record<string, unknown>} */
+  const f = {};
+  for (const [k, v] of Object.entries(E.image))
+    f[k] = typeof v === "string" && k !== "pattern" ? fill(v, w) : v;
+  return /** @type {EditField} */ ({ ...f, current: image });
 }
 
 /**
@@ -226,18 +155,21 @@ export function checkFields(form, values) {
     if (f.kind === "check") continue;
     const text = typeof v === "string" ? v.trim() : "";
     if (text === "") {
-      if (f.required) errors[f.name] = `${f.label} is needed.`;
+      if (f.required) errors[f.name] = say("needed", { label: f.label });
       continue;
     }
     if (f.kind === "number") {
       const n = Number(text);
       if (!/^\d+$/.test(text) || n < (f.min ?? 0) || n > (f.max ?? Infinity))
-        errors[f.name] =
-          `${f.label} must be a whole number from ${f.min} to ${f.max}.`;
+        errors[f.name] = say("number", {
+          label: f.label,
+          min: String(f.min),
+          max: String(f.max),
+        });
     } else if (f.kind === "typed" && text !== f.expect)
-      errors[f.name] = `Type ${f.expect} exactly to confirm.`;
+      errors[f.name] = say("typed", { expect: f.expect ?? "" });
     else if (f.pattern && !new RegExp(`^(?:${f.pattern})$`).test(text))
-      errors[f.name] = `"${text}" is not a valid ${f.label.toLowerCase()}.`;
+      errors[f.name] = say("pattern", { text, lower: f.label.toLowerCase() });
   }
   return errors;
 }
@@ -361,83 +293,20 @@ export function ruleSummary(r) {
  */
 export function ruleFields(r) {
   const peer = r ? (r.dir === "in" ? r.source : r.dest) : "";
-  return [
-    {
-      name: "dir",
-      id: "rule-dir",
-      kind: "choice",
-      label: "Direction",
-      help: "In: who may reach this container. Out: where it may go.",
-      choices: [
-        { value: "in", label: "In (to this container)" },
-        { value: "out", label: "Out (from this container)" },
-      ],
-      current: r?.dir ?? "in",
-    },
-    {
-      name: "action",
-      id: "rule-action",
-      kind: "choice",
-      label: "Action",
-      help: "The first rule that matches decides; the policy applies when none does.",
-      choices: [
-        { value: "ACCEPT", label: "Accept" },
-        { value: "DROP", label: "Drop" },
-        { value: "REJECT", label: "Reject" },
-      ],
-      current: r?.action ?? "ACCEPT",
-    },
-    {
-      name: "peer",
-      id: "rule-peer",
-      kind: "text",
-      label: "Other side",
-      help: "One address (10.10.10.4) or a network (10.10.10.0/24); empty: anywhere.",
-      pattern: "\\d{1,3}(\\.\\d{1,3}){3}(/\\d{1,2})?",
-      placeholder: "10.10.10.4",
-      current: peer ?? "",
-    },
-    {
-      name: "proto",
-      id: "rule-proto",
-      kind: "choice",
-      label: "Protocol",
-      help: "A port needs tcp or udp; icmp has no ports.",
-      choices: [
-        { value: "", label: "Any" },
-        { value: "tcp", label: "tcp" },
-        { value: "udp", label: "udp" },
-        { value: "icmp", label: "icmp" },
-      ],
-      current: r?.proto ?? "tcp",
-    },
-    {
-      name: "dport",
-      id: "rule-dport",
-      kind: "text",
-      label: "Ports",
-      help: "8080, 8080,8787 or 5000:5003; empty: every port.",
-      pattern: "\\d{1,5}([:,]\\d{1,5})*",
-      placeholder: "8080",
-      current: r?.dport ?? "",
-    },
-    {
-      name: "note",
-      id: "rule-note",
-      kind: "text",
-      label: "Note",
-      help: "One line, written after the rule in pve's file (who this is for).",
-      current: r?.note ?? "",
-    },
-    {
-      name: "comment",
-      id: "rule-comment",
-      kind: "textarea",
-      label: "Comment above the rule",
-      help: "Optional lines written above the rule: why it exists.",
-      current: r?.comment ?? "",
-    },
-  ];
+  /** @type {Record<string, string | null | undefined>} */
+  const from = {
+    dir: r?.dir,
+    action: r?.action,
+    peer,
+    proto: r?.proto,
+    dport: r?.dport,
+    note: r?.note,
+    comment: r?.comment,
+  };
+  return /** @type {EditField[]} */ (E.rule).map((f) => ({
+    ...f,
+    current: from[f.name] ?? f.current,
+  }));
 }
 
 /**
@@ -476,7 +345,7 @@ export function ruleProblems(v) {
     const m =
       /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(peer);
     if (!m || m.slice(1, 5).some((o) => Number(o) > 255))
-      out.peer = `${peer} is not an address like 10.10.10.4 or a network like 10.10.10.0/24.`;
+      out.peer = say("peer_form", { peer });
     else if (m[5] !== undefined) {
       const bits = Number(m[5]);
       const ip =
@@ -485,31 +354,28 @@ export function ruleProblems(v) {
         (Number(m[3]) << 8) +
         Number(m[4]);
       const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
-      if (bits > 32) out.peer = `${peer} has a prefix longer than 32.`;
+      if (bits > 32) out.peer = say("peer_prefix", { peer });
       else if ((ip & mask) >>> 0 !== ip)
-        out.peer = `${peer} has host bits set: Proxmox reads it as the whole network. Write one address, or the network.`;
+        out.peer = say("peer_host_bits", { peer });
     }
   }
   const ports = String(v.dport ?? "").replace(/\s+/g, "");
   const proto = String(v.proto ?? "");
   if (ports) {
     if (proto === "" || proto === "icmp")
-      out.dport =
-        proto === "icmp"
-          ? "icmp has no ports; clear them."
-          : "A port needs tcp or udp.";
+      out.dport = say(proto === "icmp" ? "icmp_ports" : "port_proto");
     else
       for (const part of ports.split(",")) {
         const [a, b] = part.split(":").map(Number);
         const ok = (/** @type {number} */ n) =>
           Number.isInteger(n) && n >= 1 && n <= 65535;
         if (!ok(a) || (part.includes(":") && (!ok(b) || b <= a))) {
-          out.dport = `${part} is not a port 1 to 65535 or a forward range.`;
+          out.dport = say("port_range", { part });
           break;
         }
       }
   }
-  if (String(v.note ?? "").includes("\n")) out.note = "A note is one line.";
+  if (String(v.note ?? "").includes("\n")) out.note = say("note_line");
   return out;
 }
 
@@ -546,97 +412,35 @@ export function moveRule(m, i, delta) {
  */
 export function newStackWizard(presets, suggestVmid) {
   const first = presets[0];
+  const d = E.new_defaults;
+  /** @type {Record<string, string>} */
+  const now = {
+    preset: first?.name ?? "",
+    vmid: suggestVmid == null ? "" : String(suggestVmid),
+    ram_mb: String(first?.ram_mb ?? d.ram_mb),
+    cores: String(first?.cores ?? d.cores),
+    disk_gb: String(first?.disk_gb ?? d.disk_gb),
+    swap_mb: "",
+  };
   return {
     id: "new-stack",
     title: "New stack",
-    steps: [
-      {
-        id: "preset",
-        label: "Preset",
-        fields: [
-          {
-            name: "preset",
-            id: "new-preset",
-            kind: "choice",
-            label: "Start from",
-            help: "A preset from the repository's presets/ directory: its apps, their compose files and a size.",
-            required: true,
-            choices: presets.map((p) => ({
-              value: p.name,
-              label: `${p.name} · ${p.description}`,
-            })),
-            current: first?.name ?? "",
-          },
-        ],
-      },
-      {
-        id: "identity",
-        label: "Name",
-        fields: [
-          {
-            name: "name",
-            id: "new-name",
-            kind: "text",
-            label: "Stack name",
-            help: "Lowercase letters, digits and dashes; it names the directory, the container and its data.",
-            required: true,
-            pattern: "[a-z0-9][a-z0-9\\-]{0,31}",
-            placeholder: "recipes",
-          },
-          {
-            name: "vmid",
-            id: "new-vmid",
-            kind: "number",
-            label: "Container number",
-            help: "The vmid; its address becomes 10.10.10.<number − 100>.",
-            required: true,
-            min: 102,
-            max: 354,
-            current: suggestVmid == null ? "" : String(suggestVmid),
-          },
-        ],
-      },
-      {
-        id: "size",
-        label: "Size",
-        fields: [
-          num(
-            "ram_mb",
-            "Memory",
-            "The container's memory limit.",
-            128,
-            262144,
-            "MB",
-            first?.ram_mb ?? 1024,
-          ),
-          num("cores", "Cores", "CPU cores.", 1, 64, "", first?.cores ?? 2),
-          num(
-            "disk_gb",
-            "Disk",
-            "Root disk size.",
-            2,
-            4096,
-            "GB",
-            first?.disk_gb ?? 32,
-          ),
-          {
-            ...num(
-              "swap_mb",
-              "Swap",
-              "Empty: a quarter of the memory, 512 MB to 2 GB.",
-              0,
-              65536,
-              "MB",
-              "",
-            ),
-            id: "new-swap-mb",
-            required: false,
-          },
-        ].map((f) => ({ ...f, id: f.id.replace(/^edit-/, "new-") })),
-      },
-      { id: "data", label: "Data", fields: [] },
-      { id: PLAN, label: "Plan and commit", fields: [] },
-    ],
+    steps: E.new_stack.map((s) => ({
+      id: s.id,
+      label: s.label,
+      fields: /** @type {EditField[]} */ (s.fields).map((f) => ({
+        ...f,
+        ...(f.name === "preset"
+          ? {
+              choices: presets.map((p) => ({
+                value: p.name,
+                label: `${p.name} · ${p.description}`,
+              })),
+            }
+          : {}),
+        ...(f.name in now && f.name !== "name" ? { current: now[f.name] } : {}),
+      })),
+    })),
   };
 }
 
@@ -661,12 +465,12 @@ export const presetSize = (p) =>
  * @returns {EditField[]}
  */
 export const dataFields = (paths) =>
-  paths.map((p, i) => ({
-    name: `nodata:${p}`,
-    id: `new-nodata-${i}`,
+  paths.map((path, i) => ({
+    name: fill(E.nodata.name, { path }),
+    id: fill(E.nodata.id, { i: String(i) }),
     kind: /** @type {const} */ ("check"),
-    label: `${p} keeps nothing`,
-    help: "Ticked: the app keeps no files of its own here, so it gets no backup repository (no_data). Leave it off when in doubt.",
+    label: fill(E.nodata.label, { path }),
+    help: E.nodata.help,
     current: false,
   }));
 
@@ -706,12 +510,12 @@ export function checkNewStep(w, step, v, taken) {
   if (step === "identity") {
     const name = String(v.name ?? "").trim();
     if (!errors.name && taken.names.includes(name))
-      errors.name = `There is a stack called ${name} already.`;
+      errors.name = say("name_taken", { name });
     const vmid = Number(v.vmid);
     if (!errors.vmid && taken.vmids.includes(vmid))
-      errors.vmid = `CT ${vmid} exists already.`;
-    if (!errors.vmid && [100, 101, 102, 103].includes(vmid))
-      errors.vmid = `${vmid} is on the no-touch list.`;
+      errors.vmid = say("vmid_taken", { vmid });
+    if (!errors.vmid && E.no_touch.includes(vmid))
+      errors.vmid = say("vmid_no_touch", { vmid });
   }
   return errors;
 }
@@ -796,22 +600,22 @@ export function parseKey(f, input) {
       const n = Number(t);
       return /^\d+$/.test(t) && n >= k.min && n <= k.max
         ? { ok: true, value: n }
-        : { ok: false, why: `A whole number from ${k.min} to ${k.max}.` };
+        : { ok: false, why: say("key_int", { min: k.min, max: k.max }) };
     }
     case "vmid": {
       const n = Number(t);
       return /^\d+$/.test(t) && n >= 100
         ? { ok: true, value: n }
-        : { ok: false, why: "A container number, 100 or more." };
+        : { ok: false, why: say("key_vmid") };
     }
     case "url":
       return /^https?:\/\/\S+$/.test(t)
         ? { ok: true, value: t }
-        : { ok: false, why: "An http:// or https:// address." };
+        : { ok: false, why: say("key_url") };
     case "window":
       return /^\d+[smhdw]$/.test(t)
         ? { ok: true, value: t }
-        : { ok: false, why: "A number and a unit, e.g. 24h." };
+        : { ok: false, why: say("key_window") };
     case "vmid_list": {
       const parts = t
         .split(/[\s,]+/)
@@ -819,7 +623,7 @@ export function parseKey(f, input) {
         .map(Number);
       return parts.every((n) => Number.isInteger(n) && n >= 100)
         ? { ok: true, value: parts }
-        : { ok: false, why: "Container numbers separated by commas." };
+        : { ok: false, why: say("key_vmid_list") };
     }
     case "text_list":
       return {
@@ -833,7 +637,7 @@ export function parseKey(f, input) {
       return { ok: true, value: t };
     default:
       return t.includes("\n")
-        ? { ok: false, why: "One line." }
+        ? { ok: false, why: say("key_line") }
         : { ok: true, value: t };
   }
 }

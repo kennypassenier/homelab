@@ -18,6 +18,7 @@ import {
   startValues,
 } from "./editforms.js";
 import { editField, markErrors, planBlock } from "./editui.js";
+import { driven, register } from "./drivehooks.js";
 import { fetchJson, h } from "./dom.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { committedText } from "./plan.js";
@@ -155,7 +156,23 @@ export async function openNewStack(navigate) {
   const handle = wizard(wiz);
   /** @type {() => void} */
   let stopPanel = () => {};
+  // feat-platform-10: the Live view replay moves this very wizard.
+  const unregister = register("new-stack", {
+    dialog: d.dialog,
+    closed: d.closed,
+    step: () => handle?.step() ?? 0,
+    goTo: (/** @type {number} */ i) =>
+      handle ? handle.goTo(i) : Promise.resolve(false),
+    next: () => next,
+    back: () => back,
+    planReady: () => plan !== null,
+    runError: (/** @type {import("./doctor.js").RouteError | null} */ e) =>
+      runError.replaceChildren(...(e ? [refusalCallout(e)] : [])),
+    showCommitted: (/** @type {any} */ a) => showCommitted(a),
+    close: () => d.close(),
+  });
   d.closed.then(() => {
+    unregister();
     detach();
     stopPanel();
   });
@@ -264,8 +281,52 @@ export async function openNewStack(navigate) {
   });
 
   let running = false;
+  /** What the commit answered, in the wizard's place.
+   * @param {any} answer */
+  const showCommitted = (answer) => {
+    if (body.dataset.shownCommit) return;
+    body.dataset.shownCommit = "1";
+    const text = committedText(answer);
+    notify(text, "success");
+    const name = String(values.name).trim();
+    const parts = /** @type {Node[]} */ ([
+      h("div", { class: "kp-alert kp-alert--success", role: "status" }, text),
+    ]);
+    if (answer.follow?.refused)
+      parts.push(
+        refusalCallout(answer.follow.refused, "warning", "Not queued"),
+      );
+    if (typeof answer.follow?.job === "number") {
+      const panel = mountJobPanel(answer.follow.job, { compact: true });
+      stopPanel = panel.stop;
+      parts.push(panel.element);
+    }
+    const open = h(
+      "a",
+      { class: "kp-button", href: stackHref(name, "settings") },
+      `Open ${name}`,
+    );
+    open.addEventListener("click", (ev) => {
+      if (!navigate) return;
+      ev.preventDefault();
+      d.close();
+      navigate(stackHref(name, "settings"));
+    });
+    const close = h(
+      "button",
+      { type: "button", class: "kp-button kp-button--primary" },
+      "Close",
+    );
+    close.addEventListener("click", () => d.close());
+    handle?.element.remove();
+    body.replaceChildren(
+      ...parts,
+      h("div", { class: "kp-dialog__actions" }, open, close),
+    );
+  };
   wiz.addEventListener(FINISH_EVENT, async () => {
-    if (running || !plan?.valid) return;
+    // Live view: the commit runs on the dashboard's server, once.
+    if (running || !plan?.valid || driven()) return;
     if (!String(commitValues.subject ?? "").trim()) {
       markErrors(commitInputs, { subject: "A commit needs a subject." });
       return;
@@ -296,42 +357,6 @@ export async function openNewStack(navigate) {
       await refusalAlarm(x.error, x.status);
       return;
     }
-    const text = committedText(x.body);
-    notify(text, "success");
-    const name = String(values.name).trim();
-    const parts = /** @type {Node[]} */ ([
-      h("div", { class: "kp-alert kp-alert--success", role: "status" }, text),
-    ]);
-    if (x.body.follow?.refused)
-      parts.push(
-        refusalCallout(x.body.follow.refused, "warning", "Not queued"),
-      );
-    if (typeof x.body.follow?.job === "number") {
-      const panel = mountJobPanel(x.body.follow.job, { compact: true });
-      stopPanel = panel.stop;
-      parts.push(panel.element);
-    }
-    const open = h(
-      "a",
-      { class: "kp-button", href: stackHref(name, "settings") },
-      `Open ${name}`,
-    );
-    open.addEventListener("click", (ev) => {
-      if (!navigate) return;
-      ev.preventDefault();
-      d.close();
-      navigate(stackHref(name, "settings"));
-    });
-    const close = h(
-      "button",
-      { type: "button", class: "kp-button kp-button--primary" },
-      "Close",
-    );
-    close.addEventListener("click", () => d.close());
-    handle?.element.remove();
-    body.replaceChildren(
-      ...parts,
-      h("div", { class: "kp-dialog__actions" }, open, close),
-    );
+    showCommitted(x.body);
   });
 }

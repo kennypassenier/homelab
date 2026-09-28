@@ -4,6 +4,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { actionForm, checkValues } from "../js/actionforms.js";
 import {
+  checkFields,
+  parseKey,
+  ruleFields,
+  ruleProblems,
+  settingsForm,
+} from "../js/editforms.js";
+import {
+  animate,
   badgeText,
   catchUp,
   isActive,
@@ -105,7 +113,9 @@ test("a tab that follows animates the next step and catches up after a gap", () 
     ev(4, { do: "check", field: "act-force", on: true }, state({ seq: 4 })),
     true,
   );
-  assert.deepEqual(typed.ops, [{ op: "set", name: "force", value: true }]);
+  assert.deepEqual(typed.ops, [
+    { op: "set", name: "force", id: "act-force", value: true },
+  ]);
   const pressed = plan(
     typed.local,
     ev(5, { do: "press", button: "confirm" }, state({ seq: 5 })),
@@ -124,7 +134,7 @@ test("a tab that follows animates the next step and catches up after a gap", () 
   assert.deepEqual(late.ops, [
     { op: "goto", path: "/app/stacks/media" },
     { op: "open", action: "deploy", stack: "media" },
-    { op: "set", name: "force", value: false },
+    { op: "set", name: "force", id: "act-force", value: false },
     { op: "sync" },
   ]);
   // Another form open in the tab is closed first.
@@ -187,4 +197,101 @@ test("the form description is one file: the browser's checks match the cases the
     SPEC.stack_tabs,
     STACK_TABS.map((t) => t.tab),
   );
+});
+
+/** An edit form's state, as the dashboard's server sends it. */
+const editState = (/** @type {Partial<DriveState>} */ o = {}) =>
+  state({
+    page: "/app/stacks/admin/firewall",
+    form: {
+      .../** @type {import("../js/driveview.js").DriveForm} */ (state().form),
+      id: "edit:firewall:admin",
+      action: "firewall",
+      stack: "admin",
+      title: "Firewall · admin",
+      steps: ["rules", "plan", "commit"],
+      step: "rules",
+      fields: [
+        {
+          id: "rule-peer",
+          name: "peer",
+          kind: "text",
+          value: "10.10.10.4",
+          error: null,
+          shown: true,
+          step: "rule",
+        },
+      ],
+      edit: { family: "firewall", guarded: 0 },
+    },
+    ...o,
+  });
+
+test("an edit form catches up by opening its own editor and syncing it", () => {
+  const ops = catchUp({ seq: -1, page: "/app/", form: null }, editState());
+  assert.deepEqual(ops, [
+    { op: "goto", path: "/app/stacks/admin/firewall" },
+    { op: "open", action: "firewall", stack: "admin", edit: true },
+    { op: "sync" },
+  ]);
+});
+
+test("row, edit and a typed field name the field by its id", () => {
+  const local = {
+    seq: 3,
+    page: "/app/stacks/admin/firewall",
+    form: { action: "firewall", stack: "admin" },
+  };
+  const s = editState();
+  assert.deepEqual(animate(local, { do: "row", op: "add" }, s), [
+    { op: "row", row: "add", target: undefined },
+    { op: "sync" },
+  ]);
+  assert.deepEqual(
+    animate(local, { do: "type", field: "rule-peer", text: "10.10.10.4" }, s),
+    [{ op: "type", name: "peer", id: "rule-peer", text: "10.10.10.4" }],
+  );
+  assert.deepEqual(
+    animate(local, { do: "edit", field: "rule-peer", text: "a\nb" }, s),
+    [{ op: "set", name: "peer", id: "rule-peer", value: "a\nb" }],
+  );
+});
+
+test("a press that hands over to another form closes this one and opens that", () => {
+  const local = {
+    seq: 3,
+    page: "/app/stacks/media",
+    form: { action: "rollback", stack: "media" },
+  };
+  const ops = animate(local, { do: "press", button: "next" }, state());
+  assert.deepEqual(
+    ops.map((o) => o.op),
+    ["press", "close", "open", "set", "sync"],
+  );
+  assert.equal(
+    badgeText(editState({ form: null }), 1010)?.includes("dashboard"),
+    true,
+  );
+});
+
+test("the edit checks are the server's: the same cases give the same words", () => {
+  for (const c of CASES.edit_cases) {
+    /** @type {any} */
+    const v = c.values;
+    let got;
+    if (c.check === "settings") {
+      const form = settingsForm("kp-soft", /** @type {any} */ (c.manifest), {});
+      got = checkFields(form, v);
+    } else if (c.check === "rule") {
+      const steps = [{ id: "rule", label: "Rule", fields: ruleFields(null) }];
+      got = { ...checkFields({ steps }, v), ...ruleProblems(v) };
+    } else {
+      const p = parseKey(
+        /** @type {any} */ ({ kind: c.kind }),
+        /** @type {any} */ (v.value),
+      );
+      got = p.ok ? { value: p.value } : { why: p.why };
+    }
+    assert.deepEqual(got, c.errors, JSON.stringify(c));
+  }
 });

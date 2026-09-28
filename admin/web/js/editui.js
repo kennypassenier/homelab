@@ -12,6 +12,7 @@ import {
   refusalCallout,
 } from "./actui.js";
 import { commitFields, startValues } from "./editforms.js";
+import { driven, register } from "./drivehooks.js";
 import { h } from "./dom.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { commitBody, committedText, planView } from "./plan.js";
@@ -305,7 +306,26 @@ export function openPlanDialog(o) {
   const handle = wizard(wiz);
   /** @type {() => void} */
   let stopPanel = () => {};
+  /** @type {(v: boolean) => void} */
+  let loaded = () => {};
+  const ready = new Promise((r) => (loaded = r));
+  // feat-platform-10: the Live view replay moves this very dialog.
+  const unregister = register("plan", {
+    dialog: d.dialog,
+    ready,
+    step: () => handle?.step() ?? 0,
+    goTo: (/** @type {number} */ i) =>
+      handle ? handle.goTo(i) : Promise.resolve(false),
+    input: (/** @type {string} */ name) => inputs.get(name) ?? null,
+    back: () => /** @type {HTMLElement} */ (back),
+    next: () => /** @type {HTMLElement} */ (next),
+    runError: (/** @type {import("./doctor.js").RouteError | null} */ e) =>
+      runError.replaceChildren(...(e ? [refusalCallout(e)] : [])),
+    showCommitted: (/** @type {any} */ r) => showCommitted(r),
+    close: () => d.close(),
+  });
   d.closed.then(() => {
+    unregister();
     detach();
     stopPanel();
   });
@@ -328,6 +348,7 @@ export function openPlanDialog(o) {
       planBox.replaceChildren(
         refusalCallout(r.error, "destructive", "No plan"),
       );
+      loaded(false);
       return;
     }
     plan = /** @type {import("./plan.js").Plan} */ (r.body);
@@ -354,6 +375,7 @@ export function openPlanDialog(o) {
     );
     next.disabled = !plan.valid;
     if (!plan.valid) next.title = "Nothing can be committed; see the plan";
+    loaded(true);
   })();
 
   wiz.addEventListener(BEFORE_STEP_EVENT, (e) => {
@@ -363,8 +385,50 @@ export function openPlanDialog(o) {
   });
 
   let running = false;
+  /** What the commit answered, in the dialog: the text, the job's panel.
+   * @param {any} answer */
+  const showCommitted = (answer) => {
+    if (body.dataset.shownCommit) return;
+    body.dataset.shownCommit = "1";
+    const text = committedText(answer);
+    notify(text, "success");
+    o.onCommitted?.();
+    const job = answer.follow?.job;
+    const parts = /** @type {Node[]} */ ([
+      h(
+        "div",
+        {
+          class: "kp-alert kp-alert--success",
+          role: "status",
+          "data-committed": answer.committed.commit,
+        },
+        text,
+      ),
+    ]);
+    if (answer.follow?.refused)
+      parts.push(
+        refusalCallout(answer.follow.refused, "warning", "Not queued"),
+      );
+    if (typeof job === "number") {
+      const panel = mountJobPanel(job, { compact: true });
+      stopPanel = panel.stop;
+      parts.push(panel.element);
+    }
+    handle?.element.remove();
+    const close = h(
+      "button",
+      { type: "button", class: "kp-button kp-button--primary" },
+      "Close",
+    );
+    close.addEventListener("click", () => d.close());
+    body.replaceChildren(
+      ...parts,
+      h("div", { class: "kp-dialog__actions" }, close),
+    );
+  };
   wiz.addEventListener(FINISH_EVENT, async () => {
-    if (running || !plan) return;
+    // Live view: the commit runs on the dashboard's server, once.
+    if (running || !plan || driven()) return;
     if (!String(values.subject ?? "").trim()) {
       markErrors(inputs, { subject: "A commit needs a subject." });
       return;
@@ -387,41 +451,7 @@ export function openPlanDialog(o) {
       await refusalAlarm(r.error, r.status);
       return;
     }
-    const text = committedText(r.body);
-    notify(text, "success");
-    o.onCommitted?.();
-    const job = r.body.follow?.job;
-    const parts = /** @type {Node[]} */ ([
-      h(
-        "div",
-        {
-          class: "kp-alert kp-alert--success",
-          role: "status",
-          "data-committed": r.body.committed.commit,
-        },
-        text,
-      ),
-    ]);
-    if (r.body.follow?.refused)
-      parts.push(
-        refusalCallout(r.body.follow.refused, "warning", "Not queued"),
-      );
-    if (typeof job === "number") {
-      const panel = mountJobPanel(job, { compact: true });
-      stopPanel = panel.stop;
-      parts.push(panel.element);
-    }
-    handle?.element.remove();
-    const close = h(
-      "button",
-      { type: "button", class: "kp-button kp-button--primary" },
-      "Close",
-    );
-    close.addEventListener("click", () => d.close());
-    body.replaceChildren(
-      ...parts,
-      h("div", { class: "kp-dialog__actions" }, close),
-    );
+    showCommitted(r.body);
   });
   return d;
 }

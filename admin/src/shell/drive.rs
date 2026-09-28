@@ -6,6 +6,11 @@
 //!
 //! Tabs never run a driven press themselves: the job exists whether zero,
 //! one or two tabs are open, and a tab only shows it.
+//!
+//! The edit forms (`core::driveedit`) go the same way: what an `open`
+//! needs is read through the editor's own reads, and a plan, the data
+//! folders and the final press (the commit and push, host.toml, the batch)
+//! run through the very functions the routes a click reaches run.
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -19,9 +24,11 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast::error::RecvError;
 
 use super::actions::{Actions, Clock, HostPort, Origin, Publish};
+use super::edit::{self as ed, EditCtx};
 use super::host_link::Shared;
 use crate::core::actions::{self as act, ActionKind, Arg, Refusal};
-use crate::core::drive::{Applied, Ctx, DriveState, Effect, JobRef, Sources};
+use crate::core::drive::{Applied, Ctx, DriveState, Effect, Family, JobRef, Sources};
+use crate::core::driveedit::{self, EditCall, EditKind};
 
 struct Inner {
     state: Mutex<DriveState>,
@@ -31,6 +38,8 @@ struct Inner {
     shared: Shared,
     publish: Arc<dyn Publish>,
     clock: Clock,
+    /// The editor's reads and writes, for the edit forms.
+    edit: Option<EditCtx>,
 }
 
 #[derive(Clone)]
@@ -40,6 +49,17 @@ pub struct Driver {
 
 impl Driver {
     pub fn new(actions: Actions, shared: Shared, publish: Arc<dyn Publish>, clock: Clock) -> Self {
+        Self::with_edit(actions, shared, publish, clock, None)
+    }
+
+    /// A driver that can drive the edit forms too.
+    pub fn with_edit(
+        actions: Actions,
+        shared: Shared,
+        publish: Arc<dyn Publish>,
+        clock: Clock,
+        edit: Option<EditCtx>,
+    ) -> Self {
         Driver {
             inner: Arc::new(Inner {
                 state: Mutex::new(DriveState::default()),
@@ -48,6 +68,7 @@ impl Driver {
                 shared,
                 publish,
                 clock,
+                edit,
             }),
         }
     }
@@ -91,6 +112,14 @@ impl Driver {
     /// The lists an `open` fills its choices from: the fleet's apps, and the
     /// working copy's commits and native units when the form asks.
     async fn sources(&self, step: &UiStep) -> Sources {
+        if let UiStep::Open { form, target } = step {
+            if let Some(kind) = EditKind::from_form(form) {
+                return Sources {
+                    edit: self.edit_read(kind, form, target.as_deref()).await,
+                    ..Sources::default()
+                };
+            }
+        }
         let UiStep::Open {
             form,
             target: Some(stack),
@@ -127,6 +156,149 @@ impl Driver {
         out
     }
 
+    /// What an edit form's `open` reads first, through the editor's own
+    /// reads; `{"error": refusal}` when it could not be read.
+    async fn edit_read(&self, kind: EditKind, form: &str, target: Option<&str>) -> Value {
+        let err = |r: Refusal| json!({ "error": r });
+        let Some(c) = self.inner.edit.as_ref() else {
+            return err(Refusal::new(
+                "the edit forms",
+                "this dashboard has no editor",
+                "use a dashboard with its working copy",
+            ));
+        };
+        match kind {
+            EditKind::Settings | EditKind::Raw | EditKind::AddApp | EditKind::Firewall => {
+                match target {
+                    Some(t) if act::valid_stack_name(t) => ed::read_stack_edit(c, t)
+                        .await
+                        .unwrap_or_else(|(_, r)| err(r)),
+                    _ => Value::Null,
+                }
+            }
+            EditKind::NewStack => ed::read_presets(c).await,
+            EditKind::HostSettings => ed::read_host_settings(c)
+                .await
+                .unwrap_or_else(|(_, r)| err(r)),
+            EditKind::Rollback => match target {
+                Some(t) if act::valid_stack_name(t) => self
+                    .inner
+                    .actions
+                    .rollback_options(t.to_string())
+                    .await
+                    .unwrap_or_else(err),
+                _ => Value::Null,
+            },
+            EditKind::Batch => {
+                // Each stack's own preview, as the dialog reads it: whether
+                // its deploy guard refuses (force is offered only then).
+                let action = form.strip_prefix("batch:").unwrap_or("");
+                let Some(kind) = ActionKind::from_slug(action) else {
+                    return Value::Null;
+                };
+                let mut guarded = 0;
+                for s in target.unwrap_or("").split(',').map(str::trim) {
+                    if !act::valid_stack_name(s) {
+                        continue;
+                    }
+                    let args = act::ActionArgs {
+                        confirm: kind.confirm().then(|| s.to_string()),
+                        ..Default::default()
+                    };
+                    if let Ok(req) = act::validate(s, action, args) {
+                        if self.inner.actions.preview_of(req).await.1.is_some() {
+                            guarded += 1;
+                        }
+                    }
+                }
+                json!({ "guarded": guarded })
+            }
+        }
+    }
+
+    /// An edit form's call to the dashboard's server, through the route's
+    /// own function; the answer goes into the form.
+    async fn edit_call(&self, by: &str, call: EditCall) -> Option<Refusal> {
+        let Some(c) = self.inner.edit.clone() else {
+            let r = Refusal::new(
+                "the edit forms",
+                "this dashboard has no editor",
+                "use a dashboard with its working copy",
+            );
+            if let Some(f) = self.lock().form.as_mut() {
+                driveedit::done(f, &call, Err(r.clone()));
+            }
+            return Some(r);
+        };
+        let origin = || Origin::Claude { by: by.to_string() };
+        let parse = |what: &str, v: &Value| -> Result<Value, Refusal> {
+            Err(Refusal::new(
+                what,
+                format!("the driven form built a body the server does not read: {v}"),
+                "report this with the dashboard's log",
+            ))
+        };
+        let outcome: Result<Value, Refusal> = match &call {
+            EditCall::Plan { stack, edit } => match serde_json::from_value(edit.clone()) {
+                Ok(e) => ed::plan_stack(&c, stack, e).await.map_err(|(_, r)| r),
+                Err(_) => parse("the plan", edit),
+            },
+            EditCall::Commit { stack, body } => match serde_json::from_value(body.clone()) {
+                Ok(b) => ed::commit_stack(&c, stack, b, origin())
+                    .await
+                    .map_err(|(_, r)| r),
+                Err(_) => parse("the commit", body),
+            },
+            EditCall::Appdata { body } => match serde_json::from_value(body.clone()) {
+                Ok(b) => Ok(ed::appdata_paths(&c, b).await),
+                Err(_) => Ok(json!({ "appdata": [] })),
+            },
+            EditCall::NewPlan { body } => match serde_json::from_value(body.clone()) {
+                Ok(b) => ed::plan_new(&c, b).await.map_err(|(_, r)| r),
+                Err(_) => parse("the new stack's plan", body),
+            },
+            EditCall::NewCommit { body } => match serde_json::from_value(body.clone()) {
+                Ok(b) => ed::commit_new(&c, b, origin()).await.map_err(|(_, r)| r),
+                Err(_) => parse("the new stack", body),
+            },
+            EditCall::HostWrite { body } => match serde_json::from_value(body.clone()) {
+                Ok(b) => ed::save_host_settings(&c, b).await.map_err(|(_, r)| r),
+                Err(_) => parse("the host settings", body),
+            },
+            EditCall::Batch { body } => match serde_json::from_value(body.clone()) {
+                Ok(b) => self.inner.actions.run_batch(b).map_err(|(_, r)| r),
+                Err(_) => parse("the batch", body),
+            },
+        };
+        if call.final_press() {
+            match &outcome {
+                Ok(_) => {
+                    tracing::info!(by, call = ?std::mem::discriminant(&call), "a driven edit's final press ran")
+                }
+                Err(r) => {
+                    tracing::info!(by, why = %r.why, "a driven edit's final press was refused")
+                }
+            }
+        }
+        let refusal = outcome.as_ref().err().cloned();
+        let job = outcome
+            .as_ref()
+            .ok()
+            .and_then(|v| v["follow"]["job"].as_u64())
+            .and_then(|j| self.inner.actions.job(j));
+        let mut st = self.lock();
+        if let Some(f) = st.form.as_mut() {
+            driveedit::done(f, &call, outcome);
+            if let Some(v) = job {
+                f.job = Some(job_ref(&v));
+                f.refresh();
+            }
+        }
+        // A plan that could not be made is shown in the dialog, as a click
+        // shows it; only a refused final press is the driver's refusal.
+        refusal.filter(|_| call.final_press())
+    }
+
     /// Apply one step and answer `{ok, refusal, state}`.
     pub async fn step(&self, by: &str, scope: Scope, step: UiStep) -> Value {
         let _turn = self.inner.turn.lock().await;
@@ -156,6 +328,7 @@ impl Driver {
                     held
                 }
                 Effect::Run(args) => self.run(by, args).await,
+                Effect::Edit(call) => self.edit_call(by, call).await.or(held),
             },
         };
         tracing::info!(by, step = step.verb(), "a driven step was applied");
@@ -180,13 +353,16 @@ impl Driver {
     /// The review step is on screen: the CLI line and the deploy guard, read
     /// the way the dialog's own preview reads them.
     async fn preview(&self) {
-        let Some((stack, action, mut args, confirm)) = self.lock().form.as_ref().map(|f| {
-            (
+        let Some((stack, action, mut args, confirm)) = self.lock().form.as_ref().and_then(|f| {
+            let Family::Action(kind) = f.desc.family else {
+                return None;
+            };
+            Some((
                 f.stack.clone(),
                 f.action.clone(),
-                crate::core::drive::build_args(&f.desc, &f.values),
-                f.desc.action.confirm(),
-            )
+                crate::core::drive::build_args_of(f.desc.fields(), &f.values),
+                kind.confirm(),
+            ))
         }) else {
             return;
         };

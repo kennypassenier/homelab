@@ -28,6 +28,7 @@ import {
   stackCommit,
 } from "./editui.js";
 import { badgeCell, errorBox, fetchJson, h, tableBlock, td } from "./dom.js";
+import { driven, register } from "./drivehooks.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 
 /**
@@ -83,6 +84,8 @@ export function settingsTab(panel, params) {
   panel.replaceChildren(
     h("p", { class: "measured" }, "Reading the stack's files…"),
   );
+  /** @type {() => void} */
+  let unregister = () => {};
   const load = async () => {
     const r = await readEdit(stack, abort.signal);
     if (!r.ok) {
@@ -90,6 +93,24 @@ export function settingsTab(panel, params) {
       return;
     }
     const e = /** @type {EditRead} */ (r.body);
+    // feat-platform-10: the Live view replay presses these very buttons.
+    unregister();
+    unregister = register(`stack-edit:${stack}`, {
+      openRaw: () => {
+        const d = panel.querySelector("#raw-editor");
+        if (d instanceof HTMLDetailsElement) d.open = true;
+      },
+      review: (/** @type {string} */ family) =>
+        /** @type {HTMLElement | null} */ (
+          panel.querySelector(
+            family === "raw"
+              ? "#raw-review"
+              : family === "add-app"
+                ? "#add-app-review"
+                : "#settings-review",
+          )
+        ),
+    });
     const parts = /** @type {Node[]} */ ([...headLine(e)]);
     if (e.manifest) parts.push(settingsCard(stack, e, load));
     else
@@ -105,7 +126,10 @@ export function settingsTab(panel, params) {
     panel.replaceChildren(...parts);
   };
   void load().catch(() => {});
-  return () => abort.abort();
+  return () => {
+    abort.abort();
+    unregister();
+  };
 }
 
 /**
@@ -637,7 +661,32 @@ function drawFirewall(panel, stack, e, reload) {
   const table = dataTable(t.wrap);
   paintOptions();
   paintRules();
-  return detachTables;
+  // feat-platform-10: the Live view replay works this very editor: its
+  // model is the one Claude's steps built on the dashboard's server, and
+  // the rule dialog is the one Add and Edit open.
+  const unregister = register(`firewall:${stack}`, {
+    model: () => model,
+    setModel: (/** @type {import("./editforms.js").FirewallModel} */ m) => {
+      model = m;
+      paintOptions();
+      paintRules();
+    },
+    openRule: (/** @type {number | null} */ i) =>
+      openRuleDialog(
+        i == null ? null : (model.rules[i]?.rule ?? null),
+        () => {},
+      ),
+    review: () => review,
+    add: () => add,
+    rowButton: (/** @type {string} */ act, /** @type {number} */ i) =>
+      /** @type {HTMLElement | null} */ (
+        t.tbody.querySelector(`button[data-act="${act}"][data-i="${i}"]`)
+      ),
+  });
+  return () => {
+    unregister();
+    detachTables();
+  };
 }
 
 /**
@@ -656,6 +705,7 @@ function choice(id, options) {
  * The rule dialog behind Add and Edit.
  * @param {import("./editforms.js").Rule | null} rule
  * @param {(r: import("./editforms.js").Rule) => void} done
+ * @returns {{close: () => void}}
  */
 function openRuleDialog(rule, done) {
   const fields = ruleFields(rule);
@@ -690,8 +740,17 @@ function openRuleDialog(rule, done) {
     ],
     id: "rule-dialog",
   });
+  const unregister = register("rule", {
+    dialog: d.dialog,
+    save: () => save,
+    cancel: () => cancel,
+    close: () => d.close(),
+  });
+  d.closed.then(unregister);
   cancel.addEventListener("click", () => d.close());
   save.addEventListener("click", () => {
+    // Live view: the rule is kept on the dashboard's server.
+    if (driven()) return;
     const errors = {
       ...checkFields(
         { steps: [{ id: "rule", label: "Rule", fields }] },
@@ -712,4 +771,5 @@ function openRuleDialog(rule, done) {
     done(ruleFromValues(values));
     d.close();
   });
+  return { close: () => d.close() };
 }

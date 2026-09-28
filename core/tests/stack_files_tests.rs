@@ -1273,8 +1273,23 @@ fn fix_93_loki_takes_only_pushes_from_the_lan_and_deletes_nothing() {
     }
     assert_eq!(
         conf.matches("location ").count(),
-        3,
-        "push, ready and the refusal; nothing else is let through: {conf}"
+        4,
+        "push, ready, the dashboard's read and the refusal; nothing else is let through: {conf}"
+    );
+    // loki-read (Kenny, 2026-09-28): one read endpoint, GET only, CT 120 only.
+    let read_route = conf
+        .split("location = /loki/api/v1/query_range {")
+        .nth(1)
+        .and_then(|rest| rest.split('}').nth(1).map(|_| rest))
+        .expect("the dashboard's read route");
+    let block: String = read_route.split("proxy_pass").next().unwrap().to_string();
+    assert!(block.contains("limit_except GET { deny all; }"), "{block}");
+    assert!(block.contains("allow 10.10.10.20;"), "{block}");
+    assert!(block.contains("deny all;\n"), "{block}");
+    assert_eq!(
+        block.matches("allow ").count(),
+        1,
+        "only CT 120 reads: {block}"
     );
     let checks = read("metrics/loki/checks.yml");
     assert!(checks.contains("http://127.0.0.1:3101/loki/api/v1/labels"));

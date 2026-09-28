@@ -458,33 +458,48 @@ async fn stack_plan(
         Ok(b) => b,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
-    if !actions::valid_stack_name(&stack) {
-        return refusal(
+    answer(plan_stack(&c, &stack, b.edit).await)
+}
+
+/// A route's answer from a shared function's.
+fn answer(r: Result<serde_json::Value, (StatusCode, Refusal)>) -> Response {
+    match r {
+        Ok(v) => Json(v).into_response(),
+        Err((status, r)) => refusal(status, r),
+    }
+}
+
+/// feat-stacks-2: the plan of one stack's edit. The route and a driven
+/// `next` (feat-platform-10) both come here.
+pub async fn plan_stack(
+    c: &EditCtx,
+    stack: &str,
+    edit: StackEdit,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    if !actions::valid_stack_name(stack) {
+        return Err((
             StatusCode::BAD_REQUEST,
             Refusal::new(
                 "the plan",
                 "not a stack name",
                 "use the name the fleet page shows",
             ),
-        );
+        ));
     }
     let wc = c.wc.clone();
-    let (s2, e2) = (stack.clone(), b.edit.clone());
-    let planned = match blocking(move || prepare(&wc, &s2, &e2))
+    let (s2, e2) = (stack.to_string(), edit.clone());
+    let planned = blocking(move || prepare(&wc, &s2, &e2))
         .await
         .and_then(|r| r)
-    {
-        Ok(p) => p,
-        Err(r) => return refusal(StatusCode::CONFLICT, r),
-    };
-    let applied = applied_changes(&c, &stack, planned.checked.digest.as_ref()).await;
-    let (json, _, _) = plan_json(&stack, b.edit.kind(), b.edit.feature(), &planned, applied);
-    Json(json).into_response()
+        .map_err(|r| (StatusCode::CONFLICT, r))?;
+    let applied = applied_changes(c, stack, planned.checked.digest.as_ref()).await;
+    let (json, _, _) = plan_json(stack, edit.kind(), edit.feature(), &planned, applied);
+    Ok(json)
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CommitBody {
+pub struct CommitBody {
     edit: StackEdit,
     /// The first line; the default is the plan's. A missing feature id is
     /// added (standing rule 4).
@@ -513,7 +528,13 @@ pub fn subject_with_id(typed: Option<&str>, default: &str, feature: &str) -> Str
 }
 
 /// Queue the follow-up of a commit (the act job machinery).
-fn follow_up(c: &EditCtx, stack: &str, follow: Option<&str>, commit: &str) -> serde_json::Value {
+fn follow_up(
+    c: &EditCtx,
+    stack: &str,
+    follow: Option<&str>,
+    commit: &str,
+    origin: Origin,
+) -> serde_json::Value {
     let kind = match follow {
         None | Some("") | Some("none") => return serde_json::Value::Null,
         Some("deploy") => ActionKind::DeployCommit,
@@ -533,7 +554,7 @@ fn follow_up(c: &EditCtx, stack: &str, follow: Option<&str>, commit: &str) -> se
     if let Err(r) = c.actions.precheck(&req) {
         return serde_json::json!({ "refused": r });
     }
-    let job = c.actions.submit(req, Origin::Manual);
+    let job = c.actions.submit(req, origin);
     serde_json::json!({ "job": job.job, "action": job.action, "restarts_dashboard": job.restarts_dashboard })
 }
 
@@ -546,16 +567,29 @@ async fn stack_commit(
         Ok(b) => b,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
-    if !actions::valid_stack_name(&stack) {
-        return refusal(
+    answer(commit_stack(&c, &stack, b, Origin::Manual).await)
+}
+
+/// feat-stacks-2: the commit and push of one stack's edit, then its
+/// follow-up. The route and a driven `confirm` (feat-platform-10) both
+/// come here: one transaction, whoever pressed.
+pub async fn commit_stack(
+    c: &EditCtx,
+    stack: &str,
+    b: CommitBody,
+    origin: Origin,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    if !actions::valid_stack_name(stack) {
+        return Err((
             StatusCode::BAD_REQUEST,
             Refusal::new(
                 "the commit",
                 "not a stack name",
                 "use the name the fleet page shows",
             ),
-        );
+        ));
     }
+    let stack = stack.to_string();
     let wc = c.wc.clone();
     let (s2, edit) = (stack.clone(), b.edit.clone());
     let (subject_in, note) = (b.subject.clone(), b.note.clone().unwrap_or_default());
@@ -586,31 +620,39 @@ async fn stack_commit(
     })
     .await
     .and_then(|r| r);
-    publish_repo(&c).await;
+    publish_repo(c).await;
     match done {
         Ok(committed) => {
-            let follow = follow_up(&c, &stack, b.follow.as_deref(), &committed.commit);
-            Json(serde_json::json!({ "committed": committed, "follow": follow })).into_response()
+            let follow = follow_up(c, &stack, b.follow.as_deref(), &committed.commit, origin);
+            Ok(serde_json::json!({ "committed": committed, "follow": follow }))
         }
-        Err(r) => refusal(StatusCode::CONFLICT, r),
+        Err(r) => Err((StatusCode::CONFLICT, r)),
     }
 }
 
 /// The editor's first read: the stack's files, its parsed settings and
 /// firewall, its images, and the presets an app can come from.
 async fn stack_edit(State(c): State<EditCtx>, UrlPath(stack): UrlPath<String>) -> Response {
-    if !actions::valid_stack_name(&stack) {
-        return refusal(
+    answer(read_stack_edit(&c, &stack).await)
+}
+
+/// The editor's first read, for the route and a driven `open`.
+pub async fn read_stack_edit(
+    c: &EditCtx,
+    stack: &str,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    if !actions::valid_stack_name(stack) {
+        return Err((
             StatusCode::BAD_REQUEST,
             Refusal::new(
                 "the editor",
                 "not a stack name",
                 "use the name the fleet page shows",
             ),
-        );
+        ));
     }
     let wc = c.wc.clone();
-    let s2 = stack.clone();
+    let s2 = stack.to_string();
     let read = blocking(move || {
         let sync_error = wc.sync().err().map(|r| r.why);
         let texts = wc.stack_texts(&s2)?;
@@ -620,10 +662,7 @@ async fn stack_edit(State(c): State<EditCtx>, UrlPath(stack): UrlPath<String>) -
     })
     .await
     .and_then(|r| r);
-    let (texts, presets, head, sync_error) = match read {
-        Ok(x) => x,
-        Err(r) => return refusal(StatusCode::CONFLICT, r),
-    };
+    let (texts, presets, head, sync_error) = read.map_err(|r| (StatusCode::CONFLICT, r))?;
     let manifest = texts.get(MANIFEST).map(|t| stackedit::parse_manifest(t));
     let (manifest_json, manifest_error) = match manifest {
         Some(Ok(m)) => (
@@ -646,7 +685,7 @@ async fn stack_edit(State(c): State<EditCtx>, UrlPath(stack): UrlPath<String>) -
             Some(format!("stacks/{stack} has no {MANIFEST}")),
         ),
     };
-    Json(serde_json::json!({
+    Ok(serde_json::json!({
         "stack": stack,
         "head": head,
         "sync_error": sync_error,
@@ -659,7 +698,6 @@ async fn stack_edit(State(c): State<EditCtx>, UrlPath(stack): UrlPath<String>) -
             "name": p.name, "description": p.meta.description, "apps": p.apps,
         })).collect::<Vec<_>>(),
     }))
-    .into_response()
 }
 
 // ── feat-stacks-3: a new stack ──────────────────────────────────────────
@@ -710,6 +748,11 @@ async fn taken(c: &EditCtx) -> Taken {
 }
 
 async fn presets(State(c): State<EditCtx>) -> Response {
+    Json(read_presets(&c).await).into_response()
+}
+
+/// The new-stack wizard's first read, for the route and a driven `open`.
+pub async fn read_presets(c: &EditCtx) -> serde_json::Value {
     let wc = c.wc.clone();
     // Only the repository's presets: without a working copy the scaffold's
     // built-in fallbacks would be offered as if they were Kenny's.
@@ -727,9 +770,9 @@ async fn presets(State(c): State<EditCtx>) -> Response {
     })
     .await
     .unwrap_or_default();
-    let t = taken(&c).await;
+    let t = taken(c).await;
     let d = homelab_client::scaffold::StackDefaults::default();
-    Json(serde_json::json!({
+    serde_json::json!({
         "presets": list.iter().map(|p| serde_json::json!({
             "name": p.name,
             "description": p.meta.description,
@@ -745,13 +788,12 @@ async fn presets(State(c): State<EditCtx>) -> Response {
         "swap": { "divisor": d.swap_divisor, "min_mb": d.swap_min_mb, "max_mb": d.swap_max_mb },
         "working_copy": c.wc.present(),
         "sync_error": sync_error,
-    }))
-    .into_response()
+    })
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AppdataBody {
+pub struct AppdataBody {
     preset: String,
     name: String,
     vmid: u16,
@@ -765,6 +807,11 @@ async fn new_appdata(
         Ok(b) => b,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
+    Json(appdata_paths(&c, b).await).into_response()
+}
+
+/// The `/appdata` folders a new stack's preset binds.
+pub async fn appdata_paths(c: &EditCtx, b: AppdataBody) -> serde_json::Value {
     let wc = c.wc.clone();
     let paths = blocking(move || {
         let base = wc.repo.join("presets");
@@ -774,7 +821,7 @@ async fn new_appdata(
     })
     .await
     .unwrap_or_default();
-    Json(serde_json::json!({ "appdata": paths })).into_response()
+    serde_json::json!({ "appdata": paths })
 }
 
 fn scaffold_new(wc: &WorkingCopy, req: &NewStack) -> Result<Vec<FileChange>, Refusal> {
@@ -839,16 +886,21 @@ async fn new_plan(State(c): State<EditCtx>, b: Result<Json<NewStack>, JsonReject
         Ok(b) => b,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
-    let t = taken(&c).await;
+    answer(plan_new(&c, req).await)
+}
+
+/// feat-stacks-3: the new stack's plan, for the route and a driven wizard.
+pub async fn plan_new(
+    c: &EditCtx,
+    req: NewStack,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    let t = taken(c).await;
     let wc = c.wc.clone();
     let r2 = req.clone();
-    let planned = match blocking(move || prepare_new(&wc, &r2, &t))
+    let planned = blocking(move || prepare_new(&wc, &r2, &t))
         .await
         .and_then(|r| r)
-    {
-        Ok(p) => p,
-        Err(r) => return refusal(StatusCode::CONFLICT, r),
-    };
+        .map_err(|r| (StatusCode::CONFLICT, r))?;
     let (json, _, _) = plan_json(
         &req.name,
         "new",
@@ -856,12 +908,12 @@ async fn new_plan(State(c): State<EditCtx>, b: Result<Json<NewStack>, JsonReject
         &planned,
         serde_json::json!({ "never": true, "changes": [] }),
     );
-    Json(json).into_response()
+    Ok(json)
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct NewCommitBody {
+pub struct NewCommitBody {
     stack: NewStack,
     #[serde(default)]
     subject: Option<String>,
@@ -879,7 +931,17 @@ async fn new_commit(
         Ok(b) => b,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
-    let t = taken(&c).await;
+    answer(commit_new(&c, b, Origin::Manual).await)
+}
+
+/// feat-stacks-3: the new stack's commit and push, then its first deploy
+/// when asked; for the route and a driven wizard's final press.
+pub async fn commit_new(
+    c: &EditCtx,
+    b: NewCommitBody,
+    origin: Origin,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    let t = taken(c).await;
     let wc = c.wc.clone();
     let req = b.stack.clone();
     let (subject_in, note) = (b.subject.clone(), b.note.clone().unwrap_or_default());
@@ -910,13 +972,19 @@ async fn new_commit(
     })
     .await
     .and_then(|r| r);
-    publish_repo(&c).await;
+    publish_repo(c).await;
     match done {
         Ok(committed) => {
-            let follow = follow_up(&c, &b.stack.name, b.follow.as_deref(), &committed.commit);
-            Json(serde_json::json!({ "committed": committed, "follow": follow })).into_response()
+            let follow = follow_up(
+                c,
+                &b.stack.name,
+                b.follow.as_deref(),
+                &committed.commit,
+                origin,
+            );
+            Ok(serde_json::json!({ "committed": committed, "follow": follow }))
         }
-        Err(r) => refusal(StatusCode::CONFLICT, r),
+        Err(r) => Err((StatusCode::CONFLICT, r)),
     }
 }
 
@@ -1008,23 +1076,45 @@ async fn host_new_enough(c: &EditCtx) -> Result<(), Refusal> {
 }
 
 async fn host_settings(State(c): State<EditCtx>) -> Response {
-    if let Err(r) = host_new_enough(&c).await {
-        return refusal(StatusCode::SERVICE_UNAVAILABLE, r);
-    }
+    answer(read_host_settings(&c).await)
+}
+
+/// feat-settings-1: host.toml as the page shows it, for the route and a
+/// driven `open host-settings`.
+pub async fn read_host_settings(c: &EditCtx) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    host_new_enough(c)
+        .await
+        .map_err(|r| (StatusCode::SERVICE_UNAVAILABLE, r))?;
     let r = c
         .host
         .ask_traced(Command::GetHostConfig, Duration::from_secs(20), None)
         .await;
     match r {
         Ok(r) if r.ok => match serde_json::from_str::<homelab_proto::HostConfigFile>(&r.message) {
-            Ok(file) => Json(serde_json::json!({ "page": hostsettings::page(&file), "measured_at": super::host_link::now_s() })).into_response(),
-            Err(e) => refusal(
-                StatusCode::BAD_GATEWAY,
-                Refusal::new("the host settings", format!("the host's answer did not read: {e}"), "update the host and the dashboard to the same release"),
+            Ok(file) => Ok(
+                serde_json::json!({ "page": hostsettings::page(&file), "measured_at": super::host_link::now_s() }),
             ),
+            Err(e) => Err((
+                StatusCode::BAD_GATEWAY,
+                Refusal::new(
+                    "the host settings",
+                    format!("the host's answer did not read: {e}"),
+                    "update the host and the dashboard to the same release",
+                ),
+            )),
         },
-        Ok(r) => refusal(StatusCode::BAD_GATEWAY, Refusal::new("the host settings", r.message, "look at host.toml on pve")),
-        Err(e) => refusal(StatusCode::BAD_GATEWAY, Refusal::new("the host settings", e, "check that the host answers (homelab ping)")),
+        Ok(r) => Err((
+            StatusCode::BAD_GATEWAY,
+            Refusal::new("the host settings", r.message, "look at host.toml on pve"),
+        )),
+        Err(e) => Err((
+            StatusCode::BAD_GATEWAY,
+            Refusal::new(
+                "the host settings",
+                e,
+                "check that the host answers (homelab ping)",
+            ),
+        )),
     }
 }
 
@@ -1036,14 +1126,20 @@ async fn host_settings_save(
         Ok(b) => b,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
-    if let Err(r) = host_new_enough(&c).await {
-        return refusal(StatusCode::SERVICE_UNAVAILABLE, r);
-    }
+    answer(save_host_settings(&c, change).await)
+}
+
+/// feat-settings-1: write host.toml, for the route and a driven final
+/// press: the same check, the same session-only command, once.
+pub async fn save_host_settings(
+    c: &EditCtx,
+    change: hostsettings::Change,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    host_new_enough(c)
+        .await
+        .map_err(|r| (StatusCode::SERVICE_UNAVAILABLE, r))?;
     let expect = change.expect_sha256.clone();
-    let changes = match hostsettings::check(change) {
-        Ok(ch) => ch,
-        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
-    };
+    let changes = hostsettings::check(change).map_err(|r| (StatusCode::BAD_REQUEST, r))?;
     let keys: Vec<String> = changes.keys().cloned().collect();
     let r = c
         .host
@@ -1063,24 +1159,24 @@ async fn host_settings_save(
                 "host_settings",
                 serde_json::json!({ "saved": saved, "keys": keys }),
             );
-            Json(serde_json::json!({ "saved": saved })).into_response()
+            Ok(serde_json::json!({ "saved": saved }))
         }
-        Ok(r) => refusal(
+        Ok(r) => Err((
             StatusCode::CONFLICT,
             Refusal::new(
                 "the host settings",
                 r.message,
                 "nothing was written; correct the change or reload the page",
             ),
-        ),
-        Err(e) => refusal(
+        )),
+        Err(e) => Err((
             StatusCode::BAD_GATEWAY,
             Refusal::new(
                 "the host settings",
                 format!("{e}; whether the host wrote it is unknown"),
                 "reload the page: it shows host.toml as it is now",
             ),
-        ),
+        )),
     }
 }
 

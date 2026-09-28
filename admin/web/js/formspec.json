@@ -1,7 +1,10 @@
 {
   "about": "feat-platform-10: the one description of every action form's fields, read by the browser (actionforms.js imports it) and by the dashboard's server (core::drive embeds it), so a step Claude sends and a click Kenny makes are checked against the same words. {stack}, {expect}, {label} and {text} are filled in by both sides the same way.",
   "review_args": ["force", "confirm"],
-  "steps": { "options": "Options", "review": "Review and run" },
+  "steps": {
+    "options": "Options",
+    "review": "Review and run"
+  },
   "patterns": {
     "word": "[A-Za-z0-9._:\\-]{1,128}",
     "commit": "[0-9a-fA-F]{7,40}"
@@ -105,5 +108,476 @@
     "checks",
     "settings",
     "firewall"
-  ]
+  ],
+  "edit": {
+    "about": "feat-platform-10: the edit forms (stack settings, the raw editor, add an app, the firewall and its rule dialog, the plan dialog's commit step, the new-stack wizard, a host.toml key, the batch and roll back dialogs), described once. editforms.js draws them from here and core::driveedit checks a driven step against the same words. {label}, {lower}, {min}, {max}, {expect}, {text}, {stack}, {key}, {name}, {vmid}, {peer}, {part} are filled in the same way on both sides.",
+    "messages": {
+      "needed": "{label} is needed.",
+      "number": "{label} must be a whole number from {min} to {max}.",
+      "typed": "Type {expect} exactly to confirm.",
+      "pattern": "\"{text}\" is not a valid {lower}.",
+      "subject": "A commit needs a subject.",
+      "unchanged": "Nothing is changed yet.",
+      "raw_unchanged": "The file is as it was.",
+      "name_taken": "There is a stack called {name} already.",
+      "vmid_taken": "CT {vmid} exists already.",
+      "vmid_no_touch": "{vmid} is on the no-touch list.",
+      "peer_form": "{peer} is not an address like 10.10.10.4 or a network like 10.10.10.0/24.",
+      "peer_prefix": "{peer} has a prefix longer than 32.",
+      "peer_host_bits": "{peer} has host bits set: Proxmox reads it as the whole network. Write one address, or the network.",
+      "icmp_ports": "icmp has no ports; clear them.",
+      "port_proto": "A port needs tcp or udp.",
+      "port_range": "{part} is not a port 1 to 65535 or a forward range.",
+      "note_line": "A note is one line.",
+      "key_int": "A whole number from {min} to {max}.",
+      "key_vmid": "A container number, 100 or more.",
+      "key_url": "An http:// or https:// address.",
+      "key_window": "A number and a unit, e.g. 24h.",
+      "key_vmid_list": "Container numbers separated by commas.",
+      "key_line": "One line.",
+      "key_confirm": "Type {key} exactly.",
+      "batch_confirm": "Type {stack} to confirm.",
+      "rollback_choose": "Choose a commit to deploy or a unit to roll back."
+    },
+    "no_touch": [100, 101, 102, 103],
+    "follow": {
+      "none": "Commit only",
+      "deploy": "Commit, then deploy exactly this commit",
+      "resize": "Commit, then resize the running container"
+    },
+    "settings": [
+      {
+        "name": "cores",
+        "id": "edit-cores",
+        "kind": "number",
+        "label": "Cores",
+        "help": "CPU cores the container may use.",
+        "min": 1,
+        "max": 64,
+        "unit": "",
+        "required": true
+      },
+      {
+        "name": "memory_mb",
+        "id": "edit-memory-mb",
+        "kind": "number",
+        "label": "Memory (MB)",
+        "help": "Memory limit; raising it takes a Resize, lowering it a rebuild.",
+        "min": 128,
+        "max": 262144,
+        "unit": "MB",
+        "required": true
+      },
+      {
+        "name": "swap_mb",
+        "id": "edit-swap-mb",
+        "kind": "number",
+        "label": "Swap (MB)",
+        "help": "Swap limit; 0 is valid.",
+        "min": 0,
+        "max": 65536,
+        "unit": "MB",
+        "required": true
+      },
+      {
+        "name": "disk_gb",
+        "id": "edit-disk-gb",
+        "kind": "number",
+        "label": "Disk (GB)",
+        "help": "Root disk size; Proxmox can grow a disk, never shrink it.",
+        "min": 2,
+        "max": 4096,
+        "unit": "GB",
+        "required": true
+      },
+      {
+        "name": "onboot",
+        "id": "edit-onboot",
+        "kind": "check",
+        "label": "Start on boot",
+        "help": "Whether the container starts when pve starts (the deploy puts it back, W3)."
+      },
+      {
+        "name": "order",
+        "id": "edit-order",
+        "kind": "number",
+        "label": "Boot order",
+        "help": "Lower starts earlier; everything behind the edge waits for Traefik.",
+        "min": 0,
+        "max": 9999,
+        "unit": "",
+        "required": false
+      },
+      {
+        "name": "protection",
+        "id": "edit-protection",
+        "kind": "check",
+        "label": "Proxmox protection",
+        "help": "Refuses a destroy at the hypervisor; a rebuild applies a change."
+      }
+    ],
+    "image": {
+      "name": "image:{key}",
+      "id": "edit-image-{slug}",
+      "kind": "text",
+      "label": "Image of {key}",
+      "help": "The image reference in the app's compose file, e.g. name:1.2.3.",
+      "required": true,
+      "pattern": "[A-Za-z0-9._/:@\\-]{1,255}"
+    },
+    "commit": [
+      {
+        "name": "subject",
+        "id": "edit-subject",
+        "kind": "text",
+        "label": "Commit subject",
+        "help": "The first line of the commit; a feature id in brackets is added when it names none.",
+        "required": true
+      },
+      {
+        "name": "note",
+        "id": "edit-note",
+        "kind": "textarea",
+        "label": "Why (optional)",
+        "help": "A sentence for the commit body: why this changes."
+      },
+      {
+        "name": "follow",
+        "id": "edit-follow",
+        "kind": "choice",
+        "label": "After the commit",
+        "help": "A deploy goes through the Jobs queue with its progress; it deploys this very commit."
+      }
+    ],
+    "raw": [
+      {
+        "name": "file",
+        "id": "raw-file",
+        "kind": "choice",
+        "label": "File",
+        "help": "Anything the form does not cover. Secrets (.env) are not here: they live in latch."
+      },
+      {
+        "name": "text",
+        "id": "raw-text",
+        "kind": "textarea",
+        "label": "The file's text",
+        "help": "The whole file as it should be; homelab ui edit raw-text <file> sets it."
+      }
+    ],
+    "add_app": [
+      {
+        "name": "preset",
+        "id": "add-app-preset",
+        "kind": "choice",
+        "label": "Preset",
+        "help": "A preset's app joins this stack: its files, its entry in apps and its /appdata folder."
+      }
+    ],
+    "firewall": [
+      {
+        "name": "enabled",
+        "id": "fw-enabled",
+        "kind": "check",
+        "label": "In force (the deploy writes the file and switches firewall=1 on the network card)",
+        "help": ""
+      },
+      {
+        "name": "policy_in",
+        "id": "fw-policy-in",
+        "kind": "choice",
+        "label": "Inbound policy",
+        "help": "What happens when no inbound rule matches.",
+        "choices": [
+          {
+            "value": "DROP",
+            "label": "DROP"
+          },
+          {
+            "value": "ACCEPT",
+            "label": "ACCEPT"
+          },
+          {
+            "value": "REJECT",
+            "label": "REJECT"
+          }
+        ]
+      },
+      {
+        "name": "policy_out",
+        "id": "fw-policy-out",
+        "kind": "choice",
+        "label": "Outbound policy",
+        "help": "What happens when no outbound rule matches.",
+        "choices": [
+          {
+            "value": "ACCEPT",
+            "label": "ACCEPT"
+          },
+          {
+            "value": "DROP",
+            "label": "DROP"
+          },
+          {
+            "value": "REJECT",
+            "label": "REJECT"
+          }
+        ]
+      },
+      {
+        "name": "management_open",
+        "id": "fw-management-open",
+        "kind": "text",
+        "label": "Management network open, because…",
+        "help": "Empty: DNS to the router only, the rest of 10.10.5.0/24 dropped. A reason drops that guard.",
+        "placeholder": "empty: the management guard applies"
+      },
+      {
+        "name": "comment",
+        "id": "fw-comment",
+        "kind": "textarea",
+        "label": "Comment at the top of the file",
+        "help": "Lines written above the rules in pve's file."
+      }
+    ],
+    "rule": [
+      {
+        "name": "dir",
+        "id": "rule-dir",
+        "kind": "choice",
+        "label": "Direction",
+        "help": "In: who may reach this container. Out: where it may go.",
+        "choices": [
+          {
+            "value": "in",
+            "label": "In (to this container)"
+          },
+          {
+            "value": "out",
+            "label": "Out (from this container)"
+          }
+        ],
+        "current": "in"
+      },
+      {
+        "name": "action",
+        "id": "rule-action",
+        "kind": "choice",
+        "label": "Action",
+        "help": "The first rule that matches decides; the policy applies when none does.",
+        "choices": [
+          {
+            "value": "ACCEPT",
+            "label": "Accept"
+          },
+          {
+            "value": "DROP",
+            "label": "Drop"
+          },
+          {
+            "value": "REJECT",
+            "label": "Reject"
+          }
+        ],
+        "current": "ACCEPT"
+      },
+      {
+        "name": "peer",
+        "id": "rule-peer",
+        "kind": "text",
+        "label": "Other side",
+        "help": "One address (10.10.10.4) or a network (10.10.10.0/24); empty: anywhere.",
+        "pattern": "\\d{1,3}(\\.\\d{1,3}){3}(/\\d{1,2})?",
+        "placeholder": "10.10.10.4",
+        "current": ""
+      },
+      {
+        "name": "proto",
+        "id": "rule-proto",
+        "kind": "choice",
+        "label": "Protocol",
+        "help": "A port needs tcp or udp; icmp has no ports.",
+        "choices": [
+          {
+            "value": "",
+            "label": "Any"
+          },
+          {
+            "value": "tcp",
+            "label": "tcp"
+          },
+          {
+            "value": "udp",
+            "label": "udp"
+          },
+          {
+            "value": "icmp",
+            "label": "icmp"
+          }
+        ],
+        "current": "tcp"
+      },
+      {
+        "name": "dport",
+        "id": "rule-dport",
+        "kind": "text",
+        "label": "Ports",
+        "help": "8080, 8080,8787 or 5000:5003; empty: every port.",
+        "pattern": "\\d{1,5}([:,]\\d{1,5})*",
+        "placeholder": "8080",
+        "current": ""
+      },
+      {
+        "name": "note",
+        "id": "rule-note",
+        "kind": "text",
+        "label": "Note",
+        "help": "One line, written after the rule in pve's file (who this is for).",
+        "current": ""
+      },
+      {
+        "name": "comment",
+        "id": "rule-comment",
+        "kind": "textarea",
+        "label": "Comment above the rule",
+        "help": "Optional lines written above the rule: why it exists.",
+        "current": ""
+      }
+    ],
+    "new_stack": [
+      {
+        "id": "preset",
+        "label": "Preset",
+        "fields": [
+          {
+            "name": "preset",
+            "id": "new-preset",
+            "kind": "choice",
+            "label": "Start from",
+            "help": "A preset from the repository's presets/ directory: its apps, their compose files and a size.",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "identity",
+        "label": "Name",
+        "fields": [
+          {
+            "name": "name",
+            "id": "new-name",
+            "kind": "text",
+            "label": "Stack name",
+            "help": "Lowercase letters, digits and dashes; it names the directory, the container and its data.",
+            "required": true,
+            "pattern": "[a-z0-9][a-z0-9\\-]{0,31}",
+            "placeholder": "recipes"
+          },
+          {
+            "name": "vmid",
+            "id": "new-vmid",
+            "kind": "number",
+            "label": "Container number",
+            "help": "The vmid; its address becomes 10.10.10.<number − 100>.",
+            "required": true,
+            "min": 102,
+            "max": 354
+          }
+        ]
+      },
+      {
+        "id": "size",
+        "label": "Size",
+        "fields": [
+          {
+            "name": "ram_mb",
+            "id": "new-ram-mb",
+            "kind": "number",
+            "label": "Memory (MB)",
+            "help": "The container's memory limit.",
+            "min": 128,
+            "max": 262144,
+            "unit": "MB",
+            "required": true
+          },
+          {
+            "name": "cores",
+            "id": "new-cores",
+            "kind": "number",
+            "label": "Cores",
+            "help": "CPU cores.",
+            "min": 1,
+            "max": 64,
+            "unit": "",
+            "required": true
+          },
+          {
+            "name": "disk_gb",
+            "id": "new-disk-gb",
+            "kind": "number",
+            "label": "Disk (GB)",
+            "help": "Root disk size.",
+            "min": 2,
+            "max": 4096,
+            "unit": "GB",
+            "required": true
+          },
+          {
+            "name": "swap_mb",
+            "id": "new-swap-mb",
+            "kind": "number",
+            "label": "Swap (MB)",
+            "help": "Empty: a quarter of the memory, 512 MB to 2 GB.",
+            "min": 0,
+            "max": 65536,
+            "unit": "MB",
+            "required": false
+          }
+        ]
+      },
+      {
+        "id": "data",
+        "label": "Data",
+        "fields": []
+      },
+      {
+        "id": "plan",
+        "label": "Plan and commit",
+        "fields": []
+      }
+    ],
+    "new_defaults": {
+      "ram_mb": 1024,
+      "cores": 2,
+      "disk_gb": 32
+    },
+    "nodata": {
+      "name": "nodata:{path}",
+      "id": "new-nodata-{i}",
+      "kind": "check",
+      "label": "{path} keeps nothing",
+      "help": "Ticked: the app keeps no files of its own here, so it gets no backup repository (no_data). Leave it off when in doubt."
+    },
+    "host_key": {
+      "id": "key-{slug}",
+      "confirm_id": "key-{slug}-confirm",
+      "confirm_label": "Type {key} to confirm"
+    },
+    "rollback": [
+      {
+        "name": "commit",
+        "id": "rollback-commit",
+        "kind": "choice",
+        "label": "Deploy an earlier commit",
+        "help": "The stack's files as they were at this commit are deployed (the Deploy this button of its row)."
+      },
+      {
+        "name": "unit",
+        "id": "rollback-unit",
+        "kind": "choice",
+        "label": "Native unit",
+        "help": "The service whose previous binary goes back (the button of its row)."
+      }
+    ]
+  }
 }

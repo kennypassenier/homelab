@@ -56,6 +56,11 @@ const FILES: &[(&str, &[u8])] = &[
     ("js/drive.js", include_bytes!("../web/js/drive.js")),
     ("js/driveview.js", include_bytes!("../web/js/driveview.js")),
     (
+        "js/drivehooks.js",
+        include_bytes!("../web/js/drivehooks.js"),
+    ),
+    ("js/editdrive.js", include_bytes!("../web/js/editdrive.js")),
+    (
         "js/actiondialog.js",
         include_bytes!("../web/js/actiondialog.js"),
     ),

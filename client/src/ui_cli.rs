@@ -12,15 +12,35 @@ use homelab_proto::UiStep;
 use serde_json::Value;
 
 /// The steps, for the usage line and the verb's help.
-pub const STEPS: &str = "goto <path> | open <action> [stack] | type <field> <text> | \
-pick <field> <value> | check <field> on|off | press next|back|confirm | close | state | done";
+pub const STEPS: &str = "goto <path> | open <form> [stack] | type <field> <text> | \
+pick <field> <value> | check <field> on|off | edit <field> <file|-> | \
+row add|edit|up|down|delete [n|key] | press next|back|confirm|save|cancel|default | \
+close | state | done";
 
 fn usage() -> String {
     format!("usage: homelab ui {STEPS} [--json]")
 }
 
-/// `args` are the words after `ui`, `--json` already taken out.
+/// `args` are the words after `ui`, `--json` already taken out. `edit`
+/// reads its text from a file, or from stdin for `-`.
 pub fn parse(args: &[String]) -> Result<UiStep, String> {
+    parse_with(args, &|path: &str| {
+        if path == "-" {
+            let mut s = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
+                .map_err(|e| format!("stdin: {e}"))?;
+            Ok(s)
+        } else {
+            std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))
+        }
+    })
+}
+
+/// `parse`, with the reader `edit` takes its text from.
+pub fn parse_with(
+    args: &[String],
+    read: &dyn Fn(&str) -> Result<String, String>,
+) -> Result<UiStep, String> {
     let word = |i: usize| args.get(i).cloned().ok_or_else(usage);
     let verb = args.first().map(String::as_str).unwrap_or("state");
     let step = match verb {
@@ -33,8 +53,23 @@ pub fn parse(args: &[String]) -> Result<UiStep, String> {
             };
             UiStep::Goto { path }
         }
+        // `open batch <action> <stack>,<stack>`: the batch form of that
+        // action on those stacks.
+        "open" if args.get(1).map(String::as_str) == Some("batch") => UiStep::Open {
+            form: format!("batch:{}", word(2)?),
+            target: Some(word(3)?),
+        },
         "open" => UiStep::Open {
             form: word(1)?,
+            target: args.get(2).cloned(),
+        },
+        "edit" => {
+            let field = word(1)?;
+            let text = read(&word(2)?)?;
+            UiStep::Edit { field, text }
+        }
+        "row" => UiStep::Row {
+            op: word(1)?,
             target: args.get(2).cloned(),
         },
         "type" => {
@@ -66,9 +101,15 @@ pub fn parse(args: &[String]) -> Result<UiStep, String> {
         "done" => UiStep::Done,
         other => return Err(format!("unknown ui step '{other}'; {}", usage())),
     };
+    let batch = args.get(1).map(String::as_str) == Some("batch");
     let extra = match &step {
         UiStep::Goto { .. } | UiStep::Press { .. } => args.len() > 2,
-        UiStep::Open { .. } | UiStep::Pick { .. } | UiStep::Check { .. } => args.len() > 3,
+        UiStep::Open { .. } if batch => args.len() > 4,
+        UiStep::Open { .. }
+        | UiStep::Pick { .. }
+        | UiStep::Check { .. }
+        | UiStep::Edit { .. }
+        | UiStep::Row { .. } => args.len() > 3,
         UiStep::Close | UiStep::State | UiStep::Done => args.len() > 1,
         UiStep::Type { .. } => false,
     };
@@ -166,6 +207,17 @@ pub fn render(message: &str) -> Result<String, String> {
             if !buttons.is_empty() {
                 out.push_str(&format!("buttons {}\n", buttons.join(", ")));
             }
+            let e = &f["edit"];
+            if !e.is_null() {
+                render_edit(e, &mut out);
+            }
+            if let Some(r) = f.get("run_error").filter(|r| !r.is_null()) {
+                out.push_str(&format!(
+                    "  not done: {} ({})\n",
+                    text(&r["why"]),
+                    text(&r["fix"])
+                ));
+            }
             let j = &f["job"];
             if !j.is_null() {
                 out.push_str(&format!(
@@ -185,6 +237,64 @@ pub fn render(message: &str) -> Result<String, String> {
         Err(out)
     } else {
         Ok(out)
+    }
+}
+
+/// An edit form's own lines: its table, a dialog on top, the plan and
+/// what the final press answered.
+fn render_edit(e: &Value, out: &mut String) {
+    for r in e["rows"].as_array().into_iter().flatten() {
+        out.push_str(&format!("  row    {}\n", text(r)));
+    }
+    if let Some(s) = e.get("sub").filter(|s| !s.is_null()) {
+        out.push_str(&format!(
+            "dialog {} (its fields are the ones on step {})\n",
+            text(&s["title"]),
+            text(&s["kind"])
+        ));
+    }
+    let p = &e["plan"];
+    if !p.is_null() {
+        let files: Vec<String> = p["files"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|f| format!("{} {}", text(&f["status"]), text(&f["path"])))
+            .collect();
+        out.push_str(&format!(
+            "plan   {} · {}\n",
+            if p["valid"] == Value::Bool(true) {
+                "can be committed"
+            } else {
+                "refused"
+            },
+            if files.is_empty() {
+                "no file changes".to_string()
+            } else {
+                files.join(", ")
+            }
+        ));
+        for x in p["problems"].as_array().into_iter().flatten() {
+            out.push_str(&format!("    ✗ {}\n", text(x)));
+        }
+    }
+    let r = &e["result"];
+    if !r.is_null() {
+        let line = if !r["committed"].is_null() {
+            let c = text(&r["committed"]["commit"]);
+            format!(
+                "committed {} and pushed: {}",
+                c.chars().take(10).collect::<String>(),
+                text(&r["committed"]["subject"])
+            )
+        } else if !r["batch"].is_null() {
+            format!("batch {} queued", text(&r["batch"]))
+        } else if !r["saved"].is_null() {
+            "host.toml written".to_string()
+        } else {
+            r.to_string()
+        };
+        out.push_str(&format!("done   {line}\n"));
     }
 }
 
@@ -232,6 +342,38 @@ mod tests {
             .unwrap_err()
             .contains("usage: homelab ui"));
         assert!(parse(&words("close now")).is_err());
+        // The edit forms' steps.
+        assert_eq!(
+            parse(&words("open batch update media,drill")).unwrap(),
+            UiStep::Open {
+                form: "batch:update".into(),
+                target: Some("media,drill".into())
+            }
+        );
+        assert_eq!(
+            parse(&words("row up 2")).unwrap(),
+            UiStep::Row {
+                op: "up".into(),
+                target: Some("2".into())
+            }
+        );
+        let read = |p: &str| {
+            if p == "f.yml" {
+                Ok("a: 1\nb: 2\n".to_string())
+            } else {
+                Err(format!("{p}: missing"))
+            }
+        };
+        assert_eq!(
+            parse_with(&words("edit raw-text f.yml"), &read).unwrap(),
+            UiStep::Edit {
+                field: "raw-text".into(),
+                text: "a: 1\nb: 2\n".into()
+            }
+        );
+        assert!(parse_with(&words("edit raw-text nope"), &read)
+            .unwrap_err()
+            .contains("missing"));
     }
 
     #[test]

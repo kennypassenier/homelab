@@ -42,6 +42,9 @@ Environment=HOMELAB_ADMIN_PUBLIC_URL=https://admin.kp-soft.dev
 # The dashboard's own settings (arch-config); secrets come from admin.env.
 Environment=HOMELAB_ADMIN_HOST=10.10.10.250:8443
 Environment=HOMELAB_ADMIN_POLL_S=10
+# The log tab reads Loki through the loki-push front's one read route, which
+# admits only this container (stacks/metrics/loki-push/nginx.conf).
+Environment=HOMELAB_ADMIN_LOKI_URL=http://10.10.10.13:3100
 # arch-exposure: the Access application every kp-soft.dev name sits behind
 # ("*.kp-soft.dev", read from the Access API 2026-09-28); not secrets, both
 # are in every token Access issues.

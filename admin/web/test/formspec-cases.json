@@ -1,5 +1,5 @@
 {
-  "about": "feat-platform-10: the same values checked by the browser (checkValues) and by the dashboard's server (core::drive::check_values) must give the same words. Both suites read this file; the Rust suite also holds args and confirm equal to the server's catalog.",
+  "about": "feat-platform-10: the same values checked by the browser (checkValues) and by the dashboard's server (core::drive::check_values) must give the same words. Both suites read this file; the Rust suite also holds args and confirm equal to the server's catalog. edit_cases: the edit forms' checks (checkFields, ruleProblems, parseKey against core::driveedit), the same way.",
   "cases": [
     {
       "action": "restore",
@@ -13,7 +13,9 @@
         "skip_safety_copy": false
       },
       "step": "review",
-      "errors": { "confirm": "Type media to confirm." }
+      "errors": {
+        "confirm": "Type media to confirm."
+      }
     },
     {
       "action": "restore",
@@ -36,24 +38,35 @@
       "args": ["unit"],
       "confirm": false,
       "stack": "kyu",
-      "values": { "unit": "" },
-      "errors": { "unit": "Choose the native unit." }
+      "values": {
+        "unit": ""
+      },
+      "errors": {
+        "unit": "Choose the native unit."
+      }
     },
     {
       "action": "deploy-commit",
       "args": ["commit", "force"],
       "confirm": false,
       "stack": "media",
-      "values": { "commit": "xyz", "force": false },
+      "values": {
+        "commit": "xyz",
+        "force": false
+      },
       "step": "options",
-      "errors": { "commit": "\"xyz\" is not a valid commit." }
+      "errors": {
+        "commit": "\"xyz\" is not a valid commit."
+      }
     },
     {
       "action": "wipe",
       "args": ["confirm"],
       "confirm": false,
       "stack": "drill",
-      "values": { "confirm": "" },
+      "values": {
+        "confirm": ""
+      },
       "errors": {}
     },
     {
@@ -61,8 +74,245 @@
       "args": ["confirm", "skip_backup"],
       "confirm": true,
       "stack": "drill",
-      "values": { "confirm": " drill ", "skip_backup": true },
+      "values": {
+        "confirm": " drill ",
+        "skip_backup": true
+      },
       "errors": {}
+    }
+  ],
+  "edit_cases": [
+    {
+      "check": "settings",
+      "manifest": {
+        "vmid": 116,
+        "hostname": "116-app-kp-soft",
+        "ip": "10.10.10.16/24",
+        "resources": {
+          "cores": 2,
+          "memory_mb": 2048,
+          "swap_mb": 0,
+          "disk_gb": 16
+        },
+        "boot": {
+          "onboot": true,
+          "order": 75
+        },
+        "protection": true,
+        "apps": ["kp-soft"],
+        "natives": [],
+        "firewall": null
+      },
+      "values": {
+        "cores": "0",
+        "memory_mb": "3072",
+        "swap_mb": "0",
+        "disk_gb": "abc",
+        "onboot": true,
+        "order": "",
+        "protection": true
+      },
+      "errors": {
+        "cores": "Cores must be a whole number from 1 to 64.",
+        "disk_gb": "Disk (GB) must be a whole number from 2 to 4096."
+      }
+    },
+    {
+      "check": "settings",
+      "manifest": {
+        "vmid": 116,
+        "hostname": "116-app-kp-soft",
+        "ip": "10.10.10.16/24",
+        "resources": {
+          "cores": 2,
+          "memory_mb": 2048,
+          "swap_mb": 0,
+          "disk_gb": 16
+        },
+        "boot": {
+          "onboot": true,
+          "order": 75
+        },
+        "protection": true,
+        "apps": ["kp-soft"],
+        "natives": [],
+        "firewall": null
+      },
+      "values": {
+        "cores": "2",
+        "memory_mb": "",
+        "swap_mb": "0",
+        "disk_gb": "16",
+        "onboot": false,
+        "order": "99999",
+        "protection": true
+      },
+      "errors": {
+        "memory_mb": "Memory (MB) is needed.",
+        "order": "Boot order must be a whole number from 0 to 9999."
+      }
+    },
+    {
+      "check": "rule",
+      "values": {
+        "dir": "in",
+        "action": "ACCEPT",
+        "peer": "10.10.10.4/24",
+        "proto": "",
+        "dport": "80",
+        "note": "a\nb",
+        "comment": ""
+      },
+      "errors": {
+        "peer": "10.10.10.4/24 has host bits set: Proxmox reads it as the whole network. Write one address, or the network.",
+        "dport": "A port needs tcp or udp.",
+        "note": "A note is one line."
+      }
+    },
+    {
+      "check": "rule",
+      "values": {
+        "dir": "out",
+        "action": "DROP",
+        "peer": "300.1.1.1",
+        "proto": "tcp",
+        "dport": "80:70",
+        "note": "",
+        "comment": ""
+      },
+      "errors": {
+        "peer": "300.1.1.1 is not an address like 10.10.10.4 or a network like 10.10.10.0/24.",
+        "dport": "80:70 is not a port 1 to 65535 or a forward range."
+      }
+    },
+    {
+      "check": "rule",
+      "values": {
+        "dir": "in",
+        "action": "ACCEPT",
+        "peer": "abc",
+        "proto": "icmp",
+        "dport": "22",
+        "note": "",
+        "comment": ""
+      },
+      "errors": {
+        "peer": "abc is not an address like 10.10.10.4 or a network like 10.10.10.0/24.",
+        "dport": "icmp has no ports; clear them."
+      }
+    },
+    {
+      "check": "rule",
+      "values": {
+        "dir": "in",
+        "action": "ACCEPT",
+        "peer": "10.10.10.0/24",
+        "proto": "tcp",
+        "dport": "8080,8787",
+        "note": "desk",
+        "comment": ""
+      },
+      "errors": {}
+    },
+    {
+      "check": "key",
+      "kind": {
+        "type": "int",
+        "min": 0,
+        "max": 23
+      },
+      "values": {
+        "value": "25"
+      },
+      "errors": {
+        "why": "A whole number from 0 to 23."
+      }
+    },
+    {
+      "check": "key",
+      "kind": {
+        "type": "int",
+        "min": 0,
+        "max": 23
+      },
+      "values": {
+        "value": " 5 "
+      },
+      "errors": {
+        "value": 5
+      }
+    },
+    {
+      "check": "key",
+      "kind": {
+        "type": "vmid_list"
+      },
+      "values": {
+        "value": "101, 105"
+      },
+      "errors": {
+        "value": [101, 105]
+      }
+    },
+    {
+      "check": "key",
+      "kind": {
+        "type": "vmid_list"
+      },
+      "values": {
+        "value": "12"
+      },
+      "errors": {
+        "why": "Container numbers separated by commas."
+      }
+    },
+    {
+      "check": "key",
+      "kind": {
+        "type": "bool"
+      },
+      "values": {
+        "value": true
+      },
+      "errors": {
+        "value": true
+      }
+    },
+    {
+      "check": "key",
+      "kind": {
+        "type": "text"
+      },
+      "values": {
+        "value": "a\nb"
+      },
+      "errors": {
+        "why": "One line."
+      }
+    },
+    {
+      "check": "key",
+      "kind": {
+        "type": "url"
+      },
+      "values": {
+        "value": "ftp://x"
+      },
+      "errors": {
+        "why": "An http:// or https:// address."
+      }
+    },
+    {
+      "check": "key",
+      "kind": {
+        "type": "window"
+      },
+      "values": {
+        "value": ""
+      },
+      "errors": {
+        "value": null
+      }
     }
   ]
 }

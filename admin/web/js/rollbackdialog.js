@@ -7,6 +7,7 @@
 import { openAction } from "./actiondialog.js";
 import { openDialog, refusalCallout } from "./actui.js";
 import { fetchJson, h, tableBlock, td } from "./dom.js";
+import { register } from "./drivehooks.js";
 import { formatTime } from "./format.js";
 import { rollbackView } from "./rollback.js";
 import { sortKeys } from "./sortkeys.js";
@@ -34,6 +35,19 @@ export async function openRollback(stack) {
     id: "rollback-dialog",
     wide: true,
   });
+  // feat-platform-10: the Live view replay points at this very list.
+  const unregister = register("rollback", {
+    dialog: d.dialog,
+    closed: d.closed,
+    rowButton: (/** @type {string} */ kind, /** @type {string} */ value) =>
+      /** @type {HTMLElement | null} */ (
+        content.querySelector(
+          `button[data-${kind === "unit" ? "unit" : "commit"}="${CSS.escape(value)}"]`,
+        )
+      ),
+    close: () => d.close(),
+  });
+  d.closed.then(unregister);
   const r = await fetchJson(
     `/data/actions/${encodeURIComponent(stack)}/rollback-options`,
     "the roll-back options",

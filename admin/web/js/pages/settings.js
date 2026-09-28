@@ -27,6 +27,7 @@ import {
   valueText,
 } from "../editforms.js";
 import { markErrors } from "../editui.js";
+import { driven, register } from "../drivehooks.js";
 import { formatTime } from "../format.js";
 import { listen } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
@@ -342,8 +343,19 @@ export function mount(root) {
         h("div", { class: "kp-dialog__actions" }, cancel, reset, save),
       ],
     });
+    const unregisterKey = register("key", {
+      dialog: d.dialog,
+      key: f.key,
+      save: () => save,
+      default: () => reset,
+      cancel: () => cancel,
+      close: () => d.close(),
+    });
+    d.closed.then(unregisterKey);
     cancel.addEventListener("click", () => d.close());
     const stage = (/** @type {unknown} */ value) => {
+      // Live view: the change is kept on the dashboard's server.
+      if (driven()) return;
       if (f.access === "confirm") {
         if (typed.value.trim() !== f.key) {
           markErrors(new Map([["confirm", typed]]), {
@@ -411,8 +423,19 @@ export function mount(root) {
         h("div", { class: "kp-dialog__actions" }, cancel, save),
       ],
     });
+    const unregisterReview = register("host-review", {
+      dialog: d.dialog,
+      save: () => save,
+      back: () => cancel,
+      runError: (/** @type {import("../doctor.js").RouteError | null} */ e) =>
+        runError.replaceChildren(...(e ? [refusalCallout(e)] : [])),
+      close: () => d.close(),
+    });
+    d.closed.then(unregisterReview);
     cancel.addEventListener("click", () => d.close());
     save.addEventListener("click", async () => {
+      // Live view: host.toml is written on the dashboard's server, once.
+      if (driven()) return;
       save.disabled = true;
       const r = await send(
         "PUT",
@@ -426,19 +449,73 @@ export function mount(root) {
         await refusalAlarm(r.error, r.status);
         return;
       }
-      const s = r.body.saved ?? {};
-      const later = /** @type {string[]} */ (s.restart ?? []);
-      notify(
-        `host.toml written.${later.length ? ` At the host's next start: ${later.join(", ")}.` : " In force now."}`,
-        "success",
-      );
-      changes.clear();
-      confirmed.clear();
-      paintStaged();
+      saved(r.body);
       d.close();
-      void loadHost();
     });
   };
+
+  /** host.toml was written: say so, and read it again.
+   * @param {any} answer */
+  const saved = (answer) => {
+    const s = answer.saved ?? {};
+    const later = /** @type {string[]} */ (s.restart ?? []);
+    notify(
+      `host.toml written.${later.length ? ` At the host's next start: ${later.join(", ")}.` : " In force now."}`,
+      "success",
+    );
+    changes.clear();
+    confirmed.clear();
+    paintStaged();
+    void loadHost();
+  };
+
+  // feat-platform-10: the Live view replay works this very page: the
+  // changes Claude kept on the dashboard's server, the key dialog and the
+  // review dialog are the ones Edit and Review open.
+  let lastSaved = "";
+  const unregister = register("host-settings", {
+    ready: () => page !== null,
+    openKey: (/** @type {string} */ key) => {
+      const f = page?.fields.find((x) => x.key === key);
+      if (f) openKey(f);
+    },
+    rowButton: (/** @type {string} */ key) =>
+      /** @type {HTMLElement | null} */ (
+        t.tbody.querySelector(`button[data-key="${CSS.escape(key)}"]`)
+      ),
+    reviewButton: () =>
+      /** @type {HTMLElement | null} */ (
+        staged.querySelector("#settings-save")
+      ),
+    setStaged: (
+      /** @type {Record<string, unknown>} */ want,
+      /** @type {string[]} */ typed,
+    ) => {
+      if (!page) return;
+      const same =
+        changes.size === Object.keys(want).length &&
+        [...changes].every(
+          ([k, v]) => JSON.stringify(v.value) === JSON.stringify(want[k]),
+        );
+      if (same) return;
+      changes.clear();
+      confirmed.clear();
+      for (const [k, v] of Object.entries(want)) {
+        const field = page.fields.find((x) => x.key === k);
+        if (field) changes.set(k, { field, value: v });
+      }
+      for (const k of typed) confirmed.add(k);
+      paintStaged();
+      paintRows();
+    },
+    openReview: () => openReview(),
+    showSaved: (/** @type {any} */ answer) => {
+      const key = JSON.stringify(answer);
+      if (key === lastSaved) return;
+      lastSaved = key;
+      saved(answer);
+    },
+  });
 
   const offRepo = listen("repo", (v) => drawRepo(repoBox, v, loadRepo));
   const offHost = listen("host_settings", () => void loadHost());
@@ -447,6 +524,7 @@ export function mount(root) {
   void loadRepo().catch(() => {});
   retry();
   return () => {
+    unregister();
     abort.abort();
     offRepo();
     offHost();

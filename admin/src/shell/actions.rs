@@ -583,6 +583,24 @@ impl Actions {
         view
     }
 
+    /// feat-stacks-5: a batch as the page sends it, checked whole, then
+    /// queued. The route and a driven batch dialog (feat-platform-10) both
+    /// come here, so a driven batch is the same batch a click makes.
+    pub fn run_batch(
+        &self,
+        b: actions::BatchRequest,
+    ) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+        let reqs = actions::validate_batch(b).map_err(|r| (StatusCode::BAD_REQUEST, r))?;
+        for r in &reqs {
+            self.precheck(r).map_err(|r| (StatusCode::CONFLICT, r))?;
+        }
+        let (batch, jobs) = self.submit_batch(reqs);
+        Ok(serde_json::json!({
+            "batch": batch,
+            "jobs": jobs.iter().map(|j| serde_json::json!({"job": j.job, "stack": j.stack})).collect::<Vec<_>>(),
+        }))
+    }
+
     /// feat-stacks-5: every stack of a validated batch, in the order given.
     pub fn submit_batch(&self, reqs: Vec<ActionRequest>) -> (u64, Vec<JobView>) {
         let batch = self.inner.next_job.fetch_add(1, Ordering::Relaxed);
@@ -1041,24 +1059,10 @@ async fn batch(State(a): State<Actions>, b: Result<Json<BatchRequest>, JsonRejec
         Ok(b) => b,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
-    let reqs = match actions::validate_batch(b) {
-        Ok(r) => r,
-        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
-    };
-    for r in &reqs {
-        if let Err(r) = a.precheck(r) {
-            return refusal(StatusCode::CONFLICT, r);
-        }
+    match a.run_batch(b) {
+        Ok(v) => (StatusCode::ACCEPTED, Json(v)).into_response(),
+        Err((status, r)) => refusal(status, r),
     }
-    let (batch, jobs) = a.submit_batch(reqs);
-    (
-        StatusCode::ACCEPTED,
-        Json(serde_json::json!({
-            "batch": batch,
-            "jobs": jobs.iter().map(|j| serde_json::json!({"job": j.job, "stack": j.stack})).collect::<Vec<_>>(),
-        })),
-    )
-        .into_response()
 }
 
 /// feat-stacks-7 before the press: the CLI line and what the press would
@@ -1225,19 +1229,22 @@ pub fn mount(
         cfg.schedule_grace_s,
     )
     .map_err(|e| e.to_string())?;
-    app.dashboard_routes(super::edit::router(super::edit::EditCtx {
+    let edit_ctx = super::edit::EditCtx {
         wc: wc.clone(),
         actions: actions.clone(),
         host: host.clone(),
         shared: shared_for_edit,
         publish: publish_for_edit,
-    }));
-    // feat-platform-10: the driver, its catch-up route and its relay.
-    let driver = super::drive::Driver::new(
+    };
+    app.dashboard_routes(super::edit::router(edit_ctx.clone()));
+    // feat-platform-10: the driver, its catch-up route and its relay; it
+    // drives the edit forms through the same editor.
+    let driver = super::drive::Driver::with_edit(
         actions.clone(),
         shared_for_drive,
         publish_for_drive,
         clock_for_drive,
+        Some(edit_ctx),
     );
     app.dashboard_routes(super::drive::router(driver.clone()));
     if demo_host {

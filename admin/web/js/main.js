@@ -129,7 +129,7 @@ mountChrome(
   { nav: bar, asks },
   { navigate, route: () => route(location.pathname) },
 );
-// feat-platform-10: the "Watch Claude" toggle and badge, on every page.
+// feat-platform-10: the "Live view" switch and badge, on every page.
 mountFollow(/** @type {HTMLElement} */ (document.getElementById("follow")), {
   navigate,
 });

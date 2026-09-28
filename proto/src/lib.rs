@@ -414,8 +414,20 @@ pub enum UiStep {
     Pick { field: String, value: String },
     /// Tick (`on`) or untick a check field.
     Check { field: String, on: bool },
-    /// Press a button of the open form: `next`, `back` or `confirm`.
+    /// Press a button of the open form: `next`, `back` or `confirm`; in
+    /// an edit form's dialog also `save`, `cancel` or `default`.
     Press { button: String },
+    /// Set the whole text of a multi-line field (the raw editor's file, a
+    /// commit note), at once.
+    Edit { field: String, text: String },
+    /// Act on one row of the open edit form's table: `add`, and `edit`,
+    /// `up`, `down` or `delete` a firewall rule by its number (from 1), or
+    /// `edit` a host.toml key by its name.
+    Row {
+        op: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<String>,
+    },
     /// Close the open dialog.
     Close,
     /// Change nothing; answer what is on screen now.
@@ -444,6 +456,8 @@ impl UiStep {
             UiStep::Pick { .. } => "pick",
             UiStep::Check { .. } => "check",
             UiStep::Press { .. } => "press",
+            UiStep::Edit { .. } => "edit",
+            UiStep::Row { .. } => "row",
             UiStep::Close => "close",
             UiStep::State => "state",
             UiStep::Done => "done",
@@ -971,6 +985,18 @@ mod wire_tests {
             },
             UiStep::Press {
                 button: "confirm".into(),
+            },
+            UiStep::Edit {
+                field: "raw-text".into(),
+                text: "a: 1\nb: 2\n".into(),
+            },
+            UiStep::Row {
+                op: "up".into(),
+                target: Some("2".into()),
+            },
+            UiStep::Row {
+                op: "add".into(),
+                target: None,
             },
             UiStep::Close,
             UiStep::State,

@@ -1,8 +1,11 @@
 // Milestone follow (feat-platform-10): Claude drives this dashboard with
-// `homelab ui <step>`, and this tab plays each step when its "Watch Claude"
-// toggle is on: the page changes, the dialog opens, the text appears letter
+// `homelab ui <step>`, and this tab plays each step when its "Live view"
+// switch is on: the page changes, the dialog opens, the text appears letter
 // by letter, the button shows its press. The final press runs on the
-// dashboard's server, once; this tab only shows the job it started.
+// dashboard's server, once; this tab only shows the job it started. The
+// edit forms (a stack's settings and firewall, a new stack, the host
+// settings, the batch and roll back dialogs) are played on their own
+// dialogs through editdrive.js.
 //
 // Off (the default, remembered per tab): nothing here ever touches the
 // page; the badge says what Claude is working on and offers to follow.
@@ -12,6 +15,8 @@
 import { openAction } from "./actiondialog.js";
 import { notify } from "./actui.js";
 import { fetchJson, h } from "./dom.js";
+import { setDriven } from "./drivehooks.js";
+import { openDriven } from "./editdrive.js";
 import {
   FOLLOW_KEY,
   badgeText,
@@ -47,7 +52,8 @@ export function mountFollow(region, ctx) {
   let state = null;
   /** @type {import("./driveview.js").Local} */
   let local = { seq: -1, page: location.pathname, form: null };
-  /** @type {import("./actiondialog.js").ActionController | null} */
+  /** @type {import("./actiondialog.js").ActionController |
+   *   import("./editdrive.js").DrivenControl | null} */
   let ctl = null;
   let queue = Promise.resolve();
 
@@ -55,8 +61,8 @@ export function mountFollow(region, ctx) {
     class: "kp-switch__input",
     type: "checkbox",
     role: "switch",
-    id: "watch-claude",
-    "aria-describedby": "watch-claude-hint",
+    id: "live-view",
+    "aria-describedby": "live-view-hint",
   });
   toggle.checked = following;
   const badge = h("span", {
@@ -72,7 +78,7 @@ export function mountFollow(region, ctx) {
       class: "kp-button kp-button--ghost follow-watch",
       hidden: "",
     },
-    "Watch",
+    "Live view",
   );
   region.replaceChildren(
     h(
@@ -80,11 +86,11 @@ export function mountFollow(region, ctx) {
       { class: "kp-switch follow-switch" },
       toggle,
       h("span", { class: "kp-switch__state", "aria-hidden": "true" }),
-      h("span", null, "Watch Claude"),
+      h("span", null, "Live view"),
     ),
     h(
       "span",
-      { class: "measured follow-hint", id: "watch-claude-hint" },
+      { class: "measured follow-hint", id: "live-view-hint" },
       "this tab plays Claude's steps live",
     ),
     badge,
@@ -98,6 +104,7 @@ export function mountFollow(region, ctx) {
     watchBtn.hidden = !text || following;
     region.dataset.driving = String(!!text);
     region.dataset.following = String(following);
+    setDriven(following && !!text);
     banner();
   };
 
@@ -113,7 +120,7 @@ export function mountFollow(region, ctx) {
       const stop = h(
         "button",
         { type: "button", class: "kp-button kp-button--ghost" },
-        "Stop watching",
+        "Leave live view",
       );
       stop.addEventListener("click", () => setFollowing(false));
       b = h(
@@ -151,7 +158,10 @@ export function mountFollow(region, ctx) {
         return;
       case "open": {
         ctl?.close();
-        const c = await openAction(op.stack, op.action, { driven: true });
+        const c =
+          op.edit && s.form
+            ? await openDriven(s.form, ctx)
+            : await openAction(op.stack, op.action, { driven: true });
         ctl = c;
         c?.closed.then(() => {
           if (ctl === c) ctl = null;
@@ -161,25 +171,30 @@ export function mountFollow(region, ctx) {
         return;
       }
       case "type": {
-        const input = ctl?.input(op.name);
+        const input = ctl?.input(op.name, op.id);
         if (!ctl || !input) return;
         const wrap = /** @type {HTMLElement | null} */ (
           input.closest(".kp-field")
         );
         wrap?.classList.add("drive-focus");
-        ctl.set(op.name, "");
+        ctl.set(op.name, "", op.id);
         const ms = letterDelay(op.text);
         for (let i = 1; i <= op.text.length; i += 1) {
-          ctl.set(op.name, op.text.slice(0, i));
+          ctl.set(op.name, op.text.slice(0, i), op.id);
           await sleep(ms);
         }
         wrap?.classList.remove("drive-focus");
         return;
       }
+      case "row": {
+        const c = ctl && "row" in ctl ? ctl : null;
+        await flash(c?.row(op.row, op.target) ?? null, "drive-press", 420);
+        return;
+      }
       case "set": {
-        const input = ctl?.input(op.name);
+        const input = ctl?.input(op.name, op.id);
         if (!ctl || !input) return;
-        ctl.set(op.name, op.value);
+        ctl.set(op.name, op.value, op.id);
         await flash(
           /** @type {HTMLElement | null} */ (input.closest(".kp-field")),
           "drive-focus",
@@ -193,6 +208,11 @@ export function mountFollow(region, ctx) {
       case "sync": {
         const f = s.form;
         if (!ctl || !f) return;
+        if ("sync" in ctl) {
+          await ctl.sync(f);
+          banner();
+          return;
+        }
         if (ctl.step() !== f.step_index) await ctl.goTo(f.step_index);
         ctl.errors(f.errors);
         ctl.runError(f.run_error);
@@ -289,7 +309,7 @@ export function mountFollow(region, ctx) {
     if (Date.now() - lastNote > 3000) {
       lastNote = Date.now();
       notify(
-        "Claude is driving this tab: your input was not used. Turn off Watch Claude to use it yourself.",
+        "Claude is driving this tab: your input was not used. Turn off Live view to use it yourself.",
         "info",
       );
     }

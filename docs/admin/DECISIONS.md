@@ -163,6 +163,22 @@ Claude is driving; it shows only a small "Claude is working on <stack>:
 <action>" badge with a button that turns following on. On: the tab performs
 every step, and Kenny's own input while Claude drives is refused with a
 visible note rather than mixed in. The toggle is per tab and remembered.
-Working name "Watch Claude"; the final name goes on Kenny's next form.
+Working name "Watch Claude"; the final name is **"Live view"** (Kenny,
+2026-09-28).
 Placed as milestone `follow`, after `edit`, because the wizards arrive in
 `act` and `edit`.
+
+## Back-from-AFK rounds (decided 2026-09-28 19:13 and 19:24, forms "Terug van AFK" and "Meer uitleg")
+
+| Item | Kenny's answer | What it means |
+|---|---|---|
+| follow-name | Live view | The toggle, badge and driven-dialog button say "Live view". |
+| loki-read | Read route for CT 120 only | `stacks/metrics/loki-push/nginx.conf` admits GET `/loki/api/v1/query_range` from 10.10.10.20 alone; everything else stays 403 (fix-93 kept). |
+| demo-host | Only in test builds | The simulated host is behind the Cargo feature `demo-host`; `make release` builds without it. |
+| dash-exec | Own answer: "wel, zonder bevestiging, we hebben genoeg security" | `exec` is in the dashboard as a command field, no typed confirmation; the host still refuses unless `exec_enabled = true`. |
+| dash-host-update | release-update yes, self-update no | An "Update host" action runs release-update and reconnects; self-update stays CLI. |
+| dash-template | Add | A template-build wizard (vmid, version, privileged, base). |
+| dash-install-native | Own answer: "ik wil wel mijn eigen Rust programma's kunnen deployen en managen vanuit het dashboard. Wat nu in de TUI kan, moet nog altijd kunnen in ons systeem" | install-native is in the dashboard, with the host downloading and verifying the release so CT 120 needs no `gh`. Standing rule: everything the TUI can do, the dashboard can do (parity audited against the TUI). |
+| dash-apply | Yes, plan first | An Apply page: the per-stack plan, one confirmation, destroying a stack whose directory is gone only after its name is typed. |
+| cli-yes | With --yes once the name was typed | The copied CLI line carries `--yes` when the form's typed name matches. |
+| defaults | Kept, except the two above | The other defaults listed on the form stand. |

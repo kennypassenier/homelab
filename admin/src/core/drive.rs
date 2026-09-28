@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::core::actions::{ActionArgs, ActionKind, Arg, Refusal, HOST_TARGET, SELF_STACK};
+use crate::core::driveedit::{EditCall, EditKind, EditState};
 
 /// The shared description, compiled in.
 pub const FORM_SPEC_JSON: &str = include_str!("../../web/js/formspec.json");
@@ -31,6 +32,17 @@ pub enum FieldKind {
     Text,
     Choice,
     Typed,
+    /// A whole number between `min` and `max` (the edit forms).
+    Number,
+    /// Several lines (a commit note, a rule's comment, a file's text).
+    Textarea,
+}
+
+/// One value of a choice field whose list is part of its description.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Choice {
+    pub value: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -91,6 +103,8 @@ pub struct FormSpec {
     pub messages: Messages,
     pub pages: Vec<String>,
     pub stack_tabs: Vec<String>,
+    /// The edit forms (`driveedit`).
+    pub edit: crate::core::driveedit::EditSpec,
 }
 
 /// The description, read once. It is compiled in and covered by a test, so
@@ -144,6 +158,16 @@ pub struct Field {
     pub when: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expect: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<i64>,
+    /// The list of a choice field whose values are part of the form.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub choices: Option<Vec<Choice>>,
+    /// The value an edit form starts with.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current: Option<Value>,
 }
 
 pub fn arg_field(arg: Arg, action: ActionKind, stack: &str) -> Field {
@@ -178,6 +202,10 @@ pub fn arg_field(arg: Arg, action: ActionKind, stack: &str) -> Field {
         danger: def.danger,
         when: def.when.clone(),
         expect: def.expect.as_deref().map(f),
+        min: None,
+        max: None,
+        choices: None,
+        current: None,
     }
 }
 
@@ -281,13 +309,18 @@ pub fn check_values(
     values: &Values,
     step: Option<&str>,
 ) -> BTreeMap<String, String> {
+    check_steps(&form.steps, values, step)
+}
+
+/// `check_values` over any action form's steps.
+pub fn check_steps(
+    steps: &[FormStep],
+    values: &Values,
+    step: Option<&str>,
+) -> BTreeMap<String, String> {
     let m = &spec().messages;
     let mut errors = BTreeMap::new();
-    for s in form
-        .steps
-        .iter()
-        .filter(|s| step.is_none_or(|id| s.id == id))
-    {
+    for s in steps.iter().filter(|s| step.is_none_or(|id| s.id == id)) {
         for f in &s.fields {
             if f.kind == FieldKind::Check {
                 continue;
@@ -336,8 +369,13 @@ pub fn check_values(
 
 /// The request body, as `actionforms.js` `buildArgs`: only what is set.
 pub fn build_args(form: &ActionForm, values: &Values) -> ActionArgs {
+    build_args_of(form.fields(), values)
+}
+
+/// `build_args` over any list of action fields.
+pub fn build_args_of<'a>(fields: impl Iterator<Item = &'a Field>, values: &Values) -> ActionArgs {
     let mut args = ActionArgs::default();
-    for f in form.fields() {
+    for f in fields {
         let v = values.get(&f.name);
         let on = v == Some(&Value::Bool(true));
         let text = v
@@ -410,8 +448,32 @@ pub struct OpenForm {
     pub job: Option<JobRef>,
     pub buttons: Vec<String>,
     pub fields: Vec<FieldState>,
+    /// The edit forms' own state: the firewall's rules, a dialog on top,
+    /// the plan, what the final press answered (`driveedit`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edit: Option<EditState>,
     #[serde(skip)]
-    pub desc: ActionForm,
+    pub desc: FormDesc,
+}
+
+/// What a form is: one of the actions, or one of the edit forms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Family {
+    Action(ActionKind),
+    Edit(EditKind),
+}
+
+/// The description an open form is checked against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormDesc {
+    pub family: Family,
+    pub steps: Vec<FormStep>,
+}
+
+impl FormDesc {
+    pub fn fields(&self) -> impl Iterator<Item = &Field> {
+        self.steps.iter().flat_map(|s| s.fields.iter())
+    }
 }
 
 /// The one shared "Claude is driving" state.
@@ -450,6 +512,9 @@ pub struct Sources {
     pub apps: Vec<String>,
     pub units: Vec<String>,
     pub commits: Vec<String>,
+    /// What an edit form's `open` reads first (the stack's files, the
+    /// presets, host.toml, the roll-back list, the batch's previews).
+    pub edit: Value,
 }
 
 pub struct Ctx<'a> {
@@ -470,6 +535,9 @@ pub enum Effect {
     Preview,
     /// The final press: run the action with these arguments, once.
     Run(ActionArgs),
+    /// An edit form needs the dashboard's server: a plan, the data
+    /// folders, or its final press (the commit, host.toml, the batch).
+    Edit(EditCall),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -480,14 +548,16 @@ pub struct Applied {
     pub held: Option<Refusal>,
 }
 
-fn refused(step: &UiStep, why: impl Into<String>, fix: impl Into<String>) -> Refusal {
+pub fn refused(step: &UiStep, why: impl Into<String>, fix: impl Into<String>) -> Refusal {
     Refusal::new(format!("ui {}", step.verb()), why, fix)
 }
 
-const BUTTONS: &[&str] = &["next", "back", "confirm", "close"];
+const BUTTONS: &[&str] = &[
+    "next", "back", "confirm", "close", "save", "default", "cancel",
+];
 
 impl OpenForm {
-    fn new(desc: ActionForm, sources: &Sources) -> Self {
+    pub fn new(desc: ActionForm, sources: &Sources) -> Self {
         let values = initial_values(&desc);
         let mut choices = BTreeMap::new();
         for f in desc.fields().filter(|f| f.kind == FieldKind::Choice) {
@@ -517,13 +587,57 @@ impl OpenForm {
             job: None,
             buttons: Vec::new(),
             fields: Vec::new(),
-            desc,
+            edit: None,
+            desc: FormDesc {
+                family: Family::Action(desc.action),
+                steps: desc.steps,
+            },
         };
         form.refresh();
         form
     }
 
-    fn last(&self) -> usize {
+    /// An edit form (`driveedit::open`).
+    pub fn new_edit(
+        id: String,
+        stack: String,
+        title: String,
+        steps: Vec<FormStep>,
+        edit: EditState,
+    ) -> Self {
+        let mut values = Values::new();
+        for f in steps.iter().flat_map(|s| s.fields.iter()) {
+            values.insert(f.name.clone(), start_value(f));
+        }
+        let mut form = OpenForm {
+            id,
+            action: edit.family.slug().to_string(),
+            stack,
+            title,
+            steps: steps.iter().map(|s| s.id.clone()).collect(),
+            step: steps[0].id.clone(),
+            step_index: 0,
+            values,
+            errors: BTreeMap::new(),
+            choices: BTreeMap::new(),
+            guard: None,
+            cli: None,
+            restarts_dashboard: false,
+            run_error: None,
+            job: None,
+            buttons: Vec::new(),
+            fields: Vec::new(),
+            desc: FormDesc {
+                family: Family::Edit(edit.family),
+                steps,
+            },
+            edit: Some(edit),
+        };
+        form.refresh();
+        form
+    }
+
+    pub fn last(&self) -> usize {
         self.steps.len() - 1
     }
 
@@ -531,13 +645,33 @@ impl OpenForm {
     fn shown(&self, f: &Field) -> bool {
         f.when.as_deref() != Some("guard")
             || self.guard.is_some()
+            || self.edit.as_ref().is_some_and(|e| e.guarded > 0)
             || self.values.get(&f.name) == Some(&Value::Bool(true))
+    }
+
+    /// Whether the final press was made: its job or its answer is there.
+    pub fn sent(&self) -> bool {
+        self.job.is_some() || self.edit.as_ref().is_some_and(|e| e.result.is_some())
+    }
+
+    /// The values a choice field may take.
+    pub fn choice_values(&self, f: &Field) -> Vec<String> {
+        match &f.choices {
+            Some(c) => c.iter().map(|c| c.value.clone()).collect(),
+            None => self.choices.get(&f.name).cloned().unwrap_or_default(),
+        }
     }
 
     /// Recompute what a reader of the screen needs: the step, the buttons,
     /// every field with its value and error.
     pub fn refresh(&mut self) {
+        self.steps = self.desc.steps.iter().map(|s| s.id.clone()).collect();
+        self.step_index = self.step_index.min(self.steps.len().saturating_sub(1));
         self.step = self.steps[self.step_index].clone();
+        if let Family::Edit(_) = self.desc.family {
+            crate::core::driveedit::refresh(self);
+            return;
+        }
         self.buttons = if self.job.is_some() {
             vec!["close".into()]
         } else {
@@ -553,10 +687,16 @@ impl OpenForm {
             b.push("close".into());
             b
         };
-        let mut fields = Vec::new();
+        self.fields = self.field_states();
+    }
+
+    /// Every field on screen or behind a step, as a reader of the screen
+    /// sees it: the form's own, then an open dialog's.
+    pub fn field_states(&self) -> Vec<FieldState> {
+        let mut out = Vec::new();
         for s in &self.desc.steps {
             for f in &s.fields {
-                fields.push(FieldState {
+                out.push(FieldState {
                     id: f.id.clone(),
                     name: f.name.clone(),
                     kind: f.kind,
@@ -565,20 +705,50 @@ impl OpenForm {
                     value: self.values.get(&f.name).cloned().unwrap_or(Value::Null),
                     error: self.errors.get(&f.name).cloned(),
                     shown: self.shown(f),
-                    choices: self.choices.get(&f.name).cloned().unwrap_or_default(),
+                    choices: self.choice_values(f),
                 });
             }
         }
-        self.fields = fields;
+        if let Some(sub) = self.edit.as_ref().and_then(|e| e.sub.as_ref()) {
+            for f in &sub.fields {
+                out.push(FieldState {
+                    id: f.id.clone(),
+                    name: f.name.clone(),
+                    kind: f.kind,
+                    label: f.label.clone(),
+                    step: sub.kind.clone(),
+                    value: sub.values.get(&f.name).cloned().unwrap_or(Value::Null),
+                    error: sub.errors.get(&f.name).cloned(),
+                    shown: true,
+                    choices: f
+                        .choices
+                        .as_ref()
+                        .map(|c| c.iter().map(|c| c.value.clone()).collect())
+                        .unwrap_or_default(),
+                });
+            }
+        }
+        out
     }
 
     fn field<'a>(&'a self, step: &UiStep, id: &str) -> Result<(&'a Field, &'a str), Refusal> {
+        if let Some(sub) = self.edit.as_ref().and_then(|e| e.sub.as_ref()) {
+            if let Some(f) = sub.fields.iter().find(|f| f.id == id) {
+                return Ok((f, sub.kind.as_str()));
+            }
+        }
         for s in &self.desc.steps {
             if let Some(f) = s.fields.iter().find(|f| f.id == id) {
                 return Ok((f, s.id.as_str()));
             }
         }
-        let ids: Vec<&str> = self.desc.fields().map(|f| f.id.as_str()).collect();
+        let sub = self.edit.as_ref().and_then(|e| e.sub.as_ref());
+        let ids: Vec<&str> = sub
+            .into_iter()
+            .flat_map(|s| s.fields.iter())
+            .chain(self.desc.fields())
+            .map(|f| f.id.as_str())
+            .collect();
         Err(refused(
             step,
             format!("the form {} has no field {id}", self.title),
@@ -598,7 +768,7 @@ impl OpenForm {
         kinds: &[FieldKind],
         verb_for: fn(FieldKind) -> &'static str,
     ) -> Result<&'a Field, Refusal> {
-        if self.job.is_some() {
+        if self.sent() {
             return Err(refused(
                 step,
                 "the form was sent; its job runs",
@@ -606,6 +776,23 @@ impl OpenForm {
             ));
         }
         let (f, on) = self.field(step, id)?;
+        if let Some(sub) = self.edit.as_ref().and_then(|e| e.sub.as_ref()) {
+            if on != sub.kind {
+                return Err(refused(
+                    step,
+                    format!("{id} is behind the open dialog {}", sub.title),
+                    "press save or cancel in that dialog first",
+                ));
+            }
+            if !kinds.contains(&f.kind) {
+                return Err(refused(
+                    step,
+                    format!("{id} is a {:?} field", f.kind).to_lowercase(),
+                    format!("use homelab ui {} {id} …", verb_for(f.kind)),
+                ));
+            }
+            return Ok(f);
+        }
         if !kinds.contains(&f.kind) {
             return Err(refused(
                 step,
@@ -638,7 +825,63 @@ fn verb_for(kind: FieldKind) -> &'static str {
     match kind {
         FieldKind::Check => "check",
         FieldKind::Choice => "pick",
-        FieldKind::Text | FieldKind::Typed => "type",
+        FieldKind::Text | FieldKind::Typed | FieldKind::Number => "type",
+        FieldKind::Textarea => "edit",
+    }
+}
+
+/// The value a field starts with: its `current`, else empty or off.
+pub fn start_value(f: &Field) -> Value {
+    match &f.current {
+        Some(v) => v.clone(),
+        None if f.kind == FieldKind::Check => Value::Bool(false),
+        None => Value::String(String::new()),
+    }
+}
+
+impl OpenForm {
+    /// Set one field by its id, checked: the field is on screen, of one of
+    /// `kinds`, and a choice's value is on its list. Returns the field's
+    /// name and whether it is an open dialog's.
+    pub fn set(
+        &mut self,
+        step: &UiStep,
+        id: &str,
+        kinds: &[FieldKind],
+        value: Value,
+    ) -> Result<(String, bool), Refusal> {
+        let f = self.field_here(step, id, kinds, verb_for)?.clone();
+        if f.kind == FieldKind::Choice {
+            let v = value.as_str().unwrap_or_default().to_string();
+            let choices = self.choice_values(&f);
+            let listed = f.choices.is_some();
+            if (listed || !v.is_empty()) && !choices.contains(&v) {
+                return Err(refused(
+                    step,
+                    format!("{v} is not a choice of {id}"),
+                    if choices.is_empty() {
+                        "the list is empty; nothing can be picked".to_string()
+                    } else {
+                        format!("its choices are: {}", choices.join(", "))
+                    },
+                ));
+            }
+        }
+        let sub = self.edit.as_mut().and_then(|e| e.sub.as_mut());
+        let in_sub = sub
+            .as_ref()
+            .is_some_and(|s| s.fields.iter().any(|x| x.id == id));
+        match sub {
+            Some(s) if in_sub => {
+                s.values.insert(f.name.clone(), value);
+                s.errors.remove(&f.name);
+            }
+            _ => {
+                self.values.insert(f.name.clone(), value);
+                self.errors.remove(&f.name);
+            }
+        }
+        Ok((f.name, in_sub))
     }
 }
 
@@ -737,12 +980,29 @@ impl DriveState {
                         "homelab ui close first",
                     ));
                 }
+                if let Some(kind) = EditKind::from_form(form) {
+                    let applied = crate::core::driveedit::open(
+                        self,
+                        step,
+                        kind,
+                        form,
+                        target.as_deref(),
+                        cx,
+                    )?;
+                    self.bump(cx, true);
+                    return Ok(applied);
+                }
                 let Some(kind) = ActionKind::from_slug(form) else {
                     let all: Vec<&str> = ActionKind::ALL.iter().map(|k| k.slug()).collect();
+                    let edit: Vec<&str> = EditKind::ALL.iter().map(|k| k.usage()).collect();
                     return Err(refused(
                         step,
                         format!("there is no form {form}"),
-                        format!("the forms are the actions: {}", all.join(", ")),
+                        format!(
+                            "the forms are the actions: {}; and the edit forms: {}",
+                            all.join(", "),
+                            edit.join(", ")
+                        ),
                     ));
                 };
                 let stack = if kind.host_wide() {
@@ -811,51 +1071,51 @@ impl DriveState {
             }
             UiStep::Type { field, text } => {
                 let form = self.open_form(step)?;
-                let f = form
-                    .field_here(step, field, &[FieldKind::Text, FieldKind::Typed], verb_for)?
-                    .name
-                    .clone();
-                form.values.insert(f.clone(), Value::String(text.clone()));
-                form.errors.remove(&f);
+                let kinds = [
+                    FieldKind::Text,
+                    FieldKind::Typed,
+                    FieldKind::Number,
+                    FieldKind::Textarea,
+                ];
+                let (name, sub) = form.set(step, field, &kinds, Value::String(text.clone()))?;
+                crate::core::driveedit::after_set(form, &name, sub);
+                plain
+            }
+            UiStep::Edit { field, text } => {
+                let form = self.open_form(step)?;
+                let kinds = [FieldKind::Textarea, FieldKind::Text];
+                let (name, sub) = form.set(step, field, &kinds, Value::String(text.clone()))?;
+                crate::core::driveedit::after_set(form, &name, sub);
                 plain
             }
             UiStep::Pick { field, value } => {
                 let form = self.open_form(step)?;
-                let f = form
-                    .field_here(step, field, &[FieldKind::Choice], verb_for)?
-                    .name
-                    .clone();
-                let choices = form.choices.get(&f).cloned().unwrap_or_default();
-                if !value.is_empty() && !choices.contains(value) {
-                    return Err(refused(
-                        step,
-                        format!("{value} is not a choice of {field}"),
-                        if choices.is_empty() {
-                            "the list is empty; nothing can be picked".to_string()
-                        } else {
-                            format!("its choices are: {}", choices.join(", "))
-                        },
-                    ));
-                }
-                form.values.insert(f.clone(), Value::String(value.clone()));
-                form.errors.remove(&f);
+                let (name, sub) = form.set(
+                    step,
+                    field,
+                    &[FieldKind::Choice],
+                    Value::String(value.clone()),
+                )?;
+                crate::core::driveedit::after_set(form, &name, sub);
                 plain
             }
             UiStep::Check { field, on } => {
                 let form = self.open_form(step)?;
-                let f = form
-                    .field_here(step, field, &[FieldKind::Check], verb_for)?
-                    .name
-                    .clone();
-                form.values.insert(f.clone(), Value::Bool(*on));
+                let (name, sub) = form.set(step, field, &[FieldKind::Check], Value::Bool(*on))?;
+                crate::core::driveedit::after_set(form, &name, sub);
+                let action = matches!(form.desc.family, Family::Action(_));
                 Applied {
-                    effect: if f == "force" {
+                    effect: if name == "force" && action {
                         Effect::Preview
                     } else {
                         Effect::None
                     },
                     held: None,
                 }
+            }
+            UiStep::Row { op, target } => {
+                let form = self.open_form(step)?;
+                crate::core::driveedit::row(form, step, op, target.as_deref())?
             }
             UiStep::Press { button } => self.press(step, button, cx)?,
         };
@@ -873,7 +1133,7 @@ impl DriveState {
         }
     }
 
-    fn open_form(&mut self, step: &UiStep) -> Result<&mut OpenForm, Refusal> {
+    pub fn open_form(&mut self, step: &UiStep) -> Result<&mut OpenForm, Refusal> {
         self.form.as_mut().ok_or_else(|| {
             refused(
                 step,
@@ -901,6 +1161,9 @@ impl DriveState {
             });
         }
         let form = self.open_form(step)?;
+        if let Family::Edit(_) = form.desc.family {
+            return crate::core::driveedit::press(form, step, button, cx);
+        }
         if let Some(j) = &form.job {
             return Err(refused(
                 step,
@@ -946,7 +1209,7 @@ impl DriveState {
                 })
             }
             "next" => {
-                let errors = check_values(&form.desc, &form.values, Some(&form.step));
+                let errors = check_steps(&form.desc.steps, &form.values, Some(&form.step));
                 if !errors.is_empty() {
                     let r = held("next", &errors, form);
                     form.errors = errors;
@@ -969,7 +1232,9 @@ impl DriveState {
             }
             _ => {
                 // confirm: the final press.
-                let kind = form.desc.action;
+                let Family::Action(kind) = form.desc.family else {
+                    return Err(refused(step, "not an action form", "homelab ui state"));
+                };
                 if kind.scope() > cx.scope {
                     return Err(refused(
                         step,
@@ -983,7 +1248,7 @@ impl DriveState {
                         "leave this press to Kenny",
                     ));
                 }
-                let errors = check_values(&form.desc, &form.values, None);
+                let errors = check_steps(&form.desc.steps, &form.values, None);
                 if !errors.is_empty() {
                     let r = held("confirm", &errors, form);
                     form.errors = errors;
@@ -1009,7 +1274,7 @@ impl DriveState {
                 }
                 form.run_error = None;
                 Ok(Applied {
-                    effect: Effect::Run(build_args(&form.desc, &form.values)),
+                    effect: Effect::Run(build_args_of(form.desc.fields(), &form.values)),
                     held: None,
                 })
             }

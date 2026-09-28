@@ -40,6 +40,18 @@ pub struct AdminConfig {
     pub backoff_min_s: u64,
     #[serde(default = "d_backoff_max")]
     pub backoff_max_s: u64,
+    /// arch-exposure, lock 1: the Cloudflare Access team (its key set lives
+    /// at https://<team>/cdn-cgi/access/certs) and the application's
+    /// audience tag. Neither is a secret.
+    pub access_team_domain: String,
+    pub access_aud: String,
+    /// Clock skew a token's times may have. Default 60 s.
+    #[serde(default = "d_leeway")]
+    pub access_leeway_s: u64,
+    /// How often the team's keys are fetched again. Default 3600 s; an
+    /// unknown key id also fetches at once, at most once a minute.
+    #[serde(default = "d_certs_refresh")]
+    pub access_certs_refresh_s: u64,
 }
 
 fn d_poll() -> u64 {
@@ -53,6 +65,12 @@ fn d_backoff_min() -> u64 {
 }
 fn d_backoff_max() -> u64 {
     60
+}
+fn d_leeway() -> u64 {
+    60
+}
+fn d_certs_refresh() -> u64 {
+    3600
 }
 
 /// `${NAME}` in a value, replaced from `lookup`; an unset name is an error,
@@ -115,6 +133,21 @@ impl AdminConfig {
             why.push(
                 "admin.backoff_min_s must be at least 1 and at most admin.backoff_max_s".into(),
             );
+        }
+        if !self.access_team_domain.ends_with(".cloudflareaccess.com") {
+            why.push(format!(
+                "admin.access_team_domain {:?} must be <team>.cloudflareaccess.com",
+                self.access_team_domain
+            ));
+        }
+        if self.access_aud.len() != 64 || !self.access_aud.bytes().all(|b| b.is_ascii_hexdigit()) {
+            why.push(
+                "admin.access_aud must be the Access application's 64-character audience tag"
+                    .into(),
+            );
+        }
+        if self.access_certs_refresh_s < 60 {
+            why.push("admin.access_certs_refresh_s must be at least 60".into());
         }
         if why.is_empty() {
             Ok(self)

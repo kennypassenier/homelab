@@ -599,6 +599,10 @@ pub struct HostView {
     /// 1-minute load average ×100 (so 250 = 2.50), avoids f64 on the wire.
     #[serde(default)]
     pub load1_x100: u32,
+    /// arch-exposure: the house's public address, as the host last read it
+    /// from the router (fix-94). The dashboard answers only from there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

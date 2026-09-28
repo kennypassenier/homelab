@@ -7581,6 +7581,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             let fleet = homelab_proto::FleetState {
                 status_measured_at: reading.as_ref().map(|r| r.measured_at),
                 host: homelab_proto::HostView {
+                    home_address: hs.home_address.clone(),
                     name: "pve-01".into(),
                     cpu_pct: 0,
                     // feat-platform-2: was a fixed 0; used over total, both

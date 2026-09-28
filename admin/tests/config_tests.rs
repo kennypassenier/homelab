@@ -2,15 +2,18 @@
 
 use homelab_admin::core::config::from_table;
 
+/// The Access settings every valid file carries.
+const ACCESS: &str = "access_team_domain = \"example.cloudflareaccess.com\"\naccess_aud = \"e76eb5aa00000000000000000000000000000000000000000000000000000000\"\n";
+
 fn table(s: &str) -> toml::Table {
     s.parse().unwrap()
 }
 
 #[test]
 fn arch_config_defaults_fill_what_the_file_leaves_out() {
-    let c = from_table(table(
-        "[admin]\nhost = \"10.10.10.250:8443\"\nhost_token = \"0123456789abcdef0123\"\n",
-    ))
+    let c = from_table(table(&format!(
+        "[admin]\nhost = \"10.10.10.250:8443\"\nhost_token = \"0123456789abcdef0123\"\n{ACCESS}"
+    )))
     .unwrap();
     assert_eq!(
         (c.poll_s, c.sse_buffer, c.backoff_min_s, c.backoff_max_s),
@@ -21,9 +24,13 @@ fn arch_config_defaults_fill_what_the_file_leaves_out() {
 #[test]
 fn arch_config_every_problem_is_named_at_once() {
     let e = from_table(table(
-        "[admin]\nhost = \"pve\"\nhost_token = \"short\"\npoll_s = 0\n",
+        "[admin]\nhost = \"pve\"\nhost_token = \"short\"\npoll_s = 0\naccess_team_domain = \"evil.example\"\naccess_aud = \"x\"\n",
     ))
     .unwrap_err();
+    assert!(
+        e.contains("access_team_domain") && e.contains("access_aud"),
+        "{e}"
+    );
     assert!(
         e.contains("host:port") && e.contains("16 characters") && e.contains("poll_s"),
         "{e}"
@@ -33,7 +40,7 @@ fn arch_config_every_problem_is_named_at_once() {
 #[test]
 fn arch_config_an_unknown_key_is_refused_not_ignored() {
     let e = from_table(table(
-        "[admin]\nhost = \"10.10.10.250:8443\"\nhost_token = \"0123456789abcdef0123\"\npol_s = 5\n",
+        &format!("[admin]\nhost = \"10.10.10.250:8443\"\nhost_token = \"0123456789abcdef0123\"\npol_s = 5\n{ACCESS}"),
     ))
     .unwrap_err();
     assert!(e.contains("pol_s"), "{e}");

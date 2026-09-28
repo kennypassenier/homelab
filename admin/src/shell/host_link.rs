@@ -33,6 +33,9 @@ pub struct Snapshot {
     pub host_version: Option<String>,
     /// Why the line is down, when it is.
     pub link_error: Option<String>,
+    /// arch-exposure, lock 2: the house's public address as the host last
+    /// read it from the router.
+    pub home_address: Option<String>,
 }
 
 pub type Shared = Arc<RwLock<Snapshot>>;
@@ -117,7 +120,11 @@ async fn session(
                             let s = shared.read().await;
                             s.fleet.as_ref().map(|f| (&f.stacks, &f.counts)) != Some((&view.stacks, &view.counts))
                         };
-                        shared.write().await.fleet = Some(view.clone());
+                        {
+                            let mut s = shared.write().await;
+                            s.fleet = Some(view.clone());
+                            s.home_address = state.host.home_address.clone();
+                        }
                         // Every snapshot carries a new "measured at"; the
                         // event goes out on every poll so the page's
                         // "measured x ago" stays honest, and `changed` lets

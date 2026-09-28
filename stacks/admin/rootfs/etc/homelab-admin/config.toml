@@ -4,3 +4,9 @@
 host = "10.10.10.250:8443"
 host_token = "${HOMELAB_ADMIN_HOST_TOKEN}"
 poll_s = 10
+
+# arch-exposure: the Cloudflare Access application every kp-soft.dev name sits
+# behind ("*.kp-soft.dev", read from the Access API 2026-09-28). Neither value
+# is a secret: both are in every token Access issues.
+access_team_domain = "mendax1.cloudflareaccess.com"
+access_aud = "e76eb55877d9f58d4f7194e5248419251ac0528a1c9082f090799de91b22221b"

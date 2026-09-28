@@ -70,6 +70,7 @@ fn fleet(applied_hash: &str) -> ServerMsg {
     ServerMsg::State(Box::new(FleetState {
         status_measured_at: None,
         host: HostView {
+            home_address: None,
             name: "pve-01".into(),
             cpu_pct: 0,
             ram_pct: 0,

@@ -5,7 +5,6 @@
 //! host link and the dashboard's own routes into it.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::Router;
 use chassis::shell::live::Live;
@@ -13,6 +12,7 @@ use chassis::shell::webapp::WebApp;
 use chassis::{App, AppSpec};
 use tokio::sync::RwLock;
 
+use homelab_admin::core::config;
 use homelab_admin::shell::host_link::{self, HostTarget, LinkConfig, Snapshot};
 use homelab_admin::shell::routes;
 
@@ -24,10 +24,11 @@ const FILES: &[(&str, &[u8])] = &[
 ];
 
 const HELP: &str = "\
-Host link (skeleton; moves into the config file with arch-config):
-  HOMELAB_ADMIN_HOST        host:port of homelab-host, e.g. 10.10.10.250:8443
-  HOMELAB_ADMIN_HOST_TOKEN  the token this dashboard presents to the host
-  HOMELAB_ADMIN_POLL_S      seconds between two fleet reads (default 10)";
+The dashboard's own settings are the [admin] table of the config file:
+  [admin]
+  host = \"10.10.10.250:8443\"                     # homelab-host
+  host_token = \"${HOMELAB_ADMIN_HOST_TOKEN}\"    # from the environment
+  poll_s = 10  sse_buffer = 256  backoff_min_s = 1  backoff_max_s = 60";
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
@@ -51,43 +52,49 @@ async fn main() -> std::process::ExitCode {
         }
     };
 
-    let target = match (
-        std::env::var("HOMELAB_ADMIN_HOST"),
-        std::env::var("HOMELAB_ADMIN_HOST_TOKEN"),
-    ) {
-        (Ok(addr), Ok(token)) if !addr.is_empty() && !token.is_empty() => {
-            HostTarget { addr, token }
-        }
-        _ => {
-            eprintln!(
-                "homelab-admin: HOMELAB_ADMIN_HOST and HOMELAB_ADMIN_HOST_TOKEN must both be set \
-                 (the host's address and the token this dashboard presents to it)"
-            );
-            return std::process::ExitCode::FAILURE;
-        }
-    };
-    let poll_s = std::env::var("HOMELAB_ADMIN_POLL_S")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(10);
-
     let shared = Arc::new(RwLock::new(Snapshot::default()));
-    let live = Live::new(256);
+    // arch-config: read and check the [admin] table only when this run needs
+    // it (a start or --check); --help and --version work without a file.
+    let config = if app.needs_project_config() {
+        match app
+            .project_config::<config::File>()
+            .map_err(|e| e.to_string())
+            .and_then(|f| f.admin.expanded(&|k| std::env::var(k).ok()))
+            .and_then(|c| c.validate())
+        {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("homelab-admin: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
+    let live = Live::new(config.as_ref().map(|c| c.sse_buffer).unwrap_or(256));
     app.webapp(WebApp::embedded(FILES));
     app.nav_entry("Fleet", "/app/");
     app.dashboard_routes(live.router("/events"));
     app.dashboard_routes(routes::router(shared.clone()));
 
-    tokio::spawn(host_link::run(
-        target,
-        LinkConfig {
-            poll: Duration::from_secs(poll_s),
-            backoff_min: Duration::from_secs(1),
-            backoff_max: Duration::from_secs(60),
-        },
-        shared,
-        live,
-    ));
+    if let Some(c) = config {
+        // Started only on the serving path: --check never opens the line.
+        app.on_start(move || {
+            let (backoff_min, backoff_max) = c.backoff();
+            tokio::spawn(host_link::run(
+                HostTarget {
+                    addr: c.host.clone(),
+                    token: c.host_token.clone(),
+                },
+                LinkConfig {
+                    poll: c.poll(),
+                    backoff_min,
+                    backoff_max,
+                },
+                shared,
+                live,
+            ));
+        });
+    }
     app.run().await
 }

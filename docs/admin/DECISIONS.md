@@ -39,7 +39,7 @@ exist:
 - the login gate: nothing under `/app` or `/events` answers without a session;
 - LAN-only binding refuses a non-private peer.
 
-## Phase 4 — FROZEN 2026-09-28 12:40 (form "Dashboard architectuur", freeze: Akkoord), except arch-exposure (follow-up round)
+## Phase 4 — FROZEN 2026-09-28 12:40 (form "Dashboard architectuur", freeze: Akkoord); arch-exposure decided 12:44 in a follow-up round
 
 Facts (measured 2026-09-28): deploys push content inline as `DeploySpec`
 (proto/src/lib.rs:32, core/src/manifest.rs:562), secrets in its `env`,
@@ -95,9 +95,23 @@ entries sampled 12:28 (e.g. .7 → .13:3100, Alloy to Loki).
 | arch-deploy-guard | **CLI and dashboard both refuse** a deploy when the host's last `source.commit` is not in the local history; `--force` overrides. |
 | arch-host, arch-admin, arch-safety, arch-tests | Approved as listed above (Klopt). |
 
-### Open: arch-exposure
+### arch-exposure (decided 2026-09-28 12:44, follow-up form "Dashboard bereikbaarheid")
 
-Kenny's own answer: "kan het dan toch via de cloudflare tunnel en traefik? die
-infrastructuur bestaat al". Follow-up round (deep dive) with that route as an
-option. HYPOTHESIS still open: latch as a daemon subprocess in an unprivileged
-LXC, measured in a throwaway container before the secrets work starts.
+**Via the Cloudflare tunnel and Traefik, from home only.** `admin.kp-soft.dev`
+is a Traefik route on the `web` entrypoint behind the existing Cloudflare Access
+policy, like `kyu.kp-soft.dev`. The dashboard itself enforces three locks in
+order: (1) a valid Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`, verified
+against the team's public keys; team domain and AUD in admin.toml), which closes
+the Traefik host-header gap from the LAN; (2) the client address
+(`Cf-Connecting-IP`, trusted only from CT 104) equals the house's public
+address the host already reads from the router (on a mismatch the admin asks
+the host to re-read once before refusing); (3) the chassis login with
+passkeys (OpenSSL through webauthn-rs accepted by this choice). CT 120's
+firewall admits inbound only from CT 104. No Caddy, no Cloudflare write token,
+no OPNsense change. Accepted cost: without internet at home the dashboard is
+unreachable; the CLI keeps working (S4). HYPOTHESIS measured before the login
+is built: Secure cookie and passkeys work through the chain (Traefik trusts
+forwarded headers from 172.16.0.0/12).
+
+HYPOTHESIS still open: latch as a daemon subprocess in an unprivileged LXC,
+measured in a throwaway container before the secrets work starts.

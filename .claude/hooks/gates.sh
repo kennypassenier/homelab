@@ -38,6 +38,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 # program and `gate_glob` is a shell function, so the wrapper that way
 # round printed `env: 'gate_glob': No such file or directory` and the
 # suite never ran (2026-09-16).
+# gap-36 (2026-09-28): the same for the daemon's own variables. The host
+# reads HOMELAB_TOKEN before its config file, and a short one ends the
+# process with exit 1 — so a commit made from a shell that had exported
+# HOMELAB_TOKEN=offline (to regenerate the test plan) killed the host's
+# unit-test binary mid-suite, with no failing test named. Six blocked
+# commits in one night; reproduced with `HOMELAB_TOKEN=offline cargo test
+# -p homelab-host --bin homelab-host`: "FATAL: token must be set".
 # The suite also validates inputs that are not Rust: every stack file
 # (core/tests/stack_files_tests.rs), the committed DR runbook and test plan
 # (client/tests/tui_snapshot_tests.rs), config/client.toml
@@ -51,6 +58,7 @@ gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
   'docs/DR_RUNBOOK.md' 'docs/deployment/TEST_PLAN.md' 'docs/deployment/UPDATE_POLICY.md' -- \
   env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
       -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+      -u HOMELAB_TOKEN -u HOMELAB_HOST -u HOMELAB_CONFIG -u HOMELAB_LISTEN \
       cargo test --workspace
 
 gate_cache_done

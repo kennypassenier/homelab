@@ -224,6 +224,77 @@ export async function fetchJson(url, what, signal) {
 }
 
 /**
+ * A slow read (shell/slow.rs): the dashboard runs it once and answers each
+ * request within 20 s; a 202 `{running, run}` says it is still on its way,
+ * and the page asks again for that run until the answer is there. No
+ * request lives long enough for a proxy to cut it (Cloudflare: 100 s).
+ * @param {string} url
+ * @param {string} what
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ok: true, body: any} | {ok: false, error: import("./doctor.js").RouteError}>}
+ */
+export async function slowRead(url, what, signal) {
+  /** @type {number | null} */
+  let run = null;
+  for (;;) {
+    const u =
+      run == null
+        ? url
+        : `${url}${url.includes("?") ? "&" : "?"}run=${encodeURIComponent(run)}`;
+    const r = await fetchJson(u, what, signal);
+    if (!r.ok || r.body.running !== true) return r;
+    run = Number(r.body.run);
+  }
+}
+
+/**
+ * `slowRead` for a report route: the host's JSON answer is under `report`.
+ * @param {string} url
+ * @param {string} what
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ok: true, report: any} | {ok: false, error: import("./doctor.js").RouteError}>}
+ */
+export async function slowReport(url, what, signal) {
+  const r = await slowRead(url, what, signal);
+  if (!r.ok) return r;
+  return { ok: true, report: r.body.report };
+}
+
+/**
+ * Call `paint(seconds)` now and every second until the returned stop is
+ * called: the "N s so far" of a read the page waits for.
+ * @param {(seconds: number) => void} paint
+ * @returns {() => number} stop; hands back the seconds it ran
+ */
+export function elapsed(paint) {
+  const began = Date.now();
+  const secs = () => Math.round((Date.now() - began) / 1000);
+  paint(0);
+  const t = setInterval(() => paint(secs()), 1000);
+  return () => {
+    clearInterval(t);
+    return (Date.now() - began) / 1000;
+  };
+}
+
+/**
+ * A word that changes with a control's state ("on" / "muted"), in a box as
+ * wide as the widest word it can show, so nothing beside or after it moves
+ * when it changes (Kenny, 2026-09-29: the layout never shifts under the
+ * pointer). The other words are only a sizer (CSS `.state-word`); the text
+ * a table reads, sorts and filters on stays `text`.
+ * @param {string} text
+ * @param {string[]} words every text this element can show
+ */
+export function stateWord(text, words) {
+  return h(
+    "span",
+    { class: "state-word", "data-size": [text, ...words].join("\n") },
+    text,
+  );
+}
+
+/**
  * Ask a report route: the host's JSON answer is under `report`.
  * @param {string} url
  * @param {string} what

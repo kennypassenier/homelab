@@ -401,7 +401,27 @@ pub enum Command {
         ok: bool,
         message: String,
     },
+    /// Live view (decided 2026-09-29): the dashboard holds relay `relay`
+    /// longer than the host's usual wait (the viewer paused it): the host
+    /// waits `wait_s` more seconds from now, at most [`UI_HOLD_MAX_S`], and
+    /// hands `note` to the waiting CLI as `ServerMsg::UiNote`. Taken only
+    /// from the attached session, like `UiReply`.
+    UiHold {
+        relay: u64,
+        wait_s: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+    },
 }
+
+/// Live view: the longest one `UiHold` may ask the host to wait. The
+/// dashboard's own longest pause (`HOMELAB_ADMIN_LIVE_MAX_PAUSE_S`, at most
+/// an hour) fits inside it with room for the step itself.
+pub const UI_HOLD_MAX_S: u64 = 3_900;
+
+/// feat-platform-10: how long the host waits for the dashboard's answer to
+/// a UI step it does not hold (`UiHold`).
+pub const UI_RELAY_WAIT_S: u64 = 20;
 
 /// feat-platform-10 (milestone follow): one step of Claude driving the
 /// dashboard, as `homelab ui <step>` sends it. The dashboard validates it
@@ -446,6 +466,11 @@ pub enum UiStep {
     State,
     /// Stop driving: the tabs are the viewer's again.
     Done,
+    /// Live view: the whole sequence up front (`homelab ui plan`). Changes
+    /// nothing on screen; the tabs that follow list it beside the page and
+    /// mark each step as it is taken. A later step that is not the next one
+    /// of the plan is still taken, and marks the plan "changed".
+    Plan { steps: Vec<UiStep> },
 }
 
 impl UiStep {
@@ -473,6 +498,7 @@ impl UiStep {
             UiStep::Close => "close",
             UiStep::State => "state",
             UiStep::Done => "done",
+            UiStep::Plan { .. } => "plan",
         }
     }
 }
@@ -566,7 +592,8 @@ impl Command {
             | BackupDevices
             | AnswerManualCheck { .. }
             | UiAttach
-            | UiReply { .. } => Scope::Operate,
+            | UiReply { .. }
+            | UiHold { .. } => Scope::Operate,
             DestroyStack { .. }
             | SelfUpdateHost { .. }
             | ExecIn { .. }
@@ -634,6 +661,7 @@ impl Command {
             Ui { .. } => "ui",
             UiAttach => "ui_attach",
             UiReply { .. } => "ui_reply",
+            UiHold { .. } => "ui_hold",
         }
     }
 
@@ -896,6 +924,11 @@ pub enum ServerMsg {
         scope: Scope,
         step: UiStep,
     },
+    /// Live view: a word for the CLI whose UI step the dashboard holds
+    /// ("paused by the viewer …"), sent to that session alone.
+    UiNote {
+        note: String,
+    },
     /// G8: host settings (reply to GetConfig).
     Config(Box<HostConfigView>),
     RpcDone(RpcResponse),
@@ -1053,5 +1086,22 @@ mod wire_tests {
         assert_eq!(frame["kind"], "ui");
         assert_eq!(frame["step"]["do"], "close");
         assert_eq!(frame["by"], "wsl");
+        // Live view: the plan carries its steps, the hold its wait.
+        let plan = UiStep::Plan {
+            steps: vec![UiStep::Close, UiStep::Done],
+        };
+        let v = serde_json::to_value(&plan).unwrap();
+        assert_eq!(v["do"], "plan");
+        assert_eq!(v["steps"][1]["do"], "done");
+        assert_eq!(serde_json::from_value::<UiStep>(v).unwrap(), plan);
+        assert_eq!(plan.verb(), "plan");
+        let hold = Command::UiHold {
+            relay: 3,
+            wait_s: 60,
+            note: Some("paused by the viewer kenny".into()),
+        };
+        assert_eq!((hold.scope(), hold.name()), (Scope::Operate, "ui_hold"));
+        let note = serde_json::to_value(ServerMsg::UiNote { note: "x".into() }).unwrap();
+        assert_eq!(note["kind"], "ui_note");
     }
 }

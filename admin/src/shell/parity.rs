@@ -22,6 +22,7 @@ use serde::Deserialize;
 
 use super::actions::{Actions, HostPort, LocalStacks, StackFiles};
 use super::host_link::{now_s, Shared};
+use super::slow::{RunQuery, SlowRead, WAIT};
 use crate::core::actions::{valid_stack_name, Refusal};
 use crate::core::drift::drift_state;
 
@@ -39,6 +40,10 @@ pub struct ParityCtx {
     /// Where a download is written before it is read back and removed.
     pub scratch: PathBuf,
     drift: Arc<Mutex<Option<(u64, LocalStacks)>>>,
+    /// Today and the fleet check take about 90 s: started once, asked after
+    /// (`shell::slow`).
+    today_read: Arc<SlowRead>,
+    check_read: Arc<SlowRead>,
 }
 
 impl ParityCtx {
@@ -58,6 +63,8 @@ impl ParityCtx {
             repo,
             scratch,
             drift: Arc::new(Mutex::new(None)),
+            today_read: SlowRead::new("today"),
+            check_read: SlowRead::new("the fleet check"),
         }
     }
 }
@@ -119,9 +126,28 @@ fn stack_side(
 
 // ── today, the fleet check ───────────────────────────────────────────────
 
+/// A failed host read as the slow read's answer: `{what, why, fix}`, 502.
+fn gateway_value(what: &str, why: String) -> (StatusCode, serde_json::Value) {
+    (
+        StatusCode::BAD_GATEWAY,
+        serde_json::to_value(Refusal::new(
+            what,
+            why,
+            "the dashboard asks the host over its one line; check that it answers (Ping on the host page)",
+        ))
+        .unwrap_or_default(),
+    )
+}
+
 /// fix-68 (`homelab today`): doctor, the fleet check with its manual checks
-/// and the open incidents as one list and one verdict.
-async fn today(State(c): State<ParityCtx>) -> Response {
+/// and the open incidents as one list and one verdict. About 90 s on pve,
+/// so it is a slow read: started once, asked after with `?run=`.
+async fn today(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> Response {
+    let read = c.today_read.clone();
+    read.read(q.run, WAIT, move || read_today(c)).await
+}
+
+async fn read_today(c: ParityCtx) -> (StatusCode, serde_json::Value) {
     let repo = c.repo.clone();
     let (stack_files, digests, skipped) = tokio::task::spawn_blocking(move || stack_side(&repo))
         .await
@@ -138,16 +164,18 @@ async fn today(State(c): State<ParityCtx>) -> Response {
     .await
     {
         Ok(r) => match serde_json::from_str::<homelab_core::ops::today::Today>(&r.message) {
-            Ok(t) => Json(serde_json::json!({
-                "today": t,
-                "verdict": t.verdict(),
-                "needs_you": t.needs_you(),
-                "stack_files": n,
-                "skipped": skipped,
-                "measured_at": now_s(),
-            }))
-            .into_response(),
-            Err(_) => bad_gateway(
+            Ok(t) => (
+                StatusCode::OK,
+                serde_json::json!({
+                    "today": t,
+                    "verdict": t.verdict(),
+                    "needs_you": t.needs_you(),
+                    "stack_files": n,
+                    "skipped": skipped,
+                    "measured_at": now_s(),
+                }),
+            ),
+            Err(_) => gateway_value(
                 "today",
                 format!(
                     "the host answered: {}",
@@ -155,14 +183,19 @@ async fn today(State(c): State<ParityCtx>) -> Response {
                 ),
             ),
         },
-        Err(e) => bad_gateway("today", e),
+        Err(e) => gateway_value("today", e),
     }
 }
 
 /// Y4 (`homelab check`, the TUI's c): the repository against the fleet.
 /// The edge and pin comparisons need a workstation's Cloudflare token and
-/// registry access; the page says so.
-async fn fleet_check(State(c): State<ParityCtx>) -> Response {
+/// registry access; the page says so. About 90 s on pve: a slow read.
+async fn fleet_check(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> Response {
+    let read = c.check_read.clone();
+    read.read(q.run, WAIT, move || read_fleet_check(c)).await
+}
+
+async fn read_fleet_check(c: ParityCtx) -> (StatusCode, serde_json::Value) {
     let repo = c.repo.clone();
     let (stack_files, digests, skipped) = tokio::task::spawn_blocking(move || stack_side(&repo))
         .await
@@ -180,16 +213,18 @@ async fn fleet_check(State(c): State<ParityCtx>) -> Response {
     .await
     {
         Ok(r) => match serde_json::from_str::<serde_json::Value>(&r.message) {
-            Ok(v) => Json(serde_json::json!({
-                "passes": v["passes"],
-                "findings": v["findings"],
-                "stack_files": n,
-                "skipped": skipped,
-                "not_here": "The Cloudflare edge and the registries' pinned digests are compared from a workstation: homelab check.",
-                "measured_at": now_s(),
-            }))
-            .into_response(),
-            Err(_) => bad_gateway(
+            Ok(v) => (
+                StatusCode::OK,
+                serde_json::json!({
+                    "passes": v["passes"],
+                    "findings": v["findings"],
+                    "stack_files": n,
+                    "skipped": skipped,
+                    "not_here": "The Cloudflare edge and the registries' pinned digests are compared from a workstation: homelab check.",
+                    "measured_at": now_s(),
+                }),
+            ),
+            Err(_) => gateway_value(
                 "the fleet check",
                 format!(
                     "the host answered text, not JSON: {}",
@@ -197,7 +232,7 @@ async fn fleet_check(State(c): State<ParityCtx>) -> Response {
                 ),
             ),
         },
-        Err(e) => bad_gateway("the fleet check", e),
+        Err(e) => gateway_value("the fleet check", e),
     }
 }
 

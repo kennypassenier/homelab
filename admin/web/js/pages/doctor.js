@@ -7,8 +7,8 @@ import {
   badgeCell,
   bindTableUrl,
   errorBox,
-  fetchReport,
   h,
+  slowReport,
   tableBlock,
   td,
 } from "../dom.js";
@@ -77,7 +77,7 @@ export function mount(root) {
     clearInterval(timer);
     timer = setInterval(waiting, 1000);
     try {
-      const r = await fetchReport("/data/doctor", "the doctor", mine.signal);
+      const r = await slowReport("/data/doctor", "the doctor", mine.signal);
       if (mine.signal.aborted) return;
       const took = humanDuration((Date.now() - began) / 1000);
       if (!r.ok) {

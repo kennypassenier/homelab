@@ -15,4 +15,5 @@ pub mod parity;
 pub mod releases;
 pub mod routes;
 pub mod scheduler;
+pub mod slow;
 pub mod workcopy;

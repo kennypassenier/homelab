@@ -90,6 +90,7 @@ function render() {
       );
     }),
   );
+  queueMicrotask(fitBar);
   switch (r.page) {
     case "overview":
       cleanup = overview(page, { navigate });
@@ -193,3 +194,30 @@ render();
 // kp-themes' bar: the phone menu button, and dropdowns kept inside the window.
 attachNavToggles(bar);
 attachNavMenus(bar);
+
+/**
+ * The bar in one row in every theme (Kenny, 2026-09-29): a theme whose font
+ * is wide (cyberpunk at 1280 px) would wrap the links onto a second row, so
+ * the bar then folds its links behind kp's menu button, as on a phone.
+ */
+function fitBar() {
+  bar.removeAttribute("data-fold");
+  const kids = [...bar.children].filter(
+    (e) => e instanceof HTMLElement && e.offsetParent !== null,
+  );
+  if (kids.length === 0) return;
+  const firstBottom = Math.min(
+    ...kids.map((e) => e.getBoundingClientRect().bottom),
+  );
+  const wrapped = kids.some(
+    (e) => e.getBoundingClientRect().top >= firstBottom,
+  );
+  if (wrapped) bar.setAttribute("data-fold", "");
+}
+fitBar();
+addEventListener("resize", fitBar);
+new MutationObserver(fitBar).observe(document.documentElement, {
+  attributes: true,
+  attributeFilter: ["data-theme", "class"],
+});
+void document.fonts?.ready.then(fitBar);

@@ -423,3 +423,101 @@ fn parity_the_demo_host_is_not_in_a_release_build() {
     assert!(!binaries.contains("demo-host"), "{binaries}");
     assert!(!binaries.contains("--all-features"), "{binaries}");
 }
+
+/// Kenny, 2026-09-29 ("Today seems to load, but nothing loads"): today and
+/// the fleet check take ~90 s, past the 30 s request guard and near
+/// Cloudflare's 100 s. A slow read runs once; each request waits a bounded
+/// time and says 202 "still running" with the run's id; a second page joins
+/// the run instead of asking the host again; the answer comes by id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn parity_a_slow_read_answers_202_until_its_one_run_is_done() {
+    use axum::http::StatusCode;
+    use homelab_admin::shell::slow::SlowRead;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    async fn parts(r: axum::response::Response) -> (StatusCode, serde_json::Value) {
+        let status = r.status();
+        let body = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    let read = SlowRead::new("today");
+    let started = Arc::new(AtomicUsize::new(0));
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let rx = Arc::new(Mutex::new(Some(rx)));
+    let short = Duration::from_millis(50);
+    let work = |started: Arc<AtomicUsize>,
+                rx: Arc<Mutex<Option<tokio::sync::oneshot::Receiver<()>>>>| {
+        move || {
+            started.fetch_add(1, Ordering::SeqCst);
+            let rx = rx.lock().unwrap().take();
+            async move {
+                if let Some(rx) = rx {
+                    let _ = rx.await;
+                }
+                (StatusCode::OK, serde_json::json!({ "verdict": "fine" }))
+            }
+        }
+    };
+
+    let (s, b) = parts(
+        read.read(None, short, work(started.clone(), rx.clone()))
+            .await,
+    )
+    .await;
+    assert_eq!(s, StatusCode::ACCEPTED, "{b}");
+    assert_eq!(b["running"], true);
+    let run = b["run"].as_u64().unwrap();
+
+    // A second page joins the run on its way: the host is not asked again.
+    let (s, b) = parts(
+        read.read(None, short, work(started.clone(), rx.clone()))
+            .await,
+    )
+    .await;
+    assert_eq!((s, b["run"].as_u64()), (StatusCode::ACCEPTED, Some(run)));
+    assert_eq!(started.load(Ordering::SeqCst), 1);
+
+    // The run finishes while a page waits for it: that page gets the answer.
+    let waiting = {
+        let read = read.clone();
+        let (started, rx) = (started.clone(), rx.clone());
+        tokio::spawn(async move {
+            read.read(Some(run), Duration::from_secs(5), work(started, rx))
+                .await
+        })
+    };
+    tx.send(()).unwrap();
+    let (s, b) = parts(waiting.await.unwrap()).await;
+    assert_eq!((s, b["verdict"].as_str()), (StatusCode::OK, Some("fine")));
+    // Asked again by id, the same answer; an id it never had is 410 with
+    // what, why and fix.
+    let (s, _) = parts(
+        read.read(Some(run), short, work(started.clone(), rx.clone()))
+            .await,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, b) = parts(
+        read.read(Some(run + 40), short, work(started.clone(), rx.clone()))
+            .await,
+    )
+    .await;
+    assert_eq!(s, StatusCode::GONE);
+    assert!(
+        b["what"].is_string() && b["why"].is_string() && b["fix"].is_string(),
+        "{b}"
+    );
+    // Without an id after the run is done: a fresh run.
+    let (s, b) = parts(
+        read.read(
+            None,
+            Duration::from_secs(5),
+            work(started.clone(), rx.clone()),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert_eq!(started.load(Ordering::SeqCst), 2);
+}

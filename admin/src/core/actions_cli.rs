@@ -259,7 +259,8 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | SetHostConfig { .. }
         | Ui { .. }
         | UiAttach
-        | UiReply { .. } => return None,
+        | UiReply { .. }
+        | UiHold { .. } => return None,
     }
     Some(parts.join(" "))
 }

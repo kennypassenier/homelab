@@ -182,3 +182,19 @@ Placed as milestone `follow`, after `edit`, because the wizards arrive in
 | dash-apply | Yes, plan first | An Apply page: the per-stack plan, one confirmation, destroying a stack whose directory is gone only after its name is typed. |
 | cli-yes | With --yes once the name was typed | The copied CLI line carries `--yes` when the form's typed name matches. |
 | defaults | Kept, except the two above | The other defaults listed on the form stand. |
+
+## Live view: announce, plan and pause (decided 2026-09-29 03:46, form "Live view aankondigen")
+
+Kenny, after the live demo: "het typen was heel goed, maar soms springt het
+allemaal veel te snel van het ene naar het andere scherm zonder dat ik weet
+wat er komt."
+
+- live-announce: **announcement with countdown and highlight, plus the whole
+  plan up front.** Before every step except typing, every following tab
+  shows "Next: <step>" with a 3 s countdown and highlights the target
+  element; the dashboard does the waiting, so the driver needs no sleeps.
+  The driver can send the whole plan first (`homelab ui plan`), shown as a
+  side list with the current step marked.
+- live-control: **Pause, Continue and Stop** in the announcement bar. A pause
+  holds the next step until Continue or Stop; the CLI hears "paused by the
+  viewer" (and who paused), Stop ends the whole sequence.

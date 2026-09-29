@@ -255,14 +255,16 @@ export function applySummary(p) {
 }
 
 /**
- * The manual checks as the answer form's choices.
+ * The manual checks as the answer form's choices, each with its whole
+ * text: the open list wraps a long option (Kenny, 2026-09-29: cut at 120
+ * characters, a check could not be told from its neighbour).
  * @param {{id: string, record: {stack: string, app: string, text: string}}[]} checks
  * @returns {{id: string, label: string}[]}
  */
 export const checkChoices = (checks) =>
   checks.map((c) => ({
     id: c.id,
-    label: `${c.record.stack}/${c.record.app}: ${c.record.text}`.slice(0, 120),
+    label: `${c.record.stack}/${c.record.app}: ${c.record.text}`,
   }));
 
 /**

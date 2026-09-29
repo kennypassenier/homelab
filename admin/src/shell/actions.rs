@@ -1884,6 +1884,10 @@ pub fn mount(
         clock_for_drive,
         Some(edit_ctx),
     );
+    driver.set_timing(super::drive::LiveTiming {
+        announce: Duration::from_millis(cfg.live_announce_ms),
+        max_pause: Duration::from_secs(cfg.live_max_pause_s),
+    });
     app.dashboard_routes(super::drive::router(driver.clone()));
     #[cfg(feature = "demo-host")]
     if demo_host {

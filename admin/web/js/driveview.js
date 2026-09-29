@@ -27,12 +27,20 @@
  *   values: Record<string, string | boolean>, errors: Record<string, string>},
  *   plan?: any, result?: any, staged?: Record<string, unknown>,
  *   confirmed?: string[], stacks?: string[], guarded: number}} DriveEdit
+ * @typedef {{id: number, step: DriveStep, text: string, countdown: boolean,
+ *   total_ms: number, left_ms: number}} DriveAnnounce
+ * @typedef {{step: DriveStep, text: string, done: boolean}} DrivePlanStep
+ * @typedef {{by: string, steps: DrivePlanStep[], next: number,
+ *   changed: boolean}} DrivePlan
  * @typedef {{active: boolean, by: string | null, seq: number, page: string,
- *   form: DriveForm | null, last_at: number, idle_s: number}} DriveState
+ *   form: DriveForm | null, last_at: number, idle_s: number,
+ *   announce?: DriveAnnounce | null, paused_by?: string | null,
+ *   stopped_by?: string | null, plan?: DrivePlan | null}} DriveState
  * @typedef {{do: string, path?: string, form?: string, target?: string,
  *   field?: string, text?: string, value?: string, on?: boolean,
  *   button?: string, op?: string}} DriveStep
- * @typedef {{seq: number, step: DriveStep, applied: boolean,
+ * @typedef {{kind?: "step" | "announce" | "control", seq: number,
+ *   step: DriveStep, applied: boolean,
  *   refusal: DriveRefusal | null, state: DriveState}} DriveEvent
  * @typedef {{seq: number, page: string,
  *   form: {action: string, stack: string} | null}} Local
@@ -42,7 +50,12 @@
  *   {op: "set", name: string, id?: string, value: string | boolean} |
  *   {op: "row", row: string, target?: string} |
  *   {op: "press", button: string} | {op: "sync"} | {op: "close"} |
- *   {op: "note", refusal: DriveRefusal}} Op
+ *   {op: "note", refusal: DriveRefusal} |
+ *   {op: "highlight", step: DriveStep}} Op
+ * @typedef {{kind: "link", path: string} | {kind: "action", action: string} |
+ *   {kind: "field", id: string} | {kind: "button", button: string} |
+ *   {kind: "row", op: string, target?: string} | {kind: "close"} |
+ *   {kind: "none"}} Target
  */
 
 /** Where the Live view switch is remembered: per tab (sessionStorage). */
@@ -83,7 +96,8 @@ export function badgeText(s, now) {
       : s.form.stack.replace(/,/g, ", ") || "a new stack";
   const action = s.form.title.split(" · ")[0];
   const job = s.form.job ? ` · job ${s.form.job.job} ${s.form.job.state}` : "";
-  return `Claude is working on ${where}: ${action}${job}`;
+  const paused = s.paused_by ? ` · paused by ${s.paused_by}` : "";
+  return `Claude is working on ${where}: ${action}${job}${paused}`;
 }
 
 /**
@@ -240,6 +254,13 @@ export function animate(local, step, s) {
  */
 export function plan(local, ev, following) {
   if (!following) return { ops: [], local };
+  // Live view: an announcement marks the step's target; a button pressed
+  // in the bar only repaints. Neither is a step: `local` stays.
+  if (ev.kind === "announce") {
+    const a = ev.state.announce;
+    return { ops: a ? [{ op: "highlight", step: a.step }] : [], local };
+  }
+  if (ev.kind === "control") return { ops: [], local };
   if (!ev.applied)
     return {
       ops: ev.refusal ? [{ op: "note", refusal: ev.refusal }] : [],
@@ -260,3 +281,135 @@ export function plan(local, ev, following) {
  */
 export const letterDelay = (text) =>
   Math.max(15, Math.min(70, Math.floor(2500 / Math.max(1, text.length))));
+
+// ── Live view: announce, plan and pause (Kenny, 2026-09-29) ────────────
+
+/**
+ * What is left of the announcement's countdown now: frozen while paused,
+ * otherwise counted down on this tab's own clock from when the state came.
+ * @param {DriveState | null} s
+ * @param {number} since milliseconds since `s` arrived
+ * @returns {number}
+ */
+export function leftNow(s, since) {
+  const a = s?.announce;
+  if (!a || !a.countdown) return 0;
+  if (s?.paused_by) return a.left_ms;
+  return Math.max(0, Math.min(a.total_ms, a.left_ms - Math.max(0, since)));
+}
+
+/**
+ * "Step 2 of 5": the plan's next step, for the bar; empty without a plan.
+ * @param {DriveState | null} s
+ */
+export function planCounter(s) {
+  const p = s?.plan;
+  if (!p || p.steps.length === 0) return "";
+  const n = Math.min(p.next + 1, p.steps.length);
+  return `Step ${n} of ${p.steps.length}`;
+}
+
+/**
+ * The announcement bar of a tab in Live view: null when there is nothing to
+ * announce and nothing is paused. Every string has a fixed place in the
+ * bar, so a new value never moves the rest (the count is one digit wide,
+ * the status and the counter keep their width when empty).
+ * @param {DriveState | null} s
+ * @param {number} left what `leftNow` says
+ * @returns {{text: string, count: string, fraction: number,
+ *   status: string, counter: string, paused: boolean,
+ *   countdown: boolean} | null}
+ */
+export function announceView(s, left) {
+  if (!s) return null;
+  const a = s.announce ?? null;
+  const paused = !!s.paused_by;
+  if (!a && !paused) return null;
+  const countdown = !!a && a.countdown;
+  const ms = countdown ? Math.max(0, Math.min(a.total_ms, left)) : 0;
+  return {
+    text: a ? `Next: ${a.text}` : "Next: Claude's next step",
+    count: countdown ? String(Math.ceil(ms / 1000)) : "",
+    fraction: countdown && a.total_ms > 0 ? ms / a.total_ms : 0,
+    status: paused ? `Paused by ${s.paused_by}` : "",
+    counter: planCounter(s),
+    paused,
+    countdown,
+  };
+}
+
+/**
+ * The plan beside the page: each step with its mark, the current one being
+ * the plan's next; null without a plan.
+ * @param {DriveState | null} s
+ * @returns {{changed: boolean, counter: string,
+ *   items: {text: string, mark: "done" | "current" | "todo"}[]} | null}
+ */
+export function planList(s) {
+  const p = s?.plan;
+  if (!p) return null;
+  return {
+    changed: p.changed,
+    counter: planCounter(s),
+    items: p.steps.map((x, i) => ({
+      text: x.text,
+      mark: x.done ? "done" : i === p.next ? "current" : "todo",
+    })),
+  };
+}
+
+/** The edit forms whose page is a stack's tab. */
+const EDIT_TABS = /** @type {Record<string, string>} */ ({
+  settings: "settings",
+  raw: "settings",
+  "add-app": "settings",
+  firewall: "firewall",
+});
+
+/**
+ * The element a step will act on, as a description the page resolves: the
+ * link of the page a `goto` shows, the action button an `open` presses, the
+ * field, button or row of the open form.
+ * @param {DriveStep} step
+ * @returns {Target}
+ */
+export function targetOf(step) {
+  switch (step.do) {
+    case "goto":
+      return step.path ? { kind: "link", path: step.path } : { kind: "none" };
+    case "open": {
+      const form = step.form ?? "";
+      const tab = EDIT_TABS[form];
+      if (tab && step.target)
+        return { kind: "link", path: `/app/stacks/${step.target}/${tab}` };
+      if (form === "host-settings")
+        return { kind: "link", path: "/app/settings" };
+      if (form.startsWith("batch") || form === "new-stack" || form === "import")
+        return { kind: "none" };
+      return { kind: "action", action: form };
+    }
+    case "type":
+    case "edit":
+    case "pick":
+    case "check":
+      return step.field ? { kind: "field", id: step.field } : { kind: "none" };
+    case "press":
+      return step.button === "close"
+        ? { kind: "close" }
+        : { kind: "button", button: step.button ?? "" };
+    case "row":
+      return { kind: "row", op: step.op ?? "", target: step.target };
+    case "close":
+      return { kind: "close" };
+    default:
+      return { kind: "none" };
+  }
+}
+
+/**
+ * A field's name in the open form, by its id.
+ * @param {DriveState | null} s
+ * @param {string} id
+ */
+export const fieldName = (s, id) =>
+  s?.form?.fields.find((f) => f.id === id)?.name ?? id;

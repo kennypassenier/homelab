@@ -15,7 +15,7 @@ use serde_json::Value;
 pub const STEPS: &str = "goto <path> | open <form> [stack] | type <field> <text> | \
 pick <field> <value> | check <field> on|off | edit <field> <file|-> | \
 row add|edit|up|down|delete [n|key] | press next|back|confirm|save|cancel|default | \
-close | state | done";
+close | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
 
 fn usage() -> String {
     format!("usage: homelab ui {STEPS} [--json]")
@@ -43,6 +43,9 @@ pub fn parse_with(
 ) -> Result<UiStep, String> {
     let word = |i: usize| args.get(i).cloned().ok_or_else(usage);
     let verb = args.first().map(String::as_str).unwrap_or("state");
+    if verb == "plan" {
+        return parse_plan(&args[1..], read);
+    }
     let step = match verb {
         "goto" => {
             let p = word(1)?;
@@ -111,12 +114,60 @@ pub fn parse_with(
         | UiStep::Edit { .. }
         | UiStep::Row { .. } => args.len() > 3,
         UiStep::Close | UiStep::State | UiStep::Done => args.len() > 1,
-        UiStep::Type { .. } => false,
+        UiStep::Type { .. } | UiStep::Plan { .. } => false,
     };
     if extra {
         return Err(format!("too many words for ui {verb}; {}", usage()));
     }
     Ok(step)
+}
+
+/// Live view: `plan "<step>" "<step>" …`, each argument one step as
+/// `homelab ui` spells it, or `plan --file <file>` (`-` for stdin) with one
+/// step per line; blank lines and lines starting with `#` are skipped. A
+/// step's words are split on white space, so a typed text keeps single
+/// spaces only. `edit` reads its file now, when the plan is made.
+fn parse_plan(
+    args: &[String],
+    read: &dyn Fn(&str) -> Result<String, String>,
+) -> Result<UiStep, String> {
+    let lines: Vec<String> = match args.first().map(String::as_str) {
+        Some("--file" | "-f") => {
+            if args.len() != 2 {
+                return Err(format!("plan --file takes one file; {}", usage()));
+            }
+            read(&args[1])?
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(str::to_string)
+                .collect()
+        }
+        _ => args.to_vec(),
+    };
+    if lines.is_empty() {
+        return Err(format!(
+            "a plan needs at least one step, e.g. homelab ui plan \"goto jobs\" \"open deploy media\"; {}",
+            usage()
+        ));
+    }
+    let mut steps = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let words: Vec<String> = line.split_whitespace().map(str::to_string).collect();
+        match words.first().map(String::as_str) {
+            Some("plan") | Some("state") | None => {
+                return Err(format!(
+                    "plan step {} ({line:?}) is not a step that changes the screen: \
+                     a plan lists goto, open, type, pick, check, edit, row, press, close and done",
+                    i + 1
+                ))
+            }
+            _ => {}
+        }
+        let step = parse_with(&words, read).map_err(|e| format!("plan step {}: {e}", i + 1))?;
+        steps.push(step);
+    }
+    Ok(UiStep::Plan { steps })
 }
 
 fn text(v: &Value) -> String {
@@ -153,6 +204,42 @@ pub fn render(message: &str) -> Result<String, String> {
             "not driving: every tab is its viewer's".into()
         };
         out.push_str(&format!("{driving}\npage   {}\n", text(&s["page"])));
+        if !s["stopped_by"].is_null() {
+            out.push_str(&format!(
+                "stopped by {}: every step is refused until `homelab ui done`\n",
+                text(&s["stopped_by"])
+            ));
+        }
+        if !s["paused_by"].is_null() {
+            out.push_str(&format!(
+                "paused by {}: the next step waits for Continue\n",
+                text(&s["paused_by"])
+            ));
+        }
+        let p = &s["plan"];
+        if !p.is_null() {
+            let steps = p["steps"].as_array().map(Vec::len).unwrap_or(0);
+            let done = p["steps"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|x| x["done"] == Value::Bool(true))
+                .count();
+            out.push_str(&format!(
+                "plan   {done} of {steps} steps done{}\n",
+                if p["changed"] == Value::Bool(true) {
+                    " · changed: a step was not the plan's next"
+                } else {
+                    ""
+                }
+            ));
+            if let Some(next) = p["steps"]
+                .as_array()
+                .and_then(|a| a.get(p["next"].as_u64().unwrap_or(0) as usize))
+            {
+                out.push_str(&format!("  next {}\n", text(&next["text"])));
+            }
+        }
         let f = &s["form"];
         if f.is_null() {
             out.push_str("form   none open\n");
@@ -374,6 +461,73 @@ mod tests {
         assert!(parse_with(&words("edit raw-text nope"), &read)
             .unwrap_err()
             .contains("missing"));
+    }
+
+    #[test]
+    fn follow_a_plan_is_parsed_from_words_or_a_file_and_refuses_what_is_no_step() {
+        let args: Vec<String> = ["plan", "goto jobs", "open deploy media", "press confirm"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let UiStep::Plan { steps } = parse(&args).unwrap() else {
+            panic!("not a plan")
+        };
+        assert_eq!(steps.len(), 3);
+        assert_eq!(
+            steps[0],
+            UiStep::Goto {
+                path: "/app/jobs".into()
+            }
+        );
+        let file = "# deploy media\n\ngoto stacks/media\ntype act-confirm media now\nedit raw-text f.yml\n";
+        let read = |p: &str| match p {
+            "plan.txt" => Ok(file.to_string()),
+            "f.yml" => Ok("a: 1\n".to_string()),
+            _ => Err(format!("{p}: missing")),
+        };
+        let UiStep::Plan { steps } = parse_with(&words("plan --file plan.txt"), &read).unwrap()
+        else {
+            panic!("not a plan")
+        };
+        assert_eq!(steps.len(), 3);
+        assert_eq!(
+            steps[1],
+            UiStep::Type {
+                field: "act-confirm".into(),
+                text: "media now".into()
+            }
+        );
+        assert_eq!(
+            steps[2],
+            UiStep::Edit {
+                field: "raw-text".into(),
+                text: "a: 1\n".into()
+            }
+        );
+        assert!(parse(&words("plan")).is_err());
+        let nested: Vec<String> = ["plan", "state"].iter().map(|s| s.to_string()).collect();
+        assert!(parse(&nested).unwrap_err().contains("plan step 1"));
+        let wrong: Vec<String> = ["plan", "goto jobs", "fly away"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(parse(&wrong).unwrap_err().starts_with("plan step 2"));
+    }
+
+    #[test]
+    fn follow_the_answer_names_a_pause_a_stop_and_the_plan() {
+        let v = serde_json::json!({
+            "ok": false,
+            "refusal": {"what": "ui press", "why": "stopped by the viewer kenny", "fix": "ask Kenny"},
+            "state": {"active": false, "by": "wsl", "seq": 9, "page": "/app/", "form": null,
+              "paused_by": null, "stopped_by": "the viewer kenny",
+              "plan": {"next": 1, "changed": true, "steps": [
+                {"text": "go to jobs", "done": true}, {"text": "press Confirm", "done": false}]}}
+        });
+        let e = render(&v.to_string()).unwrap_err();
+        assert!(e.contains("stopped by the viewer kenny"), "{e}");
+        assert!(e.contains("plan   1 of 2 steps done · changed"), "{e}");
+        assert!(e.contains("next press Confirm"), "{e}");
     }
 
     #[test]

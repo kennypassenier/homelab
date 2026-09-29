@@ -1,0 +1,401 @@
+//! Live view: announce, plan and pause (Kenny, 2026-09-29, form "Live view
+//! aankondigen"). The driver holds a step for its countdown on the server,
+//! a viewer's Pause holds it until Continue (and the host is told to wait),
+//! Stop fails it and ends the drive, and the plan follows the steps taken.
+//! Time is tokio's paused clock, so a 30-minute pause takes no real time.
+
+mod act_support;
+
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use act_support::{
+    history, shared, temp_dir, until, MemFiles, MockHost, Recorder, Script, TestClock,
+};
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use homelab_admin::core::drivelive::Control;
+use homelab_admin::shell::actions::{Actions, ActionsDeps};
+use homelab_admin::shell::actions_notify::NotifyCenter;
+use homelab_admin::shell::drive::{router, Driver, LiveTiming};
+use homelab_proto::{Scope, UiStep};
+use serde_json::Value;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
+use tower::ServiceExt as _;
+
+struct World {
+    host: Arc<MockHost>,
+    live: Arc<Recorder>,
+    driver: Driver,
+}
+
+fn world(tag: &str) -> World {
+    let clock = TestClock::at(1_790_000_000);
+    let host = MockHost::start(
+        clock.clone(),
+        Arc::new(|_| Script::ok(&[("pull", 5), ("up", 5)])),
+        history("deploy-media", &[]),
+        Arc::new(std::sync::Mutex::new(Vec::new())),
+    );
+    let live = Arc::new(Recorder::default());
+    let dir = temp_dir(&format!("follow-live-{tag}"));
+    let notify = NotifyCenter::load(
+        dir.join("notifications.json"),
+        Arc::new(act_support::RecPusher::default()),
+        live.clone(),
+        clock.clock(),
+    )
+    .unwrap();
+    let shared = shared(&[("media", 106, None), ("admin", 120, None)]);
+    let actions = Actions::start(ActionsDeps {
+        host: host.clone(),
+        publish: live.clone(),
+        files: Arc::new(MemFiles::default()),
+        shared: shared.clone(),
+        notify,
+        clock: clock.clock(),
+        timeout: Duration::from_secs(5),
+    });
+    let driver = Driver::new(actions, shared, live.clone(), clock.clock());
+    driver.set_timing(LiveTiming {
+        announce: Duration::from_secs(3),
+        max_pause: Duration::from_secs(1800),
+    });
+    World { host, live, driver }
+}
+
+fn goto(p: &str) -> UiStep {
+    UiStep::Goto { path: p.into() }
+}
+
+type Holds = Arc<Mutex<Vec<(u64, Option<String>)>>>;
+
+/// A step sent as the host relays it, with the host's holds recorded.
+fn send(w: &World, step: UiStep, holds: &Holds) -> JoinHandle<Value> {
+    let (d, h) = (w.driver.clone(), holds.clone());
+    tokio::spawn(async move {
+        let hold = move |wait: u64, note: Option<String>| h.lock().unwrap().push((wait, note));
+        d.step_held("wsl", Scope::Operate, step, &hold).await
+    })
+}
+
+async fn announced(w: &World) -> homelab_admin::core::drivelive::Announce {
+    let d = w.driver.clone();
+    until("the step is announced", || d.snapshot().announce.is_some()).await;
+    w.driver.snapshot().announce.unwrap()
+}
+
+fn deploys(w: &World) -> usize {
+    w.host
+        .ran()
+        .iter()
+        .filter(|(_, name, _)| name == "deploy_stack")
+        .count()
+}
+
+/// Live view.
+///
+/// A step that changes the screen is announced to every tab with its words
+/// and a 3 s countdown, and taken only after it, on the server: the CLI's
+/// answer comes after the step ran. Typing is not announced and not held.
+#[tokio::test(start_paused = true)]
+async fn follow_live_a_step_is_announced_and_held_for_the_countdown() {
+    let w = world("announce");
+    let holds = Holds::default();
+    let t0 = Instant::now();
+    let pending = send(&w, goto("/app/jobs"), &holds);
+    let a = announced(&w).await;
+    assert_eq!(a.text, "go to the jobs page");
+    assert!(
+        a.countdown && a.total_ms == 3000 && a.left_ms <= 3000,
+        "{a:?}"
+    );
+    assert_eq!(w.driver.snapshot().page, "/app/", "not taken yet");
+    // Every tab heard the announcement before the step.
+    let kinds: Vec<Value> = w
+        .live
+        .events("drive")
+        .iter()
+        .map(|e| e["kind"].clone())
+        .collect();
+    assert_eq!(kinds, [Value::from("announce")]);
+    let answer = pending.await.unwrap();
+    assert_eq!(answer["ok"], true, "{answer}");
+    assert!(t0.elapsed() >= Duration::from_secs(3), "{:?}", t0.elapsed());
+    assert_eq!(answer["state"]["page"], "/app/jobs");
+    assert!(answer["state"]["announce"].is_null());
+    assert!(
+        holds.lock().unwrap().is_empty(),
+        "3 s fits the host's usual wait"
+    );
+
+    // A step that will be refused is refused at once, never announced.
+    let before = w.live.events("drive").len();
+    let t1 = Instant::now();
+    let r = send(&w, goto("/app/nowhere"), &holds).await.unwrap();
+    assert_eq!(r["ok"], false);
+    assert!(t1.elapsed() < Duration::from_millis(100));
+    assert!(w.live.events("drive")[before..]
+        .iter()
+        .all(|e| e["kind"] != "announce"));
+
+    // Typing is played letter by letter by the tabs: no countdown.
+    let opened = send(
+        &w,
+        UiStep::Open {
+            form: "restore".into(),
+            target: Some("media".into()),
+        },
+        &holds,
+    );
+    assert!(announced(&w).await.text.starts_with("open "));
+    assert_eq!(opened.await.unwrap()["ok"], true);
+    let t2 = Instant::now();
+    let typed = send(
+        &w,
+        UiStep::Type {
+            field: "act-snapshot".into(),
+            text: "latest".into(),
+        },
+        &holds,
+    )
+    .await
+    .unwrap();
+    assert_eq!(typed["ok"], true, "{typed}");
+    assert!(t2.elapsed() < Duration::from_millis(100));
+}
+
+/// Live view.
+///
+/// Pause holds the step past the host's usual 20 s (the host is told to
+/// wait, and the CLI hears who paused); `ui state` still answers at once;
+/// Continue takes the step; a pause past the longest one fails the step
+/// with what, why and fix and takes nothing.
+#[tokio::test(start_paused = true)]
+async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() {
+    let w = world("pause");
+    let holds = Holds::default();
+    let pending = send(&w, goto("/app/jobs"), &holds);
+    announced(&w).await;
+    let st = w
+        .driver
+        .control(Control::Pause, "the viewer kenny@example.org")
+        .unwrap();
+    assert_eq!(
+        st.paused_by.as_deref(),
+        Some("the viewer kenny@example.org")
+    );
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert!(!pending.is_finished(), "paused for 10 min, still held");
+    assert_eq!(w.driver.snapshot().page, "/app/");
+    // The screen can be read while a step is held.
+    let now = w.driver.step("wsl", Scope::Read, UiStep::State).await;
+    assert_eq!(now["state"]["paused_by"], "the viewer kenny@example.org");
+    assert!(now["state"]["announce"]["left_ms"].as_u64().unwrap() <= 3000);
+    {
+        let h = holds.lock().unwrap();
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(
+            h[0].0 >= 1800 + 20,
+            "the host waits past the longest pause: {h:?}"
+        );
+        let note = h[0].1.as_deref().unwrap();
+        assert!(
+            note.contains("paused by the viewer kenny@example.org"),
+            "{note}"
+        );
+        assert!(note.contains("at most 30 min"), "{note}");
+    }
+    w.driver
+        .control(Control::Continue, "the viewer kenny@example.org")
+        .unwrap();
+    let answer = pending.await.unwrap();
+    assert_eq!(answer["ok"], true, "{answer}");
+    assert_eq!(answer["state"]["page"], "/app/jobs");
+    let notes: Vec<String> = holds
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|(_, n)| n.clone())
+        .collect();
+    assert!(
+        notes[1].contains("continued by the viewer kenny@example.org"),
+        "{notes:?}"
+    );
+    // Continue with nothing paused is refused.
+    assert!(w.driver.control(Control::Continue, "kenny").is_err());
+
+    // A pause pressed between two steps holds the next one.
+    w.driver
+        .control(Control::Pause, "the viewer kenny")
+        .unwrap();
+    let t0 = Instant::now();
+    let pending = send(&w, goto("/app/host"), &holds);
+    let r = pending.await.unwrap();
+    assert!(
+        t0.elapsed() >= Duration::from_secs(1800),
+        "{:?}",
+        t0.elapsed()
+    );
+    assert_eq!(r["ok"], false);
+    let why = r["refusal"]["why"].as_str().unwrap();
+    assert!(
+        why.contains("paused by the viewer kenny for more than 30 min"),
+        "{why}"
+    );
+    assert!(!r["refusal"]["fix"].as_str().unwrap().is_empty());
+    assert_eq!(r["state"]["page"], "/app/jobs", "nothing was taken");
+    assert!(r["state"]["paused_by"].is_null() && r["state"]["announce"].is_null());
+}
+
+/// Live view.
+///
+/// Stop fails the held step with "stopped by the viewer", ends the drive
+/// (the dialog closes, the plan is gone) and refuses every later step until
+/// the driver says `done`; a final press stopped in its countdown never
+/// runs.
+#[tokio::test(start_paused = true)]
+async fn follow_live_stop_ends_the_sequence_and_a_stopped_press_never_runs() {
+    let w = world("stop");
+    let holds = Holds::default();
+    let opened = send(
+        &w,
+        UiStep::Open {
+            form: "deploy".into(),
+            target: Some("media".into()),
+        },
+        &holds,
+    );
+    announced(&w).await;
+    assert_eq!(opened.await.unwrap()["state"]["form"]["step"], "review");
+    let pressed = send(
+        &w,
+        UiStep::Press {
+            button: "confirm".into(),
+        },
+        &holds,
+    );
+    let a = announced(&w).await;
+    assert!(a.text.contains("the final press"), "{}", a.text);
+    w.driver.control(Control::Stop, "the viewer kenny").unwrap();
+    let r = pressed.await.unwrap();
+    assert_eq!(r["ok"], false);
+    assert!(r["refusal"]["why"]
+        .as_str()
+        .unwrap()
+        .starts_with("stopped by the viewer kenny"));
+    assert!(r["state"]["form"].is_null() && r["state"]["active"] == false);
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert_eq!(deploys(&w), 0, "{:?}", w.host.ran());
+    // Every tab closes the dialog as on `done`.
+    assert!(w
+        .live
+        .events("drive")
+        .iter()
+        .any(|e| e["step"]["do"] == "done" && e["applied"] == true));
+
+    // Refused until `done`, at once and without an announcement.
+    let r = send(&w, goto("/app/jobs"), &holds).await.unwrap();
+    let fix = r["refusal"]["fix"].as_str().unwrap();
+    assert!(fix.contains("homelab ui done"), "{fix}");
+    assert_eq!(
+        w.driver.step("wsl", Scope::Operate, UiStep::Done).await["ok"],
+        true
+    );
+    let r = send(&w, goto("/app/jobs"), &holds).await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    // Nothing to stop or pause once nobody drives.
+    w.driver.step("wsl", Scope::Operate, UiStep::Done).await;
+    assert!(w.driver.control(Control::Stop, "kenny").is_err());
+}
+
+/// Live view.
+///
+/// The plan is sent up front and changes nothing on screen; each step taken
+/// ticks the plan's next one; a step that deviates is still taken and
+/// marks the plan changed; `done` ends it.
+#[tokio::test(start_paused = true)]
+async fn follow_live_the_plan_is_ticked_step_by_step_and_a_deviation_marks_it_changed() {
+    let w = world("plan");
+    let holds = Holds::default();
+    let plan = UiStep::Plan {
+        steps: vec![goto("/app/jobs"), goto("/app/host"), UiStep::Done],
+    };
+    let r = w.driver.step("wsl", Scope::Operate, plan).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let p = &r["state"]["plan"];
+    assert_eq!(p["steps"][1]["text"], "go to the host page");
+    assert_eq!(
+        (p["next"].clone(), p["changed"].clone()),
+        (0.into(), false.into())
+    );
+    assert_eq!(r["state"]["page"], "/app/");
+    let r = send(&w, goto("/app/jobs"), &holds).await.unwrap();
+    assert_eq!(r["state"]["plan"]["next"], 1);
+    assert_eq!(r["state"]["plan"]["steps"][0]["done"], true);
+    assert_eq!(r["state"]["plan"]["changed"], false);
+    let r = send(&w, goto("/app/log"), &holds).await.unwrap();
+    assert_eq!(r["ok"], true, "a step off the plan is still taken");
+    assert_eq!(r["state"]["plan"]["changed"], true);
+    assert_eq!(r["state"]["plan"]["next"], 1);
+    let r = w.driver.step("wsl", Scope::Operate, UiStep::Done).await;
+    assert!(r["state"]["plan"].is_null());
+    // A plan with a step that changes nothing is refused.
+    let r = w
+        .driver
+        .step(
+            "wsl",
+            Scope::Operate,
+            UiStep::Plan {
+                steps: vec![UiStep::State],
+            },
+        )
+        .await;
+    assert_eq!(r["ok"], false);
+}
+
+/// Live view.
+///
+/// The buttons' route: anyone logged in may press them; nothing to pause
+/// when Claude is not driving is a 409 with what, why and fix.
+#[tokio::test(start_paused = true)]
+async fn follow_live_the_control_route_pauses_and_refuses_when_nobody_drives() {
+    let w = world("route");
+    let app = router(w.driver.clone());
+    let post = |body: &str| {
+        Request::post("/data/drive/control")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let r = app
+        .clone()
+        .oneshot(post(r#"{"do":"pause"}"#))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT);
+    let body: Value =
+        serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap())
+            .unwrap();
+    assert_eq!(body["why"], "Claude is not driving");
+    let holds = Holds::default();
+    let pending = send(&w, goto("/app/jobs"), &holds);
+    announced(&w).await;
+    let r = app
+        .clone()
+        .oneshot(post(r#"{"do":"pause"}"#))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(w.driver.snapshot().paused_by.is_some());
+    let r = app
+        .clone()
+        .oneshot(post(r#"{"do":"continue"}"#))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(pending.await.unwrap()["ok"], true);
+    let r = app.oneshot(post(r#"{"do":"fly"}"#)).await.unwrap();
+    assert!(r.status().is_client_error());
+}

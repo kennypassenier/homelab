@@ -11,11 +11,25 @@
 // page; the badge says what Claude is working on and offers to follow.
 // On, while Claude drives: the viewer's own clicks and keys are refused
 // with a visible note rather than mixed in.
+//
+// Live view (Kenny, 2026-09-29): before each step that changes the screen,
+// a tab that follows shows "Next: <step>" with the server's countdown,
+// marks the step's target, and offers Pause, Continue and Stop; Claude's
+// plan, when it sent one, is listed beside the page (driveannounce.js).
 
 import { openAction } from "./actiondialog.js";
 import { notify } from "./actui.js";
 import { fetchJson, h } from "./dom.js";
 import { setDriven } from "./drivehooks.js";
+import {
+  announceView,
+  countdown,
+  findTarget,
+  makeBar,
+  makePlan,
+  mark,
+  unmark,
+} from "./driveannounce.js";
 import { openDriven } from "./editdrive.js";
 import {
   FOLLOW_KEY,
@@ -27,6 +41,7 @@ import {
   readFollow,
 } from "./driveview.js";
 import { listen } from "./store.js";
+import { attachSwitches } from "/static/kp/js/forms.js";
 
 /** @param {number} ms */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -96,6 +111,32 @@ export function mountFollow(region, ctx) {
     badge,
     watchBtn,
   );
+  // The switch's On/Off words (they were never filled here before).
+  attachSwitches(region);
+
+  // Live view: the bar over the page and the plan beside it; inside a
+  // driven dialog the bar is the dialog's banner (`banner`).
+  const pageBar = makeBar(false);
+  const planBox = makePlan();
+  document.body.append(pageBar.el, planBox.el);
+  /** @type {import("./driveannounce.js").Bar | null} */
+  let dialogBar = null;
+  const clock = countdown();
+
+  const idleText = () =>
+    `${badgeText(state, now()) ?? "Claude drove this form"}. Your own input waits until Claude is done.`;
+
+  const paintLive = () => {
+    const on =
+      following && !!state && (isActive(state, now()) || !!state.announce);
+    const v = on ? announceView(state, clock.left()) : null;
+    const d = ctl?.dialog;
+    const inDialog = !!d && !!dialogBar && d.contains(dialogBar.el);
+    pageBar.paint(inDialog ? null : v, "");
+    if (inDialog) dialogBar?.paint(v, idleText());
+    planBox.paint(state, on);
+    if (!v || !state?.announce) unmark();
+  };
 
   const paint = () => {
     const text = badgeText(state, now());
@@ -106,6 +147,7 @@ export function mountFollow(region, ctx) {
     region.dataset.following = String(following);
     setDriven(following && !!text);
     banner();
+    paintLive();
   };
 
   /** A strip inside a driven dialog: a modal dialog makes the page's own
@@ -116,25 +158,25 @@ export function mountFollow(region, ctx) {
     let b = /** @type {HTMLElement | null} */ (
       d.querySelector(".drive-banner")
     );
-    if (!b) {
+    if (!b || !dialogBar || !d.contains(dialogBar.el)) {
       const stop = h(
         "button",
         { type: "button", class: "kp-button kp-button--ghost" },
         "Leave live view",
       );
       stop.addEventListener("click", () => setFollowing(false));
-      b = h(
-        "div",
-        { class: "kp-alert kp-alert--info drive-banner", role: "status" },
-        h("span", { class: "kp-alert__body drive-banner__text" }),
-        stop,
-      );
+      // Live view's bar is the banner: the announcement, its countdown and
+      // Pause/Continue/Stop keep their place whether or not a step is
+      // announced, so the dialog never moves.
+      dialogBar = makeBar(true, [stop]);
+      b?.remove();
+      b = dialogBar.el;
       d.querySelector(".kp-dialog__body")?.prepend(b);
     }
-    const t = /** @type {HTMLElement} */ (
-      b.querySelector(".drive-banner__text")
+    dialogBar.paint(
+      following && state ? announceView(state, clock.left()) : null,
+      idleText(),
     );
-    t.textContent = `${badgeText(state, now()) ?? "Claude drove this form"}. Your own input waits until Claude is done.`;
   };
 
   // ── the operations ───────────────────────────────────────────────────
@@ -226,6 +268,11 @@ export function mountFollow(region, ctx) {
       case "note":
         notify(`Claude's step was refused: ${op.refusal.why}.`, "warning");
         return;
+      case "highlight":
+        // Only while the step is still announced: a step already taken
+        // leaves no mark behind.
+        if (state?.announce) mark(findTarget(op.step, ctl, state));
+        return;
     }
   };
 
@@ -247,6 +294,7 @@ export function mountFollow(region, ctx) {
     /** @type {import("./driveview.js").DriveState} */
     const s = r.body.state;
     state = s;
+    clock.set(s);
     paint();
     if (!following || !isActive(s, now())) return;
     local.page = location.pathname;
@@ -284,6 +332,8 @@ export function mountFollow(region, ctx) {
 
   listen("drive", (/** @type {import("./driveview.js").DriveEvent} */ ev) => {
     state = ev.state;
+    clock.set(ev.state);
+    if ((ev.kind ?? "step") === "step") unmark();
     paint();
     queue = queue.then(() => play(ev)).catch(() => {});
   });
@@ -303,7 +353,8 @@ export function mountFollow(region, ctx) {
   const refuse = (e) => {
     if (!e.isTrusted || !following || !isActive(state, now())) return;
     const t = /** @type {Element | null} */ (e.target);
-    if (t?.closest?.("#follow, .drive-banner")) return;
+    if (t?.closest?.("#follow, .drive-banner, .drive-announce, .drive-plan"))
+      return;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (Date.now() - lastNote > 3000) {
@@ -326,6 +377,10 @@ export function mountFollow(region, ctx) {
     document.addEventListener(type, refuse, { capture: true });
 
   setInterval(paint, 5000);
+  // The countdown's digit and bar; a no-op while nothing is announced.
+  setInterval(() => {
+    if (state?.announce) paintLive();
+  }, 100);
   paint();
   void catchUpNow();
 }

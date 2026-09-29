@@ -19,7 +19,15 @@ import {
   refusalAlarm,
   refusalCallout,
 } from "../actui.js";
-import { bindTableUrl, errorBox, h, tableBlock, td } from "../dom.js";
+import {
+  bindTableUrl,
+  errorBox,
+  h,
+  stateWord,
+  tableBlock,
+  td,
+} from "../dom.js";
+import { formatTime } from "../format.js";
 import {
   DAYS,
   scheduleBody,
@@ -121,10 +129,22 @@ export function mount(root) {
           td(r.stack),
           td(r.action),
           td(r.when),
-          td(
-            r.next == null || !r.enabled
-              ? r.nextText
-              : keys.note("time", r.nextText, r.next),
+          // Toggling a schedule turns this cell into "off" and back; the
+          // cell keeps the width of both, so the switch beside it does not
+          // move under the pointer (Kenny, 2026-09-29).
+          h(
+            "td",
+            null,
+            stateWord(
+              r.next == null || !r.enabled
+                ? r.nextText
+                : keys.note("time", r.nextText, r.next),
+              [
+                "off",
+                "no further run",
+                formatTime(r.next ?? Date.now() / 1000),
+              ],
+            ),
           ),
           td(r.last),
           h(
@@ -134,7 +154,7 @@ export function mount(root) {
               "label",
               { class: "kp-switch" },
               sw,
-              h("span", null, r.enabled ? "on" : "off"),
+              stateWord(r.enabled ? "on" : "off", ["on", "off"]),
             ),
           ),
           td(r.note),

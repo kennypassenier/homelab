@@ -20,6 +20,8 @@
 //! | `HOMELAB_ADMIN_DEPLOY_KEY_B64` | none | the deploy key file, base64, from latch (a secret: admin.env); written to `HOMELAB_ADMIN_GIT_KEY` with mode 0600 when that file is missing, never logged |
 //! | `HOMELAB_ADMIN_GIT_KNOWN_HOSTS` | `<data dir>/known_hosts` | the remote's ssh host keys; ssh refuses a host not in it; GitHub's pinned keys are written there when it is missing |
 //! | `HOMELAB_ADMIN_GIT_AUTHOR` | `homelab-admin <homelab-admin@users.noreply.github.com>` | the author and committer of the dashboard's commits |
+//! | `HOMELAB_ADMIN_LIVE_ANNOUNCE_MS` | 3000 | Live view: how long a driven step is announced ("Next: …" with its countdown) before it is taken; 0 announces nothing, at most 10000 |
+//! | `HOMELAB_ADMIN_LIVE_MAX_PAUSE_S` | 1800 | Live view: how long a step a viewer paused waits for Continue before it fails; 60 to 3600 |
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -34,6 +36,10 @@ pub struct ActConfig {
     pub schedule_grace_s: u64,
     pub incidents_poll_s: u64,
     pub action_timeout_s: u64,
+    /// Live view: the announcement's countdown, in milliseconds.
+    pub live_announce_ms: u64,
+    /// Live view: the longest pause, in seconds.
+    pub live_max_pause_s: u64,
     /// arch-edit-txn: the working copy's remote, branch and credential.
     pub git: GitConfig,
 }
@@ -143,6 +149,20 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
         schedule_grace_s: number(lookup, "SCHEDULE_GRACE_S", 300, 1, &mut why),
         incidents_poll_s: number(lookup, "INCIDENTS_POLL_S", 300, 10, &mut why),
         action_timeout_s: number(lookup, "ACTION_TIMEOUT_S", 21_600, 60, &mut why),
+        live_announce_ms: number(
+            lookup,
+            "LIVE_ANNOUNCE_MS",
+            crate::core::drivelive::ANNOUNCE_MS,
+            0,
+            &mut why,
+        ),
+        live_max_pause_s: number(
+            lookup,
+            "LIVE_MAX_PAUSE_S",
+            crate::core::drivelive::MAX_PAUSE_S,
+            60,
+            &mut why,
+        ),
         git: {
             let remote =
                 non_empty("HOMELAB_ADMIN_GIT_REMOTE").unwrap_or_else(|| DEFAULT_REMOTE.into());
@@ -180,6 +200,19 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
             }
         },
     };
+    if cfg.live_announce_ms > crate::core::drivelive::ANNOUNCE_MAX_MS {
+        why.push(format!(
+            "HOMELAB_ADMIN_LIVE_ANNOUNCE_MS must be at most {}: the host waits {} s for a step's answer",
+            crate::core::drivelive::ANNOUNCE_MAX_MS,
+            homelab_proto::UI_RELAY_WAIT_S
+        ));
+    }
+    if cfg.live_max_pause_s > crate::core::drivelive::MAX_PAUSE_MAX_S {
+        why.push(format!(
+            "HOMELAB_ADMIN_LIVE_MAX_PAUSE_S must be at most {}: the host holds a paused step no longer",
+            crate::core::drivelive::MAX_PAUSE_MAX_S
+        ));
+    }
     if cfg.schedule_grace_s < cfg.schedule_tick_s {
         why.push(
             "HOMELAB_ADMIN_SCHEDULE_GRACE_S must be at least HOMELAB_ADMIN_SCHEDULE_TICK_S, \

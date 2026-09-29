@@ -11,16 +11,27 @@
 //! needs is read through the editor's own reads, and a plan, the data
 //! folders and the final press (the commit and push, host.toml, the batch)
 //! run through the very functions the routes a click reaches run.
+//!
+//! Live view (Kenny, 2026-09-29): before a step changes the screen, the
+//! driver announces it to every tab and holds it for the countdown here, on
+//! the server, so every tab sees the same wait and the CLI's answer comes
+//! after the step ran. A viewer's Pause holds the step until Continue (the
+//! host is told to wait longer, and the CLI hears who paused); Stop fails it
+//! and ends the drive (`core::drivelive`).
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use axum::extract::State;
-use axum::routing::get;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use homelab_proto::{Command, Scope, ServerMsg, UiStep};
+use homelab_proto::{Command, Scope, ServerMsg, UiStep, UI_HOLD_MAX_S, UI_RELAY_WAIT_S};
 use serde_json::{json, Value};
 use tokio::sync::broadcast::error::RecvError;
+use tokio::time::Instant;
 
 use super::actions::{Actions, Clock, HostPort, Origin, Publish};
 use super::edit::{self as ed, EditCtx};
@@ -28,6 +39,30 @@ use super::host_link::Shared;
 use crate::core::actions::{self as act, ActionKind, Arg, Refusal};
 use crate::core::drive::{Applied, Ctx, DriveState, Effect, Family, JobRef, Sources};
 use crate::core::driveedit::{self, EditCall, EditKind};
+use crate::core::drivelive::{self, Announce, Control};
+
+/// Live view's timing: how long a step is announced, and how long a paused
+/// step waits for Continue before it fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveTiming {
+    pub announce: Duration,
+    pub max_pause: Duration,
+}
+
+impl Default for LiveTiming {
+    /// No announcement: a driver built without settings (the tests) takes
+    /// every step at once; the dashboard sets the configured timing.
+    fn default() -> Self {
+        LiveTiming {
+            announce: Duration::ZERO,
+            max_pause: Duration::from_secs(drivelive::MAX_PAUSE_S),
+        }
+    }
+}
+
+/// What the relay does while a step is held: ask the host to wait
+/// `wait_s` more seconds and hand the note to the CLI.
+pub type Hold<'a> = &'a (dyn Fn(u64, Option<String>) + Send + Sync);
 
 struct Inner {
     state: Mutex<DriveState>,
@@ -39,6 +74,15 @@ struct Inner {
     clock: Clock,
     /// The editor's reads and writes, for the edit forms.
     edit: Option<EditCtx>,
+    /// Live view.
+    timing: Mutex<LiveTiming>,
+    /// A viewer pressed a button: the held step looks again.
+    wake: tokio::sync::Notify,
+    /// Where the running countdown ends; None when none runs (or paused).
+    deadline: Mutex<Option<Instant>>,
+    announced: AtomicU64,
+    /// Who pressed Continue last, for the CLI's note.
+    continued_by: Mutex<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -68,8 +112,38 @@ impl Driver {
                 publish,
                 clock,
                 edit,
+                timing: Mutex::new(LiveTiming::default()),
+                wake: tokio::sync::Notify::new(),
+                deadline: Mutex::new(None),
+                announced: AtomicU64::new(0),
+                continued_by: Mutex::new(None),
             }),
         }
+    }
+
+    /// Live view's timing, from the dashboard's settings.
+    pub fn set_timing(&self, t: LiveTiming) {
+        *self
+            .inner
+            .timing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = t;
+    }
+
+    fn timing(&self) -> LiveTiming {
+        *self
+            .inner
+            .timing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn set_deadline(&self, d: Option<Instant>) {
+        *self
+            .inner
+            .deadline
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = d;
     }
 
     fn now(&self) -> i64 {
@@ -87,6 +161,16 @@ impl Driver {
     /// job as the queue has it.
     pub fn snapshot(&self) -> DriveState {
         let mut s = self.lock().snapshot(self.now());
+        if let (Some(a), Some(d)) = (
+            s.announce.as_mut(),
+            *self
+                .inner
+                .deadline
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        ) {
+            a.left_ms = d.saturating_duration_since(Instant::now()).as_millis() as u64;
+        }
         if let Some(f) = s.form.as_mut() {
             if let Some(j) = f.job.as_mut() {
                 if let Some(v) = self.inner.actions.job(j.job) {
@@ -357,10 +441,17 @@ impl Driver {
 
     /// Apply one step and answer `{ok, refusal, state}`.
     pub async fn step(&self, by: &str, scope: Scope, step: UiStep) -> Value {
-        let _turn = self.inner.turn.lock().await;
+        self.step_held(by, scope, step, &|_, _| {}).await
+    }
+
+    /// [`Driver::step`], announced and held first (Live view); `hold` asks
+    /// the host to wait longer while a viewer has paused.
+    pub async fn step_held(&self, by: &str, scope: Scope, step: UiStep, hold: Hold<'_>) -> Value {
+        // Reading the screen never waits behind a held step.
         if step == UiStep::State {
             return reply(None, &self.snapshot());
         }
+        let _turn = self.inner.turn.lock().await;
         let stacks = self.stacks().await;
         let sources = self.sources(&step).await;
         let cx = Ctx {
@@ -370,7 +461,10 @@ impl Driver {
             stacks: &stacks,
             sources: &sources,
         };
-        let applied = self.lock().apply(&step, &cx);
+        let applied = match self.held(&step, &cx, hold).await {
+            Ok(applied) => applied,
+            Err(r) => Err(r),
+        };
         let refusal = match applied {
             Err(r) => {
                 tracing::info!(by, step = step.verb(), why = %r.why, "a driven step was refused");
@@ -392,11 +486,198 @@ impl Driver {
         reply(refusal.as_ref(), &self.snapshot())
     }
 
+    /// Live view: announce `step`, hold it for the countdown and for as
+    /// long as a viewer has paused, then apply it, all against the one
+    /// state. The pause and the stop are checked under the same lock the
+    /// step is applied under, so a step is taken once or not at all.
+    /// `Err`: the step was not taken (stopped, or paused too long).
+    async fn held(
+        &self,
+        step: &UiStep,
+        cx: &Ctx<'_>,
+        hold: Hold<'_>,
+    ) -> Result<Result<Applied, Refusal>, Refusal> {
+        let t = self.timing();
+        let countdown = drivelive::counts_down(step) && !t.announce.is_zero();
+        {
+            let mut st = self.lock();
+            if !drivelive::holds(step) || (!countdown && st.paused_by.is_none()) {
+                return Ok(st.apply(step, cx));
+            }
+            // A step the dashboard will refuse is refused now, not announced.
+            if let Err(r) = st.clone().apply(step, cx) {
+                return Ok(Err(r));
+            }
+            let total = if countdown {
+                t.announce
+            } else {
+                Duration::ZERO
+            };
+            st.announce = Some(Announce {
+                id: self.inner.announced.fetch_add(1, Ordering::Relaxed) + 1,
+                step: step.clone(),
+                text: drivelive::describe(step, &st),
+                countdown,
+                total_ms: total.as_millis() as u64,
+                left_ms: total.as_millis() as u64,
+            });
+        }
+        let mut left = if countdown {
+            t.announce
+        } else {
+            Duration::ZERO
+        };
+        let mut deadline = Instant::now() + left;
+        let mut paused: Option<(Instant, String)> = None;
+        {
+            let paused_now = self.lock().paused_by.is_some();
+            self.set_deadline((!paused_now).then_some(deadline));
+        }
+        self.publish_live("announce");
+        let max_pause_s = t.max_pause.as_secs();
+        loop {
+            let woken = self.inner.wake.notified();
+            tokio::pin!(woken);
+            woken.as_mut().enable();
+            let (paused_by, stopped_by) = {
+                let st = self.lock();
+                (st.paused_by.clone(), st.stopped_by.clone())
+            };
+            if let Some(who) = stopped_by {
+                self.set_deadline(None);
+                return Err(drivelive::stopped_refusal(step, &who));
+            }
+            match paused_by {
+                Some(who) => {
+                    let since = match &paused {
+                        Some((since, _)) => *since,
+                        None => {
+                            left = deadline.saturating_duration_since(Instant::now());
+                            self.set_deadline(None);
+                            if let Some(a) = self.lock().announce.as_mut() {
+                                a.left_ms = left.as_millis() as u64;
+                            }
+                            hold(
+                                max_pause_s + UI_RELAY_WAIT_S + left.as_secs() + 30,
+                                Some(format!(
+                                    "paused by {who}: `ui {}` waits for Continue, at most {} min",
+                                    step.verb(),
+                                    max_pause_s / 60
+                                )),
+                            );
+                            tracing::info!(viewer = %who, step = step.verb(), "a viewer paused a driven step");
+                            let now = Instant::now();
+                            paused = Some((now, who.clone()));
+                            self.publish_live("control");
+                            now
+                        }
+                    };
+                    tokio::select! {
+                        _ = &mut woken => continue,
+                        _ = tokio::time::sleep_until(since + t.max_pause) => {
+                            {
+                                let mut st = self.lock();
+                                st.announce = None;
+                                st.paused_by = None;
+                            }
+                            self.set_deadline(None);
+                            self.publish_live("control");
+                            tracing::info!(viewer = %who, step = step.verb(), "a paused step waited past the longest pause");
+                            return Err(drivelive::pause_expired(step, &who, max_pause_s));
+                        }
+                    }
+                }
+                None => {
+                    if paused.take().is_some() {
+                        let who = self
+                            .inner
+                            .continued_by
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .clone()
+                            .unwrap_or_else(|| "a viewer".into());
+                        if countdown {
+                            left = left.max(Duration::from_secs(1));
+                        }
+                        deadline = Instant::now() + left;
+                        self.set_deadline(Some(deadline));
+                        hold(
+                            UI_RELAY_WAIT_S + left.as_secs() + 1,
+                            Some(format!("continued by {who}")),
+                        );
+                        self.publish_live("control");
+                    }
+                    if Instant::now() >= deadline {
+                        let mut st = self.lock();
+                        if st.paused_by.is_some() {
+                            continue;
+                        }
+                        if let Some(who) = &st.stopped_by {
+                            return Err(drivelive::stopped_refusal(step, who));
+                        }
+                        st.announce = None;
+                        self.set_deadline(None);
+                        return Ok(st.apply(step, cx));
+                    }
+                    tokio::select! {
+                        _ = &mut woken => {}
+                        _ = tokio::time::sleep_until(deadline) => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// A viewer pressed Pause, Continue or Stop in the announcement bar.
+    pub fn control(&self, c: Control, who: &str) -> Result<DriveState, Refusal> {
+        self.lock().control(c, who, self.now())?;
+        tracing::info!(
+            viewer = who,
+            button = c.word(),
+            "a viewer pressed a Live view button"
+        );
+        match c {
+            Control::Continue => {
+                *self
+                    .inner
+                    .continued_by
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some(who.to_string());
+                self.publish_live("control");
+            }
+            Control::Pause => self.publish_live("control"),
+            // The drive ended: every tab closes the dialog, as on `done`.
+            Control::Stop => {
+                self.set_deadline(None);
+                self.publish(&UiStep::Done, true, None);
+            }
+        }
+        self.inner.wake.notify_waiters();
+        Ok(self.snapshot())
+    }
+
+    /// The announcement or the pause changed; no step was taken.
+    fn publish_live(&self, kind: &str) {
+        let state = self.snapshot();
+        self.inner.publish.publish(
+            "drive",
+            json!({
+                "kind": kind,
+                "seq": state.seq,
+                "step": state.announce.as_ref().map(|a| &a.step),
+                "applied": false,
+                "refusal": null,
+                "state": state,
+            }),
+        );
+    }
+
     fn publish(&self, step: &UiStep, applied: bool, refusal: Option<&Refusal>) {
         let state = self.snapshot();
         self.inner.publish.publish(
             "drive",
             json!({
+                "kind": "step",
                 "seq": state.seq,
                 "step": step,
                 "applied": applied,
@@ -493,10 +774,33 @@ impl Driver {
                         scope,
                         step,
                     }) => {
-                        let answer = driver.step(&by, scope, step).await;
-                        let ok = answer["ok"] == Value::Bool(true);
-                        let host = host.clone();
+                        // Each step on its own task: a held step (Live view)
+                        // must not keep `ui state` or a viewer's button
+                        // waiting. Steps still run one at a time (`turn`).
+                        let (driver, host) = (driver.clone(), host.clone());
                         tokio::spawn(async move {
+                            let asker = host.clone();
+                            let hold = move |wait_s: u64, note: Option<String>| {
+                                let host = asker.clone();
+                                tokio::spawn(async move {
+                                    let r = host
+                                        .ask_traced(
+                                            Command::UiHold {
+                                                relay,
+                                                wait_s: wait_s.min(UI_HOLD_MAX_S),
+                                                note,
+                                            },
+                                            Duration::from_secs(10),
+                                            None,
+                                        )
+                                        .await;
+                                    if let Err(e) = r {
+                                        tracing::warn!(relay, error = %e, "the host was not told to hold a UI step");
+                                    }
+                                });
+                            };
+                            let answer = driver.step_held(&by, scope, step, &hold).await;
+                            let ok = answer["ok"] == Value::Bool(true);
                             let r = host
                                 .ask_traced(
                                     Command::UiReply {
@@ -558,10 +862,44 @@ async fn state(State(d): State<Driver>) -> Json<Value> {
     Json(json!({ "state": d.snapshot() }))
 }
 
+#[derive(serde::Deserialize)]
+struct ControlBody {
+    #[serde(rename = "do")]
+    what: Control,
+}
+
+/// Who pressed a Live view button, as the driver reads it after "paused
+/// by": "the viewer <the Cloudflare Access login of the request>" (lock 1
+/// verified its token before this route runs), else "a viewer". A label,
+/// never a credential.
+fn viewer(headers: &HeaderMap) -> String {
+    headers
+        .get("cf-access-jwt-assertion")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|t| crate::core::access::parse_jwt(t).ok())
+        .and_then(|j| j.claims.email)
+        .map(|e| format!("the viewer {e}"))
+        .unwrap_or_else(|| "a viewer".into())
+}
+
+/// Pause, Continue or Stop, from the announcement bar of any tab in Live
+/// view; anyone logged in may press them.
+async fn control(
+    State(d): State<Driver>,
+    headers: HeaderMap,
+    Json(body): Json<ControlBody>,
+) -> Response {
+    match d.control(body.what, &viewer(&headers)) {
+        Ok(state) => Json(json!({ "state": state })).into_response(),
+        Err(r) => (StatusCode::CONFLICT, Json(r)).into_response(),
+    }
+}
+
 /// Mounted with `dashboard_routes`: behind the login and both locks.
 pub fn router(driver: Driver) -> Router {
     Router::new()
         .route("/data/drive", get(state))
+        .route("/data/drive/control", post(control))
         .with_state(driver)
 }
 

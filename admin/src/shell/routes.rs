@@ -14,8 +14,11 @@ use chassis::shell::live::Live;
 use homelab_proto::Command;
 use serde::Deserialize;
 
+use std::sync::Arc;
+
 use super::host_link::{now_s, publish_asks, HostClient, Shared};
 use super::loki::Loki;
+use super::slow::{RunQuery, SlowRead, WAIT};
 use crate::core::asks::AnswerRequest;
 use crate::core::guests::parse_status;
 use crate::core::logs::LogQuery;
@@ -24,6 +27,9 @@ use crate::core::logs::LogQuery;
 struct Ctx {
     shared: Shared,
     host: HostClient,
+    /// The doctor reads for about 30 s, the request guard's own limit: a
+    /// slow read (`shell::slow`).
+    doctor_read: Arc<SlowRead>,
 }
 
 /// The page's first paint: the newest snapshot, then SSE carries the rest.
@@ -66,8 +72,44 @@ async fn report(c: &Ctx, what: &str, command: Command) -> Response {
     }
 }
 
-async fn doctor(State(c): State<Ctx>) -> Response {
-    report(&c, "doctor", Command::Doctor { json: true }).await
+/// The report answer as a value, for a slow read.
+async fn report_value(
+    host: &HostClient,
+    what: &str,
+    command: Command,
+) -> (StatusCode, serde_json::Value) {
+    let failed = |why: String| {
+        (
+            StatusCode::BAD_GATEWAY,
+            serde_json::json!({
+                "what": what,
+                "why": why,
+                "fix": "the dashboard asks the host over its one line; check that the host answers (homelab ping) and look at the dashboard's log",
+            }),
+        )
+    };
+    match host.ask(command).await {
+        Ok(r) => match serde_json::from_str::<serde_json::Value>(&r.message) {
+            Ok(v) => (
+                StatusCode::OK,
+                serde_json::json!({ "ok": r.ok, "report": v }),
+            ),
+            Err(_) => failed(format!(
+                "the host answered text, not JSON: {}",
+                r.message.chars().take(200).collect::<String>()
+            )),
+        },
+        Err(e) => failed(e),
+    }
+}
+
+async fn doctor(State(c): State<Ctx>, Query(q): Query<RunQuery>) -> Response {
+    let host = c.host.clone();
+    c.doctor_read
+        .read(q.run, WAIT, move || async move {
+            report_value(&host, "doctor", Command::Doctor { json: true }).await
+        })
+        .await
 }
 
 async fn incidents(State(c): State<Ctx>) -> Response {
@@ -118,7 +160,11 @@ pub fn router(shared: Shared, host: HostClient) -> Router {
         .route("/data/manual-checks", get(manual_checks))
         .route("/data/current-op", get(current_op))
         .route("/data/history", get(history))
-        .with_state(Ctx { shared, host })
+        .with_state(Ctx {
+            shared,
+            host,
+            doctor_read: SlowRead::new("doctor"),
+        })
 }
 
 /// The read milestone's routes that need more than the host line: the live

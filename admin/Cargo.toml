@@ -54,6 +54,8 @@ regex = "1"
 # milestone act: the action routes are called in-process (already in the tree
 # through axum).
 tower = { version = "0.5", features = ["util"] }
+# Live view: the countdown and the pause are tested on paused time.
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

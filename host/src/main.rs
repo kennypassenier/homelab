@@ -5993,12 +5993,38 @@ where
                 let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
                 continue;
             }
+            Rpc::UiHold {
+                relay,
+                wait_s,
+                ref note,
+            } => {
+                let (ok, message) = match state.ui.hold(session, relay, wait_s, note.clone()) {
+                    Ok(()) => (true, "held".to_string()),
+                    Err(e) => (false, e),
+                };
+                let resp = RpcResponse {
+                    id: req.id,
+                    ok,
+                    message,
+                    deferred: None,
+                };
+                let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+                continue;
+            }
             Rpc::Ui { ref step } => {
                 info!(token = %who.name, step = step.verb(), "UI step relayed to the dashboard");
                 let (out_tx, ui, step) = (out_tx.clone(), state.ui.clone(), step.clone());
                 let (by, scope, id) = (who.name.clone(), who.scope, req.id);
                 tokio::spawn(async move {
-                    let (ok, message) = ui.relay(&by, scope, step, ui_relay::RELAY_WAIT).await;
+                    // Live view: a note from a held step ("paused by the
+                    // viewer …") goes to this CLI alone.
+                    let notes = out_tx.clone();
+                    let note = move |note: String| {
+                        let _ = notes.try_send(ServerMsg::UiNote { note });
+                    };
+                    let (ok, message) = ui
+                        .relay(&by, scope, step, ui_relay::RELAY_WAIT, &note)
+                        .await;
                     let resp = RpcResponse {
                         id,
                         ok,
@@ -6888,7 +6914,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             deferred: None,
         },
         // feat-platform-10: answered by the session loop (`serve_ws`).
-        Rpc::Ui { .. } | Rpc::UiAttach | Rpc::UiReply { .. } => RpcResponse {
+        Rpc::Ui { .. } | Rpc::UiAttach | Rpc::UiReply { .. } | Rpc::UiHold { .. } => RpcResponse {
             id: req.id,
             ok: false,
             message: "UI steps are relayed by the session, not run".into(),

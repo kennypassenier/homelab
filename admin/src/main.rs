@@ -55,6 +55,11 @@ const FILES: &[(&str, &[u8])] = &[
     ),
     ("js/drive.js", include_bytes!("../web/js/drive.js")),
     ("js/driveview.js", include_bytes!("../web/js/driveview.js")),
+    // Live view: the announcement bar, the plan, the target's mark.
+    (
+        "js/driveannounce.js",
+        include_bytes!("../web/js/driveannounce.js"),
+    ),
     (
         "js/drivehooks.js",
         include_bytes!("../web/js/drivehooks.js"),

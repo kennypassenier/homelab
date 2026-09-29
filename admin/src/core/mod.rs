@@ -12,6 +12,7 @@ pub mod credentials;
 pub mod drift;
 pub mod drive;
 pub mod driveedit;
+pub mod drivelive;
 pub mod editplan;
 pub mod fleet;
 pub mod fwmatrix;

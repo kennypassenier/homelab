@@ -10,15 +10,17 @@ import { doctorRows } from "../doctor.js";
 import {
   badgeCell,
   bindTableUrl,
+  elapsed,
   errorBox,
   fetchJson,
-  fetchReport,
   fillFacts,
   h,
   progressGroup,
+  slowReport,
   tableBlock,
   td,
 } from "../dom.js";
+import { humanDuration } from "../format.js";
 import { guestRows, hostBars, hostChecks, hostFacts } from "../host.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
@@ -68,7 +70,7 @@ export function mount(root, ctx) {
   const checksNote = h(
     "p",
     { class: "measured", role: "status" },
-    "The doctor reads for about a minute on pve; the disk and the state file are among its host-level checks.",
+    "The doctor reads for about half a minute on pve; the disk and the state file are among its host-level checks.",
   );
   const checks = tableBlock({
     remember: "host-checks",
@@ -186,8 +188,8 @@ export function mount(root, ctx) {
     guestErr,
     guests.wrap,
     h("p", null, guestsAgo),
-    h("h2", null, "Host checks"),
-    h("div", { class: "title-row" }, checksNote, checksBtn),
+    h("div", { class: "title-row" }, h("h2", null, "Host checks"), checksBtn),
+    checksNote,
     checksErr,
     checks.wrap,
     h("p", null, checksAgo),
@@ -197,6 +199,8 @@ export function mount(root, ctx) {
   const unbindS = bindTableUrl(settingsTable, "hosttoml");
   const guestTable = dataTable(guests.wrap);
   const checksTable = dataTable(checks.wrap);
+  // Read on request: no empty table that looks like a load before that.
+  checks.wrap.hidden = true;
   const unbindG = bindTableUrl(guestTable, "guests");
   const unbindC = bindTableUrl(checksTable, "hostchecks");
   const abort = new AbortController();
@@ -365,15 +369,24 @@ export function mount(root, ctx) {
 
   const loadChecks = async () => {
     checksBtn.disabled = true;
-    checksNote.textContent = "Reading… the doctor takes about a minute.";
+    checks.wrap.hidden = false;
     checksTable?.state("loading");
-    const r = await fetchReport("/data/doctor", "the doctor", abort.signal);
-    checksBtn.disabled = false;
-    checksBtn.textContent = "Read again";
+    checksErr.replaceChildren();
+    const stop = elapsed((s) => {
+      checksNote.textContent = `Reading… ${humanDuration(s)} so far; the doctor takes about half a minute.`;
+    });
+    let r;
+    let secs = 0;
+    try {
+      r = await slowReport("/data/doctor", "the doctor", abort.signal);
+    } finally {
+      checksBtn.disabled = false;
+      secs = stop();
+    }
     if (!r.ok) {
       checksErr.replaceChildren(errorBox(r.error));
       checksTable?.state("failed");
-      checksNote.textContent = "The doctor did not answer.";
+      checksNote.textContent = `The doctor did not answer (after ${humanDuration(secs)}).`;
       return;
     }
     checksErr.replaceChildren();
@@ -392,7 +405,7 @@ export function mount(root, ctx) {
     );
     checksTable?.refresh();
     checksTable?.state("ready");
-    checksNote.textContent = `${rows.length} host-level checks.`;
+    checksNote.textContent = `${rows.length} host-level checks, read in ${humanDuration(secs)}.`;
     setAgo(checksAgo, Date.now() / 1000);
   };
   checksBtn.addEventListener("click", () => void loadChecks().catch(() => {}));

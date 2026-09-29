@@ -1064,6 +1064,11 @@ const CLI_ONLY: &[(&str, &str)] = &[
          else may send it",
     ),
     (
+        "UiHold",
+        "Live view: the dashboard keeps a UI step a viewer paused alive; \
+         nobody else may send it",
+    ),
+    (
         "InstallNativeRelease",
         "TUI parity round: the dashboard's install-native, where the host downloads \
          the release because CT 120 has no gh; the TUI and CLI download it themselves \

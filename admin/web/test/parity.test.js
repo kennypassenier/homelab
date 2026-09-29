@@ -13,6 +13,7 @@ import {
 } from "../js/actionforms.js";
 import {
   applySummary,
+  checkChoices,
   findingRows,
   hostSettingRows,
   lineMatches,
@@ -315,4 +316,12 @@ test("an import is the bundle, the new name and number, held in the wizard's wor
     importErrors({ bundle: "x", name: "recipes2", vmid: "197" }, taken),
     {},
   );
+});
+
+test("a manual check's choice carries its whole text", () => {
+  const text = "Open een route van buitenaf op je telefoon. ".repeat(6);
+  const [c] = checkChoices([
+    { id: "a1", record: { stack: "gateway", app: "cloudflared", text } },
+  ]);
+  assert.deepEqual(c, { id: "a1", label: `gateway/cloudflared: ${text}` });
 });

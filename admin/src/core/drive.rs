@@ -18,6 +18,7 @@ use serde_json::Value;
 
 use crate::core::actions::{ActionArgs, ActionKind, Arg, Refusal, HOST_TARGET, SELF_STACK};
 use crate::core::driveedit::{EditCall, EditKind, EditState};
+use crate::core::drivelive::{self, Announce, Plan};
 
 /// The shared description, compiled in.
 pub const FORM_SPEC_JSON: &str = include_str!("../../web/js/formspec.json");
@@ -535,6 +536,15 @@ pub struct DriveState {
     /// Unix seconds of the last step.
     pub last_at: i64,
     pub idle_s: i64,
+    /// Live view: the step announced now, before it is taken (`drivelive`).
+    pub announce: Option<Announce>,
+    /// Live view: a viewer paused; the next step waits for Continue.
+    pub paused_by: Option<String>,
+    /// Live view: a viewer stopped the drive; every step is refused until
+    /// the driver says `done`.
+    pub stopped_by: Option<String>,
+    /// Live view: the sequence the driver sent up front.
+    pub plan: Option<Plan>,
 }
 
 impl Default for DriveState {
@@ -547,6 +557,10 @@ impl Default for DriveState {
             form: None,
             last_at: 0,
             idle_s: IDLE_S,
+            announce: None,
+            paused_by: None,
+            stopped_by: None,
+            plan: None,
         }
     }
 }
@@ -984,13 +998,49 @@ impl DriveState {
 
     /// Apply one step. `Err`: refused, nothing changed. `Ok`: applied (the
     /// press may have been held by the form, which `held` says).
+    ///
+    /// Live view: a drive a viewer stopped refuses every step until `done`;
+    /// `plan` records the sequence; a step taken moves the plan on.
     pub fn apply(&mut self, step: &UiStep, cx: &Ctx) -> Result<Applied, Refusal> {
         let plain = Applied {
             effect: Effect::None,
             held: None,
         };
-        let applied = match step {
+        match step {
             UiStep::State => return Ok(plain),
+            UiStep::Done => {
+                self.stopped_by = None;
+                self.paused_by = None;
+                self.announce = None;
+                self.plan = None;
+            }
+            _ => {
+                if let Some(who) = &self.stopped_by {
+                    return Err(drivelive::stopped_refusal(step, who));
+                }
+            }
+        }
+        if let UiStep::Plan { steps } = step {
+            self.plan = Some(drivelive::new_plan(steps, cx.by, self)?);
+            self.bump(cx, true);
+            return Ok(plain);
+        }
+        let applied = self.apply_step(step, cx)?;
+        if drivelive::holds(step) {
+            if let Some(p) = self.plan.as_mut() {
+                p.advance(step);
+            }
+        }
+        Ok(applied)
+    }
+
+    fn apply_step(&mut self, step: &UiStep, cx: &Ctx) -> Result<Applied, Refusal> {
+        let plain = Applied {
+            effect: Effect::None,
+            held: None,
+        };
+        let applied = match step {
+            UiStep::State | UiStep::Plan { .. } => return Ok(plain),
             UiStep::Done => {
                 self.form = None;
                 self.active = false;

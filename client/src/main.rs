@@ -1971,6 +1971,11 @@ async fn rpc_exchange(
             }
             // feat-platform-10: only the attached dashboard gets UI steps.
             ServerMsg::Ui { .. } => {}
+            // Live view: the dashboard holds this CLI's UI step ("paused by
+            // the viewer …"); on stderr, so `--json` stays one JSON answer.
+            ServerMsg::UiNote { note } => {
+                eprintln!("{}● {}{}", C_YELLOW, note, C_RESET);
+            }
             ServerMsg::Config(view) => {
                 payload_seen = true;
                 // G8: plain-text dump for the CLI (`homelab config`).

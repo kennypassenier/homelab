@@ -4,7 +4,14 @@
 
 import { act, loadNotices, onAct, patchNoticeSettings, send } from "../act.js";
 import { notify, refusalCallout } from "../actui.js";
-import { badgeCell, bindTableUrl, h, tableBlock, td } from "../dom.js";
+import {
+  badgeCell,
+  bindTableUrl,
+  h,
+  stateWord,
+  tableBlock,
+  td,
+} from "../dom.js";
 import { formatTime, humanDuration } from "../format.js";
 import {
   KIND_ORDER,
@@ -28,7 +35,7 @@ import { attachSwitches } from "/static/kp/js/forms.js";
  * in the DOM, which the table would read as the cell's text); the label
  * then says the state.
  * @param {string} id
- * @param {string} label
+ * @param {string | Node} label
  * @param {boolean} [words]
  */
 function switchEl(id, label, words = true) {
@@ -45,7 +52,7 @@ function switchEl(id, label, words = true) {
     ...(words
       ? [h("span", { class: "kp-switch__state", "aria-hidden": "true" })]
       : []),
-    h("span", null, label),
+    typeof label === "string" ? h("span", null, label) : label,
   );
   return { wrap, input };
 }
@@ -62,6 +69,7 @@ export function mount(root) {
     class: "kp-field__input",
     type: "number",
     id: "notify-long",
+    "aria-describedby": "notify-long-help",
     min: "1",
     max: "1440",
     step: "1",
@@ -112,7 +120,13 @@ export function mount(root) {
       { label: "Stack", sort: "text", filter: "choice" },
       { label: "What", sort: "text", cls: "wide" },
       { label: "Push", sort: "text" },
-      { label: "Read", sort: "text", order: "unread,read", filter: "choice" },
+      {
+        label: "Read",
+        sort: "text",
+        order: "unread,read",
+        filter: "choice",
+        cls: "col-button",
+      },
     ],
   });
   notices.tbody.id = "notices";
@@ -126,6 +140,8 @@ export function mount(root) {
       { label: "Push", sort: "text", order: "muted,on", filter: "choice" },
     ],
   });
+  /** @type {Map<string, {input: HTMLInputElement, word: HTMLElement, unread: HTMLElement}>} */
+  const stackRows = new Map();
   stacks.tbody.id = "notify-stacks";
 
   root.replaceChildren(
@@ -141,6 +157,10 @@ export function mount(root) {
         { class: "measured" },
         "A notice always lands in this list; the switch decides whether it also goes to the phone.",
       ),
+      // The help goes under the row, not in the field: in the field it made
+      // the field taller than the button beside it, and the row's
+      // bottom-aligned button sat level with the help text instead of the
+      // input (Kenny, 2026-09-29).
       h(
         "div",
         { class: "inline-fields" },
@@ -153,13 +173,13 @@ export function mount(root) {
             "Push when an action ran at least (minutes)",
           ),
           longInput,
-          h(
-            "span",
-            { class: "kp-field__help" },
-            "A shorter action pushes only when it failed.",
-          ),
         ),
         longSave,
+      ),
+      h(
+        "p",
+        { class: "kp-field__help inline-fields__help", id: "notify-long-help" },
+        "A shorter action pushes only when it failed.",
       ),
       h(
         "div",
@@ -356,7 +376,7 @@ export function mount(root) {
                     "Mark read",
                   ),
                 )
-              : td("read"),
+              : h("td", null, h("span", { class: "read-mark" }, "read")),
           ),
         ),
       );
@@ -365,30 +385,46 @@ export function mount(root) {
     nTable?.state("ready");
     const names = (current().fleet?.stacks ?? []).map((s) => s.name);
     const mrows = stackMuteRows(names, snap);
-    const msig = JSON.stringify(mrows);
+    const msig = JSON.stringify(mrows.map((r) => r.stack));
     if (msig !== stacksSig) {
       stacksSig = msig;
+      stackRows.clear();
       stacks.tbody.replaceChildren(
         ...mrows.map((r) => {
-          const sw = switchEl(
-            `mute-${r.stack}`,
-            r.muted ? "muted" : "on",
-            false,
-          );
-          sw.input.checked = !r.muted;
+          const word = stateWord("on", ["on", "muted"]);
+          const sw = switchEl(`mute-${r.stack}`, word, false);
           sw.input.dataset.mute = r.stack;
           sw.input.setAttribute("aria-label", `Push for ${r.stack}`);
+          const unread = td("", "num");
+          stackRows.set(r.stack, { input: sw.input, word, unread });
           return h(
             "tr",
             { "data-kp-row-key": r.stack },
             td(r.stack),
-            td(String(r.unread), "num"),
+            unread,
             h("td", null, sw.wrap),
           );
         }),
       );
-      sTable?.refresh();
     }
+    // A toggle changes its row in place: the same switch stays under the
+    // pointer and keeps the keyboard focus (Kenny, 2026-09-29).
+    let changed = false;
+    for (const r of mrows) {
+      const row = stackRows.get(r.stack);
+      if (!row) continue;
+      const text = r.muted ? "muted" : "on";
+      if (row.word.textContent !== text) {
+        row.word.textContent = text;
+        changed = true;
+      }
+      if (row.input.checked === r.muted) row.input.checked = !r.muted;
+      if (row.unread.textContent !== String(r.unread)) {
+        row.unread.textContent = String(r.unread);
+        changed = true;
+      }
+    }
+    if (changed) sTable?.refresh();
   };
   const off = onAct("notices", render);
   const unsub = subscribe(render);

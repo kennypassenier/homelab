@@ -65,12 +65,28 @@ export function routeError(what, status, body) {
         why: b.why,
         fix: typeof b.fix === "string" ? b.fix : "",
       };
+    // chassis' own refusals (the request guard's timeout, the in-flight
+    // cap) say `{error, remedy}`.
+    if (typeof b.error === "string")
+      return {
+        what,
+        why: `${b.error} (HTTP ${status})`,
+        fix: typeof b.remedy === "string" ? b.remedy : "",
+      };
   }
   if (status === 401 || status === 403)
     return {
       what,
       why: `the dashboard refused the request (HTTP ${status})`,
       fix: "log in again at /login",
+    };
+  // A proxy that gave up waiting: Traefik (504) or Cloudflare (524, after
+  // 100 s) in front of the dashboard, or the dashboard's own guard (408).
+  if (status === 408 || status === 504 || status === 524)
+    return {
+      what,
+      why: `the answer took longer than ${status === 524 ? "Cloudflare" : status === 504 ? "the proxy" : "the dashboard"} waits (HTTP ${status})`,
+      fix: "read again; if it keeps timing out, look at the dashboard's log for this route",
     };
   return {
     what,

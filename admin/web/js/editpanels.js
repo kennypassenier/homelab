@@ -30,6 +30,7 @@ import {
 import { badgeCell, errorBox, fetchJson, h, tableBlock, td } from "./dom.js";
 import { driven, register } from "./drivehooks.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import { attachSwitches } from "/static/kp/js/forms.js";
 
 /**
  * @typedef {{stack: string, head: {commit: string, subject: string, at: number} | null,
@@ -153,7 +154,12 @@ function settingsCard(stack, e, reload) {
     inputs.set(f.name, x.input);
     return x.wrap;
   });
-  const status = h("span", { class: "measured", role: "status" });
+  // Sized for its one text, so it never reflows the row when it appears.
+  const status = h("span", {
+    class: "measured state-word",
+    "data-size": "Changed; not committed.",
+    role: "status",
+  });
   const review = h(
     "button",
     {
@@ -374,7 +380,8 @@ function drawFirewall(panel, stack, e, reload) {
   let model = firewallModel(original);
   const state = h("span", { class: "state" });
   const dirty = h("span", {
-    class: "measured",
+    class: "measured state-word",
+    "data-size": "Changed; not committed.",
     role: "status",
     id: "fw-dirty",
   });
@@ -658,6 +665,8 @@ function drawFirewall(panel, stack, e, reload) {
     t.wrap,
   );
   const detachTables = attachDataTables(panel);
+  // The "In force" switch's On/Off words.
+  const detachSwitches = attachSwitches(panel);
   const table = dataTable(t.wrap);
   paintOptions();
   paintRules();
@@ -686,6 +695,7 @@ function drawFirewall(panel, stack, e, reload) {
   return () => {
     unregister();
     detachTables();
+    detachSwitches();
   };
 }
 

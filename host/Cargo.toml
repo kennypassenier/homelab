@@ -28,6 +28,8 @@ libc = "0.2"
 # The host's tests drive core with the MockExecutor (test-support feature).
 homelab-core = { path = "../core", features = ["test-support"] }
 tokio-tungstenite.workspace = true
+# Live view: the relay's long holds are tested on paused time.
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

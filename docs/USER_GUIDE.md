@@ -612,7 +612,9 @@ no second way in: the steps travel on the same TLS line as every other verb.
 | `homelab ui press save\|cancel\|default` | the buttons of a dialog on top of a form: the rule dialog (`save`, `cancel`), a host.toml key (`save`, `default`, `cancel`) |
 | `homelab ui close` | closes the dialog |
 | `homelab ui state` | changes nothing; prints what is on screen |
-| `homelab ui done` | stops driving: every tab is its viewer's again |
+| `homelab ui done` | stops driving: every tab is its viewer's again; after a viewer's **Stop** it also acknowledges the stop |
+| `homelab ui plan "<step>" "<step>" …` | sends the whole sequence up front, each argument one step as above (`plan "goto jobs" "open deploy media" "press confirm"`); changes nothing on screen |
+| `homelab ui plan --file <file\|->` | the same, one step per line of the file (or stdin); blank lines and `#` lines are skipped |
 
 Every step is checked against the same form description the dashboard draws
 its dialogs and edit forms from (`admin/web/js/formspec.json`, its `edit`
@@ -695,8 +697,59 @@ homelab ui close
 homelab ui done
 ```
 
+**Live view: announce, plan and pause** (Kenny, 2026-09-29, form "Live
+view aankondigen": "soms springt het allemaal veel te snel van het ene naar
+het andere scherm zonder dat ik weet wat er komt").
+
+- *Announce.* Before every step that changes the screen, except `type` and
+  `edit` (their letters already show what happens), every tab in Live view
+  shows a bar "Next: <the step in words>" with a 3 s countdown (the digit
+  and a progress bar) and marks the element the step acts on (the page's
+  link in the bar, the action's button, the field, the button, the row)
+  with an outline that pulses. The dashboard's server holds the step for
+  the countdown and takes it afterwards, so every tab waits the same and
+  `homelab ui` answers after the step ran. A step the dashboard refuses is
+  refused at once, never announced. The countdown is
+  `HOMELAB_ADMIN_LIVE_ANNOUNCE_MS` (default 3000, 0 announces nothing, at
+  most 10000).
+- *Plan.* `homelab ui plan` sends the sequence first; a tab in Live view
+  lists it beside the page ("Claude's plan"), done steps ticked, the next
+  one marked, and the bar says "Step n of m". Each step taken ticks the
+  plan's next step; a step that is not it is still taken and marks the
+  plan **changed**. `homelab ui state` prints the plan's progress; `done`
+  ends the plan.
+- *Pause, Continue, Stop.* The bar of a tab in Live view carries the three
+  buttons; anyone logged in may press them. **Pause** freezes the countdown
+  and holds the step (or, between two steps, the next one, typing
+  included) until **Continue**; the waiting `homelab ui` prints
+  `● paused by the viewer <who>: ui <verb> waits for Continue, at most 30
+  min` on stderr, then `● continued by the viewer <who>`. A step paused
+  longer than `HOMELAB_ADMIN_LIVE_MAX_PAUSE_S` (default 1800, 60 to 3600)
+  is not taken and fails with what, why and fix. **Stop** fails the held
+  step with "stopped by the viewer <who>", closes the driven dialog, drops
+  the plan and hands every tab back; every later step is refused until
+  `homelab ui done` acknowledges the stop. `<who>` is the Cloudflare Access
+  login of the tab that pressed.
+
+The host waits 20 s for a step's answer; a paused step is kept alive by
+the dashboard (`UiHold`), at most 65 min, and a dashboard that goes away
+answers a held step at once.
+
+```
+$ homelab ui plan "goto stacks/media" "open deploy media" "press confirm" "close"
+$ homelab ui goto stacks/media        # "Next: go to the stack media" · 3 2 1
+$ homelab ui open deploy media        # the Deploy button pulses, then the dialog
+$ homelab ui press confirm            # Kenny presses Pause in the bar:
+● paused by the viewer kenny@…: `ui press` waits for Continue, at most 30 min
+● continued by the viewer kenny@…     # … the deploy runs once, then the answer
+$ homelab ui close
+$ homelab ui done
+```
+
 Tests: `admin/tests/follow_tests.rs`, `admin/tests/follow_edit_tests.rs`
-(the edit forms, each final press once), `host/src/ui_relay.rs`,
+(the edit forms, each final press once), `admin/tests/follow_live_tests.rs`
+(the countdown, pause, stop and plan on the driver), `admin/src/core/drivelive.rs`,
+`admin/web/test/announce.test.js` (the bar's view model), `host/src/ui_relay.rs`,
 `host/src/main.rs` (`follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope`),
 `client/src/ui_cli.rs`, `proto/src/lib.rs`, `admin/web/test/follow.test.js`
 (the replay, and the edit checks against the shared cases file).

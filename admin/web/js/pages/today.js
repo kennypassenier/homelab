@@ -7,12 +7,14 @@ import { agoEl, setAgo } from "../ago.js";
 import {
   badgeCell,
   bindTableUrl,
+  elapsed,
   errorBox,
-  fetchJson,
   h,
+  slowRead,
   tableBlock,
   td,
 } from "../dom.js";
+import { humanDuration } from "../format.js";
 import { findingRows, todayView } from "../parity.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 
@@ -54,10 +56,15 @@ export function mount(root) {
     { type: "button", class: "kp-button", id: "fleet-check-run" },
     "Run the fleet check",
   );
+  const checkAbout = h(
+    "p",
+    { class: "measured" },
+    "The repository against the fleet (the TUI's c, homelab check): every stack file against what runs, backups, routes. The host needs about a minute and a half.",
+  );
   const checkNote = h(
     "p",
     { class: "measured", role: "status" },
-    "The repository against the fleet (the TUI's c, homelab check): every stack file against what runs, backups, routes. About a minute.",
+    "Not run yet on this page.",
   );
   const checkErr = h("div");
   const checkAgo = agoEl("read");
@@ -85,8 +92,9 @@ export function mount(root) {
     items.wrap,
     unread,
     h("p", null, ago),
-    h("h2", null, "Fleet check"),
-    h("div", { class: "title-row" }, checkNote, checkBtn),
+    h("div", { class: "title-row" }, h("h2", null, "Fleet check"), checkBtn),
+    checkAbout,
+    checkNote,
     checkErr,
     findings.wrap,
     h("p", null, checkAgo),
@@ -97,26 +105,36 @@ export function mount(root) {
   const unbind = bindTableUrl(table, "today");
   const unbindC = bindTableUrl(checkTable, "findings");
   const abort = new AbortController();
+  // Nothing to show before the first run: no empty table that looks like
+  // a load that never finishes.
+  findings.wrap.hidden = true;
 
   const load = async () => {
     read.disabled = true;
     table?.state("loading");
-    verdict.replaceChildren(
-      h(
-        "p",
-        { class: "measured" },
-        "Asking the host: doctor, the fleet check, incidents and manual checks (about a minute)…",
-      ),
-    );
-    const r = await fetchJson("/data/today", "today", abort.signal);
-    read.disabled = false;
+    err.replaceChildren();
+    const waiting = h("p", { class: "measured", role: "status" });
+    verdict.replaceChildren(waiting);
+    const stop = elapsed((s) => {
+      waiting.textContent = `Asking the host: doctor, the fleet check, incidents and manual checks… ${humanDuration(s)} so far; the host needs about a minute and a half.`;
+    });
+    let r;
+    let secs = 0;
+    try {
+      r = await slowRead("/data/today", "today", abort.signal);
+    } finally {
+      read.disabled = false;
+      secs = stop();
+    }
+    const took = humanDuration(secs);
     if (!r.ok) {
       err.replaceChildren(errorBox(r.error));
-      verdict.replaceChildren();
+      verdict.replaceChildren(
+        h("p", { class: "measured", role: "status" }, `Failed after ${took}.`),
+      );
       table?.state("failed");
       return;
     }
-    err.replaceChildren();
     const v = todayView(r.body);
     verdict.replaceChildren(
       h(
@@ -129,8 +147,8 @@ export function mount(root) {
         h("strong", null, v.verdict),
       ),
     );
-    note.textContent = v.note;
-    note.hidden = !v.note;
+    note.textContent = [v.note, `Read in ${took}.`].filter(Boolean).join(" ");
+    note.hidden = false;
     items.tbody.replaceChildren(
       ...v.items.map((i) =>
         h(
@@ -155,22 +173,27 @@ export function mount(root) {
 
   const runCheck = async () => {
     checkBtn.disabled = true;
-    checkNote.textContent = "Checking… about a minute.";
+    findings.wrap.hidden = false;
     checkTable?.state("loading");
-    const r = await fetchJson(
-      "/data/fleet-check",
-      "the fleet check",
-      abort.signal,
-    );
-    checkBtn.disabled = false;
-    checkBtn.textContent = "Run it again";
+    checkErr.replaceChildren();
+    const stop = elapsed((s) => {
+      checkNote.textContent = `Checking… ${humanDuration(s)} so far; the host needs about a minute and a half.`;
+    });
+    let r;
+    let secs = 0;
+    try {
+      r = await slowRead("/data/fleet-check", "the fleet check", abort.signal);
+    } finally {
+      checkBtn.disabled = false;
+      secs = stop();
+    }
+    const took = humanDuration(secs);
     if (!r.ok) {
       checkErr.replaceChildren(errorBox(r.error));
       checkTable?.state("failed");
-      checkNote.textContent = "The fleet check did not answer.";
+      checkNote.textContent = `The fleet check did not answer (after ${took}).`;
       return;
     }
-    checkErr.replaceChildren();
     const rows = findingRows(r.body.findings ?? []);
     findings.tbody.replaceChildren(
       ...rows.map((f) =>
@@ -187,7 +210,7 @@ export function mount(root) {
     checkTable?.refresh();
     checkTable?.state("ready");
     checkNote.textContent =
-      `${r.body.passes ? "Passes" : "Does not pass"}: ${rows.length} finding(s) over ${r.body.stack_files} stack file(s). ${r.body.skipped ?? ""} ${r.body.not_here ?? ""}`.trim();
+      `${r.body.passes ? "Passes" : "Does not pass"}: ${rows.length} finding(s) over ${r.body.stack_files} stack file(s), checked in ${took}. ${r.body.skipped ?? ""} ${r.body.not_here ?? ""}`.trim();
     setAgo(checkAgo, r.body.measured_at ?? Date.now() / 1000);
   };
 

@@ -174,4 +174,18 @@ test("a route's error reads as what, why and fix", () => {
   );
   assert.match(routeError("x", 500, "oops").why, /HTTP 500/);
   assert.match(routeError("x", 0, null).why, /did not answer/);
+  // chassis' own refusal ({error, remedy}) and a proxy that gave up
+  // (Kenny, 2026-09-29: Today failed with nothing readable).
+  assert.deepEqual(
+    routeError("today", 408, {
+      error: "request to /data/today exceeded 30 s",
+      remedy: "retry",
+    }),
+    {
+      what: "today",
+      why: "request to /data/today exceeded 30 s (HTTP 408)",
+      fix: "retry",
+    },
+  );
+  assert.match(routeError("today", 524, null).why, /Cloudflare.*HTTP 524/);
 });

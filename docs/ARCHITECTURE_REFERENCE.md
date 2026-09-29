@@ -56,11 +56,11 @@ flowchart LR
 <sub>Source: `client/src/main.rs`, `client/src/spec.rs`, `client/src/release.rs`, `host/src/main.rs`, `core/src/ops/backup.rs`, `core/src/ops/native.rs`.</sub>
 
 - Four workspace members (`Cargo.toml:3`); the release builds only
-  `homelab-host` and `homelab` (`.github/workflows/release.yml:26`).
+  `homelab-host`, `homelab` and `homelab-admin` (`Makefile`, `release-binaries`).
   `tui-preview`, a mockup on simulated data, sits outside the workspace (`exclude`, fix-135).
 
 - Five workspace members (`Cargo.toml:3`); the release builds only
-  `homelab-host` and `homelab` (`.github/workflows/release.yml`, `build` job).
+  `homelab-host`, `homelab` and `homelab-admin` (`Makefile`, `release-binaries`).
   `tui-preview` is a mockup on simulated data (`tui-preview/Cargo.toml:5`).
 - Containers are reached only through `pct exec` (`core/src/executor.rs:161-174`)
   and `pct push` of a staged file (`core/src/ops/util.rs:99-107`).
@@ -491,7 +491,7 @@ Verification: `SHA256SUMS.minisig` over `SHA256SUMS` with the compiled
 | AR6 | Elm-style TUI over `Backend` | `client/src/tui/backend.rs:33,40,173`; `update` at `client/src/tui/model.rs:389` |
 | AR7 | `OperatorError` what, why, remedy | `core/src/error.rs:41-45` |
 | AR8 | no template engine (amended 2026-09-27) | string substitution in `client/src/scaffold.rs` |
-| AR9 | hard CI gates | `ci.yml:29-42`: fmt, clippy `-D warnings`, tests |
+| AR9 | hard gates | `.githooks/pre-commit` and `make release` (fmt, clippy `-D warnings`, tests, scanners); no GitHub Actions since 2026-09-29 |
 | AR10 | tagged releases with sha256 | `release.yml`: a read-only `build` job, a `publish` job that alone can write; no signature |
 | AR11 | TOML config, YAML manifests | `host/src/main.rs:369-396`; `client/src/spec.rs:54-56` |
 | AR12 | serial mutations | `host/src/main.rs:1667,2944` |

@@ -28,6 +28,22 @@ else
   echo "warning: .githooks/check-secrets.sh is missing; the secret gate did not run." >&2
 fi
 
+# The scans GitHub's CI ran until 2026-09-29 (Kenny: every build and check
+# runs locally), on what this commit changes: gitleaks over the staged diff,
+# and cargo-deny's advisories when Cargo.lock moves. `make release` scans the
+# whole history once more. The pinned binaries are fetched on first use.
+if ! make -s secrets-staged; then
+  echo "COMMIT BLOCKED — gitleaks found a secret in the staged changes (values redacted above)." >&2
+  echo "Remedy: remove it, or allowlist a proven false positive per file in .gitleaks.toml." >&2
+  exit 1
+fi
+if git diff --cached --name-only | grep -qx 'Cargo.lock'; then
+  if ! make -s advisories; then
+    echo "COMMIT BLOCKED — Cargo.lock pins a crate with a known advisory (cargo deny, above)." >&2
+    echo "Remedy: bump the crate, or record a reasoned ignore in deny.toml." >&2
+    exit 1
+  fi
+fi
 # The "release: vX [meta]" commit of `make release` changes only the
 # workspace version, on a tree `make release` gated moments before (Kenny,
 # 2026-09-29: "drie keer dezelfde testrun is dom, dat moet naar één"). The

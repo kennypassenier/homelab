@@ -1,15 +1,15 @@
-//! The GitHub workflows are part of the supply chain of a binary that runs as
-//! root on the hypervisor, so their security properties are asserted here
+//! The build and check chain is part of the supply chain of a binary that runs
+//! as root on the hypervisor, so its security properties are asserted here
 //! rather than trusted to review (expert panel 2026-09-27,
-//! host-release-unsigned). The files are parsed, not grepped, so a property
-//! moved to another key or job is still found.
+//! host-release-unsigned).
 //!
 //! Since 2026-09-28 (Kenny: "Lokaal bouwen en uploaden") the release is built
-//! on the release machine by `make release`, not by a GitHub job; the tests
-//! for that job went with it and the Makefile's release path is asserted
-//! below instead.
+//! on the release machine by `make release`, and since 2026-09-29 (Kenny:
+//! "alle builds lokaal") so is every check CI ran: GitHub Actions runs
+//! nothing for this repository. The Makefile and the commit hook are asserted
+//! below instead of the workflows.
 
-use serde_yaml::{Mapping, Value};
+use serde_yaml::Value;
 use std::path::{Path, PathBuf};
 
 fn root() -> PathBuf {
@@ -19,163 +19,65 @@ fn root() -> PathBuf {
         .to_path_buf()
 }
 
-fn workflow_text(name: &str) -> String {
-    std::fs::read_to_string(root().join(".github/workflows").join(name)).unwrap()
+fn makefile() -> String {
+    std::fs::read_to_string(root().join("Makefile")).unwrap()
 }
 
-fn workflow(name: &str) -> Value {
-    serde_yaml::from_str(&workflow_text(name)).unwrap()
-}
-
-fn steps(job: &Value) -> Vec<&Value> {
-    job.get("steps")
-        .and_then(Value::as_sequence)
-        .map(|s| s.iter().collect())
-        .unwrap_or_default()
-}
-
-fn run_text(job: &Value) -> String {
-    steps(job)
-        .iter()
-        .filter_map(|s| s.get("run").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// `permissions:` as a map of scope → level; a bare string (`write-all`,
-/// `read-all`) comes back as the single entry `* → <string>`.
-fn permissions(v: Option<&Value>) -> Vec<(String, String)> {
-    match v {
-        None => vec![("*".into(), "<default>".into())],
-        Some(Value::String(s)) => vec![("*".into(), s.clone())],
-        Some(Value::Mapping(m)) => map_pairs(m),
-        Some(other) => panic!("unexpected permissions value {other:?}"),
-    }
-}
-
-fn map_pairs(m: &Mapping) -> Vec<(String, String)> {
-    m.iter()
-        .map(|(k, v)| {
-            (
-                k.as_str().unwrap_or_default().to_string(),
-                v.as_str().unwrap_or_default().to_string(),
-            )
-        })
-        .collect()
-}
-
-fn grants_write(perms: &[(String, String)]) -> bool {
-    perms
-        .iter()
-        .any(|(_, level)| level == "write" || level == "write-all" || level == "<default>")
+/// The recipe lines of one Makefile target, up to the next blank line.
+fn recipe(mk: &str, target: &str) -> String {
+    let start = mk
+        .find(&format!("\n{target}:"))
+        .unwrap_or_else(|| panic!("Makefile has no `{target}` target"));
+    mk[start + 1..].split("\n\n").next().unwrap().to_string()
 }
 
 #[test]
-fn fix_139_every_action_is_pinned_by_commit_sha_with_its_tag_named() {
+fn no_github_workflow_builds_or_checks_anything() {
     let dir = root().join(".github/workflows");
-    let mut files: Vec<_> = std::fs::read_dir(&dir)
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|x| x == "yml" || x == "yaml"))
-        .collect();
-    files.sort();
-    assert!(!files.is_empty());
-    let mut bad = Vec::new();
-    for f in &files {
-        let text = std::fs::read_to_string(f).unwrap();
-        for (n, line) in text.lines().enumerate() {
-            let t = line.trim_start().trim_start_matches("- ");
-            let Some(rest) = t.strip_prefix("uses:") else {
-                continue;
-            };
-            let (spec, comment) = rest.split_once('#').unwrap_or((rest, ""));
-            let spec = spec.trim();
-            if spec.starts_with("./") || spec.starts_with("docker://") {
-                continue;
-            }
-            let sha = spec.rsplit_once('@').map(|(_, r)| r).unwrap_or("");
-            let pinned = sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit());
-            // Dependabot keeps SHA pins current and rewrites the comment with
-            // them; without the tag nobody can tell which release it is.
-            let named = comment.trim().starts_with('v');
-            if !pinned || !named {
-                bad.push(format!(
-                    "{}:{}: {}",
-                    f.file_name().unwrap().to_string_lossy(),
-                    n + 1,
-                    line.trim()
-                ));
-            }
-        }
-    }
+    let files: Vec<_> = std::fs::read_dir(&dir)
+        .map(|d| {
+            d.map(|e| e.unwrap().path())
+                .filter(|p| p.extension().is_some_and(|x| x == "yml" || x == "yaml"))
+                .collect()
+        })
+        .unwrap_or_default();
     assert!(
-        bad.is_empty(),
-        "actions must be pinned by a 40-hex commit SHA with `# vX.Y.Z` after it:\n{}",
-        bad.join("\n")
+        files.is_empty(),
+        "every build and check runs locally (Kenny, 2026-09-29); found {files:?}"
     );
-}
-
-fn ci_run_text() -> String {
-    let wf = workflow("ci.yml");
-    wf.get("jobs")
-        .and_then(Value::as_mapping)
-        .unwrap()
-        .values()
-        .map(run_text)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// The MSRV `Cargo.toml` promises (`rust-version`), as the Makefile reads it.
-fn msrv() -> String {
-    let cargo = std::fs::read_to_string(root().join("Cargo.toml")).unwrap();
-    cargo
-        .lines()
-        .find_map(|l| l.strip_prefix("rust-version = \""))
-        .and_then(|r| r.strip_suffix('"'))
-        .unwrap()
-        .to_string()
 }
 
 #[test]
-fn fix_140_ci_checks_advisories_secrets_and_the_msrv_on_every_push() {
-    let run = ci_run_text();
-    // Dependabot alerts went unread for weeks (F48); a red run is read.
+fn fix_140_the_release_machine_checks_advisories_secrets_and_the_msrv() {
+    let mk = makefile();
     assert!(
-        run.contains("cargo deny") && run.contains("check advisories"),
-        "ci.yml runs `cargo deny check advisories`"
+        recipe(&mk, "check").starts_with("check: gate advisories secrets msrv"),
+        "`make check` is everything CI ran"
     );
-    // The local check-secrets.sh matches one shape and `--no-verify` skips
-    // it; on a public repository the server-side scan is the one that holds.
-    let gl = run
-        .lines()
-        .find(|l| l.contains("gitleaks git"))
-        .expect("ci.yml runs `gitleaks git` over the history");
-    assert!(
-        gl.contains("--redact"),
-        "a public repository's CI log must not print the secret it found: {gl}"
-    );
-    assert!(
-        run.contains("sha256sum -c"),
-        "downloaded scanners are checked against a pinned checksum"
-    );
-    // The MSRV check used to live only in `make release`.
-    assert!(
-        run.contains("rust-version") && run.contains("cargo +\"$msrv\" check --workspace --locked"),
-        "ci.yml checks the workspace with the rust-version Cargo.toml declares ({})",
-        msrv()
-    );
-    // Each of these jobs reads only (a job without its own `permissions:`
-    // gets the workflow's).
-    let wf = workflow("ci.yml");
-    for (name, j) in wf.get("jobs").and_then(Value::as_mapping).unwrap() {
-        let p = permissions(j.get("permissions").or(wf.get("permissions")));
-        assert!(
-            !grants_write(&p),
-            "ci.yml job `{}` holds {p:?}",
-            name.as_str().unwrap()
-        );
-    }
+    // Dependabot alerts went unread for weeks (F48); a refused release is read.
+    assert!(recipe(&mk, "advisories").contains("$(DENY) --locked check advisories"));
+    // A found secret must not end up in a terminal log either.
+    let secrets = recipe(&mk, "secrets");
+    assert!(secrets.contains("$(GITLEAKS) git") && secrets.contains("--redact"));
+    // The scanners are pinned release binaries, checked before first use.
+    assert_eq!(mk.matches("sha256sum -c --quiet -").count(), 2);
+    // The MSRV Cargo.toml promises, with that compiler.
+    assert!(recipe(&mk, "msrv").contains("cargo +$$msrv check --workspace --locked"));
+    // The release runs all three before DRY=1 stops and before anything is
+    // tagged, and no longer asks GitHub for a verdict.
+    let scan = mk.find("$(MAKE) advisories secrets msrv").unwrap();
+    assert!(scan < mk.find("ifdef DRY").unwrap());
+    assert!(scan < mk.find("git tag -a").unwrap());
+    assert!(!mk.contains("check-runs"), "no CI verdict is read any more");
+}
+
+#[test]
+fn the_commit_gate_scans_the_staged_changes_for_secrets_and_advisories() {
+    let hook = std::fs::read_to_string(root().join(".githooks/pre-commit")).unwrap();
+    assert!(hook.contains("make -s secrets-staged"));
+    assert!(hook.contains("make -s advisories"));
+    let staged = recipe(&makefile(), "secrets-staged");
+    assert!(staged.contains("--staged") && staged.contains("--redact"));
 }
 
 #[test]

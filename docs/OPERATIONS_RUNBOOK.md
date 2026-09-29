@@ -710,15 +710,14 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
    ends with `"version and tag checks passed; the gate (fmt, clippy, tests)
    was NOT run; nothing tagged or pushed"` (`Makefile`; it said "every check
    passed" until gap-29, while the gate never ran). Refusals: `"working tree not clean"`,
-   `"already exists"`, `"refusing: CI on HEAD says"`.
-2. **Release.** `make release VERSION=x.y.z`. Runs `make gate`, stamps the
-   version, commits `release: vx.y.z [meta]`, tags and pushes
-   (`Makefile:105-118`). **Point of no return:** the push. The tag starts
-   `.github/workflows/release.yml`: its `build` job refuses a tag that is
-   not the version in `Cargo.toml` or not on `main`, runs the gate again
-   with `--locked` and builds with a read-only token; its `publish` job
-   then publishes `homelab-host`, `homelab` and `SHA256SUMS`
-   (`.github/workflows/release.yml`). Watch with `gh run watch`.
+   `"already exists"`, `"refusing: releases are cut from main"`, and the
+   scanners' own output (`cargo deny`, gitleaks, the MSRV check).
+2. **Release.** `make release VERSION=x.y.z`. Runs the scanners and `make
+   gate`, stamps the version, commits `release: vx.y.z [meta]`, tags, builds
+   `homelab-host`, `homelab`, `homelab-admin` and `SHA256SUMS` in
+   `rust:1-bookworm` on this machine (`make release-binaries`), pushes and
+   publishes them with `gh release create --verify-tag` (`Makefile`,
+   `release`). **Point of no return:** the push. Nothing runs on GitHub.
 3. **Roll out to the host.** `homelab release-update` (newest) or
    `homelab release-update vx.y.z`; or TUI key `u` when the dashboard shows
    `"HOST UPDATE <tag> available"` (`client/src/main.rs:808-834`,

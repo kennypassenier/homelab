@@ -438,7 +438,7 @@ pub fn generate_test_plan(roots: &[&Path], plan_path: &Path, out: &Path) -> Resu
     }
 
     d.push_str("## Running the tests\n\n```sh\n");
-    d.push_str("# the whole workspace, as .github/workflows/ci.yml runs it\n");
+    d.push_str("# the whole workspace, as the commit gate and make release run it\n");
     d.push_str("cargo test --workspace --locked\n");
     d.push_str("# one crate\n");
     for c in &crates {

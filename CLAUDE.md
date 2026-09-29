@@ -194,14 +194,15 @@ warnings, full suite) and both demanding IDs in brackets (`[B4]`,
 2. **session hook** — `.claude/hooks/check-commit.sh` (PreToolUse on
    Bash), which only loads in a session opened in this directory.
 
-CI re-runs the same gates on every push; red blocks merge. Layer 1 was
+There is no GitHub Actions CI since 2026-09-29 (Kenny: every build and
+check runs locally); `make check` and `make release` run what it ran. Layer 1 was
 added 2026-08-28 after v3.0.1–v3.1.1 were committed from a session opened
 elsewhere, where layer 2 silently did not load.
 
-3. **branch protection** on `main` (2026-08-28): the `check` CI job is
-   required (the `msrv` job was removed 2026-09-10, d318ada; nothing checks
-   the declared rust-version 1.88 since, gap-30). `enforce_admins` is deliberately off so
-   `make release` can still push directly; a red gate blocks any merge.
+3. **branch protection** on `main` (2026-08-28): it required the `check` CI
+   job, which no longer exists since 2026-09-29; whether that requirement is
+   dropped is Kenny's call (local-builds form). `enforce_admins` is off so
+   `make release` can push directly.
 
 ## Build & ship
 
@@ -209,7 +210,7 @@ elsewhere, where layer 2 silently did not load.
 cargo test --workspace                       # 211 tests
 docker run --rm -v "$PWD":/w -w /w -e CARGO_TARGET_DIR=/w/target-debian \
   rust:1-bookworm cargo build --release -p homelab-host
-make release VERSION=x.y.z                   # gate, tag, push; CI publishes
+make release VERSION=x.y.z                   # scan, gate, tag, build, push, publish
 homelab release-update                       # roll out to the host (H7)
 ```
 `.env` holds HOMELAB_HOST/HOMELAB_TOKEN (source it: `set -a; . ./.env; set +a`).

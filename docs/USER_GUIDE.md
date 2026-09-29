@@ -2421,7 +2421,7 @@ can read it.
 #### G9 · Own Rust services as images
 
 **Status:** Built as files, no orchestrator code. `templates/rust-service/`
-holds a `Dockerfile`, `release-image.yml` and a README for publishing an image
+holds a `Dockerfile`, `publish-image.sh` and a README for publishing an image
 next to each GitHub release; `presets/rust-service/` is a preset with the
 service and RabbitMQ that the wizard lists like any other. For a Rust service
 run as a native binary instead, see C7.

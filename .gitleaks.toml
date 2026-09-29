@@ -1,5 +1,7 @@
-# gitleaks configuration for the server-side secret scan in ci.yml
-# (expert panel 2026-09-27, ci-hygiene-gaps). The default rules apply; the
+# gitleaks configuration for the secret scan (expert panel 2026-09-27,
+# ci-hygiene-gaps), run by `make secrets`/`make release` over the whole
+# history and by the pre-commit hook over the staged diff; it ran in
+# ci.yml until 2026-09-29. The default rules apply; the
 # allowlists below name the false positives a full-history scan found on
 # 2026-09-27 (10 findings, every one of them one of these), each narrowed to
 # its own file so a real secret elsewhere is still caught.

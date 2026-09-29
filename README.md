@@ -532,12 +532,14 @@ make release VERSION=x.y.z DRY=1   # the pre-flight checks only, nothing tagged 
 homelab release-update       # afterwards: roll the published release out to the host
 ```
 
-`make release` refuses a dirty tree, an existing tag, and a HEAD whose CI
-failed. `DRY=1` stops after those three checks, before the gate runs. The tag starts `.github/workflows/release.yml`, which refuses a tag that is
-not the `Cargo.toml` version or not on `main`, runs the gates again with a
-read-only token, and then, from a separate job, publishes `homelab-host`,
-`homelab` and `SHA256SUMS` built in `rust:1-bookworm`. CI (`.github/workflows/ci.yml`) runs fmt, clippy and the
-tests with `--locked` on every push. The toolchain is pinned in
+`make release` refuses a dirty tree, a branch other than `main` and an
+existing tag, then runs `cargo deny` (advisories), gitleaks (the whole
+history) and the MSRV check. `DRY=1` stops there, before the gate runs.
+Otherwise it runs the full gate, tags, builds `homelab-host`, `homelab`,
+`homelab-admin` and `SHA256SUMS` in `rust:1-bookworm` on this machine,
+pushes and publishes the GitHub Release. GitHub Actions runs nothing for
+this repository (Kenny, 2026-09-29); `make check` gives the verdict CI used
+to give. The toolchain is pinned in
 `rust-toolchain.toml`.
 
 More in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).

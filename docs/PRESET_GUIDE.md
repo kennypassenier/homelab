@@ -147,9 +147,11 @@ stacks' `.env` files are gitignored.
 Your Rust repos and the homelab meet at one interface: a Docker image on
 GHCR. The bridge lives in `templates/rust-service/`:
 
-1. Copy `Dockerfile` (swap in your binary name) and `release-image.yml`
-   into your Rust repo. Every `vX.Y.Z` tag then publishes
-   `ghcr.io/<user>/<repo>:<version>` and `:latest` next to the release.
+1. Copy `Dockerfile` (swap in your binary name) and `publish-image.sh`
+   into your Rust repo. After tagging `vX.Y.Z`, `scripts/publish-image.sh
+   vX.Y.Z` builds on your machine and pushes
+   `ghcr.io/<user>/<repo>:<version>` and `:latest` (no GitHub Actions since
+   2026-09-29).
    The package is linked to the repo and takes its visibility, so a public
    repo yields one the host can pull anonymously — nothing to flip. (This
    step used to say the opposite; corrected 2026-08-28 after Kenny checked.)
@@ -157,7 +159,7 @@ GHCR. The bridge lives in `templates/rust-service/`:
    `myservice` compose at your image, keep or drop the bundled RabbitMQ.
    `RABBIT_USER`/`RABBIT_PASS` go in BOTH apps' `.env` via the secrets
    vault (RabbitMQ's built-in guest user is localhost-only).
-3. Wizard → deploy. From then on: tag a release in the app repo → CI
+3. Wizard → deploy. From then on: tag a release in the app repo → `publish-image.sh`
    builds the image → the nightly run updates it with automatic rollback
    (`com.homelab.update.policy=auto`), or `homelab update stacks/<name>`
    immediately.

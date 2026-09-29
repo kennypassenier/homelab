@@ -3,7 +3,7 @@
 //! configs are only pushed (and services only restarted) on content change.
 
 use crate::error::CoreError;
-use crate::executor::{pct_sh, Executor};
+use crate::executor::{pct_sh, run_ok, shq, Cmd, Executor};
 use crate::ops::util::push_content;
 use crate::sink::{Level, PipelineEvent, Sink};
 
@@ -261,6 +261,10 @@ pub async fn apply(
     // alternative is a check that depends on a tool somebody installed by
     // hand once, which is the shape of a check that works until it does not.
     ensure_package(exec, vmid, "sqlite3", "sqlite3").await?;
+
+    // latch (dashboard-latch): verified from its signed release when it is
+    // missing, left alone when it is there.
+    ensure_latch(exec, sink, vmid).await?;
     push_content(
         exec,
         vmid,
@@ -363,6 +367,196 @@ pub async fn apply(
 
     log("[guard] runaway guards + security patching in place".into());
     Ok(())
+}
+
+/// dashboard-latch: where latch comes from and where it goes.
+pub const LATCH_REPO: &str = "kennypassenier/latch-rs";
+pub const LATCH_ASSET: &str = "latch-x86_64-unknown-linux-gnu";
+pub const LATCH_BIN: &str = "/usr/local/bin/latch";
+/// Beside the real path, so a copy that cannot run never replaces one that can.
+const LATCH_NEW: &str = "/usr/local/bin/latch.homelab-new";
+/// The presence probe's answer for "not installed"; any other failure is the
+/// probe itself failing (container down), which is not a reason to download.
+const LATCH_MISSING: i32 = 3;
+
+/// dashboard-latch (Kenny, 2026-09-29, form "Latch": "latch in ct120, latch
+/// moet als default geinstalleerd worden in de golden images"): latch on
+/// every managed container, and so in the golden templates, which run these
+/// guards in their "bake guards" step. The dashboard on CT 120 needs it to
+/// deploy the stacks whose secrets live in latch; everywhere else it is the
+/// tool at hand when a secret has to be read on the container itself.
+///
+/// Idempotent and cheap when present: one `test -x`, no network. When it is
+/// missing the host fetches the newest SIGNED release of latch-rs (the
+/// orchestrator's native releases follow `latest` the same way; a pin would
+/// be one more hand-kept version, and the signature is what proves the
+/// author), checks the minisign signature over `SHA256SUMS` (fix-29, the
+/// same check as every native release), checks the download against that
+/// list, pushes it beside the real path, checks the container's glibc can
+/// run it (latch is a glibc build, F304), and only then moves it into place.
+/// Any failed check fails the step, like a failed apt install (fix-161).
+///
+/// git comes with it: latch drives the git CLI for its secrets clone.
+/// Returns true when latch was installed.
+pub async fn ensure_latch(
+    exec: &dyn Executor,
+    sink: &dyn Sink,
+    vmid: u16,
+) -> Result<bool, CoreError> {
+    ensure_package(exec, vmid, "git", "git").await?;
+    let probe = pct_sh(
+        exec,
+        vmid,
+        &format!("test -x {LATCH_BIN} || exit {LATCH_MISSING}"),
+        30,
+    )
+    .await?;
+    if probe.success() {
+        return Ok(false);
+    }
+    if probe.code != LATCH_MISSING {
+        return Err(CoreError::Command {
+            rendered: format!("test -x {LATCH_BIN}"),
+            detail: format!(
+                "could not tell whether latch is installed (exit {}): {}",
+                probe.code,
+                probe.stderr.trim()
+            ),
+        });
+    }
+    let tag = install_latch(exec, vmid).await?;
+    sink.emit(PipelineEvent::Line {
+        level: Level::Info,
+        source: "HOST".into(),
+        msg: format!(
+            "[guard] latch {tag} installed at {LATCH_BIN} (signature and checksum verified)"
+        ),
+    });
+    Ok(true)
+}
+
+async fn fetch(exec: &dyn Executor, url: &str, what: &str) -> Result<String, CoreError> {
+    let out = exec
+        .run(&Cmd::new(
+            "curl",
+            &[
+                "-sSL",
+                "-m",
+                "60",
+                "-H",
+                "Accept: application/vnd.github+json",
+                url,
+            ],
+            90,
+        ))
+        .await?;
+    if !out.success() {
+        return Err(CoreError::Other(format!(
+            "could not fetch {what} of latch: {}",
+            out.stderr.trim()
+        )));
+    }
+    Ok(out.stdout)
+}
+
+async fn install_latch(exec: &dyn Executor, vmid: u16) -> Result<String, CoreError> {
+    use crate::ops::native::{
+        glibc_probe_script, glibc_verdict, listed_sha, newest_signed_release,
+    };
+    let list = fetch(
+        exec,
+        &format!("https://api.github.com/repos/{LATCH_REPO}/releases?per_page=10"),
+        "the release list",
+    )
+    .await?;
+    let refs = newest_signed_release(&list, LATCH_ASSET).map_err(CoreError::Other)?;
+    let sig_url = refs.sig_url.clone().unwrap_or_default();
+    let sig = fetch(exec, &sig_url, "the signature").await?;
+    let sums = fetch(exec, &refs.sums_url, "SHA256SUMS").await?;
+    crate::release_sig::verify_sums(&sums, &sig)
+        .map_err(|e| CoreError::SafetyAbort(format!("latch {}: {}", refs.tag, e)))?;
+    let wanted = listed_sha(&sums, LATCH_ASSET).ok_or_else(|| {
+        CoreError::SafetyAbort(format!(
+            "the signed SHA256SUMS of latch {} lists no '{LATCH_ASSET}' — not installing it",
+            refs.tag
+        ))
+    })?;
+
+    // The download lands under the root-only state dir on the host (H21),
+    // one file per container so two guards never share it (T74).
+    let staged = format!("/var/lib/homelab/staged/latch/latch-{vmid}");
+    let script = format!(
+        "mkdir -p /var/lib/homelab/staged/latch && curl -sSL -m 300 -o {f} {u} && \
+         sha256sum {f} | cut -d' ' -f1",
+        f = shq(&staged),
+        u = shq(&refs.asset_url)
+    );
+    let out = exec.run(&Cmd::new("sh", &["-c", &script], 400)).await?;
+    let rm_staged = Cmd::new("rm", &["-f", &staged], 30);
+    let drop_staged = || exec.run(&rm_staged);
+    if !out.success() {
+        let _ = drop_staged().await;
+        return Err(CoreError::Other(format!(
+            "download of latch {} failed: {}",
+            refs.tag,
+            out.stderr.trim()
+        )));
+    }
+    if !out.stdout.trim().eq_ignore_ascii_case(&wanted) {
+        let _ = drop_staged().await;
+        return Err(CoreError::SafetyAbort(format!(
+            "CHECKSUM MISMATCH for {LATCH_ASSET} in latch {}: the signed SHA256SUMS does not \
+             list this download — corrupted or tampered; nothing installed",
+            refs.tag
+        )));
+    }
+    let pushed = run_ok(
+        exec,
+        &Cmd::new(
+            "pct",
+            &[
+                "push",
+                &vmid.to_string(),
+                &staged,
+                LATCH_NEW,
+                "--perms",
+                "0755",
+            ],
+            120,
+        ),
+    )
+    .await;
+    let _ = drop_staged().await;
+    pushed?;
+
+    let probe = pct_sh(exec, vmid, &glibc_probe_script(LATCH_NEW), 60).await?;
+    if let Err(why) = glibc_verdict(&probe.stdout) {
+        let _ = pct_sh(exec, vmid, &format!("rm -f {LATCH_NEW}"), 30).await;
+        return Err(CoreError::SafetyAbort(format!(
+            "latch {}: {} :: nothing installed",
+            refs.tag, why
+        )));
+    }
+    let swap = pct_sh(
+        exec,
+        vmid,
+        &format!("{LATCH_NEW} --version >/dev/null && mv -f {LATCH_NEW} {LATCH_BIN}"),
+        60,
+    )
+    .await?;
+    if !swap.success() {
+        let _ = pct_sh(exec, vmid, &format!("rm -f {LATCH_NEW}"), 30).await;
+        return Err(CoreError::Command {
+            rendered: format!("mv -f {LATCH_NEW} {LATCH_BIN}"),
+            detail: format!(
+                "latch {} does not run on this container (exit {}): {}",
+                refs.tag,
+                swap.code,
+                swap.stderr.trim()
+            ),
+        });
+    }
+    Ok(refs.tag)
 }
 
 /// fix-161: install `pkg` unless `tool` is already on the PATH. The package

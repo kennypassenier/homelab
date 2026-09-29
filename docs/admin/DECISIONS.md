@@ -255,3 +255,13 @@ state.json. The stage's cost was the host-memory reading, which ran
 was applied to the one remote listing in that stage, the Google Drive
 listing of watched backups (1.7 s): the nightly round refreshes it and
 records it, a check reads the record.
+
+## Latch on the dashboard (decided 2026-09-29 17:00, form "Latch")
+
+Kenny: "latch in ct120, latch moet als default geinstalleerd worden in de
+golden images". The golden templates install the signed latch release; the
+deploy guard installs it (verified) where it is missing; the dashboard's
+unit sets HOMELAB_LATCH_ENV=prod and gets a latch credential limited to
+latch project `stacks`, environment prod, through `latch clone`. uptime-now:
+"Wachten op het dashboard": uptime is deployed from the dashboard in Live
+view once latch works there.

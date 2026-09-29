@@ -53,6 +53,17 @@ Environment=HOMELAB_ADMIN_LIVE_ANNOUNCE_MS=5000
 # are in every token Access issues.
 Environment=HOMELAB_ADMIN_ACCESS_TEAM_DOMAIN=mendax1.cloudflareaccess.com
 Environment=HOMELAB_ADMIN_ACCESS_AUD=e76eb55877d9f58d4f7194e5248419251ac0528a1c9082f090799de91b22221b
+# dashboard-latch (Kenny, 2026-09-29, form "Latch"): a deploy of a stack with
+# latch_secrets runs `latch cat --env $HOMELAB_LATCH_ENV --expand` (the
+# client's spec code, in this process; the child inherits this environment).
+# ProtectHome=yes hides /home, where the system user's HOME would point, so
+# HOME and latch's home sit in the state directory: writable (ReadWritePaths),
+# on the data mount, backed up. latch keeps config.toml, credentials.enc and
+# credentials.key (a machine-key file, no passphrase: it never prompts) and
+# its git clone of the secrets repository under LATCH_HOME.
+Environment=HOMELAB_LATCH_ENV=prod
+Environment=HOME=/appdata/admin/admin-config
+Environment=LATCH_HOME=/appdata/admin/admin-config/latch
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

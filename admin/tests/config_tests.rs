@@ -114,3 +114,42 @@ fn fix_158_a_dashboard_without_locks_never_attaches_for_ui_steps() {
         .iter()
         .any(|cmd| matches!(cmd, Command::SessionOptions { .. })));
 }
+
+/// dashboard-latch (Kenny, 2026-09-29, form "Latch"): the dashboard deploys
+/// the stacks whose secrets come from latch, so its unit names the latch
+/// environment (client/src/spec.rs refuses `latch_secrets` without it), and
+/// the sandbox leaves latch a home it can read and write: ProtectHome=yes
+/// hides /home, so HOME and LATCH_HOME point into the state directory,
+/// which is the one ReadWritePaths entry that is always there.
+#[test]
+fn dashboard_latch_the_unit_gives_latch_its_environment_and_a_writable_home() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../stacks/admin/admin/admin.service"
+    );
+    let unit = std::fs::read_to_string(path).unwrap();
+    let env: std::collections::BTreeMap<&str, &str> = unit
+        .lines()
+        .filter_map(|l| l.strip_prefix("Environment="))
+        .filter_map(|kv| kv.split_once('='))
+        .collect();
+    assert_eq!(env.get("HOMELAB_LATCH_ENV"), Some(&"prod"));
+    let state = "/appdata/admin/admin-config";
+    let latch_home = env.get("LATCH_HOME").expect("LATCH_HOME is set");
+    assert!(latch_home.starts_with(&format!("{state}/")), "{latch_home}");
+    let home = env.get("HOME").expect("HOME is set");
+    assert!(
+        *home == state || home.starts_with(&format!("{state}/")),
+        "{home}"
+    );
+    let rw: Vec<&str> = unit
+        .lines()
+        .filter_map(|l| l.strip_prefix("ReadWritePaths="))
+        .flat_map(|l| l.split_whitespace())
+        .collect();
+    assert!(rw.contains(&state), "{rw:?}");
+    // latch drives git over HTTPS and reads its own files; none of the
+    // hardening may take either away.
+    assert!(unit.contains("ProtectHome=yes"));
+    assert!(unit.contains("RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX"));
+}

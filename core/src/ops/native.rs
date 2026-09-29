@@ -1193,6 +1193,39 @@ pub fn parse_latest_release(json: &str, asset: &str) -> Result<ReleaseRefs, Stri
     })
 }
 
+/// dashboard-latch: the newest published release in GitHub's release LIST
+/// (`/releases`, newest first) that carries `asset`, `SHA256SUMS` and the
+/// signature over it. Drafts and pre-releases are passed over, and so is a
+/// release that is not signed yet: between the CI upload and the author's
+/// signature the newest release is unsigned, and a container missing a tool
+/// should get the newest one that can be verified rather than fail its
+/// deploy for an hour. Each entry is read by [`parse_latest_release`], so
+/// the refusals are the same as for a single release.
+pub fn newest_signed_release(json: &str, asset: &str) -> Result<ReleaseRefs, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("release list is not JSON: {}", e))?;
+    let Some(list) = v.as_array() else {
+        let msg = v
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("not a list of releases");
+        return Err(format!("GitHub answered: {}", msg));
+    };
+    let flag = |r: &serde_json::Value, k: &str| r.get(k).and_then(|b| b.as_bool()) == Some(true);
+    list.iter()
+        .filter(|r| !flag(r, "draft") && !flag(r, "prerelease"))
+        .filter_map(|r| parse_latest_release(&r.to_string(), asset).ok())
+        .find(|refs| refs.sig_url.is_some())
+        .ok_or_else(|| {
+            format!(
+                "no signed release carries '{}' (asset, SHA256SUMS and {}) — refusing to \
+                 install an unverified binary",
+                asset,
+                crate::release_sig::SIG_ASSET
+            )
+        })
+}
+
 /// The checksum a SHA256SUMS file lists for `filename`, if any.
 pub fn listed_sha(sums: &str, filename: &str) -> Option<String> {
     sums.lines().find_map(|l| {

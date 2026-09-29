@@ -1,5 +1,40 @@
 # kp-themes bug reports from the homelab dashboard (2026-09-29)
 
+## Status after chassis-rs 2.4.1 (kp-themes 8.0.0, via 7.3.0)
+
+The dashboard moved to chassis-rs v2.4.1 on 2026-09-29; it vendors
+kp-themes 8.0.0 (for web pages identical to 7.3.0, which carries the fixes).
+Each workaround below was removed and the native behaviour measured in one
+Playwright run (Chromium, the dashboard built from the tree reading the real
+host read-only, 1280 and 1440 px). Every report is **resolved in 8.0.0**;
+no workaround is left in `app.css` or `dom.js`.
+
+| # | Report | kp fix | Status | Measurement without the workaround |
+|---|--------|--------|--------|-------------------------------------|
+| 1 | Bar ghost buttons take the page's ink | fix-77 | resolved in 8.0.0 | all 22 themes × 1280/1440 pass at rest: lowest bell/help 5.0:1 (shade-dark), theme icon 6.27:1 (shade-light) |
+| 2 | Select picker runs off screen, labels right-aligned | fix-78 | resolved in 8.0.0 | Answer dialog, 32 options at 1280: list 630 px wide (x 363-993), inside the window; labels start 10 px from the option's start edge, wrap to 2-3 lines, check mark at the end |
+| 3 | Switch words change its width | fix-79 | resolved in 8.0.0 | four switches, checked vs unchecked: box 32 px both ways, the label after it moved 0 px |
+| 4 | First load: skeleton with no sign of progress | fix-80 | resolved in 8.0.0 | Today's first load at 1.5/4.5/8.5 s: kp's spinner, the page's words and kp's counter ("1 s … 8 s so far"), status line in the same place (height 20 px) throughout |
+| 5 | Bar ghost buttons: hover plate is the page's | fix-82 | resolved in 8.0.0 | hover and keyboard focus (`:focus-visible`) of bell, help, theme, Go to, menu toggle in 22 themes × 1280/1440: 0 fails; lowest ghost hover 5.33:1 (phantom), theme icon hover 4.26:1 (lapis, icon ≥ 3:1) |
+| 6 | Multi-sort summary shares the search's row | fix-83 | resolved in 8.0.0 | history table at 1440, five sort keys: search, sort line, Reset the sort and the first row moved 0 px; the line stays 45 px high; the reset keeps its place hidden while unsorted |
+| 7 | busy(text) not released; counter by hand | fix-80, fix-84 | resolved in 8.0.0 | `busy({ text, since })`: kp ticks the counter itself in an `aria-hidden` part; a refresh keeps the rows (opacity 0.55) and says "Showing the rows from …" |
+| 8 | Empty and failed slots half there without a server | fix-85 | resolved in 8.0.0 | incidents answered 502 (route mock): kp's own failed slot, the reason in three lines, Try again reads again (103 rows, slot hidden); incidents answered empty: the "nothing yet" part only; a search matching nothing: the "nothing matches" part with Clear, 61 rows back after it |
+
+The dashboard now uses: kp's sort line and reset (no sort slot of its own),
+`busy({ text, since })` (no spinner or counter of its own; `tablestate.js
+busyWords` only writes the words), `fail(reason)` in kp's own failed slot
+(`tablestate.js failReason`: what, why, what to do; `white-space: pre-line`
+in `app.css` keeps the three lines), and the empty slot's
+`data-kp-datatable-empty-none` / `-nomatch` parts (the page writes the
+"nothing matches" words from the view). What stays in `app.css` is layout of
+the dashboard's own: the search taking the toolbar's width, tabular digits in
+the status line, the slots' margins inside the frame, and the version text in
+the bar wearing the bar's ink (`.kp-nav .link`, the dashboard's own element).
+
+---
+
+## The reports as filed
+
 Found while fixing Kenny's UI findings of 2026-09-29 03:40 in the homelab
 admin dashboard (kp-themes as vendored by chassis-rs 2.4.0; source checked
 at kp-themes 1d6ef4ac). Each is worked around in

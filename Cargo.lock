@@ -457,8 +457,8 @@ dependencies = [
 
 [[package]]
 name = "chassis"
-version = "2.4.0"
-source = "git+https://github.com/kennypassenier/chassis-rs?tag=v2.4.0#1206d771beb47c69b7d0ee99082f56740902322c"
+version = "2.4.1"
+source = "git+https://github.com/kennypassenier/chassis-rs?tag=v2.4.1#63364817ac531c4f1ff29b98fcfd092ec8d6a4ca"
 dependencies = [
  "axum",
  "axum-extra",
@@ -2368,7 +2368,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3197,7 +3197,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

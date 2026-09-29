@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/log.js (kp-themes 7.2.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/log.js (kp-themes 8.0.0),
 // copied from kp-themes js/log.d.ts: chassis serves the module, not its types.
 /** The custom property a source's colour is written to. */
 export declare const SOURCE_PROPERTY = "--kp-source-colour";

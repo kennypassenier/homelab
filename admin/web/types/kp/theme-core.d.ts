@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/theme-core.js (kp-themes 7.2.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/theme-core.js (kp-themes 8.0.0),
 // copied from kp-themes js/theme-core.d.ts: chassis serves the module, not its types.
 import { THEMES, DEFAULT_THEME, STORAGE_KEY } from "./theme-registry.js";
 export type ThemeName = import("./theme-registry.js").ThemeName;

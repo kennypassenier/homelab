@@ -780,27 +780,6 @@ td.stack-flags {
   visibility: hidden;
 }
 
-/* kp's switch words (On / Off) take turns in one grid cell, so the box is
-   as wide as the wider one in every face and language; kp only gives it
-   a 2rem floor (English fits it today: at most 21 px in all 22 themes),
-   and a longer word would move the label on every toggle. See the
-   kp-themes report (switch). */
-.kp-switch__state {
-  display: inline-grid;
-}
-.kp-switch__state > .kp-switch__on,
-.kp-switch__state > .kp-switch__off {
-  display: inline;
-  grid-area: 1 / 1;
-}
-.kp-switch__state > .kp-switch__on,
-.kp-switch:has(:checked) .kp-switch__state > .kp-switch__off {
-  visibility: hidden;
-}
-.kp-switch:has(:checked) .kp-switch__state > .kp-switch__on {
-  visibility: visible;
-}
-
 /* A button's label stays on one line: "Mark read", "Answer…", "Review and
    commit…". The table around it scrolls sideways before a label breaks. */
 .kp-button {
@@ -835,111 +814,33 @@ td.stack-flags {
   flex: 1 1 20rem;
   min-inline-size: 0;
 }
-/* The sort summary on its own line under the toolbar (dom.js tableBlock):
-   one line, cut with an ellipsis (the whole text in its title), and kp's
-   reset beside it keeping its place while hidden, so sorting on more
-   columns never moves the search or the rows. */
-.kp-datatable__bar.table-sortline {
-  flex-wrap: nowrap;
-  padding-block-start: 0;
-  min-block-size: calc(
-    var(
-        --kp-button-height-sm,
-        max(1.75rem, calc(var(--kp-control-height, 2.25rem) - 0.5rem))
-      ) +
-      var(--kp-datatable-bar-padding-block, var(--kp-space-sm, 0.5rem))
-  );
-}
-.table-sortline > .kp-datatable__sort-summary {
-  flex: 1 1 0;
-  min-inline-size: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.table-sortline > [data-kp-datatable-sort-reset] {
-  flex: 0 0 auto;
-}
-.table-sortline > [data-kp-datatable-sort-reset][data-off] {
-  visibility: hidden;
-}
-/* The loading line: kp's spinner, then the words; the seconds are
-   tabular, so the count ticking never moves the words after it. */
+/* The loading line: kp's spinner, the words, then kp's counter; the
+   seconds are tabular, so the count ticking never changes its width. */
 .kp-datatable__status {
   font-variant-numeric: tabular-nums;
 }
-/* kp's failed slot and empty box inside the table's frame. */
-.kp-datatable > .table-failed {
-  display: grid;
-  justify-items: start;
-  gap: 4px;
+/* kp's failed slot and empty box inside the table's frame; the failed
+   slot's reason is three lines (what, why, what to do: tablestate.js
+   failReason). */
+.kp-datatable > [data-kp-datatable-failed] {
   margin: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 0.75rem);
 }
-.kp-datatable > .table-failed[hidden] {
-  display: none;
-}
-.kp-datatable > .table-failed p {
+[data-kp-datatable-failed-reason] {
   margin: 0;
-}
-.kp-datatable > .table-failed .kp-button {
-  margin-block-start: 4px;
+  white-space: pre-line;
 }
 .kp-datatable > .kp-empty {
   margin: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 0.75rem);
 }
-.kp-datatable > .kp-empty > p {
+.kp-datatable > .kp-empty p {
   margin: 0 0 6px;
 }
 /* ==== END data tables ==== */
 
-/* The bar's icon buttons (the bell, the shortcut sheet) wear the bar's
-   own ink, as kp's theme button beside them does: a ghost button's ink is
-   the page's foreground, which on a bar with its own plate (cyberpunk's
-   yellow, nostromo's) read at 1.0 to 1.5:1. The version text likewise.
-   See the kp-themes report (nav-bar ghost buttons). */
-.kp-nav .kp-button--ghost {
-  --kp-btn-fg: currentColor;
-  color: inherit;
-}
-/* Hovered, kp's registers lay the page's hover plate under it (nostromo's
-   card, solstice's muted, high-contrast's inverse): the bar's ink on the
-   page's plate read 1.0 to 1.7:1 (measured 2026-09-29). In the bar the
-   hover is a frame in the bar's ink instead, on the bar's own plate. See
-   the kp-themes report (nav-bar ghost buttons, hover). */
-.kp-nav .kp-button--ghost:is(:hover, :focus-visible):not(:disabled) {
-  background: transparent;
-  border-color: currentColor;
-  box-shadow: none;
-  filter: none;
-  text-shadow: none;
-}
-/* …and no register's sweep plate (phantom's red ::after under the bar's
-   white ink read 3.56:1). */
-.kp-nav .kp-button--ghost:is(:hover, :focus-visible):not(:disabled)::before,
-.kp-nav .kp-button--ghost:is(:hover, :focus-visible):not(:disabled)::after {
-  background: transparent;
-}
+/* The version text in the bar wears the bar's ink, as kp's own bar
+   controls do (kp-themes 7.3.0, fix-77/82). */
 .kp-nav .link {
   color: inherit;
-}
-
-/* The native select's open list (appearance: base-select, Chromium 135+):
-   kp lets it grow as wide as its longest option on one line, so a list of
-   manual checks ran off the screen and was cut; and kp's `margin-inline-
-   start: auto` on the check mark pushed every label to the right edge.
-   Here the list is at most the dialog's width and an option wraps. See
-   the kp-themes report (select picker). */
-@supports (appearance: base-select) {
-  select.kp-field__input::picker(select) {
-    max-inline-size: min(40rem, calc(100vw - 32px));
-  }
-  select.kp-field__input option {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-  select.kp-field__input option::checkmark {
-    order: 1;
-  }
 }
 
 /* ==== BEGIN Live view: announce, plan and pause (feat-platform-10, ====

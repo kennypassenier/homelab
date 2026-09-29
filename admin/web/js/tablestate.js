@@ -6,25 +6,34 @@
 import { humanDuration } from "./format.js";
 
 /**
- * The status line while a table loads: what it is doing, how long it has
- * been at it, how long it usually takes and, on a refresh, which rows stay
- * on screen meanwhile.
- * @param {{words: string, seconds: number, expect?: number | null,
- *   shownFrom?: string | null}} b
+ * The status line's words while a table loads: what it is doing, how long
+ * it usually takes and, on a refresh, which rows stay on screen meanwhile.
+ * kp's datatable counts the seconds after them itself (busy({ since })).
+ * @param {{words: string, expect?: number | null, shownFrom?: string | null}} b
  *   expect: the usual duration in seconds (the host's slow reads);
  *   shownFrom: the time of the rows still shown (a refresh).
- * @returns {{text: string, counter: string}} `text` without the counter,
- *   `counter` the ticking part ("42 s so far")
+ * @returns {string}
  */
 export function busyWords(b) {
   const parts = [b.words];
   if (b.expect)
     parts.push(`It usually takes about ${humanDuration(b.expect)}.`);
   if (b.shownFrom) parts.push(`Showing the rows from ${b.shownFrom}.`);
-  return {
-    text: parts.join(" "),
-    counter: `${humanDuration(Math.max(0, Math.floor(b.seconds)))} so far`,
-  };
+  return parts.join(" ");
+}
+
+/**
+ * The failed slot's words (kp's fail(reason)): what could not be read,
+ * why, and what to do, one per line.
+ * @param {{what: string, why: string, fix?: string | null}} e
+ * @returns {string}
+ */
+export function failReason(e) {
+  return [
+    `Could not read ${e.what}.`,
+    `Why: ${e.why}`,
+    ...(e.fix ? [`What to do: ${e.fix}`] : []),
+  ].join("\n");
 }
 
 /**

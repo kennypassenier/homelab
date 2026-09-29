@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/patterns.js (kp-themes 7.2.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/patterns.js (kp-themes 8.0.0),
 // copied from kp-themes js/patterns.d.ts: chassis serves the module, not its types.
 /** How long the undo stays offered before the action is committed. An operational knob; per element as `data-kp-undo-ms`. */
 export declare const UNDO_MS = 6000;

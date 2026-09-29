@@ -3,30 +3,30 @@
 // and when an open tab is older than the dashboard serving it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { busyWords, emptyWords } from "../js/tablestate.js";
+import { busyWords, emptyWords, failReason } from "../js/tablestate.js";
 import { outdatedPage } from "../js/parity.js";
 
-test("a loading table counts, names the usual time and the rows it keeps", () => {
-  const first = busyWords({ words: "Asking the host…", seconds: 42.7 });
-  assert.equal(first.text, "Asking the host…");
-  assert.equal(first.counter, "42 s so far");
-  const slow = busyWords({
-    words: "Asking the host…",
-    seconds: 95,
-    expect: 93,
-  });
+test("a loading table names the usual time and the rows it keeps", () => {
+  assert.equal(busyWords({ words: "Asking the host…" }), "Asking the host…");
   assert.equal(
-    slow.text,
+    busyWords({ words: "Asking the host…", expect: 93 }),
     "Asking the host… It usually takes about 1 min 33 s.",
   );
-  assert.equal(slow.counter, "1 min 35 s so far");
-  const again = busyWords({
-    words: "Reading again…",
-    seconds: 3,
-    shownFrom: "05:40",
-  });
-  assert.match(again.text, /Showing the rows from 05:40\.$/);
-  assert.equal(busyWords({ words: "x", seconds: -2 }).counter, "0 s so far");
+  assert.match(
+    busyWords({ words: "Reading again…", shownFrom: "05:40" }),
+    /Showing the rows from 05:40\.$/,
+  );
+});
+
+test("a failed table says what, why and what to do, a line each", () => {
+  assert.equal(
+    failReason({ what: "the incidents", why: "HTTP 502", fix: "Try again" }),
+    "Could not read the incidents.\nWhy: HTTP 502\nWhat to do: Try again",
+  );
+  assert.equal(
+    failReason({ what: "the jobs", why: "timed out" }),
+    "Could not read the jobs.\nWhy: timed out",
+  );
 });
 
 test("an empty table says nothing is there, apart from nothing matching", () => {

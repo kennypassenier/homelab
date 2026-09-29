@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/wizard.js (kp-themes 7.2.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/wizard.js (kp-themes 8.0.0),
 // copied from kp-themes js/wizard.d.ts: chassis serves the module, not its types.
 /** Fired when the step changed: `{ step, of, previous, direction }`. A contract value [TH26]. */
 export declare const STEP_EVENT = "kp-wizard-step";

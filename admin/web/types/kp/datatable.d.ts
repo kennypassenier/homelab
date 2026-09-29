@@ -1,5 +1,5 @@
 // The kp-themes module chassis-rs serves at /static/kp/js/datatable.js (kp-themes
-// 7.2.0), copied whole from kp-themes js/datatable.d.ts: chassis serves the
+// 8.0.0), copied whole from kp-themes js/datatable.d.ts: chassis serves the
 // module, not its types.
 /** A detail row, directly after the row it belongs to. */
 export declare const DETAIL = "[data-kp-row-detail]";
@@ -409,6 +409,22 @@ export type DataTableHandle = {
    * loading, failed, or ready again
    */
   state: (state: State) => void;
+  /**
+   * the status line's words while the table loads, kept across refresh(), shown only while loading, cleared with no text [fix-80]; with `since` (a time or a Date) the table counts how long it has been loading by itself, in a part the live region does not announce [fix-84]
+   */
+  busy: (
+    words?:
+      | string
+      | null
+      | {
+          text?: string | null;
+          since?: number | Date | null;
+        },
+  ) => void;
+  /**
+   * the failed state with the app's reason in the failed slot's words, and Try again under them; any table, not only a server's [fix-85]
+   */
+  fail: (reason?: string | null) => void;
   /**
    * ask the server again for what the table shows
    */

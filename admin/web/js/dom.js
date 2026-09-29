@@ -7,7 +7,7 @@ import {
   tableFromParams,
   tableToParams,
 } from "./urlstate.js";
-import { busyWords, emptyWords } from "./tablestate.js";
+import { busyWords, emptyWords, failReason } from "./tablestate.js";
 import { VIEW_EVENT, dataTable } from "/static/kp/js/datatable.js";
 
 /**
@@ -55,12 +55,13 @@ export function badgeCell(st) {
  * Every kp datatable feature a table that asks for its rows can use
  * (Kenny, 2026-09-29: "Als we componenten gebruiken, dan moeten we alle
  * toepasselijke features ook gebruiken"): the search takes the toolbar's
- * width; the sort summary and kp's reset sit on their own line under it,
- * so sorting moves nothing; loading shows kp's skeleton on a first load and
- * dims the rows on a refresh, with a spinner, the page's own words and a
- * counter in the status line; kp's empty slot says "nothing" and "nothing
- * matches" apart; kp's failed slot carries the reason and a retry
- * (`kp-datatable-retry`, which each page already hears).
+ * width; kp puts the multi-sort summary and its reset on a line of their
+ * own under it, so sorting moves nothing; loading shows kp's skeleton on a
+ * first load and dims the rows on a refresh, with kp's spinner, the page's
+ * own words and kp's counter in the status line (busy()); kp's empty slot
+ * says "nothing" and "nothing matches" apart; kp's failed slot carries the
+ * reason and a Try again (fail(), `kp-datatable-retry`, which each page
+ * already hears). All of it kp-themes 7.3.0 (chassis-rs 2.4.1).
  * @param {{remember: string, caption: string, search: string,
  *   columns: Column[], state?: "loading", pageSize?: number,
  *   pageSizes?: string, select?: {label: string, actions: Node[]},
@@ -115,61 +116,33 @@ export function tableBlock(spec) {
     role: "status",
     "aria-live": "polite",
   });
-  // The multi-sort summary, given to kp so it does not put its own in the
-  // search's row, where every key added shortened the search box.
-  const sortSummary = h("p", {
-    class: "kp-datatable__status kp-datatable__sort-summary",
-    "data-kp-datatable-sort-summary": "",
-    "aria-live": "polite",
-  });
-  const sortReset = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--ghost kp-button--sm",
-      "data-kp-datatable-sort-reset": "",
-      "data-off": "",
-    },
-    "Clear sort",
-  );
-  const failTitle = h("p", { class: "kp-alert__label" });
-  const failWhy = h("p");
-  const failFix = h("p");
-  const failed = h(
-    "div",
-    {
-      class: "kp-alert kp-alert--destructive table-failed",
-      "data-kp-datatable-failed": "",
-      role: "alert",
-      hidden: "",
-    },
-    failTitle,
-    failWhy,
-    failFix,
-    h(
-      "button",
-      { type: "button", class: "kp-button", "data-kp-datatable-retry": "" },
-      "Try again",
-    ),
-  );
-  const emptyTitle = h("p", { class: "kp-empty__title" });
-  const emptyBody = h("p", { class: "kp-empty__body" });
-  const emptyClear = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--secondary",
-      "data-kp-datatable-clear": "",
-    },
-    "Clear the search and filters",
-  );
+  // kp's empty slot, in its two parts: kp shows the one that applies
+  // ("nothing yet" or "nothing matches", fix-85); the page words the
+  // second from the view (how many rows the search and filters hide).
+  const noneTitle = h("p", { class: "kp-empty__title" });
+  const matchTitle = h("p", { class: "kp-empty__title" });
+  const matchBody = h("p", { class: "kp-empty__body" });
   const empty = h(
     "div",
     { class: "kp-empty", "data-kp-datatable-empty": "", hidden: "" },
-    emptyTitle,
-    emptyBody,
-    emptyClear,
+    h("div", { "data-kp-datatable-empty-none": "" }, noneTitle),
+    h(
+      "div",
+      { "data-kp-datatable-empty-nomatch": "" },
+      matchTitle,
+      matchBody,
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--secondary",
+          "data-kp-datatable-clear": "",
+        },
+        "Clear the search and filters",
+      ),
+    ),
   );
+  noneTitle.textContent = spec.nothing ?? "Nothing to show.";
   const wrap = h(
     "div",
     wrapAttrs,
@@ -183,12 +156,6 @@ export function tableBlock(spec) {
         placeholder: spec.search,
         "aria-label": spec.search,
       }),
-    ),
-    h(
-      "div",
-      { class: "kp-datatable__bar table-sortline" },
-      sortSummary,
-      sortReset,
     ),
     ...(spec.select
       ? [
@@ -204,7 +171,6 @@ export function tableBlock(spec) {
           ),
         ]
       : []),
-    failed,
     h(
       "div",
       { class: "kp-table-wrap" },
@@ -232,93 +198,64 @@ export function tableBlock(spec) {
     ),
   );
 
-  // ── Loading: kp's spinner, the page's words and a counter ────────────
-  /** @type {{words: string, expect: number | null, shownFrom: string | null, began: number} | null} */
+  // ── Loading: kp's spinner, the page's words and kp's own counter ─────
+  /** @type {{text: string, since: number, given: boolean} | null} */
   let busy = null;
-  /** @type {ReturnType<typeof setInterval> | null} */
-  let tick = null;
   /** @type {number | null} when the rows on screen were read */
   let readAt = null;
   const handle = () => dataTable(wrap);
-  /**
-   * SHIM for kp-themes' busy(text) (kp main 8c2c7f8a, fix-80; not in the
-   * 7.2.0 chassis vendors): the handle's own busy() when it has one;
-   * otherwise exactly what it does, painted after each kp render: a
-   * spinner, then the words, in the status line while the table loads.
-   * Remove when chassis vendors a kp-themes with busy().
-   * @param {string | null} text
-   */
-  const setBusyText = (text) => {
-    const hd = /** @type {any} */ (handle());
-    if (hd && typeof hd.busy === "function") {
-      hd.busy(text);
-      return;
-    }
-    if (text == null || wrap.dataset.kpState !== "loading") return;
-    status.replaceChildren(
-      h("span", { class: "kp-spinner", "aria-hidden": "true" }),
-      " ",
-      text,
-    );
-  };
-  const paintBusy = () => {
-    if (!busy) return;
-    const w = busyWords({
-      words: busy.words,
-      seconds: (Date.now() - busy.began) / 1000,
-      expect: busy.expect,
-      shownFrom: busy.shownFrom,
-    });
-    setBusyText(`${w.text} ${w.counter}`);
+  /** Hand the words to kp once its handle exists (busy(), fix-80/84). */
+  const giveBusy = () => {
+    const hd = handle();
+    if (!busy || busy.given || !hd) return;
+    busy.given = true;
+    hd.busy({ text: busy.text, since: busy.since });
   };
   const stopBusy = () => {
-    if (tick) clearInterval(tick);
-    tick = null;
     const was = busy;
     busy = null;
-    if (was) setBusyText(null);
-    return was ? (Date.now() - was.began) / 1000 : 0;
+    if (was?.given) handle()?.busy(null);
+    return was ? (Date.now() - was.since) / 1000 : 0;
   };
   wrap.addEventListener(VIEW_EVENT, (e) => {
     const v = /** @type {CustomEvent} */ (e).detail;
-    // The sort line: the full summary on hover, the reset only when sorted
-    // (its place kept, so the line never changes height or shifts).
-    sortSummary.title = sortSummary.textContent ?? "";
-    sortReset.toggleAttribute("data-off", (v?.sorts ?? []).length === 0);
     const words = emptyWords(v, spec.nothing ?? "Nothing to show.");
-    emptyTitle.textContent = words.title;
-    emptyBody.textContent = words.body;
-    emptyBody.hidden = words.body === "";
-    emptyClear.hidden = !words.clear;
-    paintBusy();
+    matchTitle.textContent = words.title;
+    matchBody.textContent = words.body;
+    matchBody.hidden = words.body === "";
+    // A table attached after loading() began gets its words on its first
+    // render (giveBusy renders once more; `given` stops it there).
+    giveBusy();
   });
 
   /**
-   * The table is asking for its rows: a first load keeps kp's skeleton, a
-   * refresh keeps the old rows dimmed and says from when they are.
+   * The table is asking for its rows: a first load shows kp's skeleton, a
+   * refresh keeps the old rows dimmed and says from when they are; kp's
+   * spinner, the page's words and kp's counter in the status line.
    * @param {{words?: string, expect?: number}} [o] expect: the usual
    *   seconds, for the host's slow reads
    */
   const loading = (o = {}) => {
     stopBusy();
     busy = {
-      words: o.words ?? "Asking the host…",
-      expect: o.expect ?? null,
-      shownFrom:
-        readAt != null && tbody.querySelector("tr:not([data-kp-skeleton-row])")
-          ? new Date(readAt).toLocaleTimeString(undefined, {
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : null,
-      began: Date.now(),
+      text: busyWords({
+        words: o.words ?? "Asking the host…",
+        expect: o.expect ?? null,
+        shownFrom:
+          readAt != null &&
+          tbody.querySelector("tr:not([data-kp-skeleton-row])")
+            ? new Date(readAt).toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : null,
+      }),
+      since: Date.now(),
+      given: false,
     };
-    tick = setInterval(paintBusy, 1000);
     const hd = handle();
-    if (hd) {
-      if (hd.view().state === "loading") paintBusy();
-      else hd.state("loading");
-    }
+    if (hd && hd.view().state !== "loading") hd.state("loading");
+    giveBusy();
   };
   /**
    * The rows are in: kp re-reads them (unless `refresh` is false: a live
@@ -334,17 +271,13 @@ export function tableBlock(spec) {
     return secs;
   };
   /**
-   * The read failed: kp's failed slot says why, what to do and offers a
-   * retry. Returns the seconds the load took.
+   * The read failed: kp's failed slot says what, why and what to do, with
+   * its Try again (fail(), fix-85). Returns the seconds the load took.
    * @param {import("./doctor.js").RouteError} e
    */
   const fail = (e) => {
     const secs = stopBusy();
-    failTitle.textContent = `Could not read ${e.what}`;
-    failWhy.textContent = `Why: ${e.why}`;
-    failFix.textContent = e.fix ? `What to do: ${e.fix}` : "";
-    failFix.hidden = !e.fix;
-    handle()?.state("failed");
+    handle()?.fail(failReason(e));
     return secs;
   };
   return { wrap, tbody, loading, ready, failed: fail };

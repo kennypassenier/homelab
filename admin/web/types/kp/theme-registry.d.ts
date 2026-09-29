@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/theme-registry.js (kp-themes 7.2.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/theme-registry.js (kp-themes 8.0.0),
 // copied from kp-themes js/theme-registry.d.ts: chassis serves the module, not its types.
 export type ThemeName =
   | "formal"
@@ -60,4 +60,4 @@ export declare const STORAGE_KEY = "theme";
  * matters happens in the browser, on a page where the two files may
  * have arrived separately. js/diagnostics.js does it.
  */
-export declare const VERSION = "7.2.0";
+export declare const VERSION = "8.0.0";

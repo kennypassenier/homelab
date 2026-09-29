@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/palette.js (kp-themes 7.2.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/palette.js (kp-themes 8.0.0),
 // copied from kp-themes js/palette.d.ts: chassis serves the module, not its types.
 /** The attribute that opens a palette or a sheet on a press [gap-12]. */
 export declare const OPENER = "[data-kp-palette-open]";

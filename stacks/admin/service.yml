@@ -8,6 +8,10 @@ binary: /opt/homelab-admin/bin/homelab-admin
 env_file: /appdata/admin/admin-config/admin.env
 data_dirs:
   - /appdata/admin/admin-config
+# fix-157 (2026-09-29): the dashboard writes its state and its working copy
+# while it runs, so a live tar read "file changed as we read it" and the
+# first backup failed. Stopped for the tar (fix-113), a few seconds a night.
+backup_pause: true
 # The homelab release carries homelab-admin beside the host and the client;
 # from the dashboard release on it is signed (Kenny, 2026-09-28).
 release_repo: kennypassenier/homelab

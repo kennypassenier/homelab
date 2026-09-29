@@ -85,8 +85,14 @@ fn feat_firewall_1_an_unchanged_firewall_changes_no_file() {
 fn feat_firewall_1_add_and_remove_a_rule_keep_the_rest_of_the_file() {
     let t = texts("admin");
     let mut f = firewall_as_is("admin");
-    let n = f.rules.len();
-    f.rules.remove(n - 1); // Uptime Kuma's HTTP monitor
+    // Uptime Kuma's HTTP monitor, found by its note: rules added in the
+    // browser land after it (fix-157's end-to-end run added one).
+    let kuma = f
+        .rules
+        .iter()
+        .position(|r| r.rule.note.as_deref() == Some("Uptime Kuma HTTP monitor (/healthz)"))
+        .expect("the stack still has Uptime Kuma's HTTP rule");
+    f.rules.remove(kuma);
     f.rules.push(RuleEdit {
         origin: None,
         rule: FirewallRule {

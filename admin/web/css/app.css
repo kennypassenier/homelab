@@ -731,3 +731,15 @@ td.stack-flags {
   font-family: var(--font-mono, monospace);
   font-size: 0.9em;
 }
+
+/* Kenny, 2026-09-29: the bar in one row. On a phone the page links sit
+   behind kp's menu button; the version, the palette's key hint and the
+   keyboard-shortcut sheet (no keyboard there) make room for the palette,
+   the bell and the theme button. */
+@media (max-width: 40rem) {
+  .kp-nav .link,
+  .kp-nav .help-button,
+  .kp-nav [data-kp-palette-keys] {
+    display: none;
+  }
+}

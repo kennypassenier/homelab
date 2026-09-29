@@ -9,6 +9,7 @@ import { startAgoTicker } from "./ago.js";
 import { mountChrome } from "./chrome.js";
 import { mountFollow } from "./drive.js";
 import { h } from "./dom.js";
+import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
 import { navEntries, pageTitle, route } from "./router.js";
 import { current, start, subscribe } from "./store.js";
 import { mount as activity } from "./pages/activity.js";
@@ -43,7 +44,21 @@ let cleanup = () => {};
 function navigate(href) {
   if (href === location.pathname + location.search) return;
   history.pushState(null, "", href);
+  closeBar();
   render();
+}
+
+/**
+ * A page change inside the app leaves the bar as a page load would: the
+ * phone menu closed and no dropdown held open by the focus in it.
+ */
+function closeBar() {
+  if (bar.hasAttribute("data-kp-nav-open"))
+    /** @type {HTMLElement | null} */ (
+      bar.querySelector("[data-kp-nav-toggle]")
+    )?.click();
+  const f = document.activeElement;
+  if (f instanceof HTMLElement && bar.contains(f)) f.blur();
 }
 
 function render() {
@@ -56,7 +71,23 @@ function render() {
       /** @type {Record<string, string>} */
       const a = { class: "kp-nav__link", href: n.href };
       if (n.current) a["aria-current"] = "page";
-      return h("li", null, h("a", a, n.label));
+      if (!n.items) return h("li", null, h("a", a, n.label));
+      a["aria-haspopup"] = "true";
+      return h(
+        "li",
+        null,
+        h("a", a, n.label),
+        h(
+          "ul",
+          { class: "kp-nav__menu" },
+          ...n.items.map((i) => {
+            /** @type {Record<string, string>} */
+            const ia = { href: i.href };
+            if (i.current) ia["aria-current"] = "page";
+            return h("li", null, h("a", ia, i.label));
+          }),
+        ),
+      );
     }),
   );
   switch (r.page) {
@@ -159,3 +190,6 @@ mountVersions(/** @type {HTMLElement} */ (document.getElementById("versions")));
 startAgoTicker();
 start();
 render();
+// kp-themes' bar: the phone menu button, and dropdowns kept inside the window.
+attachNavToggles(bar);
+attachNavMenus(bar);

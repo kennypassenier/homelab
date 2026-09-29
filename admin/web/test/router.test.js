@@ -54,12 +54,39 @@ test("the navigation marks the current page, a stack page beside the overview", 
       .filter((n) => n.current)
       .map((n) => n.label);
   assert.deepEqual(cur("/app/"), ["Overview"]);
-  assert.deepEqual(cur("/app/doctor"), ["Doctor"]);
   assert.deepEqual(cur("/app/host"), ["Host"]);
+  // A page in a dropdown marks its group and itself.
+  assert.deepEqual(cur("/app/doctor"), ["Health"]);
+  const health = navEntries(route("/app/doctor")).find(
+    (n) => n.label === "Health",
+  );
+  assert.deepEqual(
+    health?.items?.map((i) => [i.label, i.current]),
+    [
+      ["Checks", false],
+      ["Doctor", true],
+    ],
+  );
+  // Kenny, 2026-09-29: the bar fits one row at 1280 px, so few top items.
+  const top = navEntries(route("/app/"));
+  assert.deepEqual(
+    top.map((n) => n.label),
+    [
+      "Overview",
+      "Today",
+      "Host",
+      "Operations",
+      "History",
+      "Health",
+      "Configure",
+    ],
+  );
+  // Every page of the bar is reachable from it, in a group or on its own.
+  const reached = top.flatMap((n) =>
+    (n.items ? n.items : [n]).map((i) => i.href),
+  );
+  assert.equal(reached.length, 13);
   const onStack = navEntries(route("/app/stacks/media/apps"));
-  // Eight pages, milestone edit's Firewall and Settings, the parity
-  // round's Today, Live log and Apply, and the stack.
-  assert.equal(onStack.length, 14);
   assert.deepEqual(onStack[1], {
     href: "/app/stacks/media",
     label: "Stack media",
@@ -82,7 +109,7 @@ test("the navigation marks the current page, a stack page beside the overview", 
     "Homelab · Notifications",
   );
   assert.deepEqual(cur("/app/notifications"), []);
-  assert.deepEqual(cur("/app/jobs"), ["Jobs"]);
+  assert.deepEqual(cur("/app/jobs"), ["Operations"]);
   // Milestone edit's pages and tabs.
   assert.deepEqual(route("/app/firewall"), { page: "firewall" });
   assert.deepEqual(route("/app/settings"), { page: "settings" });

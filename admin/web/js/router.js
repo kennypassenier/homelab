@@ -28,24 +28,53 @@ export const STACK_TABS = /** @type {const} */ ([
  *   {page: "presets"} | {page: "notfound", path: string}} Route
  */
 
-/** The navigation bar, in order. */
+/**
+ * The navigation bar, in order. `group` puts a page in a dropdown of the bar
+ * (Kenny, 2026-09-29: thirteen top-level links wrapped onto a second row at
+ * 1280 px); a page without one is a top-level link.
+ */
 export const NAV = /** @type {const} */ ([
   { page: "overview", href: "/app/", label: "Overview" },
   // TUI parity: `homelab today`, the morning question in one answer.
   { page: "today", href: "/app/today", label: "Today" },
   { page: "host", href: "/app/host", label: "Host" },
   // TUI parity: LOG_STREAM, every host operation whoever started it.
-  { page: "log", href: "/app/log", label: "Live log" },
-  { page: "activity", href: "/app/activity", label: "Activity" },
-  { page: "timeline", href: "/app/timeline", label: "Timeline" },
-  { page: "checks", href: "/app/checks", label: "Checks" },
-  { page: "doctor", href: "/app/doctor", label: "Doctor" },
-  { page: "jobs", href: "/app/jobs", label: "Jobs" },
+  { page: "log", href: "/app/log", label: "Live log", group: "Operations" },
+  { page: "jobs", href: "/app/jobs", label: "Jobs", group: "Operations" },
   // TUI parity: `homelab apply`, plan first.
-  { page: "apply", href: "/app/apply", label: "Apply" },
-  { page: "schedules", href: "/app/schedules", label: "Schedules" },
-  { page: "firewall", href: "/app/firewall", label: "Firewall" },
-  { page: "settings", href: "/app/settings", label: "Settings" },
+  { page: "apply", href: "/app/apply", label: "Apply", group: "Operations" },
+  {
+    page: "schedules",
+    href: "/app/schedules",
+    label: "Schedules",
+    group: "Operations",
+  },
+  {
+    page: "activity",
+    href: "/app/activity",
+    label: "Activity",
+    group: "History",
+  },
+  {
+    page: "timeline",
+    href: "/app/timeline",
+    label: "Timeline",
+    group: "History",
+  },
+  { page: "checks", href: "/app/checks", label: "Checks", group: "Health" },
+  { page: "doctor", href: "/app/doctor", label: "Doctor", group: "Health" },
+  {
+    page: "firewall",
+    href: "/app/firewall",
+    label: "Firewall",
+    group: "Configure",
+  },
+  {
+    page: "settings",
+    href: "/app/settings",
+    label: "Settings",
+    group: "Configure",
+  },
 ]);
 
 /** Pages with a fixed address that the bar does not list (the bell opens it). */
@@ -113,19 +142,42 @@ export const stackHref = (name, tab = "overview") =>
   `/app/stacks/${encodeURIComponent(name)}${tab === "overview" ? "" : `/${tab}`}`;
 
 /**
- * The navigation bar for a route, the current page marked. A stack page has
- * no fixed link, so while one is open it gets its own entry beside the
- * overview it was opened from.
+ * @typedef {{href: string, label: string, current: boolean}} NavLink
+ * @typedef {NavLink & {items?: NavLink[]}} NavEntry a link, or a group whose
+ *   own link opens its first page and whose `items` fill its dropdown
+ */
+
+/**
+ * The navigation bar for a route, the current page marked (a group is
+ * current when one of its pages is). A stack page has no fixed link, so
+ * while one is open it gets its own entry beside the overview it was opened
+ * from.
  * @param {Route} r
- * @returns {{href: string, label: string, current: boolean}[]}
+ * @returns {NavEntry[]}
  */
 export function navEntries(r) {
-  /** @type {{href: string, label: string, current: boolean}[]} */
-  const out = NAV.map((n) => ({
-    href: n.href,
-    label: n.label,
-    current: n.page === r.page,
-  }));
+  /** @type {NavEntry[]} */
+  const out = [];
+  for (const n of NAV) {
+    const link = { href: n.href, label: n.label, current: n.page === r.page };
+    const group = "group" in n ? n.group : undefined;
+    if (!group) {
+      out.push(link);
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (last && last.items && last.label === group) {
+      last.items.push(link);
+      last.current = last.current || link.current;
+    } else {
+      out.push({
+        href: n.href,
+        label: group,
+        current: link.current,
+        items: [link],
+      });
+    }
+  }
   if (r.page === "stack")
     out.splice(1, 0, {
       href: stackHref(r.name),

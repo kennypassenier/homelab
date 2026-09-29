@@ -25,13 +25,20 @@ import SPEC from "./formspec.json" with { type: "json" };
 /**
  * One field of a form. `source` names the list a choice is filled from
  * (the stack's apps, its native units, its commits); `when` says the field
- * only shows while the preview reports a deploy-guard refusal.
+ * only shows while the preview reports a deploy-guard refusal. `show_when`:
+ * the field is on screen, checked and sent only while another field has a
+ * value (the answer's days, with accept); `change_when`: its label, help
+ * and required then (the note becomes the required reason).
+ * @typedef {{field: string, value: string, says: string}} ShowWhen
+ * @typedef {{field: string, value: string, label: string, help: string,
+ *   required: boolean}} ChangeWhen
  * @typedef {{name: ArgName, id: string, kind: "check" | "text" | "choice" | "typed",
  *   label: string, help: string, required: boolean, pattern?: string,
  *   placeholder?: string,
  *   source?: "apps" | "units" | "commits" | "checks" | "templates",
  *   empty?: string, danger?: boolean, when?: "guard", expect?: string,
- *   choices?: {value: string, label: string}[]}} Field
+ *   choices?: {value: string, label: string}[],
+ *   show_when?: ShowWhen, change_when?: ChangeWhen}} Field
  * @typedef {{id: "options" | "review", label: string, fields: Field[]}} Step
  * @typedef {{id: string, action: string, target: "stack" | "host",
  *   stack: string, title: string, what: string, submit: string,
@@ -93,7 +100,8 @@ export const ROLLBACK_ACTIONS = /** @type {const} */ ([
  *   help_for?: Record<string, string>,
  *   label_for?: Record<string, string>,
  *   required_for?: Record<string, boolean>,
- *   choices?: {value: string, label: string}[]}} FieldDef
+ *   choices?: {value: string, label: string}[],
+ *   show_when?: ShowWhen, change_when?: ChangeWhen}} FieldDef
  */
 
 /**
@@ -134,6 +142,26 @@ export function argField(arg, entry, stack) {
     id: `act-${arg.replace(/_/g, "-")}`,
     ...merged,
   });
+}
+
+/**
+ * The field as the form stands with these values: null while its
+ * `show_when` does not hold (hidden, not checked, not sent), its
+ * `change_when` words laid on while that holds. The same as
+ * core::drive::shown_field.
+ * @template {{name: string, label: string, help: string, required: boolean,
+ *   show_when?: ShowWhen, change_when?: ChangeWhen}} F
+ * @param {F} f
+ * @param {Record<string, unknown>} values
+ * @returns {F | null}
+ */
+export function shownField(f, values) {
+  const w = f.show_when;
+  if (w && values[w.field] !== w.value) return null;
+  const c = f.change_when;
+  if (c && values[c.field] === c.value)
+    return { ...f, label: c.label, help: c.help, required: c.required };
+  return f;
 }
 
 /** Arguments asked on the review step, next to the preview. */
@@ -224,6 +252,7 @@ export function buildArgs(form, values) {
   /** @type {Record<string, string | boolean>} */
   const out = {};
   for (const f of formFields(form)) {
+    if (!shownField(f, values)) continue;
     const v = values[f.name];
     if (f.kind === "check") {
       if (v === true) out[f.name] = true;
@@ -260,7 +289,8 @@ export const nameTyped = (form, values) =>
 
 /**
  * What is wrong with the values of one step (or of the whole form), by
- * field name. A guard-only field is not checked here: it is a choice.
+ * field name. A guard-only field is not checked here: it is a choice; a
+ * field its `show_when` hides is not checked either.
  * @param {ActionForm} form
  * @param {Values} values
  * @param {"options" | "review"} [step]
@@ -270,7 +300,9 @@ export function checkValues(form, values, step) {
   /** @type {Record<string, string>} */
   const errors = {};
   const steps = step ? form.steps.filter((s) => s.id === step) : form.steps;
-  for (const f of steps.flatMap((s) => s.fields)) {
+  for (const field of steps.flatMap((s) => s.fields)) {
+    const f = shownField(field, values);
+    if (!f) continue;
     const v = values[f.name];
     const text = typeof v === "string" ? v.trim() : "";
     if (f.kind === "check") continue;

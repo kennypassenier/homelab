@@ -3,7 +3,8 @@
 // it glides from where it was to the element the step acts on (the element
 // the highlight marks), arrives shortly before 0, shows a click (a ring and
 // a brief pressed look on the target) and the step then runs as before.
-// While Claude types it sits in the field. Display only: nothing about what
+// While Claude types it sits in the field. A target outside the window is
+// scrolled into view first (fix-163). Display only: nothing about what
 // is sent, or the once-only press, depends on it.
 //
 // The pointer lives in a fixed overlay that takes no pointer events and no
@@ -99,6 +100,20 @@ export function aimAt(box, vw, vh) {
     x: clamp(box.left + box.width / 2, vw),
     y: clamp(box.top + box.height / 2, vh),
   };
+}
+
+/**
+ * fix-163: is the target (partly) outside the window, so the page must
+ * scroll it into view before the pointer glides there? A target larger
+ * than half the window counts as on screen once that much of it shows.
+ * @param {Box} box the target's client rectangle
+ * @param {number} vw window width
+ * @param {number} vh window height
+ */
+export function offScreen(box, vw, vh) {
+  const bottom = box.top + Math.min(box.height, vh / 2);
+  const right = box.left + Math.min(box.width, vw / 2);
+  return box.top < 0 || box.left < 0 || bottom > vh || right > vw;
 }
 
 /**
@@ -283,6 +298,19 @@ export function makeCursor() {
     if (!frame && shown) frame = requestAnimationFrame(tick);
   };
 
+  /** fix-163: a target below the fold (or above it) is scrolled into
+   * view first, so the pointer is seen reaching it. */
+  const reveal = (/** @type {HTMLElement} */ el) => {
+    if (!el.isConnected) return;
+    const t = aimElement(el);
+    if (offScreen(t.getBoundingClientRect(), innerWidth, innerHeight))
+      t.scrollIntoView({
+        block: "center",
+        inline: "nearest",
+        behavior: reducedMotion() ? "auto" : "smooth",
+      });
+  };
+
   const begin = () => {
     from = pos ?? { x: innerWidth / 2, y: innerHeight / 2 };
     if (!pos) place(from);
@@ -322,6 +350,7 @@ export function makeCursor() {
     },
     glide(el, id, total, left, paused) {
       if (move?.kind === "count" && move.id === id && target === el) return;
+      if (el) reveal(el);
       begin();
       target = el;
       move = el
@@ -339,6 +368,7 @@ export function makeCursor() {
     },
     sit(el) {
       if (!el) return;
+      reveal(el);
       begin();
       target = el;
       move = { kind: "timed", start: performance.now() };

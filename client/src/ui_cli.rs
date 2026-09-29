@@ -278,7 +278,10 @@ pub fn render(message: &str) -> Result<String, String> {
                     }
                 );
                 if !shown {
-                    line.push_str("  [hidden: shown only when the deploy guard refuses]");
+                    let why = x["hidden_why"]
+                        .as_str()
+                        .unwrap_or("shown only when the deploy guard refuses");
+                    line.push_str(&format!("  [hidden: {why}]"));
                 }
                 if let Some(c) = x["choices"].as_array().filter(|c| !c.is_empty()) {
                     let c: Vec<String> = c.iter().map(text).collect();
@@ -578,5 +581,34 @@ mod tests {
             "{e}"
         );
         assert!(e.contains("form   none open"), "{e}");
+    }
+
+    /// fix-answer-days: a field hidden until another field has a value says
+    /// when it shows; the guard's force keeps its own words.
+    #[test]
+    fn fix_answer_days_a_hidden_field_says_when_it_shows() {
+        let ok = serde_json::json!({
+            "ok": true,
+            "state": {"active": true, "by": "wsl", "seq": 4, "page": "/app/host",
+              "form": {"title": "Answer check · the whole host", "step": "options", "step_index": 0,
+                "steps": ["options", "review"], "buttons": ["next", "close"],
+                "fields": [
+                  {"id": "act-days", "kind": "text", "value": "", "shown": false,
+                   "hidden_why": "shown only when the answer is \"not ok, accepted for some days\"", "error": null},
+                  {"id": "act-force", "kind": "check", "value": false, "shown": false, "error": null}
+                ],
+                "guard": null, "job": null}}
+        });
+        let t = render(&ok.to_string()).unwrap();
+        assert!(
+            t.contains(
+                "[hidden: shown only when the answer is \"not ok, accepted for some days\"]"
+            ),
+            "{t}"
+        );
+        assert!(
+            t.contains("[hidden: shown only when the deploy guard refuses]"),
+            "{t}"
+        );
     }
 }

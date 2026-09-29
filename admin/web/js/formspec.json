@@ -1,5 +1,5 @@
 {
-  "about": "feat-platform-10: the one description of every action form's fields, read by the browser (actionforms.js imports it) and by the dashboard's server (core::drive embeds it), so a step Claude sends and a click Kenny makes are checked against the same words. {stack}, {expect}, {label} and {text} are filled in by both sides the same way.",
+  "about": "feat-platform-10: the one description of every action form's fields, read by the browser (actionforms.js imports it) and by the dashboard's server (core::drive embeds it), so a step Claude sends and a click Kenny makes are checked against the same words. {stack}, {expect}, {label} and {text} are filled in by both sides the same way. show_when: a field is on screen, checked and sent only while another field has that value ('says' is when, in words); change_when: its label, help and required while another field has that value.",
   "review_args": ["force", "confirm"],
   "review_for": {
     "exec": ["vmid", "command"],
@@ -17,7 +17,7 @@
     "vmid": "\\d{3,5}",
     "tag": "[A-Za-z0-9._+\\-]{1,64}",
     "version": "\\d{1,3}",
-    "days": "\\d{1,4}",
+    "days": "0*(?:[1-9]\\d{0,2}|[12]\\d{3}|3[0-5]\\d{2}|36[0-4]\\d|3650)",
     "stack_list": "[a-z0-9][a-z0-9\\-]*( *, *[a-z0-9][a-z0-9\\-]*)*"
   },
   "fields": {
@@ -161,7 +161,7 @@
     "verdict": {
       "kind": "choice",
       "label": "Answer",
-      "help": "ok, not ok, or a not ok accepted for some days (the reason goes in the note).",
+      "help": "ok, not ok, or not ok accepted for a number of days (then the days and the reason are asked).",
       "required": true,
       "choices": [
         {
@@ -180,17 +180,29 @@
     },
     "days": {
       "kind": "text",
-      "label": "Accepted for (days)",
-      "help": "Only with accept: how many days the not ok counts as noted rather than broken.",
-      "required": false,
+      "label": "Number of days",
+      "help": "How many days this not ok counts as accepted, 1 to 3650.",
+      "required": true,
       "pattern": "days",
-      "placeholder": "30"
+      "placeholder": "30",
+      "show_when": {
+        "field": "verdict",
+        "value": "accept",
+        "says": "the answer is \"not ok, accepted for some days\""
+      }
     },
     "note": {
       "kind": "text",
       "label": "Note",
-      "help": "One line; optional for ok and not ok, the reason for accept.",
-      "required": false
+      "help": "One line, optional.",
+      "required": false,
+      "change_when": {
+        "field": "verdict",
+        "value": "accept",
+        "label": "Reason",
+        "help": "Required with this answer: one line on why this not ok is accepted.",
+        "required": true
+      }
     },
     "destroy": {
       "kind": "text",

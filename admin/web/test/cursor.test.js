@@ -8,6 +8,7 @@ import {
   arriveLead,
   clickDue,
   glideFraction,
+  offScreen,
   pathAt,
 } from "../js/drivecursor.js";
 
@@ -47,4 +48,25 @@ test("the path eases from start to target and aims inside the window", () => {
   assert.equal(clickDue(1000, 5000, false), false);
   assert.equal(clickDue(100, 5000, false), true);
   assert.equal(clickDue(100, 5000, true), false);
+});
+
+test("fix-163: a target below the fold is scrolled to before the glide", () => {
+  const box = (/** @type {number} */ top, h = 30) => ({
+    left: 100,
+    top,
+    width: 200,
+    height: h,
+  });
+  assert.equal(offScreen(box(200), 1280, 800), false);
+  // Below the fold, above the top, or cut off by the bottom edge.
+  assert.equal(offScreen(box(900), 1280, 800), true);
+  assert.equal(offScreen(box(-60), 1280, 800), true);
+  assert.equal(offScreen(box(790), 1280, 800), true);
+  // A target taller than the window counts as on screen once its top is.
+  assert.equal(offScreen(box(40, 2000), 1280, 800), false);
+  // Off to the side.
+  assert.equal(
+    offScreen({ left: 1400, top: 200, width: 50, height: 20 }, 1280, 800),
+    true,
+  );
 });

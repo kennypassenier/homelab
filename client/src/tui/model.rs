@@ -1379,6 +1379,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        on_demand: false,
         syslog_receivers: vec![],
         firewall: None,
         natives: Vec::new(),

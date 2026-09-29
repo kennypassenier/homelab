@@ -70,6 +70,8 @@ impl EditFieldDef {
             max: self.max,
             choices: self.choices.clone(),
             current: self.current.clone(),
+            show_when: None,
+            change_when: None,
         }
     }
 
@@ -1915,6 +1917,8 @@ pub fn row(
                 max: None,
                 choices: None,
                 current: None,
+                show_when: None,
+                change_when: None,
             };
             value.current = Some(start);
             let mut sub_fields = vec![value];
@@ -1937,6 +1941,8 @@ pub fn row(
                     max: None,
                     choices: None,
                     current: None,
+                    show_when: None,
+                    change_when: None,
                 });
             }
             let values = sub_fields

@@ -28,6 +28,7 @@ struct World {
     host: Arc<MockHost>,
     live: Arc<Recorder>,
     driver: Driver,
+    clock: TestClock,
 }
 
 fn world(tag: &str) -> World {
@@ -62,7 +63,12 @@ fn world(tag: &str) -> World {
         announce: Duration::from_secs(3),
         max_pause: Duration::from_secs(1800),
     });
-    World { host, live, driver }
+    World {
+        host,
+        live,
+        driver,
+        clock,
+    }
 }
 
 fn goto(p: &str) -> UiStep {
@@ -398,4 +404,117 @@ async fn follow_live_the_control_route_pauses_and_refuses_when_nobody_drives() {
     assert_eq!(pending.await.unwrap()["ok"], true);
     let r = app.oneshot(post(r#"{"do":"fly"}"#)).await.unwrap();
     assert!(r.status().is_client_error());
+}
+
+/// fix-163 (Kenny, 2026-09-29), the pure part: a confirmed dialog whose job
+/// has finished, with no step since, is released 30 s after the later of
+/// the job's end and the last step; never while the job runs, a step is
+/// announced or a viewer paused, and never a drive that is not active.
+#[test]
+fn fix_163_release_is_due_30_s_after_the_confirmed_job_ends() {
+    use homelab_admin::core::actions::ActionKind;
+    use homelab_admin::core::drive::{
+        action_form, DriveState, JobRef, OpenForm, Sources, RELEASE_AFTER_JOB_S,
+    };
+    assert_eq!(RELEASE_AFTER_JOB_S, 30);
+    let mut form = OpenForm::new(
+        action_form(ActionKind::Deploy, "media"),
+        &Sources::default(),
+    );
+    form.job = Some(JobRef {
+        job: 7,
+        state: "done".into(),
+        message: Some("deploy complete".into()),
+        progress: None,
+    });
+    let st = DriveState {
+        active: true,
+        by: Some("wsl".into()),
+        seq: 5,
+        form: Some(form),
+        last_at: 1000,
+        ..DriveState::default()
+    };
+    // The job ended at 1010, after the confirm at 1000.
+    assert!(!st.release_due(1039, Some(1010)));
+    assert!(st.release_due(1040, Some(1010)));
+    // Still running: no end yet.
+    assert!(!st.release_due(5000, None));
+    // A step after the job's end starts the 30 s again.
+    let later = DriveState {
+        last_at: 1030,
+        ..st.clone()
+    };
+    assert!(!later.release_due(1059, Some(1010)));
+    assert!(later.release_due(1060, Some(1010)));
+    // A dialog with no job, a drive that is over, an announced step or a
+    // pause: nothing to release.
+    let mut no_job = st.clone();
+    no_job.form.as_mut().unwrap().job = None;
+    assert!(!no_job.release_due(5000, Some(1010)));
+    let over = DriveState {
+        active: false,
+        ..st.clone()
+    };
+    assert!(!over.release_due(5000, Some(1010)));
+    let paused = DriveState {
+        paused_by: Some("kenny".into()),
+        ..st.clone()
+    };
+    assert!(!paused.release_due(5000, Some(1010)));
+    // Released: as `homelab ui done`, the dialog closed and the tabs free.
+    let mut done = st.clone();
+    done.release(1040);
+    assert!(done.form.is_none() && !done.active && done.plan.is_none());
+    assert_eq!(done.seq, 6);
+}
+
+/// fix-163: after `ui press confirm` the dialog shows the job's end; when no
+/// step follows within 30 s the dashboard closes it and gives the tabs
+/// back, the same as `homelab ui done`, and every tab hears it as a step.
+#[tokio::test(start_paused = true)]
+async fn fix_163_a_finished_confirmed_dialog_is_closed_and_released() {
+    let w = world("release");
+    w.driver.set_timing(LiveTiming::default());
+    let open = UiStep::Open {
+        form: "deploy".into(),
+        target: Some("media".into()),
+    };
+    assert_eq!(w.driver.step("wsl", Scope::Operate, open).await["ok"], true);
+    let pressed = w
+        .driver
+        .step(
+            "wsl",
+            Scope::Operate,
+            UiStep::Press {
+                button: "confirm".into(),
+            },
+        )
+        .await;
+    assert_eq!(pressed["ok"], true, "{pressed}");
+    // Before the job ends nothing is released, however long it runs.
+    assert!(!w.driver.release_if_done());
+    let d = w.driver.clone();
+    until("the job ended", || {
+        d.snapshot()
+            .form
+            .and_then(|f| f.job)
+            .is_some_and(|j| j.state == "done")
+    })
+    .await;
+    assert!(!w.driver.release_if_done(), "not before 30 s");
+    w.clock.advance(29);
+    assert!(!w.driver.release_if_done(), "not before 30 s");
+    w.clock.advance(1);
+    assert!(w.driver.release_if_done());
+    let s = w.driver.snapshot();
+    assert!(s.form.is_none() && !s.active, "{s:?}");
+    let last = w.live.events("drive").last().cloned().unwrap();
+    assert_eq!(last["kind"], "step");
+    assert_eq!(last["step"]["do"], "done");
+    assert_eq!(last["applied"], true);
+    // Once released there is nothing left to release.
+    w.clock.advance(60);
+    assert!(!w.driver.release_if_done());
+    assert_eq!(deploys(&w), 1);
 }

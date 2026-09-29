@@ -102,15 +102,30 @@
       "stack": "_host",
       "values": {
         "check": "",
-        "verdict": "ok",
+        "verdict": "accept",
         "days": "x",
         "note": ""
       },
       "step": "options",
       "errors": {
         "check": "Choose the check.",
-        "days": "\"x\" is not a valid accepted for (days)."
+        "days": "\"x\" is not a valid number of days.",
+        "note": "Choose the reason."
       }
+    },
+    {
+      "action": "answer-check",
+      "args": ["check", "verdict", "days", "note"],
+      "confirm": false,
+      "stack": "_host",
+      "values": {
+        "check": "c4bca102",
+        "verdict": "ok",
+        "days": "x",
+        "note": ""
+      },
+      "step": "options",
+      "errors": {}
     }
   ],
   "edit_cases": [

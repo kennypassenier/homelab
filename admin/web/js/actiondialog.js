@@ -21,6 +21,7 @@ import {
   initialValues,
   nameTyped,
   previewArgs,
+  shownField,
 } from "./actionforms.js";
 import {
   badge,
@@ -271,6 +272,36 @@ function drawActionDialog(form, values, sources, driven) {
       next,
     ),
   );
+  // A field shown only while another has a value (the answer's days, with
+  // accept), or worded differently then (the note becomes the required
+  // reason): kept in step with the values as they change, by a click or a
+  // driven step alike. Hidden fields are not checked or sent (buildArgs).
+  const conditional = formFields(form).filter(
+    (f) => f.show_when || f.change_when,
+  );
+  const applyConditions = () => {
+    for (const f of conditional) {
+      const wrap = wraps.get(f.name);
+      const input = inputs.get(f.name);
+      if (!wrap || !input) continue;
+      const now = shownField(f, values);
+      wrap.hidden = !now;
+      if (!now) {
+        if (input.getAttribute("aria-invalid") === "true") clearError(input);
+        continue;
+      }
+      const label = wrap.querySelector(".kp-field__label");
+      if (label) label.textContent = now.label;
+      const help = wrap.querySelector(`[id="${f.id}-hint"]`);
+      if (help) help.textContent = now.help;
+      input.required = now.required;
+    }
+  };
+  if (conditional.length) {
+    wiz.addEventListener("input", applyConditions);
+    wiz.addEventListener("change", applyConditions);
+    applyConditions();
+  }
   const body = h("div", { class: "act-body" }, wiz);
   const d = openDialog({
     title: form.title,

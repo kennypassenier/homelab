@@ -386,7 +386,8 @@ pub fn evaluate_repo_drift(state: &HostState, live: &LiveFacts) -> Vec<Finding> 
             // is already reported by the stack-file check above.
             let vmid = d.manifest.as_ref().map(|m| m.vmid);
             let taken = vmid.is_some_and(|v| live.containers.iter().any(|(c, _)| *c == v));
-            if d.manifest.is_some() && !taken {
+            let on_demand = d.manifest.as_ref().is_some_and(|m| m.on_demand);
+            if d.manifest.is_some() && !taken && !on_demand {
                 out.push(Finding {
                     severity: Severity::Drift,
                     subject: d.stack.clone(),

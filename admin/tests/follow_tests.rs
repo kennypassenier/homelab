@@ -546,12 +546,40 @@ async fn parity_a_check_answer_is_drivable() {
         value: v.into(),
     };
     assert_eq!(s(pick("act-check", "c4bca102")).await["ok"], true);
-    assert_eq!(s(pick("act-verdict", "accept")).await["ok"], true);
-    // accept without days: held by the server's check at the press.
-    assert_eq!(s(press("next")).await["ok"], true);
-    let held = s(press("confirm")).await;
-    assert_eq!(held["ok"], false, "{held}");
-    s(press("back")).await;
+    // fix-answer-days: the days are asked only with accept. Before it is
+    // chosen the field is hidden (and says why), and typing in it is refused.
+    let days = |v: &Value| {
+        v["state"]["form"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["id"] == "act-days")
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(days(&opened)["shown"], false);
+    assert!(
+        days(&opened)["hidden_why"]
+            .as_str()
+            .is_some_and(|w| w.contains("not ok, accepted for some days")),
+        "{}",
+        days(&opened)
+    );
+    let early = s(typed("act-days", "30")).await;
+    let (_, why, _) = refused(&early);
+    assert!(why.contains("act-days is not on screen"), "{why}");
+    let picked = s(pick("act-verdict", "accept")).await;
+    assert_eq!(picked["ok"], true);
+    assert_eq!(days(&picked)["shown"], true);
+    assert_eq!(days(&picked)["label"], "Number of days");
+    // accept without days and reason: held by the form at next.
+    let held = s(press("next")).await;
+    assert!(
+        held["refusal"]["why"]
+            .as_str()
+            .is_some_and(|w| w.contains("act-days") && w.contains("act-note")),
+        "{held}"
+    );
     assert_eq!(s(typed("act-days", "30")).await["ok"], true);
     assert_eq!(
         s(typed("act-note", "known, fixed next month")).await["ok"],

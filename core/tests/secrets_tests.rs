@@ -19,6 +19,7 @@ fn spec_with_secret() -> DeploySpec {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        on_demand: false,
         syslog_receivers: vec![],
         firewall: None,
         natives: Vec::new(),

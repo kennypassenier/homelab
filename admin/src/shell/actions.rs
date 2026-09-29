@@ -1943,6 +1943,7 @@ pub fn mount(
         });
         scheduler.spawn(tick);
         driver.spawn_relay(host.clone());
+        driver.spawn_release();
         hostlog.spawn(host.clone());
         // The demo host answers without the internet; the badge would not.
         if !demo_host {

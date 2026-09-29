@@ -19,6 +19,9 @@ stack_name: drill
 vmid: 119
 hostname: 119-app-drill
 native_only: true
+# Exists only during a rollback drill, created and destroyed in one sitting:
+# the fleet check does not report it as never deployed (2026-09-29).
+on_demand: true
 # fix-100 (2026-09-27): `homelab apply` would have created CT 119, and the
 # DR runbook would have rebuilt it. Deployed by name only.
 ephemeral: true

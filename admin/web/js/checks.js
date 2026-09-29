@@ -97,3 +97,22 @@ export function checkRows(checks, now, opts) {
         a.app.localeCompare(b.app),
     );
 }
+
+/**
+ * fix-checks-refresh: the answer jobs that finished well since the page
+ * last looked, whoever pressed them (this tab, another, Claude, a
+ * schedule); each is news once. `seen` holds the jobs already counted and
+ * is updated. A failed answer changed nothing on the host.
+ * @param {{job: number, action: string, state: string}[]} jobs
+ * @param {Set<number>} seen
+ * @returns {number[]}
+ */
+export function answeredJobs(jobs, seen) {
+  const out = [];
+  for (const j of jobs)
+    if (j.action === "answer-check" && j.state === "done" && !seen.has(j.job)) {
+      seen.add(j.job);
+      out.push(j.job);
+    }
+  return out;
+}

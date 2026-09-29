@@ -760,6 +760,65 @@ impl Driver {
         }
     }
 
+    /// fix-163 (Kenny, 2026-09-29): after `ui press confirm` the dialog shows
+    /// the job's end; when no step follows within 30 s of it, close the
+    /// dialog and give the tabs back, as `homelab ui done` does, so the
+    /// viewer is not locked out until the 10-minute idle release. `true`
+    /// when it released. A step being taken now is never cut short.
+    pub fn release_if_done(&self) -> bool {
+        let Ok(_turn) = self.inner.turn.try_lock() else {
+            return false;
+        };
+        let job = self
+            .lock()
+            .form
+            .as_ref()
+            .and_then(|f| f.job.as_ref())
+            .map(|j| j.job);
+        let Some(job) = job else {
+            return false;
+        };
+        let ended = self
+            .inner
+            .actions
+            .job(job)
+            .filter(|v| {
+                !matches!(
+                    v.state,
+                    super::actions::JobState::Queued | super::actions::JobState::Running
+                )
+            })
+            .and_then(|v| v.finished_at);
+        let now = self.now();
+        {
+            let mut st = self.lock();
+            if !st.release_due(now, ended) {
+                return false;
+            }
+            st.release(now);
+        }
+        tracing::info!(
+            job,
+            "a confirmed dialog's job ended and no step followed: the drive was released"
+        );
+        self.publish(&UiStep::Done, true, None);
+        true
+    }
+
+    /// fix-163: look every few seconds whether a finished drive is due to
+    /// be released.
+    pub fn spawn_release(&self) {
+        let driver = self.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(5));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                driver.release_if_done();
+            }
+        });
+    }
+
     /// feat-platform-10: answer the host's `Ui` frames, one after the other,
     /// for as long as the process runs.
     pub fn spawn_relay(&self, host: Arc<dyn HostPort>) {

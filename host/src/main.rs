@@ -3595,6 +3595,7 @@ port = 5003
                 retention: None,
                 data_mounts: Vec::new(),
                 native_only: false,
+                on_demand: false,
                 syslog_receivers: vec![],
                 firewall: None,
                 natives: Vec::new(),

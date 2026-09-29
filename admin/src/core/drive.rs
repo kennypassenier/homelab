@@ -26,6 +26,10 @@ pub const FORM_SPEC_JSON: &str = include_str!("../../web/js/formspec.json");
 /// A driver who sends nothing for this long no longer holds the tabs.
 pub const IDLE_S: i64 = 600;
 
+/// fix-163: a confirmed dialog whose job has ended, with no step since, is
+/// closed and the tabs given back this long after (as `homelab ui done`).
+pub const RELEASE_AFTER_JOB_S: i64 = 30;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FieldKind {
@@ -87,6 +91,32 @@ pub struct FieldDef {
     /// Per action: whether the field must be filled when it differs.
     #[serde(default)]
     pub required_for: BTreeMap<String, bool>,
+    /// On screen, checked and sent only while another field has a value.
+    #[serde(default)]
+    pub show_when: Option<ShowWhen>,
+    /// Other words (and required) while another field has a value.
+    #[serde(default)]
+    pub change_when: Option<ChangeWhen>,
+}
+
+/// A field shown only while `field` has `value` (the answer's days, with
+/// accept); `says` is when, in words, for `homelab ui state` and a refusal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShowWhen {
+    pub field: String,
+    pub value: String,
+    pub says: String,
+}
+
+/// A field's label, help and required while `field` has `value` (the note
+/// becomes the required reason with accept).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangeWhen {
+    pub field: String,
+    pub value: String,
+    pub label: String,
+    pub help: String,
+    pub required: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -193,6 +223,32 @@ pub struct Field {
     /// The value an edit form starts with.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_when: Option<ShowWhen>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub change_when: Option<ChangeWhen>,
+}
+
+/// The field as the form stands with these values, as `actionforms.js`
+/// `shownField`: `None` while its `show_when` does not hold (hidden, not
+/// checked, not sent), its `change_when` words laid on while that holds.
+pub fn shown_field<'a>(f: &'a Field, values: &Values) -> Option<std::borrow::Cow<'a, Field>> {
+    let holds = |field: &str, value: &str| values.get(field).and_then(Value::as_str) == Some(value);
+    if let Some(w) = &f.show_when {
+        if !holds(&w.field, &w.value) {
+            return None;
+        }
+    }
+    match &f.change_when {
+        Some(c) if holds(&c.field, &c.value) => {
+            let mut g = f.clone();
+            g.label = c.label.clone();
+            g.help = c.help.clone();
+            g.required = c.required;
+            Some(std::borrow::Cow::Owned(g))
+        }
+        _ => Some(std::borrow::Cow::Borrowed(f)),
+    }
 }
 
 pub fn arg_field(arg: Arg, action: ActionKind, stack: &str) -> Field {
@@ -241,6 +297,8 @@ pub fn arg_field(arg: Arg, action: ActionKind, stack: &str) -> Field {
         max: None,
         choices: def.choices.clone(),
         current: None,
+        show_when: def.show_when.clone(),
+        change_when: def.change_when.clone(),
     }
 }
 
@@ -358,6 +416,9 @@ pub fn check_steps(
     let mut errors = BTreeMap::new();
     for s in steps.iter().filter(|s| step.is_none_or(|id| s.id == id)) {
         for f in &s.fields {
+            let Some(f) = shown_field(f, values) else {
+                continue;
+            };
             if f.kind == FieldKind::Check {
                 continue;
             }
@@ -411,7 +472,7 @@ pub fn build_args(form: &ActionForm, values: &Values) -> ActionArgs {
 /// `build_args` over any list of action fields.
 pub fn build_args_of<'a>(fields: impl Iterator<Item = &'a Field>, values: &Values) -> ActionArgs {
     let mut args = ActionArgs::default();
-    for f in fields {
+    for f in fields.filter(|f| shown_field(f, values).is_some()) {
         let v = values.get(&f.name);
         let on = v == Some(&Value::Bool(true));
         let text = v
@@ -468,6 +529,9 @@ pub struct FieldState {
     pub value: Value,
     pub error: Option<String>,
     pub shown: bool,
+    /// Why a hidden field is hidden: when it shows, in words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden_why: Option<String>,
     pub choices: Vec<String>,
 }
 
@@ -707,12 +771,22 @@ impl OpenForm {
         self.steps.len() - 1
     }
 
-    /// Force is only on screen while the guard refuses, or once ticked.
-    fn shown(&self, f: &Field) -> bool {
-        f.when.as_deref() != Some("guard")
+    /// When a hidden field shows, in words; `None` while it is shown. Force
+    /// is only on screen while the guard refuses, or once ticked; a
+    /// `show_when` field only while the other field has its value.
+    fn hidden_why(&self, f: &Field) -> Option<String> {
+        let guard = f.when.as_deref() != Some("guard")
             || self.guard.is_some()
             || self.edit.as_ref().is_some_and(|e| e.guarded > 0)
-            || self.values.get(&f.name) == Some(&Value::Bool(true))
+            || self.values.get(&f.name) == Some(&Value::Bool(true));
+        if !guard {
+            return Some("shown only when the deploy guard refuses".into());
+        }
+        if shown_field(f, &self.values).is_none() {
+            let says = f.show_when.as_ref().map_or("", |w| w.says.as_str());
+            return Some(format!("shown only when {says}"));
+        }
+        None
     }
 
     /// Whether the final press was made: its job or its answer is there.
@@ -762,15 +836,18 @@ impl OpenForm {
         let mut out = Vec::new();
         for s in &self.desc.steps {
             for f in &s.fields {
+                let hidden_why = self.hidden_why(f);
                 out.push(FieldState {
                     id: f.id.clone(),
                     name: f.name.clone(),
                     kind: f.kind,
-                    label: f.label.clone(),
+                    label: shown_field(f, &self.values)
+                        .map_or_else(|| f.label.clone(), |g| g.label.clone()),
                     step: s.id.clone(),
                     value: self.values.get(&f.name).cloned().unwrap_or(Value::Null),
                     error: self.errors.get(&f.name).cloned(),
-                    shown: self.shown(f),
+                    shown: hidden_why.is_none(),
+                    hidden_why,
                     choices: self.choice_values(f),
                 });
             }
@@ -786,6 +863,7 @@ impl OpenForm {
                     value: sub.values.get(&f.name).cloned().unwrap_or(Value::Null),
                     error: sub.errors.get(&f.name).cloned(),
                     shown: true,
+                    hidden_why: None,
                     choices: f
                         .choices
                         .as_ref()
@@ -876,11 +954,22 @@ impl OpenForm {
                 "press next or back to reach it",
             ));
         }
-        if !self.shown(f) {
+        if let Some(why) = self.hidden_why(f) {
+            let fix = match &f.show_when {
+                Some(w) if f.when.as_deref() != Some("guard") => {
+                    let other = self
+                        .desc
+                        .fields()
+                        .find(|x| x.name == w.field)
+                        .map_or(w.field.as_str(), |x| x.id.as_str());
+                    format!("homelab ui pick {other} {} first", w.value)
+                }
+                _ => "nothing to set; the guard does not refuse this deploy".to_string(),
+            };
             return Err(refused(
                 step,
-                format!("{id} is not on screen: it shows only while the deploy guard refuses"),
-                "nothing to set; the guard does not refuse this deploy",
+                format!("{id} is not on screen: it is {why}"),
+                fix,
             ));
         }
         Ok(f)
@@ -988,6 +1077,35 @@ fn known_page(path: &str, stacks: &[String]) -> Result<String, String> {
 }
 
 impl DriveState {
+    /// fix-163 (Kenny, 2026-09-29): is the drive due to be released? The
+    /// open dialog was confirmed and its job has ended (`job_finished_at`,
+    /// unix seconds), and no step came for `RELEASE_AFTER_JOB_S` after the
+    /// later of that end and the last step. Never while a step is
+    /// announced or a viewer paused, and never a drive that is not active.
+    pub fn release_due(&self, now: i64, job_finished_at: Option<i64>) -> bool {
+        let Some(ended) = job_finished_at else {
+            return false;
+        };
+        self.active
+            && self.announce.is_none()
+            && self.paused_by.is_none()
+            && self.stopped_by.is_none()
+            && self.form.as_ref().is_some_and(|f| f.job.is_some())
+            && now - ended.max(self.last_at) >= RELEASE_AFTER_JOB_S
+    }
+
+    /// Release the drive as `homelab ui done` does: the dialog closes and
+    /// the tabs are the viewer's again. One step on, so every tab hears it.
+    pub fn release(&mut self, now: i64) {
+        self.form = None;
+        self.active = false;
+        self.announce = None;
+        self.paused_by = None;
+        self.plan = None;
+        self.seq += 1;
+        self.last_at = now;
+    }
+
     /// The state as a reader sees it now: a driver silent past `idle_s` no
     /// longer holds the tabs.
     pub fn snapshot(&self, now: i64) -> DriveState {

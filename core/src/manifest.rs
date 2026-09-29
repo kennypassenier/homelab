@@ -38,6 +38,12 @@ pub struct StackManifest {
     /// installs it. None of that is docker's business.
     #[serde(default)]
     pub native_only: bool,
+    /// A stack that exists only while it is used, like the rollback drill:
+    /// created and destroyed in one sitting. The fleet check does not report
+    /// it as "declared but never deployed" (Kenny, 2026-09-29, batch form
+    /// item drill-stack).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub on_demand: bool,
     /// The systemd units this container runs, by name. Each one has a
     /// `service.yml` describing it and a `<unit>/<unit>.service` file beside
     /// it — the unit file lives in the repository now, which it did not

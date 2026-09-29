@@ -7,7 +7,7 @@ import { firewallTab, settingsTab } from "../editpanels.js";
 import { historyRows, incidentRows } from "../activity.js";
 import { agoEl, setAgo } from "../ago.js";
 import { checkRows } from "../checks.js";
-import { answerButton } from "../answer.js";
+import { answerButton, onAnswered } from "../answer.js";
 import { showButton } from "../incident.js";
 import {
   badgeCell,
@@ -413,9 +413,11 @@ function historyTab(panel, params) {
   };
   const retry = () => void load().catch(() => {});
   panel.addEventListener("kp-datatable-retry", retry);
+  const stopAnswers = onAnswered(retry);
   retry();
   return () => {
     abort.abort();
+    stopAnswers();
     panel.removeEventListener("kp-datatable-retry", retry);
     unbindH();
     unbindI();

@@ -1,7 +1,7 @@
 // Manual checks (feat-ops-3): the questions deploys left for a person,
 // open ones first, each with its Answer button (TUI parity: checks answer).
 
-import { answerButton } from "../answer.js";
+import { answerButton, onAnswered } from "../answer.js";
 import { checkRows } from "../checks.js";
 import { agoEl, setAgo } from "../ago.js";
 import {
@@ -102,9 +102,11 @@ export function mount(root) {
   };
   const retry = () => void load();
   root.addEventListener("kp-datatable-retry", retry);
+  const stopAnswers = onAnswered(() => void load().catch(() => {}));
   void load().catch(() => {});
   return () => {
     abort.abort();
+    stopAnswers();
     root.removeEventListener("kp-datatable-retry", retry);
     unbind();
     detach();

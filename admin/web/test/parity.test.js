@@ -10,6 +10,7 @@ import {
   fieldChoices,
   initialValues,
   schedulableActions,
+  shownField,
 } from "../js/actionforms.js";
 import {
   applySummary,
@@ -324,4 +325,69 @@ test("a manual check's choice carries its whole text", () => {
     { id: "a1", record: { stack: "gateway", app: "cloudflared", text } },
   ]);
   assert.deepEqual(c, { id: "a1", label: `gateway/cloudflared: ${text}` });
+});
+
+test("fix-answer-days: the days ask only with accept, and accept asks the reason", () => {
+  const f = actionForm(
+    entry("answer-check", {
+      target: "host",
+      args: ["check", "verdict", "days", "note"],
+    }),
+    ctx,
+  );
+  const fields = f.steps.flatMap((s) => s.fields);
+  const days = /** @type {import("../js/actionforms.js").Field} */ (
+    fields.find((x) => x.name === "days")
+  );
+  const note = /** @type {import("../js/actionforms.js").Field} */ (
+    fields.find((x) => x.name === "note")
+  );
+  const v = (/** @type {string} */ verdict, days = "", note = "") => ({
+    check: "c4bc",
+    verdict,
+    days,
+    note,
+  });
+  // Hidden (null) until accept is chosen; the words say what to type.
+  assert.equal(shownField(days, v("")), null);
+  assert.equal(shownField(days, v("ok")), null);
+  assert.equal(shownField(days, v("nok")), null);
+  const shown = shownField(days, v("accept"));
+  assert.equal(shown?.label, "Number of days");
+  assert.match(
+    shown?.help ?? "",
+    /How many days this not ok counts as accepted, 1 to 3650/,
+  );
+  assert.equal(shown?.required, true);
+  // The note is optional for ok and not ok, the required reason for accept.
+  assert.equal(shownField(note, v("ok"))?.required, false);
+  const reason = shownField(note, v("accept"));
+  assert.equal(reason?.label, "Reason");
+  assert.equal(reason?.required, true);
+  assert.match(reason?.help ?? "", /^Required/);
+  // A days value left behind by an earlier accept is neither checked nor
+  // sent once the answer is ok (the server refuses days with ok).
+  assert.deepEqual(checkValues(f, v("ok", "x")), {});
+  assert.deepEqual(buildArgs(f, v("ok", "30")), {
+    check: "c4bc",
+    verdict: "ok",
+  });
+  // With accept, days and the reason are asked, and sent.
+  assert.deepEqual(checkValues(f, v("accept")), {
+    days: "Choose the number of days.",
+    note: "Choose the reason.",
+  });
+  assert.deepEqual(checkValues(f, v("accept", "0", "known")), {
+    days: '"0" is not a valid number of days.',
+  });
+  assert.deepEqual(checkValues(f, v("accept", "3651", "known")), {
+    days: '"3651" is not a valid number of days.',
+  });
+  assert.deepEqual(checkValues(f, v("accept", "3650", "known")), {});
+  assert.deepEqual(buildArgs(f, v("accept", "30", "known")), {
+    check: "c4bc",
+    verdict: "accept",
+    days: "30",
+    note: "known",
+  });
 });

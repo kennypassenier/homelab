@@ -65,6 +65,7 @@ fn manifest(
         retention,
         data_mounts: Vec::new(),
         native_only: false,
+        on_demand: false,
         syslog_receivers: vec![],
         natives: Vec::new(),
         stack_name: stack.into(),

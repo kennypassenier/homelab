@@ -7,7 +7,12 @@ import {
   incidentRows,
   parseIncident,
 } from "../js/activity.js";
-import { checkAnswer, checkRows, extraField } from "../js/checks.js";
+import {
+  answeredJobs,
+  checkAnswer,
+  checkRows,
+  extraField,
+} from "../js/checks.js";
 import { doctorRows, doctorSummary, routeError } from "../js/doctor.js";
 
 test("an incident name splits into its moment and its operation", () => {
@@ -188,4 +193,27 @@ test("a route's error reads as what, why and fix", () => {
     },
   );
   assert.match(routeError("today", 524, null).why, /Cloudflare.*HTTP 524/);
+});
+
+test("fix-checks-refresh: a finished answer job is news once, wherever it came from", () => {
+  /** @param {number} job @param {string} action @param {string} state */
+  const j = (job, action, state) =>
+    /** @type {import("../js/jobs.js").Job} */ (
+      /** @type {unknown} */ ({ job, action, state })
+    );
+  const seen = new Set([1]);
+  const jobs = [
+    j(1, "answer-check", "done"),
+    j(2, "answer-check", "running"),
+    j(3, "deploy", "done"),
+    j(4, "answer-check", "done"),
+    j(5, "answer-check", "failed"),
+  ];
+  // Job 1 was done before the page came; 2 still runs; 3 is no answer;
+  // a failed answer changed nothing on the host.
+  assert.deepEqual(answeredJobs(jobs, seen), [4]);
+  assert.deepEqual([...seen].sort(), [1, 4]);
+  assert.deepEqual(answeredJobs(jobs, seen), []);
+  jobs[1] = j(2, "answer-check", "done");
+  assert.deepEqual(answeredJobs(jobs, seen), [2]);
 });

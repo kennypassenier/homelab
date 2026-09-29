@@ -525,6 +525,7 @@ fn boot_manifest(vmid: u16, onboot: bool, order: u16, mem: u32, cores: u16) -> S
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        on_demand: false,
         syslog_receivers: vec![],
         firewall: None,
         natives: Vec::new(),
@@ -1783,6 +1784,28 @@ fn fix_142_a_declared_stack_that_was_never_deployed_is_drift() {
     assert_eq!(got[0].subject, "drill");
     assert!(got[0].what.contains("never"), "{}", got[0].what);
     assert!(got[0].remedy.contains("homelab apply"), "{}", got[0].remedy);
+}
+
+/// Kenny, 2026-09-29 (batch form, drill-stack): a stack marked on_demand
+/// (the rollback drill, created and destroyed in one sitting) is not
+/// reported as never deployed; the real stacks directory marks drill so.
+#[test]
+fn an_on_demand_stack_that_was_never_deployed_is_not_drift() {
+    let st = state(vec![]);
+    let mut m = boot_manifest(119, false, 9, 512, 1);
+    m.on_demand = true;
+    let live = LiveFacts {
+        stack_files: vec![("stacks/drill".into(), 119)],
+        digests: vec![digest("drill", Some(m), &[])],
+        ..Default::default()
+    };
+    assert!(evaluate_repo_drift(&st, &live).is_empty());
+    let real = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/drill/lxc-compose.yml"),
+    )
+    .unwrap();
+    let parsed: homelab_core::manifest::StackManifest = serde_yaml::from_str(&real).unwrap();
+    assert!(parsed.on_demand, "stacks/drill is marked on_demand");
 }
 
 /// fix-142: no digests (an older client, or the nightly round, which has no

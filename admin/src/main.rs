@@ -75,6 +75,8 @@ const FILES: &[(&str, &[u8])] = &[
         "js/drivecursor.js",
         include_bytes!("../web/js/drivecursor.js"),
     ),
+    // Live view pace: how fast Claude types and picks.
+    ("js/drivepace.js", include_bytes!("../web/js/drivepace.js")),
     ("js/editdrive.js", include_bytes!("../web/js/editdrive.js")),
     (
         "js/actiondialog.js",

@@ -1863,3 +1863,36 @@ async fn fix_63_empty_data_dirs_are_not_backed_up_over_a_repository_with_history
     .await;
     assert!(report.ok, "{:?}", report.error);
 }
+
+/// fix-164: re-adopting a native service (install-native re-adopts every
+/// time) rebuilt the stack's record from scratch and dropped what a deploy
+/// had recorded. Measured 2026-09-29: after install-native of admin at 18:47
+/// the fleet check again reported CT 120's firewall and its route file as
+/// unknown, though `homelab deploy stacks/admin` had recorded both at 17:45.
+#[tokio::test]
+async fn fix_164_readopting_keeps_what_a_deploy_recorded() {
+    use homelab_core::ops::native::adopt;
+    use homelab_core::state::StateStore;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let hub = kyu_manifest();
+    assert!(adopt(&ctx(&exec, &sink, &j), &hub).await.ok);
+
+    let store = StateStore::new(&exec, "/var/lib/homelab");
+    let mut state = store.load().await.unwrap();
+    let st = state.stacks.get_mut("kyu").unwrap();
+    st.applied_hash = "deployed-hash".into();
+    st.route_file = Some("kyu.yml".into());
+    st.enabled = false;
+    store.save(state).await.unwrap();
+
+    assert!(adopt(&ctx(&exec, &sink, &j), &hub).await.ok);
+    let state = store.load().await.unwrap();
+    let st = state.stacks.get("kyu").unwrap();
+    assert_eq!(st.applied_hash, "deployed-hash");
+    assert_eq!(st.route_file.as_deref(), Some("kyu.yml"));
+    assert!(!st.enabled, "re-adoption does not re-enable a parked stack");
+    assert_eq!(st.natives.len(), 1);
+}

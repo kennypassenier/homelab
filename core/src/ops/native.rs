@@ -226,24 +226,35 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
         let mut apps: Vec<String> = natives.iter().map(|n| n.unit.clone()).collect();
         apps.sort();
         apps.dedup();
-        state.stacks.insert(
-            m.stack_name.clone(),
-            crate::state::StackState {
-                applied_source: None,
+        let fresh = crate::state::StackState {
+            applied_source: None,
+            vmid: m.vmid,
+            hostname: m.hostname.clone(),
+            apps,
+            applied_at: ctx.now_unix,
+            last_backup,
+            applied_hash: String::new(),
+            manifest: None,
+            natives,
+            enabled: true,
+            incomplete_step: None,
+            route_file: None,
+            extra_route_files: Vec::new(),
+        };
+        // fix-164: install-native re-adopts every time; a stack a deploy
+        // already recorded keeps its manifest, hash, routes, enabled flag and
+        // the rest, and only its natives, apps, vmid and hostname change.
+        let record = match state.stacks.get(&m.stack_name) {
+            Some(prev) => crate::state::StackState {
                 vmid: m.vmid,
                 hostname: m.hostname.clone(),
-                apps,
-                applied_at: ctx.now_unix,
-                last_backup,
-                applied_hash: String::new(),
-                manifest: None,
-                natives,
-                enabled: true,
-                incomplete_step: None,
-                route_file: None,
-                extra_route_files: Vec::new(),
+                apps: fresh.apps,
+                natives: fresh.natives,
+                ..prev.clone()
             },
-        );
+            None => fresh,
+        };
+        state.stacks.insert(m.stack_name.clone(), record);
         store.save(state).await?;
         Ok(StepOutcome::Changed)
     });

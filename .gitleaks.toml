@@ -30,3 +30,17 @@ condition = "AND"
 paths = ['''^captured/gateway/cloudflare-access\.json$''', '''^core/tests/edge_tests\.rs$''']
 regexTarget = "line"
 regexes = ['''"token_id": "a836cb28-4c6e-440c-ac2b-b4317ee0b44c"''']
+
+[[allowlists]]
+description = "Dashboard parity tests: a fake OpenSSH key body (not a key: ssh-keygen refuses it), a base64 of 'secret-that-is-not-a-key', and a dummy bearer in a masked log line"
+condition = "AND"
+paths = ['''^admin/tests/parity_tests\.rs$''']
+regexTarget = "line"
+regexes = ['''BEGIN OPENSSH PRIVATE KEY''', '''c2VjcmV0LXRoYXQtaXMtbm90LWEta2V5''', '''Bearer abcdef0123456789''']
+
+[[allowlists]]
+description = "Cloudflare Access application AUD: a public identifier (it is in every Access redirect URL and JWT), not a secret"
+condition = "AND"
+paths = ['''^stacks/admin/admin/admin\.service$''', '''^stacks/admin/rootfs/etc/homelab-admin/config\.toml$''']
+regexTarget = "line"
+regexes = ['''(HOMELAB_ADMIN_ACCESS_AUD=|access_aud = ")[0-9a-f]{64}''']

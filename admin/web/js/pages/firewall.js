@@ -8,7 +8,6 @@ import { agoEl, setAgo } from "../ago.js";
 import {
   badgeCell,
   bindTableUrl,
-  errorBox,
   fetchJson,
   h,
   tableBlock,
@@ -25,13 +24,13 @@ import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
  */
 export function mount(root) {
   const ago = agoEl("read");
-  const err = h("div");
   const head = h("p", { class: "measured" });
   const stacks = tableBlock({
     remember: "firewall-stacks",
     caption: "Each stack's firewall",
     search: "Search stacks",
     state: "loading",
+    nothing: "The working copy holds no stack files.",
     columns: [
       { label: "vmid", sort: "number" },
       { label: "Stack", sort: "text" },
@@ -53,6 +52,7 @@ export function mount(root) {
     caption: "Every rule of every stack",
     search: "Search rules",
     state: "loading",
+    nothing: "No stack declares a firewall rule.",
     pageSize: 50,
     pageSizes: "25,50,100,250",
     columns: [
@@ -81,7 +81,6 @@ export function mount(root) {
       "What each container's Proxmox firewall lets through, from the stack files in the working copy. Change a stack's rules on its own Firewall tab.",
     ),
     head,
-    err,
     stacks.wrap,
     h("h2", null, "Who may reach whom"),
     h(
@@ -104,20 +103,19 @@ export function mount(root) {
   const abort = new AbortController();
 
   const load = async () => {
-    stacksTable?.state("loading");
-    rulesTable?.state("loading");
+    const words = "Reading the stack files in the working copy…";
+    stacks.loading({ words });
+    rules.loading({ words });
     const r = await fetchJson(
       "/data/firewall",
       "the fleet's firewall",
       abort.signal,
     );
     if (!r.ok) {
-      err.replaceChildren(errorBox(r.error));
-      stacksTable?.state("failed");
-      rulesTable?.state("failed");
+      stacks.failed(r.error);
+      rules.failed(r.error);
       return;
     }
-    err.replaceChildren();
     head.textContent = r.body.head
       ? `Read from the working copy at ${String(r.body.head.commit).slice(0, 10)} · ${r.body.head.subject}`
       : "";
@@ -150,8 +148,7 @@ export function mount(root) {
         ),
       ),
     );
-    stacksTable?.refresh();
-    stacksTable?.state("ready");
+    stacks.ready();
     rules.tbody.replaceChildren(
       ...ruleRows(r.body.matrix?.rules ?? []).map((x) =>
         h(
@@ -173,8 +170,7 @@ export function mount(root) {
         ),
       ),
     );
-    rulesTable?.refresh();
-    rulesTable?.state("ready");
+    rules.ready();
     const m = r.body.matrix;
     detachMatrix();
     if (m) {
@@ -183,6 +179,7 @@ export function mount(root) {
         remember: "firewall-matrix",
         caption: "Row may reach column on",
         search: "Search the matrix",
+        nothing: "No stack has an address to reach.",
         columns: [
           { label: "From ↓ / to →", sort: "text" },
           ...cols.map((c) => ({ label: c, sort: "text" })),

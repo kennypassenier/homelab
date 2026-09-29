@@ -6,7 +6,6 @@ import { agoEl, setAgo } from "../ago.js";
 import {
   badgeCell,
   bindTableUrl,
-  errorBox,
   h,
   slowReport,
   tableBlock,
@@ -25,6 +24,7 @@ export function mount(root) {
     caption: "Doctor checks",
     search: "Search checks",
     state: "loading",
+    nothing: "The doctor answered with no checks.",
     columns: [
       { label: "Check", sort: "text" },
       {
@@ -44,12 +44,10 @@ export function mount(root) {
   );
   const overall = h("span", { class: "state" });
   const status = h("p", { class: "measured", role: "status" });
-  const err = h("div");
   const ago = agoEl("read");
   root.replaceChildren(
     h("div", { class: "title-row" }, h("h1", null, "Doctor"), overall, refresh),
     status,
-    err,
     t.wrap,
     h("p", null, ago),
   );
@@ -58,8 +56,6 @@ export function mount(root) {
   const unbind = bindTableUrl(table, "doctor");
   /** @type {AbortController | null} */
   let abort = null;
-  /** @type {ReturnType<typeof setInterval> | undefined} */
-  let timer;
 
   const load = async () => {
     abort?.abort();
@@ -67,24 +63,17 @@ export function mount(root) {
     abort = mine;
     const began = Date.now();
     refresh.setAttribute("disabled", "");
-    table?.state("loading");
-    err.replaceChildren();
-    const waiting = () => {
-      const s = Math.round((Date.now() - began) / 1000);
-      status.textContent = `Asking the host… ${humanDuration(s)} so far; the doctor takes about 30 s.`;
-    };
-    waiting();
-    clearInterval(timer);
-    timer = setInterval(waiting, 1000);
+    // The table's status line counts; this line says what runs.
+    t.loading({ words: "Asking the host to run the doctor…", expect: 30 });
+    status.textContent = "The doctor is running on the host.";
     try {
       const r = await slowReport("/data/doctor", "the doctor", mine.signal);
       if (mine.signal.aborted) return;
       const took = humanDuration((Date.now() - began) / 1000);
       if (!r.ok) {
-        err.replaceChildren(errorBox(r.error));
+        t.failed(r.error);
         status.textContent = `Failed after ${took}.`;
         overall.replaceChildren();
-        table?.state("failed");
         return;
       }
       const hl = health(r.report.overall);
@@ -103,14 +92,10 @@ export function mount(root) {
           ),
         ),
       );
-      table?.refresh();
-      table?.state("ready");
+      t.ready();
       setAgo(ago, Date.now() / 1000);
     } finally {
-      if (abort === mine) {
-        clearInterval(timer);
-        refresh.removeAttribute("disabled");
-      }
+      if (abort === mine) refresh.removeAttribute("disabled");
     }
   };
 
@@ -120,7 +105,6 @@ export function mount(root) {
   void load().catch(() => {});
   return () => {
     abort?.abort();
-    clearInterval(timer);
     root.removeEventListener("kp-datatable-retry", retry);
     unbind();
     detach();

@@ -17,6 +17,16 @@ pick <field> <value> | check <field> on|off | edit <field> <file|-> | \
 row add|edit|up|down|delete [n|key] | press next|back|confirm|save|cancel|default | \
 close | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
 
+/// What the line may print for a command besides its own answer. The host
+/// broadcasts every log line, transfer, fleet snapshot and question to every
+/// client on the line; a `homelab ui` step printed "fleet: 15 stack(s)
+/// managed" and "CHECK asking each container…" between its answers (Kenny,
+/// 2026-09-29), so a UI step prints only its answer and the dashboard's
+/// notes to it (paused, stopped), plus a first-use certificate pin.
+pub fn quiet_line(command: &homelab_proto::Command) -> bool {
+    matches!(command, homelab_proto::Command::Ui { .. })
+}
+
 fn usage() -> String {
     format!("usage: homelab ui {STEPS} [--json]")
 }
@@ -528,6 +538,19 @@ mod tests {
         assert!(e.contains("stopped by the viewer kenny"), "{e}");
         assert!(e.contains("plan   1 of 2 steps done · changed"), "{e}");
         assert!(e.contains("next press Confirm"), "{e}");
+    }
+
+    #[test]
+    fn follow_a_ui_step_keeps_the_line_quiet_and_other_verbs_do_not() {
+        use homelab_proto::Command;
+        let step = Command::Ui {
+            step: UiStep::Goto {
+                path: "/app/".into(),
+            },
+        };
+        assert!(quiet_line(&step));
+        assert!(!quiet_line(&Command::Ping));
+        assert!(!quiet_line(&Command::PatchFleet));
     }
 
     #[test]

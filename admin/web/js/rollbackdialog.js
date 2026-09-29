@@ -64,6 +64,7 @@ export async function openRollback(stack) {
     remember: "rollback-commits",
     caption: `Commits that touched stacks/${stack}`,
     search: "Search commits",
+    nothing: "No commits to go back to.",
     columns: [
       { label: "When", sort: "time" },
       { label: "Commit", sort: "text" },
@@ -104,6 +105,7 @@ export async function openRollback(stack) {
     remember: "rollback-units",
     caption: "Native units",
     search: "Search units",
+    nothing: "This stack declares no native units.",
     columns: [
       { label: "Unit", sort: "text" },
       { label: "Roll back", sort: "text" },

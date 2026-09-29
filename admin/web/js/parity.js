@@ -220,6 +220,23 @@ export function versionNotes(v) {
 }
 
 /**
+ * A tab that outlived its dashboard (Kenny, 2026-09-29: after 3.63.1 was
+ * installed his open tab still drew 3.63.0's bar). The page is one
+ * document that never reloads while he moves between pages, so a new
+ * release of the dashboard reaches it only when the page notices the
+ * server's version moved and loads again.
+ * @param {string | null} loadedAs the dashboard version this page was
+ *   served by (its first read)
+ * @param {string | null | undefined} serving the version the dashboard
+ *   answers with now
+ * @returns {string | null} the words for the banner, or null when current
+ */
+export function outdatedPage(loadedAs, serving) {
+  if (!loadedAs || !serving || loadedAs === serving) return null;
+  return `The dashboard was updated to ${serving}; this page still runs ${loadedAs}.`;
+}
+
+/**
  * The apply plan in words, and why it cannot run when it cannot.
  * @param {{deploy: string[], new: string[], unchanged: string[],
  *   destroy: string[], ephemeral: string[], broken: [string, string][]}} p

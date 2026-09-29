@@ -7,7 +7,6 @@ import { agoEl, setAgo } from "../ago.js";
 import {
   badgeCell,
   bindTableUrl,
-  errorBox,
   fetchReport,
   h,
   tableBlock,
@@ -37,6 +36,7 @@ export function mount(root) {
     caption: "Incidents",
     search: "Search incidents",
     state: "loading",
+    nothing: "No incidents: no operation has failed.",
     columns: [
       { label: "When", sort: "time" },
       { label: "Operation", sort: "text" },
@@ -49,6 +49,7 @@ export function mount(root) {
     caption: `History, last ${DAYS} days`,
     search: "Search history",
     state: "loading",
+    nothing: `Nothing ran in the last ${DAYS} days.`,
     columns: [
       { label: "Started", sort: "time" },
       { label: "What", sort: "text" },
@@ -63,8 +64,6 @@ export function mount(root) {
       { label: "Detail", sort: "text" },
     ],
   });
-  const incErr = h("div");
-  const histErr = h("div");
   const incAgo = agoEl("read");
   const histAgo = agoEl("read");
   root.replaceChildren(
@@ -79,11 +78,9 @@ export function mount(root) {
       ),
     ),
     h("h2", null, "Incidents"),
-    incErr,
     inc.wrap,
     h("p", null, incAgo),
     h("h2", null, "History"),
-    histErr,
     hist.wrap,
     h("p", null, histAgo),
   );
@@ -95,18 +92,16 @@ export function mount(root) {
   const abort = new AbortController();
 
   const loadIncidents = async () => {
-    incTable?.state("loading");
+    inc.loading({ words: "Reading the incidents from the host…" });
     const r = await fetchReport(
       "/data/incidents",
       "the incidents",
       abort.signal,
     );
     if (!r.ok) {
-      incErr.replaceChildren(errorBox(r.error));
-      incTable?.state("failed");
+      inc.failed(r.error);
       return;
     }
-    incErr.replaceChildren();
     const names = /** @type {string[]} */ (r.report?.incidents ?? []);
     inc.tbody.replaceChildren(
       ...incidentRows(names).map((x) =>
@@ -120,13 +115,12 @@ export function mount(root) {
         ),
       ),
     );
-    incTable?.refresh();
-    incTable?.state("ready");
+    inc.ready();
     setAgo(incAgo, Date.now() / 1000);
   };
 
   const loadHistory = async () => {
-    histTable?.state("loading");
+    hist.loading({ words: "Reading the history from the host…" });
     const since = Math.floor(Date.now() / 1000) - DAYS * 86400;
     const r = await fetchReport(
       `/data/history?since=${since}`,
@@ -134,11 +128,9 @@ export function mount(root) {
       abort.signal,
     );
     if (!r.ok) {
-      histErr.replaceChildren(errorBox(r.error));
-      histTable?.state("failed");
+      hist.failed(r.error);
       return;
     }
-    histErr.replaceChildren();
     const entries = r.report?.entries ?? [];
     hist.tbody.replaceChildren(
       ...historyRows(entries).map((x) =>
@@ -159,8 +151,7 @@ export function mount(root) {
         ),
       ),
     );
-    histTable?.refresh();
-    histTable?.state("ready");
+    hist.ready();
     setAgo(histAgo, Date.now() / 1000);
   };
 

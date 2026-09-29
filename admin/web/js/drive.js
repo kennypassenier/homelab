@@ -16,6 +16,8 @@
 // a tab that follows shows "Next: <step>" with the server's countdown,
 // marks the step's target, and offers Pause, Continue and Stop; Claude's
 // plan, when it sent one, is listed beside the page (driveannounce.js).
+// A simulated "Claude" cursor glides to that target during the countdown,
+// clicks at 0 and sits in a field while Claude types (drivecursor.js).
 
 import { openAction } from "./actiondialog.js";
 import { notify } from "./actui.js";
@@ -30,6 +32,7 @@ import {
   mark,
   unmark,
 } from "./driveannounce.js";
+import { makeCursor } from "./drivecursor.js";
 import { openDriven } from "./editdrive.js";
 import {
   FOLLOW_KEY,
@@ -122,6 +125,7 @@ export function mountFollow(region, ctx) {
   /** @type {import("./driveannounce.js").Bar | null} */
   let dialogBar = null;
   const clock = countdown();
+  const cursor = makeCursor();
 
   const idleText = () =>
     `${badgeText(state, now()) ?? "Claude drove this form"}. Your own input waits until Claude is done.`;
@@ -146,6 +150,11 @@ export function mountFollow(region, ctx) {
     region.dataset.driving = String(!!text);
     region.dataset.following = String(following);
     setDriven(following && !!text);
+    // From the first announcement (Claude may not be driving yet) until
+    // done, Stop or Live view off.
+    cursor.show(
+      following && (!!text || !!state?.announce) && !state?.stopped_by,
+    );
     banner();
     paintLive();
   };
@@ -219,6 +228,7 @@ export function mountFollow(region, ctx) {
           input.closest(".kp-field")
         );
         wrap?.classList.add("drive-focus");
+        cursor.sit(wrap ?? input);
         ctl.set(op.name, "", op.id);
         const ms = letterDelay(op.text);
         for (let i = 1; i <= op.text.length; i += 1) {
@@ -271,7 +281,15 @@ export function mountFollow(region, ctx) {
       case "highlight":
         // Only while the step is still announced: a step already taken
         // leaves no mark behind.
-        if (state?.announce) mark(findTarget(op.step, ctl, state));
+        if (state?.announce) {
+          const a = state.announce;
+          const el = mark(findTarget(op.step, ctl, state));
+          if (a.countdown)
+            cursor.glide(el, a.id, a.total_ms, clock.left, () =>
+              Boolean(state?.paused_by),
+            );
+          else cursor.sit(el);
+        }
         return;
     }
   };
@@ -333,7 +351,10 @@ export function mountFollow(region, ctx) {
   listen("drive", (/** @type {import("./driveview.js").DriveEvent} */ ev) => {
     state = ev.state;
     clock.set(ev.state);
-    if ((ev.kind ?? "step") === "step") unmark();
+    if ((ev.kind ?? "step") === "step") {
+      if (following && ev.applied) cursor.stepped();
+      unmark();
+    }
     paint();
     queue = queue.then(() => play(ev)).catch(() => {});
   });

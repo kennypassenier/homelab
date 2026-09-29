@@ -828,6 +828,70 @@ td.stack-flags {
   display: none;
 }
 
+/* ==== BEGIN data tables: toolbar, sort line, states (Kenny 2026-09-29) ====
+   The search takes the toolbar's width, as in kp's demo; kp's own
+   controls (Filters, the column menu) keep their size beside it. */
+.kp-datatable__bar > .kp-datatable__search {
+  flex: 1 1 20rem;
+  min-inline-size: 0;
+}
+/* The sort summary on its own line under the toolbar (dom.js tableBlock):
+   one line, cut with an ellipsis (the whole text in its title), and kp's
+   reset beside it keeping its place while hidden, so sorting on more
+   columns never moves the search or the rows. */
+.kp-datatable__bar.table-sortline {
+  flex-wrap: nowrap;
+  padding-block-start: 0;
+  min-block-size: calc(
+    var(
+        --kp-button-height-sm,
+        max(1.75rem, calc(var(--kp-control-height, 2.25rem) - 0.5rem))
+      ) +
+      var(--kp-datatable-bar-padding-block, var(--kp-space-sm, 0.5rem))
+  );
+}
+.table-sortline > .kp-datatable__sort-summary {
+  flex: 1 1 0;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-sortline > [data-kp-datatable-sort-reset] {
+  flex: 0 0 auto;
+}
+.table-sortline > [data-kp-datatable-sort-reset][data-off] {
+  visibility: hidden;
+}
+/* The loading line: kp's spinner, then the words; the seconds are
+   tabular, so the count ticking never moves the words after it. */
+.kp-datatable__status {
+  font-variant-numeric: tabular-nums;
+}
+/* kp's failed slot and empty box inside the table's frame. */
+.kp-datatable > .table-failed {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  margin: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 0.75rem);
+}
+.kp-datatable > .table-failed[hidden] {
+  display: none;
+}
+.kp-datatable > .table-failed p {
+  margin: 0;
+}
+.kp-datatable > .table-failed .kp-button {
+  margin-block-start: 4px;
+}
+.kp-datatable > .kp-empty {
+  margin: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 0.75rem);
+}
+.kp-datatable > .kp-empty > p {
+  margin: 0 0 6px;
+}
+/* ==== END data tables ==== */
+
 /* The bar's icon buttons (the bell, the shortcut sheet) wear the bar's
    own ink, as kp's theme button beside them does: a ghost button's ink is
    the page's foreground, which on a bar with its own plate (cyberpunk's
@@ -836,6 +900,24 @@ td.stack-flags {
 .kp-nav .kp-button--ghost {
   --kp-btn-fg: currentColor;
   color: inherit;
+}
+/* Hovered, kp's registers lay the page's hover plate under it (nostromo's
+   card, solstice's muted, high-contrast's inverse): the bar's ink on the
+   page's plate read 1.0 to 1.7:1 (measured 2026-09-29). In the bar the
+   hover is a frame in the bar's ink instead, on the bar's own plate. See
+   the kp-themes report (nav-bar ghost buttons, hover). */
+.kp-nav .kp-button--ghost:is(:hover, :focus-visible):not(:disabled) {
+  background: transparent;
+  border-color: currentColor;
+  box-shadow: none;
+  filter: none;
+  text-shadow: none;
+}
+/* …and no register's sweep plate (phantom's red ::after under the bar's
+   white ink read 3.56:1). */
+.kp-nav .kp-button--ghost:is(:hover, :focus-visible):not(:disabled)::before,
+.kp-nav .kp-button--ghost:is(:hover, :focus-visible):not(:disabled)::after {
+  background: transparent;
 }
 .kp-nav .link {
   color: inherit;
@@ -1053,3 +1135,94 @@ td.stack-flags {
   align-items: flex-start;
   gap: 0.25rem;
 }
+
+/* ==== BEGIN Live view cursor (live-cursor, Kenny 2026-09-29) ====
+   Claude's simulated pointer in a tab that follows: a fixed, zero-size
+   overlay (a manual popover, so it also shows above a modal dialog) that
+   takes no pointer events and no room; the pointer and its click ring move
+   by transform only. Theme tokens only. */
+.drive-cursor,
+.drive-cursor[popover] {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 60;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+/* Two classes: above `.drive-cursor[popover]`. */
+.drive-cursor.drive-cursor--on {
+  opacity: 1;
+}
+.drive-cursor__pointer,
+.drive-cursor__ring {
+  position: absolute;
+  inset: 0 auto auto 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.drive-cursor__pointer {
+  display: flex;
+  align-items: flex-start;
+  /* The arrow's tip (1, 1 in its box) sits on the point. */
+  margin: -1px 0 0 -1px;
+}
+.drive-cursor__arrow {
+  display: block;
+  width: 20px;
+  height: 24px;
+  overflow: visible;
+  filter: drop-shadow(
+    0 2px 3px color-mix(in srgb, var(--foreground) 35%, transparent)
+  );
+  transform-origin: 1px 1px;
+  transition: transform 0.12s ease;
+}
+.drive-cursor__arrow path {
+  fill: var(--primary);
+  stroke: var(--primary-foreground);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.drive-cursor__pointer--down .drive-cursor__arrow {
+  transform: scale(0.82);
+}
+.drive-cursor__label {
+  margin: 16px 0 0 -2px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--primary);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--foreground) 25%, transparent);
+  color: var(--primary-foreground);
+  font-family: var(--theme-font-body, inherit);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.drive-cursor__ring {
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  margin: -18px 0 0 -18px;
+  border: 3px solid var(--primary);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--primary-foreground) 70%, transparent);
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drive-cursor,
+  .drive-cursor__arrow {
+    transition: none;
+  }
+}
+/* ==== END Live view cursor ==== */

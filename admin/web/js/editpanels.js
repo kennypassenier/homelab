@@ -409,6 +409,7 @@ function drawFirewall(panel, stack, e, reload) {
     remember: "stack-firewall",
     caption: `Firewall rules of ${stack}, read top to bottom`,
     search: "Search rules",
+    nothing: "No rules yet: the policies above decide everything.",
     columns: [
       { label: "#", sort: "number" },
       { label: "Direction", sort: "text", filter: "choice" },

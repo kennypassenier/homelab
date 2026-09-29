@@ -3,14 +3,7 @@
 
 import { agoEl, setAgo } from "../ago.js";
 import { humanMb } from "../fleet.js";
-import {
-  bindTableUrl,
-  errorBox,
-  fetchJson,
-  h,
-  tableBlock,
-  td,
-} from "../dom.js";
+import { bindTableUrl, fetchJson, h, tableBlock, td } from "../dom.js";
 import { openImport } from "../importstack.js";
 import { openNewStack } from "../newstack.js";
 import { sortKeys } from "../sortkeys.js";
@@ -27,7 +20,6 @@ import {
  */
 export function mount(root, ctx) {
   const keys = sortKeys();
-  const err = h("div");
   const note = h("p", { class: "measured", role: "status" });
   const ago = agoEl("read");
   const t = tableBlock({
@@ -35,6 +27,8 @@ export function mount(root, ctx) {
     caption: "Presets",
     search: "Search presets",
     state: "loading",
+    nothing:
+      "No presets: the working copy's presets/ directory is empty or missing.",
     columns: [
       { label: "Preset", sort: "text" },
       { label: "Memory", sort: "size" },
@@ -68,7 +62,6 @@ export function mount(root, ctx) {
       h("span", { class: "actions-row" }, importBtn, newStack),
     ),
     note,
-    err,
     t.wrap,
     h("p", null, ago),
   );
@@ -77,14 +70,12 @@ export function mount(root, ctx) {
   const unbind = bindTableUrl(table, "presets");
   const abort = new AbortController();
   const load = async () => {
-    table?.state("loading");
+    t.loading({ words: "Reading the presets from the working copy…" });
     const r = await fetchJson("/data/presets", "the presets", abort.signal);
     if (!r.ok) {
-      err.replaceChildren(errorBox(r.error));
-      table?.state("failed");
+      t.failed(r.error);
       return;
     }
-    err.replaceChildren();
     const list = r.body.presets ?? [];
     note.textContent = r.body.working_copy
       ? `${list.length} preset(s) in the repository's presets/ directory.`
@@ -106,8 +97,7 @@ export function mount(root, ctx) {
         );
       }),
     );
-    table?.refresh();
-    table?.state("ready");
+    t.ready();
     setAgo(ago, Date.now() / 1000);
   };
   const retry = () => void load().catch(() => {});

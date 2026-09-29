@@ -114,6 +114,7 @@ export function mount(root) {
     caption: "Notifications, newest first",
     search: "Search notifications",
     state: "loading",
+    nothing: "No notifications yet.",
     columns: [
       { label: "When", sort: "time" },
       { label: "Kind", sort: "text", order: KIND_ORDER, filter: "choice" },
@@ -134,6 +135,8 @@ export function mount(root) {
     remember: "notify-stacks",
     caption: "Per stack",
     search: "Search stacks",
+    state: "loading",
+    nothing: "The host manages no stacks yet.",
     columns: [
       { label: "Stack", sort: "text" },
       { label: "Unread", sort: "number" },
@@ -325,7 +328,13 @@ export function mount(root) {
   };
   const render = () => {
     const snap = act.notices;
-    if (!snap) return;
+    if (!snap) {
+      if (act.failed.notices) {
+        notices.failed(act.failed.notices);
+        stacks.failed(act.failed.notices);
+      }
+      return;
+    }
     push.input.checked = snap.settings.push;
     if (document.activeElement !== longInput)
       longInput.value = String(Math.round(snap.settings.long_action_s / 60));
@@ -335,7 +344,8 @@ export function mount(root) {
     markAll.disabled = snap.unread === 0;
     const rows = noticeRows(snap.notices);
     const sig = JSON.stringify(rows.map((r) => [r.id, r.read]));
-    if (sig !== noticesSig) {
+    const noticesChanged = sig !== noticesSig;
+    if (noticesChanged) {
       noticesSig = sig;
       notices.tbody.replaceChildren(
         ...rows.map((r) =>
@@ -380,13 +390,13 @@ export function mount(root) {
           ),
         ),
       );
-      nTable?.refresh();
     }
-    nTable?.state("ready");
+    notices.ready({ refresh: noticesChanged });
     const names = (current().fleet?.stacks ?? []).map((s) => s.name);
     const mrows = stackMuteRows(names, snap);
     const msig = JSON.stringify(mrows.map((r) => r.stack));
-    if (msig !== stacksSig) {
+    let changed = msig !== stacksSig;
+    if (changed) {
       stacksSig = msig;
       stackRows.clear();
       stacks.tbody.replaceChildren(
@@ -409,7 +419,6 @@ export function mount(root) {
     }
     // A toggle changes its row in place: the same switch stays under the
     // pointer and keeps the keyboard focus (Kenny, 2026-09-29).
-    let changed = false;
     for (const r of mrows) {
       const row = stackRows.get(r.stack);
       if (!row) continue;
@@ -424,16 +433,25 @@ export function mount(root) {
         changed = true;
       }
     }
-    if (changed) sTable?.refresh();
+    stacks.ready({ refresh: changed });
   };
   const off = onAct("notices", render);
   const unsub = subscribe(render);
   const timer = setInterval(paintSnooze, 1000);
-  if (!act.notices) void loadNotices();
+  const first = () => {
+    if (act.notices) return;
+    const words = "Reading the notifications from the dashboard…";
+    notices.loading({ words });
+    stacks.loading({ words });
+    void loadNotices();
+  };
+  root.addEventListener("kp-datatable-retry", first);
+  first();
   render();
   return () => {
     off();
     unsub();
+    root.removeEventListener("kp-datatable-retry", first);
     clearInterval(timer);
     unbindN();
     unbindS();

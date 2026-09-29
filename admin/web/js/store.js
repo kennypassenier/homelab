@@ -99,6 +99,11 @@ export const ACT_EVENTS = /** @type {const} */ ([
   "transfer",
   "release",
   "link",
+  // Not the server's: the live channel opened again after it dropped (the
+  // dashboard restarted, a release installed). chassis sends `resync` only
+  // to a browser that had heard an event before; this comes on every
+  // reconnect.
+  "reopened",
 ]);
 
 /** @type {Map<string, Set<(data: any) => void>>} */
@@ -123,6 +128,10 @@ export function listen(name, f) {
 /** Open the live channel and read the first snapshot. */
 export function start() {
   const events = new EventSource("/events");
+  let opens = 0;
+  events.addEventListener("open", () => {
+    if (opens++ > 0) listeners.get("reopened")?.forEach((f) => f(null));
+  });
   for (const name of ACT_EVENTS)
     events.addEventListener(name, (e) => {
       /** @type {any} */

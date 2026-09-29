@@ -10,7 +10,6 @@ import { doctorRows } from "../doctor.js";
 import {
   badgeCell,
   bindTableUrl,
-  elapsed,
   errorBox,
   fetchJson,
   fillFacts,
@@ -39,12 +38,12 @@ export function mount(root, ctx) {
   const facts = h("dl", { class: "facts", id: "host-facts" });
   const liveAgo = agoEl("measured", null, { live: true });
   const guestsAgo = agoEl("read");
-  const guestErr = h("div");
   const guests = tableBlock({
     remember: "guests",
     caption: "Containers on the host (pct list)",
     search: "Search containers",
     state: "loading",
+    nothing: "The host lists no containers.",
     columns: [
       { label: "vmid", sort: "number" },
       { label: "Name", sort: "text" },
@@ -60,7 +59,6 @@ export function mount(root, ctx) {
   });
   // feat-stacks-4: the four host-wide actions.
   const actions = mountActionsArea({ host: true });
-  const checksErr = h("div");
   const checksAgo = agoEl("read");
   const checksBtn = h(
     "button",
@@ -76,6 +74,7 @@ export function mount(root, ctx) {
     remember: "host-checks",
     caption: "Host checks (from the doctor)",
     search: "Search checks",
+    nothing: "The doctor reported no host-level checks.",
     columns: [
       { label: "Check", sort: "text" },
       {
@@ -102,13 +101,13 @@ export function mount(root, ctx) {
     role: "status",
     id: "host-ping-out",
   });
-  const settingsErr = h("div");
   const settingsAgo = agoEl("read");
   const settingsT = tableBlock({
     remember: "host-toml",
     caption: "host.toml, as the host reads it",
     search: "Search settings",
     state: "loading",
+    nothing: "host.toml sets nothing.",
     columns: [
       { label: "Group", sort: "text", filter: "choice" },
       { label: "Key", sort: "text" },
@@ -178,19 +177,16 @@ export function mount(root, ctx) {
       h("a", { href: "/app/settings" }, "the Settings page"),
       " changes them.",
     ),
-    settingsErr,
     settingsT.wrap,
     h("p", null, settingsAgo),
     h("h2", null, "Templates"),
     h("div", { class: "actions-row" }, tplBtn, tplBuild),
     tplOut,
     h("h2", null, "Containers"),
-    guestErr,
     guests.wrap,
     h("p", null, guestsAgo),
     h("div", { class: "title-row" }, h("h2", null, "Host checks"), checksBtn),
     checksNote,
-    checksErr,
     checks.wrap,
     h("p", null, checksAgo),
   );
@@ -258,18 +254,16 @@ export function mount(root, ctx) {
   pingBtn.addEventListener("click", () => void ping().catch(() => {}));
 
   const loadSettings = async () => {
-    settingsTable?.state("loading");
+    settingsT.loading({ words: "Reading host.toml from the host…" });
     const r = await fetchJson(
       "/data/host-settings",
       "the host settings",
       abort.signal,
     );
     if (!r.ok) {
-      settingsErr.replaceChildren(errorBox(r.error));
-      settingsTable?.state("failed");
+      settingsT.failed(r.error);
       return;
     }
-    settingsErr.replaceChildren();
     settingsT.tbody.replaceChildren(
       ...hostSettingRows(r.body.page).map((x) =>
         h(
@@ -283,8 +277,7 @@ export function mount(root, ctx) {
         ),
       ),
     );
-    settingsTable?.refresh();
-    settingsTable?.state("ready");
+    settingsT.ready();
     setAgo(settingsAgo, r.body.measured_at ?? Date.now() / 1000);
   };
 
@@ -349,47 +342,44 @@ export function mount(root, ctx) {
     );
     guestTable?.refresh();
   };
-  const loadGuests = async () => {
+  /** @param {boolean} [show] a first read or a retry: say it loads (the
+   * timer's reads refresh quietly) */
+  const loadGuests = async (show = false) => {
+    if (show || lastGuests.length === 0)
+      guests.loading({
+        words: "Asking the host for its containers (pct list)…",
+      });
     const r = await fetchJson(
       "/data/host/guests",
       "the host's containers",
       abort.signal,
     );
     if (!r.ok) {
-      guestErr.replaceChildren(errorBox(r.error));
-      guestTable?.state("failed");
+      guests.failed(r.error);
       return;
     }
-    guestErr.replaceChildren();
     lastGuests = r.body.guests ?? [];
     paintGuests();
-    guestTable?.state("ready");
+    guests.ready();
     setAgo(guestsAgo, r.body.measured_at);
   };
 
   const loadChecks = async () => {
     checksBtn.disabled = true;
     checks.wrap.hidden = false;
-    checksTable?.state("loading");
-    checksErr.replaceChildren();
-    const stop = elapsed((s) => {
-      checksNote.textContent = `Reading… ${humanDuration(s)} so far; the doctor takes about half a minute.`;
-    });
+    checks.loading({ words: "Asking the host to run the doctor…", expect: 30 });
+    checksNote.textContent = "The doctor is running on the host.";
     let r;
-    let secs = 0;
     try {
       r = await slowReport("/data/doctor", "the doctor", abort.signal);
     } finally {
       checksBtn.disabled = false;
-      secs = stop();
     }
     if (!r.ok) {
-      checksErr.replaceChildren(errorBox(r.error));
-      checksTable?.state("failed");
+      const secs = checks.failed(r.error);
       checksNote.textContent = `The doctor did not answer (after ${humanDuration(secs)}).`;
       return;
     }
-    checksErr.replaceChildren();
     const rows = doctorRows({ ...r.report, checks: hostChecks(r.report) });
     checks.tbody.replaceChildren(
       ...rows.map((x) =>
@@ -403,8 +393,7 @@ export function mount(root, ctx) {
         ),
       ),
     );
-    checksTable?.refresh();
-    checksTable?.state("ready");
+    const secs = checks.ready();
     checksNote.textContent = `${rows.length} host-level checks, read in ${humanDuration(secs)}.`;
     setAgo(checksAgo, Date.now() / 1000);
   };
@@ -412,7 +401,7 @@ export function mount(root, ctx) {
 
   const retry = (/** @type {Event} */ e) => {
     if (guests.wrap.contains(/** @type {Node} */ (e.target)))
-      void loadGuests().catch(() => {});
+      void loadGuests(true).catch(() => {});
     else if (settingsT.wrap.contains(/** @type {Node} */ (e.target)))
       void loadSettings().catch(() => {});
     else void loadChecks().catch(() => {});

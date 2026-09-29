@@ -5,7 +5,7 @@
 
 import { openAction } from "./actiondialog.js";
 import { fetchJson, h } from "./dom.js";
-import { versionNotes } from "./parity.js";
+import { outdatedPage, versionNotes } from "./parity.js";
 import { listen } from "./store.js";
 
 /**
@@ -13,10 +13,18 @@ import { listen } from "./store.js";
  * @returns {() => void}
  */
 export function mountVersions(root) {
+  /** The dashboard version that served this page (its first read). */
+  /** @type {string | null} */
+  let loadedAs = null;
+  /** @type {HTMLElement | null} */
+  let outdated = null;
+  /** @type {any} */
+  let last = null;
   /** @param {any} v */
   const paint = (v) => {
+    last = v;
     const n = versionNotes(v);
-    root.hidden = !n.update && !n.older;
+    root.hidden = !n.update && !n.older && !outdated;
     const parts = [];
     if (n.update) {
       const b = h(
@@ -52,20 +60,63 @@ export function mountVersions(root) {
           n.older,
         ),
       );
-    root.replaceChildren(...parts);
+    root.replaceChildren(...(outdated ? [outdated] : []), ...parts);
+  };
+  /** @param {string | null | undefined} serving */
+  const checkOutdated = (serving) => {
+    if (loadedAs == null) {
+      loadedAs = serving ?? null;
+      return;
+    }
+    const words = outdatedPage(loadedAs, serving);
+    if (!words) return;
+    // Nothing of the viewer's is lost: load the new release at once.
+    const typing = document.activeElement?.matches(
+      "input:not([type=checkbox]):not([type=radio]), textarea, select",
+    );
+    if (!document.querySelector("dialog[open]") && !typing) {
+      location.reload();
+      return;
+    }
+    // A dialog or a field in use: say so, and reload on the viewer's word.
+    if (outdated) return;
+    const b = h(
+      "button",
+      { type: "button", class: "kp-button kp-button--primary" },
+      "Reload",
+    );
+    b.addEventListener("click", () => location.reload());
+    outdated = h(
+      "div",
+      {
+        class: "kp-alert kp-alert--warning versions-outdated",
+        role: "status",
+      },
+      h("span", { class: "kp-alert__body" }, words, " "),
+      b,
+    );
+    paint(last);
   };
   const read = async () => {
     const r = await fetchJson("/data/versions", "the versions");
-    if (r.ok) paint(r.body);
+    if (!r.ok) return;
+    paint(r.body);
+    checkOutdated(r.body.dashboard);
   };
   const offRelease = listen("release", (v) => paint(v));
   // The host restarts into another version: read the warnings again.
   const offLink = listen("link", (d) => {
     if (d?.up) void read();
   });
+  // The dashboard itself restarted (a release installed): the live channel
+  // reconnects with a resync; the versions say whether this page is old.
+  const offResync = listen("resync", () => void read());
+  const offReopened = listen("reopened", () => void read());
   void read();
   return () => {
     offRelease();
     offLink();
+    offResync();
+    offReopened();
   };
 }

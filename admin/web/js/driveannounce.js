@@ -250,8 +250,9 @@ function onScreen(el) {
   let x = el;
   while (x && !visible(x)) x = x.parentElement;
   if (!x || x === el) return x;
+  // The menu's own button first: the bar's brand link comes before it.
   return /** @type {HTMLElement} */ (
-    x.querySelector(":scope > button, :scope > a") ?? x
+    x.querySelector(":scope > button") ?? x.querySelector(":scope > a") ?? x
   );
 }
 
@@ -261,14 +262,17 @@ let marked = null;
 /**
  * Mark the step's target until the step is taken (`unmark`).
  * @param {HTMLElement | null} el
+ * @returns {HTMLElement | null} what was marked (the Claude cursor aims
+ *   there): the target, or the button of the closed menu that holds it
  */
 export function mark(el) {
   unmark();
   el = onScreen(el);
-  if (!el) return;
+  if (!el) return null;
   marked = el;
   el.classList.add("drive-target");
   el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  return el;
 }
 
 export function unmark() {

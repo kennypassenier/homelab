@@ -7,7 +7,6 @@ import { agoEl, setAgo } from "../ago.js";
 import {
   badgeCell,
   bindTableUrl,
-  errorBox,
   fetchReport,
   h,
   tableBlock,
@@ -35,6 +34,7 @@ export function mount(root) {
     caption: "Manual checks",
     search: "Search checks",
     state: "loading",
+    nothing: "No manual checks are registered.",
     columns: [
       { label: "Stack", sort: "text", filter: "choice" },
       { label: "App", sort: "text" },
@@ -52,12 +52,10 @@ export function mount(root) {
       { label: "Answer", sort: "text" },
     ],
   });
-  const err = h("div");
   const summary = h("p", { class: "measured" });
   const ago = agoEl("read");
   root.replaceChildren(
     h("h1", null, "Checks"),
-    err,
     summary,
     t.wrap,
     h("p", null, ago),
@@ -68,18 +66,16 @@ export function mount(root) {
   const abort = new AbortController();
 
   const load = async () => {
-    table?.state("loading");
+    t.loading({ words: "Reading the manual checks from the host…" });
     const r = await fetchReport(
       "/data/manual-checks",
       "the manual checks",
       abort.signal,
     );
     if (!r.ok) {
-      err.replaceChildren(errorBox(r.error));
-      table?.state("failed");
+      t.failed(r.error);
       return;
     }
-    err.replaceChildren();
     const now = r.report?.now ?? Math.floor(Date.now() / 1000);
     const rows = checkRows(r.report?.checks ?? [], now);
     const open = rows.filter((x) => x.answer.label !== "ok").length;
@@ -101,8 +97,7 @@ export function mount(root) {
         ),
       ),
     );
-    table?.refresh();
-    table?.state("ready");
+    t.ready();
     setAgo(ago, Date.now() / 1000);
   };
   const retry = () => void load();

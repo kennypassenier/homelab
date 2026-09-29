@@ -26,6 +26,11 @@ const FILES: &[(&str, &[u8])] = &[
     ("js/router.js", include_bytes!("../web/js/router.js")),
     ("js/store.js", include_bytes!("../web/js/store.js")),
     ("js/dom.js", include_bytes!("../web/js/dom.js")),
+    // The words a data table shows while it loads, is empty or failed.
+    (
+        "js/tablestate.js",
+        include_bytes!("../web/js/tablestate.js"),
+    ),
     ("js/activity.js", include_bytes!("../web/js/activity.js")),
     ("js/checks.js", include_bytes!("../web/js/checks.js")),
     ("js/doctor.js", include_bytes!("../web/js/doctor.js")),
@@ -63,6 +68,11 @@ const FILES: &[(&str, &[u8])] = &[
     (
         "js/drivehooks.js",
         include_bytes!("../web/js/drivehooks.js"),
+    ),
+    // Live view cursor: Claude's simulated pointer.
+    (
+        "js/drivecursor.js",
+        include_bytes!("../web/js/drivecursor.js"),
     ),
     ("js/editdrive.js", include_bytes!("../web/js/editdrive.js")),
     (

@@ -19,14 +19,7 @@ import {
   refusalAlarm,
   refusalCallout,
 } from "../actui.js";
-import {
-  bindTableUrl,
-  errorBox,
-  h,
-  stateWord,
-  tableBlock,
-  td,
-} from "../dom.js";
+import { bindTableUrl, h, stateWord, tableBlock, td } from "../dom.js";
 import { formatTime } from "../format.js";
 import {
   DAYS,
@@ -63,6 +56,7 @@ export function mount(root) {
     caption: "Schedules",
     search: "Search schedules",
     state: "loading",
+    nothing: "No schedules yet: New schedule adds one.",
     columns: [
       { label: "Stack", sort: "text", filter: "choice" },
       { label: "Action", sort: "text", filter: "choice" },
@@ -162,8 +156,7 @@ export function mount(root) {
         );
       }),
     );
-    table?.refresh();
-    table?.state("ready");
+    t.ready();
   };
 
   t.tbody.addEventListener("change", async (e) => {
@@ -199,15 +192,19 @@ export function mount(root) {
   add.addEventListener("click", () => void openScheduleForm(null));
 
   const off = onAct("schedules", render);
-  void loadSchedules().then((e) => {
-    if (e) {
-      err.replaceChildren(errorBox(e));
-      table?.state("failed");
-    }
-  });
+  const first = () => {
+    if (!act.schedules)
+      t.loading({ words: "Reading the schedules from the dashboard…" });
+    void loadSchedules().then((e) => {
+      if (e) t.failed(e);
+    });
+  };
+  root.addEventListener("kp-datatable-retry", first);
+  first();
   render();
   return () => {
     off();
+    root.removeEventListener("kp-datatable-retry", first);
     unbind();
     detach();
   };

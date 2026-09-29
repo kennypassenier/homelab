@@ -42,6 +42,7 @@ import {
   attachThemePickers,
   themeMenuMarkup,
 } from "/static/kp/js/theme-picker.js";
+import { attachEffects } from "/static/kp/js/effects.js";
 
 /**
  * @typedef {{navigate: (href: string) => void,
@@ -443,6 +444,10 @@ export function mountChrome(where, ctx) {
   where.nav.append(trigger, mountBell(ctx.navigate), help, themes);
   document.body.append(dialog, sheet);
   attachThemePickers(themes);
+  // The themes' pointer effects (the dark theme's cursor glow) follow the
+  // mouse only once attached; kyu does this, the dashboard never did
+  // (Kenny, 2026-09-29 05:53).
+  attachEffects(document);
   attachPalettes(document, { hotkey: "k", sheetKey: "?" });
 
   /** @type {import("./commands.js").Command[]} */

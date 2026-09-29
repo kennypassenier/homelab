@@ -124,3 +124,128 @@ nothing in kp-themes was changed.
   ("… 42 s so far; the host needs about a minute and a half") above the
   table and keeps a table it fills only on request hidden until the first
   request. Not a CSS override; nothing of kp's is patched for this one.
+
+---
+
+# Second round (2026-09-29, Kenny's findings of 05:39)
+
+Checked against kp-themes main at 3bee5403 (fix-77..80 are on main, not
+released; chassis-rs 2.4.0 still vendors kp-themes 7.2.0). Each item is
+worked around in the dashboard (`admin/web/css/app.css`,
+`admin/web/js/dom.js` `tableBlock`) and marked there as a shim to remove.
+
+## 5. Nav-bar ghost buttons: the hover plate is the page's, not the bar's
+
+- **Component:** nav bar (`.kp-nav`) with `.kp-button--ghost` inside it;
+  fix-77 made the resting state inherit the bar's ink, the hover state was
+  left out.
+- **Where (main 3bee5403):**
+  - `css/nostromo-register.css:445-447` — hover `background: var(--card)`
+  - `css/solstice-register.css:275-277` — hover `background: var(--muted)`
+  - `css/high-contrast-register.css:1177-1181` — hover insets in
+    `--kp-hc-bar-ink` (`var(--background)`), and `:408-409` the `::after` bar
+  - `css/phantom-register.css:538-548` — hover sweeps a `--primary` plate
+    (`::after`) under the button and sets `color: var(--primary-foreground)`
+  - `css/components.css:698-701` — the package hover plate
+    `hsl(from var(--foreground) h s l / 0.08)`, the page's foreground
+- **Repro:** `<nav class="kp-nav">…<button class="kp-button kp-button--ghost">?</button></nav>`
+  with the bar's ink inherited (fix-77); hover the button in nostromo,
+  high-contrast, phantom.
+- **Measured** (the button's ink against the rendered plate under it,
+  hovered, 1280 and 1440 px, homelab dashboard): nostromo 1.12:1,
+  high-contrast 1.00:1, phantom 3.56:1 (white "?" on the red sweep). At rest
+  all 22 themes pass (lowest shade-dark 5.0:1).
+- **Expected:** a control in the bar reads at ≥ 4.5:1 (text) / ≥ 3:1 (icon)
+  in every state, hover and focus included.
+- **Suggested fix:** in `components.css` (and each register that paints a
+  ghost hover), inside the bar:
+  ```css
+  .kp-nav :is(.kp-button--ghost, .kp-icon-button):is(:hover, :focus-visible):not(:disabled) {
+      background: transparent;
+      border-color: currentColor;   /* the hover is a frame in the bar's ink */
+      box-shadow: none;
+  }
+  .kp-nav :is(.kp-button--ghost, .kp-icon-button):is(:hover, :focus-visible)::before,
+  .kp-nav :is(.kp-button--ghost, .kp-icon-button):is(:hover, :focus-visible)::after {
+      background: transparent;      /* no register sweep plate */
+  }
+  ```
+  or give the bar its own hover token derived from the bar ink, and add the
+  hovered state to `tests/nav-ghost.spec.mjs`.
+- **Workaround in the dashboard:** exactly those rules (app.css, after
+  "The bar's icon buttons … wear the bar's own ink").
+
+## 6. Datatable: the multi-sort summary shares the search's row
+
+- **Component:** datatable with `data-kp-sort-multi`.
+- **Where:** `js/datatable.js:1259-1268` — without a consumer's
+  `[data-kp-datatable-sort-summary]` the summary is made and
+  `ensureTopBar().prepend(sortSummary)`: it sits in the toolbar before the
+  search, and `.kp-datatable__sort-summary { flex: 1 1 auto }`
+  (`css/components.css`, "multi-sort summary") makes it grow with its text.
+- **Repro:** a datatable with a search and `data-kp-sort-multi`; Shift+click
+  four headers.
+- **Measured:** at 1440 px the search box was 743 px unsorted ("Not
+  sorted." 615 px beside it) and shrank with every key added; the search box
+  moved under the pointer on every sort (Kenny: "als ik nu veel dingen
+  sort, verschuift de UI ook"). The demo's toolbar gives the search most of
+  the width.
+- **Expected:** sorting never moves the toolbar or the rows; the search keeps
+  its width.
+- **Suggested fix:** create the summary as its own line under the toolbar
+  (a `.kp-datatable__bar` of its own, one line, `text-overflow: ellipsis`,
+  full text in `title`), with the sort reset (`data-kp-datatable-sort-reset`)
+  at its end, hidden by `visibility` while nothing is sorted so the line
+  never changes height. The reset button has no automatic visibility today
+  (`:2806` only handles its click).
+- **Workaround in the dashboard:** `tableBlock` supplies the summary and the
+  reset in their own bar (`.table-sortline`), toggles the reset's
+  `data-off` from the view event; measured: search 1267 of 1390 px (91 %),
+  search, sort line and first row did not move across five sort keys.
+
+## 7. Datatable: busy(text) and the first-load spinner are on main but not released
+
+- **Component:** datatable loading state (fix-80, main 8c2c7f8a).
+- **Where (7.2.0 as vendored by chassis 2.4.0):** `js/datatable.js:1675-1685`
+  — spinner only when `state === 'loading' && all.length > 0`, words always
+  `strings.busy` ("Working…"), rewritten on every render.
+- **Observed:** Kenny, 05:39: "Er staat nog altijd gewoon Working... en de
+  default skeleton dingen. Is te statisch."
+- **Request:** release fix-80 and have chassis-rs vendor it. Two additions
+  that every consumer of a slow read would otherwise build again:
+  1. `busy({ text, since })`: with a start time the table ticks the counter
+     itself ("42 s so far") instead of the consumer calling `busy()` every
+     second (which re-renders the whole table each second).
+  2. The counter outside the live region's announcement (or a polite
+     announcement only when the words change), so a screen reader is not
+     told every second.
+- **Shim in the dashboard:** `tableBlock` → `setBusyText(text)` calls the
+  handle's `busy(text)` when it exists; otherwise it paints exactly what
+  fix-80 paints (spinner, then the words) after each kp render (the
+  `kp-datatable-view` event). Remove when chassis vendors a kp-themes with
+  `busy()`.
+
+## 8. Datatable: the empty and failed slots are half there without a server
+
+- **Component:** datatable (framework-free), `data-kp-datatable-empty`,
+  `data-kp-datatable-failed`, `data-kp-datatable-retry`.
+- **Where:**
+  - `js/datatable.js:1338-1350` — the failed slot (with its retry button) is
+    made only for a `data-kp-server` table; a table whose consumer loads the
+    rows itself and calls `state('failed')` shows nothing but "Showing 0 of 0".
+  - `:1702` — one empty slot for "nothing at all" and "nothing matches";
+    the demo's `#states` draws them apart (different words, different way
+    out), marked "mock".
+  - The failed slot's text is the dictionary's `tableFailed`; there is no
+    way to hand it the reason ("the host did not answer, HTTP 502").
+- **Expected:** every table that can fail has the failed slot with the
+  reason and Try again; the empty slot says "there is nothing yet" and "no
+  row matches the search/filters (N hidden) — clear them" apart.
+- **Suggested fix:** make the failed slot for any table (not only server
+  mode), add `fail(reason?: string | Node)` to the handle, and read two
+  optional children of the empty slot (`data-kp-datatable-empty-none`,
+  `data-kp-datatable-empty-nomatch`) shown by `view().total === 0`.
+- **Workaround in the dashboard:** `tableBlock` puts its own failed slot
+  (label, why, what to do, `data-kp-datatable-retry`) and an empty slot whose
+  words follow the view event (`tablestate.js emptyWords`); kp shows, hides
+  and wires both (native), the dashboard only writes the words.

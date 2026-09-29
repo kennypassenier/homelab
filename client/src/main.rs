@@ -1827,6 +1827,9 @@ async fn rpc_exchange(
     // (Config) may see RpcDone first — wait for the payload before exiting.
     let awaits_payload = matches!(command, Command::GetConfig | Command::GetState);
     let is_ping = matches!(command, Command::Ping);
+    // A UI step prints only its own answer and notes, never the host's
+    // broadcasts (log lines, transfers, the fleet snapshot, questions).
+    let quiet = homelab_client::ui_cli::quiet_line(&command);
     // fix-141: ping and status also name the client's own build.
     let names_builds = matches!(command, Command::Ping | Command::Status);
     let mut payload_seen = false;
@@ -1842,6 +1845,9 @@ async fn rpc_exchange(
     .await
     .unwrap_or_else(|e| die(&e));
     match &link.pinned {
+        Some(
+            homelab_client::link::Pinned::BuiltIn(_) | homelab_client::link::Pinned::FromRepo(_),
+        ) if quiet => {}
         // fix-149: nothing trusted on first use; say where the pin came from.
         Some(homelab_client::link::Pinned::BuiltIn(fp)) => eprintln!(
             "{}● pinned host certificate SHA256:{}, the one this client was built with{}",
@@ -1883,6 +1889,7 @@ async fn rpc_exchange(
             // there is no prompt to draw and the operator may not even be
             // watching. Print it and let the host's timeout do the rest,
             // which lands on Unattended rather than on a guess.
+            ServerMsg::Ask { .. } if quiet => {}
             ServerMsg::Ask { op, step, what, .. } => {
                 eprintln!(
                     "{}? {} :: {} is waiting for a decision — {}{}",
@@ -1901,13 +1908,15 @@ async fn rpc_exchange(
                 // fix-141 (expert panel 2026-09-27,
                 // changes-reach-prod-without-ci): "v3.59.3" named the release
                 // and a hand build alike; the build tells them apart.
-                println!(
-                    "{}● HOST {} · proto {} — link up{}",
-                    C_GREEN,
-                    homelab_client::link::version_label(&version, build.as_deref()),
-                    proto,
-                    C_RESET
-                );
+                if !quiet {
+                    println!(
+                        "{}● HOST {} · proto {} — link up{}",
+                        C_GREEN,
+                        homelab_client::link::version_label(&version, build.as_deref()),
+                        proto,
+                        C_RESET
+                    );
+                }
                 if names_builds {
                     println!(
                         "{}  client {}{}",
@@ -1949,6 +1958,7 @@ async fn rpc_exchange(
                     sent = true;
                 }
             }
+            ServerMsg::Log { .. } | ServerMsg::Transfer { .. } | ServerMsg::State(_) if quiet => {}
             ServerMsg::Log {
                 level, source, msg, ..
             } => {

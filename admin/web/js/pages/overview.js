@@ -60,6 +60,8 @@ export function mount(root, ctx) {
     },
     caption: "Stacks",
     search: "Search stacks",
+    state: "loading",
+    nothing: "The host manages no stacks yet.",
     columns: [
       { label: "vmid", sort: "number" },
       { label: "Stack", sort: "text" },
@@ -131,6 +133,8 @@ export function mount(root, ctx) {
     if (tr?.dataset.stack) ctx.navigate(stackHref(tr.dataset.stack));
   });
 
+  if (!current().fleet)
+    t.loading({ words: "Waiting for the host's report of the fleet…" });
   const render = () => {
     const f = current().fleet;
     if (!f) return;
@@ -171,7 +175,7 @@ export function mount(root, ctx) {
     t.tbody.replaceChildren(...rows);
     // The table sorts the rows it holds; new rows are read again and put
     // in the reader's order.
-    table?.refresh();
+    t.ready();
     if (ticked.length) table?.select(ticked);
     setAgo(ago, f.measured_at);
   };

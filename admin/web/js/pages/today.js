@@ -7,8 +7,6 @@ import { agoEl, setAgo } from "../ago.js";
 import {
   badgeCell,
   bindTableUrl,
-  elapsed,
-  errorBox,
   h,
   slowRead,
   tableBlock,
@@ -30,13 +28,14 @@ export function mount(root) {
     "Read again",
   );
   const note = h("p", { class: "measured", role: "status" });
-  const err = h("div");
   const ago = agoEl("read");
   const items = tableBlock({
     remember: "today",
     caption: "What needs you",
     search: "Search",
     state: "loading",
+    nothing:
+      "Nothing needs you: doctor, the fleet check, the incidents and the manual checks are all clear.",
     columns: [
       {
         label: "Level",
@@ -66,12 +65,12 @@ export function mount(root) {
     { class: "measured", role: "status" },
     "Not run yet on this page.",
   );
-  const checkErr = h("div");
   const checkAgo = agoEl("read");
   const findings = tableBlock({
     remember: "fleet-check",
     caption: "Findings",
     search: "Search findings",
+    nothing: "The fleet check found nothing.",
     columns: [
       {
         label: "Severity",
@@ -88,14 +87,12 @@ export function mount(root) {
     h("div", { class: "title-row" }, h("h1", null, "Today"), read),
     verdict,
     note,
-    err,
     items.wrap,
     unread,
     h("p", null, ago),
     h("div", { class: "title-row" }, h("h2", null, "Fleet check"), checkBtn),
     checkAbout,
     checkNote,
-    checkErr,
     findings.wrap,
     h("p", null, checkAgo),
   );
@@ -111,30 +108,35 @@ export function mount(root) {
 
   const load = async () => {
     read.disabled = true;
-    table?.state("loading");
-    err.replaceChildren();
-    const waiting = h("p", { class: "measured", role: "status" });
-    verdict.replaceChildren(waiting);
-    const stop = elapsed((s) => {
-      waiting.textContent = `Asking the host: doctor, the fleet check, incidents and manual checks… ${humanDuration(s)} so far; the host needs about a minute and a half.`;
+    // The table's status line counts the seconds; the verdict's place
+    // says what is being asked until the verdict replaces it.
+    items.loading({
+      words:
+        "Asking the host: doctor, the fleet check, the incidents and the manual checks…",
+      expect: 93,
     });
+    if (!verdict.querySelector(".today-verdict"))
+      verdict.replaceChildren(
+        h(
+          "p",
+          { class: "measured", role: "status" },
+          "Today's list is being read on the host.",
+        ),
+      );
     let r;
-    let secs = 0;
     try {
       r = await slowRead("/data/today", "today", abort.signal);
     } finally {
       read.disabled = false;
-      secs = stop();
     }
-    const took = humanDuration(secs);
     if (!r.ok) {
-      err.replaceChildren(errorBox(r.error));
+      const took = humanDuration(items.failed(r.error));
       verdict.replaceChildren(
         h("p", { class: "measured", role: "status" }, `Failed after ${took}.`),
       );
-      table?.state("failed");
       return;
     }
+    const took = humanDuration(items.ready({ refresh: false }));
     const v = todayView(r.body);
     verdict.replaceChildren(
       h(
@@ -167,33 +169,29 @@ export function mount(root) {
       ),
     );
     table?.refresh();
-    table?.state("ready");
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
   };
 
   const runCheck = async () => {
     checkBtn.disabled = true;
     findings.wrap.hidden = false;
-    checkTable?.state("loading");
-    checkErr.replaceChildren();
-    const stop = elapsed((s) => {
-      checkNote.textContent = `Checking… ${humanDuration(s)} so far; the host needs about a minute and a half.`;
+    findings.loading({
+      words: "Running the fleet check on the host…",
+      expect: 92,
     });
+    checkNote.textContent = "The fleet check is running on the host.";
     let r;
-    let secs = 0;
     try {
       r = await slowRead("/data/fleet-check", "the fleet check", abort.signal);
     } finally {
       checkBtn.disabled = false;
-      secs = stop();
     }
-    const took = humanDuration(secs);
     if (!r.ok) {
-      checkErr.replaceChildren(errorBox(r.error));
-      checkTable?.state("failed");
+      const took = humanDuration(findings.failed(r.error));
       checkNote.textContent = `The fleet check did not answer (after ${took}).`;
       return;
     }
+    const took = humanDuration(findings.ready({ refresh: false }));
     const rows = findingRows(r.body.findings ?? []);
     findings.tbody.replaceChildren(
       ...rows.map((f) =>
@@ -208,7 +206,6 @@ export function mount(root) {
       ),
     );
     checkTable?.refresh();
-    checkTable?.state("ready");
     checkNote.textContent =
       `${r.body.passes ? "Passes" : "Does not pass"}: ${rows.length} finding(s) over ${r.body.stack_files} stack file(s), checked in ${took}. ${r.body.skipped ?? ""} ${r.body.not_here ?? ""}`.trim();
     setAgo(checkAgo, r.body.measured_at ?? Date.now() / 1000);

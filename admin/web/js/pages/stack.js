@@ -12,7 +12,6 @@ import { showButton } from "../incident.js";
 import {
   badgeCell,
   bindTableUrl,
-  errorBox,
   fetchJson,
   fetchReport,
   fillFacts,
@@ -259,6 +258,8 @@ function appsTab(panel, params) {
     remember: "stack-apps",
     caption: "Apps",
     search: "Search apps",
+    state: "loading",
+    nothing: "This stack declares no apps.",
     columns: [
       { label: "App", sort: "text" },
       {
@@ -275,6 +276,7 @@ function appsTab(panel, params) {
   const detach = attachDataTables(panel);
   const table = dataTable(t.wrap);
   const unbind = bindTableUrl(table, "apps");
+  t.loading({ words: "Waiting for the host's report of the fleet…" });
   const render = () => {
     const f = current().fleet;
     const d = stackDetail(f, params.name);
@@ -301,7 +303,7 @@ function appsTab(panel, params) {
         ),
       ),
     );
-    table?.refresh();
+    t.ready();
     setAgo(ago, f.measured_at);
   };
   const unsub = subscribe(render);
@@ -320,12 +322,12 @@ function historyTab(panel, params) {
   const time = (unix) =>
     unix == null ? "—" : keys.note("time", formatTime(unix), unix);
   const ago = agoEl("read");
-  const err = h("div");
   const hist = tableBlock({
     remember: "stack-history",
     caption: `What the host did with ${params.name}, last ${HISTORY_DAYS} days`,
     search: "Search the history",
     state: "loading",
+    nothing: `The host did nothing with ${params.name} in the last ${HISTORY_DAYS} days.`,
     columns: [
       { label: "Started", sort: "time" },
       { label: "What", sort: "text" },
@@ -344,6 +346,7 @@ function historyTab(panel, params) {
     caption: `Incidents of ${params.name}`,
     search: "Search incidents",
     state: "loading",
+    nothing: `No incidents: no operation on ${params.name} has failed.`,
     columns: [
       { label: "When", sort: "time" },
       { label: "Operation", sort: "text" },
@@ -351,7 +354,7 @@ function historyTab(panel, params) {
       { label: "Read", sort: "text" },
     ],
   });
-  panel.replaceChildren(err, hist.wrap, inc.wrap, h("p", null, ago));
+  panel.replaceChildren(hist.wrap, inc.wrap, h("p", null, ago));
   const detach = attachDataTables(panel, { compare: keys.compare(compare) });
   const histTable = dataTable(hist.wrap);
   const incTable = dataTable(inc.wrap);
@@ -359,17 +362,13 @@ function historyTab(panel, params) {
   const unbindI = bindTableUrl(incTable, "incidents");
   const abort = new AbortController();
   const load = async () => {
-    histTable?.state("loading");
-    incTable?.state("loading");
+    hist.loading({ words: "Reading the history from the host…" });
+    inc.loading({ words: "Reading the incidents from the host…" });
     const since = Math.floor(Date.now() / 1000) - HISTORY_DAYS * 86400;
     const [hr, ir] = await Promise.all([
       fetchReport(`/data/history?since=${since}`, "the history", abort.signal),
       fetchReport("/data/incidents", "the incidents", abort.signal),
     ]);
-    err.replaceChildren(
-      ...(hr.ok ? [] : [errorBox(hr.error)]),
-      ...(ir.ok ? [] : [errorBox(ir.error)]),
-    );
     if (hr.ok) {
       const rows = historyRows(
         stackEntries(hr.report?.entries ?? [], params.name),
@@ -392,9 +391,8 @@ function historyTab(panel, params) {
           ),
         ),
       );
-      histTable?.refresh();
-      histTable?.state("ready");
-    } else histTable?.state("failed");
+      hist.ready();
+    } else hist.failed(hr.error);
     if (ir.ok) {
       const names = stackIncidents(ir.report?.incidents ?? [], params.name);
       inc.tbody.replaceChildren(
@@ -409,9 +407,8 @@ function historyTab(panel, params) {
           ),
         ),
       );
-      incTable?.refresh();
-      incTable?.state("ready");
-    } else incTable?.state("failed");
+      inc.ready();
+    } else inc.failed(ir.error);
     setAgo(ago, Date.now() / 1000);
   };
   const retry = () => void load().catch(() => {});
@@ -475,7 +472,6 @@ function logsTab(panel, params) {
   );
   const ago = agoEl("read");
   const logql = h("p", { class: "measured mono", id: "logs-logql" });
-  const err = h("div");
   const t = tableBlock({
     remember: "logs",
     pageSize: 100,
@@ -483,6 +479,8 @@ function logsTab(panel, params) {
     caption: `Logs of ${params.name}`,
     search: "Search these lines",
     state: "loading",
+    nothing:
+      "Loki holds no lines for this choice: widen the window or pick another app.",
     columns: [
       { label: "Time", sort: "time" },
       { label: "App", sort: "text", filter: "choice" },
@@ -515,7 +513,6 @@ function logsTab(panel, params) {
       h("label", { class: "logs-follow" }, follow, " Follow (every 5 s)"),
       refresh,
     ),
-    err,
     t.wrap,
     h("p", null, ago),
     logql,
@@ -527,21 +524,20 @@ function logsTab(panel, params) {
   /** @type {ReturnType<typeof setInterval> | null} */
   let timer = null;
 
-  const load = async () => {
+  /** @param {boolean} [quiet] Follow's reads every 5 s refresh quietly */
+  const load = async (quiet = false) => {
     abort.abort();
     abort = new AbortController();
-    table?.state("loading");
+    if (!quiet) t.loading({ words: "Asking Loki for the lines…" });
     const r = await fetchJson(
       logsUrl(params.name, settings),
       "the logs",
       abort.signal,
     );
     if (!r.ok) {
-      err.replaceChildren(errorBox(r.error));
-      table?.state("failed");
+      t.failed(r.error);
       return;
     }
-    err.replaceChildren();
     const rows = logRows(r.body.lines ?? []);
     t.tbody.replaceChildren(
       ...rows.map((x) => {
@@ -561,8 +557,7 @@ function logsTab(panel, params) {
       }),
     );
     attachLogs(t.tbody);
-    table?.refresh();
-    table?.state("ready");
+    t.ready();
     logql.textContent = `${rows.length} lines · LogQL: ${r.body.logql}`;
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
   };
@@ -583,7 +578,7 @@ function logsTab(panel, params) {
     history.replaceState(history.state, "", location.pathname + search);
     if (timer) clearInterval(timer);
     timer = settings.follow
-      ? setInterval(() => void load().catch(() => {}), 5000)
+      ? setInterval(() => void load(true).catch(() => {}), 5000)
       : null;
     void load().catch(() => {});
   };
@@ -616,12 +611,12 @@ function checksTab(panel, params) {
   const time = (unix) =>
     unix == null ? "never" : keys.note("time", formatTime(unix), unix);
   const ago = agoEl("read");
-  const err = h("div");
   const t = tableBlock({
     remember: "stack-checks",
     caption: `Manual checks of ${params.name}`,
     search: "Search checks",
     state: "loading",
+    nothing: `No manual checks are registered for ${params.name}.`,
     columns: [
       { label: "App", sort: "text" },
       {
@@ -636,24 +631,22 @@ function checksTab(panel, params) {
       { label: "Answer", sort: "text" },
     ],
   });
-  panel.replaceChildren(err, t.wrap, h("p", null, ago));
+  panel.replaceChildren(t.wrap, h("p", null, ago));
   const detach = attachDataTables(panel, { compare: keys.compare(compare) });
   const table = dataTable(t.wrap);
   const unbind = bindTableUrl(table, "checks");
   const abort = new AbortController();
   const load = async () => {
-    table?.state("loading");
+    t.loading({ words: "Reading the manual checks from the host…" });
     const r = await fetchReport(
       "/data/manual-checks",
       "the manual checks",
       abort.signal,
     );
     if (!r.ok) {
-      err.replaceChildren(errorBox(r.error));
-      table?.state("failed");
+      t.failed(r.error);
       return;
     }
-    err.replaceChildren();
     const now = r.report?.now ?? Math.floor(Date.now() / 1000);
     const rows = checkRows(
       stackChecks(r.report?.checks ?? [], params.name),
@@ -673,8 +666,7 @@ function checksTab(panel, params) {
         ),
       ),
     );
-    table?.refresh();
-    table?.state("ready");
+    t.ready();
     setAgo(ago, Date.now() / 1000);
   };
   const retry = () => void load().catch(() => {});

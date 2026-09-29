@@ -29,6 +29,16 @@ export const act = {
   notices: null,
   /** @type {import("./schedules.js").ScheduleList | null} */
   schedules: null,
+  /** Whether the jobs list was read once (an empty list is then true). */
+  jobsRead: false,
+  /** Why the last read of a topic failed, until one succeeds: the pages'
+   * tables show it in kp's failed slot. */
+  failed: {
+    /** @type {import("./doctor.js").RouteError | null} */
+    jobs: null,
+    /** @type {import("./doctor.js").RouteError | null} */
+    notices: null,
+  },
 };
 
 /** @type {Map<Topic, Set<(detail?: any) => void>>} */
@@ -114,9 +124,15 @@ async function loadCatalog() {
   }
 }
 
-async function loadJobs() {
+export async function loadJobs() {
   const r = await fetchJson("/data/actions/jobs", "the jobs");
-  if (!r.ok) return;
+  if (!r.ok) {
+    act.failed.jobs = r.error;
+    tell("jobs");
+    return;
+  }
+  act.failed.jobs = null;
+  act.jobsRead = true;
   /** @type {import("./jobs.js").Job[]} */
   let jobs = [];
   for (const j of r.body.jobs ?? []) jobs = upsertJob(jobs, j);
@@ -128,7 +144,12 @@ async function loadJobs() {
 
 export async function loadNotices() {
   const r = await fetchJson("/data/notifications", "the notifications");
-  if (!r.ok) return;
+  if (!r.ok) {
+    act.failed.notices = r.error;
+    tell("notices");
+    return;
+  }
+  act.failed.notices = null;
   act.notices = r.body;
   tell("notices");
 }

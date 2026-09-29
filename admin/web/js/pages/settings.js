@@ -47,7 +47,6 @@ export function mount(root) {
     { class: "kp-card", "aria-label": "Working copy", id: "repo" },
     h("p", { class: "measured" }, "Reading the working copy…"),
   );
-  const hostErr = h("div");
   const hostHead = h("p", { class: "measured" });
   const staged = h("div", {
     class: "staged",
@@ -60,6 +59,7 @@ export function mount(root) {
     caption: "host.toml on pve",
     search: "Search settings",
     state: "loading",
+    nothing: "host.toml sets nothing.",
     columns: [
       { label: "Group", sort: "text", filter: "choice" },
       { label: "Setting", sort: "text" },
@@ -86,7 +86,6 @@ export function mount(root) {
       "Every key of host.toml. Changes are collected here, checked with the host's start-up validation and written in one go; the TUI's settings screen keeps its own unsaved edits.",
     ),
     hostHead,
-    hostErr,
     staged,
     t.wrap,
     h("p", null, ago),
@@ -214,23 +213,21 @@ export function mount(root) {
           : String(v);
 
   const loadHost = async () => {
-    table?.state("loading");
+    t.loading({ words: "Reading host.toml from the host…" });
     const r = await fetchJson(
       "/data/host-settings",
       "the host settings",
       abort.signal,
     );
     if (!r.ok) {
-      hostErr.replaceChildren(errorBox(r.error));
-      table?.state("failed");
+      t.failed(r.error);
       return;
     }
-    hostErr.replaceChildren();
     page = r.body.page;
     const unknown = /** @type {string[]} */ (r.body.page.unknown ?? []);
     hostHead.textContent = `${r.body.page.path} · version ${String(r.body.page.sha256).slice(0, 12)}${unknown.length ? ` · keys the host does not read: ${unknown.join(", ")}` : ""}`;
     paintRows();
-    table?.state("ready");
+    t.ready();
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
   };
 

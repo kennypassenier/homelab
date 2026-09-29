@@ -198,3 +198,21 @@ wat er komt."
 - live-control: **Pause, Continue and Stop** in the announcement bar. A pause
   holds the next step until Continue or Stop; the CLI hears "paused by the
   viewer" (and who paused), Stop ends the whole sequence.
+
+Defaults approved (form "Release 3.63.1", live-defaults: Klopt, 2026-09-29
+04:27): after Stop every step is refused until `homelab ui done`; a pause
+lasts at most 30 min; Continue resumes the remaining countdown; a pause
+holds the next step, typing included; the pauser is named by the Access
+email; the plan list floats top right from 1100 px; host, dashboard and
+client ship together. Released as 3.63.1 and live since 2026-09-29 05:14.
+
+## Live view tempo and cursor (decided 2026-09-29 05:39 and 05:42)
+
+- live-speed: **5 s** announcement (was 3 s, "soms nog wat te snel"): set as
+  HOMELAB_ADMIN_LIVE_ANNOUNCE_MS=5000 in stacks/admin/admin/admin.service,
+  deployed through homelab 2026-09-29 05:41.
+- live-cursor: **build it.** A simulated "Claude" cursor in following tabs:
+  during the countdown it glides from where it was to the step's target,
+  shows a click (ring, pressed button) at 0, then the step runs; while
+  typing it sits in the field. Display only: nothing about what is sent or
+  the once-only press changes.

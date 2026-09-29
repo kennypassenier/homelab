@@ -1,7 +1,7 @@
 // Jobs (feat-ops-6): every job the dashboard ran or runs, newest first, as
 // a kp datatable; the one in `?job=` gets its live panel above the table.
 
-import { act, actionLabel, onAct } from "../act.js";
+import { act, actionLabel, loadJobs, onAct } from "../act.js";
 import { agoEl, setAgo } from "../ago.js";
 import { badgeCell, bindTableUrl, h, tableBlock, td } from "../dom.js";
 import { formatTime } from "../format.js";
@@ -28,6 +28,8 @@ export function mount(root, ctx) {
     remember: "jobs",
     caption: "Jobs, newest first (the last 200)",
     search: "Search jobs",
+    state: "loading",
+    nothing: "No jobs yet: an action from any stack's page starts one.",
     columns: [
       { label: "Job", sort: "number" },
       { label: "Queued", sort: "time" },
@@ -102,7 +104,13 @@ export function mount(root, ctx) {
   });
 
   let shown = "";
+  if (!act.jobsRead)
+    t.loading({ words: "Reading the jobs from the dashboard…" });
   const render = () => {
+    if (!act.jobsRead) {
+      if (act.failed.jobs) t.failed(act.failed.jobs);
+      return;
+    }
     const now = Date.now() / 1000;
     const rows = jobRows(act.jobs, actionLabel, now);
     // Redraw only when something a row shows changed (a running job's
@@ -143,16 +151,22 @@ export function mount(root, ctx) {
         ),
       ),
     );
-    table?.refresh();
+    t.ready();
     setAgo(ago, now);
   };
   const offJobs = onAct("jobs", render);
+  const retry = () => {
+    t.loading({ words: "Reading the jobs from the dashboard…" });
+    void loadJobs();
+  };
+  root.addEventListener("kp-datatable-retry", retry);
   const timer = setInterval(render, 5000);
   render();
   showJob();
   void ctx;
   return () => {
     offJobs();
+    root.removeEventListener("kp-datatable-retry", retry);
     clearInterval(timer);
     panel?.stop();
     unbind();

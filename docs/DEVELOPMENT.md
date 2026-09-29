@@ -90,7 +90,7 @@ gates on push, so a bypassed commit does not get to hide.
 ## 4 · The everyday commands
 
 ```bash
-make gate                    # exactly what the hooks run, before you commit
+make gate                    # the hooks' gates.sh with the whole suite; stamps .git/gate-pass
 make test                    # tests only
 make build                   # debug build of the workspace
 make host-binary             # release build of the host daemon for Debian 12
@@ -104,6 +104,14 @@ make release VERSION=3.2.0
 
 Runs the full gate locally, stamps the workspace version, commits, tags
 `v3.2.0` and pushes. It refuses on a dirty working tree or an existing tag.
+The gate runs once per release: a green `make gate` on a clean checkout
+stamps its tree and toolchain (`rustc -V`, `node -v`) in `.git/gate-pass`
+through the shared `gate-stamp` helper (`.githooks/gate-stamp` finds it in
+the workstation repository), and `make release` skips its own gate when the
+clean HEAD tree and toolchain equal that stamp. The version-bump commit
+skips the pre-commit gates when every changed line is an x.y.z `version =`
+line in `Cargo.toml` or `Cargo.lock`. Without the helper both skips are off;
+the commit-msg ID check still runs.
 GitHub then re-runs the gate — a red gate blocks the release — and
 publishes `homelab-host`, `homelab` and `SHA256SUMS` as a GitHub Release.
 

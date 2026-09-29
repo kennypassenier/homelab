@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Resolve the shared gate-stamp helper (workstation repo) and run it with
+# this project's toolchain line: rustc from the repository root (so
+# rust-toolchain.toml applies) plus node, which the admin web checks use
+# but the helper would not see (there is no package.json at the root).
+#
+# Kenny, 2026-09-29: "drie keer dezelfde testrun is dom, dat moet naar
+# één". Used by .claude/hooks/gates.sh (record), `make release` (fresh) and
+# .githooks/pre-commit (version-only). No helper found means exit 1, and
+# every caller then runs the gate: fail closed.
+h="${GATE_STAMP:-$HOME/Projects/workstation/bin/gate-stamp}"
+[ -x "$h" ] || h="$HOME/Projects/.wt/workstation/bin/gate-stamp"
+if [ ! -x "$h" ]; then
+  echo "gate-stamp: shared helper not found — running the gate" >&2
+  exit 1
+fi
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
+if [ -z "${GATE_STAMP_TOOLCHAIN:-}" ]; then
+  GATE_STAMP_TOOLCHAIN="$(cd "$root" && rustc -V 2>/dev/null || echo 'rustc none') node $(node -v 2>/dev/null || echo none)"
+  export GATE_STAMP_TOOLCHAIN
+fi
+exec "$h" "$@"

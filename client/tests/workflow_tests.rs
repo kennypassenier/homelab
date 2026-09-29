@@ -206,9 +206,23 @@ fn fix_140_dependabot_commits_carry_a_bracketed_id() {
 #[test]
 fn release_build_is_local_in_the_debian_image_and_locked() {
     let mk = std::fs::read_to_string(root().join("Makefile")).unwrap();
+    // 2026-09-29: the image is pinned to the Rust rust-toolchain.toml names
+    // and the build uses that image's own install, so no download per build.
+    let channel = std::fs::read_to_string(root().join("rust-toolchain.toml"))
+        .unwrap()
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("channel = \"")
+                .map(|v| v.trim_end_matches('"').to_string())
+        })
+        .expect("rust-toolchain.toml names a channel");
     assert!(
-        mk.contains("DEBIAN_IMAGE := rust:1-bookworm"),
-        "the same image as before"
+        mk.contains(&format!("DEBIAN_IMAGE ?= rust:{channel}-bookworm")),
+        "the Debian image carries the pinned Rust {channel}"
+    );
+    assert!(
+        mk.contains("-e RUSTUP_TOOLCHAIN=$(IMAGE_TOOLCHAIN)"),
+        "the build uses the image's own toolchain"
     );
     let builds: Vec<&str> = mk
         .lines()

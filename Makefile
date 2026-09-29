@@ -46,7 +46,11 @@ clippy:
 diagrams:
 	scripts/check-diagrams.sh
 
-gate: fmt clippy test admin-full
+# One gate, one script (2026-09-29): `make gate` is the commit hook's
+# .claude/hooks/gates.sh with the whole test suite and no cache skips, so a
+# green run on a clean checkout stamps .git/gate-pass for `make release`.
+gate:
+	GATE_FULL=1 GATE_SUITE=full .claude/hooks/gates.sh
 
 # The dashboard's browser checks (tsc, prettier, node tests); Playwright joins
 # with the `read` milestone.
@@ -144,7 +148,10 @@ endif
 ifdef DRY
 	@echo "✓ dry run for v$(VERSION): version, tag, CI and MSRV checks passed; the gate (fmt, clippy, tests) was NOT run; nothing tagged or pushed"
 else
-	$(MAKE) gate
+	@# Kenny, 2026-09-29: "drie keer dezelfde testrun is dom, dat moet naar
+	@# één": skip the gate when `make gate` already passed on this clean tree
+	@# with this toolchain (.githooks/gate-stamp fresh; no helper = run it).
+	@if .githooks/gate-stamp fresh; then echo "gate already passed for this tree (stamp $$(git rev-parse --short 'HEAD^{tree}')), not running it again"; else $(MAKE) gate; fi
 	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml
 	@cargo update --workspace --quiet 2>/dev/null || cargo check --workspace --quiet
 	@if ! git diff --quiet; then \
@@ -169,12 +176,18 @@ endif
 # rustls would carry two crypto providers into the host and the client. The
 # registry and git caches are this machine's, mounted, so a build does not
 # download the world; the target directory is separate from the debug one.
-DEBIAN_IMAGE := rust:1-bookworm
-DOCKER_CARGO := docker run --rm --user $$(id -u):$$(id -g) \
+# The image carries the Rust that rust-toolchain.toml pins, and the build
+# uses the image's own install: with only the toolchain file, rustup in a
+# fresh container downloaded 1.97 again on every build (measured 2026-09-29:
+# 1 min 10 s per build, two builds per release).
+DEBIAN_IMAGE ?= rust:1.97-bookworm
+IMAGE_TOOLCHAIN = $(shell docker run --rm $(DEBIAN_IMAGE) rustup default 2>/dev/null | cut -d' ' -f1)
+DOCKER_CARGO = docker run --rm --user $$(id -u):$$(id -g) \
 	-v $(CURDIR):/src -w /src \
 	-v $(HOME)/.cargo/registry:/usr/local/cargo/registry \
 	-v $(HOME)/.cargo/git:/usr/local/cargo/git \
 	-e CARGO_HOME=/usr/local/cargo -e HOME=/tmp \
+	-e RUSTUP_TOOLCHAIN=$(IMAGE_TOOLCHAIN) \
 	$(DEBIAN_IMAGE) cargo
 release-binaries:
 	$(DOCKER_CARGO) build --release --locked -p homelab-host -p homelab-client --target-dir target-debian

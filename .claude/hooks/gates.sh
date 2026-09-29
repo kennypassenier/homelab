@@ -15,6 +15,25 @@ gate_tree_fingerprint() {
   { git status --porcelain; git diff; } | sha256sum | cut -d' ' -f1
 }
 gate_tree_before=$(gate_tree_fingerprint)
+
+# The gate-pass stamp (Kenny, 2026-09-29: "drie keer dezelfde testrun is
+# dom, dat moet naar één"), through the shared helper (.githooks/gate-stamp).
+# The old stamp goes first, so a red run never leaves a green verdict
+# behind. Only `make gate` (GATE_SUITE=full, GATE_FULL=1: the whole suite, no
+# cache skips) stamps, and only when the working tree is exactly the index
+# with nothing untracked, because the gates test the working tree while the
+# helper stamps the index. The commit-time subset never stamps: `make
+# release` must not skip its full gate on the strength of a partial run.
+rm -f "$(git rev-parse --absolute-git-dir)/gate-pass"
+gate_stamp_ok=0
+if [ "${GATE_SUITE:-}" = full ] && [ "${GATE_FULL:-0}" = 1 ]; then
+  gate_suite_cmd=(cargo test --workspace)
+  if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+    gate_stamp_ok=1
+  fi
+else
+  gate_suite_cmd=(.githooks/test-subset.sh)
+fi
 # Kenny, 2026-09-16, standing rule 49 (commit-floor and rust-suite):
 # format and lint always run, and the suite is skipped when no Rust
 # source moved. Measured across sixteen projects: 41% of commits touch
@@ -54,8 +73,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 # The generated policy table in UPDATE_POLICY.md joined them on 2026-09-27
 # (fix-144, update-policy-doc-drift): a hand edit there is caught too.
 # Rule 7 as amended 2026-09-28: the commit runs the subset in
-# .githooks/test-subset.sh (every security suite included); `make gate` and
-# `make release` run the whole suite.
+# .githooks/test-subset.sh (every security suite included); `make gate`
+# (GATE_SUITE=full, and so `make release`) runs the whole suite through this
+# same script, so the two can no longer drift apart.
 gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
   'stacks/*' 'templates/*' 'presets/*' 'config/*' 'proto/*' 'core/assets/*' \
   'docs/DR_RUNBOOK.md' 'docs/deployment/TEST_PLAN.md' 'docs/deployment/UPDATE_POLICY.md' \
@@ -63,7 +83,7 @@ gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
   env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
       -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
       -u HOMELAB_TOKEN -u HOMELAB_HOST -u HOMELAB_CONFIG -u HOMELAB_LISTEN \
-      .githooks/test-subset.sh
+      "${gate_suite_cmd[@]}"
 
 # tech-js-checks (homelab-admin, 2026-09-28): the dashboard's browser code
 # is plain ES modules; tsc checks its JSDoc types (checkJs, strict, no
@@ -86,4 +106,10 @@ if [ "$(gate_tree_fingerprint)" != "$gate_tree_before" ]; then
     echo "What now: run 'git add -A' and commit again."
   } >&2
   exit 1
+fi
+
+if [ "$gate_stamp_ok" = 1 ]; then
+  if "$(git rev-parse --show-toplevel)/.githooks/gate-stamp" record; then
+    echo "gates: stamped tree $(git write-tree) for make release"
+  fi
 fi

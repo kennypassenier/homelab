@@ -3,6 +3,12 @@
 # before every git commit; non-zero exit blocks the commit.
 set -euo pipefail
 
+# git-env-leak (Kenny, 2026-09-29, Klopt): a hook runs with git's GIT_*
+# variables set, and in a linked worktree they point at the main repository.
+# Five test files start git in a temporary repository and would inherit
+# them. git finds this checkout again from the working directory.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+
 # ── Standing rule 7: a gate that does not predict the build is not a gate ──
 # The checks below rewrite files. cargo updates Cargo.lock, formatters
 # rewrite sources — and anything rewritten AFTER `git add` is green here

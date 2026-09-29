@@ -95,3 +95,25 @@ test("inside the dialog the band is the overlap with its scrolling body", () => 
   const field = { left: 0, top: 580, width: 300, height: 36 };
   assert.equal(bandScroll(field, inner), 598 - 400);
 });
+
+// Kenny, 2026-09-29 19:20: the pointer and its "Claude" label sat in an
+// opaque square. The list rule (cb9dddea) had been inserted between
+// `.drive-cursor__pointer,` and its own rule, so the pointer took the list's
+// background, border and shadow.
+test("the drawn list's box styles never reach the pointer", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(
+    new URL("../css/app.css", import.meta.url),
+    "utf8",
+  );
+  const noComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const m of noComments.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    const selectors = m[1].split(",").map((s) => s.trim());
+    if (selectors.includes(".drive-cursor__list")) {
+      assert.ok(
+        !selectors.includes(".drive-cursor__pointer"),
+        `one rule styles both the list and the pointer: ${m[1].trim()}`,
+      );
+    }
+  }
+});

@@ -1167,7 +1167,6 @@ td.stack-flags {
 .drive-cursor.drive-cursor--on {
   opacity: 1;
 }
-.drive-cursor__pointer,
 /* A dropdown pick (Kenny, 2026-09-29: "selecties in een dropdown mogen
    veel trager"): a native list cannot be opened by a script, so the
    options are drawn under the dropdown and the pointer passes over them. */
@@ -1212,6 +1211,7 @@ td.stack-flags {
   );
   color: var(--accent-foreground, inherit);
 }
+.drive-cursor__pointer,
 .drive-cursor__ring {
   position: absolute;
   inset: 0 auto auto 0;

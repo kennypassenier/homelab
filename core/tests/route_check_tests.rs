@@ -304,6 +304,7 @@ async fn the_gatherer_lists_every_file_in_the_routes_directory() {
         logs_window: "24h".into(),
         grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
+        watched_fresh: true,
     };
     let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
     assert_eq!(

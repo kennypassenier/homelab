@@ -57,6 +57,11 @@ pub struct FactsInputs {
     pub grafana_dashboards_dir: Option<String>,
     /// Now, in seconds since the epoch. Core never reads a clock.
     pub now_unix: u64,
+    /// true = list every watched backup on its remote and record the answer
+    /// (the nightly round); false = read the recorded answer and list only a
+    /// watcher that has none yet (`homelab check`, `homelab today`). See
+    /// [`crate::ops::watched`].
+    pub watched_fresh: bool,
 }
 
 /// What the gatherer measured, said out loud even when nothing is wrong.
@@ -93,10 +98,13 @@ pub async fn read_host_memory(exec: &dyn Executor) -> Option<(u32, u32, u32, u32
             "sh",
             &[
                 "-c",
-                // free gives total and swap; pct/qm give what is promised.
+                // free gives total and swap; the containers' config files (the
+                // part before the first [snapshot] section, what `pct config`
+                // prints, without its 0.45 s start per container) and qm give
+                // what is promised.
                 "free -m | awk '/^Mem:/{print $2} /^Swap:/{print $3\" \"$2}'; \
-                 pct list 2>/dev/null | awk 'NR>1{print $1}' | \
-                   xargs -r -n1 pct config 2>/dev/null | awk '/^memory:/{s+=$2} END{print s+0}'; \
+                 awk 'FNR==1{skip=0} /^\\[/{skip=1} /^memory:/ && !skip{s+=$2} END{print s+0}' \
+                   /etc/pve/lxc/*.conf 2>/dev/null; \
                  qm list 2>/dev/null | awk 'NR>1{s+=$4} END{print s+0}'",
             ],
             60,
@@ -222,6 +230,79 @@ pub async fn grafana_generated_uids(
     )
 }
 
+/// List one watched backup on its remote: the fact, and the record to keep
+/// when the listing worked (a failed listing is never recorded).
+async fn list_watched(
+    exec: &dyn Executor,
+    inp: &FactsInputs,
+    w: &WatchedBackupSpec,
+) -> (
+    WatchedBackupFact,
+    Option<crate::ops::watched::WatchedRecord>,
+) {
+    let out = exec
+        .run(&Cmd::new(
+            "sh",
+            &[
+                "-c",
+                &format!(
+                    "rclone lsjson --files-only {} 2>&1 | \
+                     sed -n 's/.*\"ModTime\":\"\\([^\"]*\\)\".*/\\1/p' | sort | tail -1",
+                    shq(&w.rclone_path)
+                ),
+            ],
+            180,
+        ))
+        .await;
+    let mut fact = WatchedBackupFact {
+        name: w.name.clone(),
+        max_age_s: w.max_age_hours * 3600,
+        ..Default::default()
+    };
+    let mut newest_unix = None;
+    match out {
+        Err(e) => fact.error = Some(e.to_string()),
+        Ok(o) if !o.success() => fact.error = Some(o.stderr.trim().to_string()),
+        Ok(o) => {
+            let newest = o.stdout.trim().to_string();
+            if !newest.is_empty() {
+                // rclone prints RFC3339; the host has `date` and this
+                // avoids a chrono dependency in a place that has none.
+                if let Ok(d) = exec
+                    .run(&Cmd::new("date", &["-d", &newest, "+%s"], 30))
+                    .await
+                {
+                    if let Ok(t) = d.stdout.trim().parse::<u64>() {
+                        newest_unix = Some(t);
+                        fact.newest_age_s = Some(inp.now_unix.saturating_sub(t));
+                    }
+                }
+                if newest_unix.is_none() {
+                    // A file whose time could not be read: not recorded,
+                    // so the next check asks again rather than keeping
+                    // "no files" for a repository that has some.
+                    return (fact, None);
+                }
+            }
+        }
+    }
+    let learned = fact
+        .error
+        .is_none()
+        .then(|| crate::ops::watched::WatchedRecord {
+            rclone_path: w.rclone_path.clone(),
+            newest_unix,
+            learned_at: inp.now_unix,
+            source: if inp.watched_fresh {
+                "nightly"
+            } else {
+                "check"
+            }
+            .to_string(),
+        });
+    (fact, learned)
+}
+
 /// Read off the machine everything `fleetcheck` judges.
 pub async fn gather_live_facts(
     exec: &dyn Executor,
@@ -249,54 +330,62 @@ pub async fn gather_live_facts_with(
     // O1: what the router (and anything else outside this suite) uploaded
     // last night. Read through the rclone remote that already exists for the
     // restic repositories — no new credential, no new timer.
-    // ops::pool: each listing is its own question, asked a few at a time.
-    let watched_fut = crate::ops::pool::bounded(
-        inp.watched_backups
-            .iter()
-            .map(|w| async move {
-                let out = exec
-                    .run(&Cmd::new(
-                        "sh",
-                        &[
-                            "-c",
-                            &format!(
-                                "rclone lsjson --files-only {} 2>&1 | \
-                         sed -n 's/.*\"ModTime\":\"\\([^\"]*\\)\".*/\\1/p' | sort | tail -1",
-                                shq(&w.rclone_path)
+    // Fleet check speed (2026-09-29): a check reads the answer the host
+    // recorded (ops::watched) and lists only a watcher with no record; the
+    // nightly round lists them all and records what it saw.
+    let watched_fut = async {
+        let records = if inp.watched_backups.is_empty() {
+            Default::default()
+        } else {
+            crate::ops::watched::load(exec, &inp.state_dir).await
+        };
+        let answers: Vec<(
+            WatchedBackupFact,
+            Option<crate::ops::watched::WatchedRecord>,
+        )> = crate::ops::pool::bounded(
+            inp.watched_backups
+                .iter()
+                .map(|w| {
+                    let known = (!inp.watched_fresh)
+                        .then(|| crate::ops::watched::recorded(&records, &w.name, &w.rclone_path))
+                        .flatten()
+                        .cloned();
+                    async move {
+                        match known {
+                            Some(r) => (
+                                WatchedBackupFact {
+                                    name: w.name.clone(),
+                                    max_age_s: w.max_age_hours * 3600,
+                                    newest_age_s: r
+                                        .newest_unix
+                                        .map(|t| inp.now_unix.saturating_sub(t)),
+                                    ..Default::default()
+                                },
+                                None,
                             ),
-                        ],
-                        180,
-                    ))
-                    .await;
-                let mut fact = WatchedBackupFact {
-                    name: w.name.clone(),
-                    max_age_s: w.max_age_hours * 3600,
-                    ..Default::default()
-                };
-                match out {
-                    Err(e) => fact.error = Some(e.to_string()),
-                    Ok(o) if !o.success() => fact.error = Some(o.stderr.trim().to_string()),
-                    Ok(o) => {
-                        let newest = o.stdout.trim().to_string();
-                        if !newest.is_empty() {
-                            // rclone prints RFC3339; the host has `date` and this
-                            // avoids a chrono dependency in a place that has none.
-                            if let Ok(d) = exec
-                                .run(&Cmd::new("date", &["-d", &newest, "+%s"], 30))
-                                .await
-                            {
-                                if let Ok(t) = d.stdout.trim().parse::<u64>() {
-                                    fact.newest_age_s = Some(inp.now_unix.saturating_sub(t));
-                                }
-                            }
+                            None => list_watched(exec, inp, w).await,
                         }
                     }
-                }
-                fact
-            })
-            .collect(),
-        crate::ops::pool::READ_CONCURRENCY,
-    );
+                })
+                .collect(),
+            crate::ops::pool::READ_CONCURRENCY,
+        )
+        .await;
+        let mut records = records;
+        let mut changed = false;
+        let mut facts = Vec::with_capacity(answers.len());
+        for (w, (fact, learned)) in inp.watched_backups.iter().zip(answers) {
+            if let Some(r) = learned {
+                records.insert(w.name.clone(), r);
+                changed = true;
+            }
+            facts.push(fact);
+        }
+        if changed {
+            crate::ops::watched::save(exec, &inp.state_dir, &records).await;
+        }
+        facts
+    };
 
     // T49: the seeder's verdict, read from the file it writes beside the
     // generated monitor list. Same directory, so there is no second setting

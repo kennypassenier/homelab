@@ -5,12 +5,15 @@
 //! `HEAD /v2/<repository>/manifests/<digest>`. 200 is present, 404 is
 //! missing; anything else (401/403 on a private repository, no network) is
 //! "not asked" and never a fault. Only anonymous reads: no credential leaves
-//! this machine. One registry that does not answer at all is asked once, not
-//! once per image.
+//! this machine. One registry that does not answer at all is not asked again
+//! for the rest of the run. Registries are asked 8 at a time; nothing is
+//! remembered between runs, so a vanished image is always reported fresh.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use homelab_core::ops::fleetcheck::Finding;
 use homelab_core::ops::pinexists::{
@@ -132,26 +135,80 @@ fn ask(p: &PinnedDigest) -> PinAnswer {
     }
 }
 
+/// How many registries are asked at the same time (decision "Fleet check
+/// speed", 2026-09-29): 8, no answer remembered across runs.
+pub const PIN_ASK_WIDTH: usize = 8;
+
 /// Ask about every pin; a registry that did not answer once is not asked
 /// again in the same run.
 pub fn check_pins(stacks_dir: &Path) -> Vec<Finding> {
-    let mut dead: BTreeSet<String> = BTreeSet::new();
-    let mut seen: BTreeMap<String, PinAnswer> = BTreeMap::new();
-    let mut answers = Vec::new();
-    for p in collect(stacks_dir) {
-        let a = if dead.contains(&p.registry) {
-            PinAnswer::NotAsked(format!("{} did not answer", p.registry))
-        } else if let Some(a) = seen.get(&p.reference) {
-            a.clone()
-        } else {
-            let a = ask(&p);
-            if matches!(&a, PinAnswer::NotAsked(w) if w.ends_with("did not answer")) {
-                dead.insert(p.registry.clone());
-            }
-            seen.insert(p.reference.clone(), a.clone());
-            a
-        };
-        answers.push((p, a));
-    }
+    let answers = answer_pins(collect(stacks_dir), PIN_ASK_WIDTH, ask);
     evaluate_pin_existence(&answers)
+}
+
+/// The answer for every pin, in the order given. Identical references are
+/// asked once; a registry that "did not answer" is not asked again.
+pub fn answer_pins<F>(
+    pins: Vec<PinnedDigest>,
+    width: usize,
+    ask: F,
+) -> Vec<(PinnedDigest, PinAnswer)>
+where
+    F: Fn(&PinnedDigest) -> PinAnswer + Sync,
+{
+    // One question per distinct reference, in first-seen order.
+    let mut firsts: Vec<usize> = Vec::new();
+    let mut slot_of: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut slots: Vec<usize> = Vec::with_capacity(pins.len());
+    for (i, p) in pins.iter().enumerate() {
+        let slot = *slot_of.entry(p.reference.as_str()).or_insert_with(|| {
+            firsts.push(i);
+            firsts.len() - 1
+        });
+        slots.push(slot);
+    }
+    let next = AtomicUsize::new(0);
+    let dead: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+    let results: Vec<Mutex<Option<PinAnswer>>> = firsts.iter().map(|_| Mutex::new(None)).collect();
+    let workers = width.max(1).min(firsts.len());
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let slot = next.fetch_add(1, Ordering::SeqCst);
+                let Some(&i) = firsts.get(slot) else { break };
+                let p = &pins[i];
+                let known_dead = dead
+                    .lock()
+                    .map(|d| d.contains(&p.registry))
+                    .unwrap_or(false);
+                let a = if known_dead {
+                    PinAnswer::NotAsked(format!("{} did not answer", p.registry))
+                } else {
+                    let a = ask(p);
+                    if matches!(&a, PinAnswer::NotAsked(w) if w.ends_with("did not answer")) {
+                        if let Ok(mut d) = dead.lock() {
+                            d.insert(p.registry.clone());
+                        }
+                    }
+                    a
+                };
+                if let Ok(mut r) = results[slot].lock() {
+                    *r = Some(a);
+                }
+            });
+        }
+    });
+    let results: Vec<PinAnswer> = results
+        .into_iter()
+        .map(|r| {
+            r.into_inner()
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| PinAnswer::NotAsked("the question was not finished".into()))
+        })
+        .collect();
+    pins.into_iter()
+        .zip(slots)
+        .map(|(p, slot)| (p, results[slot].clone()))
+        .collect()
 }

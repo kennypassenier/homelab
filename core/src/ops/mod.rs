@@ -53,6 +53,7 @@ pub mod template;
 pub mod today;
 pub mod update;
 pub mod util;
+pub mod watched;
 pub mod zfs;
 
 use crate::error::CoreError;

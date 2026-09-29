@@ -254,25 +254,13 @@ pub async fn apply(
     }
 
     // 3. Classic syslog rotation.
-    pct_sh(
-        exec,
-        vmid,
-        "command -v logrotate >/dev/null || (export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq logrotate)",
-        300,
-    )
-    .await?;
+    ensure_package(exec, vmid, "logrotate", "logrotate").await?;
 
     // sqlite3, because a service's own health checks (J1) run at this level
     // and several of them ask the application's database what it holds. The
     // alternative is a check that depends on a tool somebody installed by
     // hand once, which is the shape of a check that works until it does not.
-    pct_sh(
-        exec,
-        vmid,
-        "command -v sqlite3 >/dev/null || (export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq sqlite3)",
-        300,
-    )
-    .await?;
+    ensure_package(exec, vmid, "sqlite3", "sqlite3").await?;
     push_content(
         exec,
         vmid,
@@ -355,13 +343,7 @@ pub async fn apply(
     .await?;
 
     // 6. Security patches (A7): unattended-upgrades, security-only, no reboot.
-    pct_sh(
-        exec,
-        vmid,
-        "command -v unattended-upgrade >/dev/null || (export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq unattended-upgrades)",
-        300,
-    )
-    .await?;
+    ensure_package(exec, vmid, "unattended-upgrade", "unattended-upgrades").await?;
     push_content(
         exec,
         vmid,
@@ -381,6 +363,39 @@ pub async fn apply(
 
     log("[guard] runaway guards + security patching in place".into());
     Ok(())
+}
+
+/// fix-161: install `pkg` unless `tool` is already on the PATH. The package
+/// lists are refreshed first (a container cloned from an old template carries
+/// lists whose files are gone from the mirror), and a failed install fails the
+/// step: on CT 118 the ignored exit code let a deploy report "security
+/// patching in place" with neither unattended-upgrades nor sqlite3 installed.
+async fn ensure_package(
+    exec: &dyn Executor,
+    vmid: u16,
+    tool: &str,
+    pkg: &str,
+) -> Result<(), CoreError> {
+    let out = pct_sh(
+        exec,
+        vmid,
+        &format!(
+            "command -v {tool} >/dev/null || (export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq {pkg})"
+        ),
+        300,
+    )
+    .await?;
+    if out.success() {
+        return Ok(());
+    }
+    Err(CoreError::Command {
+        rendered: format!("apt-get install {pkg}"),
+        detail: format!(
+            "{pkg} could not be installed (exit {}): {}",
+            out.code,
+            out.stderr.trim()
+        ),
+    })
 }
 
 /// fix-24: where the per-stack rotation rule lives inside the container.

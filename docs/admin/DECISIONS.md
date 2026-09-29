@@ -229,3 +229,29 @@ holds the last result of Today, doctor and the fleet check with its time;
 opening the page shows it at once with "measured x ago" and starts one new
 run (joining a running one), whose result arrives over SSE. No timer. No browser storage is needed for Kenny's "vorige resultaten zien als
 ik van tab verander": the server holds them for every tab.
+
+## Fleet check speed (decided 2026-09-29 15:04, form "Snelheid")
+
+Measured on v3.63.3 (15:00): `homelab check` 37.3 s = backups/seeder/stacks
+10.4 s (host, restic), containers 3.5 s, Prometheus/Loki/Grafana 0.7 s,
+Cloudflare 3.0 s (desktop), pinned-image existence 19.6 s (desktop, 20
+pins asked one at a time in `client/src/pinexists.rs`).
+
+- pin-check: **only concurrent** (8 at a time), no remembered answer, so
+  a vanished image is always reported fresh.
+- backup-read: **reuse**. The host keeps the backup state it learns from
+  the nightly round and from every backup it makes itself; the check reads
+  that instead of asking restic again. A backup made or removed outside
+  homelab shows after the next nightly round.
+- agent-project (a Rust agent in every container): **not now**. It would
+  remove at most the 3.5 s container part; noted in the backlog with this
+  measurement.
+
+Correction (2026-09-29 15:14, measured read-only on pve): the first stage's
+10.4 s was not restic. The check never asks restic; backup ages come from
+state.json. The stage's cost was the host-memory reading, which ran
+`pct config` for each of 19 containers (9.25 s). It now sums `memory:` from
+`/etc/pve/lxc/*.conf` directly (same total, 38144 MB, in 2 ms). "Reuse"
+was applied to the one remote listing in that stage, the Google Drive
+listing of watched backups (1.7 s): the nightly round refreshes it and
+records it, a check reads the record.

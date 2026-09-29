@@ -4898,25 +4898,49 @@ fn orphan_watchers(
     // So: normalise the prefix, and accept the repo path or anything under
     // it. A guard that cries wolf on a correct configuration is worse than no
     // guard, because it teaches its reader to skip the line.
-    let norm = |p: &str| {
-        p.trim_start_matches("rclone:")
-            .trim_end_matches('/')
-            .to_string()
-    };
-    let written: Vec<String> = devices
-        .iter()
-        .map(|d| norm(&format!("{}/{}-config", restic_base, d.name)))
-        .collect();
+    // Both live in `ops::watched::feeds`, which the recorded watched-backup
+    // state uses too.
     watched
         .iter()
         .filter(|w| {
-            let path = norm(&w.rclone_path);
-            !written
+            !devices
                 .iter()
-                .any(|repo| path == *repo || path.starts_with(&format!("{}/", repo)))
+                .any(|d| homelab_core::ops::watched::feeds(&w.rclone_path, restic_base, &d.name))
         })
         .map(|w| format!("{} → {}", w.name, w.rclone_path))
         .collect()
+}
+
+/// Decision "Fleet check speed": a device backup this suite just made is
+/// recorded for every watcher on its repository, so the fleet check knows
+/// without listing Google Drive.
+async fn record_device_backup(state: &AppState, device: &str) {
+    let watchers: Vec<(String, String)> = state
+        .config
+        .watched_backups
+        .iter()
+        .map(|w| (w.name.clone(), w.rclone_path.clone()))
+        .collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let fed = homelab_core::ops::watched::record_device_backup(
+        &RealExecutor,
+        &state.config.state_dir,
+        &watchers,
+        &state.config.backup.restic_base,
+        device,
+        now,
+    )
+    .await;
+    if !fed.is_empty() {
+        info!(
+            "device backup {} recorded for watcher(s) {}",
+            device,
+            fed.join(", ")
+        );
+    }
 }
 
 /// fix-120 (api-token-is-root, 2026-09-27): compared as SHA-256 digests with
@@ -5173,6 +5197,7 @@ async fn status_loop(state: AppState) {
             .map(|(name, s)| homelab_core::ops::livestatus::Target {
                 vmid: s.vmid,
                 stack: name.clone(),
+                units: s.natives.iter().map(|n| n.unit.clone()).collect(),
             })
             .collect();
         let reading = homelab_core::ops::livestatus::read(&exec, &targets, unix_now()).await;
@@ -5489,6 +5514,8 @@ async fn scheduler_loop(state: AppState) {
                          being kept",
                         name
                     );
+                } else {
+                    record_device_backup(&state, &name).await;
                 }
             }
         }
@@ -5623,7 +5650,7 @@ async fn scheduler_loop(state: AppState) {
             // the host, so "does this file target a vmid somebody else owns"
             // is a question `homelab check` asks from the workstation. The
             // host answers everything it can actually see.
-            let live = gather_live_facts(&exec, &state, &[]).await;
+            let live = gather_live_facts(&exec, &state, &[], true).await;
             if let Ok(snapshot) = store.load().await {
                 let findings = homelab_core::ops::fleetcheck::evaluate(
                     &snapshot,
@@ -6779,8 +6806,10 @@ async fn gather_today(
         gather_security_probes(exec, &ProbeContext::of(&state.config), now, &mut probes).await;
         homelab_core::doctor::diagnose(&probes)
     };
-    let (checks, mut live) =
-        futures_util::join!(doctor_fut, gather_live_facts(exec, state, stack_files));
+    let (checks, mut live) = futures_util::join!(
+        doctor_fut,
+        gather_live_facts(exec, state, stack_files, false)
+    );
     live.digests = digests;
     let incidents: Vec<String> = std::fs::read_dir(format!("{}/incidents", state.config.state_dir))
         .map(|rd| {
@@ -6818,10 +6847,14 @@ async fn gather_today(
     }
 }
 
+/// `watched_fresh`: true lists every watched backup on its remote and records
+/// the answer (the nightly round); false reads what the host recorded
+/// (`homelab check`, `homelab today`; decision "Fleet check speed").
 async fn gather_live_facts(
     exec: &RealExecutor,
     state: &AppState,
     stack_files: &[(String, u16)],
+    watched_fresh: bool,
 ) -> homelab_core::ops::fleetcheck::LiveFacts {
     use homelab_core::ops::facts::{FactsInputs, WatchedBackupSpec};
     let inp = FactsInputs {
@@ -6850,6 +6883,7 @@ async fn gather_live_facts(
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0),
+        watched_fresh,
     };
     // fix-104: each phase goes to whoever is watching; the check took 41 s
     // with nothing on the screen after "link up".
@@ -7610,7 +7644,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             digests,
             json,
         } => {
-            let mut live = gather_live_facts(&exec, state, &stack_files).await;
+            let mut live = gather_live_facts(&exec, state, &stack_files, false).await;
             // fix-142: what the client's files say, for the repository comparison.
             live.digests = digests;
             let snapshot =
@@ -7763,6 +7797,9 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 })
                 .await;
                 ok &= report.ok;
+                if report.ok {
+                    record_device_backup(state, &name).await;
+                }
                 lines.push(format!(
                     "{}: {}",
                     name,
@@ -8248,9 +8285,17 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         .to_string(),
                     vmid: s.vmid,
                     hostname: s.hostname.clone(),
+                    // fix-160: a native stack's units are its apps, also on
+                    // stacks adopted before install-native recorded them.
                     apps: s
                         .apps
                         .iter()
+                        .chain(
+                            s.natives
+                                .iter()
+                                .map(|n| &n.unit)
+                                .filter(|u| !s.apps.contains(u)),
+                        )
                         .map(|a| {
                             let (running, restarts) = live_app(reading.as_ref(), s.vmid, a);
                             homelab_proto::AppView {

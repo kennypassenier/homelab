@@ -780,6 +780,7 @@ async fn the_facts_read_every_recorded_stacks_firewall_file() {
         logs_window: "24h".into(),
         grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
+        watched_fresh: true,
     };
     let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
     let mut got: Vec<(u16, Option<String>)> = facts

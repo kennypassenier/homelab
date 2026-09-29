@@ -20,10 +20,32 @@ use crate::executor::{Cmd, Executor};
 
 /// Inside a container: one line per docker container. `working_dir` is the
 /// compose project directory (`/opt/<stack>/<app>`), which names the app.
-pub const PROBE: &str = "command -v docker >/dev/null 2>&1 || exit 0; \
+pub const PROBE: &str = "if command -v docker >/dev/null 2>&1; then \
      for c in $(docker ps -aq); do \
      docker inspect --format '{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}|{{index .Config.Labels \"com.docker.compose.service\"}}|{{.State.Running}}|{{.RestartCount}}' \"$c\"; \
-     done";
+     done; fi";
+
+/// fix-160: the probe for one guest. After the docker lines, one line per
+/// native unit, `unit:<unit>|<unit>|<active>|<NRestarts>`, so a stack of
+/// systemd services has apps too. A unit name that is not a plain unit name
+/// is left out rather than put in a shell line.
+pub fn probe(units: &[String]) -> String {
+    let mut sh = PROBE.to_string();
+    for u in units {
+        if u.is_empty()
+            || !u
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '.' | '_' | '-'))
+        {
+            continue;
+        }
+        sh.push_str(&format!(
+            "; if [ \"$(systemctl is-active {u})\" = active ]; then a=true; else a=false; fi; \
+             printf 'unit:{u}|{u}|%s|%s\\n' \"$a\" \"$(systemctl show -p NRestarts --value {u} 2>/dev/null || echo 0)\""
+        ));
+    }
+    sh
+}
 
 /// One guest as Proxmox reports it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -105,7 +127,10 @@ pub fn parse_apps(stack: &str, probe_out: &str) -> BTreeMap<String, AppStatus> {
         if parts.len() != 4 {
             continue;
         }
-        let Some(app) = parts[0].strip_prefix(&prefix) else {
+        let Some(app) = parts[0]
+            .strip_prefix(&prefix)
+            .or_else(|| parts[0].strip_prefix("unit:"))
+        else {
             continue;
         };
         let app = app.trim_end_matches('/');
@@ -131,6 +156,8 @@ pub fn parse_apps(stack: &str, probe_out: &str) -> BTreeMap<String, AppStatus> {
 pub struct Target {
     pub vmid: u16,
     pub stack: String,
+    /// fix-160: the stack's native systemd units; each one is an app.
+    pub units: Vec<String>,
 }
 
 /// Take one reading. Never fails as a whole: a guest whose probe fails is
@@ -184,7 +211,7 @@ pub async fn read(exec: &dyn Executor, targets: &[Target], now: u64) -> LiveStat
         let out = exec
             .run(&Cmd::new(
                 "pct",
-                &["exec", &vmid, "--", "sh", "-c", PROBE],
+                &["exec", &vmid, "--", "sh", "-c", &probe(&t.units)],
                 30,
             ))
             .await;

@@ -31,6 +31,7 @@ fn inputs() -> FactsInputs {
         logs_window: "24h".into(),
         grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
+        watched_fresh: true,
     }
 }
 
@@ -611,4 +612,237 @@ async fn fix_142_the_intent_copy_is_read_file_by_file() {
     // A name that could leave the repository is never asked about.
     let odd = intent_files(&exec, "/var/lib/homelab", &["../etc".to_string()]).await;
     assert!(odd.is_empty());
+}
+
+/// Decision "Fleet check speed" (2026-09-29, backup-read = reuse): the check
+/// reads the watched backups the host recorded and asks rclone nothing.
+#[tokio::test]
+async fn speed_a_check_with_recorded_backups_asks_no_remote() {
+    use homelab_core::ops::watched::{WatchedRecord, WatchedRecords, WATCHED_BACKUPS_FILE};
+    let exec = MockExecutor::new();
+    let mut rec = WatchedRecords::new();
+    rec.insert(
+        "opnsense".into(),
+        WatchedRecord {
+            rclone_path: "gdrive:ok".into(),
+            newest_unix: Some(1_789_700_400),
+            learned_at: 1_789_701_000,
+            source: "nightly".into(),
+        },
+    );
+    exec.seed_file(
+        &format!("/var/lib/homelab/{}", WATCHED_BACKUPS_FILE),
+        &serde_json::to_string(&rec).unwrap(),
+    );
+    let mut inp = inputs();
+    inp.watched_fresh = false;
+    inp.watched_backups = vec![WatchedBackupSpec {
+        name: "opnsense".into(),
+        rclone_path: "gdrive:ok".into(),
+        max_age_hours: 26,
+    }];
+    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
+    assert_eq!(
+        exec.calls_containing("rclone").len(),
+        0,
+        "{:?}",
+        exec.calls()
+    );
+    assert_eq!(
+        exec.calls_containing("restic").len(),
+        0,
+        "{:?}",
+        exec.calls()
+    );
+    assert_eq!(
+        exec.calls_containing("date -d").len(),
+        0,
+        "{:?}",
+        exec.calls()
+    );
+    let w = &facts.watched_backups[0];
+    assert_eq!(w.newest_age_s, Some(3600));
+    assert_eq!(w.max_age_s, 26 * 3600);
+    assert!(w.error.is_none());
+}
+
+/// No record yet (the first check after the upgrade, or a watcher moved to
+/// another path): asked once, recorded, and the next check asks nothing.
+#[tokio::test]
+async fn speed_a_check_without_a_record_asks_once_and_records_it() {
+    use homelab_core::ops::watched::{load, WatchedRecord, WatchedRecords, WATCHED_BACKUPS_FILE};
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "rclone lsjson --files-only 'gdrive:ok'",
+        CmdOutput::ok("2026-09-19T01:00:00Z\n"),
+    );
+    exec.respond_always(
+        "date -d 2026-09-19T01:00:00Z",
+        CmdOutput::ok("1789700400\n"),
+    );
+    // A record about another path does not count.
+    let mut rec = WatchedRecords::new();
+    rec.insert(
+        "opnsense".into(),
+        WatchedRecord {
+            rclone_path: "gdrive:old-place".into(),
+            newest_unix: Some(1),
+            learned_at: 1,
+            source: "nightly".into(),
+        },
+    );
+    exec.seed_file(
+        &format!("/var/lib/homelab/{}", WATCHED_BACKUPS_FILE),
+        &serde_json::to_string(&rec).unwrap(),
+    );
+    let mut inp = inputs();
+    inp.watched_fresh = false;
+    inp.watched_backups = vec![WatchedBackupSpec {
+        name: "opnsense".into(),
+        rclone_path: "gdrive:ok".into(),
+        max_age_hours: 26,
+    }];
+    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
+    assert_eq!(facts.watched_backups[0].newest_age_s, Some(3600));
+    assert_eq!(exec.calls_containing("rclone lsjson").len(), 1);
+    let saved = load(&exec, "/var/lib/homelab").await;
+    assert_eq!(saved["opnsense"].rclone_path, "gdrive:ok");
+    assert_eq!(saved["opnsense"].newest_unix, Some(1_789_700_400));
+
+    let (again, _) = gather_live_facts(&exec, &inp, &[]).await;
+    assert_eq!(
+        exec.calls_containing("rclone lsjson").len(),
+        1,
+        "asked twice"
+    );
+    assert_eq!(again.watched_backups[0].newest_age_s, Some(3600));
+}
+
+/// The nightly round always lists, and its answer replaces the record; a
+/// listing that fails is reported that night and never recorded.
+#[tokio::test]
+async fn speed_the_nightly_round_lists_and_records_but_not_a_failure() {
+    use homelab_core::ops::watched::{load, WatchedRecord, WatchedRecords, WATCHED_BACKUPS_FILE};
+    let exec = MockExecutor::new();
+    exec.respond_always(
+        "rclone lsjson --files-only 'gdrive:ok'",
+        CmdOutput::ok("2026-09-19T01:00:00Z\n"),
+    );
+    exec.respond_always(
+        "date -d 2026-09-19T01:00:00Z",
+        CmdOutput::ok("1789700400\n"),
+    );
+    exec.respond_always(
+        "rclone lsjson --files-only 'gdrive:broken'",
+        CmdOutput::failed(1, "directory not found"),
+    );
+    let old = WatchedRecord {
+        rclone_path: "gdrive:broken".into(),
+        newest_unix: Some(1_789_600_000),
+        learned_at: 1_789_600_000,
+        source: "nightly".into(),
+    };
+    let mut rec = WatchedRecords::new();
+    rec.insert("nothing".into(), old.clone());
+    rec.insert(
+        "opnsense".into(),
+        WatchedRecord {
+            rclone_path: "gdrive:ok".into(),
+            newest_unix: Some(5),
+            learned_at: 5,
+            source: "nightly".into(),
+        },
+    );
+    exec.seed_file(
+        &format!("/var/lib/homelab/{}", WATCHED_BACKUPS_FILE),
+        &serde_json::to_string(&rec).unwrap(),
+    );
+    let mut inp = inputs();
+    inp.watched_fresh = true;
+    inp.watched_backups = vec![
+        WatchedBackupSpec {
+            name: "opnsense".into(),
+            rclone_path: "gdrive:ok".into(),
+            max_age_hours: 26,
+        },
+        WatchedBackupSpec {
+            name: "nothing".into(),
+            rclone_path: "gdrive:broken".into(),
+            max_age_hours: 26,
+        },
+    ];
+    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
+    assert_eq!(exec.calls_containing("rclone lsjson").len(), 2);
+    assert_eq!(facts.watched_backups[0].newest_age_s, Some(3600));
+    assert!(facts.watched_backups[1].error.is_some());
+    let saved = load(&exec, "/var/lib/homelab").await;
+    assert_eq!(saved["opnsense"].newest_unix, Some(1_789_700_400));
+    assert_eq!(saved["opnsense"].source, "nightly");
+    assert_eq!(
+        saved["nothing"], old,
+        "a failed listing replaced the last good one"
+    );
+}
+
+/// A device backup this suite made is recorded for the watcher on its
+/// repository, in either spelling F259 accepts, and for no other watcher.
+#[tokio::test]
+async fn speed_a_device_backup_records_its_watchers() {
+    use homelab_core::ops::watched::{feeds, load, record_device_backup};
+    assert!(feeds(
+        "gdrive:homelab-backups/opnsense-config/snapshots",
+        "rclone:gdrive:homelab-backups",
+        "opnsense"
+    ));
+    assert!(feeds(
+        "rclone:gdrive:homelab-backups/opnsense-config",
+        "rclone:gdrive:homelab-backups",
+        "opnsense"
+    ));
+    assert!(!feeds(
+        "gdrive:homelab-backups/opnsense-config-old",
+        "rclone:gdrive:homelab-backups",
+        "opnsense"
+    ));
+    let exec = MockExecutor::new();
+    let watchers = vec![
+        (
+            "router".to_string(),
+            "gdrive:homelab-backups/opnsense-config/snapshots".to_string(),
+        ),
+        ("other".to_string(), "gdrive:elsewhere".to_string()),
+    ];
+    let fed = record_device_backup(
+        &exec,
+        "/var/lib/homelab",
+        &watchers,
+        "rclone:gdrive:homelab-backups",
+        "opnsense",
+        1_789_704_000,
+    )
+    .await;
+    assert_eq!(fed, vec!["router".to_string()]);
+    let saved = load(&exec, "/var/lib/homelab").await;
+    assert_eq!(saved["router"].newest_unix, Some(1_789_704_000));
+    assert!(!saved.contains_key("other"));
+    assert!(
+        exec.calls().iter().all(|c| c.starts_with("write_file ")),
+        "recording asks nothing: {:?}",
+        exec.calls()
+    );
+}
+
+/// Measured on pve 2026-09-29 15:14: `pct config` for each of 19 containers
+/// took 9.25 s, the bulk of the fleet check's first stage; the same
+/// committed-memory total (38144) reads from the config files in 2 ms.
+#[tokio::test]
+async fn host_memory_reads_the_config_files_not_pct_config() {
+    let exec = MockExecutor::new();
+    exec.respond_always("free -m", CmdOutput::ok("64000\n0 8192\n38144\n4096\n"));
+    let m = read_host_memory(&exec).await;
+    assert_eq!(m, Some((64000, 42240, 0, 8192)));
+    let calls = exec.calls();
+    assert_eq!(calls.len(), 1, "{:?}", calls);
+    assert!(!calls[0].contains("pct config"), "{}", calls[0]);
+    assert!(calls[0].contains("/etc/pve/lxc/"), "{}", calls[0]);
 }

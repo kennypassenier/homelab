@@ -85,6 +85,7 @@ fn inputs() -> FactsInputs {
         logs_window: "24h".into(),
         grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
+        watched_fresh: true,
     }
 }
 

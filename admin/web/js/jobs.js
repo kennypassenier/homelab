@@ -175,8 +175,10 @@ export function remaining(j, progressAt, now) {
 
 /**
  * How far along, 0 to 100, or null when nothing says (the bar is then
- * indeterminate). Time-based when earlier runs give a total, step-based
- * otherwise; never 100 before the end.
+ * indeterminate, busy). Time-based when earlier runs give a total, but
+ * never behind the steps already finished (a slow run's time share stayed
+ * near 0 while its steps went by, Kenny 2026-09-29); step-based without a
+ * time; never 100 before the end.
  * @param {Job} j
  * @param {number | null} progressAt
  * @param {number} now
@@ -188,11 +190,15 @@ export function percent(j, progressAt, now) {
   if (!p) return j.state === "queued" ? 0 : null;
   const left = remaining(j, progressAt, now).s;
   const ran = elapsedS(j, now);
-  if (left != null && ran != null && ran + left > 0)
-    return Math.min(99, Math.round((ran / (ran + left)) * 100));
-  if (p.m)
-    return Math.min(99, Math.round(((p.n - (p.finished ? 0 : 1)) / p.m) * 100));
-  return null;
+  const byTime =
+    left != null && ran != null && ran + left > 0
+      ? Math.round((ran / (ran + left)) * 100)
+      : null;
+  const bySteps = p.m
+    ? Math.round(((p.n - (p.finished ? 0 : 1)) / p.m) * 100)
+    : null;
+  if (byTime == null && bySteps == null) return null;
+  return Math.min(99, Math.max(byTime ?? 0, bySteps ?? 0));
 }
 
 /**

@@ -610,6 +610,8 @@ no second way in: the steps travel on the same TLS line as every other verb.
 | `homelab ui row edit <key>` | opens a host.toml key's dialog on the host settings page (`row edit backup_hour`) |
 | `homelab ui press next\|back\|confirm` | presses a button of the form; `confirm` is the final press and runs the action, the commit, the write or the batch |
 | `homelab ui press save\|cancel\|default` | the buttons of a dialog on top of a form: the rule dialog (`save`, `cancel`), a host.toml key (`save`, `default`, `cancel`) |
+| `homelab ui press confirm --wait` | the final press, then as `finish`: one call from Confirm to the dashboard handed back |
+| `homelab ui finish` | waits for the open dialog's job to end (reads the screen every 2 s, prints each new step line), prints its outcome, then closes the dialog and hands the dashboard back at once, as `done`; exit 1 when the job did not end in done or deferred. Refused when the open dialog ran no job (`close` and `done` let go without running it). Without it, a confirmed dialog is closed 30 s after its job ended (fix-163) |
 | `homelab ui close` | closes the dialog |
 | `homelab ui state` | changes nothing; prints what is on screen |
 | `homelab ui done` | stops driving: every tab is its viewer's again; after a viewer's **Stop** it also acknowledges the stop |

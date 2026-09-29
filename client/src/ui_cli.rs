@@ -14,8 +14,8 @@ use serde_json::Value;
 /// The steps, for the usage line and the verb's help.
 pub const STEPS: &str = "goto <path> | open <form> [stack] | type <field> <text> | \
 pick <field> <value> | check <field> on|off | edit <field> <file|-> | \
-row add|edit|up|down|delete [n|key] | press next|back|confirm|save|cancel|default | \
-close | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
+row add|edit|up|down|delete [n|key] | press next|back|save|cancel|default | \
+press confirm [--wait] | finish | close | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
 
 /// What the line may print for a command besides its own answer. The host
 /// broadcasts every log line, transfer, fleet snapshot and question to every
@@ -25,6 +25,98 @@ close | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
 /// notes to it (paused, stopped), plus a first-use certificate pin.
 pub fn quiet_line(command: &homelab_proto::Command) -> bool {
     matches!(command, homelab_proto::Command::Ui { .. })
+}
+
+/// What one `homelab ui …` line asks for: one step, or a step and then
+/// waiting for the open dialog's job to end and letting go (Kenny,
+/// 2026-09-29: control back as soon as the job ends, not 30 s later).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UiCall {
+    Step(UiStep),
+    /// `ui finish`: wait for the open dialog's job to end, print its
+    /// outcome, then `done` (which closes the dialog and releases the tabs).
+    Finish,
+    /// `ui press confirm --wait`: the press, then as `finish`.
+    PressWait(UiStep),
+}
+
+/// `args` are the words after `ui`, `--json` already taken out; `--wait`
+/// is read here.
+pub fn parse_call(args: &[String]) -> Result<UiCall, String> {
+    let wait = args.iter().any(|a| a == "--wait");
+    let words: Vec<String> = args.iter().filter(|a| *a != "--wait").cloned().collect();
+    if words.first().map(String::as_str) == Some("finish") {
+        if words.len() > 1 || wait {
+            return Err(format!("too many words for ui finish; {}", usage()));
+        }
+        return Ok(UiCall::Finish);
+    }
+    let step = parse(&words)?;
+    if !wait {
+        return Ok(UiCall::Step(step));
+    }
+    match &step {
+        UiStep::Press { button } if button == "confirm" => Ok(UiCall::PressWait(step)),
+        _ => Err(format!(
+            "--wait goes with press confirm only (the press that starts a job); {}",
+            usage()
+        )),
+    }
+}
+
+/// What `finish` does next, read from a `state` answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FinishNext {
+    /// The job still runs: the line to show (printed when it changes).
+    Wait(String),
+    /// Let go now. `outcome`: the job's end, when a job ran; `failed` when
+    /// that end was not a success (exit 1 after the release).
+    Release {
+        outcome: Option<String>,
+        failed: bool,
+    },
+    /// A dialog is open and ran no job: nothing to wait for, and closing it
+    /// would throw its input away.
+    NoJob(String),
+}
+
+/// The next move of `finish` from the dashboard's answer to `state`.
+pub fn finish_next(message: &str) -> Result<FinishNext, String> {
+    let v: Value =
+        serde_json::from_str(message).map_err(|_| format!("the host answered: {message}"))?;
+    let f = &v["state"]["form"];
+    if f.is_null() {
+        return Ok(FinishNext::Release {
+            outcome: None,
+            failed: false,
+        });
+    }
+    let j = &f["job"];
+    if j.is_null() {
+        return Ok(FinishNext::NoJob(format!(
+            "the open dialog {} ran no job, so there is nothing to wait for; \
+             press confirm first, or `homelab ui close` and `homelab ui done` to let go without running it",
+            text(&f["title"])
+        )));
+    }
+    let state = text(&j["state"]);
+    let line = format!(
+        "job    {} {}{}",
+        text(&j["job"]),
+        state,
+        [&j["progress"], &j["message"]]
+            .iter()
+            .filter(|x| !x.is_null())
+            .map(|x| format!(" · {}", text(x)))
+            .collect::<String>()
+    );
+    Ok(match state.as_str() {
+        "queued" | "running" => FinishNext::Wait(line),
+        other => FinishNext::Release {
+            outcome: Some(line),
+            failed: !matches!(other, "done" | "deferred"),
+        },
+    })
 }
 
 fn usage() -> String {
@@ -474,6 +566,82 @@ mod tests {
         assert!(parse_with(&words("edit raw-text nope"), &read)
             .unwrap_err()
             .contains("missing"));
+    }
+
+    /// Kenny, 2026-09-29: control back as soon as the confirmed dialog's
+    /// job ends: `finish`, and `press confirm --wait` in one call.
+    #[test]
+    fn finish_and_press_confirm_wait_parse_and_wait_goes_with_confirm_only() {
+        assert_eq!(parse_call(&words("finish")).unwrap(), UiCall::Finish);
+        assert_eq!(
+            parse_call(&words("press confirm --wait")).unwrap(),
+            UiCall::PressWait(UiStep::Press {
+                button: "confirm".into()
+            })
+        );
+        assert_eq!(
+            parse_call(&words("press confirm")).unwrap(),
+            UiCall::Step(UiStep::Press {
+                button: "confirm".into()
+            })
+        );
+        assert!(parse_call(&words("press next --wait"))
+            .unwrap_err()
+            .contains("--wait goes with press confirm only"));
+        assert!(parse_call(&words("finish now")).is_err());
+        assert!(STEPS.contains("finish"));
+        assert!(STEPS.contains("press confirm [--wait]"));
+    }
+
+    #[test]
+    fn finish_waits_while_the_job_runs_then_releases_with_its_outcome() {
+        let with_job = |state: &str, progress: Value, message: Value| {
+            serde_json::json!({"ok": true, "state": {"active": true, "by": "wsl", "seq": 7,
+                "page": "/app/stacks/uptime", "form": {"title": "Deploy · uptime",
+                "job": {"job": 458, "state": state, "progress": progress, "message": message}}}})
+            .to_string()
+        };
+        assert_eq!(
+            finish_next(&with_job("running", "step 3/31: pull".into(), Value::Null)).unwrap(),
+            FinishNext::Wait("job    458 running · step 3/31: pull".into())
+        );
+        assert!(matches!(
+            finish_next(&with_job("queued", Value::Null, Value::Null)).unwrap(),
+            FinishNext::Wait(_)
+        ));
+        assert_eq!(
+            finish_next(&with_job(
+                "done",
+                "step 31/31: service checks".into(),
+                "complete".into()
+            ))
+            .unwrap(),
+            FinishNext::Release {
+                outcome: Some("job    458 done · step 31/31: service checks · complete".into()),
+                failed: false
+            }
+        );
+        assert!(matches!(
+            finish_next(&with_job("failed", Value::Null, "pull failed".into())).unwrap(),
+            FinishNext::Release { failed: true, .. }
+        ));
+        // No dialog (already released): let go all the same.
+        let none = serde_json::json!({"ok": true, "state": {"active": false, "form": null}});
+        assert_eq!(
+            finish_next(&none.to_string()).unwrap(),
+            FinishNext::Release {
+                outcome: None,
+                failed: false
+            }
+        );
+        // A dialog that ran nothing is not closed behind the driver's back.
+        let open = serde_json::json!({"ok": true, "state": {"active": true,
+            "form": {"title": "Deploy · uptime", "job": null}}});
+        let FinishNext::NoJob(why) = finish_next(&open.to_string()).unwrap() else {
+            panic!("not NoJob")
+        };
+        assert!(why.contains("Deploy · uptime ran no job"), "{why}");
+        assert!(finish_next("not json").is_err());
     }
 
     #[test]

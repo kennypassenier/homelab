@@ -269,6 +269,30 @@
 .act-dialog--wide {
   inline-size: min(60rem, calc(100vw - 32px));
 }
+/* The action dialog is wider on a large screen, so the Live view banner
+   and a running job's panel have room (Kenny, 2026-09-29); still the full
+   width less the gutter on a phone. kp's own dialog width token, so the
+   theme's dialog stays the one in use. */
+#action-dialog {
+  --kp-dialog-max-width: calc(100vw - 32px);
+  inline-size: min(52rem, calc(100vw - 32px));
+}
+/* A running job without a count to go by is busy, not empty: kp-themes
+   draws the indeterminate stripes as a background image, which every
+   theme's own `.kp-progress { background: … }` rule later in the sheet
+   resets, so the bar read as 0% until the end (Kenny, 2026-09-29). This
+   sheet is outside kp's layers, so the stripes win here. */
+.kp-progress:indeterminate {
+  background-image: linear-gradient(
+    -45deg,
+    var(--kp-control-accent, var(--primary)) 25%,
+    transparent 25% 50%,
+    var(--kp-control-accent, var(--primary)) 50% 75%,
+    transparent 75%
+  );
+  background-size: var(--kp-progress-stripe, 1rem)
+    var(--kp-progress-stripe, 1rem);
+}
 .act-dialog .kp-field,
 .sched-form .kp-field {
   margin-block: 10px;
@@ -957,11 +981,12 @@ td.stack-flags {
   gap: 2px;
   min-width: 0;
 }
+/* The words wrap rather than end in an ellipsis while there is room below
+   (Kenny, 2026-09-29: "Claude is working on uptime: Deploy · job …" was
+   cut off in the dialog). */
 .drive-announce__text {
-  overflow: hidden;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .drive-announce__meta {
   display: flex;

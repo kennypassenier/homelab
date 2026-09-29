@@ -14,7 +14,7 @@ use std::path::Path;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 
-use homelab_proto::{Command, LogLevel, RpcRequest, ServerMsg};
+use homelab_proto::{Command, LogLevel, RpcRequest, ServerMsg, UiStep};
 
 use homelab_client::{spec, tui};
 
@@ -297,24 +297,30 @@ async fn run(explicit_host: Option<String>) {
                 .filter(|a| a.as_str() != "--json")
                 .cloned()
                 .collect();
-            let step = homelab_client::ui_cli::parse(&words).unwrap_or_else(|e| die(&e));
+            use homelab_client::ui_cli::UiCall;
+            let call = homelab_client::ui_cli::parse_call(&words).unwrap_or_else(|e| die(&e));
+            let step = match call {
+                UiCall::Step(step) => step,
+                UiCall::Finish => ui_finish(&host, &token, json).await,
+                UiCall::PressWait(step) => {
+                    let reply = rpc_reply(&host, &token, Command::Ui { step })
+                        .await
+                        .unwrap_or_else(|| die("the host closed the line before it answered"));
+                    if !reply.ok {
+                        ui_print(&reply, json);
+                    }
+                    if !json {
+                        if let Ok(text) = homelab_client::ui_cli::render(&reply.message) {
+                            print!("{text}");
+                        }
+                    }
+                    ui_finish(&host, &token, json).await
+                }
+            };
             let reply = rpc_reply(&host, &token, Command::Ui { step })
                 .await
                 .unwrap_or_else(|| die("the host closed the line before it answered"));
-            if json {
-                println!("{}", reply.message);
-                std::process::exit(if reply.ok { 0 } else { 1 });
-            }
-            match homelab_client::ui_cli::render(&reply.message) {
-                Ok(text) => {
-                    print!("{text}");
-                    std::process::exit(0);
-                }
-                Err(text) => {
-                    eprint!("{text}");
-                    std::process::exit(1);
-                }
-            }
+            ui_print(&reply, json);
         }
         "patch" => rpc(&host, &token, Command::PatchFleet).await,
         "config" => rpc(&host, &token, Command::GetConfig).await,
@@ -1788,6 +1794,79 @@ async fn rpc_collect(
     let (ok, fleet, _) = rpc_exchange(host, token, command, true).await;
     (ok, fleet)
 }
+
+/// A `homelab ui` answer printed, and the process ended with its code.
+fn ui_print(reply: &homelab_proto::RpcResponse, json: bool) -> ! {
+    let failed = FINISH_FAILED.load(std::sync::atomic::Ordering::Relaxed);
+    if json {
+        println!("{}", reply.message);
+        std::process::exit(if reply.ok && !failed { 0 } else { 1 });
+    }
+    match homelab_client::ui_cli::render(&reply.message) {
+        Ok(text) => {
+            print!("{text}");
+            std::process::exit(if failed { 1 } else { 0 });
+        }
+        Err(text) => {
+            eprint!("{text}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// `homelab ui finish` (Kenny, 2026-09-29): read the screen every 2 s until
+/// the open dialog's job has ended, print its outcome, then answer with the
+/// `done` step to send, which closes the dialog and gives the tabs back at
+/// once instead of after fix-163's 30 s. A failed job still lets go, and
+/// the process then ends with 1 (after `done` answered).
+async fn ui_finish(host: &str, token: &str, json: bool) -> UiStep {
+    use homelab_client::ui_cli::{finish_next, FinishNext};
+    let mut last = String::new();
+    let mut misses = 0;
+    loop {
+        let Some(reply) = rpc_reply(
+            host,
+            token,
+            Command::Ui {
+                step: UiStep::State,
+            },
+        )
+        .await
+        else {
+            // A job that restarts the dashboard drops the line for a moment.
+            misses += 1;
+            if misses >= 30 {
+                die("ui finish: the host did not answer for a minute; `homelab ui state` shows where it is");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            continue;
+        };
+        misses = 0;
+        match finish_next(&reply.message).unwrap_or_else(|e| die(&e)) {
+            FinishNext::Wait(line) => {
+                if !json && line != last {
+                    println!("{line}");
+                }
+                last = line;
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            FinishNext::NoJob(why) => die(&format!("ui finish: {why}")),
+            FinishNext::Release { outcome, failed } => {
+                if let Some(o) = outcome.filter(|_| !json) {
+                    println!("{o}");
+                }
+                if failed {
+                    FINISH_FAILED.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                return UiStep::Done;
+            }
+        }
+    }
+}
+
+/// `ui finish` saw the job end in something other than success: exit 1
+/// once `done` has let go.
+static FINISH_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// fix-68: the host's reply handed back instead of printed, for a verb whose
 /// reply is data to render (`today`).

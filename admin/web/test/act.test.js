@@ -369,6 +369,26 @@ test("no earlier run: the step without a count and an honest remaining", () => {
   assert.equal(percent(noM, 1000, 1100), 6); // (3 - 1) / 35
 });
 
+// Kenny, 2026-09-29: a deploy's bar stayed empty and filled only at its
+// last step. The bar never trails the steps already finished, and a job
+// with no count to go by is busy (indeterminate), never 0%.
+test("the bar advances with each step and is busy without a count", () => {
+  const slow = job({
+    progress: prog({ n: 20, m: 31, expected_remaining_s: 5000 }),
+  });
+  // Time says 2% (20 s run of 5020 s); 19 of 31 steps are behind it.
+  assert.equal(percent(slow, 1030, 1030), 61);
+  const unknown = job({
+    progress: prog({ n: 31, m: null, expected_remaining_s: null, runs: 0 }),
+  });
+  assert.equal(percent(unknown, 1030, 1030), null);
+  assert.equal(stepText(unknown), "step 31");
+  assert.equal(
+    jobPanel(unknown, { label: (a) => a, progressAt: 1030, now: 1030 }).percent,
+    null,
+  );
+});
+
 test("the end of a job says what came of it", () => {
   const done = job({ state: "done", finished_at: 1210, progress: prog() });
   const v = jobPanel(done, { label: (a) => a, progressAt: null, now: 5000 });

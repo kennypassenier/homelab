@@ -114,7 +114,6 @@ export function makeBar(inline, extra = []) {
     if (!inline) el.hidden = !v;
     el.dataset.paused = String(!!v?.paused);
     text.textContent = v ? v.text : idle;
-    text.title = text.textContent;
     status.textContent = v?.status ?? "";
     shown(status, !!v?.status);
     counter.textContent = v?.counter ?? "";

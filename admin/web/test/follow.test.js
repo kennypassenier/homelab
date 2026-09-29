@@ -15,7 +15,6 @@ import {
   badgeText,
   catchUp,
   isActive,
-  letterDelay,
   plan,
   readFollow,
 } from "../js/driveview.js";
@@ -164,7 +163,15 @@ test("the badge names the stack and the action while Claude drives, and ends", (
   assert.equal(badgeText(state({ active: false }), 1010), null);
   assert.equal(isActive(null, 0), false);
   assert.match(String(badgeText(state({ form: null }), 1010)), /dashboard/);
-  assert.ok(letterDelay("x") <= 70 && letterDelay("x".repeat(500)) >= 15);
+});
+
+test("after a dashboard restart the re-read state ends a stale badge", () => {
+  // Before: Claude drove media. The restarted dashboard answers with a
+  // fresh, inactive state (seq from 0, no form): nothing is driving.
+  assert.ok(badgeText(state(), 1010));
+  const fresh = state({ active: false, by: null, seq: 0, form: null });
+  assert.equal(isActive(fresh, 1010), false);
+  assert.equal(badgeText(fresh, 1010), null);
 });
 
 test("the form description is one file: the browser's checks match the cases the server runs", () => {

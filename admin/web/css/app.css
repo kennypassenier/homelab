@@ -1168,6 +1168,50 @@ td.stack-flags {
   opacity: 1;
 }
 .drive-cursor__pointer,
+/* A dropdown pick (Kenny, 2026-09-29: "selecties in een dropdown mogen
+   veel trager"): a native list cannot be opened by a script, so the
+   options are drawn under the dropdown and the pointer passes over them. */
+.drive-cursor__list {
+  position: absolute;
+  inset: 0 auto auto 0;
+  display: flex;
+  flex-direction: column;
+  max-width: min(28rem, calc(100vw - 32px));
+  max-height: min(20rem, 50vh);
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--border, currentColor);
+  border-radius: var(--radius, 6px);
+  background: var(--popover, var(--background));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--foreground) 22%, transparent);
+  color: var(--popover-foreground, var(--foreground));
+  font-family: var(--theme-font-body, inherit);
+  font-size: 14px;
+  pointer-events: none;
+}
+.drive-cursor__list[hidden] {
+  display: none;
+}
+.drive-cursor__option {
+  padding: 4px 10px;
+  border-radius: calc(var(--radius, 6px) - 2px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drive-cursor__option--on {
+  font-weight: 600;
+}
+.drive-cursor__option--off {
+  opacity: 0.5;
+}
+.drive-cursor__option--hover {
+  background: var(
+    --accent,
+    color-mix(in srgb, var(--primary) 15%, transparent)
+  );
+  color: var(--accent-foreground, inherit);
+}
 .drive-cursor__ring {
   position: absolute;
   inset: 0 auto auto 0;

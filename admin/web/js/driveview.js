@@ -48,6 +48,7 @@
  *   stack: string, edit?: boolean} |
  *   {op: "type", name: string, id?: string, text: string} |
  *   {op: "set", name: string, id?: string, value: string | boolean} |
+ *   {op: "pick", name: string, id?: string, value: string} |
  *   {op: "row", row: string, target?: string} |
  *   {op: "press", button: string} | {op: "sync"} | {op: "close"} |
  *   {op: "note", refusal: DriveRefusal} |
@@ -186,9 +187,10 @@ export function animate(local, step, s) {
         },
       ];
     case "pick":
+      // Played slowly, as a person opens a list and picks (drivepace.js).
       return [
         {
-          op: "set",
+          op: "pick",
           name: nameOf(s, step.field),
           id: step.field,
           value: step.value ?? "",
@@ -272,15 +274,6 @@ export function plan(local, ev, following) {
       : catchUp(local, ev.state);
   return { ops, local: localOf(ev.state) };
 }
-
-/**
- * How long to wait before each letter: readable, and never more than about
- * two and a half seconds for the whole text.
- * @param {string} text
- * @returns {number} milliseconds per letter
- */
-export const letterDelay = (text) =>
-  Math.max(15, Math.min(70, Math.floor(2500 / Math.max(1, text.length))));
 
 // ── Live view: announce, plan and pause (Kenny, 2026-09-29) ────────────
 

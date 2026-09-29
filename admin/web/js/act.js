@@ -221,11 +221,16 @@ export function startAct() {
     act.schedules = list;
     tell("schedules");
   });
-  listen("resync", () => {
+  // After a restart the jobs a page shows (a driven dialog's among them)
+  // are read again: `resync` only reaches a browser that heard an event
+  // before, `reopened` comes on every reconnect.
+  const reload = () => {
     void loadJobs();
     void loadNotices();
     void loadSchedules();
-  });
+  };
+  listen("resync", reload);
+  listen("reopened", reload);
   void loadCatalog();
   void loadJobs();
   void loadNotices();

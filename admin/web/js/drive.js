@@ -33,12 +33,12 @@ import {
   unmark,
 } from "./driveannounce.js";
 import { makeCursor } from "./drivecursor.js";
+import { REDUCED_TYPE_MS, typingDelays } from "./drivepace.js";
 import { openDriven } from "./editdrive.js";
 import {
   FOLLOW_KEY,
   badgeText,
   isActive,
-  letterDelay,
   localOf,
   plan,
   readFollow,
@@ -48,6 +48,10 @@ import { attachSwitches } from "/static/kp/js/forms.js";
 
 /** @param {number} ms */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** @returns {boolean} */
+const reducedMotion = () =>
+  !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 const now = () => Date.now() / 1000;
 
 /** sessionStorage: per tab, kept over a reload; absent in a private window. */
@@ -230,12 +234,40 @@ export function mountFollow(region, ctx) {
         wrap?.classList.add("drive-focus");
         cursor.sit(wrap ?? input);
         ctl.set(op.name, "", op.id);
-        const ms = letterDelay(op.text);
-        for (let i = 1; i <= op.text.length; i += 1) {
-          ctl.set(op.name, op.text.slice(0, i), op.id);
-          await sleep(ms);
+        // As a person types (drivepace.js): uneven, resting after words and
+        // punctuation; reduced motion sets the whole text at once.
+        const delays = typingDelays(op.text, Math.random, reducedMotion());
+        if (delays.length === 0) {
+          ctl.set(op.name, op.text, op.id);
+          await sleep(REDUCED_TYPE_MS);
         }
+        const letters = [...op.text];
+        for (let i = 0; i < delays.length; i += 1) {
+          if (!following) break;
+          ctl.set(op.name, letters.slice(0, i + 1).join(""), op.id);
+          await sleep(delays[i]);
+        }
+        ctl.set(op.name, op.text, op.id);
         wrap?.classList.remove("drive-focus");
+        return;
+      }
+      case "pick": {
+        const input = ctl?.input(op.name, op.id);
+        if (!ctl || !input) return;
+        const c = ctl;
+        const commit = () => c.set(op.name, op.value, op.id);
+        // A dropdown is opened, its options passed over and the choice
+        // clicked (drivecursor.js); any other control is set as before.
+        if (input instanceof HTMLSelectElement && following)
+          await cursor.pick(input, op.value, commit);
+        else {
+          commit();
+          await flash(
+            /** @type {HTMLElement | null} */ (input.closest(".kp-field")),
+            "drive-focus",
+            200,
+          );
+        }
         return;
       }
       case "row": {
@@ -305,16 +337,17 @@ export function mountFollow(region, ctx) {
     }
   };
 
-  /** Catch up with the state as the server has it now. */
+  /** Catch up with the state as the server has it now; false when it
+   * could not be read. */
   const catchUpNow = async () => {
     const r = await fetchJson("/data/drive", "what Claude is doing");
-    if (!r.ok) return;
+    if (!r.ok) return false;
     /** @type {import("./driveview.js").DriveState} */
     const s = r.body.state;
     state = s;
     clock.set(s);
     paint();
-    if (!following || !isActive(s, now())) return;
+    if (!following || !isActive(s, now())) return true;
     local.page = location.pathname;
     const ev = {
       seq: s.seq,
@@ -325,6 +358,7 @@ export function mountFollow(region, ctx) {
     };
     // A seq that cannot follow on forces a catch-up.
     queue = queue.then(() => play({ ...ev, seq: -2 }));
+    return true;
   };
 
   /** @param {boolean} on */
@@ -358,6 +392,19 @@ export function mountFollow(region, ctx) {
     paint();
     queue = queue.then(() => play(ev)).catch(() => {});
   });
+  // The live channel came back (the dashboard restarted, e.g. during its
+  // own install-native, 2026-09-29 18:15): the new dashboard's drive state
+  // is the truth, so a "Claude is driving" badge, the input lock and the
+  // cursor from before the restart must not outlive it. Read it again.
+  // A dashboard still starting may not answer yet: a few tries.
+  const reread = async () => {
+    for (let i = 0; i < 5; i += 1) {
+      if (await catchUpNow()) return;
+      await sleep(1500);
+    }
+  };
+  listen("reopened", () => void reread());
+  listen("resync", () => void reread());
   // The press's job moves on without a step: its state comes with the
   // queue's own `action` events.
   listen("action", (/** @type {import("./jobs.js").Job} */ j) => {

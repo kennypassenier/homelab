@@ -5,11 +5,14 @@ import assert from "node:assert/strict";
 import {
   EDGE,
   aimAt,
+  bandScroll,
+  clipBand,
+  inBand,
   arriveLead,
   clickDue,
   glideFraction,
-  offScreen,
   pathAt,
+  safeBand,
 } from "../js/drivecursor.js";
 
 test("the glide starts where the pointer was and lands before 0", () => {
@@ -50,23 +53,45 @@ test("the path eases from start to target and aims inside the window", () => {
   assert.equal(clickDue(100, 5000, true), false);
 });
 
-test("fix-163: a target below the fold is scrolled to before the glide", () => {
+test("the pointer is kept in a safe band above the announce bar", () => {
   const box = (/** @type {number} */ top, h = 30) => ({
     left: 100,
     top,
     width: 200,
     height: h,
   });
-  assert.equal(offScreen(box(200), 1280, 800), false);
-  // Below the fold, above the top, or cut off by the bottom edge.
-  assert.equal(offScreen(box(900), 1280, 800), true);
-  assert.equal(offScreen(box(-60), 1280, 800), true);
-  assert.equal(offScreen(box(790), 1280, 800), true);
-  // A target taller than the window counts as on screen once its top is.
-  assert.equal(offScreen(box(40, 2000), 1280, 800), false);
-  // Off to the side.
-  assert.equal(
-    offScreen({ left: 1400, top: 200, width: 50, height: 20 }, 1280, 800),
-    true,
-  );
+  // 800 px window, a 56 px sticky bar on top, a 90 px announce bar below.
+  const band = safeBand(800, 56, 90);
+  assert.deepEqual(band, { top: 80, bottom: 686 });
+  // Well inside: no scroll.
+  assert.equal(inBand(box(300), band), true);
+  assert.equal(bandScroll(box(300), band), 0);
+  // Visible in the window but under the announce bar (the 18:14 case):
+  // scrolled down until its centre is the band's middle.
+  assert.equal(inBand(box(700), band), false);
+  assert.equal(bandScroll(box(700), band), 715 - 383);
+  // Under the top bar, or above the window: scrolled up.
+  assert.equal(bandScroll(box(40), band), 55 - 383);
+  assert.equal(bandScroll(box(-400), band) < 0, true);
+  // Far below the fold (fix-163's case) still scrolls.
+  assert.equal(bandScroll(box(2400), band), 2415 - 383);
+  // A target taller than half the band: its top a sixth of the way down.
+  assert.equal(inBand(box(100, 2000), band), true);
+  assert.equal(bandScroll(box(600, 2000), band), 600 - (80 + 101));
+  // No bars: only the margin; a window too short gets the whole window.
+  assert.deepEqual(safeBand(800, 0, 0), { top: 24, bottom: 776 });
+  assert.deepEqual(safeBand(150, 56, 90), { top: 0, bottom: 150 });
+});
+
+test("inside the dialog the band is the overlap with its scrolling body", () => {
+  const band = safeBand(800, 56, 0);
+  // The dialog body shows 200..600 of the window.
+  assert.deepEqual(clipBand(band, 200, 600), { top: 212, bottom: 588 });
+  // A body wider than the band keeps the band.
+  assert.deepEqual(clipBand(band, 0, 900), band);
+  // A body too small for a band gets its own visible part.
+  assert.deepEqual(clipBand(band, 700, 740), { top: 700, bottom: 740 });
+  const inner = clipBand(band, 200, 600);
+  const field = { left: 0, top: 580, width: 300, height: 36 };
+  assert.equal(bandScroll(field, inner), 598 - 400);
 });

@@ -109,6 +109,49 @@ pub fn file_changes(
         .collect()
 }
 
+/// fix-159 (2026-09-29): the running native units a deploy of these files
+/// restarts, said in the plan before it happens: "restarts <unit>: unit
+/// changed" (its unit file, or a drop-in of it under `rootfs/`). The deploy
+/// restarts a unit only when it runs and what it reads really changed on
+/// the container; a unit the host never had starts instead, and is not
+/// listed. An env file is never among the stack files (latch fills it, the
+/// deploy restores it from the vault), so "env changed" is said by the
+/// deploy's transcript alone.
+pub fn native_restarts(
+    local: &[homelab_proto::FileBlob],
+    applied: &[homelab_proto::FileBlob],
+) -> Vec<String> {
+    let differs = |f: &homelab_proto::FileBlob| match applied.iter().find(|a| a.path == f.path) {
+        None => true,
+        Some(a) => a.content != f.content || a.mode != f.mode,
+    };
+    let unit_of = |path: &str| {
+        let (dir, file) = path.split_once('/')?;
+        (file.strip_suffix(".service") == Some(dir)).then(|| dir.to_string())
+    };
+    let mut written: Vec<String> = Vec::new();
+    for f in local.iter().filter(|f| differs(f)) {
+        if let Some(rest) = f.path.strip_prefix(homelab_core::manifest::ROOTFS_PREFIX) {
+            written.push(format!("/{}", rest));
+        } else if let Some(unit) = unit_of(&f.path) {
+            // A unit file new to the stack starts; only a changed one restarts.
+            if applied.iter().any(|a| a.path == f.path) {
+                written.push(format!("/etc/systemd/system/{}.service", unit));
+            }
+        }
+    }
+    let mut out: Vec<String> = local
+        .iter()
+        .filter_map(|f| {
+            let unit = unit_of(&f.path)?;
+            let why = homelab_core::native::restart_reason(&unit, &f.content, &written)?;
+            Some(format!("restarts {}: {}", unit, why))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
 /// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): the exit
 /// code of `homelab apply --plan`, which prints the plan and changes
 /// nothing: 0 when the host runs exactly what the files say, 2 when a

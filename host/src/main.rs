@@ -5964,8 +5964,8 @@ where
         // the session options: never queued behind a deploy.
         match req.command {
             Rpc::UiAttach => {
-                state.ui.attach(session, out_tx.clone());
-                info!(token = %who.name, "the dashboard attached for UI steps");
+                state.ui.attach(session, &who.name, out_tx.clone());
+                info!(token = %who.name, session, "the dashboard attached for UI steps");
                 let resp = RpcResponse {
                     id: req.id,
                     ok: true,
@@ -6070,7 +6070,21 @@ where
     // as it did when the loop ran requests inline: a deploy is not abandoned
     // halfway because a laptop lid closed.
     drop(work_tx);
-    state.ui.detach(session);
+    // fix-158: the attached dashboard's end hands the steps back to the
+    // most recent earlier dashboard still connected, and says which.
+    match state.ui.detach(session) {
+        ui_relay::Detached::NotAttached => {}
+        ui_relay::Detached::FellBackTo(back, token) => info!(
+            session,
+            back,
+            token = %token,
+            "the attached dashboard's session ended; UI steps go to the earlier dashboard session {back} again"
+        ),
+        ui_relay::Detached::NoneLeft => info!(
+            session,
+            "the attached dashboard's session ended; no dashboard is attached for UI steps"
+        ),
+    }
     let _ = worker.await;
     forward.abort();
 }

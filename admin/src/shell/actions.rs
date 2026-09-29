@@ -1115,10 +1115,17 @@ impl Actions {
         }
         changes.sort_by(|a, b| a.path.cmp(&b.path));
         let summary = homelab_client::apply::file_changes(&local, &applied);
+        // fix-159: the running native units this deploy restarts, and why.
+        let restarts = if known {
+            homelab_client::apply::native_restarts(&local, &applied)
+        } else {
+            Vec::new()
+        };
         Ok(serde_json::json!({
             "new_stack": !known,
             "files": crate::core::editplan::file_diffs(&changes),
             "summary": summary,
+            "restarts": restarts,
             "note": if changes.is_empty() {
                 "the files are as the host applied them; secrets or settings may still differ"
             } else {

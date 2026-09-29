@@ -153,3 +153,55 @@ fn fix_100_the_apply_plan_lists_added_changed_and_removed_files() {
     );
     assert!(homelab_client::apply::file_changes(&local, &local).is_empty());
 }
+
+/// fix-159: the plan says beforehand which running native units the deploy
+/// restarts and why: a changed unit file or drop-in ("unit changed"). A new
+/// unit starts rather than restarts, and a stack whose unit files are
+/// unchanged restarts nothing. (An env file is never in the stack files, so
+/// "env changed" is only in the deploy's transcript, core's tests.)
+#[test]
+fn fix_159_the_plan_names_the_native_units_a_deploy_restarts() {
+    use homelab_client::apply::native_restarts;
+    use homelab_proto::FileBlob;
+    let blob = |p: &str, c: &str| FileBlob {
+        path: p.into(),
+        content: c.into(),
+        mode: None,
+    };
+    let admin = "[Service]\nEnvironmentFile=/appdata/admin/admin-config/admin.env\n\
+                 ExecStart=/usr/local/bin/homelab-admin\n";
+    let applied = vec![
+        blob("admin/admin.service", admin),
+        blob("admin/checks.yml", "x"),
+    ];
+    // Unchanged: nothing restarts.
+    assert!(native_restarts(&applied, &applied).is_empty());
+    // A setting in the unit file.
+    let changed_unit = format!("{admin}Environment=HOMELAB_ADMIN_LIVE_ANNOUNCE_MS=5000\n");
+    let mut local = applied.clone();
+    local[0] = blob("admin/admin.service", &changed_unit);
+    assert_eq!(
+        native_restarts(&local, &applied),
+        vec!["restarts admin: unit changed".to_string()]
+    );
+    // A drop-in of the unit.
+    let mut local = applied.clone();
+    local.push(blob(
+        "rootfs/etc/systemd/system/admin.service.d/limits.conf",
+        "[Service]\nMemoryMax=1G\n",
+    ));
+    assert_eq!(
+        native_restarts(&local, &applied),
+        vec!["restarts admin: unit changed".to_string()]
+    );
+    // A unit the host never had starts; it does not restart.
+    let local = vec![blob(
+        "kyu/kyu.service",
+        "[Service]\nExecStart=/usr/local/bin/kyu\n",
+    )];
+    assert!(native_restarts(&local, &[]).is_empty());
+    // A file no unit reads restarts nothing.
+    let mut local = applied.clone();
+    local[1] = blob("admin/checks.yml", "y");
+    assert!(native_restarts(&local, &applied).is_empty());
+}

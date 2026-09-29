@@ -1707,9 +1707,10 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             // ask-2: systemd only reads a unit it has been told about, and a
             // timer file on disk fires nothing until it is enabled. A changed
             // unit or timer reloads the manager; a changed timer is enabled
-            // and started — starting a TIMER is not starting a service, so
-            // adoption's rule (a deploy never restarts a running service)
-            // holds. Nothing here touches a `.service` beyond the reload.
+            // and started — starting a TIMER is not starting a service.
+            // Nothing here touches a `.service` beyond the reload; a native
+            // unit whose drop-in or env file changed here is restarted by
+            // the "native units" step (fix-159), health-checked.
             if rootfs_changed
                 .iter()
                 .any(|d| d.starts_with("/etc/systemd/system/"))
@@ -2755,6 +2756,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             return Ok(StepOutcome::Unchanged);
         }
         let mut changed = false;
+        // fix-159: what the push step wrote into the container this run; a
+        // running unit whose drop-in or env file is among it restarts.
+        let pushed_paths: Vec<String> = pushed
+            .lock()
+            .map(|g| g.iter().map(|(p, _)| p.clone()).collect())
+            .unwrap_or_default();
         // fix-37: file names two or more units read. A flat vault copy
         // written by an older deploy under such a name belongs to nobody in
         // particular and is never restored.
@@ -2793,9 +2800,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 )));
             };
             let dest = format!("/etc/systemd/system/{}.service", unit);
+            // fix-159: every file this unit reads that the deploy wrote.
+            let mut written = pushed_paths.clone();
             if push_content(exec, m.vmid, &dest, &blob.content, "644").await? {
                 log_info(format!("[native] {} written", dest));
                 pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
+                written.push(dest.clone());
                 changed = true;
             }
 
@@ -2912,6 +2922,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     Ok(content) if !content.trim().is_empty() => {
                         push_content(exec, m.vmid, f, &content, "600").await?;
                         log_info(format!("[native] {} restored from the vault", f));
+                        written.push(f.clone());
                         changed = true;
                     }
                     _ => missing.push(f.clone()),
@@ -3022,6 +3033,48 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 }
             }
             if running {
+                // fix-159 (2026-09-29): a running unit whose unit file, drop-in
+                // or env file this deploy changed restarts, or the change waits
+                // for an unrelated restart: HOMELAB_ADMIN_LIVE_ANNOUNCE_MS set
+                // at 05:41 took effect at the 13:28 reinstall. Through the
+                // health check updates and rollbacks use (restart, wait for
+                // active, NRestarts across a window), said before it happens.
+                // Unchanged: left running, as adoption leaves it.
+                if let Some(reason) = crate::native::restart_reason(unit, &blob.content, &written) {
+                    log_info(format!("[native] restarts {}: {}", unit, reason));
+                    let svc = format!("{}.service", unit);
+                    let out =
+                        pct_sh(exec, m.vmid, &crate::ops::native::health_script(&svc), 180).await?;
+                    if !out.success() {
+                        let tail = pct_sh(
+                            exec,
+                            m.vmid,
+                            &format!("journalctl -u {} -n 20 --no-pager 2>&1 | tail -20", svc),
+                            60,
+                        )
+                        .await
+                        .map(|o| o.stdout.trim().to_string())
+                        .unwrap_or_default();
+                        return Err(CoreError::Other(format!(
+                            "{} did not come up healthy after its restart ({}; the check read \
+                             {}) :: the new files are in place and the service does not run on \
+                             them; correct the stack file and deploy again, or put the previous \
+                             version back and deploy that. Last log lines: {}",
+                            unit,
+                            reason,
+                            match out.stdout.trim() {
+                                "" => "nothing",
+                                r => r,
+                            },
+                            tail
+                        )));
+                    }
+                    log_info(format!(
+                        "[native] {} restarted and healthy ({})",
+                        unit, reason
+                    ));
+                    changed = true;
+                }
                 // 6 · keep the vault current, so the NEXT rebuild can restore
                 // what this container has. The same reasoning as the per-app
                 // .env copies: a file that exists in exactly one place is one

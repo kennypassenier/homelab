@@ -1128,6 +1128,10 @@ async fn run(explicit_host: Option<String>) {
                 for c in changes {
                     println!("      {}", c);
                 }
+                // fix-159: which running native units the deploy restarts.
+                for r in homelab_client::apply::native_restarts(&sp.files, &applied) {
+                    println!("{}      ↻ {}{}", C_YELLOW, r, C_RESET);
+                }
             }
             for n in &plan.destroy {
                 println!(

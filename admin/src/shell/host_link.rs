@@ -145,6 +145,39 @@ pub struct LinkConfig {
     pub backoff_max: Duration,
     /// feat-ops-2: how long the host waits for an answer (arch-config).
     pub ask_timeout_s: u64,
+    /// feat-platform-10: whether this dashboard takes `homelab ui` steps
+    /// (`UiAttach`). fix-158: never for one running `dev_without_locks`.
+    pub ui_attach: bool,
+}
+
+impl LinkConfig {
+    /// The line's settings from the dashboard's own.
+    pub fn from_admin(c: &crate::core::config::AdminConfig) -> Self {
+        let (backoff_min, backoff_max) = c.backoff();
+        LinkConfig {
+            poll: c.poll(),
+            backoff_min,
+            backoff_max,
+            ask_timeout_s: c.ask_timeout_s,
+            // fix-158: a developer's dashboard on the same host token took
+            // the steps over from CT 120's, and on exit left it detached.
+            ui_attach: !c.dev_without_locks,
+        }
+    }
+}
+
+/// What the dashboard sends once the host said Hello (`host_version`), in
+/// order: reads beside the queue (arch-host-link), then `UiAttach` when
+/// `cfg.ui_attach` and the host is not older than this dashboard (an older
+/// host does not know the command and would log it as an unreadable frame).
+pub fn greeting(cfg: &LinkConfig, host_version: &str) -> Vec<Command> {
+    let mut out = vec![Command::SessionOptions {
+        reads_beside_queue: true,
+    }];
+    if cfg.ui_attach && !homelab_client::version::older(host_version, env!("CARGO_PKG_VERSION")) {
+        out.push(Command::UiAttach);
+    }
+    out
 }
 
 /// feat-ops-2: tell every open page which questions are open now.
@@ -253,21 +286,13 @@ async fn session_loop(
                     ServerMsg::Hello { version, build, .. } => {
                         greeted = true;
                         // arch-host-link: this session tells replies apart
-                        // by id, so its reads need not wait behind a deploy.
-                        let opts = RpcRequest {
-                            id: next_id,
-                            command: Command::SessionOptions { reads_beside_queue: true },
-                        };
-                        next_id += 1;
-                        let text = serde_json::to_string(&opts).map_err(|e| e.to_string())?;
-                        tx.send(Message::Text(text.into())).await.map_err(|e| format!("send: {e}"))?;
-                        // feat-platform-10: `homelab ui` steps come here. A
-                        // host older than this dashboard does not know the
-                        // command and would log it as an unreadable frame.
-                        if !homelab_client::version::older(&version, env!("CARGO_PKG_VERSION")) {
-                            let attach = RpcRequest { id: next_id, command: Command::UiAttach };
+                        // by id, so its reads need not wait behind a deploy;
+                        // feat-platform-10: `homelab ui` steps come here
+                        // (never to a dev dashboard, fix-158).
+                        for command in greeting(cfg, &version) {
+                            let req = RpcRequest { id: next_id, command };
                             next_id += 1;
-                            let text = serde_json::to_string(&attach).map_err(|e| e.to_string())?;
+                            let text = serde_json::to_string(&req).map_err(|e| e.to_string())?;
                             tx.send(Message::Text(text.into())).await.map_err(|e| format!("send: {e}"))?;
                         }
                         let mut s = shared.write().await;

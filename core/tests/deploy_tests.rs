@@ -509,11 +509,8 @@ async fn a_deploy_installs_the_unit_file_and_starts_a_service_that_is_down() {
         .is_empty());
 }
 
-/// A service that is already running is left running. Adoption's rule holds:
-/// a deploy does not restart a production service to take ownership of it.
-#[tokio::test]
-async fn a_running_native_service_is_never_restarted_by_a_deploy() {
-    let exec = MockExecutor::new();
+/// fix-159: the running kyu of these tests, its unit file as `unit`.
+fn running_kyu(exec: &MockExecutor, unit: &str) -> DeploySpec {
     exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
     exec.respond_always(
         "pct config",
@@ -523,8 +520,7 @@ async fn a_running_native_service_is_never_restarted_by_a_deploy() {
     exec.respond_always("is-system-running", CmdOutput::ok("running"));
     exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
     exec.respond_always("systemctl is-active kyu", CmdOutput::ok("active\n"));
-    let sink = VecSink::new();
-    let journal = NullJournal;
+    exec.respond_always("test -x '/usr/local/bin/kyu'", CmdOutput::ok("yes"));
     let mut sp = spec(109, "kyu");
     sp.manifest.hostname = "109-app-kyu".into();
     sp.manifest.apps = vec![];
@@ -534,9 +530,42 @@ async fn a_running_native_service_is_never_restarted_by_a_deploy() {
     sp.gateway_route = None;
     sp.files = vec![homelab_core::manifest::FileBlob {
         path: "kyu/kyu.service".into(),
-        content: "[Unit]\nDescription=kyu\n".into(),
+        content: unit.into(),
         mode: None,
     }];
+    sp
+}
+
+/// fix-159: the container already holds exactly this unit file.
+fn unit_on_container(exec: &MockExecutor, unit: &str) {
+    exec.respond_always(
+        "sha256sum '/etc/systemd/system/kyu.service'",
+        CmdOutput::ok(&format!(
+            "{}\n",
+            homelab_core::manifest::sha256_hex(unit.as_bytes())
+        )),
+    );
+}
+
+const KYU_UNIT: &str = "[Unit]\nDescription=kyu\n\n[Service]\n\
+                        EnvironmentFile=/appdata/kyu/kyu-config/kyu.env\n\
+                        ExecStart=/usr/local/bin/kyu\n";
+
+/// A service that is already running, whose unit file and env file are what
+/// the deploy would write, is left running. Adoption's rule holds for
+/// everything a deploy does not change: it does not restart a production
+/// service to take ownership of it (fix-159 restarts only on a change).
+#[tokio::test]
+async fn a_running_native_service_whose_unit_and_env_are_unchanged_is_not_restarted() {
+    let exec = MockExecutor::new();
+    let sp = running_kyu(&exec, KYU_UNIT);
+    unit_on_container(&exec, KYU_UNIT);
+    exec.respond_always(
+        "test -s '/appdata/kyu/kyu-config/kyu.env'",
+        CmdOutput::ok("yes"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
     assert!(deploy(&ctx(&exec, &sink, &journal), &sp).await.ok);
     // The unit itself, not the container's own housekeeping: the runaway
     // guards restart journald, which is not this service.
@@ -551,6 +580,109 @@ async fn a_running_native_service_is_never_restarted_by_a_deploy() {
             forbidden
         );
     }
+    assert!(
+        !sink.lines().iter().any(|l| l.contains("restarts kyu")),
+        "nothing announced: {:?}",
+        sink.lines()
+    );
+}
+
+/// fix-159 (2026-09-29): HOMELAB_ADMIN_LIVE_ANNOUNCE_MS=5000 went into
+/// admin.service at 05:41 and took effect at the 13:28 reinstall: the deploy
+/// wrote the unit and reloaded systemd, and the running service kept its old
+/// settings. A changed unit now restarts the unit through the health-checked
+/// path updates use (restart, wait for active, NRestarts across a window),
+/// announced in the transcript first.
+#[tokio::test]
+async fn fix_159_a_changed_unit_restarts_the_running_service_with_a_health_check() {
+    let exec = MockExecutor::new();
+    let sp = running_kyu(&exec, KYU_UNIT);
+    exec.respond_always(
+        "test -s '/appdata/kyu/kyu-config/kyu.env'",
+        CmdOutput::ok("yes"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "{:?}", report.error);
+    let calls = exec.calls();
+    let written = calls
+        .iter()
+        .position(|c| c.contains("/etc/systemd/system/kyu.service"))
+        .expect("the unit file is written");
+    let restart = calls
+        .iter()
+        .position(|c| c.contains("systemctl restart kyu.service") && c.contains("NRestarts"))
+        .unwrap_or_else(|| panic!("restarted through the health check: {:#?}", calls));
+    assert!(written < restart, "{:#?}", calls);
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("restarts kyu: unit changed")),
+        "announced: {:?}",
+        sink.lines()
+    );
+}
+
+/// fix-159: the env file changed under a running unit (here: it was gone
+/// and the vault copy came back), so the unit restarts to read it.
+#[tokio::test]
+async fn fix_159_a_changed_env_file_restarts_the_running_service() {
+    let exec = MockExecutor::new();
+    let sp = running_kyu(&exec, KYU_UNIT);
+    unit_on_container(&exec, KYU_UNIT);
+    exec.seed_file(
+        "/var/lib/homelab/secrets/kyu/kyu-config/kyu.env",
+        "KYU_TOKEN=x\n",
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls()
+            .iter()
+            .any(|c| c.contains("systemctl restart kyu.service") && c.contains("NRestarts")),
+        "{:#?}",
+        exec.calls()
+    );
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("restarts kyu: env changed")),
+        "announced: {:?}",
+        sink.lines()
+    );
+}
+
+/// fix-159: a restart that does not come up healthy fails the deploy with
+/// what, why and the reading, instead of being recorded as done.
+#[tokio::test]
+async fn fix_159_a_restart_that_does_not_come_up_fails_the_deploy() {
+    let exec = MockExecutor::new();
+    let sp = running_kyu(&exec, KYU_UNIT);
+    exec.respond_always(
+        "test -s '/appdata/kyu/kyu-config/kyu.env'",
+        CmdOutput::ok("yes"),
+    );
+    exec.respond_first(
+        "systemctl restart kyu.service",
+        CmdOutput {
+            stdout: "RESTART_LOOP\n".into(),
+            stderr: String::new(),
+            code: 1,
+        },
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(!report.ok);
+    let why = report.error.unwrap().why;
+    assert!(
+        why.contains("kyu") && why.contains("unit changed") && why.contains("RESTART_LOOP"),
+        "{}",
+        why
+    );
 }
 
 /// A declared unit with no unit file is refused, loudly. The whole point of

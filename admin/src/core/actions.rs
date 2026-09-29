@@ -1071,7 +1071,9 @@ pub fn cli_override(req: &ActionRequest, material: &Material) -> Option<String> 
 
 /// arch-self: actions on the dashboard's own stack that restart it. The
 /// page says so before the press; the outcome is read back after the
-/// restart (the reply cannot arrive on a line that went away).
+/// restart (the reply cannot arrive on a line that went away). A deploy
+/// restarts it when its unit or env file changed (fix-159; the plan names
+/// the reason), so Deploy stays on the list.
 pub fn restarts_dashboard(stack: &str, kind: ActionKind) -> bool {
     use ActionKind::*;
     stack == SELF_STACK

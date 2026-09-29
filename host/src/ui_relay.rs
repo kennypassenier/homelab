@@ -14,6 +14,12 @@
 //! then waits the time the dashboard asks for (at most
 //! [`homelab_proto::UI_HOLD_MAX_S`]) and hands its note ("paused by the
 //! viewer …") to the waiting CLI.
+//!
+//! fix-158 (2026-09-29): the host remembers every session that attached,
+//! most recent first. The newest one gets the steps; when it ends, the next
+//! one still connected is attached again. One attached slot meant a
+//! developer's dashboard on the same token took the steps over and, when it
+//! closed, left CT 120's dashboard connected but no longer attached.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,9 +41,29 @@ struct Waiting {
     hold: mpsc::UnboundedSender<Hold>,
 }
 
+/// A session that said `UiAttach`.
+struct Attached {
+    session: u64,
+    /// The token it signed in with, for the log.
+    who: String,
+    out: mpsc::Sender<ServerMsg>,
+}
+
+/// What a session's end did to the relay (fix-158), for the host's log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Detached {
+    /// It was not the attached dashboard: nothing changed for the steps.
+    NotAttached,
+    /// It was; this earlier session (number, token) gets the steps now.
+    FellBackTo(u64, String),
+    /// It was, and no other attached session is still connected.
+    NoneLeft,
+}
+
 pub struct UiRelay {
-    /// The attached session: its number and its outgoing channel.
-    target: Mutex<Option<(u64, mpsc::Sender<ServerMsg>)>>,
+    /// Every attached session, most recent first; the first one is the
+    /// dashboard the steps go to (fix-158).
+    attached: Mutex<Vec<Attached>>,
     pending: Mutex<HashMap<u64, Waiting>>,
     next: AtomicU64,
 }
@@ -45,7 +71,7 @@ pub struct UiRelay {
 impl Default for UiRelay {
     fn default() -> Self {
         UiRelay {
-            target: Mutex::new(None),
+            attached: Mutex::new(Vec::new()),
             pending: Mutex::new(HashMap::new()),
             next: AtomicU64::new(1),
         }
@@ -64,32 +90,53 @@ fn refusal(what: &str, why: &str, fix: &str) -> String {
 }
 
 impl UiRelay {
-    /// `session` is the dashboard now; a newer attach replaces an older one
-    /// (the dashboard reconnected).
-    pub fn attach(&self, session: u64, out: mpsc::Sender<ServerMsg>) {
-        *self.target.lock().unwrap_or_else(PoisonError::into_inner) = Some((session, out));
+    /// `session` (signed in as `who`) is the dashboard now. A newer attach
+    /// goes in front of the older ones, which are kept to fall back to
+    /// (fix-158); a session attaching again moves to the front.
+    pub fn attach(&self, session: u64, who: &str, out: mpsc::Sender<ServerMsg>) {
+        let mut a = self.attached.lock().unwrap_or_else(PoisonError::into_inner);
+        a.retain(|x| x.session != session);
+        a.insert(
+            0,
+            Attached {
+                session,
+                who: who.to_string(),
+                out,
+            },
+        );
     }
 
-    /// The session ended; if it was the dashboard, nobody is attached, and
-    /// every step it still held is answered at once (a paused step would
-    /// otherwise wait out its whole hold for an answer that cannot come).
-    pub fn detach(&self, session: u64) {
-        let mut t = self.target.lock().unwrap_or_else(PoisonError::into_inner);
-        if t.as_ref().map(|(s, _)| *s) == Some(session) {
-            *t = None;
-            self.pending
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clear();
+    /// The session ended and is forgotten. If it was the attached
+    /// dashboard, every step it still held is answered at once (a paused
+    /// step would otherwise wait out its whole hold for an answer that
+    /// cannot come), and the most recent earlier session whose line is
+    /// still open is attached again (fix-158).
+    pub fn detach(&self, session: u64) -> Detached {
+        let mut a = self.attached.lock().unwrap_or_else(PoisonError::into_inner);
+        let was_attached = a.first().map(|x| x.session) == Some(session);
+        a.retain(|x| x.session != session);
+        if !was_attached {
+            return Detached::NotAttached;
+        }
+        self.pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+        // A session whose line closed without its end reaching here yet is
+        // no fallback; its own end forgets it anyway.
+        a.retain(|x| !x.out.is_closed());
+        match a.first() {
+            Some(x) => Detached::FellBackTo(x.session, x.who.clone()),
+            None => Detached::NoneLeft,
         }
     }
 
     fn attached_is(&self, session: u64) -> bool {
-        self.target
+        self.attached
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            .map(|(s, _)| *s)
+            .first()
+            .map(|x| x.session)
             == Some(session)
     }
 
@@ -120,11 +167,17 @@ impl UiRelay {
     }
 
     #[cfg(test)]
-    pub fn attached(&self) -> bool {
-        self.target
+    pub fn attached_session(&self) -> Option<u64> {
+        self.attached
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .is_some()
+            .first()
+            .map(|x| x.session)
+    }
+
+    #[cfg(test)]
+    pub fn attached(&self) -> bool {
+        self.attached_session().is_some()
     }
 
     /// The dashboard's answer to relay `relay`. Only the attached session
@@ -163,11 +216,11 @@ impl UiRelay {
     ) -> (bool, String) {
         let what = format!("ui {}", step.verb());
         let Some(out) = self
-            .target
+            .attached
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            .map(|(_, o)| o.clone())
+            .first()
+            .map(|x| x.out.clone())
         else {
             return (
                 false,
@@ -292,7 +345,7 @@ mod tests {
     async fn follow_the_step_reaches_the_attached_session_and_its_answer_comes_back() {
         let r = std::sync::Arc::new(UiRelay::default());
         let (tx, mut rx) = mpsc::channel(4);
-        r.attach(7, tx);
+        r.attach(7, "admin", tx);
         let r2 = r.clone();
         let dashboard = tokio::spawn(async move {
             let Some(ServerMsg::Ui {
@@ -331,6 +384,44 @@ mod tests {
         assert!(!r.attached());
     }
 
+    /// fix-158: a second dashboard (a developer's, on the same token) that
+    /// attached and then ended used to leave nobody attached, while CT 120's
+    /// dashboard was still connected. The host remembers every attached
+    /// session, most recent first, and falls back to the next one still
+    /// connected; the last one's end leaves none.
+    #[tokio::test]
+    async fn fix_158_when_the_attached_dashboard_ends_the_one_before_it_is_attached_again() {
+        let r = UiRelay::default();
+        let (a_tx, _a_rx) = mpsc::channel(4);
+        let (b_tx, _b_rx) = mpsc::channel(4);
+        r.attach(1, "admin", a_tx);
+        r.attach(2, "admin", b_tx);
+        assert_eq!(r.attached_session(), Some(2), "the newest attach wins");
+        assert_eq!(r.detach(2), Detached::FellBackTo(1, "admin".into()));
+        assert_eq!(r.attached_session(), Some(1), "A is still connected");
+        assert_eq!(r.detach(1), Detached::NoneLeft);
+        assert_eq!(r.attached_session(), None);
+
+        // A session whose line already closed is no fallback.
+        let (a_tx, a_rx) = mpsc::channel(4);
+        let (b_tx, _b_rx) = mpsc::channel(4);
+        r.attach(3, "admin", a_tx);
+        r.attach(4, "admin", b_tx);
+        drop(a_rx);
+        assert_eq!(r.detach(4), Detached::NoneLeft);
+        assert_eq!(r.attached_session(), None);
+
+        // An earlier session's end leaves the attached one attached.
+        let (a_tx, _a_rx) = mpsc::channel(4);
+        let (b_tx, _b_rx) = mpsc::channel(4);
+        r.attach(5, "admin", a_tx);
+        r.attach(6, "admin", b_tx);
+        assert_eq!(r.detach(5), Detached::NotAttached);
+        assert_eq!(r.attached_session(), Some(6));
+        r.detach(6);
+        assert_eq!(r.attached_session(), None, "5 is gone, not a fallback");
+    }
+
     /// Live view: a paused step outlives the usual wait because the
     /// dashboard holds it; the note reaches the CLI; only the dashboard may
     /// hold; past the hold the step fails with what, why and fix.
@@ -338,7 +429,7 @@ mod tests {
     async fn follow_a_held_step_outlives_the_usual_wait_and_its_note_reaches_the_cli() {
         let r = std::sync::Arc::new(UiRelay::default());
         let (tx, mut rx) = mpsc::channel(4);
-        r.attach(7, tx);
+        r.attach(7, "admin", tx);
         let r2 = r.clone();
         let dashboard = tokio::spawn(async move {
             let Some(ServerMsg::Ui { relay, .. }) = rx.recv().await else {
@@ -371,7 +462,7 @@ mod tests {
 
         // A hold that runs out answers with what, why and fix.
         let (tx, mut rx) = mpsc::channel(4);
-        r.attach(9, tx);
+        r.attach(9, "admin", tx);
         let r3 = r.clone();
         tokio::spawn(async move {
             if let Some(ServerMsg::Ui { relay, .. }) = rx.recv().await {
@@ -395,7 +486,7 @@ mod tests {
 
         // The hold is capped, and the dashboard's end answers at once.
         let (tx, mut rx) = mpsc::channel(4);
-        r.attach(11, tx);
+        r.attach(11, "admin", tx);
         let r4 = r.clone();
         tokio::spawn(async move {
             if let Some(ServerMsg::Ui { relay, .. }) = rx.recv().await {

@@ -85,3 +85,32 @@ fn arch_exposure_the_stacks_settings_keep_the_locks_on() {
     assert_eq!(c.host, "10.10.10.250:8443");
     assert_eq!(c.access_team_domain, "mendax1.cloudflareaccess.com");
 }
+
+/// fix-158: a developer's dashboard (`dev_without_locks`, on the same host
+/// token) attached for `homelab ui` steps and, when it closed, left CT 120's
+/// dashboard detached. A dashboard without locks never says `UiAttach`; the
+/// real one still does, to a host at least as new as itself.
+#[test]
+fn fix_158_a_dashboard_without_locks_never_attaches_for_ui_steps() {
+    use homelab_admin::shell::host_link::{greeting, LinkConfig};
+    use homelab_proto::Command;
+    let base = format!(
+        "[admin]\nhost = \"10.10.10.250:8443\"\nhost_token = \"0123456789abcdef0123\"\n{ACCESS}"
+    );
+    let real = from_table(table(&base)).unwrap();
+    let dev = from_table(table(&format!("{base}dev_without_locks = true\n"))).unwrap();
+    let own = env!("CARGO_PKG_VERSION");
+    let attaches = |c: &homelab_admin::core::config::AdminConfig, host: &str| {
+        greeting(&LinkConfig::from_admin(c), host)
+            .iter()
+            .any(|cmd| matches!(cmd, Command::UiAttach))
+    };
+    assert!(attaches(&real, own), "the real dashboard attaches");
+    assert!(!attaches(&dev, own), "a dev dashboard never does");
+    assert!(!attaches(&real, "3.0.0"), "nor to a host older than itself");
+    // Both still ask to read beside the queue.
+    let g = greeting(&LinkConfig::from_admin(&dev), own);
+    assert!(g
+        .iter()
+        .any(|cmd| matches!(cmd, Command::SessionOptions { .. })));
+}

@@ -343,6 +343,18 @@ function drawActionDialog(form, values, sources, driven) {
                 : "The plan: no file changes",
           ),
           h("p", { class: "measured" }, p.plan.note),
+          // fix-159: the running native units the deploy restarts, and why.
+          ...(p.plan.restarts?.length
+            ? [
+                h(
+                  "ul",
+                  { class: "act-restarts" },
+                  ...p.plan.restarts.map((/** @type {string} */ r) =>
+                    h("li", null, r),
+                  ),
+                ),
+              ]
+            : []),
           ...diffBlocks(files),
         ),
       );

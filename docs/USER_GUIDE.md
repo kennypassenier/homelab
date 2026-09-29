@@ -631,6 +631,18 @@ whether zero, one or two tabs are open; the job's origin reads "Claude
 (<token name>)". Nothing is driven while no dashboard is attached: the step
 is refused with that reason.
 
+Which dashboard is attached (fix-158, 2026-09-29): the host remembers every
+dashboard session that sent `UiAttach`, most recent first, and hands the
+steps to the newest. When that session ends, the most recent earlier one
+still connected is attached again, and the host's journal says which ("the
+attached dashboard's session ended; UI steps go to the earlier dashboard
+session N again", or "no dashboard is attached for UI steps"). A dashboard
+running with `dev_without_locks` (a developer's machine) never sends
+`UiAttach`, so it cannot take the steps from CT 120's dashboard; its log
+says so at start (`host/src/ui_relay.rs`, `admin/src/shell/host_link.rs`
+`greeting`; tests `fix_158_when_the_attached_dashboard_ends_the_one_before_it_is_attached_again`
+and `fix_158_a_dashboard_without_locks_never_attaches_for_ui_steps`).
+
 In the dashboard, the switch **Live view** at the top of every page says
 whether this tab plays Claude's steps (Kenny's name for it, 2026-09-28; the
 working name was "Watch Claude"). It is off by default and remembered per
@@ -1234,8 +1246,10 @@ A **`rootfs/` directory** maps onto the container's `/` for two places only:
 `rootfs/etc/systemd/system/` (units and timers) and `rootfs/usr/local/bin/`
 (pushed with mode 755). Anything else under `rootfs/` fails validation
 (`core/src/manifest.rs:355-403`). A changed unit or timer reloads systemd, and
-a changed timer is enabled and started; a service is never restarted by this
-(`core/src/ops/deploy.rs:1409-1442`). A file you delete from `rootfs/` is
+a changed timer is enabled and started. A changed drop-in of a native unit
+(`rootfs/etc/systemd/system/<unit>.service.d/…`) restarts that unit when it
+runs, in the step `native units` (fix-159, below); no other service is
+restarted by this (`core/src/ops/deploy.rs`, step `push files`). A file you delete from `rootfs/` is
 removed from the container by the next deploy; a `.service`, `.timer`,
 `.socket` or `.path` unit is `systemctl disable --now` first, and systemd
 reloads afterwards (step `retire dropped`, `core/src/ops/deploy.rs:1044-1106`,
@@ -1478,6 +1492,33 @@ logs `already installed, not shipped — upgrades go through the nightly updater
 followed by the release-update command (`core/src/ops/deploy.rs:2175-2197`,
 tests `core/tests/deploy_tests.rs:2649,2677`).
 
+**A deploy restarts a running native unit whose files changed** (fix-159,
+2026-09-29). When the deploy writes a changed `<unit>/<unit>.service`, a
+changed drop-in of it, or restores its `EnvironmentFile=` or `LoadCredential=`
+file from the vault, a unit that is running is restarted, so the change takes
+effect now and not at the next unrelated restart. The transcript says so
+before it happens, `[native] restarts <unit>: unit changed` (or `env
+changed`), and the restart goes through the health check updates and
+rollbacks use: `systemctl restart`, up to 20 s to become active, then 10 s in
+which it must stay active and its `NRestarts` must not move. Healthy:
+`[native] <unit> restarted and healthy (<reason>)`. Not healthy: the deploy
+fails with the unit, the reason, what the check read (`NEVER_ACTIVE`,
+`DIED_IN_WINDOW`, `RESTART_LOOP`) and the unit's last 20 log lines; the new
+files stay in place. A unit whose files are unchanged is left running, as
+adoption leaves it (`core/src/native.rs` `restart_reason`,
+`core/src/ops/deploy.rs` step `native units`; tests
+`fix_159_a_changed_unit_restarts_the_running_service_with_a_health_check`,
+`fix_159_a_changed_env_file_restarts_the_running_service`,
+`fix_159_a_restart_that_does_not_come_up_fails_the_deploy`,
+`a_running_native_service_whose_unit_and_env_are_unchanged_is_not_restarted`
+in `core/tests/deploy_tests.rs`). The plan says it beforehand as well:
+`homelab apply` prints `↻ restarts <unit>: unit changed` under the stack's
+file changes, and the dashboard's Deploy dialog lists it above the diff
+(`client/src/apply.rs` `native_restarts`). An env file is never among the
+stack's files, so only the transcript can say `env changed`. Deploying the
+dashboard's own stack (`admin`) with a changed unit therefore restarts the
+dashboard, which its Deploy dialog already says (`restarts_dashboard`).
+
 **Removing a native unit from a stack.** Delete the unit from `natives:` in
 `lxc-compose.yml` and deploy. The deploy's step `retire dropped` runs
 `systemctl disable --now <unit>`, removes `/etc/systemd/system/<unit>.service`
@@ -1554,7 +1595,7 @@ steps in this order (`core/src/ops/deploy.rs`, the `step!` calls from line
 | `orphan files` | removes files under `/opt/<stack>/` the repository no longer has (D3) |
 | `garbage collect` | D3 |
 | `log shipper` | F1, when configured |
-| `native units` | installs unit files and missing binaries (C7) |
+| `native units` | installs unit files and missing binaries (C7); restarts a running unit whose unit, drop-in or env file changed, health-checked (fix-159) |
 | `record state` | stores the manifest, the intent hash and the flags; records apps and units that left as retired |
 | `reconcile`, `service checks` | B3 |
 

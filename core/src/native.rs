@@ -285,6 +285,49 @@ pub struct UnitPrereqs {
     pub binary: Option<String>,
 }
 
+/// fix-159 (2026-09-29): why a deploy restarts the running native `unit`
+/// (its name without `.service`), given its unit file `unit_text` and the
+/// container paths the deploy wrote this run: its unit file or a drop-in of
+/// it ("unit changed"), a file it reads with `EnvironmentFile=`, optional
+/// ones included ("env changed"), or with `LoadCredential=` ("credential
+/// changed"). None: nothing the unit reads at its start changed, and a
+/// running service is left alone, as adoption leaves it.
+pub fn restart_reason(unit: &str, unit_text: &str, written: &[String]) -> Option<String> {
+    let unit_path = format!("/etc/systemd/system/{}.service", unit);
+    let dropins = format!("{}.d/", unit_path);
+    let mut env_files: Vec<String> = Vec::new();
+    let mut section = String::new();
+    for line in unit_text.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            section = t.to_string();
+            continue;
+        }
+        if section != "[Service]" {
+            continue;
+        }
+        if let Some(v) = t.strip_prefix("EnvironmentFile=") {
+            let v = v.trim();
+            env_files.push(v.strip_prefix('-').unwrap_or(v).to_string());
+        }
+    }
+    let credentials = unit_prereqs(unit_text).credentials;
+    let mut why: Vec<&str> = Vec::new();
+    if written
+        .iter()
+        .any(|w| *w == unit_path || w.starts_with(&dropins))
+    {
+        why.push("unit changed");
+    }
+    if written.iter().any(|w| env_files.contains(w)) {
+        why.push("env changed");
+    }
+    if written.iter().any(|w| credentials.contains(w)) {
+        why.push("credential changed");
+    }
+    (!why.is_empty()).then(|| why.join(" and "))
+}
+
 /// Parse the prerequisites out of a unit file.
 ///
 /// Only `[Service]` keys are read. A key in the wrong section is invisible to

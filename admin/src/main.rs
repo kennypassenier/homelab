@@ -337,18 +337,17 @@ async fn main() -> std::process::ExitCode {
                 return;
             }
             let _ = demo_host;
-            let (backoff_min, backoff_max) = c.backoff();
+            if c.dev_without_locks {
+                tracing::warn!(
+                    "dev_without_locks is set: this dashboard does not attach for `homelab ui` steps"
+                );
+            }
             tokio::spawn(host_link::run(
                 HostTarget {
                     addr: c.host.clone(),
                     token: c.host_token.clone(),
                 },
-                LinkConfig {
-                    poll: c.poll(),
-                    backoff_min,
-                    backoff_max,
-                    ask_timeout_s: c.ask_timeout_s,
-                },
+                LinkConfig::from_admin(&c),
                 shared,
                 live,
                 host_asks,

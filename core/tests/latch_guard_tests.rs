@@ -288,4 +288,10 @@ async fn dashboard_latch_the_golden_template_bakes_latch_through_the_guard() {
     assert!(calls[swap].contains("pct exec 999"), "{}", calls[swap]);
     // Baked before the template is generalized and frozen.
     assert!(swap < index_of(&calls, "pct template 999"));
+    // template-cleanup (Kenny, 2026-09-29): the fleet ships logs with Alloy
+    // since 2026-09-02; the template no longer pulls promtail.
+    assert!(
+        calls.iter().all(|c| !c.contains("promtail")),
+        "the template still pulls promtail"
+    );
 }

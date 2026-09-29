@@ -2332,9 +2332,11 @@ async fn o2_the_template_bakes_the_observability_agents() {
         all.contains("cadvisor"),
         "cadvisor image must be pre-pulled"
     );
+    // template-cleanup (Kenny, 2026-09-29): logs ship with Alloy since
+    // 2026-09-02, so the template no longer pulls promtail.
     assert!(
-        all.contains("promtail"),
-        "promtail image must be pre-pulled"
+        !all.contains("promtail"),
+        "the template must not pull promtail any more"
     );
 }
 

@@ -195,7 +195,7 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
         Ok(StepOutcome::Changed)
     });
 
-    // O2: node_exporter, cadvisor and promtail on every container, from the
+    // O2: node_exporter and cadvisor on every container, from the
     // template rather than per stack. They were installed by hand on six hosts
     // on 2026-08-29, which is precisely the work this removes — and the reason
     // a container added after that date measured nothing until someone noticed.
@@ -213,8 +213,10 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
                 detail: install.stderr,
             });
         }
-        // cadvisor and promtail are containers, so the template only needs
-        // their compose files and images pulled; the deploy brings them up.
+        // cadvisor is a container, so the template only needs its image
+        // pulled; the deploy brings it up. Logs ship with Grafana Alloy since
+        // 2026-09-02; promtail is no longer pulled (template-cleanup, Kenny,
+        // 2026-09-29).
         // Port 8081, not cadvisor's own 8080: gluetun already publishes 8080
         // on the downloader stack, and one uniform port keeps the scrape
         // config to a single pattern.
@@ -224,7 +226,7 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
             exec,
             cfg.temp_vmid,
             &format!(
-                "mkdir -p /opt/cadvisor && docker pull {} && docker pull grafana/promtail:3.0.0",
+                "mkdir -p /opt/cadvisor && docker pull {}",
                 super::guards::CADVISOR_IMAGE
             ),
             900,

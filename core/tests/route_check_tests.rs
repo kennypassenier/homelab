@@ -316,7 +316,7 @@ async fn the_gatherer_lists_every_file_in_the_routes_directory() {
     assert!(
         exec.calls_containing("ls -1A")
             .iter()
-            .all(|c| c.starts_with("pct exec 104")),
+            .all(|c| c.starts_with("lxc-attach -n 104 ")),
         "read inside the gateway: {:?}",
         exec.calls()
     );

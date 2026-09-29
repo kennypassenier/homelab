@@ -1556,7 +1556,9 @@ port = 5003
                 now - 80 * 3600
             ),
         );
-        exec.respond_always("pct status 108", CmdOutput::ok("status: running"));
+        // Present = Proxmox holds a configuration for it (what `pct status`
+        // answered), read off pmxcfs.
+        exec.seed_file("/etc/pve/lxc/108.conf", "hostname: 108-app-synctest\n");
         exec.respond_always(
             "listremotes",
             CmdOutput::ok(
@@ -6758,18 +6760,27 @@ async fn gather_today(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let mut probes = gather_probes(
-        exec,
-        &state.config.state_dir,
-        state.config.mirror_remote.as_deref(),
-        now,
-        &|line: &str| progress_line(state, line),
-    )
-    .await;
-    probes.failed_auth = Some(state.auth_failures.snapshot());
-    gather_security_probes(exec, &ProbeContext::of(&state.config), now, &mut probes).await;
-    let checks = homelab_core::doctor::diagnose(&probes);
-    let mut live = gather_live_facts(exec, state, stack_files).await;
+    // The doctor's readings and the fleet check's are independent, so they
+    // are taken side by side (ops::pool) rather than one after the other:
+    // 27 s + 67 s on pve on 2026-09-29, before either was made concurrent.
+    // They share no round: doctor asks each recorded stack whether its
+    // container exists and its secret files are sealed; the check asks each
+    // container about disk, memory, logs, configuration and updates.
+    let doctor_fut = async {
+        let mut probes = gather_probes(
+            exec,
+            &state.config.state_dir,
+            state.config.mirror_remote.as_deref(),
+            now,
+            &|line: &str| progress_line(state, line),
+        )
+        .await;
+        probes.failed_auth = Some(state.auth_failures.snapshot());
+        gather_security_probes(exec, &ProbeContext::of(&state.config), now, &mut probes).await;
+        homelab_core::doctor::diagnose(&probes)
+    };
+    let (checks, mut live) =
+        futures_util::join!(doctor_fut, gather_live_facts(exec, state, stack_files));
     live.digests = digests;
     let incidents: Vec<String> = std::fs::read_dir(format!("{}/incidents", state.config.state_dir))
         .map(|rd| {
@@ -8537,16 +8548,7 @@ async fn gather_security_probes(
     ];
     let mut args: Vec<&str> = vec!["-c", "%a %n"];
     args.extend(private.iter().map(String::as_str));
-    if let Ok(out) = exec.run(&Cmd::new("stat", &args, 20)).await {
-        probes.loose_files = Some(
-            out.stdout
-                .lines()
-                .filter_map(|l| l.split_once(' '))
-                .filter(|(mode, _)| u32::from_str_radix(mode, 8).is_ok_and(|m| m & 0o077 != 0))
-                .map(|(mode, path)| format!("{} ({})", path, mode))
-                .collect(),
-        );
-    }
+    let stat_cmd = Cmd::new("stat", &args, 20);
 
     // Privileged containers. Templates are left out (the golden -priv
     // template is privileged on purpose and never runs), and the no-touch
@@ -8564,7 +8566,43 @@ async fn gather_security_probes(
          grep -q '^unprivileged: 1' \"$f\" || echo \"$v\"; done",
         if skip.is_empty() { "-".into() } else { skip }
     );
-    if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 20)).await {
+    let privileged_cmd = Cmd::new("sh", &["-c", &script], 20);
+    let state_path = format!("{}/state.json", pc.state_dir);
+    // Present and not empty; the content never leaves the file.
+    let password_cmd = Cmd::new("test", &["-s", &pc.password_file], 10);
+    // Drive's space, trash included: pruned packs stay in the trash and
+    // count against the quota until it is emptied.
+    let offsite_configured = probes.offsite_configured;
+    let about_cmd = Cmd::new("rclone", &["about", "gdrive:", "--json"], 60);
+    let about_fut = async {
+        if offsite_configured {
+            Some(exec.run(&about_cmd).await)
+        } else {
+            None
+        }
+    };
+    // ops::pool: five independent reads, overlapped; polled in the order
+    // they used to run.
+    let (stat_out, privileged_out, state_raw, password_out, about_out) = futures_util::join!(
+        exec.run(&stat_cmd),
+        exec.run(&privileged_cmd),
+        exec.read_file(&state_path),
+        exec.run(&password_cmd),
+        about_fut
+    );
+
+    if let Ok(out) = stat_out {
+        probes.loose_files = Some(
+            out.stdout
+                .lines()
+                .filter_map(|l| l.split_once(' '))
+                .filter(|(mode, _)| u32::from_str_radix(mode, 8).is_ok_and(|m| m & 0o077 != 0))
+                .map(|(mode, path)| format!("{} ({})", path, mode))
+                .collect(),
+        );
+    }
+
+    if let Ok(out) = privileged_out {
         let mut vmids: Vec<u16> = out
             .stdout
             .lines()
@@ -8583,10 +8621,7 @@ async fn gather_security_probes(
     }
 
     // Host-meta and the restore drill, from the record.
-    if let Ok(raw) = exec
-        .read_file(&format!("{}/state.json", pc.state_dir))
-        .await
-    {
+    if let Ok(raw) = state_raw {
         if let Ok(hs) = serde_json::from_str::<homelab_core::state::HostState>(&raw) {
             let age = |t: u64| (t > 0).then(|| now_unix.saturating_sub(t) / 3600);
             probes.host_meta = Some(Freshness {
@@ -8606,29 +8641,17 @@ async fn gather_security_probes(
         }
     }
 
-    // Present and not empty; the content never leaves the file.
-    probes.password_file_ok = exec
-        .run(&Cmd::new("test", &["-s", &pc.password_file], 10))
-        .await
-        .ok()
-        .map(|o| o.success());
+    probes.password_file_ok = password_out.ok().map(|o| o.success());
 
-    // Drive's space, trash included: pruned packs stay in the trash and
-    // count against the quota until it is emptied.
-    if probes.offsite_configured {
-        if let Ok(out) = exec
-            .run(&Cmd::new("rclone", &["about", "gdrive:", "--json"], 60))
-            .await
-        {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out.stdout) {
-                let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
-                if n("total") > 0 {
-                    probes.drive = Some(DriveSpace {
-                        total: n("total"),
-                        free: n("free"),
-                        trashed: n("trashed"),
-                    });
-                }
+    if let Some(Ok(out)) = about_out {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out.stdout) {
+            let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+            if n("total") > 0 {
+                probes.drive = Some(DriveSpace {
+                    total: n("total"),
+                    free: n("free"),
+                    trashed: n("trashed"),
+                });
             }
         }
     }
@@ -8657,22 +8680,31 @@ async fn gather_probes(
         .unwrap_or(true);
 
     // Per-stack backup freshness + container presence from state.json.
-    let mut managed_stacks = Vec::new();
-    if let Ok(raw) = state_raw.as_ref() {
-        if let Ok(hs) = serde_json::from_str::<homelab_core::state::HostState>(raw) {
-            for (name, st) in &hs.stacks {
+    // ops::pool: the stacks are asked a few at a time, in state order.
+    let stacks: Vec<(String, homelab_core::state::StackState)> = state_raw
+        .as_ref()
+        .ok()
+        .and_then(|raw| serde_json::from_str::<homelab_core::state::HostState>(raw).ok())
+        .map(|hs| hs.stacks.into_iter().collect())
+        .unwrap_or_default();
+    let stacks_fut = homelab_core::ops::pool::bounded(
+        stacks
+            .iter()
+            .map(|(name, st)| async move {
+                // Present = Proxmox has a configuration for it, which is what
+                // `pct status` answered; read off pmxcfs without pct's 0.45 s of
+                // Perl start-up (measured 2026-09-29).
                 let present = exec
-                    .run(&Cmd::new("pct", &["status", &st.vmid.to_string()], 20))
+                    .read_file(&homelab_core::executor::lxc_conf_path(st.vmid))
                     .await
-                    .map(|o| o.success())
-                    .unwrap_or(false);
+                    .is_ok();
                 // gap-27: sealed = every secret file on the container has a
                 // vault copy. It was hard-coded true, so the check never fired.
                 let env_sealed = !present
                     || homelab_core::ops::facts::unsealed_secret_files(exec, state_dir, name, st)
                         .await
                         .is_empty();
-                managed_stacks.push(StackProbe {
+                StackProbe {
                     name: name.clone(),
                     backup_age_h: (st.last_backup > 0)
                         .then(|| now_unix.saturating_sub(st.last_backup) / 3600),
@@ -8681,60 +8713,70 @@ async fn gather_probes(
                     // fix-130: a native stack's services are backed up whole.
                     nothing_to_back_up: !st.is_native()
                         && st.manifest.as_ref().is_some_and(|m| m.backs_up_nothing()),
-                });
-            }
-        }
-    }
+                }
+            })
+            .collect(),
+        homelab_core::ops::pool::READ_CONCURRENCY,
+    );
 
     // Offsite: is the gdrive remote configured, and does a cheap listing work?
-    progress("doctor: the offsite remote (one listing on Google Drive)…");
-    let remotes = exec
-        .run(&Cmd::new("rclone", &["listremotes"], 20))
-        .await
-        .map(|o| o.stdout)
-        .unwrap_or_default();
-    let offsite_configured = remotes.lines().any(|l| l.trim() == "gdrive:");
-    let offsite_token_valid = offsite_configured
-        && exec
-            .run(&Cmd::new(
-                "rclone",
-                &[
-                    "lsd",
-                    "gdrive:homelab-backups",
-                    "--max-depth",
-                    "1",
-                    "--contimeout",
-                    "10s",
-                ],
-                30,
-            ))
+    let offsite_fut = async {
+        progress("doctor: the offsite remote (one listing on Google Drive)…");
+        let remotes = exec
+            .run(&Cmd::new("rclone", &["listremotes"], 20))
             .await
-            .map(|o| o.success())
-            .unwrap_or(false);
+            .map(|o| o.stdout)
+            .unwrap_or_default();
+        let offsite_configured = remotes.lines().any(|l| l.trim() == "gdrive:");
+        let offsite_token_valid = offsite_configured
+            && exec
+                .run(&Cmd::new(
+                    "rclone",
+                    &[
+                        "lsd",
+                        "gdrive:homelab-backups",
+                        "--max-depth",
+                        "1",
+                        "--contimeout",
+                        "10s",
+                    ],
+                    30,
+                ))
+                .await
+                .map(|o| o.success())
+                .unwrap_or(false);
+        (offsite_configured, offsite_token_valid)
+    };
 
     // Mirror lag: commits not yet on the mirror remote.
-    progress("doctor: mirror, disk and the daemon's own units…");
     let repo = format!("{}/repo", state_dir);
-    let mirror_behind = match mirror_remote {
-        None => None,
-        Some(_) => exec
-            .run(&Cmd::new(
-                "git",
-                &[
-                    "-C",
-                    &repo,
-                    "rev-list",
-                    "--count",
-                    "--branches",
-                    "--not",
-                    "--remotes=mirror",
-                ],
-                30,
-            ))
-            .await
-            .ok()
-            .and_then(|o| o.stdout.trim().parse::<u32>().ok()),
+    let mirror_fut = async {
+        progress("doctor: mirror, disk and the daemon's own units…");
+        match mirror_remote {
+            None => None,
+            Some(_) => exec
+                .run(&Cmd::new(
+                    "git",
+                    &[
+                        "-C",
+                        &repo,
+                        "rev-list",
+                        "--count",
+                        "--branches",
+                        "--not",
+                        "--remotes=mirror",
+                    ],
+                    30,
+                ))
+                .await
+                .ok()
+                .and_then(|o| o.stdout.trim().parse::<u32>().ok()),
+        }
     };
+    // Independent reads, overlapped (ops::pool); polled in the order they
+    // used to run.
+    let (managed_stacks, (offsite_configured, offsite_token_valid), mirror_behind) =
+        futures_util::join!(stacks_fut, offsite_fut, mirror_fut);
     let interrupted = std::fs::read_to_string(format!("{}/journal.jsonl", state_dir))
         .map(|j| {
             homelab_core::incidents::interrupted_ops(&j)

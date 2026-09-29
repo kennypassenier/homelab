@@ -1914,6 +1914,7 @@ pub fn mount(
         files,
         cfg.repo.clone(),
         cfg.scratch_dir(),
+        publish.clone(),
     )));
     app.dashboard_routes(router(actions));
     app.dashboard_routes(super::actions_notify::router(notify.clone()));

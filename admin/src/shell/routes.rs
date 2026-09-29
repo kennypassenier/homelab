@@ -152,7 +152,11 @@ async fn history(State(c): State<Ctx>, Query(q): Query<HistoryQuery>) -> Respons
     .await
 }
 
-pub fn router(shared: Shared, host: HostClient) -> Router {
+pub fn router(
+    shared: Shared,
+    host: HostClient,
+    publish: Arc<dyn super::actions::Publish>,
+) -> Router {
     Router::new()
         .route("/data/fleet", get(fleet))
         .route("/data/doctor", get(doctor))
@@ -163,7 +167,7 @@ pub fn router(shared: Shared, host: HostClient) -> Router {
         .with_state(Ctx {
             shared,
             host,
-            doctor_read: SlowRead::new("doctor"),
+            doctor_read: SlowRead::announced("doctor", "doctor", publish),
         })
 }
 

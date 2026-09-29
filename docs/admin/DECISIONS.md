@@ -216,3 +216,16 @@ client ship together. Released as 3.63.1 and live since 2026-09-29 05:14.
   shows a click (ring, pressed button) at 0, then the step runs; while
   typing it sits in the field. Display only: nothing about what is sent or
   the once-only press changes.
+
+## Slow reads (decided 2026-09-29 13:50, form "Trage pagina's")
+
+Measured 13:43: Today = doctor 27 s then fleet check 67 s, sequential, both
+walking the 17 containers one by one. Always done: bounded concurrency (8),
+doctor and the fleet check side by side sharing one container round.
+slow-reads: **last result at once, refreshed when the page is opened**
+(Kenny first chose "every 5 min", then at 13:52: "niet elke vijf minuten,
+dat is overkill, doe het als ik op die pagina kom"). The dashboard server
+holds the last result of Today, doctor and the fleet check with its time;
+opening the page shows it at once with "measured x ago" and starts one new
+run (joining a running one), whose result arrives over SSE. No timer. No browser storage is needed for Kenny's "vorige resultaten zien als
+ik van tab verander": the server holds them for every tab.

@@ -364,23 +364,12 @@ export function mount(root, ctx) {
     setAgo(guestsAgo, r.body.measured_at);
   };
 
-  const loadChecks = async () => {
-    checksBtn.disabled = true;
-    checks.wrap.hidden = false;
-    checks.loading({ words: "Asking the host to run the doctor…", expect: 30 });
-    checksNote.textContent = "The doctor is running on the host.";
-    let r;
-    try {
-      r = await slowReport("/data/doctor", "the doctor", abort.signal);
-    } finally {
-      checksBtn.disabled = false;
-    }
-    if (!r.ok) {
-      const secs = checks.failed(r.error);
-      checksNote.textContent = `The doctor did not answer (after ${humanDuration(secs)}).`;
-      return;
-    }
-    const rows = doctorRows({ ...r.report, checks: hostChecks(r.report) });
+  /**
+   * Show one doctor answer's host-level checks.
+   * @param {any} report
+   */
+  const paintChecks = (report) => {
+    const rows = doctorRows({ ...report, checks: hostChecks(report) });
     checks.tbody.replaceChildren(
       ...rows.map((x) =>
         h(
@@ -393,9 +382,41 @@ export function mount(root, ctx) {
         ),
       ),
     );
+    return rows.length;
+  };
+  const checksWords = {
+    words: "Asking the host to run the doctor…",
+    expect: 30,
+  };
+
+  const loadChecks = async () => {
+    checksBtn.disabled = true;
+    checks.wrap.hidden = false;
+    checks.loading(checksWords);
+    checksNote.textContent = "The doctor is running on the host.";
+    let r;
+    try {
+      // slow-reads: the dashboard's last doctor answer at once, while the
+      // host runs it again.
+      r = await slowReport("/data/doctor", "the doctor", abort.signal, (b) => {
+        const n = paintChecks(b.report);
+        checks.ready();
+        checks.loading({ ...checksWords, overlay: false });
+        checksNote.textContent = `${n} host-level checks, the last reading, while the host runs the doctor again.`;
+        setAgo(checksAgo, b.read_at ?? Date.now() / 1000);
+      });
+    } finally {
+      checksBtn.disabled = false;
+    }
+    if (!r.ok) {
+      const secs = checks.failed(r.error);
+      checksNote.textContent = `The doctor did not answer (after ${humanDuration(secs)}).`;
+      return;
+    }
+    const n = paintChecks(r.report);
     const secs = checks.ready();
-    checksNote.textContent = `${rows.length} host-level checks, read in ${humanDuration(secs)}.`;
-    setAgo(checksAgo, Date.now() / 1000);
+    checksNote.textContent = `${n} host-level checks, read in ${humanDuration(secs)}.`;
+    setAgo(checksAgo, r.body.read_at ?? Date.now() / 1000);
   };
   checksBtn.addEventListener("click", () => void loadChecks().catch(() => {}));
 

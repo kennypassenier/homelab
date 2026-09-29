@@ -98,6 +98,9 @@ export const ACT_EVENTS = /** @type {const} */ ([
   "host_log",
   "transfer",
   "release",
+  // slow-reads: a slow read (Today, the fleet check, the doctor) finished;
+  // a page fetches it by id (slowread.js).
+  "slow_read",
   "link",
   // Not the server's: the live channel opened again after it dropped (the
   // dashboard restarted, a release installed). chassis sends `resync` only

@@ -31,6 +31,7 @@ const FILES: &[(&str, &[u8])] = &[
         "js/tablestate.js",
         include_bytes!("../web/js/tablestate.js"),
     ),
+    ("js/slowread.js", include_bytes!("../web/js/slowread.js")),
     ("js/activity.js", include_bytes!("../web/js/activity.js")),
     ("js/checks.js", include_bytes!("../web/js/checks.js")),
     ("js/doctor.js", include_bytes!("../web/js/doctor.js")),
@@ -291,7 +292,11 @@ async fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     }
-    app.dashboard_routes(routes::router(shared.clone(), host_client));
+    app.dashboard_routes(routes::router(
+        shared.clone(),
+        host_client,
+        std::sync::Arc::new(live.clone()),
+    ));
 
     if let Some(c) = &config {
         // arch-exposure: the two locks, before every route but /healthz.

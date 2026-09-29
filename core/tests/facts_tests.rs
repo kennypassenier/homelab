@@ -6,6 +6,16 @@
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::ops::facts::*;
 
+/// How a read-only probe inside container `vmid` renders: `lxc-attach`
+/// directly, not `pct exec` (pct's Perl start-up is 0.45 s a call).
+fn attach(vmid: u16) -> String {
+    format!(
+        "lxc-attach -n {} --clear-env --set-var {} -- ",
+        vmid,
+        homelab_core::executor::ATTACH_PATH
+    )
+}
+
 fn inputs() -> FactsInputs {
     FactsInputs {
         watched_backups: vec![],
@@ -117,7 +127,7 @@ fn g6_the_logs_window_only_passes_digits_and_a_unit() {
 
 /// Containers come from `pct list`; the untouchable ones are never probed;
 /// a stopped guest that answers nothing produces no growth fact but still
-/// a boot fact, because `pct config` can be asked about a stopped guest.
+/// a boot fact, because a stopped guest's configuration can still be read.
 #[tokio::test]
 async fn g6_managed_containers_are_probed_and_the_untouchable_are_not() {
     let exec = MockExecutor::new();
@@ -128,12 +138,12 @@ async fn g6_managed_containers_are_probed_and_the_untouchable_are_not() {
         ),
     );
     exec.respond_always(
-        "pct exec 109 -- sh -c df",
+        &format!("{}sh -c df", attach(109)),
         CmdOutput::ok("disk=46\nmem=37\nswap=0\njournal=12\ndockerlogs=3\nguards=1\n"),
     );
-    exec.respond_always("pct exec 998 -- sh -c df", CmdOutput::ok(""));
-    exec.respond_always("pct config 109", CmdOutput::ok("onboot: 1\nmemory: 256\n"));
-    exec.respond_always("pct config 998", CmdOutput::ok("memory: 2048\n"));
+    exec.respond_always(&format!("{}sh -c df", attach(998)), CmdOutput::ok(""));
+    exec.seed_file("/etc/pve/lxc/109.conf", "onboot: 1\nmemory: 256\n");
+    exec.seed_file("/etc/pve/lxc/998.conf", "memory: 2048\n");
     let (facts, _) = gather_live_facts(&exec, &inputs(), &[]).await;
     assert_eq!(facts.containers.len(), 3);
     assert_eq!(facts.growth.len(), 1, "{:?}", facts.growth);
@@ -147,7 +157,9 @@ async fn g6_managed_containers_are_probed_and_the_untouchable_are_not() {
     );
     assert!(
         exec.calls_containing("pct exec 100").is_empty()
-            && exec.calls_containing("pct config 100").is_empty(),
+            && exec.calls_containing("pct config 100").is_empty()
+            && exec.calls_containing("-n 100 ").is_empty()
+            && exec.calls_containing("/100.conf").is_empty(),
         "the no-touch list is honoured absolutely: {:?}",
         exec.calls()
     );
@@ -194,7 +206,12 @@ async fn g6_routes_are_read_from_the_gateway_and_knocked_on() {
         .unwrap();
     assert!(!media.answered);
     assert!(
-        exec.calls_containing("pct exec 104 --")
+        !exec.calls_containing(&attach(104)).is_empty(),
+        "asked inside the gateway: {:?}",
+        exec.calls()
+    );
+    assert!(
+        exec.calls_containing(&attach(104))
             .iter()
             // fix-92 adds the one listing of the directory's names.
             .all(|c| c.contains("bash -c") || c.contains("for f in") || c.contains("ls -1A")),
@@ -512,7 +529,7 @@ async fn fix_90_the_dashboard_question_is_asked_where_grafana_runs() {
     let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
     let asked = exec.calls_containing("api/search?tag=generated");
     assert!(
-        asked.iter().any(|c| c.starts_with("pct exec 113 -- ")),
+        asked.iter().any(|c| c.starts_with(&attach(113))),
         "{asked:?}"
     );
     let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
@@ -552,7 +569,7 @@ async fn fix_93_the_log_question_is_asked_inside_lokis_container() {
         homelab_core::ops::logshipper::LOKI_QUERY_LOOPBACK
     );
     assert!(
-        asked[0].starts_with("pct exec 113 -- curl ") && asked[0].contains(&inside),
+        asked[0].starts_with(&format!("{}curl ", attach(113))) && asked[0].contains(&inside),
         "{asked:?}"
     );
     assert!(!asked[0].contains("10.10.10.13:3100"), "{asked:?}");

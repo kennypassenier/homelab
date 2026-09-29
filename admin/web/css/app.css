@@ -835,6 +835,85 @@ td.stack-flags {
 .kp-datatable > .kp-empty p {
   margin: 0 0 6px;
 }
+/* The busy overlay (Kenny, 2026-09-29: the 1em spinner in the status line
+   under a long table went unseen). A LOCAL SHIM of kp-themes main 05d62af6
+   (scope-138), same names and the same rules: `data-kp-busy-overlay` on the
+   wrapper, the `.kp-datatable__busy-overlay` layer (aria-hidden; the status
+   line stays the live region) from under the header to the bottom of the
+   table, a card panel with the spinner, the words and the count, and the
+   knobs --kp-busy-overlay-veil and --kp-busy-overlay-spinner. Absolutely
+   placed over the skeleton or the dimmed rows, so nothing moves. Delete it,
+   with busyOverlay() in dom.js, when the chassis pin carries kp's own. */
+.kp-datatable:has(> .kp-datatable__busy-overlay) {
+  position: relative;
+}
+.kp-datatable__busy-overlay {
+  position: absolute;
+  inset: var(--kp-busy-overlay-top, 0px) var(--kp-busy-overlay-right, 0px)
+    var(--kp-busy-overlay-bottom, 0px) var(--kp-busy-overlay-left, 0px);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  background: color-mix(
+    in oklab,
+    var(--background) var(--kp-busy-overlay-veil, 70%),
+    transparent
+  );
+  pointer-events: none;
+}
+.kp-datatable__busy-overlay[hidden] {
+  display: none;
+}
+.kp-datatable__busy-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--kp-space-sm, 0.5rem);
+  /* A phone's column is narrow: the panel keeps inside the table. */
+  max-inline-size: calc(100% - 2 * var(--kp-space-sm, 0.5rem));
+  padding: var(--kp-space-md, 1rem) var(--kp-space-lg, 1rem);
+  border-radius: var(--radius, 0.5rem);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 0 0 1px var(--border);
+  text-align: center;
+}
+.kp-datatable__busy-panel > .kp-spinner {
+  --kp-spinner-size: var(--kp-busy-overlay-spinner, 2.5rem);
+}
+.kp-datatable__busy-panel > .kp-datatable__busy-clock {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+  font-variant-numeric: tabular-nums;
+}
+/* Ours, not kp's (yet): a phone's three skeleton rows are lower than the
+   stacked panel, so there the spinner stands beside the words, the words
+   keep to three lines (the whole sentence stays in the status line), and
+   the layer clips rather than covering the status line. */
+.kp-datatable__busy-overlay {
+  overflow: hidden;
+}
+@media (max-width: 480px) {
+  .kp-datatable__busy-panel {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: var(--kp-space-md, 1rem);
+    row-gap: 0;
+    align-items: center;
+    padding: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 1rem);
+    text-align: start;
+  }
+  .kp-datatable__busy-panel > .kp-spinner {
+    grid-row: span 2;
+  }
+  .kp-datatable__busy-panel > .kp-datatable__busy-words {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+  }
+}
 /* ==== END data tables ==== */
 
 /* The version text in the bar wears the bar's ink, as kp's own bar

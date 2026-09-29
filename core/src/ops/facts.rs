@@ -206,11 +206,7 @@ pub async fn grafana_generated_uids(
         app_dir
     );
     let out = exec
-        .run(&Cmd::new(
-            "pct",
-            &["exec", &grafana_vmid.to_string(), "--", "sh", "-c", &script],
-            60,
-        ))
+        .run(&crate::executor::attach_sh(grafana_vmid, &script, 60))
         .await
         .ok()?;
     if !out.stdout.contains("\"uid\"") {
@@ -253,182 +249,196 @@ pub async fn gather_live_facts_with(
     // O1: what the router (and anything else outside this suite) uploaded
     // last night. Read through the rclone remote that already exists for the
     // restic repositories — no new credential, no new timer.
-    let mut watched = Vec::new();
-    for w in &inp.watched_backups {
-        let out = exec
-            .run(&Cmd::new(
-                "sh",
-                &[
-                    "-c",
-                    &format!(
-                        "rclone lsjson --files-only {} 2>&1 | \
+    // ops::pool: each listing is its own question, asked a few at a time.
+    let watched_fut = crate::ops::pool::bounded(
+        inp.watched_backups
+            .iter()
+            .map(|w| async move {
+                let out = exec
+                    .run(&Cmd::new(
+                        "sh",
+                        &[
+                            "-c",
+                            &format!(
+                                "rclone lsjson --files-only {} 2>&1 | \
                          sed -n 's/.*\"ModTime\":\"\\([^\"]*\\)\".*/\\1/p' | sort | tail -1",
-                        shq(&w.rclone_path)
-                    ),
-                ],
-                180,
-            ))
-            .await;
-        let mut fact = WatchedBackupFact {
-            name: w.name.clone(),
-            max_age_s: w.max_age_hours * 3600,
-            ..Default::default()
-        };
-        match out {
-            Err(e) => fact.error = Some(e.to_string()),
-            Ok(o) if !o.success() => fact.error = Some(o.stderr.trim().to_string()),
-            Ok(o) => {
-                let newest = o.stdout.trim().to_string();
-                if !newest.is_empty() {
-                    // rclone prints RFC3339; the host has `date` and this
-                    // avoids a chrono dependency in a place that has none.
-                    if let Ok(d) = exec
-                        .run(&Cmd::new("date", &["-d", &newest, "+%s"], 30))
-                        .await
-                    {
-                        if let Ok(t) = d.stdout.trim().parse::<u64>() {
-                            fact.newest_age_s = Some(inp.now_unix.saturating_sub(t));
+                                shq(&w.rclone_path)
+                            ),
+                        ],
+                        180,
+                    ))
+                    .await;
+                let mut fact = WatchedBackupFact {
+                    name: w.name.clone(),
+                    max_age_s: w.max_age_hours * 3600,
+                    ..Default::default()
+                };
+                match out {
+                    Err(e) => fact.error = Some(e.to_string()),
+                    Ok(o) if !o.success() => fact.error = Some(o.stderr.trim().to_string()),
+                    Ok(o) => {
+                        let newest = o.stdout.trim().to_string();
+                        if !newest.is_empty() {
+                            // rclone prints RFC3339; the host has `date` and this
+                            // avoids a chrono dependency in a place that has none.
+                            if let Ok(d) = exec
+                                .run(&Cmd::new("date", &["-d", &newest, "+%s"], 30))
+                                .await
+                            {
+                                if let Ok(t) = d.stdout.trim().parse::<u64>() {
+                                    fact.newest_age_s = Some(inp.now_unix.saturating_sub(t));
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
-        watched.push(fact);
-    }
+                fact
+            })
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    );
 
     // T49: the seeder's verdict, read from the file it writes beside the
     // generated monitor list. Same directory, so there is no second setting
     // to keep in step with the first.
-    let seed = match inp.kuma_monitors_file.as_deref() {
-        None => SeedFact {
-            judged: true,
-            age_s: Some(0),
-            ..Default::default()
-        },
-        Some(monitors) => {
-            let dir = monitors.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
-            let path = format!("{}/last-seed.json", dir);
-            match exec.read_file(&path).await {
-                Err(e) => SeedFact {
-                    error: Some(format!("{}: {}", path, e)),
-                    ..Default::default()
-                },
-                Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+    let seed_fut = async {
+        match inp.kuma_monitors_file.as_deref() {
+            None => SeedFact {
+                judged: true,
+                age_s: Some(0),
+                ..Default::default()
+            },
+            Some(monitors) => {
+                let dir = monitors.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
+                let path = format!("{}/last-seed.json", dir);
+                match exec.read_file(&path).await {
                     Err(e) => SeedFact {
-                        error: Some(format!("{} is not JSON: {}", path, e)),
+                        error: Some(format!("{}: {}", path, e)),
                         ..Default::default()
                     },
-                    Ok(v) => SeedFact {
-                        stale: v["stale"]
-                            .as_array()
-                            .map(|a| {
-                                a.iter()
-                                    .filter_map(|x| x.as_str().map(str::to_string))
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        age_s: v["at"].as_u64().map(|at| inp.now_unix.saturating_sub(at)),
-                        judged: v["judged"].as_bool().unwrap_or(false),
-                        error: None,
+                    Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+                        Err(e) => SeedFact {
+                            error: Some(format!("{} is not JSON: {}", path, e)),
+                            ..Default::default()
+                        },
+                        Ok(v) => SeedFact {
+                            stale: v["stale"]
+                                .as_array()
+                                .map(|a| {
+                                    a.iter()
+                                        .filter_map(|x| x.as_str().map(str::to_string))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            age_s: v["at"].as_u64().map(|at| inp.now_unix.saturating_sub(at)),
+                            judged: v["judged"].as_bool().unwrap_or(false),
+                            error: None,
+                        },
                     },
-                },
+                }
             }
         }
     };
+
+    // The stacks the host has recorded — read once, used twice below.
+    let snapshot_fut = async {
+        crate::state::StateStore::new(exec, &inp.state_dir)
+            .load()
+            .await
+            .ok()
+    };
+    // Four independent reads, overlapped; polled in the order they used to
+    // run, so a scripted executor sees the same sequence.
+    let (watched, seed, host_memory, snapshot) = futures_util::join!(
+        watched_fut,
+        seed_fut,
+        // F184: the host's own numbers, so a per-container remedy cannot
+        // advise memory the machine does not have.
+        read_host_memory(exec),
+        snapshot_fut
+    );
 
     let mut facts = LiveFacts {
         seed,
         stack_files: stack_files.to_vec(),
         watched_backups: watched,
-        // F184: the host's own numbers, so a per-container remedy cannot
-        // advise memory the machine does not have.
-        host_memory: read_host_memory(exec).await,
+        host_memory,
         ..Default::default()
     };
-
-    // The stacks the host has recorded — read once, used twice below.
-    let snapshot = crate::state::StateStore::new(exec, &inp.state_dir)
-        .load()
-        .await
-        .ok();
 
     // R13: how full are the pools the libraries actually live on. The paths
     // come from the stacks' own `data_mounts`, so this watches what is
     // declared rather than a list somebody keeps in step by hand. One `df`
     // for all of them, keyed by filesystem: two stacks that name different
     // paths on one pool are one pool.
-    if let Some(snapshot) = snapshot.as_ref() {
-        let mut declared: Vec<(String, String)> = Vec::new();
-        for (name, st) in &snapshot.stacks {
-            if let Some(m) = &st.manifest {
-                for dm in &m.data_mounts {
-                    declared.push((dm.host_path.clone(), name.clone()));
+    let pools_fut = async {
+        let mut big_logs = None;
+        let mut pools = None;
+        if let Some(snapshot) = snapshot.as_ref() {
+            let mut declared: Vec<(String, String)> = Vec::new();
+            for (name, st) in &snapshot.stacks {
+                if let Some(m) = &st.manifest {
+                    for dm in &m.data_mounts {
+                        declared.push((dm.host_path.clone(), name.clone()));
+                    }
+                }
+            }
+            if !declared.is_empty() {
+                // Each line carries the path we ASKED about, printed by us, not
+                // df's own first column: a path that does not exist produces no
+                // row at all, every later row shifts up one, and the pool of one
+                // stack gets reported under the name of another.
+                let mut paths: Vec<&String> = declared.iter().map(|(p, _)| p).collect();
+                paths.sort();
+                paths.dedup();
+                let script = paths
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "printf '%s ' {q}; df -Pk {q} 2>/dev/null | tail -n +2 | head -1; echo",
+                            q = shq(p)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                // fix-24: oversized logs on the same mounts. Two levels deep only:
+                // logs sit at the top of a log mount, and the media pools hold
+                // terabytes that a nightly walk has no business descending into.
+                let rotated: Vec<String> = snapshot
+                    .stacks
+                    .values()
+                    .filter_map(|st| st.manifest.as_ref())
+                    .flat_map(|m| m.data_mounts.iter())
+                    .filter(|dm| dm.rotate.is_some())
+                    .map(|dm| dm.host_path.clone())
+                    .collect();
+                let find = format!(
+                    "find {} -maxdepth 2 -xdev -type f -name '*.log' -size +{}k -printf '%s %p\\n' 2>/dev/null; true",
+                    paths.iter().map(|p| shq(p)).collect::<Vec<_>>().join(" "),
+                    crate::ops::fleetcheck::BIG_LOG_BYTES / 1024
+                );
+                let find_cmd = Cmd::new("sh", &["-c", &find], 120);
+                let df_cmd = Cmd::new("sh", &["-c", &script], 60);
+                let (found, df) = futures_util::join!(exec.run(&find_cmd), exec.run(&df_cmd));
+                if let Ok(out) = found {
+                    big_logs = Some(crate::ops::fleetcheck::big_log_facts(&out.stdout, &rotated));
+                }
+                if let Ok(out) = df {
+                    pools = Some(crate::ops::fleetcheck::pool_facts_from_df(
+                        &out.stdout,
+                        &declared,
+                    ));
                 }
             }
         }
-        if !declared.is_empty() {
-            // Each line carries the path we ASKED about, printed by us, not
-            // df's own first column: a path that does not exist produces no
-            // row at all, every later row shifts up one, and the pool of one
-            // stack gets reported under the name of another.
-            let mut paths: Vec<&String> = declared.iter().map(|(p, _)| p).collect();
-            paths.sort();
-            paths.dedup();
-            let script = paths
-                .iter()
-                .map(|p| {
-                    format!(
-                        "printf '%s ' {q}; df -Pk {q} 2>/dev/null | tail -n +2 | head -1; echo",
-                        q = shq(p)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("; ");
-            // fix-24: oversized logs on the same mounts. Two levels deep only:
-            // logs sit at the top of a log mount, and the media pools hold
-            // terabytes that a nightly walk has no business descending into.
-            let rotated: Vec<String> = snapshot
-                .stacks
-                .values()
-                .filter_map(|st| st.manifest.as_ref())
-                .flat_map(|m| m.data_mounts.iter())
-                .filter(|dm| dm.rotate.is_some())
-                .map(|dm| dm.host_path.clone())
-                .collect();
-            let find = format!(
-                "find {} -maxdepth 2 -xdev -type f -name '*.log' -size +{}k -printf '%s %p\\n' 2>/dev/null; true",
-                paths.iter().map(|p| shq(p)).collect::<Vec<_>>().join(" "),
-                crate::ops::fleetcheck::BIG_LOG_BYTES / 1024
-            );
-            if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &find], 120)).await {
-                facts.big_logs = crate::ops::fleetcheck::big_log_facts(&out.stdout, &rotated);
-            }
-            if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 60)).await {
-                facts.pools = crate::ops::fleetcheck::pool_facts_from_df(&out.stdout, &declared);
-                notes.push(format!(
-                    "fleet check: {} data pool(s) measured — {}",
-                    facts.pools.len(),
-                    facts
-                        .pools
-                        .iter()
-                        .map(|p| format!(
-                            "{} {}% full, {} GB free ({})",
-                            p.path,
-                            p.used_pct,
-                            p.free_gb,
-                            p.stacks.join(", ")
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(" · ")
-                ));
-            }
-        }
-    }
+        (big_logs, pools)
+    };
 
     // fix-26: every storage directory whose owner the stack declares, read
     // back off the disk. The deploy chowns to the declared uid, so a wrong
     // declaration is a service that works until its next restart.
-    if let Some(snapshot) = snapshot.as_ref() {
+    let owners_fut = async {
+        let snapshot = snapshot.as_ref()?;
         let mut declared: Vec<(String, u32, String)> = Vec::new();
         for (name, st) in &snapshot.stacks {
             if let Some(m) = &st.manifest {
@@ -439,39 +449,80 @@ pub async fn gather_live_facts_with(
                 }
             }
         }
-        if !declared.is_empty() {
-            let script = declared
-                .iter()
-                .map(|(p, _, _)| format!("stat -c '%u %n' {} 2>/dev/null", shq(p)))
-                .collect::<Vec<_>>()
-                .join("; ");
-            if let Ok(out) = exec.run(&Cmd::new("sh", &["-c", &script], 60)).await {
-                facts.owners = crate::ops::fleetcheck::owner_facts(&out.stdout, &declared);
-            }
+        if declared.is_empty() {
+            return None;
         }
-    }
+        let script = declared
+            .iter()
+            .map(|(p, _, _)| format!("stat -c '%u %n' {} 2>/dev/null", shq(p)))
+            .collect::<Vec<_>>()
+            .join("; ");
+        let out = exec.run(&Cmd::new("sh", &["-c", &script], 60)).await.ok()?;
+        Some(crate::ops::fleetcheck::owner_facts(&out.stdout, &declared))
+    };
 
     // fix-88: each recorded stack's firewall file, read whole off pmxcfs so
     // the check compares bytes with the declaration's rendering. A file that
     // cannot be read counts as absent: the declaration says it should exist,
     // and the finding then says so.
-    if let Some(snapshot) = snapshot.as_ref() {
-        for (name, st) in &snapshot.stacks {
-            if inp.no_touch.contains(&st.vmid) {
-                continue;
-            }
-            facts.firewalls.push(crate::ops::fleetcheck::FirewallFact {
-                stack: name.clone(),
-                vmid: st.vmid,
-                content: exec
-                    .read_file(&crate::firewall::fw_path(st.vmid))
-                    .await
-                    .ok(),
-            });
-        }
-    }
+    let fw_targets: Vec<(&String, u16)> = snapshot
+        .as_ref()
+        .map(|s| {
+            s.stacks
+                .iter()
+                .filter(|(_, st)| !inp.no_touch.contains(&st.vmid))
+                .map(|(name, st)| (name, st.vmid))
+                .collect()
+        })
+        .unwrap_or_default();
+    let firewalls_fut = crate::ops::pool::bounded(
+        fw_targets
+            .into_iter()
+            .map(|(name, vmid)| async move {
+                crate::ops::fleetcheck::FirewallFact {
+                    stack: name.clone(),
+                    vmid,
+                    content: exec.read_file(&crate::firewall::fw_path(vmid)).await.ok(),
+                }
+            })
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    );
 
-    if let Ok(out) = exec.run(&Cmd::new("pct", &["list"], 30)).await {
+    let pct_list_cmd = Cmd::new("pct", &["list"], 30);
+    let ((big_logs, pools), owners, firewalls, listed) = futures_util::join!(
+        pools_fut,
+        owners_fut,
+        firewalls_fut,
+        exec.run(&pct_list_cmd)
+    );
+    if let Some(b) = big_logs {
+        facts.big_logs = b;
+    }
+    if let Some(p) = pools {
+        facts.pools = p;
+        notes.push(format!(
+            "fleet check: {} data pool(s) measured — {}",
+            facts.pools.len(),
+            facts
+                .pools
+                .iter()
+                .map(|p| format!(
+                    "{} {}% full, {} GB free ({})",
+                    p.path,
+                    p.used_pct,
+                    p.free_gb,
+                    p.stacks.join(", ")
+                ))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        ));
+    }
+    if let Some(o) = owners {
+        facts.owners = o;
+    }
+    facts.firewalls = firewalls;
+    if let Ok(out) = listed {
         facts.containers = parse_pct_list(&out.stdout);
     }
     progress("probing every gateway route…");
@@ -481,16 +532,9 @@ pub async fn gather_live_facts_with(
     // the `.bak` that was there on 2026-09-27. Only a listing that ran counts:
     // an unreadable directory is no fact, not an empty one.
     if let Ok(out) = exec
-        .run(&Cmd::new(
-            "pct",
-            &[
-                "exec",
-                &inp.gateway_vmid.to_string(),
-                "--",
-                "sh",
-                "-c",
-                &format!("ls -1A '{}'", inp.gateway_routes_dir),
-            ],
+        .run(&crate::executor::attach_sh(
+            inp.gateway_vmid,
+            &format!("ls -1A '{}'", inp.gateway_routes_dir),
             30,
         ))
         .await
@@ -509,20 +553,14 @@ pub async fn gather_live_facts_with(
     // Gateway routes: read every fragment, pull out the address it forwards
     // to, and ask whether anything is listening there. A route that resolves
     // to nothing is only ever found by someone who needs it.
-    let gw = inp.gateway_vmid.to_string();
+    let gw = inp.gateway_vmid;
     let script = format!(
         "for f in {}/*.yml; do echo \"### $(basename $f)\"; cat \"$f\"; done 2>/dev/null",
         inp.gateway_routes_dir
     );
-    if let Ok(out) = exec
-        .run(&Cmd::new(
-            "pct",
-            &["exec", &gw, "--", "sh", "-c", &script],
-            60,
-        ))
-        .await
-    {
+    if let Ok(out) = exec.run(&crate::executor::attach_sh(gw, &script, 60)).await {
         let mut current = String::new();
+        let mut targets: Vec<(String, String)> = Vec::new();
         for line in out.stdout.lines() {
             if let Some(name) = line.strip_prefix("### ") {
                 current = name.to_string();
@@ -534,31 +572,39 @@ pub async fn gather_live_facts_with(
                 .or_else(|| t.strip_prefix("- address:"))
                 .map(|v| v.trim().trim_matches('"').to_string());
             if let Some(target) = target {
-                let hostport = crate::ops::fleetcheck::probe_hostport(target.trim_matches('"'));
-                // bash, not sh: /dev/tcp is a bash feature and the shell in
-                // these containers is dash, which reports "Directory
-                // nonexistent" for every address. The first run of this
-                // check called every route in the house dead.
-                let probe = format!(
+                targets.push((current.clone(), target));
+            }
+        }
+        // ops::pool: every route is knocked on at once (bounded), and the
+        // facts keep the order the fragments listed them in.
+        facts.routes = crate::ops::pool::bounded(
+            targets
+                .into_iter()
+                .map(|(file, target)| async move {
+                    let hostport = crate::ops::fleetcheck::probe_hostport(target.trim_matches('"'));
+                    // bash, not sh: /dev/tcp is a bash feature and the shell in
+                    // these containers is dash, which reports "Directory
+                    // nonexistent" for every address. The first run of this
+                    // check called every route in the house dead.
+                    let probe = format!(
                     "timeout 3 bash -c 'echo > /dev/tcp/{}' 2>/dev/null && echo up || echo down",
                     hostport
                 );
-                let answered = exec
-                    .run(&Cmd::new(
-                        "pct",
-                        &["exec", &gw, "--", "sh", "-c", &probe],
-                        15,
-                    ))
-                    .await
-                    .map(|o| o.stdout.contains("up"))
-                    .unwrap_or(false);
-                facts.routes.push(RouteFact {
-                    file: current.clone(),
-                    target,
-                    answered,
-                });
-            }
-        }
+                    let answered = exec
+                        .run(&crate::executor::attach_sh(gw, &probe, 15))
+                        .await
+                        .map(|o| o.stdout.contains("up"))
+                        .unwrap_or(false);
+                    RouteFact {
+                        file,
+                        target,
+                        answered,
+                    }
+                })
+                .collect(),
+            crate::ops::pool::READ_CONCURRENCY,
+        )
+        .await;
     }
 
     // G3: what each managed container's resources look like right now — every
@@ -575,85 +621,113 @@ pub async fn gather_live_facts_with(
         "probing {} container(s): disk, memory, logs, guards…",
         managed.len()
     ));
-    for (i, (vmid, hostname)) in managed.iter().enumerate() {
-        progress(&format!("  {}/{} {}", i + 1, managed.len(), hostname));
-        let vs = vmid.to_string();
-        let Ok(out) = exec
-            .run(&Cmd::new(
-                "pct",
-                &["exec", &vs, "--", "sh", "-c", GROWTH_PROBE],
-                45,
-            ))
-            .await
-        else {
-            continue;
-        };
-        if let Some(g) = parse_growth(*vmid, hostname, &out.stdout) {
-            facts.growth.push(g);
-        }
-    }
+    // ops::pool: the containers are asked a few at a time. The progress line
+    // is said as each one ANSWERS, `n` counting answers, so the count climbs
+    // steadily whatever order they finish in.
+    let done = crate::ops::pool::Done::new(managed.len());
+    let done = &done;
+    facts.growth = crate::ops::pool::bounded(
+        managed
+            .iter()
+            .map(|(vmid, hostname)| async move {
+                let out = exec
+                    .run(&crate::executor::attach_sh(*vmid, GROWTH_PROBE, 45))
+                    .await;
+                progress(&format!("  {} {}", done.tick(), hostname));
+                parse_growth(*vmid, hostname, &out.ok()?.stdout)
+            })
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    )
+    .await
+    .into_iter()
+    .flatten()
+    .collect();
 
     progress("reading each container's configuration…");
-    // W3: the configured shape of every managed container, from `pct config`
-    // rather than from inside it — `pct exec` cannot ask a stopped guest
-    // anything, and the stopped guest is exactly the one to find.
-    for (vmid, hostname) in &managed {
-        let vs = vmid.to_string();
-        let Ok(out) = exec.run(&Cmd::new("pct", &["config", &vs], 30)).await else {
-            continue;
-        };
-        if !out.success() {
-            continue;
-        }
-        facts.boot.push(BootFact {
-            vmid: *vmid,
-            hostname: hostname.clone(),
-            live: crate::ops::reconcile::parse(&out.stdout),
-        });
-    }
+    // W3: the configured shape of every managed container, from its
+    // configuration rather than from inside it — nothing can be asked inside
+    // a stopped guest, and the stopped guest is exactly the one to find.
+    // Read straight off pmxcfs rather than through `pct config` (0.45 s of
+    // Perl start-up each, measured 2026-09-29); the file's main section is
+    // what `pct config` prints, so the same values are parsed.
+    facts.boot = crate::ops::pool::bounded(
+        managed
+            .iter()
+            .map(|(vmid, hostname)| async move {
+                let conf = exec
+                    .read_file(&crate::executor::lxc_conf_path(*vmid))
+                    .await
+                    .ok()?;
+                Some(BootFact {
+                    vmid: *vmid,
+                    hostname: hostname.clone(),
+                    live: crate::ops::reconcile::parse(crate::executor::lxc_conf_current(&conf)),
+                })
+            })
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    )
+    .await
+    .into_iter()
+    .flatten()
+    .collect();
 
     // fix-150: the patch state, asked inside each running container. One
     // probe, three lines: the upgradable count, the reboot-required mtime or
     // `-`, the unattended-upgrades stamp mtime or `-`. A container that does
     // not answer yields no fact, and no finding.
     progress("asking each container about pending updates…");
-    for (vmid, hostname) in &managed {
-        let vs = vmid.to_string();
-        let Ok(out) = exec
-            .run(&Cmd::new(
-                "pct",
-                &["exec", &vs, "--", "sh", "-c", PATCH_PROBE],
-                60,
-            ))
-            .await
-        else {
-            continue;
-        };
-        if !out.success() {
-            continue;
-        }
-        facts.patch.push(parse_patch_probe(
-            *vmid,
-            hostname,
-            &out.stdout,
-            inp.now_unix,
-        ));
-    }
+    facts.patch = crate::ops::pool::bounded(
+        managed
+            .iter()
+            .map(|(vmid, hostname)| async move {
+                let out = exec
+                    .run(&crate::executor::attach_sh(*vmid, PATCH_PROBE, 60))
+                    .await
+                    .ok()?;
+                if !out.success() {
+                    return None;
+                }
+                Some(parse_patch_probe(
+                    *vmid,
+                    hostname,
+                    &out.stdout,
+                    inp.now_unix,
+                ))
+            })
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    )
+    .await
+    .into_iter()
+    .flatten()
+    .collect();
 
     // Is each stack's safety net actually attached? Both questions are
     // skipped when their address is not configured: an unasked question must
     // never become a finding.
     progress("asking Prometheus, Loki and Grafana about each stack…");
-    let prom = inp.prometheus_url.clone();
-    let loki = inp.loki_url.clone();
+    let prom = inp.prometheus_url.as_deref();
+    let loki = inp.loki_url.as_deref();
     let window = &inp.logs_window;
-    let provisioned: Option<Vec<String>> = match inp.grafana_dashboards_dir.as_deref() {
-        Some(dir) => grafana_generated_uids(exec, inp.grafana_vmid, dir).await,
-        None => None,
+    let provisioned_fut = async {
+        match inp.grafana_dashboards_dir.as_deref() {
+            Some(dir) => grafana_generated_uids(exec, inp.grafana_vmid, dir).await,
+            None => None,
+        }
     };
-    if prom.is_some() || loki.is_some() {
-        if let Some(snapshot) = snapshot.as_ref() {
-            for (name, st) in &snapshot.stacks {
+    // ops::pool: one future per recorded stack, a few at a time, and within a
+    // stack the Prometheus and the Loki question side by side.
+    let asked: Vec<(&String, &crate::state::StackState)> =
+        match (&snapshot, prom.is_some() || loki.is_some()) {
+            (Some(snapshot), true) => snapshot.stacks.iter().collect(),
+            _ => Vec::new(),
+        };
+    let coverage_fut = crate::ops::pool::bounded(
+        asked
+            .into_iter()
+            .map(|(name, st)| async move {
                 let mut c = CoverageFact {
                     stack: name.clone(),
                     ..Default::default()
@@ -662,19 +736,22 @@ pub async fn gather_live_facts_with(
                 // not asked about; the check notes the decision instead.
                 c.unmeasured_by_choice =
                     !st.natives.is_empty() && st.natives.iter().all(|n| n.metrics == Some(false));
-                if let (Some(base), false) = (prom.as_deref(), c.unmeasured_by_choice) {
+                let scraped_fut = async {
+                    let (Some(base), false) = (prom, c.unmeasured_by_choice) else {
+                        return None;
+                    };
                     let q = format!(
                         "{}/api/v1/query?query=max(up%7Bstack%3D%22{}%22%7D)",
                         base.trim_end_matches('/'),
                         name
                     );
-                    c.scraped = Some(
+                    Some(
                         exec.run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
                             .await
                             .map(|o| o.stdout.contains("\"1\""))
                             .unwrap_or(false),
-                    );
-                }
+                    )
+                };
                 // Every stack ships logs through Alloy since 2026-09-02:
                 // compose stacks as container lines labelled
                 // `container_name`, native stacks as journal lines labelled
@@ -687,7 +764,8 @@ pub async fn gather_live_facts_with(
                 } else {
                     "unit"
                 };
-                if let Some(base) = loki.as_deref() {
+                let logs_fut = async {
+                    let base = loki?;
                     // fix-93: the LAN port takes pushes only, so with Loki's
                     // container named the question goes in there, to the
                     // loopback port that carries the full API.
@@ -707,35 +785,32 @@ pub async fn gather_live_facts_with(
                         window
                     );
                     let cmd = match inp.loki_vmid {
-                        Some(vmid) => Cmd::new(
-                            "pct",
-                            &[
-                                "exec",
-                                &vmid.to_string(),
-                                "--",
-                                "curl",
-                                "-s",
-                                "-m",
-                                "10",
-                                &q,
-                            ],
-                            30,
-                        ),
+                        Some(vmid) => {
+                            crate::executor::attach_cmd(vmid, &["curl", "-s", "-m", "10", &q], 30)
+                        }
                         None => Cmd::new("curl", &["-s", "-m", "10", &q], 20),
                     };
-                    c.logs_recent = Some(
+                    Some(
                         exec.run(&cmd)
                             .await
                             .map(|o| o.stdout.contains("\"value\""))
                             .unwrap_or(false),
-                    );
-                }
-                if let Some(uids) = provisioned.as_ref() {
-                    let uid = format!("homelab-{}", name);
-                    c.dashboard_provisioned = Some(uids.iter().any(|u| u == &uid));
-                }
-                facts.coverage.push(c);
-            }
+                    )
+                };
+                let (scraped, logs_recent) = futures_util::join!(scraped_fut, logs_fut);
+                c.scraped = scraped;
+                c.logs_recent = logs_recent;
+                c
+            })
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    );
+    let (provisioned, coverage) = futures_util::join!(provisioned_fut, coverage_fut);
+    facts.coverage = coverage;
+    if let Some(uids) = provisioned.as_ref() {
+        for c in &mut facts.coverage {
+            let uid = format!("homelab-{}", c.stack);
+            c.dashboard_provisioned = Some(uids.iter().any(|u| u == &uid));
         }
     }
     // fix-142: the intent copy of every stack the client named, for the
@@ -802,46 +877,53 @@ pub async fn intent_files(
     state_dir: &str,
     stacks: &[String],
 ) -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
-    let mut out = std::collections::BTreeMap::new();
-    for name in stacks {
-        let plain = !name.is_empty()
-            && name
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        if !plain {
-            continue;
-        }
-        let dir = format!("{}/repo/stacks/{}", state_dir, name);
-        let Ok(o) = exec
-            .run(&Cmd::new(
-                "sh",
-                &[
-                    "-c",
-                    &format!("cd '{}' && find . -type f -exec sha256sum {{}} +", dir),
-                ],
-                60,
-            ))
-            .await
-        else {
-            continue;
-        };
-        if !o.success() {
-            continue;
-        }
-        let files = o
-            .stdout
-            .lines()
-            .filter_map(|l| {
-                let (hash, path) = l.split_once("  ")?;
-                Some((
-                    path.trim_start_matches("./").to_string(),
-                    hash.trim().to_string(),
-                ))
+    // ops::pool: one listing per stack, a few at a time.
+    let read = crate::ops::pool::bounded(
+        stacks
+            .iter()
+            .map(|name| async move {
+                let plain = !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+                if !plain {
+                    return None;
+                }
+                let dir = format!("{}/repo/stacks/{}", state_dir, name);
+                let Ok(o) = exec
+                    .run(&Cmd::new(
+                        "sh",
+                        &[
+                            "-c",
+                            &format!("cd '{}' && find . -type f -exec sha256sum {{}} +", dir),
+                        ],
+                        60,
+                    ))
+                    .await
+                else {
+                    return None;
+                };
+                if !o.success() {
+                    return None;
+                }
+                let files = o
+                    .stdout
+                    .lines()
+                    .filter_map(|l| {
+                        let (hash, path) = l.split_once("  ")?;
+                        Some((
+                            path.trim_start_matches("./").to_string(),
+                            hash.trim().to_string(),
+                        ))
+                    })
+                    .collect();
+                Some((name.clone(), files))
             })
-            .collect();
-        out.insert(name.clone(), files);
-    }
-    out
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    )
+    .await;
+    read.into_iter().flatten().collect()
 }
 
 /// gap-27: the secret files on a stack's container that have no copy in the
@@ -882,19 +964,12 @@ pub async fn unsealed_secret_files(
     let mut missing = Vec::new();
     for (on_container, in_vault) in wanted {
         let there = exec
-            .run(&Cmd::new(
-                "pct",
-                &[
-                    "exec",
-                    &st.vmid.to_string(),
-                    "--",
-                    "sh",
-                    "-c",
-                    &format!(
-                        "test -s {} && echo yes || true",
-                        crate::ops::util::shq(&on_container)
-                    ),
-                ],
+            .run(&crate::executor::attach_sh(
+                st.vmid,
+                &format!(
+                    "test -s {} && echo yes || true",
+                    crate::ops::util::shq(&on_container)
+                ),
                 30,
             ))
             .await;

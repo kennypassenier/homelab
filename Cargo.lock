@@ -1271,6 +1271,7 @@ name = "homelab-core"
 version = "3.63.2"
 dependencies = [
  "async-trait",
+ "futures-util",
  "homelab-core",
  "minisign-verify",
  "serde",

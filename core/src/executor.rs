@@ -433,6 +433,58 @@ pub async fn pct_sh_secret(
     .await
 }
 
+/// The PATH a read-only probe gets inside the container: the Debian default,
+/// set explicitly because [`attach_cmd`] clears the host's environment.
+pub const ATTACH_PATH: &str = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/// Where Proxmox keeps a container's configuration (pmxcfs).
+pub fn lxc_conf_path(vmid: u16) -> String {
+    format!("/etc/pve/lxc/{}.conf", vmid)
+}
+
+/// A READ-ONLY command inside a running container, through `lxc-attach`
+/// directly instead of `pct exec`.
+///
+/// Measured on pve 2026-09-29: `pct exec 109 -- true` takes 0.45-0.48 s every
+/// time, `lxc-attach -n 109 -- true` 0.01 s. The difference is pct's Perl
+/// start-up (loading the PVE modules), paid once per call per container, and
+/// the long reads (check, doctor, today) made some eighty such calls. `pct
+/// exec` itself ends in the same `lxc-attach`.
+///
+/// Read-only probes only: every path that changes a container stays on `pct`,
+/// whose locking and checks it relies on. A stopped container fails here as
+/// it failed under `pct exec` (non-zero, nothing on stdout), so a probe that
+/// never ran is still no fact. The environment is cleared and PATH set, so
+/// what the probe sees does not depend on the daemon's own environment.
+pub fn attach_cmd(vmid: u16, argv: &[&str], timeout_s: u64) -> Cmd {
+    let vm = vmid.to_string();
+    let mut args: Vec<&str> = vec!["-n", &vm, "--clear-env", "--set-var", ATTACH_PATH, "--"];
+    args.extend_from_slice(argv);
+    Cmd::new("lxc-attach", &args, timeout_s)
+}
+
+/// [`attach_cmd`] running `sh -c <script>`.
+pub fn attach_sh(vmid: u16, script: &str, timeout_s: u64) -> Cmd {
+    attach_cmd(vmid, &["sh", "-c", script], timeout_s)
+}
+
+/// The main section of a container's configuration file: everything before
+/// the first `[section]` (a snapshot or `[pve:pending]`). That is what `pct
+/// config` prints without `--pending`, so parsing it gives the same current
+/// values.
+pub fn lxc_conf_current(conf: &str) -> &str {
+    let mut end = conf.len();
+    let mut at = 0;
+    for line in conf.split_inclusive('\n') {
+        if line.trim_start().starts_with('[') {
+            end = at;
+            break;
+        }
+        at += line.len();
+    }
+    &conf[..end]
+}
+
 /// Run a shell script inside an LXC via `pct exec`.
 ///
 /// fix-53 (expert panel, timeout-leaves-container-work-running, 2026-09-27):

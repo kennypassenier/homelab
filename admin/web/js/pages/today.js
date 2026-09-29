@@ -14,6 +14,8 @@ import {
 } from "../dom.js";
 import { humanDuration } from "../format.js";
 import { findingRows, todayView } from "../parity.js";
+import { fetchAnnounced, keepRead, keptRead, runUrl } from "../slowread.js";
+import { listen } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 
 /**
@@ -106,38 +108,24 @@ export function mount(root) {
   // a load that never finishes.
   findings.wrap.hidden = true;
 
-  const load = async () => {
-    read.disabled = true;
-    // The table's status line counts the seconds; the verdict's place
-    // says what is being asked until the verdict replaces it.
-    items.loading({
-      words:
-        "Asking the host: doctor, the fleet check, the incidents and the manual checks…",
-      expect: 93,
-    });
-    if (!verdict.querySelector(".today-verdict"))
-      verdict.replaceChildren(
-        h(
-          "p",
-          { class: "measured", role: "status" },
-          "Today's list is being read on the host.",
-        ),
-      );
-    let r;
-    try {
-      r = await slowRead("/data/today", "today", abort.signal);
-    } finally {
-      read.disabled = false;
-    }
-    if (!r.ok) {
-      const took = humanDuration(items.failed(r.error));
-      verdict.replaceChildren(
-        h("p", { class: "measured", role: "status" }, `Failed after ${took}.`),
-      );
-      return;
-    }
-    const took = humanDuration(items.ready({ refresh: false }));
-    const v = todayView(r.body);
+  /** The run whose answer each part shows, and whether it is reading. */
+  const todayPage = {
+    shown: /** @type {number | null} */ (null),
+    reading: false,
+  };
+  const checkPage = {
+    shown: /** @type {number | null} */ (null),
+    reading: false,
+  };
+
+  /**
+   * Show one answer of /data/today.
+   * @param {any} body
+   * @param {{took?: string, last?: boolean}} o last: an earlier answer,
+   *   shown while a new run reads again
+   */
+  const paintToday = (body, o = {}) => {
+    const v = todayView(body);
     verdict.replaceChildren(
       h(
         "div",
@@ -149,7 +137,16 @@ export function mount(root) {
         h("strong", null, v.verdict),
       ),
     );
-    note.textContent = [v.note, `Read in ${took}.`].filter(Boolean).join(" ");
+    note.textContent = [
+      v.note,
+      o.last
+        ? "The last reading, while the host reads again."
+        : o.took
+          ? `Read in ${o.took}.`
+          : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
     note.hidden = false;
     items.tbody.replaceChildren(
       ...v.items.map((i) =>
@@ -169,30 +166,76 @@ export function mount(root) {
       ),
     );
     table?.refresh();
-    setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
+    setAgo(ago, body.read_at ?? body.measured_at ?? Date.now() / 1000);
+    todayPage.shown = body.read_run ?? null;
+    if (!o.last) keepRead("/data/today", body);
   };
 
-  const runCheck = async () => {
-    checkBtn.disabled = true;
-    findings.wrap.hidden = false;
-    findings.loading({
-      words: "Running the fleet check on the host…",
-      expect: 92,
-    });
-    checkNote.textContent = "The fleet check is running on the host.";
+  const todayWords = {
+    words:
+      "Asking the host: doctor, the fleet check, the incidents and the manual checks…",
+    expect: 93,
+  };
+
+  /**
+   * An earlier answer, on screen now; the table then shows the new run.
+   * @param {any} body
+   */
+  const showLastToday = (body) => {
+    items.ready({ refresh: false });
+    paintToday(body, { last: true });
+    // The last answer stays readable: the big layer is for a table with
+    // nothing to show yet.
+    items.loading({ ...todayWords, overlay: false });
+  };
+
+  /** @param {string} [url] a run's own url, for a `slow_read` event */
+  const load = async (url) => {
+    read.disabled = true;
+    todayPage.reading = true;
+    // A page this tab showed before paints at once; the dashboard's own
+    // last answer follows within a request.
+    const kept = url ? undefined : keptRead("/data/today");
+    if (kept) showLastToday(kept);
+    // The table's status line counts the seconds; the verdict's place
+    // says what is being asked until the verdict replaces it.
+    else items.loading(todayWords);
+    if (!verdict.querySelector(".today-verdict"))
+      verdict.replaceChildren(
+        h(
+          "p",
+          { class: "measured", role: "status" },
+          "Today's list is being read on the host.",
+        ),
+      );
     let r;
     try {
-      r = await slowRead("/data/fleet-check", "the fleet check", abort.signal);
+      r = await slowRead(url ?? "/data/today", "today", abort.signal, (b) =>
+        showLastToday(b),
+      );
     } finally {
-      checkBtn.disabled = false;
+      read.disabled = false;
+      todayPage.reading = false;
     }
     if (!r.ok) {
-      const took = humanDuration(findings.failed(r.error));
-      checkNote.textContent = `The fleet check did not answer (after ${took}).`;
+      const took = humanDuration(items.failed(r.error));
+      verdict.replaceChildren(
+        h("p", { class: "measured", role: "status" }, `Failed after ${took}.`),
+      );
       return;
     }
-    const took = humanDuration(findings.ready({ refresh: false }));
-    const rows = findingRows(r.body.findings ?? []);
+    const took = humanDuration(items.ready({ refresh: false }));
+    paintToday(r.body, { took });
+  };
+
+  /**
+   * Show one answer of /data/fleet-check.
+   * @param {any} body
+   * @param {{took?: string, last?: boolean}} o
+   */
+  const paintCheck = (body, o = {}) => {
+    findings.wrap.hidden = false;
+    const rows = findingRows(body.findings ?? []);
     findings.tbody.replaceChildren(
       ...rows.map((f) =>
         h(
@@ -206,10 +249,70 @@ export function mount(root) {
       ),
     );
     checkTable?.refresh();
+    const when = o.last
+      ? "the last reading, while the host checks again"
+      : o.took
+        ? `checked in ${o.took}`
+        : "the last reading";
     checkNote.textContent =
-      `${r.body.passes ? "Passes" : "Does not pass"}: ${rows.length} finding(s) over ${r.body.stack_files} stack file(s), checked in ${took}. ${r.body.skipped ?? ""} ${r.body.not_here ?? ""}`.trim();
-    setAgo(checkAgo, r.body.measured_at ?? Date.now() / 1000);
+      `${body.passes ? "Passes" : "Does not pass"}: ${rows.length} finding(s) over ${body.stack_files} stack file(s), ${when}. ${body.skipped ?? ""} ${body.not_here ?? ""}`.trim();
+    setAgo(checkAgo, body.read_at ?? body.measured_at ?? Date.now() / 1000);
+    checkPage.shown = body.read_run ?? null;
+    if (!o.last) keepRead("/data/fleet-check", body);
   };
+
+  const checkWords = {
+    words: "Running the fleet check on the host…",
+    expect: 92,
+  };
+
+  /** @param {string} [url] a run's own url, for a `slow_read` event */
+  const runCheck = async (url) => {
+    checkBtn.disabled = true;
+    checkPage.reading = true;
+    findings.wrap.hidden = false;
+    findings.loading(checkWords);
+    checkNote.textContent = "The fleet check is running on the host.";
+    let r;
+    try {
+      r = await slowRead(
+        url ?? "/data/fleet-check",
+        "the fleet check",
+        abort.signal,
+        (b) => {
+          findings.ready({ refresh: false });
+          paintCheck(b, { last: true });
+          findings.loading({ ...checkWords, overlay: false });
+        },
+      );
+    } finally {
+      checkBtn.disabled = false;
+      checkPage.reading = false;
+    }
+    if (!r.ok) {
+      const took = humanDuration(findings.failed(r.error));
+      checkNote.textContent = `The fleet check did not answer (after ${took}).`;
+      return;
+    }
+    const took = humanDuration(findings.ready({ refresh: false }));
+    paintCheck(r.body, { took });
+  };
+
+  // A run finished (this tab's, another tab's): fetch it by id, which
+  // starts nothing on the host.
+  const unlisten = listen("slow_read", (ev) => {
+    if (fetchAnnounced(ev, "today", todayPage))
+      void load(runUrl("/data/today", ev.run)).catch(() => {});
+    if (fetchAnnounced(ev, "fleet-check", checkPage))
+      void runCheck(runUrl("/data/fleet-check", ev.run)).catch(() => {});
+  });
+  // The fleet check runs only when asked (Today already carries it); a
+  // reading this tab saw before is shown, with its age.
+  const keptCheck = keptRead("/data/fleet-check");
+  if (keptCheck) {
+    findings.ready({ refresh: false });
+    paintCheck(keptCheck);
+  }
 
   read.addEventListener("click", () => void load().catch(() => {}));
   checkBtn.addEventListener("click", () => void runCheck().catch(() => {}));
@@ -222,6 +325,7 @@ export function mount(root) {
   void load().catch(() => {});
   return () => {
     abort.abort();
+    unlisten();
     root.removeEventListener("kp-datatable-retry", retry);
     unbind();
     unbindC();

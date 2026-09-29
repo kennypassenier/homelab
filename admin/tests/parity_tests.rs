@@ -521,3 +521,143 @@ async fn parity_a_slow_read_answers_202_until_its_one_run_is_done() {
     assert_eq!(s, StatusCode::OK, "{b}");
     assert_eq!(started.load(Ordering::SeqCst), 2);
 }
+
+/// slow-reads (Kenny, 2026-09-29, form "Trage pagina's", changed at 13:52:
+/// "doe het als ik op die pagina kom"; no timer): the last result is kept.
+/// Opening the page gets it at once with when it was read and the run now
+/// reading again; a second page joins that run (never two at once); a
+/// failed run does not replace the last good answer; every finished run is
+/// announced on the live channel, and fetching it by id starts nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn slow_reads_the_last_result_is_served_at_once_while_one_run_reads_again() {
+    use axum::http::StatusCode;
+    use homelab_admin::shell::slow::SlowRead;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    async fn parts(r: axum::response::Response) -> (StatusCode, serde_json::Value) {
+        let status = r.status();
+        let body = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    let live = Arc::new(Recorder::default());
+    let read = SlowRead::announced("today", "today", live.clone());
+    let started = Arc::new(AtomicUsize::new(0));
+    // Each run answers with its own number, or fails when told to; it waits
+    // for a go so a test can hold it open.
+    type Gate = Arc<Mutex<Option<tokio::sync::oneshot::Receiver<bool>>>>;
+    let work = |started: Arc<AtomicUsize>, gate: Gate| {
+        move || {
+            let n = started.fetch_add(1, Ordering::SeqCst) + 1;
+            let rx = gate.lock().unwrap().take();
+            async move {
+                let ok = match rx {
+                    Some(rx) => rx.await.unwrap_or(true),
+                    None => true,
+                };
+                if ok {
+                    (StatusCode::OK, serde_json::json!({ "n": n }))
+                } else {
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        serde_json::json!({ "what": "today", "why": "down", "fix": "later" }),
+                    )
+                }
+            }
+        }
+    };
+    let short = Duration::from_millis(50);
+    let long = Duration::from_secs(5);
+
+    // Before any result: as before, the run and then its answer.
+    let (s, b) = parts(
+        read.read(None, long, work(started.clone(), Arc::default()))
+            .await,
+    )
+    .await;
+    assert_eq!((s, b["n"].as_u64()), (StatusCode::OK, Some(1)), "{b}");
+    assert!(b["read_at"].as_u64().is_some(), "{b}");
+    assert!(b.get("refreshing").is_none(), "{b}");
+
+    // Opening the page again: run 1's answer AT ONCE (a short wait is
+    // enough, nothing is awaited), and a new run reading again.
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    let gate: Gate = Arc::new(Mutex::new(Some(rx)));
+    let t0 = std::time::Instant::now();
+    let (s, b) = parts(
+        read.read(None, long, work(started.clone(), gate.clone()))
+            .await,
+    )
+    .await;
+    assert!(t0.elapsed() < Duration::from_secs(1), "served at once");
+    assert_eq!((s, b["n"].as_u64()), (StatusCode::OK, Some(1)), "{b}");
+    assert!(b["read_at"].as_u64().is_some(), "{b}");
+    let run = b["refreshing"]["run"]
+        .as_u64()
+        .expect("the run reading again");
+    assert!(b["refreshing"]["started_at"].as_u64().is_some(), "{b}");
+    assert_eq!(started.load(Ordering::SeqCst), 2);
+
+    // A second page (or tab) while it runs: the same last answer, the same
+    // run; the host is not asked a third time.
+    let (_, b) = parts(
+        read.read(None, short, work(started.clone(), gate.clone()))
+            .await,
+    )
+    .await;
+    assert_eq!(b["refreshing"]["run"].as_u64(), Some(run), "{b}");
+    assert_eq!(started.load(Ordering::SeqCst), 2, "never two runs at once");
+
+    // The run answers: its page gets it by id, and the live channel says so.
+    let waiting = {
+        let (read, started, gate) = (read.clone(), started.clone(), gate.clone());
+        tokio::spawn(async move { read.read(Some(run), long, work(started, gate)).await })
+    };
+    tx.send(true).unwrap();
+    let (s, b) = parts(waiting.await.unwrap()).await;
+    assert_eq!((s, b["n"].as_u64()), (StatusCode::OK, Some(2)), "{b}");
+    assert_eq!(b["read_run"].as_u64(), Some(run), "which run this is: {b}");
+    until("run 2 announced", || live.events("slow_read").len() == 2).await;
+    assert_eq!(
+        live.events("slow_read")[1],
+        serde_json::json!({ "read": "today", "run": run, "ok": true })
+    );
+    // Another tab hears the event and fetches that run by id: no new run.
+    let (s, b) = parts(
+        read.read(Some(run), short, work(started.clone(), Arc::default()))
+            .await,
+    )
+    .await;
+    assert_eq!((s, b["n"].as_u64()), (StatusCode::OK, Some(2)));
+    assert_eq!(started.load(Ordering::SeqCst), 2);
+
+    // A run that fails is its own answer, but the last good one stays first.
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    let gate: Gate = Arc::new(Mutex::new(Some(rx)));
+    let (_, b) = parts(
+        read.read(None, short, work(started.clone(), gate.clone()))
+            .await,
+    )
+    .await;
+    assert_eq!(b["n"].as_u64(), Some(2), "{b}");
+    let failing = b["refreshing"]["run"].as_u64().unwrap();
+    tx.send(false).unwrap();
+    let (s, _) = parts(
+        read.read(Some(failing), long, work(started.clone(), gate))
+            .await,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_GATEWAY);
+    until("the failed run announced", || {
+        live.events("slow_read").len() == 3
+    })
+    .await;
+    assert_eq!(live.events("slow_read")[2]["ok"], false);
+    let (s, b) = parts(
+        read.read(None, short, work(started.clone(), Arc::default()))
+            .await,
+    )
+    .await;
+    assert_eq!((s, b["n"].as_u64()), (StatusCode::OK, Some(2)), "{b}");
+    assert!(b["refreshing"]["run"].as_u64().is_some());
+}

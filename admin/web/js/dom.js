@@ -7,6 +7,7 @@ import {
   tableFromParams,
   tableToParams,
 } from "./urlstate.js";
+import { freshRead } from "./slowread.js";
 import { busyWords, emptyWords, failReason } from "./tablestate.js";
 import { VIEW_EVENT, dataTable } from "/static/kp/js/datatable.js";
 
@@ -65,12 +66,13 @@ export function badgeCell(st) {
  * @param {{remember: string, caption: string, search: string,
  *   columns: Column[], state?: "loading", pageSize?: number,
  *   pageSizes?: string, select?: {label: string, actions: Node[]},
- *   nothing?: string}} spec
+ *   nothing?: string, busyOverlay?: boolean}} spec
  *   pageSize/pageSizes: page a long table (the logs) instead of showing
  *   every row. select: a checkbox column first and an action bar that
  *   shows while rows are ticked; each row brings its own
  *   `selectCell(key)`. nothing: the empty box's words when the table has
- *   no rows at all.
+ *   no rows at all. busyOverlay: false leaves out the big loading layer
+ *   over the rows (`busyOverlay`; on by default).
  */
 export function tableBlock(spec) {
   const tbody = h("tbody");
@@ -110,6 +112,8 @@ export function tableBlock(spec) {
   };
   if (spec.pageSize) wrapAttrs["data-kp-page-size"] = String(spec.pageSize);
   if (spec.state) wrapAttrs["data-kp-state"] = spec.state;
+  // kp-themes' future `data-kp-busy-overlay` (busyOverlay below, a shim).
+  if (spec.busyOverlay !== false) wrapAttrs["data-kp-busy-overlay"] = "";
   const status = h("p", {
     class: "kp-datatable__status",
     "data-kp-datatable-status": "",
@@ -198,6 +202,9 @@ export function tableBlock(spec) {
     ),
   );
 
+  const overlay =
+    spec.busyOverlay !== false ? busyOverlay(wrap, status) : () => {};
+
   // ── Loading: kp's spinner, the page's words and kp's own counter ─────
   /** @type {{text: string, since: number, given: boolean} | null} */
   let busy = null;
@@ -232,11 +239,14 @@ export function tableBlock(spec) {
    * The table is asking for its rows: a first load shows kp's skeleton, a
    * refresh keeps the old rows dimmed and says from when they are; kp's
    * spinner, the page's words and kp's counter in the status line.
-   * @param {{words?: string, expect?: number}} [o] expect: the usual
-   *   seconds, for the host's slow reads
+   * @param {{words?: string, expect?: number, overlay?: boolean}} [o]
+   *   expect: the usual seconds, for the host's slow reads; overlay:
+   *   false keeps the big layer off for this load (a page showing its last
+   *   answer while it reads again), as kp's busy({ overlay })
    */
   const loading = (o = {}) => {
     stopBusy();
+    overlay(o.overlay);
     busy = {
       text: busyWords({
         words: o.words ?? "Asking the host…",
@@ -281,6 +291,114 @@ export function tableBlock(spec) {
     return secs;
   };
   return { wrap, tbody, loading, ready, failed: fail };
+}
+
+/**
+ * The busy overlay: while the table loads, a large spinner with the busy
+ * words and kp's counter over the rows, under the header (Kenny,
+ * 2026-09-29: the 1em spinner in the status line under a long table went
+ * unseen).
+ *
+ * A LOCAL SHIM of kp-themes main 05d62af6 (scope-138: busy({ overlay }),
+ * the `data-kp-busy-overlay` attribute, the `.kp-datatable__busy-overlay`
+ * layer with its `.kp-datatable__busy-panel`, the --kp-busy-overlay-veil and
+ * --kp-busy-overlay-spinner knobs), with exactly its names and placement,
+ * to delete when the chassis pin carries it. A thin layer on kp's busy():
+ * it reads kp's state (`aria-busy` on the wrapper) and mirrors kp's status
+ * line, words and counter, and keeps no counter of its own. The layer is
+ * aria-hidden; the status line stays the live region. Placed over the
+ * skeleton or the dimmed rows, it inserts nothing, so nothing moves.
+ * @param {HTMLElement} wrap the `.kp-datatable`
+ * @param {HTMLElement} status kp's status line
+ * @returns {(on: boolean | undefined) => void} this load's choice, as
+ *   kp's busy({ overlay }); undefined is the wrapper's attribute
+ */
+function busyOverlay(wrap, status) {
+  const words = h("span", { class: "kp-datatable__busy-words" });
+  const clock = h("span", { class: "kp-datatable__busy-clock" });
+  const panel = h(
+    "div",
+    { class: "kp-datatable__busy-panel" },
+    h("span", { class: "kp-spinner" }),
+    words,
+    clock,
+  );
+  const layer = h(
+    "div",
+    { class: "kp-datatable__busy-overlay", "aria-hidden": "true", hidden: "" },
+    panel,
+  );
+  wrap.append(layer);
+  /** @type {boolean | undefined} */
+  let chosen;
+  const wanted = () => chosen ?? wrap.hasAttribute("data-kp-busy-overlay");
+  const sync = () => {
+    const table = wrap.querySelector("table");
+    if (wrap.getAttribute("aria-busy") !== "true" || !wanted() || !table) {
+      layer.hidden = true;
+      return;
+    }
+    // kp's status line while loading: its spinner, the words, then its
+    // counter in `[data-kp-busy-clock]`.
+    const tick = status.querySelector("[data-kp-busy-clock]");
+    let text = "";
+    status.childNodes.forEach((n) => {
+      if (n !== tick && !(n instanceof Element && n.matches(".kp-spinner")))
+        text += n.textContent ?? "";
+    });
+    words.textContent = text.trim();
+    clock.textContent = tick?.textContent ?? "";
+    clock.hidden = !tick;
+    // kp's placement: from the header's bottom to the table box's bottom,
+    // within its left and right. A table not laid out (hidden) shows none.
+    const host = wrap.getBoundingClientRect();
+    if (host.height === 0) {
+      layer.hidden = true;
+      return;
+    }
+    const box = (
+      wrap.querySelector(".kp-table-wrap") ?? table
+    ).getBoundingClientRect();
+    const top = (
+      table.tHead ??
+      table.tBodies[0] ??
+      table
+    ).getBoundingClientRect()[table.tHead ? "bottom" : "top"];
+    const px = (/** @type {number} */ n) => `${Math.max(0, Math.round(n))}px`;
+    layer.style.setProperty(
+      "--kp-busy-overlay-top",
+      px(top - host.top - wrap.clientTop),
+    );
+    layer.style.setProperty(
+      "--kp-busy-overlay-bottom",
+      px(host.bottom - Math.max(box.bottom, top) - wrap.clientTop),
+    );
+    layer.style.setProperty(
+      "--kp-busy-overlay-left",
+      px(box.left - host.left - wrap.clientLeft),
+    );
+    layer.style.setProperty(
+      "--kp-busy-overlay-right",
+      px(host.right - box.right - wrap.clientLeft),
+    );
+    layer.hidden = false;
+  };
+  new MutationObserver(sync).observe(status, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+  new MutationObserver(sync).observe(wrap, {
+    attributes: true,
+    attributeFilter: ["aria-busy", "data-kp-busy-overlay", "hidden"],
+  });
+  if (typeof ResizeObserver === "function")
+    new ResizeObserver(sync).observe(wrap);
+  sync();
+  return (on) => {
+    chosen = on;
+    sync();
+  };
 }
 
 /**
@@ -354,23 +472,16 @@ export async function fetchJson(url, what, signal) {
  * request within 20 s; a 202 `{running, run}` says it is still on its way,
  * and the page asks again for that run until the answer is there. No
  * request lives long enough for a proxy to cut it (Cloudflare: 100 s).
+ * When the dashboard holds an earlier answer, `onLast(body)` gets it at
+ * once while one new run reads again (slow-reads, `slowread.js`).
  * @param {string} url
  * @param {string} what
  * @param {AbortSignal} [signal]
+ * @param {(body: any) => void} [onLast]
  * @returns {Promise<{ok: true, body: any} | {ok: false, error: import("./doctor.js").RouteError}>}
  */
-export async function slowRead(url, what, signal) {
-  /** @type {number | null} */
-  let run = null;
-  for (;;) {
-    const u =
-      run == null
-        ? url
-        : `${url}${url.includes("?") ? "&" : "?"}run=${encodeURIComponent(run)}`;
-    const r = await fetchJson(u, what, signal);
-    if (!r.ok || r.body.running !== true) return r;
-    run = Number(r.body.run);
-  }
+export function slowRead(url, what, signal, onLast) {
+  return freshRead(fetchJson, url, what, signal, onLast);
 }
 
 /**
@@ -378,12 +489,13 @@ export async function slowRead(url, what, signal) {
  * @param {string} url
  * @param {string} what
  * @param {AbortSignal} [signal]
- * @returns {Promise<{ok: true, report: any} | {ok: false, error: import("./doctor.js").RouteError}>}
+ * @param {(body: any) => void} [onLast] the earlier answer, whole body
+ * @returns {Promise<{ok: true, report: any, body: any} | {ok: false, error: import("./doctor.js").RouteError}>}
  */
-export async function slowReport(url, what, signal) {
-  const r = await slowRead(url, what, signal);
+export async function slowReport(url, what, signal, onLast) {
+  const r = await slowRead(url, what, signal, onLast);
   if (!r.ok) return r;
-  return { ok: true, report: r.body.report };
+  return { ok: true, report: r.body.report, body: r.body };
 }
 
 /**

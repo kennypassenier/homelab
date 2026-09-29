@@ -54,6 +54,7 @@ impl ParityCtx {
         files: Arc<dyn StackFiles>,
         repo: PathBuf,
         scratch: PathBuf,
+        publish: Arc<dyn super::actions::Publish>,
     ) -> Self {
         ParityCtx {
             host,
@@ -63,8 +64,8 @@ impl ParityCtx {
             repo,
             scratch,
             drift: Arc::new(Mutex::new(None)),
-            today_read: SlowRead::new("today"),
-            check_read: SlowRead::new("the fleet check"),
+            today_read: SlowRead::announced("today", "today", publish.clone()),
+            check_read: SlowRead::announced("the fleet check", "fleet-check", publish),
         }
     }
 }

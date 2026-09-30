@@ -1730,17 +1730,36 @@ fn answer_ask(model: &mut Model, allow: bool) {
     };
 }
 
+/// The manifest a stack operation acts on. Backup, restore, update and the
+/// guards need no secrets, so a local stack is read without asking latch
+/// (latch-files, 2026-09-30: building the whole spec made the backup key of
+/// kyu depend on HOMELAB_LATCH_ENV).
+fn resolve_manifest(model: &Model) -> Result<(homelab_proto::StackManifest, bool), String> {
+    let fleet = model
+        .fleet
+        .as_ref()
+        .ok_or("no fleet state yet — press R first")?;
+    let stack = fleet
+        .stacks
+        .get(model.selected_stack)
+        .ok_or("no stack selected")?;
+    if let Some((_, dir)) = model.local_stacks.iter().find(|(n, _)| *n == stack.name) {
+        return Ok((crate::spec::build_manifest(dir)?, false));
+    }
+    resolve_spec(model).map(|(spec, synthetic)| (spec.manifest, synthetic))
+}
+
 fn start_stack_op(model: &mut Model, op: StackOp) {
-    let spec = match resolve_spec(model) {
+    let m = match resolve_manifest(model) {
         // gap-19: the synthetic spec declares no storage. A backup sent with
         // it snapshotted nothing while the host recorded the backup time, and
         // a restore restored nothing; both need the real stack file.
-        Ok((spec, true)) if matches!(op, StackOp::Backup | StackOp::Restore) => {
+        Ok((sm, true)) if matches!(op, StackOp::Backup | StackOp::Restore) => {
             model.status_line = format!(
                 "{} needs stacks/{}/ — without the stack file there is no storage to {}; \
                  start the TUI from the repository root",
                 op.title(),
-                spec.manifest.stack_name,
+                sm.stack_name,
                 if op == StackOp::Backup {
                     "back up"
                 } else {
@@ -1749,13 +1768,12 @@ fn start_stack_op(model: &mut Model, op: StackOp) {
             );
             return;
         }
-        Ok((spec, _)) => spec,
+        Ok((m, _)) => m,
         Err(e) => {
             model.status_line = e;
             return;
         }
     };
-    let m = spec.manifest;
     model.focus = Some(Focus {
         title: format!("{} {} :: vmid {}", op.title(), m.stack_name, m.vmid),
         feed: Vec::new(),

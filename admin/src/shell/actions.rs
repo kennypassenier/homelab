@@ -720,6 +720,18 @@ impl Actions {
             .unwrap_or_default()
     }
 
+    /// Decision notify-routing: the job that sent this request to the host,
+    /// so the host's notice of it fills that job's notice. The dashboard's
+    /// request ids start past any a CLI or TUI uses (arch-host-link).
+    pub fn job_for_req(&self, req: u64) -> Option<u64> {
+        self.inner.jobs.lock().ok().and_then(|j| {
+            j.iter()
+                .rev()
+                .find(|v| v.reqs.contains(&req))
+                .map(|v| v.job)
+        })
+    }
+
     pub fn job(&self, id: u64) -> Option<JobView> {
         self.inner
             .jobs
@@ -1277,16 +1289,47 @@ impl Actions {
                 _ => "failed",
             }
         );
+        // Decision notify-detail: the host's own notice of this job fills in
+        // since when, the consequence and the remedy when it arrives
+        // (`NotifyFile::import_host`); what the dashboard knows now is here.
+        let on_stack = view.stack != actions::HOST_TARGET;
+        let failed = !matches!(state, JobState::Done | JobState::Deferred);
+        let detail = crate::core::notify::Detail {
+            level: match state {
+                JobState::Done => crate::core::notify::Level::Ok,
+                JobState::Deferred => crate::core::notify::Level::Info,
+                _ => crate::core::notify::Level::Warning,
+            },
+            since: view.started_at,
+            link: Some(if on_stack {
+                homelab_core::notify::page::stack(&view.stack)
+            } else {
+                format!("{}?job={}", homelab_core::notify::page::JOBS, view.job)
+            }),
+            label: Some(view.action.slug().to_string()),
+            fixes: if failed {
+                crate::core::notify::fix_for(&crate::core::notify::FixSource::Retry {
+                    action: view.action.slug(),
+                    stack: &view.stack,
+                })
+                .into_iter()
+                .collect()
+            } else {
+                Vec::new()
+            },
+            ..Default::default()
+        };
         self.inner
             .notify
             .notify(Draft {
                 kind,
                 op: format!("{}-{}", view.action.slug(), view.stack),
-                stack: (view.stack != actions::HOST_TARGET).then(|| view.stack.clone()),
+                stack: on_stack.then(|| view.stack.clone()),
                 title,
                 body: message,
                 job: Some(view.job),
                 ran_s,
+                detail,
             })
             .await;
         if let Origin::Batch { batch } = view.origin {
@@ -1823,6 +1866,7 @@ pub fn mount(
     live: chassis::shell::live::Live,
     shared: Shared,
     demo_host: bool,
+    hooks: super::actions_notify::HookSlot,
 ) -> Result<(), String> {
     let cfg = crate::core::actions_config::from_env(&|k| std::env::var(k).ok())?;
     let clock = system_clock();
@@ -1843,6 +1887,10 @@ pub fn mount(
     let publish_for_edit = publish.clone();
     let notify = NotifyCenter::load(cfg.notify_file(), pusher, publish.clone(), clock.clone())
         .map_err(|e| e.to_string())?;
+    // Decision notify-routing / notify-detail: pushes link to this address,
+    // and Alertmanager's hook now has somewhere to go.
+    notify.set_base_url(&cfg.public_url);
+    hooks.fill(notify.clone(), cfg.alerts_token.clone());
     // milestone edit (arch-edit-txn): the working copy, cloned at start.
     let wc = Arc::new(super::workcopy::WorkingCopy::new(
         cfg.repo.clone(),
@@ -1916,10 +1964,25 @@ pub fn mount(
         cfg.scratch_dir(),
         publish.clone(),
     )));
-    app.dashboard_routes(router(actions));
+    app.dashboard_routes(router(actions.clone()));
     app.dashboard_routes(super::actions_notify::router(notify.clone()));
     app.dashboard_routes(super::scheduler::router(scheduler.clone()));
     let (tick, poll) = (cfg.tick(), Duration::from_secs(cfg.incidents_poll_s));
+    let host_notices_poll = Duration::from_secs(cfg.host_notices_poll_s);
+    let actions_for_notices = actions.clone();
+    let job_of: Arc<dyn Fn(u64) -> Option<u64> + Send + Sync> =
+        Arc::new(move |req| actions_for_notices.job_for_req(req));
+    let digest_host = host.clone();
+    let digest_repo = cfg.repo.clone();
+    let today: super::actions_notify::TodayRead = Arc::new(move || {
+        let host = digest_host.clone();
+        let repo = digest_repo.clone();
+        Box::pin(async move {
+            super::parity::fetch_today(&host, &repo)
+                .await
+                .map(|t| crate::core::notify::today_lines(&t))
+        })
+    });
     let git = cfg.git.clone();
     app.on_start(move || {
         // Clone or bring the working copy up to date, off the async threads.
@@ -1954,6 +2017,13 @@ pub fn mount(
                 super::releases::WATCH_EVERY,
             );
         }
+        super::actions_notify::spawn_host_notice_poll(
+            host.clone(),
+            notify.clone(),
+            job_of,
+            host_notices_poll,
+        );
+        super::actions_notify::spawn_digest(notify.clone(), today, Duration::from_secs(60));
         super::actions_notify::spawn_incident_poll(host, notify, poll);
     });
     Ok(())

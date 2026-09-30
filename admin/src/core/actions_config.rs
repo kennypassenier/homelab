@@ -13,6 +13,9 @@
 //! | `HOMELAB_ADMIN_SCHEDULE_TICK_S` | 20 | how often the scheduler looks |
 //! | `HOMELAB_ADMIN_SCHEDULE_GRACE_S` | 300 | how late a slot may still run |
 //! | `HOMELAB_ADMIN_INCIDENTS_POLL_S` | 300 | how often the host's incident list is read |
+//! | `HOMELAB_ADMIN_HOST_NOTICES_POLL_S` | 60 | how often the host's notices are read into the notification centre (decision notify-routing) |
+//! | `HOMELAB_ADMIN_ALERTS_TOKEN` | none: the Alertmanager hook refuses every call | the bearer Alertmanager sends to `/hooks/alertmanager` (a secret: admin.env) |
+//! | `HOMELAB_ADMIN_PUBLIC_URL` | `https://admin.kp-soft.dev` | the dashboard's public address, which a push links to (`click_url`); chassis reads the same key for passkeys |
 //! | `HOMELAB_ADMIN_ACTION_TIMEOUT_S` | 21600 | the longest one action is waited for |
 //! | `HOMELAB_ADMIN_GIT_REMOTE` | `git@github.com:kennypassenier/homelab.git` | where the working copy is cloned from and pushed to (arch-edit-txn); a local path works too (tests) |
 //! | `HOMELAB_ADMIN_GIT_BRANCH` | `main` | the branch it follows and pushes |
@@ -35,6 +38,12 @@ pub struct ActConfig {
     pub schedule_tick_s: u64,
     pub schedule_grace_s: u64,
     pub incidents_poll_s: u64,
+    /// Decision notify-routing: how often the host's notices are read.
+    pub host_notices_poll_s: u64,
+    /// The bearer Alertmanager sends to the hook; None refuses every call.
+    pub alerts_token: Option<String>,
+    /// The dashboard's public address, for a push's `click_url`.
+    pub public_url: String,
     pub action_timeout_s: u64,
     /// Live view: the announcement's countdown, in milliseconds.
     pub live_announce_ms: u64,
@@ -148,6 +157,16 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
         schedule_tick_s: number(lookup, "SCHEDULE_TICK_S", 20, 1, &mut why),
         schedule_grace_s: number(lookup, "SCHEDULE_GRACE_S", 300, 1, &mut why),
         incidents_poll_s: number(lookup, "INCIDENTS_POLL_S", 300, 10, &mut why),
+        host_notices_poll_s: number(lookup, "HOST_NOTICES_POLL_S", 60, 5, &mut why),
+        alerts_token: non_empty("HOMELAB_ADMIN_ALERTS_TOKEN").map(|t| t.trim().to_string()),
+        public_url: {
+            let u = non_empty("HOMELAB_ADMIN_PUBLIC_URL")
+                .unwrap_or_else(|| homelab_core::notify::DEFAULT_DASHBOARD_URL.into());
+            if !(u.starts_with("http://") || u.starts_with("https://")) {
+                why.push("HOMELAB_ADMIN_PUBLIC_URL must be an http(s) URL".to_string());
+            }
+            u.trim_end_matches('/').to_string()
+        },
         action_timeout_s: number(lookup, "ACTION_TIMEOUT_S", 21_600, 60, &mut why),
         live_announce_ms: number(
             lookup,

@@ -6,7 +6,6 @@
 
 use std::sync::Arc;
 
-use axum::Router;
 use chassis::shell::live::Live;
 use chassis::shell::webapp::WebApp;
 use chassis::{App, AppSpec};
@@ -208,7 +207,12 @@ async fn main() -> std::process::ExitCode {
         help_extra: Some(HELP),
         ..Default::default()
     };
-    let mut app = match App::from_env_and_args(spec, Router::new()) {
+    // Decision notify-routing (2026-09-30): Alertmanager's hook is a public
+    // route with its own bearer token; chassis takes public routes here,
+    // before the notification centre exists, so it is filled in later.
+    let hooks = homelab_admin::shell::actions_notify::HookSlot::default();
+    let public = homelab_admin::shell::actions_notify::hooks_router(hooks.clone());
+    let mut app = match App::from_env_and_args(spec, public) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("{e}");
@@ -289,6 +293,7 @@ async fn main() -> std::process::ExitCode {
             live.clone(),
             shared.clone(),
             demo_host,
+            hooks.clone(),
         ) {
             eprintln!("homelab-admin: {e}");
             return std::process::ExitCode::FAILURE;
@@ -309,6 +314,10 @@ async fn main() -> std::process::ExitCode {
             // are public, before any lock can have passed.
             app.request_guard(|r| async move { guard::refusal_script(&r) });
             app.request_guard_exempt("/static");
+            // Alertmanager on CT 113 comes straight in (its firewall rule),
+            // without Access or the house's address; the hook's own bearer
+            // token decides.
+            app.request_guard_exempt("/hooks");
             let guard = Guard::new(c, shared.clone());
             let g = guard.clone();
             app.request_guard(move |r| {

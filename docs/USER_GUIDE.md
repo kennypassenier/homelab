@@ -2187,29 +2187,82 @@ those are in Loki (F1).
 #### F3 · Notifications
 
 **Status:** Built. The receiving side (the hub and Home Assistant) is outside
-this repository.
+this repository. Routing and wording follow Kenny's decision "Notifications
+and Grafana" (2026-09-30, `docs/admin/DECISIONS.md`); they need the host
+release, the admin release and a deploy of the metrics stack that carry it.
 
-After every host operation, and once at start, the host POSTs one JSON event
-(`core/src/notify.rs:15-25`, `host/src/main.rs:2833-2936`):
+**Everything lands in the dashboard's notification centre** (the bell, page
+`/app/notifications`), with its history: the host's operations (every
+deploy, backup, update, self-update, …, success or failure), the boot notice,
+a stack parked after a failed night, the nightly fleet check's report, every
+Alertmanager alert (firing and resolved), and the dashboard's own actions and
+missed schedules.
 
-```json
-{"source": "homelab-host", "op": "<op>", "label": "<label>", "ok": false,
- "error": "<what> :: <why>", "version": "<host version>"}
-```
+**Only the urgent reaches the phone at once** (through kyu and Home
+Assistant, as before):
 
-- The target is the **webhook** set in the SETTINGS tab (G8), sent with
-  `notify_auth_bearer` from `host.toml` when set. When it does not answer 2xx,
-  `notify_fallback_webhook` is tried, with its own bearer
-  (`host/src/main.rs:2876-2934`).
-- The same failure (same operation, same error text) is sent at most once per
-  20 hours; successes are always sent (`core/src/notify.rs:27-58`,
-  `host/src/main.rs:1807-1809`).
+| Urgent | What counts |
+|---|---|
+| A service not answering for more than 5 minutes | the alerts `HostDown`, `TargetDown` (Uptime Kuma notifies Home Assistant on its own) |
+| A failed backup | a failed `backup`, `scheduled-backup`, `backup-native`, `host-meta-backup`, `device-backup`, `second-copy`, `restic-check`, `zfs-replicate` |
+| A disk almost full or failing | `FilesystemAlmostFull`, `PveStorageAlmostFull`, `HypervisorRootFillingUp`, `DiskPendingSectors`, `DiskSmartFailed`, `ZpoolNotOnline`, `DriveMissing` |
+| A failed update or deploy | a failed `deploy`, `install-native`, `update`, `update-native`, `release-update-native`, `self-update`, `patch`, `rollback-native` (and their `scheduled-` forms) |
+| The nightly check found something broken | a fleet-check report with at least one `broken` finding |
+
+Everything else (successes, an operation that stood aside, drift, noted
+versions, a parked stack, the other alerts) waits in the centre. The list is
+one function, `homelab_core::notify::urgency`; Alertmanager routes by the
+same list (`stacks/metrics/alertmanager/alertmanager.yml`), and a test holds
+the two together.
+
+**Every notice says** what is wrong, since when, the consequence and what to
+do (the exact command or the dashboard button), and links the page that acts
+on it (the stack page, the host page, the Checks page). The phone gets the
+title, what to do and the link (`click_url`, which a desktop toast opens);
+the centre shows the whole text. When the dashboard can run the remedy
+itself, the notice has a **Fix: <action>** button: it opens that action's
+dialog prefilled, and its review and Confirm still decide (nothing runs on
+one click). Today's items and the fleet check's findings carry the same
+button when their remedy is a `homelab` command the dashboard runs.
+
+**The daily digest** goes out at 09:00 Brussels time (the time is a setting
+on the notifications page; empty turns it off), only when something waits:
+the unread notices and the open Today items, worst first, one push with a
+link to the notifications page. Nothing is sent when all is clear, while
+snoozed, or with pushes off. The page shows when the last digest went out.
+
+How it travels:
+
+- The host writes every event to `<state_dir>/notices.jsonl` (0600, pruned
+  with the history's limits) and pushes only an urgent one to the
+  **webhook** set in the SETTINGS tab (G8), with `notify_auth_bearer`, then
+  `notify_fallback_webhook` when the first does not answer 2xx. The payload
+  keeps its shape (`core/src/notify.rs`) and adds `click_url`:
+
+  ```json
+  {"source": "homelab-host", "op": "<op>", "label": "<label>", "ok": false,
+   "error": "<title> — <what to do>", "version": "<host version>",
+   "click_url": "https://admin.kp-soft.dev/app/stacks/<stack>"}
+  ```
+
+  The link's address is `dashboard_url` in host.toml (default
+  `https://admin.kp-soft.dev`).
+- The dashboard reads the host's notices every minute over its one line
+  (`Command::Notices`, `HOMELAB_ADMIN_HOST_NOTICES_POLL_S`). A notice about a
+  job the dashboard itself ran fills that job's notice instead of adding a
+  second one.
+- Alertmanager posts every alert to the dashboard
+  (`http://10.10.10.20:8090/hooks/alertmanager`, bearer
+  `HOMELAB_ADMIN_ALERTS_TOKEN` from admin.env; the same value in
+  `/alertmanager/admin-token` on CT 113), and the urgent ones also to kyu
+  as before. A repeat of an alert that still fires adds nothing; a resolved
+  one is stored read and the firing one stops waiting.
+- The same failure (same operation, same text) is pushed at most once per
+  20 hours; the centre keeps every occurrence.
 - At start the op is `host-online` with label `boot`, and `ok` is false when
-  the journal shows interrupted operations (`host/src/main.rs:1825-1846`).
-- A stack parked by a failed night sends its own event
-  (`host/src/main.rs:2800-2828`).
-- Whether the last event arrived is stored, so a broken notification path
-  shows up in `homelab check` (`host/src/main.rs:2938-2961`).
+  the journal shows interrupted operations.
+- Whether the last push arrived is stored, so a broken notification path
+  shows up in `homelab check`.
 
 #### F4 · Metrics stack
 

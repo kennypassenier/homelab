@@ -1,22 +1,33 @@
 // feat-overview-5, feat-ops-8, feat-ops-9: the notification centre's pure
 // half. The notices, the bell's count, the snooze in words and the per-stack
 // switches, from the server's shapes; the clock and the locale come in.
+// Decision "Notifications and Grafana" (2026-09-30): every notice says what,
+// since when, the consequence and what to do, with its page and, when the
+// dashboard can run the remedy, a Fix button; a digest goes out at 09:00.
 
 import { formatTime, humanDuration } from "./format.js";
 
 /**
  * @typedef {"action_done" | "action_failed" | "action_deferred" |
- *   "schedule_missed" | "incident"} NoticeKind
+ *   "schedule_missed" | "incident" | "host_event" | "fleet_check" |
+ *   "alert" | "alert_resolved"} NoticeKind
+ * @typedef {"critical" | "warning" | "info" | "ok"} NoticeLevel
  * @typedef {{state: "sent"} | {state: "failed", why: string} |
- *   {state: "skipped", why: string}} Push
+ *   {state: "skipped", why: string} | {state: "by_sender", who: string}} Push
+ * @typedef {{action: string, stack: string, args?: Record<string, string>,
+ *   label: string}} Fix a remedy the dashboard runs: the action dialog it
+ *   opens, prefilled (Kenny, 2026-09-30)
  * @typedef {{id: number, at: number, kind: NoticeKind, stack?: string,
  *   title: string, body: string, job?: number, read: boolean,
- *   push: Push}} Notice
+ *   push: Push, level?: NoticeLevel, since?: number, consequence?: string,
+ *   remedy?: string, link?: string, source?: string, key?: string,
+ *   fixes?: Fix[]}} Notice
  * @typedef {{push: boolean, muted_stacks: string[],
- *   snooze_until?: number | null, long_action_s: number}} NotifySettings
+ *   snooze_until?: number | null, digest_at?: string | null}} NotifySettings
+ * @typedef {{day: string, at: number, count: number, push: Push}} DigestRecord
  * @typedef {{notices: Notice[], unread: number,
  *   unread_by_stack: Record<string, number>, settings: NotifySettings,
- *   snoozed: boolean}} NotifySnapshot
+ *   snoozed: boolean, last_digest?: DigestRecord | null}} NotifySnapshot
  * @typedef {import("./format.js").TimeOptions} TimeOptions
  */
 
@@ -39,6 +50,10 @@ const KINDS = {
   action_deferred: { label: "action deferred", tone: "warn" },
   schedule_missed: { label: "schedule missed", tone: "warn" },
   incident: { label: "incident", tone: "bad" },
+  host_event: { label: "host", tone: "info" },
+  fleet_check: { label: "nightly check", tone: "warn" },
+  alert: { label: "alert", tone: "bad" },
+  alert_resolved: { label: "alert resolved", tone: "ok" },
 };
 
 /** @param {NoticeKind} k */
@@ -46,7 +61,36 @@ export const kindBadge = (k) => KINDS[k] ?? { label: String(k), tone: "info" };
 
 /** The kind column's sort order. */
 export const KIND_ORDER =
-  "incident,action failed,schedule missed,action deferred,action done";
+  "alert,incident,action failed,nightly check,schedule missed,host,action deferred,alert resolved,action done";
+
+/** @type {Record<NoticeLevel, {label: string, tone: "ok" | "warn" | "bad" | "info"}>} */
+const LEVELS = {
+  critical: { label: "urgent", tone: "bad" },
+  warning: { label: "warning", tone: "warn" },
+  info: { label: "info", tone: "info" },
+  ok: { label: "ok", tone: "ok" },
+};
+
+/**
+ * How bad a notice is (decision notify-detail); a notice from before
+ * levels existed reads as its kind says.
+ * @param {Notice} n
+ */
+export function levelBadge(n) {
+  const l = n.level ?? "info";
+  if (l === "info" && ["action_failed", "incident"].includes(n.kind))
+    return LEVELS.warning;
+  return LEVELS[l] ?? LEVELS.info;
+}
+
+/** The level column's sort order, worst first. */
+export const LEVEL_ORDER = "urgent,warning,info,ok";
+
+/**
+ * A Fix button's words.
+ * @param {Fix} f
+ */
+export const fixLabel = (f) => `Fix: ${f.label}`;
 
 /**
  * What became of a notice's push, in words.
@@ -56,6 +100,7 @@ export function pushText(p) {
   if (!p) return "—";
   if (p.state === "sent") return "sent";
   if (p.state === "failed") return `failed: ${p.why}`;
+  if (p.state === "by_sender") return `pushed by ${p.who}`;
   return `not sent: ${p.why}`;
 }
 
@@ -97,13 +142,32 @@ export function noticeRows(notices) {
     id: n.id,
     at: n.at,
     kind: kindBadge(n.kind),
+    level: levelBadge(n),
     stack: n.stack ?? "—",
     title: n.title,
     body: n.body,
+    since: n.since ?? null,
+    consequence: n.consequence ?? "",
+    remedy: n.remedy ?? "",
+    link: n.link ?? null,
+    fixes: n.fixes ?? [],
     push: pushText(n.push),
     read: n.read ? "read" : "unread",
     job: n.job ?? null,
   }));
+}
+
+/**
+ * The last digest in words (decision daily-digest).
+ * @param {DigestRecord | null | undefined} d
+ * @param {TimeOptions} [opts]
+ */
+export function digestText(d, opts) {
+  if (!d) return "No digest sent yet.";
+  const when = formatTime(d.at, opts);
+  if (d.push.state === "sent")
+    return `Last digest ${when}: ${d.count} thing(s) waited, pushed.`;
+  return `Last digest ${when}: ${d.count} thing(s) waited, ${pushText(d.push)}.`;
 }
 
 /**
@@ -149,7 +213,7 @@ export function addNotice(snap, ev) {
  * @param {Notice} n
  */
 export function toastOf(n) {
-  const k = kindBadge(n.kind);
+  const k = n.level ? levelBadge(n) : kindBadge(n.kind);
   const tone =
     k.tone === "bad"
       ? "error"
@@ -173,7 +237,7 @@ export function settingsBody(s, change) {
   const body = {
     push: out.push,
     muted_stacks: out.muted_stacks,
-    long_action_s: out.long_action_s,
+    digest_at: out.digest_at ?? null,
   };
   if (out.snooze_until != null) body.snooze_until = out.snooze_until;
   return body;

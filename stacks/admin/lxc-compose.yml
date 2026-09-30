@@ -1,8 +1,9 @@
 # homelab-admin — the browser dashboard for the homelab host (docs/admin/).
 # One native chassis-rs service, reached only through the Cloudflare tunnel
 # and Traefik (arch-exposure, Kenny 2026-09-28): CT 104 is the only neighbour
-# allowed in on 8090; the service itself checks the Access token and the
-# house's address before its own login.
+# allowed in on 8090 for the browser; the service itself checks the Access
+# token and the house's address before its own login. Alertmanager (CT 113)
+# may reach /hooks/alertmanager, which takes its own bearer token instead.
 stack_name: admin
 vmid: 120
 hostname: 120-app-admin
@@ -56,7 +57,8 @@ firewall:
   comment: |-
     CT 120 (admin), the dashboard. In force from its first deploy
     (arch-firewall, 2026-09-28). In: Traefik on CT 104 (the tunnel's only
-    way in) and Uptime Kuma on CT 107. Out: the host's API on
+    way in), Uptime Kuma on CT 107, and Alertmanager on CT 113 (alerts into
+    the notification centre, 2026-09-30). Out: the host's API on
     10.10.10.250:8443 (the one exception to "never pve's rescue address from
     a container"), Loki and Prometheus on CT 113, DNS on the router, and the
     internet for GitHub (working copy, latch) and Cloudflare (Access keys).
@@ -114,3 +116,12 @@ firewall:
       proto: tcp
       dport: "9100"
       note: Prometheus on CT 113 (node exporter)
+    # Decision notify-routing (Kenny, 2026-09-30): every alert lands in the
+    # dashboard's notification centre. Alertmanager posts to
+    # /hooks/alertmanager with the bearer HOMELAB_ADMIN_ALERTS_TOKEN.
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.13
+      proto: tcp
+      dport: "8090"
+      note: Alertmanager on CT 113 (alerts into the notification centre)

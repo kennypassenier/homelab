@@ -8,45 +8,39 @@ use homelab_admin::core::notify::{
 };
 
 fn draft(kind: Kind, stack: Option<&str>, ran_s: Option<u64>) -> Draft {
-    Draft {
-        kind,
-        op: "deploy-media".into(),
-        stack: stack.map(str::to_string),
-        title: "t".into(),
-        body: "b".into(),
-        job: Some(1),
-        ran_s,
-    }
+    let mut d = Draft::new(kind, "deploy-media", "t", "b");
+    d.stack = stack.map(str::to_string);
+    d.job = Some(1);
+    d.ran_s = ran_s;
+    // A missed schedule is urgent when its action is (decision
+    // notify-routing, 2026-09-30); these tests use a missed deploy.
+    d.detail.label = Some("deploy".into());
+    d
 }
 
+/// Decision notify-routing (2026-09-30) replaced feat-ops-8's "a long
+/// action pushes": only urgent work is pushed, and a failed operation by
+/// the host itself, never twice.
 #[test]
-fn feat_ops_8_a_long_action_pushes_a_short_one_only_when_it_failed() {
+fn feat_ops_8_only_urgent_work_pushes_from_the_dashboard() {
     let s = Settings::default();
-    assert_eq!(s.long_action_s, 120);
-    assert!(
-        route(&s, &draft(Kind::ActionDone, Some("media"), Some(600)), 0)
-            .push
-            .is_ok()
-    );
-    assert!(
-        route(&s, &draft(Kind::ActionDone, Some("media"), Some(30)), 0)
-            .push
-            .is_err()
-    );
-    assert!(
-        route(&s, &draft(Kind::ActionFailed, Some("media"), Some(3)), 0)
-            .push
-            .is_ok()
-    );
+    for (kind, ran) in [
+        (Kind::ActionDone, Some(600)),
+        (Kind::ActionDone, Some(30)),
+        (Kind::ActionFailed, Some(3)),
+        (Kind::Incident, None),
+    ] {
+        assert!(
+            route(&s, &draft(kind, Some("media"), ran), 0).push.is_err(),
+            "{kind:?}"
+        );
+    }
     assert!(
         route(&s, &draft(Kind::ScheduleMissed, Some("media"), None), 0)
             .push
             .is_ok()
     );
-    assert!(route(&s, &draft(Kind::Incident, None, None), 0)
-        .push
-        .is_ok());
-    // Every notice pops up on the open pages unless snoozed.
+    // The dashboard's own results pop up on the open pages unless snoozed.
     assert!(route(&s, &draft(Kind::ActionDone, None, Some(1)), 0).pop_up);
 }
 
@@ -56,11 +50,13 @@ fn feat_ops_9_switches_per_stack_for_all_and_the_snooze() {
     set_stack_muted(&mut s, "media", true);
     set_stack_muted(&mut s, "media", true);
     assert_eq!(s.muted_stacks, vec!["media"]);
-    let failed = draft(Kind::ActionFailed, Some("media"), Some(3));
+    let failed = draft(Kind::ScheduleMissed, Some("media"), Some(3));
     assert!(route(&s, &failed, 0).push.unwrap_err().contains("stack"));
-    assert!(route(&s, &draft(Kind::ActionFailed, Some("home"), None), 0)
-        .push
-        .is_ok());
+    assert!(
+        route(&s, &draft(Kind::ScheduleMissed, Some("home"), None), 0)
+            .push
+            .is_ok()
+    );
     set_stack_muted(&mut s, "media", false);
     assert!(route(&s, &failed, 0).push.is_ok());
     s.push = false;
@@ -142,16 +138,23 @@ fn feat_ops_8_the_push_is_the_hosts_payload_from_homelab_admin() {
     let p: serde_json::Value = serde_json::from_str(&push_payload(
         &draft(Kind::ActionFailed, Some("media"), Some(9)),
         "3.62.2",
+        "https://admin.kp-soft.dev",
     ))
     .unwrap();
     assert_eq!(p["source"], "homelab-admin");
     assert_eq!(p["op"], "deploy-media");
     assert_eq!(p["label"], "action-failed");
     assert_eq!(p["ok"], false);
-    assert_eq!(p["error"], "b");
+    // Decision notify-detail: the short version, title and what to do.
+    assert_eq!(p["error"], "t — b");
+    assert_eq!(
+        p["click_url"],
+        "https://admin.kp-soft.dev/app/notifications"
+    );
     let ok: serde_json::Value = serde_json::from_str(&push_payload(
         &draft(Kind::ActionDone, None, Some(900)),
         "3.62.2",
+        "https://admin.kp-soft.dev",
     ))
     .unwrap();
     assert_eq!(
@@ -163,7 +166,7 @@ fn feat_ops_8_the_push_is_the_hosts_payload_from_homelab_admin() {
 #[test]
 fn feat_ops_9_settings_are_checked() {
     let s = Settings {
-        long_action_s: 0,
+        digest_at: Some("9 o'clock".into()),
         ..Default::default()
     };
     assert!(s.validate().is_err());
@@ -200,6 +203,27 @@ fn arch_config_act_settings_from_the_environment() {
     assert_eq!(
         (c.schedule_tick_s, c.schedule_grace_s, c.incidents_poll_s),
         (20, 300, 300)
+    );
+    // Decision notify-routing: the host's notices every minute, the hook
+    // closed until its token is set, pushes linking to the public address.
+    assert_eq!(c.host_notices_poll_s, 60);
+    assert_eq!(c.alerts_token, None);
+    assert_eq!(c.public_url, "https://admin.kp-soft.dev");
+    let c = from_env(&env(&[
+        ("HOMELAB_ADMIN_PUBLIC_URL", "https://dash.example/"),
+        ("HOMELAB_ADMIN_ALERTS_TOKEN", " tok "),
+    ]))
+    .unwrap();
+    assert_eq!(c.public_url, "https://dash.example");
+    assert_eq!(c.alerts_token.as_deref(), Some("tok"));
+    let e = from_env(&env(&[
+        ("HOMELAB_ADMIN_PUBLIC_URL", "admin.kp-soft.dev"),
+        ("HOMELAB_ADMIN_ALERTS_TOKEN", "alerts-secret"),
+    ]))
+    .unwrap_err();
+    assert!(
+        e.contains("PUBLIC_URL") && !e.contains("alerts-secret"),
+        "{e}"
     );
     let c = from_env(&env(&[("HOMELAB_ADMIN_STATE_DIR", "/tmp/a")])).unwrap();
     assert_eq!(c.schedules_file().to_str(), Some("/tmp/a/schedules.json"));

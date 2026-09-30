@@ -21,8 +21,15 @@
 global:
   resolve_timeout: 5m
 
+# Decision notify-routing (Kenny, 2026-09-30): every alert lands in the
+# dashboard's notification centre (receiver `admin`, with its consequence,
+# remedy and link); only the urgent ones also reach the phone at once
+# (receiver `kyu-hub`, the path above). Urgent: a service not answering, a
+# disk almost full or a failing drive. The list is the same as
+# SERVICE_DOWN_ALERTS + DISK_ALERTS in core/src/notify.rs, sorted; a test
+# (core/tests/notify_routing_tests.rs) holds the two together.
 route:
-  receiver: kyu-hub
+  receiver: admin
   # One notification per alert ('...' groups by every label). HTTPSwitchboard
   # reshapes a group by reading its first alert, so a group of two lost the
   # second one, and a group whose first member had resolved was dropped
@@ -33,6 +40,13 @@ route:
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 12h
+  routes:
+    - matchers:
+        - alertname=~"DiskPendingSectors|DiskSmartFailed|DriveMissing|FilesystemAlmostFull|HostDown|HypervisorRootFillingUp|PveStorageAlmostFull|TargetDown|ZpoolNotOnline"
+      receiver: kyu-hub
+      # The centre gets the urgent ones too.
+      continue: true
+    - receiver: admin
 
 receivers:
   - name: kyu-hub
@@ -47,3 +61,15 @@ receivers:
           authorization:
             type: Bearer
             credentials_file: /alertmanager/kyu-token
+  # The dashboard's notification centre on CT 120 (its firewall admits CT 113
+  # on 8090). The token is HOMELAB_ADMIN_ALERTS_TOKEN from admin.env (latch,
+  # environment admin); the same value sits in this file on CT 113, beside
+  # kyu-token, for the same reason: this repository is public.
+  - name: admin
+    webhook_configs:
+      - url: http://10.10.10.20:8090/hooks/alertmanager
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /alertmanager/admin-token

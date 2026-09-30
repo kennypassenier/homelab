@@ -149,30 +149,60 @@ impl Scheduler {
     }
 
     async fn missed_notice(&self, s: &Schedule, slot: i64, why: &str) {
-        self.notify
-            .notify(Draft {
-                kind: Kind::ScheduleMissed,
-                op: format!("schedule-{}-{}", s.action, s.stack),
-                stack: (s.stack != crate::core::actions::HOST_TARGET).then(|| s.stack.clone()),
-                title: format!(
-                    "Skipped: {} {} of {}",
-                    s.action,
-                    s.stack,
-                    schedule::local_label(slot)
-                ),
-                body: format!(
-                    "The planned {} of {} at {} ({}) did not run: {}. It is not made up \
-                     for; the next slot runs as planned.",
-                    s.action,
-                    s.stack,
-                    schedule::local_label(slot),
-                    schedule::ZONE,
-                    why
-                ),
-                job: None,
-                ran_s: None,
+        let on_stack = s.stack != crate::core::actions::HOST_TARGET;
+        let mut d = Draft::new(
+            Kind::ScheduleMissed,
+            &format!("schedule-{}-{}", s.action, s.stack),
+            &format!(
+                "Skipped: {} {} of {}",
+                s.action,
+                s.stack,
+                schedule::local_label(slot)
+            ),
+            &format!(
+                "The planned {} of {} at {} ({}) did not run: {}. It is not made up \
+                 for; the next slot runs as planned.",
+                s.action,
+                s.stack,
+                schedule::local_label(slot),
+                schedule::ZONE,
+                why
+            ),
+        );
+        d.stack = on_stack.then(|| s.stack.clone());
+        // Decision notify-detail: since the slot, what it costs, what to do.
+        d.detail = crate::core::notify::Detail {
+            level: crate::core::notify::Level::Warning,
+            since: Some(slot),
+            consequence: Some(format!(
+                "The {} of {} planned for then did not happen.",
+                s.action, s.stack
+            )),
+            remedy: Some(format!(
+                "Run it now if it matters before the next slot: the {} button on the {} page. \
+                 The Schedules page shows the next slot.",
+                s.action,
+                if on_stack {
+                    format!("{} stack", s.stack)
+                } else {
+                    "host".into()
+                }
+            )),
+            link: Some(if on_stack {
+                homelab_core::notify::page::stack(&s.stack)
+            } else {
+                "/app/schedules".into()
+            }),
+            label: Some(s.action.clone()),
+            fixes: crate::core::notify::fix_for(&crate::core::notify::FixSource::Retry {
+                action: &s.action,
+                stack: &s.stack,
             })
-            .await;
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        self.notify.notify(d).await;
     }
 
     fn view(&self, s: &Schedule, now: i64) -> serde_json::Value {

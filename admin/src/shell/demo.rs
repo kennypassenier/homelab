@@ -103,6 +103,7 @@ pub async fn run_demo(
                     let body = match command {
                         Command::History { .. } => serde_json::json!({ "entries": [] }).to_string(),
                         Command::Incidents { .. } => serde_json::json!({ "incidents": [] }).to_string(),
+                        Command::Notices { .. } => serde_json::json!({ "notices": [], "last_seq": 0 }).to_string(),
                         Command::CurrentOp => serde_json::to_string(&homelab_proto::CurrentOpView::default()).unwrap_or_default(),
                         // The TUI parity pages' reads, in the shapes the real
                         // host answers (empty, or plainly made up and said so).

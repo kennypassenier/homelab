@@ -265,3 +265,24 @@ unit sets HOMELAB_LATCH_ENV=prod and gets a latch credential limited to
 latch project `stacks`, environment prod, through `latch clone`. uptime-now:
 "Wachten op het dashboard": uptime is deployed from the dashboard in Live
 view once latch works there.
+
+## Notifications and Grafana (decided 2026-09-30 08:59, form "Meldingen")
+
+- notify-routing: **only urgent at once.** Everything lands in the
+  dashboard's notification centre with history. Pushed to phone, desktop
+  and lights only: a service not answering for more than 5 minutes, a
+  failed backup, a disk almost full or SMART errors, a failed update or
+  deploy. Home Assistant's dispatcher is not touched; homelab decides at the
+  source what it still publishes.
+- daily-digest: **09:00, only when something waits**, with the worst first
+  and a link to the dashboard.
+- notify-detail: **every notification says what is wrong, since when, the
+  consequence and what to do** (the exact command or dashboard button),
+  plus a `click_url` to the right dashboard page; the phone gets a short
+  version with the link, the centre the full text.
+- grafana-role (Kenny's own answer): "Ik wil liefst grafana kunnen
+  vervangen door ons dashboard zodat ik maar 1 plek heb om naar te kijken,
+  daarna kan grafana later weg." The dashboard gets the charts Grafana has
+  (host and container CPU, memory, disk over time; disk health and SMART;
+  a per-stack view). Grafana is removed only in a later, separate step
+  once the dashboard covers it.

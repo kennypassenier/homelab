@@ -145,11 +145,13 @@ async fn feat_stacks_4_a_press_runs_on_the_host_and_its_lines_and_progress_arriv
     assert_eq!(states.first().map(String::as_str), Some("queued"));
     assert_eq!(states.last().map(String::as_str), Some("done"));
     assert!(states.contains(&"running".to_string()));
-    // feat-ops-8: 210 s is long, so it went to the phone (the recorder).
+    // Decision notify-routing (2026-09-30) replaced feat-ops-8's "a long
+    // action pushes": a success lands in the list only.
     until("the notice", || !w.live.events("notification").is_empty()).await;
-    let sent = w.pusher.sent.lock().unwrap().clone();
-    assert_eq!(sent.len(), 1);
-    assert!(sent[0].contains("homelab-admin") && sent[0].contains("deploy-media"));
+    assert!(w.pusher.sent.lock().unwrap().is_empty());
+    let n = &w.notify.snapshot().await["notices"][0];
+    assert_eq!(n["level"], "ok");
+    assert_eq!(n["link"], "/app/stacks/media");
 }
 
 #[tokio::test]
@@ -368,13 +370,19 @@ async fn feat_overview_5_new_incidents_become_notices_old_ones_do_not() {
     );
     let list = w.notify.snapshot().await;
     assert_eq!(list["notices"][0]["kind"], "incident");
-    assert_eq!(w.pusher.sent.lock().unwrap().len(), 1);
+    // Decision notify-routing (2026-09-30): the host pushed the failure
+    // itself; the incident is not pushed a second time.
+    assert!(w.pusher.sent.lock().unwrap().is_empty());
+    assert!(list["notices"][0]["push"]["why"]
+        .as_str()
+        .unwrap()
+        .contains("host"));
     // Snoozed: stored, not pushed, not popped up.
     w.notify.snooze(3_600).await.unwrap();
     w.notify
         .incidents(vec!["1790000900-update-media".into()])
         .await;
-    assert_eq!(w.pusher.sent.lock().unwrap().len(), 1);
+    assert!(w.pusher.sent.lock().unwrap().is_empty());
     let pops = w.live.events("notification");
     assert_eq!(pops.last().unwrap()["pop_up"], false);
     assert_eq!(w.notify.snapshot().await["snoozed"], true);

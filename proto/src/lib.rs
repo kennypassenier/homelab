@@ -366,6 +366,16 @@ pub enum Command {
         #[serde(default = "history_limit_default")]
         limit: usize,
     },
+    /// Decision notify-routing (homelab-admin, 2026-09-30): the host's
+    /// notices after `after` (a `seq`), oldest first, at most `limit`.
+    /// Answered as JSON `{ "notices": [...], "last_seq": n }`, each a
+    /// `homelab_core::notify::HostNotice`; `last_seq` is the newest the host
+    /// has, so a first read can start from now.
+    Notices {
+        after: u64,
+        #[serde(default = "notices_limit_default")]
+        limit: usize,
+    },
     /// feat-settings-1 (homelab-admin, 2026-09-28): every key of host.toml
     /// with its value, as JSON [`HostConfigFile`] in the reply's message;
     /// a secret only as "set". Answered to the asking session alone: unlike
@@ -507,6 +517,10 @@ fn history_limit_default() -> usize {
     2000
 }
 
+fn notices_limit_default() -> usize {
+    200
+}
+
 /// feat-platform-3: a step starting or ending, as structured data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepMark {
@@ -567,6 +581,7 @@ impl Command {
             | SessionOptions { .. }
             | CurrentOp
             | History { .. }
+            | Notices { .. }
             | GetHostConfig => Scope::Read,
             Ui { step } => step.scope(),
             DeployStack(_)
@@ -656,6 +671,7 @@ impl Command {
             SessionOptions { .. } => "session_options",
             CurrentOp => "current_op",
             History { .. } => "history",
+            Notices { .. } => "notices",
             GetHostConfig => "get_host_config",
             SetHostConfig { .. } => "set_host_config",
             Ui { .. } => "ui",

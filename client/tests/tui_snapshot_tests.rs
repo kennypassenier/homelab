@@ -947,6 +947,11 @@ const CLI_ONLY: &[(&str, &str)] = &[
          the TUI shows the live stream instead",
     ),
     (
+        "Notices",
+        "decision notify-routing (homelab-admin, 2026-09-30): the dashboard's \
+         notification centre reads the host's notices; the TUI has no centre",
+    ),
+    (
         "SessionOptions",
         "arch-host-link (homelab-admin): how a session asks for its reads beside \
          the queue; only the admin dashboard sends it, the TUI matches replies by order",

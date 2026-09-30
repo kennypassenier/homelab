@@ -6,6 +6,13 @@
 #
 # Thresholds live here rather than in code precisely so they can be retuned
 # without touching a binary.
+#
+# Decision notify-detail (Kenny, 2026-09-30): every alert says the
+# consequence and what to do, and links the dashboard page that acts on it
+# (`click_url`, opened by a desktop toast). The dashboard's notification
+# centre shows all of it; the phone gets the summary and the link. Which
+# alerts reach the phone at once is decided in alertmanager.yml, from the
+# list in core/src/notify.rs (a test holds the two together).
 groups:
   - name: homelab
     rules:
@@ -19,6 +26,9 @@ groups:
         annotations:
           summary: "{{ $labels.host }} has not answered for 5 minutes"
           description: "Prometheus cannot scrape {{ $labels.instance }} ({{ $labels.host }})."
+          consequence: "Everything on {{ $labels.host }} is unreachable: its services, and its backups and updates tonight."
+          remedy: "Open its page in the dashboard (Host, or the stack that runs on it) and check the container runs; on pve: `pct status <vmid>`, then `pct start <vmid>`. `homelab today` lists what else waits."
+          click_url: "https://admin.kp-soft.dev/app/host"
 
       - alert: FilesystemAlmostFull
         # One alert per DEVICE, not per mount. The hypervisor's root is
@@ -39,6 +49,9 @@ groups:
         annotations:
           summary: "{{ $labels.device }} is over 90% full"
           description: "Filesystem {{ $labels.device }} has less than 10% free ({{ $value | printf \"%.0f\" }}% used)."
+          consequence: "When it is full, writes fail: databases stop, backups and logs break."
+          remedy: "Find what grew: `homelab check` names the stack; free space or raise disk_gb in its stack file and run `homelab resize <stack>`."
+          click_url: "https://admin.kp-soft.dev/app/checks"
 
       - alert: HypervisorRootFillingUp
         # Prometheus itself, the logs and pmxcfs all live on pve's root. The
@@ -51,6 +64,9 @@ groups:
         annotations:
           summary: "pve's root filesystem will be full within 3 days at this rate"
           description: "{{ $value | humanize1024 }}B predicted free in 3 days on pve's /."
+          consequence: "When pve's root is full, Prometheus, the logs and Proxmox's own config store stop writing."
+          remedy: "On pve: `du -xh / | sort -h | tail -20` finds what grows; the Checks page shows the host's disks."
+          click_url: "https://admin.kp-soft.dev/app/host"
 
       - alert: DiskPendingSectors
         # The earliest warning a drive gives: sectors it can no longer read
@@ -63,6 +79,9 @@ groups:
         annotations:
           summary: "{{ $labels.model }} reports {{ $value }} pending sector(s)"
           description: "Drive {{ $labels.device }} ({{ $labels.model }}, serial {{ $labels.serial }}) has sectors awaiting remap. Plan a replacement."
+          consequence: "The drive is starting to fail; data on it may become unreadable."
+          remedy: "Make sure the backups of what lives on it are fresh (Back up on its stack pages), then plan a replacement; `smartctl -a {{ $labels.device }}` on pve shows the details."
+          click_url: "https://admin.kp-soft.dev/app/host"
 
       - alert: DiskSmartFailed
         expr: smart_device_health_ok == 0
@@ -72,6 +91,9 @@ groups:
         annotations:
           summary: "{{ $labels.model }} failed its own SMART self-assessment"
           description: "Drive {{ $labels.device }} ({{ $labels.model }}, serial {{ $labels.serial }}) reports itself as failing."
+          consequence: "The drive says it will fail soon; data on it is at risk now."
+          remedy: "Back up what lives on it now (Back up on its stack pages) and replace the drive; `smartctl -a {{ $labels.device }}` on pve shows why."
+          click_url: "https://admin.kp-soft.dev/app/host"
 
       # ── Missing data ─────────────────────────────────────────────────
       # The rules above fire only while their metric exists. A drive that
@@ -88,6 +110,9 @@ groups:
         annotations:
           summary: "The SMART collector on pve has not run for {{ $value | humanizeDuration }}"
           description: "No drive health has been read since then; every disk rule is blind."
+          consequence: "No drive health is read: a failing disk would not be noticed."
+          remedy: "On pve: `systemctl status smart-collector.timer` and its last run in `journalctl -u smart-collector`."
+          click_url: "https://admin.kp-soft.dev/app/host"
 
       - alert: DriveMissing
         # A drive whose health was reported a day ago and is not now.
@@ -98,6 +123,9 @@ groups:
         annotations:
           summary: "Drive {{ $labels.model }} (serial {{ $labels.serial }}) stopped reporting"
           description: "It answered SMART a day ago and does not now: a dying or unplugged drive."
+          consequence: "Whatever lives on that drive may be gone or unreachable."
+          remedy: "On pve: `lsblk` and `zpool status` show whether it is there; check its cable and power."
+          click_url: "https://admin.kp-soft.dev/app/host"
 
       - alert: ZpoolNotOnline
         # Every pool on pve is a single disk, so anything but online is loss
@@ -109,6 +137,9 @@ groups:
         annotations:
           summary: "ZFS pool {{ $labels.zpool }} is {{ $labels.state }}"
           description: "Pool {{ $labels.zpool }} on pve reports state {{ $labels.state }}."
+          consequence: "The pool's data is unavailable or at risk; stacks on it stop."
+          remedy: "On pve: `zpool status {{ $labels.zpool }}` says why; restore from backup if the disk is gone."
+          click_url: "https://admin.kp-soft.dev/app/host"
 
       - alert: TargetDown
         # HostDown covers the node exporters; this covers every other job,
@@ -120,6 +151,9 @@ groups:
         annotations:
           summary: "{{ $labels.job }} has not answered Prometheus for 10 minutes"
           description: "Scrape target {{ $labels.instance }} (job {{ $labels.job }}) is down."
+          consequence: "Its metrics stop; if the service itself is down, what it serves is down too."
+          remedy: "Open the stack's page and check it runs (Deploy again if not); Prometheus' targets page names the address."
+          click_url: "https://admin.kp-soft.dev/app/checks"
 
       - alert: AlmanacJournalUnreadable
         expr: almanac_journal_readable == 0
@@ -129,6 +163,9 @@ groups:
         annotations:
           summary: "Almanac cannot read its own journal"
           description: "Events accepted now may not be delivered to Google Calendar."
+          consequence: "Events accepted now may not reach Google Calendar."
+          remedy: "Open the almanac stack page; `journalctl -u almanac` on CT 112 says why the journal is unreadable."
+          click_url: "https://admin.kp-soft.dev/app/stacks/almanac"
 
       - alert: SystemdUnitFailed
         # Only units this fleet actually depends on. The template leftovers
@@ -141,6 +178,9 @@ groups:
         annotations:
           summary: "{{ $labels.name }} has failed on {{ $labels.host }}"
           description: "systemd reports {{ $labels.name }} failed on {{ $labels.host }}."
+          consequence: "The service that unit runs is down."
+          remedy: "On {{ $labels.host }}: `systemctl status {{ $labels.name }}` and `systemctl restart {{ $labels.name }}`; the stack page can deploy it again."
+          click_url: "https://admin.kp-soft.dev/app/checks"
 
       # ── The alert chain itself ───────────────────────────────────────
       # A Watchdog rule routed to an Uptime Kuma push monitor follows once
@@ -154,6 +194,9 @@ groups:
         annotations:
           summary: "Alertmanager failed to deliver {{ $value | printf \"%.0f\" }} notification(s) via {{ $labels.integration }}"
           description: "Alerts are not reaching the phone. Check the kyu token and CT 109."
+          consequence: "Urgent alerts do not reach the phone; the dashboard's centre may still get them."
+          remedy: "Check the kyu token in /alertmanager/kyu-token on CT 113 and that kyu on CT 109 answers (the kyu stack page)."
+          click_url: "https://admin.kp-soft.dev/app/stacks/kyu"
 
       # ── Storage as Proxmox sees it ───────────────────────────────────
       # pve-exporter already reports every Proxmox storage, including
@@ -167,6 +210,9 @@ groups:
         annotations:
           summary: "Proxmox storage {{ $labels.id }} is over 85% full"
           description: "{{ $value | humanizePercentage }} used on {{ $labels.id }}."
+          consequence: "When it is full, containers on it cannot write and new deploys and snapshots fail."
+          remedy: "Find the largest guests on the host page; prune old snapshots or move a guest; `pvesm status` on pve shows every storage."
+          click_url: "https://admin.kp-soft.dev/app/host"
 
       # ── Messages that are not being picked up ────────────────────────
       # A live consumer keeps its pending count near zero. 28,343 waited on
@@ -181,6 +227,9 @@ groups:
         annotations:
           summary: "kyu: {{ $value }} messages wait for {{ $labels.subscription }} on {{ $labels.topic }}"
           description: "The consumer {{ $labels.subscription }} is not taking messages off {{ $labels.topic }}."
+          consequence: "Notifications wait on the hub instead of reaching Home Assistant."
+          remedy: "Check that the consumer {{ $labels.subscription }} runs on CT 109 (the kyu stack page); `systemctl status kyu-runner http-switchboard` there."
+          click_url: "https://admin.kp-soft.dev/app/stacks/kyu"
 
       - alert: TraefikServerErrors
         # Sustained 5xx from one service behind the gateway.
@@ -191,6 +240,9 @@ groups:
         annotations:
           summary: "{{ $labels.service }} answers 5xx ({{ $value | printf \"%.2f\" }}/s)"
           description: "Traefik sees sustained server errors from {{ $labels.service }}."
+          consequence: "People using {{ $labels.service }} get errors."
+          remedy: "Open the stack behind it and read its logs tab; Deploy again if it does not recover."
+          click_url: "https://admin.kp-soft.dev/app/checks"
 
       # Correction corr-kuma-memory (2026-09-27): CT 107 thrashed in 512 MB
       # during a deploy round and Uptime Kuma stopped answering. A deploy now
@@ -203,4 +255,7 @@ groups:
         annotations:
           summary: "{{ $labels.host }} has {{ $value | humanizePercentage }} of its memory available"
           description: "Raise memory_mb in its stack file and run homelab resize; a deploy refuses below 15%."
+          consequence: "It may start swapping or kill processes; a deploy on it is refused."
+          remedy: "Raise memory_mb in its stack file and run `homelab resize <stack>` (Resize on the stack page)."
+          click_url: "https://admin.kp-soft.dev/app/host"
 

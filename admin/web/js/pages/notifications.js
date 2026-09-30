@@ -1,8 +1,12 @@
-// The notification centre (feat-overview-5, feat-ops-8, feat-ops-9): the
-// notices, newest first; mark read; the push switch, the "long action"
-// threshold, the snooze with its "snoozed until", and a mute per stack.
+// The notification centre (feat-overview-5, feat-ops-9): the notices,
+// newest first; mark read; the push switch, the daily digest's time, the
+// snooze with its "snoozed until", and a mute per stack. Decision
+// "Notifications and Grafana" (2026-09-30): every notice shows what, since
+// when, the consequence and what to do, its page, and a Fix button that
+// opens the action's dialog when the dashboard can run the remedy.
 
 import { act, loadNotices, onAct, patchNoticeSettings, send } from "../act.js";
+import { openAction } from "../actiondialog.js";
 import { notify, refusalCallout } from "../actui.js";
 import {
   badgeCell,
@@ -12,10 +16,13 @@ import {
   tableBlock,
   td,
 } from "../dom.js";
-import { formatTime, humanDuration } from "../format.js";
+import { formatTime } from "../format.js";
 import {
   KIND_ORDER,
+  LEVEL_ORDER,
   SNOOZE_CHOICES,
+  digestText,
+  fixLabel,
   noticeRows,
   settingsBody,
   snoozeState,
@@ -65,16 +72,22 @@ export function mount(root) {
   const keys = sortKeys();
   const err = h("div");
   const push = switchEl("notify-push", "Push to the phone (kyu)");
-  const longInput = h("input", {
+  const digestInput = h("input", {
     class: "kp-field__input",
-    type: "number",
-    id: "notify-long",
-    "aria-describedby": "notify-long-help",
-    min: "1",
-    max: "1440",
-    step: "1",
+    type: "time",
+    id: "notify-digest",
+    "aria-describedby": "notify-digest-help",
   });
-  const longSave = h("button", { type: "button", class: "kp-button" }, "Save");
+  const digestSave = h(
+    "button",
+    { type: "button", class: "kp-button", id: "notify-digest-save" },
+    "Save",
+  );
+  const digestText_ = h("p", {
+    class: "measured",
+    id: "notify-digest-last",
+    role: "status",
+  });
   const snoozeSel = h(
     "select",
     { class: "kp-field__input", id: "notify-snooze-minutes" },
@@ -117,6 +130,7 @@ export function mount(root) {
     nothing: "No notifications yet.",
     columns: [
       { label: "When", sort: "time" },
+      { label: "Level", sort: "text", order: LEVEL_ORDER, filter: "choice" },
       { label: "Kind", sort: "text", order: KIND_ORDER, filter: "choice" },
       { label: "Stack", sort: "text", filter: "choice" },
       { label: "What", sort: "text", cls: "wide" },
@@ -158,7 +172,7 @@ export function mount(root) {
       h(
         "p",
         { class: "measured" },
-        "A notice always lands in this list; the switch decides whether it also goes to the phone.",
+        "Every notice lands in this list. Only urgent ones go to the phone at once: a service down, a failed backup, update or deploy, a disk almost full or failing. The switch turns those pushes and the digest off.",
       ),
       // The help goes under the row, not in the field: in the field it made
       // the field taller than the button beside it, and the row's
@@ -172,18 +186,22 @@ export function mount(root) {
           { class: "kp-field" },
           h(
             "label",
-            { class: "kp-field__label", for: "notify-long" },
-            "Push when an action ran at least (minutes)",
+            { class: "kp-field__label", for: "notify-digest" },
+            "Daily digest at (Brussels time)",
           ),
-          longInput,
+          digestInput,
         ),
-        longSave,
+        digestSave,
       ),
       h(
         "p",
-        { class: "kp-field__help inline-fields__help", id: "notify-long-help" },
-        "A shorter action pushes only when it failed.",
+        {
+          class: "kp-field__help inline-fields__help",
+          id: "notify-digest-help",
+        },
+        "One push at that time, only when something waits (unread notices and open Today items, worst first), with a link to this page. Empty: no digest.",
       ),
+      digestText_,
       h(
         "div",
         { class: "inline-fields" },
@@ -247,14 +265,14 @@ export function mount(root) {
     "change",
     () => void saveSettings({ push: push.input.checked }),
   );
-  longSave.addEventListener("click", () => {
-    const m = Number(longInput.value);
-    if (!Number.isFinite(m) || m < 1 || m > 1440) {
-      longInput.focus();
-      notify("Pick 1 to 1440 minutes.", "warning");
+  digestSave.addEventListener("click", () => {
+    const v = digestInput.value.trim();
+    if (v !== "" && !/^\d\d:\d\d$/.test(v)) {
+      digestInput.focus();
+      notify("Pick a time, or leave it empty for no digest.", "warning");
       return;
     }
-    void saveSettings({ long_action_s: Math.round(m * 60) });
+    void saveSettings({ digest_at: v === "" ? null : v });
   });
   /** @param {number} minutes */
   const snooze = async (minutes) => {
@@ -289,6 +307,15 @@ export function mount(root) {
     else void loadNotices();
   });
   notices.tbody.addEventListener("click", async (e) => {
+    const fx = /** @type {Element} */ (e.target).closest("button[data-fix]");
+    if (fx) {
+      const el = /** @type {HTMLElement} */ (fx);
+      const [id, i] = (el.dataset.fix ?? "").split(":").map(Number);
+      const f = act.notices?.notices.find((n) => n.id === id)?.fixes?.[i];
+      // The action's own dialog, prefilled: its review and Confirm decide.
+      if (f) void openAction(f.stack, f.action, { preset: f.args ?? {} });
+      return;
+    }
     const b = /** @type {Element} */ (e.target).closest("button[data-read]");
     if (!b) return;
     const id = Number(/** @type {HTMLElement} */ (b).dataset.read);
@@ -336,14 +363,16 @@ export function mount(root) {
       return;
     }
     push.input.checked = snap.settings.push;
-    if (document.activeElement !== longInput)
-      longInput.value = String(Math.round(snap.settings.long_action_s / 60));
-    longInput.title = `now ${humanDuration(snap.settings.long_action_s)}`;
+    if (document.activeElement !== digestInput)
+      digestInput.value = snap.settings.digest_at ?? "";
+    digestText_.textContent = digestText(snap.last_digest);
     paintSnooze();
     unreadText.textContent = `${snap.unread} unread`;
     markAll.disabled = snap.unread === 0;
     const rows = noticeRows(snap.notices);
-    const sig = JSON.stringify(rows.map((r) => [r.id, r.read]));
+    const sig = JSON.stringify(
+      rows.map((r) => [r.id, r.read, r.remedy, r.fixes.length]),
+    );
     const noticesChanged = sig !== noticesSig;
     if (noticesChanged) {
       noticesSig = sig;
@@ -357,17 +386,73 @@ export function mount(root) {
               class: r.read === "unread" ? "unread" : "",
             },
             td(keys.note("time", formatTime(r.at), r.at)),
+            badgeCell(r.level),
             badgeCell(r.kind),
             td(r.stack),
             h(
               "td",
               null,
               h("strong", null, r.title),
-              ...(r.body ? [h("br"), r.body] : []),
-              ...(r.job
+              ...(r.body
+                ? [h("br"), h("span", { class: "notice-what" }, r.body)]
+                : []),
+              ...(r.since != null
                 ? [
-                    " ",
-                    h("a", { href: `/app/jobs?job=${r.job}` }, `job ${r.job}`),
+                    h("br"),
+                    h(
+                      "span",
+                      { class: "measured" },
+                      `Since ${formatTime(r.since)}`,
+                    ),
+                  ]
+                : []),
+              ...(r.consequence
+                ? [
+                    h("br"),
+                    h(
+                      "span",
+                      null,
+                      h("em", null, "Consequence: "),
+                      r.consequence,
+                    ),
+                  ]
+                : []),
+              ...(r.remedy
+                ? [
+                    h("br"),
+                    h("span", null, h("em", null, "What to do: "), r.remedy),
+                  ]
+                : []),
+              ...(r.link || r.job || r.fixes.length
+                ? [
+                    h(
+                      "div",
+                      { class: "notice-actions" },
+                      ...r.fixes.map((f, i) =>
+                        h(
+                          "button",
+                          {
+                            type: "button",
+                            class: "kp-button kp-button--sm",
+                            "data-fix": `${r.id}:${i}`,
+                          },
+                          fixLabel(f),
+                        ),
+                      ),
+                      ...(r.link
+                        ? [h("a", { href: r.link }, "Open the page")]
+                        : []),
+                      ...(r.job
+                        ? [
+                            " ",
+                            h(
+                              "a",
+                              { href: `/app/jobs?job=${r.job}` },
+                              `job ${r.job}`,
+                            ),
+                          ]
+                        : []),
+                    ),
                   ]
                 : []),
             ),

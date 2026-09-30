@@ -259,6 +259,10 @@ struct FileConfig {
     /// ceiling in MiB (default 16); past the ceiling the oldest half goes.
     history_days: Option<u64>,
     history_max_mib: Option<usize>,
+    /// Decision notify-detail (2026-09-30): the dashboard's public address,
+    /// for the link a push carries (`click_url`). Default
+    /// `homelab_core::notify::DEFAULT_DASHBOARD_URL`.
+    dashboard_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -361,6 +365,8 @@ struct Config {
     /// arch-history: how long and how large history.jsonl may grow.
     history_max_age_s: u64,
     history_max_bytes: usize,
+    /// Decision notify-detail: the dashboard's public address.
+    dashboard_url: String,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
     /// host.toml as it was read; a settings save writes this back with only
@@ -588,6 +594,11 @@ fn load_config_from(path: String) -> Config {
         recent_lines: file.recent_lines.unwrap_or(2000),
         history_max_age_s: file.history_days.unwrap_or(90) * 86_400,
         history_max_bytes: file.history_max_mib.unwrap_or(16) * 1024 * 1024,
+        dashboard_url: file
+            .dashboard_url
+            .clone()
+            .filter(|u| !u.trim().is_empty())
+            .unwrap_or_else(|| homelab_core::notify::DEFAULT_DASHBOARD_URL.to_string()),
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -2165,6 +2176,107 @@ port = 5003
         let v: serde_json::Value = serde_json::from_str(&r.message).unwrap();
         assert_eq!(v["entries"].as_array().unwrap().len(), 1, "{}", r.message);
         assert_eq!(v["entries"][0]["name"], "backup");
+    }
+
+    /// Decision notify-routing (2026-09-30): every event becomes a notice
+    /// the dashboard reads after its cursor; only an urgent one tries the
+    /// push, and what became of it is recorded; the sequence survives a
+    /// restart.
+    #[tokio::test]
+    async fn notify_routing_every_event_is_a_notice_and_only_urgent_pushes() {
+        let dir = std::env::temp_dir().join(format!("homelab-notices-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = format!(
+            "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+            dir.display()
+        );
+        let state = test_state(config_from_text(&cfg));
+        let report = |op: &str, ok: bool| homelab_core::runner::OperationReport {
+            op: op.into(),
+            steps: Vec::new(),
+            ok,
+            error: (!ok).then(|| homelab_core::error::OperatorError {
+                what: "restic failed".into(),
+                why: "repo locked".into(),
+                remedy: "unlock it".into(),
+            }),
+            deferred: None,
+        };
+        notify(
+            &state,
+            &RealExecutor,
+            "deploy",
+            &report("deploy-media", true),
+            90,
+            Some(4),
+            None,
+        )
+        .await;
+        notify(
+            &state,
+            &RealExecutor,
+            "scheduled-backup",
+            &report("backup-home", false),
+            95,
+            None,
+            Some("100-backup-home".into()),
+        )
+        .await;
+        let r = handle_rpc(
+            &state,
+            RpcRequest {
+                id: 1,
+                command: Rpc::Notices {
+                    after: 0,
+                    limit: 10,
+                },
+            },
+        )
+        .await;
+        let v: serde_json::Value = serde_json::from_str(&r.message).unwrap();
+        let n = v["notices"].as_array().unwrap();
+        assert_eq!(n.len(), 2, "{}", r.message);
+        assert_eq!(n[0]["push"], "centre only");
+        assert_eq!(n[0]["req"], 4);
+        assert_eq!(n[0]["page"], "/app/stacks/media");
+        assert_eq!(n[1]["urgent"], true);
+        assert!(
+            n[1]["push"]
+                .as_str()
+                .unwrap()
+                .starts_with("failed: no notification route"),
+            "{}",
+            n[1]
+        );
+        assert_eq!(n[1]["since"], 95);
+        assert_eq!(n[1]["incident"], "100-backup-home");
+        assert!(n[1]["remedy"]
+            .as_str()
+            .unwrap()
+            .contains("`homelab backup home`"));
+        let first = n[0]["seq"].as_u64().unwrap();
+        assert_eq!(v["last_seq"], n[1]["seq"]);
+        let after = handle_rpc(
+            &state,
+            RpcRequest {
+                id: 2,
+                command: Rpc::Notices {
+                    after: first,
+                    limit: 10,
+                },
+            },
+        )
+        .await;
+        let v2: serde_json::Value = serde_json::from_str(&after.message).unwrap();
+        assert_eq!(v2["notices"].as_array().unwrap().len(), 1);
+        // A new start reads the newest seq back and only grows from there.
+        let again = test_state(config_from_text(&cfg));
+        assert_eq!(
+            *again.notice_seq.lock().unwrap(),
+            v["last_seq"].as_u64().unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// arch-host-link: an answer stamped with an earlier start of the host
@@ -4021,10 +4133,22 @@ struct AppState {
     started_at: u64,
     /// feat-platform-10: `homelab ui` steps, handed to the dashboard.
     ui: Arc<ui_relay::UiRelay>,
+    /// Decision notify-routing: the newest notice's `seq`, read back from
+    /// notices.jsonl at start so it only grows.
+    notice_seq: Arc<std::sync::Mutex<u64>>,
 }
 
 impl AppState {
     fn new(config: Config, log_tx: broadcast::Sender<ServerMsg>) -> Self {
+        let last_seq = std::fs::read_to_string(notices_path(&config.state_dir))
+            .map(|t| {
+                homelab_core::notify::parse_notices(&t)
+                    .iter()
+                    .map(|n| n.seq)
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
         AppState {
             started_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -4038,6 +4162,7 @@ impl AppState {
             pending_asks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             ui: Arc::new(ui_relay::UiRelay::default()),
+            notice_seq: Arc::new(std::sync::Mutex::new(last_seq)),
             damper: Arc::new(std::sync::Mutex::new(
                 homelab_core::notify::NotifyDamper::new(20 * 3600),
             )),
@@ -4468,9 +4593,9 @@ async fn main() {
         }
     }
 
-    // F3: boot notification — after a power cut or crash-restart, Home
-    // Assistant hears that the daemon is back, which version runs, and
-    // whether anything was left mid-flight. Delayed so the network is up.
+    // F3: boot notification — after a power cut or crash-restart, the
+    // dashboard's centre hears that the daemon is back and whether anything
+    // was left mid-flight. Delayed so the network is up.
     {
         let boot_state = state.clone();
         tokio::spawn(async move {
@@ -4480,14 +4605,32 @@ async fn main() {
             } else {
                 Some(format!("interrupted: {}", interrupted.join("; ")))
             };
-            let payload = homelab_core::notify::op_payload(
-                "host-online",
-                "boot",
-                interrupted.is_empty(),
-                err.as_deref(),
-                VERSION,
-            );
-            notify_raw(&boot_state, &RealExecutor, payload).await;
+            // Decision notify-routing (2026-09-30): a notice in the
+            // dashboard's centre; not in the urgent list, so no push.
+            let ok = interrupted.is_empty();
+            let ex = homelab_core::notify::explain_event("host-online", "boot", ok, err.as_deref());
+            publish_notice(
+                &boot_state,
+                &RealExecutor,
+                NoticeFacts {
+                    op: "host-online".into(),
+                    label: "boot".into(),
+                    ok,
+                    deferred: false,
+                    since: boot_state.started_at,
+                    ex,
+                    urgency: homelab_core::notify::urgency(&homelab_core::notify::Event::Op {
+                        label: "boot",
+                        ok,
+                        deferred: false,
+                    }),
+                    incident: None,
+                    req: None,
+                    by: None,
+                    findings: Vec::new(),
+                },
+            )
+            .await;
         });
     }
 
@@ -5707,21 +5850,32 @@ async fn scheduler_loop(state: AppState) {
                 } else {
                     tracing::warn!("{}", render_findings(&findings));
                     // The finding text is already in the log above; the
-                    // webhook exists so it leaves the machine.
-                    // F86: through op_payload like every other event, so the
-                    // report of the day carries `source` and `label` too. It
-                    // used to hand-build its own JSON without either, which
-                    // made it the one event a filter on `source` would drop.
-                    notify_raw(
+                    // notice exists so it leaves the machine. Decision
+                    // notify-routing (2026-09-30): the whole report goes to
+                    // the dashboard's centre; the phone only when something
+                    // is broken (F86: one payload shape for every event).
+                    let broken = findings
+                        .iter()
+                        .filter(|f| f.severity == homelab_core::ops::fleetcheck::Severity::Broken)
+                        .count();
+                    publish_notice(
                         &state,
                         &exec,
-                        homelab_core::notify::op_payload(
-                            "fleet-check",
-                            "nightly",
-                            false,
-                            Some(&render_findings(&findings)),
-                            VERSION,
-                        ),
+                        NoticeFacts {
+                            op: "fleet-check".into(),
+                            label: "nightly".into(),
+                            ok: false,
+                            deferred: false,
+                            since: now,
+                            ex: homelab_core::notify::explain_fleet_check(&findings),
+                            urgency: homelab_core::notify::urgency(
+                                &homelab_core::notify::Event::FleetCheck { broken },
+                            ),
+                            incident: None,
+                            req: None,
+                            by: None,
+                            findings: findings.clone(),
+                        },
                     )
                     .await;
                 }
@@ -6213,58 +6367,210 @@ async fn park_after_night(
 /// metrics stack parked itself after the run that stopped Alertmanager, and
 /// it stayed out of every nightly protection until Kenny happened to ask why
 /// a dashboard was empty. A stack silently losing its safety net is precisely
-/// the class of silence this project exists to remove, so it now reaches him
-/// the same way a failed operation does.
+/// the class of silence this project exists to remove.
 ///
-/// The op name carries the stack, matching the convention the damper relies
-/// on: two stacks parking on the same night are two notifications, not one.
+/// Decision notify-routing (2026-09-30): a notice in the dashboard's centre
+/// and the 09:00 digest, not a push. The failed nightly run that parked it
+/// is itself a failed backup or update, and that one is pushed at once.
+/// The op name carries the stack: two stacks parking on the same night are
+/// two notices, not one.
 async fn notify_auto_disabled(state: &AppState, exec: &RealExecutor, stack: &str, why: &str) {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
     let op = format!("stack-disabled-{}", stack);
-    if !state
+    let ex = homelab_core::notify::explain_event(&op, stack, false, Some(why));
+    publish_notice(
+        state,
+        exec,
+        NoticeFacts {
+            label: stack.to_string(),
+            ok: false,
+            deferred: false,
+            since: unix_now(),
+            urgency: homelab_core::notify::urgency(&homelab_core::notify::Event::Op {
+                label: "set-enabled",
+                ok: false,
+                deferred: false,
+            }),
+            incident: None,
+            req: None,
+            by: None,
+            findings: Vec::new(),
+            op,
+            ex,
+        },
+    )
+    .await;
+}
+
+/// Decision notify-routing (2026-09-30): what one notice is made of.
+struct NoticeFacts {
+    op: String,
+    label: String,
+    ok: bool,
+    deferred: bool,
+    /// Since when it is so (the operation's start).
+    since: u64,
+    ex: homelab_core::notify::Explained,
+    urgency: homelab_core::notify::Urgency,
+    incident: Option<String>,
+    req: Option<u64>,
+    by: Option<String>,
+    /// The nightly check's findings (empty for everything else).
+    findings: Vec<homelab_core::ops::fleetcheck::Finding>,
+}
+
+/// Where the host keeps its notices for the dashboard (0600, one line each).
+fn notices_path(state_dir: &str) -> String {
+    format!("{}/notices.jsonl", state_dir)
+}
+
+/// Decision notify-routing (Kenny, 2026-09-30): every event becomes a notice
+/// the dashboard reads (`Command::Notices`); only an urgent one is also
+/// pushed at once, through kyu (fallback: Home Assistant) as before, with
+/// the short text and the link to the dashboard page. The damper (H13)
+/// still keeps one failure from paging every night; it now judges pushes
+/// only, so the centre keeps every occurrence.
+async fn publish_notice(state: &AppState, exec: &RealExecutor, f: NoticeFacts) {
+    let now = unix_now();
+    let push = if !f.urgency.urgent {
+        "centre only".to_string()
+    } else if !state
         .damper
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .should_send(&op, false, Some(why), now)
+        .should_send(&f.op, f.ok, Some(&f.ex.what), now)
     {
-        return;
-    }
-    let payload = homelab_core::notify::op_payload(&op, stack, false, Some(why), VERSION);
-    notify_raw(state, exec, payload).await;
+        "not pushed again: the same failure went out within 20 h".to_string()
+    } else {
+        let url = homelab_core::notify::click_url(&state.config.dashboard_url, &f.ex.page);
+        let short = homelab_core::notify::push_short(&f.ex.title, &f.ex.remedy);
+        let payload = homelab_core::notify::push_payload(
+            "homelab-host",
+            &f.op,
+            &f.label,
+            f.ok,
+            Some(&short),
+            VERSION,
+            Some(&url),
+        );
+        match notify_raw(state, exec, payload).await {
+            Ok(()) => "sent".to_string(),
+            Err(why) => format!("failed: {}", why),
+        }
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let seq = {
+        let mut last = state
+            .notice_seq
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        *last = homelab_core::notify::next_seq(*last, now_ms);
+        *last
+    };
+    let notice = homelab_core::notify::HostNotice {
+        seq,
+        at: now,
+        since: f.since,
+        op: f.op,
+        label: f.label,
+        ok: f.ok,
+        deferred: f.deferred,
+        stack: f.ex.stack,
+        title: f.ex.title,
+        what: f.ex.what,
+        consequence: f.ex.consequence,
+        remedy: f.ex.remedy,
+        page: f.ex.page,
+        urgent: f.urgency.urgent,
+        routed: f.urgency.why.to_string(),
+        push,
+        incident: f.incident,
+        req: f.req,
+        by: f.by,
+        findings: f.findings,
+    };
+    record_notice(state, &notice);
 }
 
-/// F3: best-effort webhook to Home Assistant after every mutating operation.
-/// Runs through the executor (curl) so it is visible in traces and never
-/// blocks or fails the operation itself.
+/// Append one notice (0600) and prune the file by the history's limits.
+/// Best effort, like the history: a notice must never fail its operation.
+fn record_notice(state: &AppState, n: &homelab_core::notify::HostNotice) {
+    let path = notices_path(&state.config.state_dir);
+    let line = match serde_json::to_string(n) {
+        Ok(l) => l + "\n",
+        Err(e) => {
+            tracing::warn!("notices.jsonl :: {}", e);
+            return;
+        }
+    };
+    if let Err(e) = append_audit(&path, &line) {
+        tracing::warn!("notices.jsonl :: {}", e);
+        return;
+    }
+    let big = std::fs::metadata(&path)
+        .map(|m| m.len() as usize > state.config.history_max_bytes)
+        .unwrap_or(false);
+    if big {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Some(kept) = homelab_core::notify::prune_notices(
+                &text,
+                unix_now(),
+                state.config.history_max_age_s,
+                state.config.history_max_bytes / 2,
+            ) {
+                let tmp = format!("{}.tmp", path);
+                if std::fs::write(&tmp, kept).is_ok() {
+                    let _ = std::fs::rename(&tmp, &path);
+                }
+            }
+        }
+    }
+}
+
+/// F3: a notice after every mutating operation (see [`publish_notice`]).
+/// Never blocks or fails the operation itself.
 async fn notify(
     state: &AppState,
     exec: &RealExecutor,
     label: &str,
     report: &homelab_core::runner::OperationReport,
+    since: u64,
+    req: Option<u64>,
+    incident: Option<String>,
 ) {
-    let error = report
-        .error
-        .as_ref()
-        .map(|e| format!("{} :: {}", e.what, e.why));
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // H13: identical repeat failures inside the window are damped.
-    if !state
-        .damper
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .should_send(&report.op, report.ok, error.as_deref(), now)
-    {
-        return;
-    }
-    let payload =
-        homelab_core::notify::op_payload(&report.op, label, report.ok, error.as_deref(), VERSION);
-    notify_raw(state, exec, payload).await;
+    let ex = homelab_core::notify::explain_op(&homelab_core::notify::OpFacts {
+        op: &report.op,
+        label,
+        ok: report.ok,
+        deferred: report.deferred.as_deref(),
+        error: report.error.as_ref(),
+        incident: incident.as_deref(),
+    });
+    let urgency = homelab_core::notify::urgency(&homelab_core::notify::Event::Op {
+        label,
+        ok: report.ok,
+        deferred: report.deferred.is_some(),
+    });
+    publish_notice(
+        state,
+        exec,
+        NoticeFacts {
+            op: report.op.clone(),
+            label: label.to_string(),
+            ok: report.ok,
+            deferred: report.deferred.is_some(),
+            since,
+            ex,
+            urgency,
+            incident,
+            req,
+            by: requested_by(),
+            findings: Vec::new(),
+        },
+    )
+    .await;
 }
 
 /// fix-36: remote exec checks the no-touch list the daemon actually runs
@@ -6358,7 +6664,7 @@ fn exec_allowed(config: &Config, vmid: u16) -> Result<(), homelab_core::error::C
 /// the status, falls back to the second route when the first fails, and
 /// records the outcome in state so an unreachable notification path becomes a
 /// finding instead of a silence.
-async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
+async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) -> Result<(), String> {
     let primary = state
         .settings
         .read()
@@ -6368,7 +6674,7 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
     let fallback = state.config.notify_fallback_webhook.clone();
     let urls = homelab_core::notify::route(primary.as_deref(), fallback.as_deref());
     if urls.is_empty() {
-        return;
+        return Err("no notification route is configured (notify_webhook)".into());
     }
     let mut last = String::new();
     let mut delivered = false;
@@ -6428,6 +6734,11 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) {
         }
     }
     record_notify_outcome(state, exec, delivered, &last).await;
+    if delivered {
+        Ok(())
+    } else {
+        Err(last)
+    }
 }
 
 /// fix-51 (expert panel, state-writes-race, 2026-09-27): every short
@@ -6679,7 +6990,38 @@ where
                 .unwrap_or_default(),
         },
     );
-    notify(state, exec, label, &report).await; // F3, best-effort
+    // AR14: a failure's incident bundle first, so its notice can name it.
+    let bundle = if !report.ok && report.deferred.is_none() {
+        let versions = format!("host={}\nproto={}\n", VERSION, homelab_proto::PROTO_VERSION);
+        Some(
+            homelab_core::incidents::write_bundle(
+                exec,
+                &state.config.state_dir,
+                now,
+                &report,
+                &sink.events(),
+                &versions,
+            )
+            .await,
+        )
+    } else {
+        None
+    };
+    let incident = match &bundle {
+        Some(Ok(dir)) => dir.rsplit('/').next().map(str::to_string),
+        _ => None,
+    };
+    // F3, best-effort; decision notify-routing: a notice, pushed if urgent.
+    notify(
+        state,
+        exec,
+        label,
+        &report,
+        now,
+        (req_id != 0).then_some(req_id),
+        incident,
+    )
+    .await;
     if report.ok {
         spawn_mirror_push(state); // D5, best-effort + detached
     }
@@ -6717,19 +7059,10 @@ where
                 remedy: "see transcript".into(),
             });
         error!("{} failed: {} — {}", label, err.what, err.why);
-        let versions = format!("host={}\nproto={}\n", VERSION, homelab_proto::PROTO_VERSION);
-        let bundle = homelab_core::incidents::write_bundle(
-            exec,
-            &state.config.state_dir,
-            now,
-            &report,
-            &sink.events(),
-            &versions,
-        )
-        .await;
         let bundle_note = match bundle {
-            Ok(dir) => format!(" :: incident bundle {}", dir),
-            Err(e) => format!(" :: (bundle write failed: {})", e),
+            Some(Ok(dir)) => format!(" :: incident bundle {}", dir),
+            Some(Err(e)) => format!(" :: (bundle write failed: {})", e),
+            None => String::new(),
         };
         RpcResponse {
             id: req_id,
@@ -6945,6 +7278,21 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 id: req.id,
                 ok: true,
                 message: serde_json::json!({ "entries": entries }).to_string(),
+                deferred: None,
+            }
+        }
+        // Decision notify-routing: the notices after the dashboard's cursor.
+        Rpc::Notices { after, limit } => {
+            let text =
+                std::fs::read_to_string(notices_path(&state.config.state_dir)).unwrap_or_default();
+            let all = homelab_core::notify::parse_notices(&text);
+            let last_seq = all.iter().map(|n| n.seq).max().unwrap_or(0);
+            let notices = homelab_core::notify::notices_after(all, after, limit.min(1000));
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::json!({ "notices": notices, "last_seq": last_seq })
+                    .to_string(),
                 deferred: None,
             }
         }

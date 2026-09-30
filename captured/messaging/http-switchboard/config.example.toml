@@ -45,8 +45,14 @@ body = '''
  "severity": {{ alerts.0.labels.severity | default("warning") }},
  "instance": {{ alerts.0.labels.instance | default("unknown") }},
  "count": {{ alerts | length }},
- "summary": {{ alerts | map(attribute="annotations.summary") | join("; ") }}}
+ "summary": {{ alerts | map(attribute="annotations.summary") | join("; ") }},
+ "click_url": {{ alerts.0.annotations.click_url | default("https://admin.kp-soft.dev/app/notifications") }}}
 '''
+
+# Decision notify-detail (Kenny, 2026-09-30): the phone's short version keeps
+# the link to the dashboard page (the rule's `click_url` annotation). Not yet
+# in the live file on CT 109: add the "click_url" line there by hand, the way
+# this profile has always been changed (config.toml, root 0600).
 
 # ── Why this is an example and not the real file ──────────────────────
 #

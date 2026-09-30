@@ -8,8 +8,9 @@
 import { humanMb } from "./fleet.js";
 
 /**
+ * @typedef {import("./notices.js").Fix} Fix
  * @typedef {{level: "Broken" | "Attention", source: string, what: string,
- *   remedy: string}} TodayItem
+ *   remedy: string, fix?: Fix}} TodayItem
  * @typedef {{today: {items: TodayItem[], unread: string[]}, verdict: string,
  *   needs_you: boolean, stack_files: number, skipped?: string | null}} TodayBody
  */
@@ -30,6 +31,7 @@ export function todayView(body) {
       source: i.source,
       what: i.what,
       remedy: i.remedy,
+      fix: i.fix ?? null,
     }));
   const unread = body.today.unread ?? [];
   return {
@@ -47,7 +49,7 @@ export function todayView(body) {
 
 /**
  * The fleet check's findings as rows, most severe first.
- * @param {{severity: string, subject: string, what: string, remedy: string}[]} findings
+ * @param {{severity: string, subject: string, what: string, remedy: string, fix?: Fix}[]} findings
  */
 export function findingRows(findings) {
   const rank = { Broken: 0, Drift: 1, Noted: 2 };
@@ -71,6 +73,7 @@ export function findingRows(findings) {
       subject: f.subject,
       what: f.what,
       remedy: f.remedy,
+      fix: f.fix ?? null,
     }));
 }
 

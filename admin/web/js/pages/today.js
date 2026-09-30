@@ -1,7 +1,8 @@
 // Today (TUI parity, fix-68's `homelab today`): doctor, the fleet check
 // with its manual checks and the open incidents as one list and one
 // verdict; and the fleet check on its own (the TUI's c), with every finding
-// and its remedy.
+// and its remedy. A remedy the dashboard runs has a Fix button that opens
+// the action's dialog, prefilled (Kenny, 2026-09-30).
 
 import { agoEl, setAgo } from "../ago.js";
 import {
@@ -13,10 +14,32 @@ import {
   td,
 } from "../dom.js";
 import { humanDuration } from "../format.js";
+import { openAction } from "../actiondialog.js";
+import { fixLabel } from "../notices.js";
 import { findingRows, todayView } from "../parity.js";
 import { fetchAnnounced, keepRead, keptRead, runUrl } from "../slowread.js";
 import { listen } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+
+/**
+ * A remedy, and its Fix button when the dashboard runs it: the action's own
+ * dialog opens prefilled, and its review and Confirm decide.
+ * @param {string} remedy
+ * @param {import("../notices.js").Fix | null} fix
+ */
+function remedyCell(remedy, fix) {
+  if (!fix) return td(remedy, "mono");
+  const b = h(
+    "button",
+    { type: "button", class: "kp-button kp-button--sm fix-button" },
+    fixLabel(fix),
+  );
+  b.addEventListener(
+    "click",
+    () => void openAction(fix.stack, fix.action, { preset: fix.args ?? {} }),
+  );
+  return h("td", null, h("span", { class: "mono" }, remedy), " ", b);
+}
 
 /**
  * @param {HTMLElement} root
@@ -156,7 +179,7 @@ export function mount(root) {
           badgeCell(i.badge),
           td(i.source),
           td(i.what),
-          td(i.remedy, "mono"),
+          remedyCell(i.remedy, i.fix),
         ),
       ),
     );
@@ -244,7 +267,7 @@ export function mount(root) {
           badgeCell(f.badge),
           td(f.subject),
           td(f.what),
-          td(f.remedy, "mono"),
+          remedyCell(f.remedy, f.fix),
         ),
       ),
     );

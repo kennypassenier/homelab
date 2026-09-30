@@ -255,6 +255,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | SessionOptions { .. }
         | CurrentOp
         | History { .. }
+        | Notices { .. }
         | GetHostConfig
         | SetHostConfig { .. }
         | Ui { .. }

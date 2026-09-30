@@ -40,6 +40,9 @@ import {
 import {
   addNotice,
   bell,
+  digestText,
+  fixLabel,
+  levelBadge,
   noticeRows,
   pushText,
   settingsBody,
@@ -47,6 +50,7 @@ import {
   stackMuteRows,
   toastOf,
 } from "../js/notices.js";
+import { findingRows, todayView } from "../js/parity.js";
 import { rollbackView } from "../js/rollback.js";
 import {
   scheduleRows,
@@ -578,7 +582,7 @@ test("the bell, the snooze and the per-stack switches", () => {
     push: true,
     muted_stacks: ["books"],
     snooze_until: 1600,
-    long_action_s: 120,
+    digest_at: "09:00",
   };
   assert.deepEqual(snoozeState(settings, 2000), {
     on: false,
@@ -601,9 +605,11 @@ test("the bell, the snooze and the per-stack switches", () => {
   assert.deepEqual(settingsBody(settings, { push: false }), {
     push: false,
     muted_stacks: ["books"],
-    long_action_s: 120,
+    digest_at: "09:00",
     snooze_until: 1600,
   });
+  // Decision daily-digest: empty is no digest.
+  assert.equal(settingsBody(settings, { digest_at: null }).digest_at, null);
   assert.ok(
     !("snooze_until" in settingsBody({ ...settings, snooze_until: null }, {})),
   );
@@ -637,7 +643,7 @@ test("notices: rows, a new one on top, its toast and its push", () => {
       notices: [],
       unread: 0,
       unread_by_stack: {},
-      settings: { push: true, muted_stacks: [], long_action_s: 120 },
+      settings: { push: true, muted_stacks: [], digest_at: "09:00" },
       snoozed: false,
     },
     { notice: n, unread: 1 },
@@ -645,4 +651,85 @@ test("notices: rows, a new one on top, its toast and its push", () => {
   assert.equal(snap?.unread, 1);
   assert.equal(snap?.unread_by_stack.media, 1);
   assert.equal(addNotice(null, { notice: n, unread: 1 }), null);
+});
+
+test("notify-detail: level, what to do, the page and the Fix button", () => {
+  /** @type {import("../js/notices.js").Notice} */
+  const n = {
+    id: 9,
+    at: 100,
+    kind: "host_event",
+    stack: "media",
+    title: "deploy media failed",
+    body: "compose: pull failed",
+    read: false,
+    push: { state: "by_sender", who: "the host" },
+    level: "critical",
+    since: 90,
+    consequence: "It may run the old version.",
+    remedy: "Run it again: `homelab deploy media`.",
+    link: "/app/stacks/media",
+    fixes: [{ action: "deploy", stack: "media", label: "Deploy" }],
+  };
+  const [r] = noticeRows([n]);
+  assert.deepEqual(r.level, { label: "urgent", tone: "bad" });
+  assert.equal(r.kind.label, "host");
+  assert.equal(r.since, 90);
+  assert.equal(r.link, "/app/stacks/media");
+  assert.equal(r.push, "pushed by the host");
+  assert.equal(fixLabel(r.fixes[0]), "Fix: Deploy");
+  assert.equal(toastOf(n).tone, "error");
+  // A notice from before levels existed reads as its kind says.
+  assert.equal(
+    levelBadge({ ...n, level: undefined, kind: "action_failed" }).label,
+    "warning",
+  );
+  assert.equal(
+    pushText({ state: "by_sender", who: "Alertmanager" }),
+    "pushed by Alertmanager",
+  );
+  assert.equal(digestText(null), "No digest sent yet.");
+  assert.match(
+    digestText(
+      { day: "2026-09-30", at: 0, count: 2, push: { state: "sent" } },
+      { locale: "en-GB", timeZone: "UTC" },
+    ),
+    /2 thing\(s\) waited, pushed\.$/,
+  );
+});
+
+test("Today and the fleet check carry each row's Fix", () => {
+  const fix = { action: "backup", stack: "media", label: "Back up" };
+  const v = todayView({
+    today: {
+      items: [
+        { level: "Attention", source: "check", what: "w", remedy: "r" },
+        {
+          level: "Broken",
+          source: "check",
+          what: "x",
+          remedy: "homelab backup media",
+          fix,
+        },
+      ],
+      unread: [],
+    },
+    verdict: "2 things need you",
+    needs_you: true,
+    stack_files: 1,
+  });
+  assert.deepEqual(v.items[0].fix, fix, "broken first, with its fix");
+  assert.equal(v.items[1].fix, null);
+  const rows = findingRows([
+    { severity: "Drift", subject: "a", what: "w", remedy: "r" },
+    {
+      severity: "Broken",
+      subject: "b",
+      what: "w",
+      remedy: "homelab backup media",
+      fix,
+    },
+  ]);
+  assert.deepEqual(rows[0].fix, fix);
+  assert.equal(rows[1].fix, null);
 });

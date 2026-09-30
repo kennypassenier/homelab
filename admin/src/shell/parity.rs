@@ -148,42 +148,80 @@ async fn today(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> Respons
     read.read(q.run, WAIT, move || read_today(c)).await
 }
 
-async fn read_today(c: ParityCtx) -> (StatusCode, serde_json::Value) {
-    let repo = c.repo.clone();
+/// The host's Today reading with the working copy's stack files: the list,
+/// how many stack files went with it, and why a half was skipped. The page
+/// and the 09:00 digest both read it here.
+async fn today_with_files(
+    host: &Arc<dyn HostPort>,
+    repo: &std::path::Path,
+) -> Result<(homelab_core::ops::today::Today, usize, Option<String>), String> {
+    let repo = repo.to_path_buf();
     let (stack_files, digests, skipped) = tokio::task::spawn_blocking(move || stack_side(&repo))
         .await
         .unwrap_or_default();
     let n = stack_files.len();
-    match ask(
-        &c,
-        Command::Today {
-            stack_files,
-            digests,
-        },
-        180,
-    )
-    .await
-    {
-        Ok(r) => match serde_json::from_str::<homelab_core::ops::today::Today>(&r.message) {
-            Ok(t) => (
+    let r = host
+        .ask_traced(
+            Command::Today {
+                stack_files,
+                digests,
+            },
+            Duration::from_secs(180),
+            None,
+        )
+        .await?;
+    serde_json::from_str::<homelab_core::ops::today::Today>(&r.message)
+        .map(|t| (t, n, skipped))
+        .map_err(|_| {
+            format!(
+                "the host answered: {}",
+                r.message.chars().take(200).collect::<String>()
+            )
+        })
+}
+
+/// Kenny, 2026-09-30 09:16: every row (a Today item, a finding) whose
+/// remedy names a command the dashboard runs carries it as `fix`, the
+/// action dialog its button opens (`core::notify::fix_for`).
+pub fn with_fixes(mut rows: serde_json::Value) -> serde_json::Value {
+    if let Some(list) = rows.as_array_mut() {
+        for row in list.iter_mut() {
+            let fix = row.get("remedy").and_then(|r| r.as_str()).and_then(|r| {
+                crate::core::notify::fix_for(&crate::core::notify::FixSource::Text(r))
+            });
+            if let (Some(o), Some(f)) = (row.as_object_mut(), fix) {
+                o.insert("fix".into(), serde_json::to_value(f).unwrap_or_default());
+            }
+        }
+    }
+    rows
+}
+
+/// Decision daily-digest: the open Today items.
+pub async fn fetch_today(
+    host: &Arc<dyn HostPort>,
+    repo: &std::path::Path,
+) -> Result<homelab_core::ops::today::Today, String> {
+    today_with_files(host, repo).await.map(|(t, _, _)| t)
+}
+
+async fn read_today(c: ParityCtx) -> (StatusCode, serde_json::Value) {
+    match today_with_files(&c.host, &c.repo).await {
+        Ok((t, n, skipped)) => {
+            let mut today = serde_json::to_value(&t).unwrap_or_default();
+            today["items"] = with_fixes(today["items"].clone());
+            (
                 StatusCode::OK,
                 serde_json::json!({
-                    "today": t,
+                    "today": today,
                     "verdict": t.verdict(),
                     "needs_you": t.needs_you(),
                     "stack_files": n,
                     "skipped": skipped,
                     "measured_at": now_s(),
                 }),
-            ),
-            Err(_) => gateway_value(
-                "today",
-                format!(
-                    "the host answered: {}",
-                    r.message.chars().take(200).collect::<String>()
-                ),
-            ),
-        },
+            )
+        }
         Err(e) => gateway_value("today", e),
     }
 }
@@ -218,7 +256,7 @@ async fn read_fleet_check(c: ParityCtx) -> (StatusCode, serde_json::Value) {
                 StatusCode::OK,
                 serde_json::json!({
                     "passes": v["passes"],
-                    "findings": v["findings"],
+                    "findings": with_fixes(v["findings"].clone()),
                     "stack_files": n,
                     "skipped": skipped,
                     "not_here": "The Cloudflare edge and the registries' pinned digests are compared from a workstation: homelab check.",

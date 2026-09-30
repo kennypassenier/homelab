@@ -8,6 +8,41 @@ reaching a person; "planned" means documents only. The redesign, which is
 T64's second half, waits until every service is running, as the register
 says. This document changes nothing.
 
+## 2026-09-30 · Decision "Notifications and Grafana", built
+
+> Built in the repository on 2026-09-30 (code, tests, stack files); **not yet
+> live**: it needs the host release, the admin release, a deploy of the
+> `metrics` stack (Alertmanager and the rules) and of `admin` (firewall), and
+> two secrets (below). Until then the rows below describe the machines.
+
+Kenny's decision (`docs/admin/DECISIONS.md`, form "Meldingen"): everything
+lands in the dashboard's notification centre with its history; only the
+urgent is pushed at once; every notice says what, since when, the
+consequence and what to do, with a `click_url`; a digest at 09:00 when
+something waits. Home Assistant and kyu are not changed: homelab decides at
+the source what it still publishes.
+
+| # | Path | Into the centre | Pushed at once (unchanged funnel: kyu → runner → HA) |
+|---|---|---|---|
+| 1' | **homelab-host** (every operation, boot notice, parked stack, nightly fleet check) | always: the host writes `<state_dir>/notices.jsonl`, the dashboard reads it every minute over its one WS line (`Command::Notices`) | only urgent (`homelab_core::notify::urgency`): a failed backup, update or deploy, a fleet check with a `broken` finding. Payload as before plus `click_url`, `error` = title and what to do |
+| 3' | **Prometheus → Alertmanager** | every alert, firing and resolved: second receiver `admin` → `http://10.10.10.20:8090/hooks/alertmanager` (bearer `HOMELAB_ADMIN_ALERTS_TOKEN`; CT 120 firewall admits 10.10.10.13 on 8090) | only the urgent alerts (`HostDown`, `TargetDown`, the seven disk alerts) also go to `kyu-hub`; every rule now carries `consequence`, `remedy` and `click_url`. The switchboard profile passes `click_url` on (captured example; the live file on CT 109 needs the same line) |
+| 13 | **homelab-admin** own events (actions, missed schedules, incidents) | always | only a missed schedule of urgent work (a missed backup, update or deploy); a failed action is pushed by the host at its source, so never twice |
+| 14 | **homelab-admin daily digest** | — | 09:00 Brussels (setting), only when unread notices or open Today items wait, worst first, `click_url` to `/app/notifications`; `op: daily-digest`, `ok: false` so HA pushes it |
+
+Why this transport (fewest new moving parts): the host already has one
+authenticated line to the dashboard, and a log file the dashboard reads after
+a cursor survives the dashboard being down or restarted (a live frame over
+the line would be lost then); Alertmanager already retries webhooks, so a
+second receiver needs one firewall rule and one token and no new component;
+subscribing the dashboard to kyu would have meant a new subscription on the
+hub, which this decision leaves alone.
+
+Consequences for what HA sees: successes, stood-aside operations, the boot
+notice, a parked stack and drift-only fleet reports no longer reach
+`homelab.ops`, so `/media/homelab_events.log` holds only the urgent from now
+on; the full history is the dashboard's. The systemd OnFailure scripts on
+pve (row 2) are unchanged.
+
 ## The picture in one paragraph
 
 Almost everything that reaches Kenny goes through **one funnel: a kyu topic,

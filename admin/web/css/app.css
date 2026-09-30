@@ -826,6 +826,20 @@ td.stack-flags {
   );
   min-inline-size: 6rem;
 }
+
+/* Decision notify-detail (2026-09-30): a notice's page link and its Fix
+   buttons, under what to do. */
+.notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kp-space-2, 0.5rem);
+  margin-top: var(--kp-space-1, 0.25rem);
+}
+.notice-what {
+  white-space: pre-wrap;
+}
+
 /* A table the page fills on request stays out of sight until then. */
 [data-kp-datatable][hidden] {
   display: none;

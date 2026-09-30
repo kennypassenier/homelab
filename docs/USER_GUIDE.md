@@ -2917,6 +2917,28 @@ drops them all. 18 probes replaced or complemented manual questions on
 2026-09-30; each was run once for real, through `lxc-attach` as the host
 runs it, and read healthy.
 
+### The dashboard in place of Homepage, Grafana, GoAccess and Uptime Kuma
+
+Kenny, 2026-09-30 ("Vervangen" four times; one place to look).
+
+- **Start** (`/app/start`): one tile per service, grouped, from the stacks'
+  `tiles:` (keyed by the hostname a tile opens, or an id with `url:`; name,
+  group, order, description, and an optional `reading` command whose lines
+  show on the tile). The host reads them from the deployed manifests
+  (`Command::Tiles`); nothing in the code names an app.
+- **Charts** (`/app/charts`): the hypervisor's panels, or one stack's, over
+  1h to 30d, from Prometheus (`admin.prometheus_url`,
+  `admin.charts_host`); the panels are `core::charts`.
+- **Traffic** (`/app/traffic`): requests per hostname and per status, and
+  the busiest hostnames and client addresses, from the proxy's access log in
+  Loki (`admin.traffic_job`); a stack ships a log file to Loki with
+  `log_files: [{path, job}]`.
+- **The minute watch**: the dashboard asks each routed tile through Traefik
+  on the house network (`HOMELAB_ADMIN_WATCH_VIA`), each enabled container
+  and the host every minute; five minutes without an answer is an urgent
+  Down notice, its return an Up notice, and a dot on the tile. The host asks
+  the dashboard's `watch_url` (host.toml) every minute in turn.
+
 ### App knowledge in the stack files
 
 app-knowledge (Kenny, 2026-09-30: "Alles verplaatsen"): what homelab knows

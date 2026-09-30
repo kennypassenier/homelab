@@ -756,6 +756,57 @@ async fn latch_files_an_unchanged_secret_file_restarts_nothing() {
     );
 }
 
+/// stale-path-binary (2026-09-30): CT 109 ran /opt/kyu/bin/kyu 4.1.0 while
+/// /usr/local/bin/kyu, a copy from before the move, answered 2.4.1. A unit
+/// whose program lives elsewhere gets that copy replaced by a link to it.
+#[tokio::test]
+async fn stale_path_binary_a_leftover_copy_on_path_becomes_a_link_to_the_real_program() {
+    let exec = MockExecutor::new();
+    let unit = "[Unit]\nDescription=kyu\n\n[Service]\n\
+                EnvironmentFile=/appdata/kyu/kyu-config/kyu.env\n\
+                ExecStart=/opt/kyu/bin/kyu\n";
+    let sp = running_kyu(&exec, unit);
+    exec.respond_always(
+        "test -s '/appdata/kyu/kyu-config/kyu.env'",
+        CmdOutput::ok("yes"),
+    );
+    exec.respond_always("ln -sfn", CmdOutput::ok("linked"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    assert!(deploy(&ctx(&exec, &sink, &journal), &sp).await.ok);
+    let link = exec.calls_containing("ln -sfn");
+    assert_eq!(link.len(), 1, "{:#?}", exec.calls());
+    assert!(
+        link[0].contains("'/opt/kyu/bin/kyu' '/usr/local/bin/kyu'") && link[0].contains("! -L"),
+        "{}",
+        link[0]
+    );
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("/usr/local/bin/kyu was a stale copy")),
+        "{:?}",
+        sink.lines()
+    );
+}
+
+/// stale-path-binary: a unit whose program IS /usr/local/bin/<unit> is left
+/// alone; there is nothing to link.
+#[tokio::test]
+async fn stale_path_binary_a_program_on_path_itself_is_left_alone() {
+    let exec = MockExecutor::new();
+    let sp = running_kyu(&exec, KYU_UNIT);
+    unit_on_container(&exec, KYU_UNIT);
+    exec.respond_always(
+        "test -s '/appdata/kyu/kyu-config/kyu.env'",
+        CmdOutput::ok("yes"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    assert!(deploy(&ctx(&exec, &sink, &journal), &sp).await.ok);
+    assert!(exec.calls_containing("ln -sfn").is_empty());
+}
+
 /// fix-159: a restart that does not come up healthy fails the deploy with
 /// what, why and the reading, instead of being recorded as done.
 #[tokio::test]

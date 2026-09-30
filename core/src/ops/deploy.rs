@@ -2930,6 +2930,35 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 }
             }
 
+            // stale-path-binary (2026-09-30): a unit whose program lives
+            // elsewhere (/opt/kyu/bin/kyu) left an old copy at
+            // /usr/local/bin/<unit> from before the move; CT 109 ran kyu
+            // 4.1.0 while `kyu` on PATH answered 2.4.1. That copy becomes a
+            // link to the real program, so the name on PATH is always the
+            // version that runs. A link, not a removal: scripts may call it.
+            let path_copy = format!("/usr/local/bin/{}", unit);
+            if let Some(real) = need.binary.as_deref().filter(|b| *b != path_copy) {
+                let out = pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!(
+                        "if [ -f {p} ] && [ ! -L {p} ] && [ -x {r} ]; then \
+                         ln -sfn {r} {p} && echo linked; fi",
+                        p = shq(&path_copy),
+                        r = shq(real)
+                    ),
+                    30,
+                )
+                .await?;
+                if out.stdout.trim() == "linked" {
+                    log_info(format!(
+                        "[native] {} was a stale copy; now a link to {}",
+                        path_copy, real
+                    ));
+                    changed = true;
+                }
+            }
+
             // 3 · the files systemd reads before the first line of the
             // program runs. They cannot be invented: what the vault holds
             // from an earlier deploy is restored, and anything else is named.

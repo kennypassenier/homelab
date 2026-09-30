@@ -4606,7 +4606,8 @@ async fn main() {
                 Some(format!("interrupted: {}", interrupted.join("; ")))
             };
             // Decision notify-routing (2026-09-30): a notice in the
-            // dashboard's centre; not in the urgent list, so no push.
+            // dashboard's centre; pushed only when work was interrupted
+            // (push-edge, 2026-09-30).
             let ok = interrupted.is_empty();
             let ex = homelab_core::notify::explain_event("host-online", "boot", ok, err.as_deref());
             publish_notice(
@@ -4619,10 +4620,8 @@ async fn main() {
                     deferred: false,
                     since: boot_state.started_at,
                     ex,
-                    urgency: homelab_core::notify::urgency(&homelab_core::notify::Event::Op {
-                        label: "boot",
-                        ok,
-                        deferred: false,
+                    urgency: homelab_core::notify::urgency(&homelab_core::notify::Event::Boot {
+                        interrupted: !ok,
                     }),
                     incident: None,
                     req: None,
@@ -6369,9 +6368,9 @@ async fn park_after_night(
 /// a dashboard was empty. A stack silently losing its safety net is precisely
 /// the class of silence this project exists to remove.
 ///
-/// Decision notify-routing (2026-09-30): a notice in the dashboard's centre
-/// and the 09:00 digest, not a push. The failed nightly run that parked it
-/// is itself a failed backup or update, and that one is pushed at once.
+/// Decision notify-routing (2026-09-30): a notice in the dashboard's centre,
+/// and pushed at once (push-edge, 2026-09-30): a parked stack loses its
+/// nightly updates until someone enables it again.
 /// The op name carries the stack: two stacks parking on the same night are
 /// two notices, not one.
 async fn notify_auto_disabled(state: &AppState, exec: &RealExecutor, stack: &str, why: &str) {
@@ -6385,11 +6384,7 @@ async fn notify_auto_disabled(state: &AppState, exec: &RealExecutor, stack: &str
             ok: false,
             deferred: false,
             since: unix_now(),
-            urgency: homelab_core::notify::urgency(&homelab_core::notify::Event::Op {
-                label: "set-enabled",
-                ok: false,
-                deferred: false,
-            }),
+            urgency: homelab_core::notify::urgency(&homelab_core::notify::Event::Parked),
             incident: None,
             req: None,
             by: None,

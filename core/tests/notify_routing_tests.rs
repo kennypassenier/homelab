@@ -7,7 +7,7 @@ use homelab_core::error::OperatorError;
 use homelab_core::notify::{
     click_url, explain_event, explain_fleet_check, explain_op, next_seq, notices_after, op_kind,
     op_stack, parse_notices, prune_notices, push_payload, push_short, urgency, Event, HostNotice,
-    OpFacts, OpKind, BACKUP_OPS, DEFAULT_DASHBOARD_URL, DEPLOY_OPS, DISK_ALERTS,
+    OpFacts, OpKind, BACKUP_OPS, DEFAULT_DASHBOARD_URL, DEPLOY_OPS, DISK_ALERTS, PIPELINE_ALERTS,
     SERVICE_DOWN_ALERTS, UPDATE_OPS,
 };
 use homelab_core::ops::fleetcheck::{Finding, Severity};
@@ -78,6 +78,11 @@ fn notify_routing_everything_else_goes_to_the_centre_only() {
     // The nightly check: only a broken finding reaches the phone.
     assert!(urgency(&Event::FleetCheck { broken: 1 }).urgent);
     assert!(!urgency(&Event::FleetCheck { broken: 0 }).urgent);
+    // push-edge (Kenny, 2026-09-30): a parked stack and a restart that
+    // interrupted work reach the phone; a clean restart does not.
+    assert!(urgency(&Event::Parked).urgent);
+    assert!(urgency(&Event::Boot { interrupted: true }).urgent);
+    assert!(!urgency(&Event::Boot { interrupted: false }).urgent);
 }
 
 #[test]
@@ -92,14 +97,15 @@ fn notify_routing_the_urgent_alerts_are_an_explicit_list() {
         "DiskSmartFailed",
         "ZpoolNotOnline",
         "DriveMissing",
+        // push-edge (Kenny, 2026-09-30): "Ook meteen".
+        "AlmanacJournalUnreadable",
+        "SystemdUnitFailed",
+        "AlertDeliveryFailing",
     ] {
         assert!(urgency(&Event::Alert { alertname: a }).urgent, "{a}");
     }
     for a in [
         "SmartCollectorStale",
-        "AlmanacJournalUnreadable",
-        "SystemdUnitFailed",
-        "AlertDeliveryFailing",
         "KyuBacklogGrowing",
         "TraefikServerErrors",
         "ContainerMemoryLow",
@@ -107,7 +113,10 @@ fn notify_routing_the_urgent_alerts_are_an_explicit_list() {
     ] {
         assert!(!urgency(&Event::Alert { alertname: a }).urgent, "{a}");
     }
-    assert_eq!(SERVICE_DOWN_ALERTS.len() + DISK_ALERTS.len(), 9);
+    assert_eq!(
+        SERVICE_DOWN_ALERTS.len() + DISK_ALERTS.len() + PIPELINE_ALERTS.len(),
+        12
+    );
     assert!(!BACKUP_OPS.is_empty() && !UPDATE_OPS.is_empty() && !DEPLOY_OPS.is_empty());
 }
 
@@ -123,6 +132,7 @@ fn notify_routing_alertmanager_routes_urgent_alerts_to_the_phone() {
     let mut names: Vec<&str> = SERVICE_DOWN_ALERTS
         .iter()
         .chain(DISK_ALERTS.iter())
+        .chain(PIPELINE_ALERTS.iter())
         .copied()
         .collect();
     names.sort();

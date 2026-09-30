@@ -274,6 +274,12 @@ view once latch works there.
   failed backup, a disk almost full or SMART errors, a failed update or
   deploy. Home Assistant's dispatcher is not touched; homelab decides at the
   source what it still publishes.
+- push-edge: **also at once** (2026-09-30): a crashed systemd unit
+  (`SystemdUnitFailed`), Alertmanager unable to deliver
+  (`AlertDeliveryFailing`), almanac unable to read its journal
+  (`AlmanacJournalUnreadable`), a stack parked after a failed night, and a
+  restart that interrupted work. `PIPELINE_ALERTS`, `Event::Parked` and
+  `Event::Boot` in core/src/notify.rs.
 - daily-digest: **09:00, only when something waits**, with the worst first
   and a link to the dashboard.
 - notify-detail: **every notification says what is wrong, since when, the

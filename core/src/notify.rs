@@ -360,6 +360,10 @@ pub enum Event<'a> {
     /// A Prometheus alert through Alertmanager (firing or resolved: a
     /// resolved alert goes where its firing one went).
     Alert { alertname: &'a str },
+    /// A stack the host parked (disabled) after a failed nightly run.
+    Parked,
+    /// The host came back; `interrupted` when operations did not finish.
+    Boot { interrupted: bool },
 }
 
 /// The decision and its reason in words, for the notice's push column.
@@ -381,6 +385,15 @@ pub const DISK_ALERTS: &[&str] = &[
     "DiskSmartFailed",
     "ZpoolNotOnline",
     "DriveMissing",
+];
+
+/// Something stopped working, or the notification path itself broke
+/// (push-edge, Kenny, 2026-09-30: "Ook meteen"): a crashed systemd unit,
+/// Alertmanager unable to deliver, almanac unable to read its journal.
+pub const PIPELINE_ALERTS: &[&str] = &[
+    "AlertDeliveryFailing",
+    "AlmanacJournalUnreadable",
+    "SystemdUnitFailed",
 ];
 
 /// Operations whose failure is a failed backup (every copy of data).
@@ -417,6 +430,8 @@ pub const DEPLOY_OPS: &[&str] = &["deploy", "install-native"];
 /// Urgent (Kenny, 2026-09-30): a service not answering for more than 5
 /// minutes, a failed backup, a disk almost full or a failing drive, a
 /// failed update or deploy, and a nightly check that found something broken.
+/// push-edge (Kenny, 2026-09-30) added a crashed unit, a broken delivery
+/// path, a parked stack and a restart that interrupted work.
 /// Everything else (successes, standing aside, drift, warnings not in the
 /// lists above) waits in the centre and in the 09:00 digest.
 pub fn urgency(e: &Event) -> Urgency {
@@ -441,7 +456,17 @@ pub fn urgency(e: &Event) -> Urgency {
         Event::Alert { alertname } if DISK_ALERTS.contains(&alertname) => {
             yes("urgent: a disk is almost full or failing")
         }
+        Event::Alert { alertname } if PIPELINE_ALERTS.contains(&alertname) => {
+            yes("urgent: something stopped, or notifications may not arrive")
+        }
         Event::Alert { .. } => no("not urgent: not in the urgent alert list"),
+        Event::Parked => yes("urgent: a stack was parked and lost its nightly updates"),
+        Event::Boot { interrupted: true } => {
+            yes("urgent: the host restarted with work interrupted")
+        }
+        Event::Boot { interrupted: false } => {
+            no("not urgent: the host is back, nothing interrupted")
+        }
     }
 }
 

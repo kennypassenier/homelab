@@ -25,8 +25,9 @@ global:
 # dashboard's notification centre (receiver `admin`, with its consequence,
 # remedy and link); only the urgent ones also reach the phone at once
 # (receiver `kyu-hub`, the path above). Urgent: a service not answering, a
-# disk almost full or a failing drive. The list is the same as
-# SERVICE_DOWN_ALERTS + DISK_ALERTS in core/src/notify.rs, sorted; a test
+# disk almost full or a failing drive, a crashed unit or a broken delivery
+# path (push-edge, 2026-09-30). The list is the same as SERVICE_DOWN_ALERTS +
+# DISK_ALERTS + PIPELINE_ALERTS in core/src/notify.rs, sorted; a test
 # (core/tests/notify_routing_tests.rs) holds the two together.
 route:
   receiver: admin
@@ -42,7 +43,7 @@ route:
   repeat_interval: 12h
   routes:
     - matchers:
-        - alertname=~"DiskPendingSectors|DiskSmartFailed|DriveMissing|FilesystemAlmostFull|HostDown|HypervisorRootFillingUp|PveStorageAlmostFull|TargetDown|ZpoolNotOnline"
+        - alertname=~"AlertDeliveryFailing|AlmanacJournalUnreadable|DiskPendingSectors|DiskSmartFailed|DriveMissing|FilesystemAlmostFull|HostDown|HypervisorRootFillingUp|PveStorageAlmostFull|SystemdUnitFailed|TargetDown|ZpoolNotOnline"
       receiver: kyu-hub
       # The centre gets the urgent ones too.
       continue: true

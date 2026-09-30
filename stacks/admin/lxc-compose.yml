@@ -49,6 +49,17 @@ apps: []
 
 natives: [admin]
 
+# latch-files (Kenny, 2026-09-30: "Claude via latch"): the unit's env file
+# (its tokens, its secret key, the Alertmanager hook's bearer) comes from
+# latch, `stacks` project, environment prod. It existed only on CT 120 and
+# in the host's vault. A changed file restarts the unit (fix-159: the unit
+# reads it with EnvironmentFile=).
+latch_files:
+  - from: admin/admin.env
+    dest: /appdata/admin/admin-config/admin.env
+    mode: "600"
+    owner: root:root
+
 extra_routes:
   - filename: manual-admin.yml
 

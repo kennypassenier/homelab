@@ -46,6 +46,7 @@ pub fn native(stack: &str) -> NativeServiceManifest {
 
 pub fn spec(stack: &str) -> DeploySpec {
     DeploySpec {
+        secret_files: Vec::new(),
         manifest: manifest(stack),
         files: Vec::new(),
         env: BTreeMap::new(),

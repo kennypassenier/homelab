@@ -57,6 +57,7 @@ fn spec_with_secret() -> DeploySpec {
     let mut env = std::collections::BTreeMap::new();
     env.insert("app".into(), format!("API_KEY={}\n", SECRET));
     DeploySpec {
+        secret_files: Vec::new(),
         source: None,
         native_binaries: Default::default(),
         native_manifests: Default::default(),

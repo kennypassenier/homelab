@@ -1603,6 +1603,13 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let pushed: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let pushed_w = pushed.clone();
+    // latch-files: the secret files whose content this deploy changed, for
+    // the native step's restarts. Apart from `pushed` on purpose: that list
+    // is hashed back from the container at the end of the step, and a
+    // secret's hash is not something to echo.
+    let secrets_changed: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let secrets_changed_w = secrets_changed.clone();
     // F129: what each rewritten app's compose said BEFORE it was pointed at
     // the cache. Kept so the pull step can put the real registry back when
     // the cache turns out not to serve — the fallback half of Kenny's C1.
@@ -1746,6 +1753,36 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 let vault = format!("{}/secrets/{}/{}.env", ctx.state_dir, m.stack_name, app);
                 exec.write_file(&vault, env, 0o600).await?;
                 log_info(format!("[vault] {} sealed (values not logged)", dest));
+            }
+            // latch-files (2026-09-30): secret files from latch, at their
+            // absolute path, then sealed into the vault under the same key a
+            // native unit's env file uses, so the native step's vault copy and
+            // this one are one file. Values never logged.
+            for f in &spec.secret_files {
+                let changed = push_content(exec, m.vmid, &f.path, &f.content, &f.mode).await?;
+                if let Some(owner) = &f.owner {
+                    run_ok(
+                        exec,
+                        &Cmd::new("pct", &["exec", &vm, "--", "chown", owner, &f.path], 60),
+                    )
+                    .await?;
+                }
+                let vault = format!(
+                    "{}/secrets/{}/{}",
+                    ctx.state_dir,
+                    m.stack_name,
+                    vault_key(&f.path)
+                );
+                exec.write_file(&vault, &f.content, 0o600).await?;
+                if changed {
+                    if let Ok(mut g) = secrets_changed_w.lock() {
+                        g.push(f.path.clone());
+                    }
+                    log_info(format!(
+                        "[latch] {} written and sealed (values not logged)",
+                        f.path
+                    ));
+                }
             }
             // A5/E3: apps whose env the client did NOT send fall back to the
             // vault — a wiped container gets its .env back on redeploy.
@@ -2758,10 +2795,17 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         let mut changed = false;
         // fix-159: what the push step wrote into the container this run; a
         // running unit whose drop-in or env file is among it restarts.
-        let pushed_paths: Vec<String> = pushed
+        let mut pushed_paths: Vec<String> = pushed
             .lock()
             .map(|g| g.iter().map(|(p, _)| p.clone()).collect())
             .unwrap_or_default();
+        // latch-files: a changed secret file counts as written too, so a unit
+        // reading it with EnvironmentFile= restarts (fix-159).
+        let secret_paths: Vec<String> = secrets_changed
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        pushed_paths.extend(secret_paths.iter().cloned());
         // fix-37: file names two or more units read. A flat vault copy
         // written by an older deploy under such a name belongs to nobody in
         // particular and is never restored.
@@ -3040,7 +3084,17 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 // health check updates and rollbacks use (restart, wait for
                 // active, NRestarts across a window), said before it happens.
                 // Unchanged: left running, as adoption leaves it.
-                if let Some(reason) = crate::native::restart_reason(unit, &blob.content, &written) {
+                // latch-files: a secret file that names this unit in
+                // `restarts` (a config it reads by path, not by systemd).
+                let declared = spec.secret_files.iter().any(|f| {
+                    f.restarts.as_deref() == Some(unit.as_str()) && secret_paths.contains(&f.path)
+                });
+                let reason = match crate::native::restart_reason(unit, &blob.content, &written) {
+                    Some(r) if declared => Some(format!("{} and secret file changed", r)),
+                    None if declared => Some("secret file changed".to_string()),
+                    other => other,
+                };
+                if let Some(reason) = reason {
                     log_info(format!("[native] restarts {}: {}", unit, reason));
                     let svc = format!("{}.service", unit);
                     let out =

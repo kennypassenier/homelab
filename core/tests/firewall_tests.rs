@@ -328,6 +328,7 @@ fn manifest(vmid: u16, stack: &str, spec: Option<FirewallSpec>) -> StackManifest
 
 fn spec(vmid: u16, stack: &str, fwspec: Option<FirewallSpec>) -> DeploySpec {
     DeploySpec {
+        secret_files: Vec::new(),
         source: None,
         native_manifests: Default::default(),
         native_binaries: Default::default(),

@@ -177,6 +177,7 @@ fn spec(files_content: &str) -> DeploySpec {
     };
     m.hostname = m.canonical_hostname();
     DeploySpec {
+        secret_files: Vec::new(),
         source: None,
         native_binaries: Default::default(),
         native_manifests: Default::default(),

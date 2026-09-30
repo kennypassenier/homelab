@@ -1857,6 +1857,37 @@ every stack it finds), `export`, `destroy` (when the stack directory exists),
 
 ### E · Backup and recovery
 
+#### latch-files · Secret files from latch
+
+**Status:** Built (2026-09-30).
+
+A secret that is a whole FILE rather than an app's `.env`: a native unit's
+env file, a config holding a webhook id, a token file a docker app reads.
+Each entry names the file in latch under the stack and where it lands:
+
+```yaml
+latch_files:
+  - from: http-switchboard/config.toml
+    dest: /appdata/kyu/http-switchboard-config/config.toml
+    mode: "640"
+    owner: root:http-switchboard
+    restarts: http-switchboard
+```
+
+The client runs `latch cat <stack>/<from> --env <env>` (raw: a `${VAR}` in
+the file is left for its program) and prints
+`[secret] <dest> <- latch <stack>/<from>`. The host writes the file with its
+mode and owner, seals it into its vault, and restarts `restarts` when the
+content changed; a unit that reads the file with `EnvironmentFile=` restarts
+anyway (fix-159). Values are never logged. Put or change a file with
+`latch put <stack>/<from> --env prod` or `latch edit`, then deploy the stack.
+
+Refusals, before latch is asked anything: a `dest` that is not absolute, a
+`from` that is, a `mode` that is not octal, an `owner` that is not
+`user:group`, a `restarts` that is not a native unit of the stack, and
+`HOMELAB_LATCH_ENV` unset. Tests: `client/tests/latch_files_tests.rs`,
+`core/tests/deploy_tests.rs` (`latch_files_*`).
+
 #### E1 · Restic backups per owning app, with retention
 
 **Status:** Built.

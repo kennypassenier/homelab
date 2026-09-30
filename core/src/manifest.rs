@@ -505,6 +505,33 @@ pub struct FileBlob {
     pub mode: Option<u32>,
 }
 
+/// latch-files (Kenny, 2026-09-30: "Vastleggen via latch"): a secret FILE
+/// the client read from latch, for an absolute path in the container.
+///
+/// `.env` per docker app was the only way a secret reached a container from
+/// latch. A native unit's env file (admin.env on CT 120), a config that holds
+/// a webhook id (http-switchboard's config.toml on CT 109) and a token file a
+/// docker app reads from its data directory (Alertmanager's admin-token on
+/// CT 113) existed only on their containers and in the host's vault, put
+/// there by hand. The host writes each one, seals it into the vault next to
+/// the unit's env copies, and restarts `restarts` when the content changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecretFile {
+    /// Absolute path inside the container.
+    pub path: String,
+    pub content: String,
+    /// Octal permission bits as `pct push --perms` takes them, e.g. "640".
+    pub mode: String,
+    /// `uid:gid` inside the container; None leaves the owner `pct push` gives.
+    #[serde(default)]
+    pub owner: Option<String>,
+    /// A native unit (without `.service`) to restart when the file changed.
+    /// A file the unit already reads with `EnvironmentFile=` restarts it
+    /// anyway (fix-159).
+    #[serde(default)]
+    pub restarts: Option<String>,
+}
+
 /// ask-2: a stack file that belongs OUTSIDE `/opt/<stack>/`.
 ///
 /// Every stack file lands under `/opt/<stack>/<path>` — the right place for
@@ -615,6 +642,12 @@ pub struct DeploySpec {
     /// synthetic specs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceRev>,
+
+    /// latch-files (2026-09-30): secret files from latch, written at their
+    /// absolute path. Empty from older clients: then nothing is written and
+    /// the vault restores what it holds, the behaviour before this existed.
+    #[serde(default)]
+    pub secret_files: Vec<SecretFile>,
 }
 
 /// fix-141: where a deployed stack came from.
@@ -1258,6 +1291,17 @@ pub fn intent_hash(spec: &DeploySpec) -> String {
         h.update(app.as_bytes());
         h.update([0]);
         h.update(env.as_bytes());
+        h.update([0]);
+    }
+    // latch-files: like env, a changed secret is a changed intent. Absent,
+    // the hash is the one it always was, so no stack reads as drifted.
+    let mut secrets: Vec<_> = spec.secret_files.iter().collect();
+    secrets.sort_by(|a, b| a.path.cmp(&b.path));
+    for f in secrets {
+        h.update(b"secret-file");
+        h.update(f.path.as_bytes());
+        h.update([0]);
+        h.update(f.content.as_bytes());
         h.update([0]);
     }
     let out = h.finalize();

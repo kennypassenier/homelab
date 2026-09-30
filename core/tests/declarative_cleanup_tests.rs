@@ -81,6 +81,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
 
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
+        secret_files: Vec::new(),
         source: None,
         native_binaries: Default::default(),
         native_manifests: Default::default(),

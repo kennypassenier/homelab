@@ -91,6 +91,16 @@ storage:
 # Loki's front on the LAN port (fix-93): pushes and /ready, nothing else.
 apps: [prometheus, alertmanager, pve-exporter, loki, loki-push, grafana]
 latch_secrets: [pve-exporter, grafana]
+# latch-files (2026-09-30): the bearer Alertmanager sends to the dashboard's
+# /hooks/alertmanager, the same value as HOMELAB_ADMIN_ALERTS_TOKEN in the
+# admin stack's admin.env. Alertmanager reads a credentials_file on every
+# request, so a new token needs no restart. nobody:nogroup is the user the
+# image runs as, as for kyu-token beside it.
+latch_files:
+  - from: alertmanager/admin-token
+    dest: /appdata/metrics/alertmanager-config/admin-token
+    mode: "600"
+    owner: nobody:nogroup
 
 # Pushes traefik-routes.yml to the gateway's watched routes directory.
 gateway_route:

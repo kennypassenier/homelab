@@ -60,6 +60,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
 
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
+        secret_files: Vec::new(),
         source: None,
         native_binaries: Default::default(),
         native_manifests: Default::default(),
@@ -653,6 +654,105 @@ async fn fix_159_a_changed_env_file_restarts_the_running_service() {
             .any(|l| l.contains("restarts kyu: env changed")),
         "announced: {:?}",
         sink.lines()
+    );
+}
+
+/// latch-files (Kenny, 2026-09-30: "Vastleggen via latch"): a secret file
+/// from latch lands at its absolute path with its mode and owner, is sealed
+/// into the vault under the key a unit's env copy uses, restarts the unit it
+/// names, and its content appears in no command and no transcript line.
+#[tokio::test]
+async fn latch_files_a_secret_file_is_written_owned_sealed_and_restarts_its_unit() {
+    let exec = MockExecutor::new();
+    let mut sp = running_kyu(&exec, KYU_UNIT);
+    unit_on_container(&exec, KYU_UNIT);
+    exec.respond_always(
+        "test -s '/appdata/kyu/kyu-config/kyu.env'",
+        CmdOutput::ok("yes"),
+    );
+    let secret = "to = { url = \"http://ha/api/webhook/SECRET-WEBHOOK-ID\" }\n";
+    sp.secret_files = vec![SecretFile {
+        path: "/appdata/kyu/kyu-config/config.toml".into(),
+        content: secret.into(),
+        mode: "640".into(),
+        owner: Some("root:kyu".into()),
+        restarts: Some("kyu".into()),
+    }];
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "{:?}", report.error);
+    let calls = exec.calls();
+    assert!(
+        calls.iter().any(|c| c.contains("pct push")
+            && c.contains("/appdata/kyu/kyu-config/config.toml")
+            && c.contains("640")),
+        "{:#?}",
+        calls
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.contains("chown root:kyu /appdata/kyu/kyu-config/config.toml")),
+        "{:#?}",
+        calls
+    );
+    assert_eq!(
+        exec.file("/var/lib/homelab/secrets/kyu/kyu-config/config.toml")
+            .as_deref(),
+        Some(secret)
+    );
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("restarts kyu") && l.contains("secret file changed")),
+        "announced: {:?}",
+        sink.lines()
+    );
+    assert!(
+        calls.iter().all(|c| !c.contains("SECRET-WEBHOOK-ID")),
+        "{:#?}",
+        calls
+    );
+    assert!(
+        sink.lines()
+            .iter()
+            .all(|l| !l.contains("SECRET-WEBHOOK-ID")),
+        "{:?}",
+        sink.lines()
+    );
+}
+
+/// latch-files: a secret file whose content is already on the container
+/// changes nothing and restarts nothing.
+#[tokio::test]
+async fn latch_files_an_unchanged_secret_file_restarts_nothing() {
+    let exec = MockExecutor::new();
+    let mut sp = running_kyu(&exec, KYU_UNIT);
+    unit_on_container(&exec, KYU_UNIT);
+    exec.respond_always(
+        "test -s '/appdata/kyu/kyu-config/kyu.env'",
+        CmdOutput::ok("yes"),
+    );
+    let secret = "same\n";
+    exec.respond_always(
+        "sha256sum '/appdata/kyu/kyu-config/config.toml'",
+        CmdOutput::ok(&sha_hex(secret)),
+    );
+    sp.secret_files = vec![SecretFile {
+        path: "/appdata/kyu/kyu-config/config.toml".into(),
+        content: secret.into(),
+        mode: "640".into(),
+        owner: None,
+        restarts: Some("kyu".into()),
+    }];
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    assert!(deploy(&ctx(&exec, &sink, &journal), &sp).await.ok);
+    assert!(
+        exec.calls_containing("systemctl restart kyu").is_empty(),
+        "{:#?}",
+        exec.calls()
     );
 }
 

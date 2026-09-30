@@ -135,6 +135,19 @@ storage:
 # service.yml files: kyu, kyu-runner, http-switchboard.
 apps: []
 
+# latch-files (Kenny, 2026-09-30: "Vastleggen via latch"): http-switchboard's
+# profiles hold Home Assistant's webhook id, so the file is a secret and not
+# in git; it lived only on CT 109, changed by hand. Now it comes from latch
+# (`stacks` project, prod) and a change restarts the unit, which reads the
+# file by path. captured/messaging/http-switchboard/config.example.toml is
+# its shape with the id taken out.
+latch_files:
+  - from: http-switchboard/config.toml
+    dest: /appdata/kyu/http-switchboard-config/config.toml
+    mode: "640"
+    owner: root:http-switchboard
+    restarts: http-switchboard
+
 # The systemd units this container runs. Each has its own service.yml and
 # its unit file in <unit>/<unit>.service — the unit file lives here now,
 # which it did not before: losing the container would have lost the only

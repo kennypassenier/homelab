@@ -1798,6 +1798,7 @@ fn preview_line(a: &Actions, req: &ActionRequest, typed: bool) -> Result<String,
                 .map_err(|r| r.why)?
             {
                 Material::Manifest(m) => Material::Spec(Box::new(homelab_proto::DeploySpec {
+                    secret_files: Vec::new(),
                     manifest: *m,
                     files: Vec::new(),
                     env: BTreeMap::new(),

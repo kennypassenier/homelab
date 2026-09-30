@@ -97,6 +97,7 @@ fn extra(filename: &str, content: &str) -> GatewayRoute {
 /// kyu's shape after fix-91.
 fn spec(vmid: u16, stack: &str, extras: Vec<GatewayRoute>) -> DeploySpec {
     DeploySpec {
+        secret_files: Vec::new(),
         source: None,
         native_manifests: Default::default(),
         native_binaries: Default::default(),

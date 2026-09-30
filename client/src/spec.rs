@@ -38,12 +38,34 @@ struct StackFile {
     /// env content either way.
     #[serde(default)]
     latch_secrets: Vec<String>,
+    /// latch-files (Kenny, 2026-09-30): secret FILES from latch, each for an
+    /// absolute path in the container (a native unit's env file, a config
+    /// holding a webhook id, a token file a docker app reads).
+    #[serde(default)]
+    latch_files: Vec<LatchFile>,
     /// fix-100 (apply-no-confirm-creates-drill, 2026-09-27): a stack that
     /// exists to be created and destroyed in one sitting, like the rollback
     /// drill. `homelab apply` and the DR runbook leave it out; it is deployed
     /// only by name. Client-side only, so it never reaches the intent hash.
     #[serde(default)]
     ephemeral: bool,
+}
+
+/// One `latch_files` entry: `from` is the file's path in latch under this
+/// stack (`<stack>/<from>`), `dest` its absolute path in the container.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LatchFile {
+    from: String,
+    dest: String,
+    /// Octal permission bits, e.g. "640".
+    mode: String,
+    /// `user:group` inside the container.
+    #[serde(default)]
+    owner: Option<String>,
+    /// A native unit of this stack to restart when the file changed.
+    #[serde(default)]
+    restarts: Option<String>,
 }
 
 /// `deny_unknown_fields` for the same reason as on `StackFile`: a misspelt
@@ -437,6 +459,7 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
         notes,
     )?;
     notes.extend(env_sources(&from_disk, &stack_file.latch_secrets, &env));
+    let secret_files = fetch_latch_files(dir, &stack_file, notes)?;
 
     // The external declarations stay here: they are the client's plan-time
     // question (fix-92), and the host writes a route the same either way.
@@ -459,6 +482,7 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
     let native_binaries = BTreeMap::new();
 
     Ok(DeploySpec {
+        secret_files,
         source: None,
         manifest: stack_file.manifest,
         files,
@@ -635,6 +659,138 @@ pub fn env_sources(
             format!("[env] {} <- {}", app, source)
         })
         .collect()
+}
+
+/// latch-files: read every declared file from latch, checked before any
+/// latch call, so a typo fails the plan and not the container.
+fn fetch_latch_files(
+    dir: &Path,
+    stack_file: &StackFile,
+    notes: &mut Vec<String>,
+) -> Result<Vec<homelab_core::manifest::SecretFile>, String> {
+    let mut out = Vec::new();
+    if stack_file.latch_files.is_empty() {
+        return Ok(out);
+    }
+    for f in &stack_file.latch_files {
+        check_latch_file(f, &stack_file.manifest.natives)?;
+    }
+    let latch_env = std::env::var("HOMELAB_LATCH_ENV").map_err(|_| {
+        "latch_files is set but HOMELAB_LATCH_ENV is not :: set it to the \
+         latch environment to read (e.g. HOMELAB_LATCH_ENV=prod in .env)"
+            .to_string()
+    })?;
+    let stack = &stack_file.manifest.stack_name;
+    let project_root = dir.parent().unwrap_or(dir);
+    for f in &stack_file.latch_files {
+        let rel = format!("{}/{}", stack, f.from);
+        // Raw, not `--expand`: a file is stored exactly as it must land, and
+        // a config may carry `${VAR}` for its own program to resolve
+        // (http-switchboard's `token = "${KYU_TOKEN}"`), which latch would
+        // otherwise try to expand and refuse.
+        let got = std::process::Command::new("latch")
+            .args(["cat", &rel, "--env", &latch_env])
+            .current_dir(project_root)
+            .output()
+            .map_err(|e| {
+                format!(
+                    "cannot run latch for {}: {} :: install latch (or remove \
+                     latch_files from the stack file)",
+                    rel, e
+                )
+            })?;
+        if !got.status.success() {
+            return Err(format!(
+                "latch cat {} --env {} failed: {}",
+                rel,
+                latch_env,
+                String::from_utf8_lossy(&got.stderr).trim()
+            ));
+        }
+        if !got.stderr.is_empty() {
+            notes.push(format!(
+                "[latch] {}",
+                String::from_utf8_lossy(&got.stderr).trim()
+            ));
+        }
+        let content = String::from_utf8(got.stdout)
+            .map_err(|_| format!("latch returned non-utf8 content for {}", rel))?;
+        if content.trim().is_empty() {
+            return Err(format!(
+                "latch returned empty content for {} in env '{}' :: commit+push \
+                 the file in latch first",
+                rel, latch_env
+            ));
+        }
+        notes.push(format!("[secret] {} <- latch {}", f.dest, rel));
+        out.push(homelab_core::manifest::SecretFile {
+            path: f.dest.clone(),
+            content,
+            mode: f.mode.clone(),
+            owner: f.owner.clone(),
+            restarts: f.restarts.clone(),
+        });
+    }
+    Ok(out)
+}
+
+/// What a `latch_files` entry may say. `dest` absolute and plain, `mode`
+/// three or four octal digits, `owner` a `user:group` of names or numbers,
+/// `restarts` a native unit of this stack, `from` a relative path latch
+/// accepts.
+fn check_latch_file(f: &LatchFile, natives: &[String]) -> Result<(), String> {
+    let plain = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'))
+            && !s.split('/').any(|p| p == "..")
+    };
+    if !f.dest.starts_with('/') || !plain(&f.dest) {
+        return Err(format!(
+            "latch_files: dest '{}' must be an absolute path of letters, digits, \
+             '/', '.', '_' and '-'",
+            f.dest
+        ));
+    }
+    if f.from.starts_with('/') || !plain(&f.from) {
+        return Err(format!(
+            "latch_files: from '{}' must be a relative path inside the stack",
+            f.from
+        ));
+    }
+    let octal = (3..=4).contains(&f.mode.len()) && f.mode.chars().all(|c| ('0'..='7').contains(&c));
+    if !octal {
+        return Err(format!(
+            "latch_files: mode '{}' for {} must be octal like \"640\"",
+            f.mode, f.dest
+        ));
+    }
+    if let Some(o) = &f.owner {
+        let part = |p: &str| {
+            !p.is_empty()
+                && p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+        };
+        let ok = matches!(o.split_once(':'), Some((u, g)) if part(u) && part(g));
+        if !ok {
+            return Err(format!(
+                "latch_files: owner '{}' for {} must be user:group",
+                o, f.dest
+            ));
+        }
+    }
+    if let Some(u) = &f.restarts {
+        if !natives.contains(u) {
+            return Err(format!(
+                "latch_files: restarts '{}' for {} is not a native unit of this \
+                 stack :: natives are [{}]",
+                u,
+                f.dest,
+                natives.join(", ")
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn fetch_latch_secrets(

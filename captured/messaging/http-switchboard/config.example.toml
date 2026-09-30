@@ -50,9 +50,10 @@ body = '''
 '''
 
 # Decision notify-detail (Kenny, 2026-09-30): the phone's short version keeps
-# the link to the dashboard page (the rule's `click_url` annotation). Not yet
-# in the live file on CT 109: add the "click_url" line there by hand, the way
-# this profile has always been changed (config.toml, root 0600).
+# the link to the dashboard page (the rule's `click_url` annotation). The
+# live file carries it since 2026-09-30, when it moved into latch
+# (`kyu/http-switchboard/config.toml`, stack kyu's `latch_files`): change it
+# there with `latch edit` and deploy kyu, never on CT 109 by hand.
 
 # ── Why this is an example and not the real file ──────────────────────
 #

@@ -38,6 +38,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 
 fn spec() -> DeploySpec {
     DeploySpec {
+        secret_files: Vec::new(),
         source: None,
         extra_routes: Vec::new(),
         native_binaries: Default::default(),

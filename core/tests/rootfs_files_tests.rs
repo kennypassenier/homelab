@@ -51,6 +51,7 @@ fn a_rootfs_file_anywhere_else_or_climbing_is_refused() {
 
 fn native_kyu_spec() -> DeploySpec {
     DeploySpec {
+        secret_files: Vec::new(),
         source: None,
         native_binaries: Default::default(),
         native_manifests: Default::default(),

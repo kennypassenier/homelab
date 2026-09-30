@@ -1,8 +1,9 @@
 /* Layout only; colours and type come from kp-themes' tokens. */
-/* Wide enough for the tables with a button column (checks, notices,
-   schedules) to keep every button on one line (Kenny, 2026-09-29). */
+/* Pages use 80% of the viewport (Kenny, 2026-09-30: a 4K desktop almost
+   always), the same default as kp-themes' .kp-page. On a phone the cap is
+   wider than the screen, so the shell simply fills it. */
 .shell {
-  max-width: 1440px;
+  max-width: max(80vw, 64rem);
   margin: 0 auto;
   padding-inline: 16px;
   padding-block: 16px 48px;
@@ -981,7 +982,7 @@ td.stack-flags {
   inset-inline: 16px;
   inset-block-end: 16px;
   z-index: 50;
-  max-width: 56rem;
+  max-width: max(80vw, 64rem);
   margin-inline: auto;
   box-shadow: 0 8px 28px color-mix(in srgb, var(--foreground) 22%, transparent);
 }
